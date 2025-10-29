@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>2.14</story-id>
+  <story-title>Issue Decomposition Engine</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-2.14-1">System shall analyze issue complexity and determine decomposition needs</req>
+      <req id="FR-2.14-2">System shall break issues into logical subtasks with clear acceptance criteria</req>
+      <req id="FR-2.14-3">System shall identify and map task dependencies</req>
+      <req id="FR-2.14-4">System shall size subtasks appropriately (2-8 hours) with clear definition of done</req>
+      <req id="FR-2.14-5">System shall preserve original issue intent and business value</req>
+      <req id="FR-2.14-6">System shall link subtasks to parent issue with traceability</req>
+      <req id="FR-2.14-7">System shall require human approval before executing decomposed tasks</req>
+      <req id="FR-2.14-8">System shall learn from decomposition patterns to improve future quality</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-2.14-1">Decomposition analysis time &lt; 30 seconds</req>
+      <req id="NFR-2.14-2">Subtask sizing accuracy: ±25% of actual effort</req>
+      <req id="NFR-2.14-3">Decomposition quality score improvement: 10% per month</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="2.2">Issue Context Analysis</story>
+    <story id="2.3">Development Plan Generation with Approval Checkpoint</story>
+    <story id="3.6">Ambiguity Detection Scoring</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-2.14-1">System analyzes issue complexity and determines when decomposition is needed (based on size, scope, dependencies)</criteria>
+    <criteria id="AC-2.14-2">Decomposition algorithm breaks issues into logical subtasks with clear acceptance criteria for each</criteria>
+    <criteria id="AC-2.14-3">Task dependencies identified and mapped (sequential, parallel, blocking relationships)</criteria>
+    <criteria id="AC-2.14-4">Each subtask sized appropriately (2-8 hours of work) with clear definition of done</criteria>
+    <criteria id="AC-2.14-5">Decomposition preserves original issue intent and business value</criteria>
+    <criteria id="AC-2.14-6">Subtasks linked to parent issue with traceability and rollup reporting</criteria>
+    <criteria id="AC-2.14-7">Human approval required before executing decomposed tasks, with ability to modify decomposition</criteria>
+    <criteria id="AC-2.14-8">System learns from decomposition patterns to improve future breakdown quality</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/intelligence/src/decomposition/</package-location>
+    <integration-points>
+      <point>Issue Analysis (Story 2.2)</point>
+      <point>Development Planning (Story 2.3)</point>
+      <point>Git Platform Operations (Stories 1.4-1.6)</point>
+      <point>AI Provider Interface (Story 1.1)</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Analysis time &lt; 30s</requirement>
+      <requirement>Sizing accuracy: ±25%</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-2.14-1">Complex feature issue decomposed into logical subtasks</scenario>
+    <scenario id="TS-2.14-2">Task dependencies correctly identified and mapped</scenario>
+    <scenario id="TS-2.14-3">Subtask sizing estimates within 25% of actual effort</scenario>
+    <scenario id="TS-2.14-4">Human approval workflow allows decomposition modification</scenario>
+    <scenario id="TS-2.14-5">Learning system improves decomposition quality over time</scenario>
+  </test-scenarios>
+</context>

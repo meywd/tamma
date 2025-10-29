@@ -1,4 +1,4 @@
-# generated: 2025-10-28
+# generated: 2025-10-29
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -29,7 +29,7 @@
 # - SM typically drafts next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', SM reviews, then Dev moves to 'done'
 
-generated: 2025-10-28
+generated: 2025-10-29
 project: Tamma
 project_key: Tamma
 tracking_system: file-system
@@ -62,34 +62,42 @@ development_status:
   1.5-7-system-configuration-management: ready-for-dev
   1.5-8-npm-package-publishing: ready-for-dev
   1.5-9-binary-releases-installers: ready-for-dev
-  1.5-10-kubernetes-deployment: backlog
+  1.5-10-kubernetes-deployment: ready-for-dev
   epic-1.5-retrospective: optional
 
   epic-2: contexted
-  2-1-issue-selection-with-filtering: backlog
-  2-2-issue-context-analysis: backlog
-  2-3-development-plan-generation-with-approval-checkpoint: backlog
-  2-4-git-branch-creation: backlog
-  2-5-test-first-development-write-failing-tests: backlog
-  2-6-implementation-code-generation: backlog
-  2-7-code-refactoring-pass: backlog
-  2-8-pull-request-creation: backlog
-  2-9-pr-status-monitoring: backlog
-  2-10-pr-merge-with-completion-checkpoint: backlog
-  2-11-auto-next-issue-selection: backlog
-  epic-2-retrospective: optional
+  2-1-issue-selection-with-filtering: ready-for-dev
+  2-2-issue-context-analysis: ready-for-dev
+  2-3-development-plan-generation-with-approval-checkpoint: ready-for-dev
+  2-4-git-branch-creation: ready-for-dev
+  2-5-test-first-development-write-failing-tests: ready-for-dev
+  2-6-implementation-code-generation: ready-for-dev
+  2-7-code-refactoring-pass: ready-for-dev
+  2-8-pull-request-creation: ready-for-dev
+  2-9-pr-status-monitoring: ready-for-dev
+  2-10-pr-merge-with-completion-checkpoint: ready-for-dev
+   2-11-auto-next-issue-selection: ready-for-dev
+   2-12-intelligent-provider-selection: ready-for-dev
+   2-13-prompt-engineering-optimization: ready-for-dev
+   2-14-issue-decomposition-engine: ready-for-dev
+   2-15-task-dependency-mapping: ready-for-dev
+   2-16-incremental-task-sequencing: ready-for-dev
+   epic-2-retrospective: optional
 
   epic-3: contexted
-  3-1-build-automation-with-retry-logic: backlog
-  3-2-test-execution-with-retry-logic: backlog
-  3-3-mandatory-escalation-workflow: backlog
-  3-4-research-capability-for-unfamiliar-concepts: backlog
-  3-5-clarifying-questions-for-ambiguous-requirements: backlog
-  3-6-ambiguity-detection-scoring: backlog
-  3-7-multi-option-design-proposals: backlog
-  3-8-static-analysis-integration: backlog
-  3-9-security-scanning-integration: backlog
-  epic-3-retrospective: optional
+  3-1-build-automation-gate-implementation: ready-for-dev
+  3-2-test-execution-gate-implementation: ready-for-dev
+  3-3-escalation-workflow-implementation: ready-for-dev
+  3-4-research-workflow-implementation: ready-for-dev
+  3-5-clarifying-questions-workflow-implementation: ready-for-dev
+  3-6-ambiguity-scoring-implementation: ready-for-dev
+  3-7-design-proposal-workflow-implementation: ready-for-dev
+  3-8-static-analysis-gate-implementation: ready-for-dev
+  3-9-security-scanning-gate-implementation: ready-for-dev
+   3-10-agent-performance-monitoring: ready-for-dev
+   3-11-cost-aware-ai-usage: ready-for-dev
+   3-12-task-complexity-assessment: ready-for-dev
+   epic-3-retrospective: optional
 
   epic-4: contexted
   4-1-event-schema-design: backlog

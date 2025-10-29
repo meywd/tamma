@@ -152,6 +152,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 ### Non-Functional Requirements
 
 **NFR-1: Performance & Scalability**
+
 - Autonomous loop completion time: <2 hours for standard feature implementation (issue → merged PR)
 - Event store write latency: <10ms for event persistence
 - Log query response time: <1 second for typical searches across 30 days of logs
@@ -159,6 +160,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 - Real-time dashboards shall refresh within 500ms
 
 **NFR-2: Reliability & Availability**
+
 - System uptime: 99.5% availability target (approximately 3.6 hours downtime per month)
 - Autonomous completion rate: 70%+ of issues complete without human escalation
 - PR rework rate: <5% after quality gates enforcement
@@ -166,6 +168,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 - Graceful degradation: Continue operation in degraded mode if AI provider unavailable (queue tasks for retry)
 
 **NFR-3: Security & Compliance**
+
 - All events stored with encryption at rest and encryption in transit
 - 100% action traceability in audit trail with millisecond precision timestamps
 - Audit log retention: Minimum 90 days, configurable up to 7 years
@@ -220,12 +223,14 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
    - Cycle repeats
 
 **Success Outcomes:**
+
 - Feature completed in 45 minutes (vs 3+ hours manually)
 - Zero rework required after merge
 - Complete audit trail of all decisions and changes
 - Sarah focused on high-value decisions (design choices, testing strategy) rather than boilerplate code
 
 **Pain Points Addressed:**
+
 - Eliminated manual test writing and boilerplate code
 - Automated coordination between CI/CD and testing
 - Intelligent retry logic prevented escalation for minor failures
@@ -276,12 +281,14 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
    - Marcus maintains current settings (proven effective)
 
 **Success Outcomes:**
+
 - Audit completed in 20 minutes (vs 2+ hours of manual log archaeology)
 - 100% traceability with millisecond precision
 - Clear approval chains for all sensitive changes
 - Proactive compliance monitoring prevents issues
 
 **Pain Points Addressed:**
+
 - No more "who approved this?" mysteries
 - Complete change control audit trail
 - Fear of autonomous systems resolved through mandatory approval gates
@@ -339,6 +346,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
    - Tamma tracks all interactions in audit trail
 
 **Success Outcomes:**
+
 - Review time reduced from 2+ hours to 15 minutes of focused maintainer time
 - 40% of PRs handled completely autonomously (passed quality gates, merged)
 - 40% of PRs rejected with clear feedback (no maintainer time required)
@@ -347,6 +355,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 - Complete transparency - community can see all Tamma decisions and rationale
 
 **Pain Points Addressed:**
+
 - Review burden scaled beyond human capacity
 - Consistent standards enforced automatically regardless of contributor skill
 - Maintainer focuses on architecture and complex decisions, not boilerplate review
@@ -375,6 +384,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 ## User Interface Design Goals
 
 **Supported Platforms:**
+
 - **CLI (Command-Line Interface)** - Primary interface for developers during active development workflow
 - **Web Dashboard** - Secondary interface for monitoring, observability, and audit trail review
 - **API** - For CI/CD integration and programmatic control
@@ -382,6 +392,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 **Platform-Specific Goals:**
 
 **CLI Interface:**
+
 - **Real-time status streaming** - Show autonomous loop progress with live updates
 - **Interactive prompts** - Clear decision points with numbered options and default suggestions
 - **Rich terminal output** - Use colors, symbols, and formatting to convey status (✅ pass, ❌ fail, ⚠️ warning, 🔄 in progress)
@@ -389,6 +400,7 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 - **Minimal cognitive load** - Single command to start autonomous loop, system handles coordination
 
 **Web Dashboard:**
+
 - **Real-time monitoring** - Live dashboards showing system health, development velocity, quality metrics
 - **Event exploration** - Interactive timeline for event trail navigation with filtering and search
 - **Black-box replay** - Visual playback of system state at any point in time
@@ -461,13 +473,14 @@ Adds structured logging, metrics collection, real-time monitoring dashboards, an
 ---
 
 **Epic Sequencing Rationale:**
+
 - **Epic 1 establishes foundation:** Infrastructure and integrations must exist before autonomous loops can function
 - **Epic 2 delivers core value:** Basic autonomous workflow enables immediate productivity gains
 - **Epic 3 enhances quality:** Quality gates build on core loop, preventing issues before they occur
 - **Epic 4 adds transparency:** Event sourcing captures loop operations, enabling audit and debugging
 - **Epic 5 prepares for scale:** Observability and polish prepare system for production use and community feedback
 
-**Total Estimated Stories:** 42-52 stories (slightly above Level 3 target of 15-40, but within acceptable range for comprehensive MVP)
+**Total Estimated Stories:** 48-58 stories (slightly above Level 3 target of 15-40, but within acceptable range for comprehensive MVP)
 
 > **Note:** Detailed epic breakdown with full story specifications is available in [epics.md](./epics.md)
 
@@ -480,6 +493,7 @@ Adds structured logging, metrics collection, real-time monitoring dashboards, an
 **Primary MVP Success Criterion:** Tamma must be capable of maintaining its own codebase post-MVP, autonomously completing 70%+ of its own backlog stories (bug fixes, features, dependency updates) without human intervention. This validates production-readiness for mission-critical software.
 
 **Validation Process:**
+
 1. After MVP release, point Tamma at its own repository (github.com/tamma/tamma)
 2. Assign Tamma stories from its own backlog (Epics 1-5 enhancements, bug fixes, post-alpha features)
 3. Measure autonomous completion rate over 30 days
@@ -490,30 +504,35 @@ Adds structured logging, metrics collection, real-time monitoring dashboards, an
 Tamma follows a **phased self-implementation approach** where humans build the minimal core, then Tamma completes its own implementation:
 
 **Phase 0: Human Bootstrap (Weeks 0-2) - Epic 1**
+
 - **Scope:** Humans implement 100% of Epic 1 (Foundation & Core Infrastructure)
 - **Rationale:** Tamma cannot run without AI/Git abstractions and CLI scaffolding
 - **Stories:** All 12 stories in Epic 1 (Stories 1-0 through 1-11)
 - **Deliverable:** Working CLI that can execute autonomous loops on any repository
 
 **Phase 1: Hybrid Implementation (Weeks 2-4) - Epic 2 Partial**
+
 - **Scope:** Humans implement 50% of Epic 2 (Stories 2.1-2.6: issue selection, context analysis, plan generation, branch creation, test-first development, code generation)
 - **Rationale:** Tamma needs basic autonomous loop to work on itself
 - **Then:** Tamma implements remaining 50% of Epic 2 (Stories 2.7-2.11: refactoring, PR creation, PR monitoring, PR merge, auto-next issue)
 - **Validation:** Tamma successfully merges its first self-implemented PR
 
 **Phase 2: Self-Implementation (Weeks 4-6) - Epic 3**
+
 - **Scope:** Tamma implements 80% of Epic 3 (Quality Gates & Intelligence)
 - **Human Implementation:** Stories 3.1-3.2 (build automation, test execution) - required for Tamma to validate its own changes
 - **Tamma Implementation:** Stories 3.3-3.9 (mandatory escalation, research capability, clarifying questions, ambiguity detection, multi-option proposals, static analysis, security scanning)
 - **Validation:** Tamma's changes pass its own quality gates without manual intervention
 
 **Phase 3: Self-Implementation (Weeks 6-8) - Epics 4-5**
+
 - **Scope:** Tamma implements 90% of Epics 4-5 (Event Sourcing & Observability)
 - **Human Implementation:** Story 5.1 (structured logging) - required for debugging Tamma's execution
 - **Tamma Implementation:** All other stories (event capture, event query, black-box replay, metrics collection, basic alerts)
 - **Validation:** Tamma can debug its own execution using event trail and logs
 
 **MVP Completion Criteria:**
+
 - ✅ All 5 epics implemented (combination of human + Tamma work)
 - ✅ Tamma successfully implements 60-70% of its own codebase
 - ✅ Tamma passes all quality gates on self-implemented code
@@ -547,6 +566,7 @@ Based on self-maintenance goal, the following are **mandatory for MVP**:
 ### MVP vs Post-MVP Scope Clarification
 
 **MVP (Required for Self-Maintenance):**
+
 - All core autonomous loop features (Epics 1-3 complete)
 - Event sourcing for debugging (Epic 4 core: Stories 4.1-4.3)
 - Logging and basic alerts (Epic 5 partial: Stories 5.1, 5.2, 5.6 basic, 5.9)
@@ -554,6 +574,7 @@ Based on self-maintenance goal, the following are **mandatory for MVP**:
 - Comprehensive test suite (validates self-implemented changes)
 
 **Post-MVP (Not Required for Self-Maintenance):**
+
 - UI dashboards (Epic 5 Stories 5.3-5.4) - CLI/log-based monitoring sufficient
 - Advanced analytics (Epic 5 Story 5.7) - User behavior tracking not critical
 - Black-box replay full implementation (Epic 4 Stories 4.7-4.8) - Nice-to-have for advanced debugging

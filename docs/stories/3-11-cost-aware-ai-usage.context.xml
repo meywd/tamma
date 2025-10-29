@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>3.11</story-id>
+  <story-title>Cost-Aware AI Usage</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-3.11-1">System shall track AI costs in real-time with breakdown by provider and task type</req>
+      <req id="FR-3.11-2">System shall support budget limits with configurable alerts</req>
+      <req id="FR-3.11-3">System shall optimize costs when approaching budget limits</req>
+      <req id="FR-3.11-4">System shall forecast future spending based on usage patterns</req>
+      <req id="FR-3.11-5">System shall evaluate cost-benefit of AI usage for specific tasks</req>
+      <req id="FR-3.11-6">System shall provide spending reports with cost-saving recommendations</req>
+      <req id="FR-3.11-7">System shall implement emergency cost controls for budget breaches</req>
+      <req id="FR-3.11-8">System shall preserve critical quality gates during cost optimization</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-3.11-1">Cost tracking accuracy: ±1% of actual provider charges</req>
+      <req id="NFR-3.11-2">Budget alert latency: &lt; 5 minutes</req>
+      <req id="NFR-3.11-3">Cost data retention: 2 years</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="1.1">AI Provider Interface Definition</story>
+    <story id="2.12">Intelligent Provider Selection</story>
+    <story id="3.10">Agent Performance Monitoring</story>
+    <story id="5.2">Metrics Collection Infrastructure</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-3.11-1">System tracks AI costs in real-time with breakdown by provider, task type, and project</criteria>
+    <criteria id="AC-3.11-2">Budget management system supports daily, weekly, and monthly spending limits with configurable alerts</criteria>
+    <criteria id="AC-3.11-3">Cost optimization strategies automatically reduce usage when approaching budget limits (cheaper providers, fewer retries, simplified prompts)</criteria>
+    <criteria id="AC-3.11-4">Cost forecasting predicts future spending based on current usage patterns and upcoming tasks</criteria>
+    <criteria id="AC-3.11-5">Cost-benefit analysis evaluates whether AI usage for specific tasks provides sufficient value</criteria>
+    <criteria id="AC-3.11-6">Spending reports provide detailed breakdown with insights and cost-saving recommendations</criteria>
+    <criteria id="AC-3.11-7">Emergency cost controls can immediately halt AI usage when critical budget thresholds are exceeded</criteria>
+    <criteria id="AC-3.11-8">Cost optimization doesn't compromise critical quality gates (security, testing, code review)</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/intelligence/src/cost/</package-location>
+    <integration-points>
+      <point>AI Provider Abstraction (Story 1.1)</point>
+      <point>Provider Selection (Story 2.12)</point>
+      <point>Performance Monitoring (Story 3.10)</point>
+      <point>Metrics Collection (Story 5.2)</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Tracking accuracy: ±1%</requirement>
+      <requirement>Alert latency: &lt; 5min</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-3.11-1">Real-time cost tracking matches actual provider billing</scenario>
+    <scenario id="TS-3.11-2">Budget alerts trigger before limits are exceeded</scenario>
+    <scenario id="TS-3.11-3">Cost optimization reduces spending while maintaining quality</scenario>
+    <scenario id="TS-3.11-4">Cost forecasting accurately predicts future spending</scenario>
+    <scenario id="TS-3.11-5">Emergency controls prevent budget overruns</scenario>
+  </test-scenarios>
+</context>

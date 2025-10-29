@@ -2,6 +2,23 @@
 
 Status: drafted
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a developer,
@@ -53,6 +70,16 @@ so that teams using GitLab can adopt system without platform migration.
 
 ## Dev Notes
 
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
+
+
 ### Architecture Patterns and Constraints
 
 - Interface-based design: GitLabPlatform must implement IGitPlatform interface [Source: docs/tech-spec-epic-1.md#Services and Modules]
@@ -85,6 +112,9 @@ so that teams using GitLab can adopt system without platform migration.
 - Use structured logging with Pino [Source: docs/architecture.md#Technology Stack]
 
 ### References
+
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 
 - [Source: docs/epics.md#Story 1.6: GitLab Platform Implementation]
 - [Source: docs/tech-spec-epic-1.md#Git Platform Abstraction]

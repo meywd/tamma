@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../shared" },
+    { "path": "../events" },
+    { "path": "../observability" },
+    { "path": "../providers" },
+    { "path": "../platforms" },
+    { "path": "../intelligence" },
+    { "path": "../gates" },
+    { "path": "../workers" }
+  ],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
+}

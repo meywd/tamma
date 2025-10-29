@@ -11,6 +11,7 @@
 **Session Goals:** Generate comprehensive feature set for automating Claude Code development lifecycle - from issue assignment through deployment with full autonomous research → design → test → code → build → fix → run → e2e → review cycle
 
 **Techniques Used:** Progressive Technique Flow
+
 - What If Scenarios (Exploratory)
 - SCAMPER (Systematic Innovation)
 - Assumption Reversal (Challenge Conventions)
@@ -167,6 +168,7 @@
 **Reversal:** Some decisions MUST require human approval
 
 **Smart Friction Zones:**
+
 - Business and domain decisions
 - Size-based approvals (major refactors, large deletions)
 - Breaking changes (NEVER auto-approve)
@@ -177,6 +179,7 @@
   - Prod: Maximum gates
 
 **Context-Aware Automation:**
+
 - **Dev Mode**: High automation, minimal friction
 - **Business Mode**: More checkpoints, guided decisions
 
@@ -185,10 +188,12 @@
 **Reversal:** AI roles should adapt to phase and mode
 
 **Dev Mode Roles:**
+
 - Design Phase: **Consultant** (offer options, explain tradeoffs)
 - Implementation Phase: **Autopilot** (autonomous execution with oversight)
 
 **Business Mode Roles:**
+
 - Design Phase: **Advisor** (guide decisions, highlight risks)
 - Implementation Phase: **Guardian** (enforce gates, prevent mistakes)
 
@@ -197,6 +202,7 @@
 **Reversal:** CCM should automate high-volume, low-creativity toil
 
 **Automated Toil:**
+
 - Testing (unit, integration, E2E)
 - Security gates and vulnerability scanning
 - Design implementation (after approval)
@@ -204,6 +210,7 @@
 - E2E tests including UI spec validation
 
 **High-Value Developer Work:**
+
 - Creative problem solving
 - Architecture decisions
 - Business logic design
@@ -214,6 +221,7 @@
 **Reversal:** Complete event sourcing enables time-travel debugging
 
 **Radical Transparency:**
+
 - CQRS event sourcing for every action
 - Black-box replay: Reconstruct exact system state at any point
 - Complete audit trail with millisecond precision
@@ -242,6 +250,7 @@
 **Core Capability:** Autonomous development lifecycle
 
 **Features:**
+
 - **Autonomous Agent System**
   - Research existing solutions
   - Ask clarifying questions
@@ -267,6 +276,7 @@
   - Always current, never stale
 
 **Dependencies:**
+
 - CI/CD integration
 - Claude Code wrapper/API abstraction
 - E2E testing frameworks
@@ -281,6 +291,7 @@
 **Features:**
 
 **Quality Assurance System**
+
 - Automated testing (unit, integration, E2E)
 - Cross-platform testing
 - Visual regression testing
@@ -292,6 +303,7 @@
   - Enforced checkpoints (build, test, deploy)
 
 **Deployment Pipeline**
+
 - Built-in CI/CD with environment-aware speeds
 - Feature flag architecture
 - A/B testing infrastructure
@@ -300,6 +312,7 @@
 - Merge conflict detection before integration
 
 **Observability Suite**
+
 - Full logs (debug + trace level)
 - Complete audit trail (CQRS event sourcing)
 - Analytics on every screen/action
@@ -308,6 +321,7 @@
 - Black-box replay capability
 
 **Infrastructure Intelligence**
+
 - Infrastructure debugger
 - Network assistant
 - Availability monitoring
@@ -316,6 +330,7 @@
 - Capacity prediction
 
 **Cost Intelligence**
+
 - Real-time cost tracking
 - Multi-cloud vendor comparison
 - Budget alerts and forecasting
@@ -331,6 +346,7 @@
 **Features:**
 
 **Security Arsenal**
+
 - Vulnerability scanning (code + dependencies)
 - **Fork/Fix/PR Flow**: Auto-fix security issues
 - Penetration testing
@@ -341,6 +357,7 @@
 - No-deletion policy (soft deletes only)
 
 **Compliance & Audit**
+
 - Complete event sourcing (CQRS)
 - Minute-by-minute system reconstruction
 - Audit trail with millisecond precision
@@ -348,6 +365,7 @@
 - Change tracking and attribution
 
 **Smart Controls**
+
 - Size-based approval gates
 - Breaking change prevention
 - Deletion confirmations
@@ -355,6 +373,7 @@
 - Manual approval zones (business/domain decisions)
 
 **Feature Management**
+
 - Independent feature toggles
 - A/B testing with statistical analysis
 - Feature goal tracking
@@ -362,6 +381,7 @@
 - Rollback capabilities
 
 **Analytics**
+
 - Every screen tracked
 - Every action logged
 - User behavior analysis
@@ -377,6 +397,7 @@
 **Features:**
 
 **Predictive Systems**
+
 - Infrastructure capacity forecasting
 - Performance bottleneck prediction
 - Cost spike prevention
@@ -384,12 +405,14 @@
 - Availability issue detection
 
 **Auto-Remediation**
+
 - Dependency updates (test + auto-merge if safe)
 - Security patches with automated PR flow
 - Performance optimization suggestions
 - Cost optimization recommendations
 
 **Business Intelligence**
+
 - Feature ROI analysis
 - User journey optimization
 - Conversion funnel analysis
@@ -397,6 +420,7 @@
 - Resource utilization forecasting
 
 **Disaster Recovery Prevention**
+
 - Automated DR planning
 - Backup validation
 - Failover testing
@@ -454,6 +478,7 @@ _Core feature - everything else is an extension_
 14. **Pick Next Issue** (repeat from step 1)
 
 **Retry Logic:**
+
 - Build: 3 attempts, then escalate
 - Tests: 3 attempts, then escalate
 - CI/CD: 3 attempts, then escalate
@@ -462,6 +487,7 @@ _Core feature - everything else is an extension_
 **Implementation Phases:**
 
 **Phase 1 (Weeks 2-4): Core Loop**
+
 - Issue selection (manual + auto-next)
 - PR creation and branch management
 - Basic code generation (no tests yet)
@@ -470,6 +496,7 @@ _Core feature - everything else is an extension_
 - User approval checkpoints
 
 **Phase 2 (Weeks 5-6): Quality Gates**
+
 - Build automation with retry
 - Test execution with retry
 - CI/CD integration with retry
@@ -477,6 +504,7 @@ _Core feature - everything else is an extension_
 - Quality gate enforcement (no bypass)
 
 **Phase 3 (Week 7): Intelligence Layer**
+
 - Research capability (analyze existing code)
 - Clarifying question generation
 - Ambiguity detection
@@ -491,12 +519,14 @@ _Complete transparency and time-travel debugging_
 **Event Sourcing Architecture:**
 
 **Week 8: Core Event Store**
+
 - Event schema design (command, event, aggregate)
 - Event storage backend (append-only log)
 - Event versioning and migration
 - Basic event replay capability
 
 **Week 9: Audit Trail Integration**
+
 - Capture all user actions as events
 - Capture all AI actions as events
 - Capture all system state changes
@@ -504,6 +534,7 @@ _Complete transparency and time-travel debugging_
 - User attribution and context
 
 **Week 10: Black-Box Replay**
+
 - Reconstruct system state at any point in time
 - Minute-by-minute event playback
 - Debugging interface for event inspection
@@ -511,6 +542,7 @@ _Complete transparency and time-travel debugging_
 - Export audit logs (compliance)
 
 **Key Capabilities:**
+
 - Every action is an immutable event
 - Complete system reconstruction from events
 - Debugging: "What was the state at 2:47 PM yesterday?"
@@ -523,6 +555,7 @@ _Complete transparency and time-travel debugging_
 _Real-time visibility into all system operations_
 
 **Week 11: Logging & Metrics**
+
 - Structured logging (debug + trace levels)
 - Real-time log streaming
 - Log aggregation and search
@@ -530,6 +563,7 @@ _Real-time visibility into all system operations_
 - Custom metrics per feature
 
 **Week 12: Analytics & Monitoring**
+
 - Analytics on every screen (page views, interactions)
 - Analytics on every action (clicks, commands, operations)
 - User behavior tracking (journeys, funnels)
@@ -537,6 +571,7 @@ _Real-time visibility into all system operations_
 - Alert system (thresholds, anomalies)
 
 **Week 13: Feedback Loops**
+
 - User suggestion capture
 - Behavior change detection (non-intrusive polls)
 - Feedback incentivization (gamification without spam)
@@ -544,6 +579,7 @@ _Real-time visibility into all system operations_
 - Bug reporting with auto-context
 
 **Dashboards:**
+
 - System health (availability, performance, errors)
 - Development velocity (PRs, issues, cycle time)
 - Quality metrics (test coverage, bug density)
@@ -654,6 +690,7 @@ _Ideas requiring breakthrough innovation or extensive R&D_
 These architectural decisions affect every subsequent feature. Building on wrong assumptions would require expensive refactoring. Must complete before Priority #1 coding begins.
 
 **Next Steps:**
+
 1. **Week 0-1: AI Provider Abstraction**
    - Research Claude Code headless API capabilities
    - Investigate OpenCode integration patterns
@@ -679,6 +716,7 @@ These architectural decisions affect every subsequent feature. Building on wrong
    - Document architecture decisions
 
 **Resources Needed:**
+
 - Access to Gitea/Forgejo test environments
 - Claude Code API documentation
 - OpenCode/GLM API documentation
@@ -687,6 +725,7 @@ These architectural decisions affect every subsequent feature. Building on wrong
 **Timeline:** Weeks 0-2 (2 weeks)
 
 **Success Criteria:**
+
 - Provider abstraction interface defined
 - Gitea/Forgejo integration approach documented
 - Hybrid architecture design validated
@@ -702,6 +741,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 **Next Steps:**
 
 **Phase 1: Core Loop (Weeks 2-4)**
+
 1. Implement issue selection (manual + auto-next)
 2. Create PR creation workflow (branch + initial commit)
 3. Build basic code generation (simple functions, no tests)
@@ -710,6 +750,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 6. Create user approval checkpoints (design, test/merge)
 
 **Phase 2: Quality Gates (Weeks 5-6)**
+
 1. Add build automation with 3-retry limit
 2. Implement test execution with 3-retry limit
 3. Integrate CI/CD checks with 3-retry limit
@@ -717,6 +758,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 5. Enforce quality gates (prevent bypass)
 
 **Phase 3: Intelligence Layer (Week 7)**
+
 1. Add research capability (analyze existing code)
 2. Implement clarifying question generation
 3. Build ambiguity detection
@@ -724,6 +766,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 5. Implement TDD workflow (tests → code → refactor)
 
 **Resources Needed:**
+
 - Claude Code API wrapper
 - Git library (libgit2 or similar)
 - CI/CD integration (Gitea Actions)
@@ -733,6 +776,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 **Timeline:** Weeks 2-7 (6 weeks)
 
 **Success Criteria:**
+
 - Complete 14-step loop operational
 - Can autonomously: select issue → plan → code → test → merge → repeat
 - 3-retry limit enforced at build/test/CI stages
@@ -745,6 +789,7 @@ This is the **core feature** of CCM - everything else is an extension. Without t
 
 **Rationale:**
 Radical transparency through event sourcing provides:
+
 - Complete audit trail for compliance
 - Time-travel debugging (reconstruct any past state)
 - Differential diagnosis (systematic bug analysis)
@@ -755,6 +800,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 **Next Steps:**
 
 **Week 8: Core Event Store**
+
 1. Design event schema (command, event, aggregate)
 2. Choose event storage backend (SQLite, PostgreSQL, or event-specific DB)
 3. Implement append-only event log
@@ -762,6 +808,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 5. Create basic event replay mechanism
 
 **Week 9: Audit Trail Integration**
+
 1. Capture all user actions as events (commands)
 2. Capture all AI actions as events (operations)
 3. Capture all system state changes (state transitions)
@@ -769,6 +816,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 5. Include user attribution and context
 
 **Week 10: Black-Box Replay**
+
 1. Build system state reconstruction from events
 2. Implement minute-by-minute event playback
 3. Create debugging interface for event inspection
@@ -776,6 +824,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 5. Build audit log export (JSON, CSV for compliance)
 
 **Resources Needed:**
+
 - Event sourcing library (EventStore, or custom)
 - Storage backend
 - Replay engine
@@ -785,6 +834,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 **Timeline:** Weeks 8-10 (3 weeks)
 
 **Success Criteria:**
+
 - Every user/AI action captured as immutable event
 - Can reconstruct system state at any point in time
 - Debugging question: "What was the state at 2:47 PM yesterday?" → answered
@@ -797,6 +847,7 @@ This is the foundation for advanced debugging, compliance, and learning from mis
 
 **Rationale:**
 You can't improve what you can't measure. The Observability Suite provides real-time visibility into:
+
 - System operations (logs, metrics, traces)
 - User behavior (analytics, journeys, funnels)
 - Feature performance (adoption, ROI, cost)
@@ -807,6 +858,7 @@ This enables data-driven decisions and rapid issue detection.
 **Next Steps:**
 
 **Week 11: Logging & Metrics**
+
 1. Implement structured logging (debug + trace levels)
 2. Build real-time log streaming
 3. Add log aggregation and search
@@ -814,6 +866,7 @@ This enables data-driven decisions and rapid issue detection.
 5. Enable custom metrics per feature
 
 **Week 12: Analytics & Monitoring**
+
 1. Add analytics on every screen (page views, interactions)
 2. Add analytics on every action (clicks, commands, operations)
 3. Implement user behavior tracking (journeys, funnels)
@@ -821,6 +874,7 @@ This enables data-driven decisions and rapid issue detection.
 5. Create alert system (thresholds, anomalies)
 
 **Week 13: Feedback Loops**
+
 1. Build user suggestion capture
 2. Implement behavior change detection (non-intrusive polls)
 3. Add feedback incentivization (gamification without spam)
@@ -828,6 +882,7 @@ This enables data-driven decisions and rapid issue detection.
 5. Build bug reporting with auto-context
 
 **Resources Needed:**
+
 - Logging framework (Winston, Pino, or similar)
 - Metrics library (Prometheus client, StatsD)
 - Analytics backend (Plausible, or custom)
@@ -837,6 +892,7 @@ This enables data-driven decisions and rapid issue detection.
 **Timeline:** Weeks 11-13 (3 weeks)
 
 **Success Criteria:**
+
 - All logs structured and searchable
 - Real-time dashboards show system health, dev velocity, quality metrics, cost
 - Analytics capture every screen view and action
@@ -865,6 +921,7 @@ Week 14-15: Integration testing, bug fixes, documentation
 ```
 
 **Milestones:**
+
 - **Week 2**: Foundation research complete, architecture decisions validated
 - **Week 7**: Autonomous loop operational (issue → merge → repeat)
 - **Week 10**: Complete event sourcing with time-travel debugging
@@ -893,6 +950,26 @@ Three critical architecture areas require deep investigation before MVP developm
 1. **AI Provider Abstraction Layer** - Multi-provider support (Claude Code, OpenCode, GLM, local LLMs)
 2. **Gitea/Forgejo Integration** - Platform-specific runner and review APIs
 3. **Hybrid Runner Architecture** - CCM as both orchestrator AND worker invoked by CI/CD runners
+
+### Additional Stories Added (2025-10-29)
+
+Based on gap analysis, the following stories were added to enhance AI agent optimization and task decomposition:
+
+**AI Agent Optimization Stories:**
+
+- **Story 2.12: Intelligent Provider Selection** - Automatic optimal provider selection based on task type, cost, and availability
+- **Story 2.13: Prompt Engineering Optimization** - Maintains and optimizes prompt templates for consistent high-quality responses
+- **Story 3.10: Agent Performance Monitoring** - Tracks performance metrics and response quality for optimization
+- **Story 3.11: Cost-Aware AI Usage** - Optimizes AI usage within budget constraints while maintaining quality
+
+**Task Decomposition Stories:**
+
+- **Story 2.14: Issue Decomposition Engine** - Automatically breaks large issues into smaller, implementable tasks
+- **Story 2.15: Task Dependency Mapping** - Identifies and manages dependencies between development tasks
+- **Story 2.16: Incremental Task Sequencing** - Sequences tasks for continuous integration and delivery
+- **Story 3.12: Task Complexity Assessment** - Estimates task complexity and determines appropriate decomposition level
+
+These additions address critical gaps in autonomous development capability, ensuring Tamma can handle complex issues through intelligent decomposition while optimizing AI agent performance and cost efficiency.
 
 ### Recommended Follow-up Techniques
 

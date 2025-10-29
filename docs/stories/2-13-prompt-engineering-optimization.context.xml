@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>2.13</story-id>
+  <story-title>Prompt Engineering Optimization</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-2.13-1">System shall maintain optimized prompt templates for each task type</req>
+      <req id="FR-2.13-2">System shall support variable placeholders in prompt templates</req>
+      <req id="FR-2.13-3">System shall track prompt effectiveness metrics per template</req>
+      <req id="FR-2.13-4">System shall A/B test prompt variations and select best performers</req>
+      <req id="FR-2.13-5">System shall support prompt template versioning with rollback</req>
+      <req id="FR-2.13-6">System shall optimize prompts for context window constraints</req>
+      <req id="FR-2.13-7">System shall include prompt engineering best practices</req>
+      <req id="FR-2.13-8">System shall provide CLI commands for prompt management</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-2.13-1">Prompt template rendering time &lt; 50ms</req>
+      <req id="NFR-2.13-2">A/B test statistical significance threshold: p &lt; 0.05</req>
+      <req id="NFR-2.13-3">Prompt template retention period: 180 days</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="1.1">AI Provider Interface Definition</story>
+    <story id="2.12">Intelligent Provider Selection</story>
+    <story id="2.3">Development Plan Generation with Approval Checkpoint</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-2.13-1">System maintains a library of optimized prompt templates for each task type (code generation, review, research, testing, refactoring)</criteria>
+    <criteria id="AC-2.13-2">Prompt templates include variable placeholders for context injection (issue details, code snippets, requirements)</criteria>
+    <criteria id="AC-2.13-3">System tracks prompt effectiveness metrics (success rate, revision count, user satisfaction) per template</criteria>
+    <criteria id="AC-2.13-4">A/B testing framework compares prompt variations and automatically selects best-performing templates</criteria>
+    <criteria id="AC-2.13-5">Prompt templates support versioning with rollback capability for degraded performance</criteria>
+    <criteria id="AC-2.13-6">Context window optimization ensures prompts fit within provider limits while maintaining effectiveness</criteria>
+    <criteria id="AC-2.13-7">System includes prompt engineering best practices (few-shot examples, chain-of-thought, role specification)</criteria>
+    <criteria id="AC-2.13-8">CLI commands allow prompt template inspection, testing, and manual optimization</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/intelligence/src/prompts/</package-location>
+    <integration-points>
+      <point>AI Provider Abstraction (Story 1.1)</point>
+      <point>Event Sourcing (Epic 4)</point>
+      <point>CLI Interface (Story 1.9)</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Template rendering &lt; 50ms</requirement>
+      <requirement>A/B test significance: p &lt; 0.05</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-2.13-1">Code generation prompt produces consistent, high-quality code</scenario>
+    <scenario id="TS-2.13-2">A/B test identifies superior prompt template</scenario>
+    <scenario id="TS-2.13-3">Prompt rollback restores performance after degradation</scenario>
+    <scenario id="TS-2.13-4">Context window optimization prevents token limit errors</scenario>
+    <scenario id="TS-2.13-5">CLI commands enable manual prompt optimization</scenario>
+  </test-scenarios>
+</context>

@@ -1,0 +1,54 @@
+{
+  "name": "tamma",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered autonomous development orchestration platform",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "test": "vitest",
+    "test:unit": "vitest --run --testPathPattern=\\.unit\\.test\\.ts$",
+    "test:integration": "vitest --run --testPathPattern=\\.integration\\.test\\.ts$",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
+    "typecheck": "tsc --noEmit",
+    "clean": "pnpm -r run clean && rm -rf node_modules",
+    "migrate:latest": "pnpm --filter @tamma/orchestrator run migrate:latest",
+    "migrate:rollback": "pnpm --filter @tamma/orchestrator run migrate:rollback"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@vitest/coverage-v8": "^3.0.6",
+    "esbuild": "^0.24.2",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "typescript": "~5.7.2",
+    "vitest": "^3.0.6"
+  },
+  "keywords": [
+    "ai",
+    "automation",
+    "orchestration",
+    "development",
+    "workflow",
+    "autonomous"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meywd/tamma.git"
+  },
+  "license": "MIT",
+  "author": "meywd"
+}

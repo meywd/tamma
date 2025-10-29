@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>2.15</story-id>
+  <story-title>Task Dependency Mapping</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-2.15-1">System shall detect dependencies between development tasks</req>
+      <req id="FR-2.15-2">System shall classify dependency types (blocking, parallel, optional)</req>
+      <req id="FR-2.15-3">System shall provide visual dependency graph with critical path analysis</req>
+      <req id="FR-2.15-4">System shall validate task prerequisites before execution</req>
+      <req id="FR-2.15-5">System shall detect circular dependencies and prevent deadlocks</req>
+      <req id="FR-2.15-6">System shall analyze downstream impact of task changes</req>
+      <req id="FR-2.15-7">System shall optimize task execution order for maximum parallelism</req>
+      <req id="FR-2.15-8">System shall propagate dependency updates when tasks change</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-2.15-1">Dependency analysis time &lt; 10 seconds per task</req>
+      <req id="NFR-2.15-2">Graph visualization refresh rate: 5 seconds</req>
+      <req id="NFR-2.15-3">Dependency detection accuracy: 95%</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="2.14">Issue Decomposition Engine</story>
+    <story id="2.3">Development Plan Generation with Approval Checkpoint</story>
+    <story id="3.4">Research Capability for Unfamiliar Concepts</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-2.15-1">System automatically detects dependencies between tasks (code dependencies, data model changes, API modifications)</criteria>
+    <criteria id="AC-2.15-2">Dependency types classified: blocking (must complete first), parallel (can run simultaneously), optional (nice to have)</criteria>
+    <criteria id="AC-2.15-3">Visual dependency graph shows task relationships and critical path analysis</criteria>
+    <criteria id="AC-2.15-4">Dependency validation ensures task prerequisites are met before execution begins</criteria>
+    <criteria id="AC-2.15-5">Circular dependency detection prevents infinite loops and deadlock situations</criteria>
+    <criteria id="AC-2.15-6">Impact analysis identifies downstream effects when tasks are modified or delayed</criteria>
+    <criteria id="AC-2.15-7">Dependency-aware scheduling optimizes task execution order for maximum parallelism</criteria>
+    <criteria id="AC-2.15-8">Dependency updates automatically propagate when tasks change scope or requirements</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/intelligence/src/dependencies/</package-location>
+    <integration-points>
+      <point>Issue Decomposition (Story 2.14)</point>
+      <point>Development Planning (Story 2.3)</point>
+      <point>Task Scheduling System</point>
+      <point>Git Platform Operations (Stories 1.4-1.6)</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Analysis time &lt; 10s</requirement>
+      <requirement>Detection accuracy: 95%</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-2.15-1">Code dependencies correctly identified between tasks</scenario>
+    <scenario id="TS-2.15-2">Visual graph accurately displays task relationships</scenario>
+    <scenario id="TS-2.15-3">Circular dependencies detected and resolved</scenario>
+    <scenario id="TS-2.15-4">Impact analysis identifies all affected downstream tasks</scenario>
+    <scenario id="TS-2.15-5">Scheduling optimization maximizes parallel task execution</scenario>
+  </test-scenarios>
+</context>

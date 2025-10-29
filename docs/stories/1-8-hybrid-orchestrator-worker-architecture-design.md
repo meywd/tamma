@@ -2,6 +2,23 @@
 
 Status: ready-for-dev
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a **system architect**,
@@ -70,6 +87,16 @@ so that system can operate both as autonomous coordinator and as CI/CD-invoked w
 
 ## Dev Notes
 
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
+
+
 ### Architecture Context
 - Implements hybrid architecture pattern supporting both orchestrator (stateful coordinator) and worker (stateless executor) modes
 - Orchestrator mode: Fastify HTTP server, REST API, WebSocket streaming, PostgreSQL task queue, worker pool management
@@ -93,6 +120,9 @@ so that system can operate both as autonomous coordinator and as CI/CD-invoked w
 - Health check endpoints for monitoring and observability
 
 ### References
+
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 - [Source: docs/epics.md#Story-1.8](../epics.md#story-18-hybrid-orchestrator-worker-architecture-design)
 - [Source: docs/tech-spec-epic-1.md#Hybrid-Architecture-Design](../tech-spec-epic-1.md#hybrid-architecture-design-story-1-8)
 - [Source: docs/tech-spec-epic-1.md#Orchestrator-Startup-Sequence](../tech-spec-epic-1.md#orchestrator-startup-sequence)

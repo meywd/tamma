@@ -3,7 +3,7 @@
 **Author:** meywd
 **Date:** 2025-10-27
 **Project Level:** 3
-**Target Scale:** Complex System - 42-52 stories across 5 epics
+**Target Scale:** Complex System - 48-58 stories across 5 epics
 
 ---
 
@@ -35,6 +35,8 @@ Each epic includes:
 
 **Estimated Stories:** 13 stories
 
+**Technical Specification:** See `tech-spec-epic-1.md` for detailed implementation guidance.
+
 ---
 
 ### **Story 1-0: AI Provider Strategy Research**
@@ -44,6 +46,7 @@ I want to research AI provider options across cost models, capabilities, and wor
 So that I can make informed decisions about which AI providers to support and when to use each.
 
 **Acceptance Criteria:**
+
 1. Research document compares at least 5 AI providers: Anthropic Claude, OpenAI GPT, GitHub Copilot, Google Gemini, local models (Ollama/LM Studio)
 2. Cost analysis includes: subscription plans, pay-as-you-go rates, volume discounts, free tiers
 3. Capability matrix maps providers to Tamma workflow steps: issue analysis, code generation, test generation, code review, refactoring, documentation
@@ -63,6 +66,7 @@ I want to define abstract interface contracts for AI provider operations,
 So that the system can support multiple AI providers without tight coupling.
 
 **Acceptance Criteria:**
+
 1. Interface defines core operations: `generateCode()`, `analyzeContext()`, `suggestFix()`, `reviewChanges()`
 2. Interface includes provider capabilities discovery (supports streaming, token limits, model versions)
 3. Interface includes error handling contracts (rate limits, timeouts, context overflow)
@@ -82,6 +86,7 @@ So that I can validate the provider abstraction with a real implementation.
 **Note:** Implementation uses Anthropic Claude API via SDK (`@anthropic-ai/sdk`) for programmatic/headless access. Story 1-0 research will validate this is the optimal provider for MVP.
 
 **Acceptance Criteria:**
+
 1. Anthropic Claude provider implements all interface operations from Story 1.1
 2. Provider handles authentication via API key configuration
 3. Provider supports streaming responses for real-time feedback
@@ -100,6 +105,7 @@ I want centralized configuration for AI provider settings,
 So that I can easily switch providers or configure provider-specific parameters.
 
 **Acceptance Criteria:**
+
 1. Configuration file supports multiple provider entries (Claude Code, OpenCode, GLM, local LLM)
 2. Each provider entry includes: name, API endpoint, API key reference, capabilities, priority
 3. Configuration validates on load (required fields, valid URLs, accessible credentials)
@@ -118,6 +124,7 @@ I want to define abstract interface contracts for Git platform operations,
 So that the system can support GitHub, GitLab, Gitea, and Forgejo without platform-specific logic in core workflows.
 
 **Acceptance Criteria:**
+
 1. Interface defines core operations: `createPR()`, `commentOnPR()`, `mergePR()`, `getIssue()`, `createBranch()`, `triggerCI()`
 2. Interface includes platform capabilities discovery (review workflows, CI/CD integration, webhook support)
 3. Interface normalizes platform-specific models (PR structure, issue format, CI status)
@@ -135,6 +142,7 @@ I want GitHub implemented as the first Git platform,
 So that I can validate the platform abstraction with the most popular Git hosting service.
 
 **Acceptance Criteria:**
+
 1. GitHub provider implements all interface operations from Story 1.4
 2. Provider handles authentication via Personal Access Token (PAT) or GitHub App
 3. Provider integrates with GitHub Actions API for CI/CD triggering
@@ -153,6 +161,7 @@ I want GitLab implemented as the second Git platform,
 So that teams using GitLab can adopt the system without platform migration.
 
 **Acceptance Criteria:**
+
 1. GitLab provider implements all interface operations from Story 1.4
 2. Provider handles authentication via Personal Access Token or OAuth
 3. Provider integrates with GitLab CI API for pipeline triggering
@@ -171,6 +180,7 @@ I want centralized configuration for Git platform settings,
 So that I can easily specify which platform to use and configure platform-specific parameters.
 
 **Acceptance Criteria:**
+
 1. Configuration file supports platform entries (GitHub, GitLab, Gitea, Forgejo)
 2. Each platform entry includes: type, base URL, authentication method, webhook secret
 3. Configuration validates on load (reachable endpoints, valid credentials)
@@ -189,6 +199,7 @@ I want documented architecture for orchestrator mode and worker mode,
 So that the system can operate both as autonomous coordinator and as CI/CD-invoked worker.
 
 **Acceptance Criteria:**
+
 1. Architecture document defines orchestrator mode responsibilities (issue selection, loop coordination, state management)
 2. Architecture document defines worker mode responsibilities (CI/CD integration, single-task execution, exit codes)
 3. Document includes sequence diagrams for both modes
@@ -207,6 +218,7 @@ I want a basic CLI entry point that supports both orchestrator and worker modes,
 So that I can test mode switching and validate the hybrid architecture design.
 
 **Acceptance Criteria:**
+
 1. CLI supports `--mode orchestrator` flag for autonomous coordinator behavior
 2. CLI supports `--mode worker` flag for CI/CD-invoked single-task execution
 3. CLI loads configuration from config file and environment variables
@@ -226,6 +238,7 @@ I want an initial marketing website hosted on Cloudflare Workers,
 So that early adopters can learn about Tamma and sign up for updates before the full documentation site launches.
 
 **Acceptance Criteria:**
+
 1. Static website hosted on Cloudflare Workers with custom domain (tamma.dev or similar)
 2. Homepage includes: project name, tagline, key features overview, "Coming Soon" message
 3. Email signup form for launch notifications (stores emails in Cloudflare KV or external service)
@@ -248,6 +261,7 @@ I want support for multiple AI providers (OpenAI, GitHub Copilot, Google Gemini,
 So that I can choose the optimal provider based on cost, capability, and deployment requirements.
 
 **Acceptance Criteria:**
+
 1. OpenAI provider implements IAIProvider interface with support for GPT-4, GPT-3.5-turbo, and o1 models
 2. GitHub Copilot provider implements IAIProvider interface with Copilot API integration
 3. Google Gemini provider implements IAIProvider interface with support for Gemini Pro and Ultra models
@@ -272,6 +286,7 @@ I want support for multiple Git platforms (Gitea, Forgejo, Bitbucket, Azure DevO
 So that I can use Tamma with my preferred Git hosting service regardless of vendor.
 
 **Acceptance Criteria:**
+
 1. Gitea provider implements IGitPlatform interface with Gitea API integration
 2. Forgejo provider implements IGitPlatform interface with Forgejo API integration
 3. Bitbucket provider implements IGitPlatform interface with Bitbucket Cloud and Server API support
@@ -307,6 +322,7 @@ I want the core orchestration engine separated from launch mechanisms,
 So that Tamma can be deployed flexibly across CLI, service, web, and container environments.
 
 **Acceptance Criteria:**
+
 1. Core engine extracted into `@tamma/core` package (workflow, quality gates, providers)
 2. Launch wrappers created: `@tamma/cli`, `@tamma/server`, `@tamma/worker`
 3. Core engine has no dependencies on launch mechanism (HTTP server, CLI parsing)
@@ -325,6 +341,7 @@ I want enhanced CLI with interactive setup wizard and single-command execution,
 So that I can quickly configure and run Tamma without manual config file editing.
 
 **Acceptance Criteria:**
+
 1. `tamma init` command launches interactive setup wizard (AI provider, Git platform, config file location)
 2. `tamma run issue-123` executes autonomous loop for specific issue
 3. `tamma config list` displays current configuration
@@ -344,6 +361,7 @@ I want Tamma to run as a background service (daemon),
 So that it can continuously monitor for new issues and execute autonomous loops without manual invocation.
 
 **Acceptance Criteria:**
+
 1. `tamma service install` installs system service (systemd on Linux, Windows Service on Windows, launchd on macOS)
 2. `tamma service start|stop|restart|status` manages service lifecycle
 3. Service runs as non-root user with appropriate permissions
@@ -363,6 +381,7 @@ I want a RESTful API for job submission and webhook receiver,
 So that Tamma can be triggered remotely from CI/CD pipelines or Git platform webhooks.
 
 **Acceptance Criteria:**
+
 1. `tamma server` starts Fastify HTTP server on configurable port (default: 3000)
 2. `POST /api/v1/jobs` creates new autonomous loop job (body: `{issueId, repositoryUrl}`)
 3. `GET /api/v1/jobs/:id` returns job status (pending, running, completed, failed)
@@ -384,6 +403,7 @@ I want Docker images and Docker Compose configuration,
 So that I can deploy Tamma with containers alongside PostgreSQL and workers.
 
 **Acceptance Criteria:**
+
 1. Multi-stage Dockerfile builds optimized production image (Node.js Alpine base, <500MB)
 2. Docker image published to Docker Hub (`tamma/tamma:latest`, `tamma/tamma:v0.1.0-alpha`)
 3. Docker Compose file includes: orchestrator service, PostgreSQL service, worker service (3 replicas)
@@ -404,6 +424,7 @@ I want Tamma to automatically respond to GitHub/GitLab webhooks,
 So that autonomous loops are triggered when issues are created or assigned without manual intervention.
 
 **Acceptance Criteria:**
+
 1. GitHub webhook verification (HMAC-SHA256 signature validation with shared secret)
 2. GitLab webhook verification (secret token validation)
 3. Event filtering: only process `issues.opened`, `issues.assigned` events (ignore others)
@@ -424,6 +445,7 @@ I want unified configuration management across all deployment modes,
 So that I can configure Tamma consistently whether running CLI, service, or container.
 
 **Acceptance Criteria:**
+
 1. Configuration file formats supported: YAML (preferred), JSON, TOML
 2. Configuration file locations (priority order): `./tamma.yaml`, `~/.tamma/config.yaml`, `/etc/tamma/config.yaml`
 3. Environment variable overrides (e.g., `TAMMA_AI_PROVIDER_KEY` overrides config file value)
@@ -444,6 +466,7 @@ I want to install Tamma via npm,
 So that I can quickly set up Tamma with a single command without manual compilation.
 
 **Acceptance Criteria:**
+
 1. `@tamma/cli` package published to npm registry (public)
 2. `@tamma/core`, `@tamma/server`, `@tamma/worker` published as libraries
 3. Semantic versioning strategy (e.g., v0.1.0-alpha, v0.2.0, v1.0.0)
@@ -464,6 +487,7 @@ I want standalone Tamma binaries and OS-specific installers,
 So that I can install Tamma without Node.js runtime or npm.
 
 **Acceptance Criteria:**
+
 1. Standalone binaries built with pkg/nexe/esbuild (Windows .exe, macOS binary, Linux binary)
 2. Binaries include bundled Node.js runtime (no external dependencies)
 3. Installers created: Windows MSI (WiX Toolset), macOS DMG (create-dmg), Linux .deb/.rpm (fpm)
@@ -484,6 +508,7 @@ I want Helm chart and Kubernetes manifests for Tamma,
 So that I can deploy Tamma in a Kubernetes cluster with auto-scaling and high availability.
 
 **Acceptance Criteria:**
+
 1. Helm chart published to Helm repository (e.g., Artifact Hub)
 2. Kubernetes manifests: Deployments (orchestrator, worker), Services (orchestrator API), ConfigMaps (config), Secrets (API keys)
 3. Orchestrator StatefulSet with persistent volume for state
@@ -504,7 +529,9 @@ So that I can deploy Tamma in a Kubernetes cluster with auto-scaling and high av
 
 **Value Delivered:** Basic autonomous development capability (issue selection, PR creation, code generation, merge operations, auto-next issue).
 
-**Estimated Stories:** 11 stories
+**Estimated Stories:** 16 stories
+
+**Technical Specification:** See `tech-spec-epic-2.md` for detailed implementation guidance.
 
 ---
 
@@ -515,6 +542,7 @@ I want the system to select the next unassigned issue from the configured reposi
 So that the autonomous loop can start without manual issue specification.
 
 **Acceptance Criteria:**
+
 1. System queries Git platform API for open issues in configured repository
 2. System filters issues by labels (configured inclusion/exclusion labels)
 3. System prioritizes issues by age (oldest first) as default strategy
@@ -534,6 +562,7 @@ I want the system to analyze selected issue content and related context,
 So that code generation has complete understanding of requirements.
 
 **Acceptance Criteria:**
+
 1. System reads issue title, body, labels, and comments
 2. System identifies related issues via issue references (#123 format)
 3. System loads recent commit history (last 10 commits) for project context
@@ -553,6 +582,7 @@ I want the system to generate a development plan and wait for my approval,
 So that I can review the approach before code is written.
 
 **Acceptance Criteria:**
+
 1. System sends issue context to AI provider with prompt: "Generate step-by-step development plan"
 2. System receives plan with 3-7 implementation steps
 3. System presents plan to user via CLI output with formatted steps
@@ -573,6 +603,7 @@ I want the system to create a feature branch for the issue,
 So that development happens in isolation from main branch.
 
 **Acceptance Criteria:**
+
 1. System generates branch name format: `Tamma/issue-{number}-{sanitized-title}`
 2. System creates branch from latest main/master branch via Git platform API
 3. System handles conflict if branch already exists (append timestamp suffix)
@@ -591,6 +622,7 @@ I want the system to generate tests before implementation code,
 So that development follows TDD principles.
 
 **Acceptance Criteria:**
+
 1. System sends plan to AI provider with prompt: "Generate failing tests for step 1"
 2. System receives test code with clear test cases
 3. System writes test files to appropriate test directory (following project conventions)
@@ -610,6 +642,7 @@ I want the system to generate implementation code to pass the tests,
 So that the feature is developed following TDD workflow.
 
 **Acceptance Criteria:**
+
 1. System sends plan and failing tests to AI provider with prompt: "Implement code to pass tests"
 2. System receives implementation code with necessary changes
 3. System writes implementation files to appropriate source directories
@@ -629,6 +662,7 @@ I want the system to perform optional refactoring after tests pass,
 So that code quality is maintained (TDD refactor phase).
 
 **Acceptance Criteria:**
+
 1. System sends implementation code to AI provider with prompt: "Suggest refactoring for improved readability/maintainability"
 2. If AI suggests refactoring, system presents to user: "Apply refactoring? [Y/n]"
 3. If user approves, system applies refactoring and commits with message: "Refactor [issue title]"
@@ -647,6 +681,7 @@ I want the system to create a Pull Request for the feature branch,
 So that changes can be reviewed and merged.
 
 **Acceptance Criteria:**
+
 1. System generates PR title format: "[Tamma] {issue title}"
 2. System generates PR body including: issue reference, development plan summary, test results summary
 3. System creates PR via Git platform API (base: main/master, head: feature branch)
@@ -666,6 +701,7 @@ I want the system to monitor the PR for CI/CD status and review feedback,
 So that the system can respond to build failures or review comments.
 
 **Acceptance Criteria:**
+
 1. System polls PR status every 30 seconds (configurable interval)
 2. System checks CI/CD status via Git platform API (pending, success, failure)
 3. System checks review status (approved, changes requested, commented)
@@ -685,6 +721,7 @@ I want the system to merge the PR after CI passes and reviews approve,
 So that the feature is integrated into main branch.
 
 **Acceptance Criteria:**
+
 1. System waits for CI/CD success and required review approvals
 2. System presents merge checkpoint: "PR ready to merge. Proceed? [Y/n]"
 3. If user approves, system merges PR via Git platform API (using configured merge strategy: merge commit, squash, rebase)
@@ -704,6 +741,7 @@ I want the system to automatically select the next issue after completing curren
 So that the autonomous loop continues without manual intervention.
 
 **Acceptance Criteria:**
+
 1. After successful merge (Story 2.10), system waits 10 seconds (cooldown period)
 2. System returns to Story 2.1 (issue selection) logic
 3. System maintains loop counter and logs iteration number
@@ -715,6 +753,110 @@ So that the autonomous loop continues without manual intervention.
 
 ---
 
+### **Story 2.12: Intelligent Provider Selection**
+
+As a **system operator**,
+I want Tamma to automatically select the optimal AI provider based on task type, cost, and availability,
+so that development tasks are completed efficiently while staying within budget constraints.
+
+**Acceptance Criteria:**
+
+1. System analyzes task characteristics (code generation, review, research, testing) to determine optimal provider
+2. Provider selection algorithm considers: task complexity, required capabilities, cost per token, response speed, current load
+3. System maintains provider performance metrics (success rate, average response time, cost efficiency) for each task type
+4. Fallback logic automatically switches providers when primary provider is unavailable or rate-limited
+5. Cost-aware routing prioritizes cheaper providers for simple tasks, premium providers for complex tasks
+6. Provider selection logged to event trail with rationale (why this provider was chosen)
+7. Configuration allows override of automatic selection per task type or provider
+
+**Prerequisites:** Story 1.1 (AI provider interface), Story 1.10 (multiple providers), Story 2.1 (issue selection)
+
+---
+
+### **Story 2.13: Prompt Engineering Optimization**
+
+As a **system architect**,
+I want Tamma to maintain and optimize prompt templates for different task types,
+so that AI responses are consistently high-quality and task-appropriate.
+
+**Acceptance Criteria:**
+
+1. System maintains a library of optimized prompt templates for each task type (code generation, review, research, testing, refactoring)
+2. Prompt templates include variable placeholders for context injection (issue details, code snippets, requirements)
+3. System tracks prompt effectiveness metrics (success rate, revision count, user satisfaction) per template
+4. A/B testing framework compares prompt variations and automatically selects best-performing templates
+5. Prompt templates support versioning with rollback capability for degraded performance
+6. Context window optimization ensures prompts fit within provider limits while maintaining effectiveness
+7. System includes prompt engineering best practices (few-shot examples, chain-of-thought, role specification)
+8. CLI commands allow prompt template inspection, testing, and manual optimization
+
+**Prerequisites:** Story 1.1 (AI provider interface), Story 2.12 (provider selection), Story 2.3 (development planning)
+
+---
+
+### **Story 2.14: Issue Decomposition Engine**
+
+As a **development team lead**,
+I want Tamma to automatically break large issues into smaller, implementable tasks,
+so that complex features can be developed incrementally with continuous integration and delivery.
+
+**Acceptance Criteria:**
+
+1. System analyzes issue complexity and determines when decomposition is needed (based on size, scope, dependencies)
+2. Decomposition algorithm breaks issues into logical subtasks with clear acceptance criteria for each
+3. Task dependencies identified and mapped (sequential, parallel, blocking relationships)
+4. Each subtask sized appropriately (2-8 hours of work) with clear definition of done
+5. Decomposition preserves original issue intent and business value
+6. Subtasks linked to parent issue with traceability and rollup reporting
+7. Human approval required before executing decomposed tasks, with ability to modify decomposition
+8. System learns from decomposition patterns to improve future breakdown quality
+
+**Prerequisites:** Story 2.2 (issue analysis), Story 2.3 (development planning), Story 3.6 (ambiguity detection)
+
+---
+
+### **Story 2.15: Task Dependency Mapping**
+
+As a **project manager**,
+I want Tamma to identify and manage dependencies between development tasks,
+so that tasks are executed in the correct order and integration conflicts are avoided.
+
+**Acceptance Criteria:**
+
+1. System automatically detects dependencies between tasks (code dependencies, data model changes, API modifications)
+2. Dependency types classified: blocking (must complete first), parallel (can run simultaneously), optional (nice to have)
+3. Visual dependency graph shows task relationships and critical path analysis
+4. Dependency validation ensures task prerequisites are met before execution begins
+5. Circular dependency detection prevents infinite loops and deadlock situations
+6. Impact analysis identifies downstream effects when tasks are modified or delayed
+7. Dependency-aware scheduling optimizes task execution order for maximum parallelism
+8. Dependency updates automatically propagate when tasks change scope or requirements
+
+**Prerequisites:** Story 2.14 (issue decomposition), Story 2.3 (development planning), Story 3.4 (research capability)
+
+---
+
+### **Story 2.16: Incremental Task Sequencing**
+
+As a **DevOps engineer**,
+I want Tamma to sequence small tasks for continuous integration and delivery,
+so that value is delivered incrementally with minimal integration risk.
+
+**Acceptance Criteria:**
+
+1. System creates optimal task execution sequences based on dependencies, risk, and value delivery
+2. Incremental delivery strategy ensures each task provides measurable value when completed
+3. Integration checkpoints validate that completed tasks work together before proceeding
+4. Rollback capability exists for each incremental step to maintain system stability
+5. Feature flags enable/disable completed tasks for controlled rollout
+6. Continuous integration pipeline automatically tests each incremental task
+7. Progress tracking shows cumulative value delivery and remaining work
+8. Task sequencing adapts based on feedback and changing priorities
+
+**Prerequisites:** Story 2.14 (issue decomposition), Story 2.15 (dependency mapping), Story 3.1 (build automation)
+
+---
+
 ## Epic 3: Quality Gates & Intelligence Layer (Weeks 5-7)
 
 **Goal:** Add build automation, test execution, CI/CD integration with 3-retry limits and mandatory escalation. Implement research capability, clarifying questions, ambiguity detection, and multi-option design proposals.
@@ -723,7 +865,9 @@ So that the autonomous loop continues without manual intervention.
 
 **MVP Critical:** All stories in Epic 3 are required for MVP - quality gates prevent Tamma from breaking itself during self-maintenance, mandatory escalation ensures Tamma never gets stuck.
 
-**Estimated Stories:** 9 stories (all MVP critical)
+**Estimated Stories:** 12 stories (all MVP critical)
+
+**Technical Specification:** See `tech-spec-epic-3.md` for detailed implementation guidance.
 
 ---
 
@@ -734,6 +878,7 @@ I want the system to automatically trigger builds and handle build failures inte
 So that build errors are resolved without manual intervention (within retry limits).
 
 **Acceptance Criteria:**
+
 1. System triggers build via platform-specific CI/CD API (GitHub Actions, GitLab CI, etc.) after each commit
 2. System polls build status every 15 seconds until completion
 3. If build fails, system retrieves build logs and error messages
@@ -754,6 +899,7 @@ I want the system to automatically run tests and handle test failures intelligen
 So that test errors are resolved without manual intervention (within retry limits).
 
 **Acceptance Criteria:**
+
 1. System executes test suite locally after implementation (Story 2.6) and after each fix
 2. System captures test output (pass/fail counts, error messages, stack traces)
 3. If tests fail, system sends failures to AI provider with prompt: "Analyze test failures and suggest fix"
@@ -774,6 +920,7 @@ I want the system to escalate to humans after retry limits are exhausted,
 So that persistent issues are handled by humans rather than infinite loops.
 
 **Acceptance Criteria:**
+
 1. When retry limit reached (build, test, or any quality gate), system creates escalation event
 2. System posts comment on PR: "❌ Escalation Required: [issue type] failed after 3 attempts. Review needed."
 3. System adds "needs-human-review" label to PR
@@ -794,6 +941,7 @@ I want the system to research unfamiliar technologies or APIs before attempting 
 So that code generation is informed by accurate, up-to-date information.
 
 **Acceptance Criteria:**
+
 1. During plan generation (Story 2.3), system detects unfamiliar terms (not in known API list)
 2. System sends research query to AI provider: "Research [concept]: provide API documentation, common patterns, gotchas"
 3. System receives research summary (300-500 words) with code examples
@@ -813,6 +961,7 @@ I want the system to ask clarifying questions when requirements are ambiguous,
 So that implementation aligns with actual intent rather than guessed assumptions.
 
 **Acceptance Criteria:**
+
 1. During issue analysis (Story 2.2), system detects ambiguity indicators (vague wording, missing details, conflicting statements)
 2. System generates 2-5 clarifying questions with multiple-choice options where possible
 3. System presents questions to user via CLI: "Requirements need clarification: [questions]"
@@ -832,6 +981,7 @@ I want the system to quantify requirement ambiguity with a confidence score,
 So that high-risk issues are flagged for extra review before implementation.
 
 **Acceptance Criteria:**
+
 1. System analyzes issue content and assigns ambiguity score (0-100, higher = more ambiguous)
 2. Scoring factors: vague language, missing acceptance criteria, conflicting requirements, unusual feature requests
 3. If score > 70 (high ambiguity), system prompts: "⚠️ High ambiguity detected. Proceed with clarifying questions? [Y/n]"
@@ -850,6 +1000,7 @@ I want the system to present multiple design approaches for complex features,
 So that I can choose the best technical direction before implementation.
 
 **Acceptance Criteria:**
+
 1. For issues labeled "design-options-needed", system generates 2-3 alternative design approaches
 2. Each option includes: description, pros/cons, implementation complexity, test strategy
 3. System presents options via CLI with numbered list
@@ -869,6 +1020,7 @@ I want the system to run static analysis tools (linters, formatters, security sc
 So that code quality issues are caught before PR creation.
 
 **Acceptance Criteria:**
+
 1. System detects project's static analysis tools (ESLint, Pylint, RuboCop, etc.) from config files
 2. System runs static analysis after implementation (Story 2.6) and before commit
 3. System captures analysis output (errors, warnings, suggestions)
@@ -888,6 +1040,7 @@ I want the system to run security vulnerability scans automatically,
 So that known vulnerabilities are blocked before code reaches production.
 
 **Acceptance Criteria:**
+
 1. System runs dependency vulnerability scanner (npm audit, pip-audit, bundle-audit) before PR creation
 2. System runs code security scanner (Semgrep, Bandit, Brakeman) on changed files
 3. If critical vulnerabilities found, system blocks PR creation and escalates immediately
@@ -900,6 +1053,69 @@ So that known vulnerabilities are blocked before code reaches production.
 
 ---
 
+### **Story 3.10: Agent Performance Monitoring**
+
+As a **system operator**,
+I want to monitor AI agent performance metrics and response quality,
+so that I can identify issues, optimize performance, and ensure consistent autonomous development quality.
+
+**Acceptance Criteria:**
+
+1. System tracks comprehensive performance metrics for each AI provider and task type combination
+2. Metrics include: response time, success rate, token usage, cost per task, revision count, quality score
+3. Real-time dashboard displays current performance with historical trends and alerts for anomalies
+4. Performance baselines established per provider/task type with automatic deviation detection
+5. Quality scoring system evaluates AI responses based on code quality, test coverage, and user feedback
+6. Automated alerts trigger when performance degrades beyond thresholds (response time, success rate, cost)
+7. Performance reports generated daily/weekly with insights and optimization recommendations
+8. Historical performance data used to inform provider selection and prompt optimization
+
+**Prerequisites:** Story 1.1 (AI provider interface), Story 2.12 (provider selection), Story 2.13 (prompt optimization), Story 5.2 (metrics collection)
+
+---
+
+### **Story 3.11: Cost-Aware AI Usage**
+
+As a **project manager**,
+I want Tamma to optimize AI usage to stay within budget constraints while maintaining development quality,
+so that autonomous development remains cost-effective and predictable.
+
+**Acceptance Criteria:**
+
+1. System tracks AI costs in real-time with breakdown by provider, task type, and project
+2. Budget management system supports daily, weekly, and monthly spending limits with configurable alerts
+3. Cost optimization strategies automatically reduce usage when approaching budget limits (cheaper providers, fewer retries, simplified prompts)
+4. Cost forecasting predicts future spending based on current usage patterns and upcoming tasks
+5. Cost-benefit analysis evaluates whether AI usage for specific tasks provides sufficient value
+6. Spending reports provide detailed breakdown with insights and cost-saving recommendations
+7. Emergency cost controls can immediately halt AI usage when critical budget thresholds are exceeded
+8. Cost optimization doesn't compromise critical quality gates (security, testing, code review)
+
+**Prerequisites:** Story 1.1 (AI provider interface), Story 2.12 (provider selection), Story 3.10 (performance monitoring), Story 5.2 (metrics collection)
+
+---
+
+### **Story 3.12: Task Complexity Assessment**
+
+As a **development team lead**,
+I want Tamma to estimate task complexity and determine appropriate decomposition level,
+so that tasks are sized optimally for autonomous development and reliable completion.
+
+**Acceptance Criteria:**
+
+1. System analyzes multiple complexity dimensions (technical difficulty, integration points, uncertainty, scope)
+2. Complexity scoring algorithm provides quantitative assessment (0-100 scale) with qualitative descriptors
+3. Historical accuracy tracking compares estimated vs actual complexity to improve predictions
+4. Decomposition recommendations suggest optimal task breakdown based on complexity scores
+5. Complexity factors identified and explained (why task is complex/simplistic)
+6. Risk assessment identifies potential blockers and failure points for each complexity level
+7. Time estimation correlates with complexity scores for planning and scheduling
+8. Complexity assessment integrates with provider selection and resource allocation
+
+**Prerequisites:** Story 2.14 (issue decomposition), Story 2.12 (provider selection), Story 3.6 (ambiguity detection)
+
+---
+
 ## Epic 4: Event Sourcing & Audit Trail (Weeks 8-10)
 
 **Goal:** Implement CQRS event sourcing for complete transparency and audit compliance. Capture all user actions, AI actions, and system state changes with millisecond precision.
@@ -907,6 +1123,8 @@ So that known vulnerabilities are blocked before code reaches production.
 **Value Delivered:** Complete audit trail (100% traceability), compliance readiness (SOC2, ISO27001, GDPR), time-travel debugging, differential diagnosis.
 
 **Estimated Stories:** 8 stories
+
+**Technical Specification:** See `tech-spec-epic-4.md` for detailed implementation guidance.
 
 ---
 
@@ -917,6 +1135,7 @@ I want a comprehensive event schema covering all system actions and state change
 So that event sourcing captures complete system history.
 
 **Acceptance Criteria:**
+
 1. Event schema defines base fields: `eventId`, `timestamp`, `eventType`, `actorType`, `actorId`, `payload`, `metadata`
 2. Schema includes event types for: issue selection, AI requests/responses, code changes, Git operations, approvals, escalations, errors
 3. Schema supports event versioning (schema version field) for future evolution
@@ -935,6 +1154,7 @@ I want a persistent, append-only event store for storing all system events,
 So that events are never lost and can be replayed for debugging or audit.
 
 **Acceptance Criteria:**
+
 1. Event store supports append-only writes (no updates or deletes)
 2. Event store provides ordered reads by timestamp with efficient querying
 3. Event store supports filtering by event type, actor, correlation ID
@@ -954,6 +1174,7 @@ I want all issue selection and analysis actions captured as events,
 So that I can audit which issues were selected and why.
 
 **Acceptance Criteria:**
+
 1. `IssueSelectedEvent` captured when issue is selected (Story 2.1) including issue ID, title, labels, selection criteria
 2. `IssueAnalysisCompletedEvent` captured after analysis (Story 2.2) including context summary length, referenced issues
 3. Events include actor (system in orchestrator mode, CI runner in worker mode)
@@ -972,6 +1193,7 @@ I want all AI provider requests and responses captured as events,
 So that I can audit AI usage, costs, and decision-making processes.
 
 **Acceptance Criteria:**
+
 1. `AIRequestEvent` captured before each AI provider call including: provider name, model, prompt (truncated if >1000 chars), token count estimate
 2. `AIResponseEvent` captured after response including: provider name, model, response (truncated), token count, latency, cost estimate
 3. Events include full prompt/response in separate blob storage for detailed analysis (with retention policy)
@@ -990,6 +1212,7 @@ I want all code changes and Git operations captured as events,
 So that I can see the complete evolution of code during autonomous development.
 
 **Acceptance Criteria:**
+
 1. `CodeFileWrittenEvent` captured for each file write including: file path, file size, change type (create/update/delete)
 2. `CommitCreatedEvent` captured for each commit including: commit SHA, message, branch name, file count
 3. `BranchCreatedEvent` captured when branch created (Story 2.4)
@@ -1009,6 +1232,7 @@ I want all user approvals and system escalations captured as events,
 So that I can verify human oversight and understand when system needed help.
 
 **Acceptance Criteria:**
+
 1. `ApprovalRequestedEvent` captured when system requests user approval (plan, merge, etc.) including: approval type, context summary
 2. `ApprovalProvidedEvent` captured when user responds including: decision (approved/rejected/edited), timestamp, user identity
 3. `EscalationTriggeredEvent` captured when retry limits exhausted (Story 3.3) including: escalation reason, retry history, current state
@@ -1027,6 +1251,7 @@ I want to query events by time range and filters to reconstruct system state at 
 So that I can debug issues by replaying what system did in the past.
 
 **Acceptance Criteria:**
+
 1. API endpoint: `GET /events?since={timestamp}&until={timestamp}&type={type}&correlationId={id}`
 2. API returns events in chronological order with pagination support (default 100 events per page)
 3. API supports filtering by: event type, actor, correlation ID, issue number
@@ -1046,6 +1271,7 @@ I want to replay system state at any point in time to understand past behavior,
 So that I can diagnose why autonomous loop made specific decisions.
 
 **Acceptance Criteria:**
+
 1. CLI command: `Tamma replay --correlation-id {id} --timestamp {timestamp}`
 2. Command reconstructs system state by replaying events up to specified timestamp
 3. Command displays: issue context, AI provider decisions, code changes, approval points, errors
@@ -1069,6 +1295,8 @@ So that I can diagnose why autonomous loop made specific decisions.
 
 **Estimated Stories:** 10 stories (6 required for MVP, 4 optional)
 
+**Technical Specification:** See `tech-spec-epic-5.md` for detailed implementation guidance.
+
 ---
 
 ### **Story 5.1: Structured Logging Implementation** ⭐ **MVP CRITICAL**
@@ -1080,6 +1308,7 @@ So that I can efficiently search, filter, and analyze logs in production.
 **MVP Rationale:** Essential for debugging stuck workflows and validating self-maintenance capability. Tamma must log all workflow steps to enable diagnosis when autonomous loop encounters issues in its own codebase.
 
 **Acceptance Criteria:**
+
 1. All log statements use structured logging library (Winston, Bunyan, structlog)
 2. Log format: `{"timestamp": ISO8601, "level": "info/warn/error", "message": "...", "context": {...}}`
 3. Context includes: correlation ID, issue number, PR number, actor ID
@@ -1101,6 +1330,7 @@ So that I can track development velocity, quality trends, and system health.
 **MVP Rationale:** Essential for monitoring autonomous loop health and detecting anomalies. Metrics enable tracking of completion rates, escalation rates, and quality metrics critical for self-maintenance validation.
 
 **Acceptance Criteria:**
+
 1. Metrics library integrated (Prometheus client, StatsD, or similar)
 2. Counter metrics: `issues_processed_total`, `prs_created_total`, `prs_merged_total`, `escalations_total`
 3. Gauge metrics: `active_autonomous_loops`, `pending_approvals`, `queue_depth`
@@ -1122,6 +1352,7 @@ So that I can monitor autonomous loops and detect issues immediately.
 **MVP Rationale:** Optional - CLI-based monitoring and log tailing sufficient for MVP. UI dashboard provides better UX but not required for self-maintenance validation. Can be deferred to post-MVP.
 
 **Acceptance Criteria:**
+
 1. Web dashboard accessible at `http://localhost:3000/dashboard` (or configured port)
 2. Dashboard displays: active loops count, pending approvals count, recent escalations list
 3. Dashboard displays: current issue being processed, step in autonomous loop, estimated time remaining
@@ -1143,6 +1374,7 @@ So that I can track team productivity improvements and identify bottlenecks.
 **MVP Rationale:** Optional - CLI-based metrics queries and log analysis sufficient for MVP. Velocity charts provide better visualization but not required for self-maintenance validation. Can be deferred to post-MVP.
 
 **Acceptance Criteria:**
+
 1. Dashboard page: `http://localhost:3000/dashboard/velocity`
 2. Charts display: issues completed per day (last 30 days), average time-to-merge (last 30 days), PR success rate (first-time merge vs. retry)
 3. Charts include filters: date range, issue labels, AI provider
@@ -1164,6 +1396,7 @@ So that I can investigate past development cycles without writing queries.
 **MVP Rationale:** Optional - Event query API (Story 4.7) provides programmatic access sufficient for MVP debugging. UI provides better UX but not required for self-maintenance validation. Can be deferred to post-MVP.
 
 **Acceptance Criteria:**
+
 1. Dashboard page: `http://localhost:3000/dashboard/events`
 2. Event list displays: timestamp, event type, actor, summary (first 100 chars of payload)
 3. Event list supports filtering: date range, event type, correlation ID, issue number
@@ -1185,6 +1418,7 @@ So that I can respond quickly before problems escalate.
 **MVP Rationale:** Partial - Basic alerts via CLI output, email, or Slack webhooks required for MVP. Full dashboard integration optional. Essential for self-maintenance to detect and respond to escalations, errors, or stuck workflows.
 
 **Acceptance Criteria:**
+
 1. Alert triggers: escalation after 3 retries, system error (uncaught exception), API rate limit hit, event store write failure
 2. Alert channels: CLI output (if running), webhook (POST to configured URL), email (if configured)
 3. Alert payload includes: severity (critical/warning/info), title, description, correlation ID, timestamp, suggested action
@@ -1206,6 +1440,7 @@ So that I can measure user satisfaction and identify improvement areas.
 **MVP Rationale:** Optional - User feedback valuable for post-MVP product improvement but not required for self-maintenance validation. Metrics and logs provide sufficient data for MVP. Can be deferred to post-MVP.
 
 **Acceptance Criteria:**
+
 1. After PR merge, system prompts: "Rate this autonomous development cycle: 👍 👎"
 2. If user selects 👎, system asks: "What went wrong? [free text]"
 3. Feedback stored in database with: timestamp, correlation ID, rating, comment
@@ -1227,6 +1462,7 @@ So that regressions are caught before production deployment.
 **MVP Rationale:** Essential for validating self-maintenance capability. Integration tests ensure Tamma's self-implemented changes don't break core functionality. Critical for confidence in autonomous loop robustness.
 
 **Acceptance Criteria:**
+
 1. Integration tests use real AI provider (mock mode) and mock Git platform API
 2. Test scenarios: happy path (issue → plan → code → PR → merge), build failure with retry, test failure with escalation, ambiguous requirements with clarifying questions
 3. Tests run in CI/CD pipeline on every PR
@@ -1248,6 +1484,7 @@ So that I can quickly install Tamma via npm, Docker, or binaries and complete fi
 **MVP Rationale:** Essential for alpha release - users cannot adopt Tamma without installation instructions.
 
 **Acceptance Criteria:**
+
 1. Installation via npm documented (`npm install -g @tamma/cli`, prerequisites, troubleshooting)
 2. Installation via Docker documented (`docker run`, Docker Compose setup, volume mounts)
 3. Installation via binaries documented (download, extract, PATH setup for Windows/macOS/Linux)
@@ -1268,6 +1505,7 @@ So that I can configure AI providers, Git platforms, and operate Tamma effective
 **MVP Rationale:** Essential for alpha release - users need configuration reference and usage examples.
 
 **Acceptance Criteria:**
+
 1. CLI command reference documented (all `tamma` commands with examples)
 2. Configuration file reference documented (all options with examples)
 3. AI provider setup guides (Anthropic, OpenAI, GitHub Copilot, local LLMs)
@@ -1289,6 +1527,7 @@ So that I can programmatically interact with Tamma's REST API and webhooks.
 **MVP Rationale:** Essential for CI/CD integration and webhook setup.
 
 **Acceptance Criteria:**
+
 1. REST API endpoints documented (`POST /api/v1/jobs`, `GET /api/v1/jobs/:id`, etc.)
 2. Webhook payloads documented (GitHub, GitLab event formats)
 3. Event schema documented (all event types with examples)
@@ -1310,6 +1549,7 @@ So that I can easily search and navigate all Tamma documentation.
 **MVP Rationale:** Essential for alpha release - replaces "Coming Soon" marketing site with full docs.
 
 **Acceptance Criteria:**
+
 1. Documentation hosted on GitHub Pages or Cloudflare Pages
 2. Searchable documentation (Algolia DocSearch or similar)
 3. Navigation organized by sections (Getting Started, Configuration, API, Troubleshooting)
@@ -1332,6 +1572,7 @@ So that I can learn Tamma quickly through visual demonstration.
 **MVP Rationale:** Optional - written documentation sufficient for MVP. Video improves onboarding experience but not required for self-maintenance validation.
 
 **Acceptance Criteria:**
+
 1. Video created (5-10 minutes, high quality)
 2. Video covers: installation, configuration, first autonomous PR
 3. Video demonstrates self-maintenance goal (Tamma working on itself)
@@ -1352,6 +1593,7 @@ So that early adopters can test the system in real projects.
 **MVP Rationale:** Essential for alpha release. Release artifacts, version tagging, and release notes required for users to adopt Tamma. Includes self-maintenance validation milestone.
 
 **Acceptance Criteria:**
+
 1. Release checklist completed: all acceptance criteria met, integration tests passing, documentation complete, security review passed
 2. Release artifacts built: Docker image (multi-arch: amd64, arm64), binary releases (Windows, macOS, Linux), source tarball
 3. Release notes drafted: features included, known limitations, breaking changes, upgrade path

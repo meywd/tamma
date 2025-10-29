@@ -2,6 +2,23 @@
 
 Status: ready-for-dev
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a **developer**,
@@ -54,6 +71,16 @@ so that I can validate the provider abstraction with a real implementation.
 
 ## Dev Notes
 
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
+
+
 ### Requirements Context Summary
 
 **Epic 1 Foundation:** This story implements the first concrete AI provider to validate the abstraction layer defined in Story 1.1. The Anthropic Claude API serves as the reference implementation that demonstrates how the IAIProvider interface should be used and establishes patterns for future providers.
@@ -77,6 +104,9 @@ so that I can validate the provider abstraction with a real implementation.
 **Naming Conventions:** Follow established patterns: `ClaudeCodeProvider` class, error classes with descriptive names, proper method signatures matching IAIProvider.
 
 ### References
+
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 
 - [Source: docs/tech-spec-epic-1.md#Claude-Code-Provider-Story-12](F:\Code\Repos\Tamma\docs\tech-spec-epic-1.md#Claude-Code-Provider-Story-12)
 - [Source: docs/epics.md#Story-12-Claude-Code-Provider-Implementation](F:\Code\Repos\Tamma\docs\epics.md#Story-12-Claude-Code-Provider-Implementation)

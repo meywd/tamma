@@ -2,6 +2,23 @@
 
 Status: ready-for-dev
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a **system architect**,
@@ -41,6 +58,16 @@ so that the system can support multiple AI providers without tight coupling.
 
 ## Dev Notes
 
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
+
+
 ### Requirements Context Summary
 
 **Epic 1 Foundation:** This story establishes the AI provider abstraction layer that enables multi-provider support (FR-7 to FR-9). The interface must support Claude Code as the reference implementation while being extensible for future providers like OpenCode, GLM, and local LLMs.
@@ -60,6 +87,9 @@ so that the system can support multiple AI providers without tight coupling.
 **Naming Conventions:** Follow the established patterns: `IAIProvider` interface, `ProviderCapabilities` type, error classes with descriptive names.
 
 ### References
+
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 
 - [Source: docs/tech-spec-epic-1.md#Core-Interfaces](F:\Code\Repos\Tamma\docs\tech-spec-epic-1.md#Core-Interfaces)
 - [Source: docs/epics.md#Story-11-AI-Provider-Interface-Definition](F:\Code\Repos\Tamma\docs\epics.md#Story-11-AI-Provider-Interface-Definition)

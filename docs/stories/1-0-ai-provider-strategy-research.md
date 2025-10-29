@@ -2,6 +2,23 @@
 
 Status: ready-for-dev
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a **technical architect**,
@@ -71,6 +88,15 @@ so that I can make informed decisions about which AI providers to support and wh
   - [ ] Subtask 6.7: Review findings with stakeholders and finalize recommendations
 
 ## Dev Notes
+
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
 
 ### Requirements Context Summary
 
@@ -146,6 +172,8 @@ so that I can make informed decisions about which AI providers to support and wh
 
 ### References
 
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 - [Anthropic Claude Pricing](https://www.anthropic.com/pricing)
 - [OpenAI API Pricing](https://openai.com/pricing)
 - [GitHub Copilot Pricing](https://github.com/features/copilot)

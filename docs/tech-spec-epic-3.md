@@ -41,6 +41,9 @@ Without Epic 3, Tamma cannot safely maintain itself - it would lack the quality 
 - **Story 3.7:** Multi-option design proposals - Alternative design generation, pros/cons analysis, user selection (FR-4)
 - **Story 3.8:** Static analysis integration - Linter/formatter integration, auto-fix application, analysis results in PR
 - **Story 3.9:** Security scanning integration - Dependency + code vulnerability scanning, critical vulnerability blocking, auto-patching (FR-33)
+- **Story 3.10:** Agent performance monitoring - Performance metrics tracking, quality scoring, real-time dashboard, alerting
+- **Story 3.11:** Cost-aware AI usage - Real-time cost tracking, budget management, optimization strategies, forecasting
+- **Story 3.12:** Task complexity assessment - Multi-dimensional analysis, scoring algorithms, decomposition recommendations
 
 **Out of Scope:**
 
@@ -68,7 +71,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 
 **1. Quality Gates Service (`packages/quality-gates`)**
 
-*Build Automation Module (Story 3.1):*
+_Build Automation Module (Story 3.1):_
+
 - `BuildOrchestrator` class triggering CI/CD builds via `GitPlatformInterface`
 - `BuildMonitor` service polling build status every 15 seconds with timeout (10 minutes default)
 - `BuildLogParser` service extracting error messages from platform-specific log formats
@@ -77,7 +81,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - Retry logic: 3 attempts with exponential backoff (2s → 4s → 8s), counter resets on success
 - Immediate escalation conditions: missing build config files, invalid credentials, unsupported platform
 
-*Test Execution Module (Story 3.2):*
+_Test Execution Module (Story 3.2):_
+
 - `TestRunner` service executing local test suites with framework detection (Jest, pytest, RSpec, etc.)
 - `TestOutputParser` service parsing test results (pass/fail counts, error messages, stack traces)
 - `TestFailureAnalyzer` service distinguishing test failures (assertions) from test errors (exceptions)
@@ -85,7 +90,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - Retry logic: 3 attempts per test failure, counter resets when all tests pass
 - Immediate escalation conditions: missing test framework, corrupted test files, environment setup failures
 
-*Escalation Workflow (Story 3.3):*
+_Escalation Workflow (Story 3.3):_
+
 - `EscalationManager` service creating structured escalation events when retry limit exhausted
 - `EscalationNotifier` abstraction supporting multiple channels:
   - `CLINotifier` for standalone mode (blocks with prompt)
@@ -96,7 +102,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - `PRCommenter` service posting escalation context as PR comments with "needs-human-review" label
 - Escalation context includes: failure type, retry history with logs, suggested next steps, correlation ID
 
-*Static Analysis Module (Story 3.8):*
+_Static Analysis Module (Story 3.8):_
+
 - `StaticAnalyzerDetector` service discovering project analysis tools from config files
   - JavaScript/TypeScript: ESLint (.eslintrc), Prettier (.prettierrc)
   - Python: Pylint (.pylintrc), Black (pyproject.toml), Flake8 (.flake8)
@@ -108,7 +115,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - `AutoFixer` service applying auto-fixes (formatting, import sorting, simple rule violations)
 - Retry logic: 3 attempts for fixable issues, immediate escalation for configuration errors
 
-*Security Scanning Module (Story 3.9):*
+_Security Scanning Module (Story 3.9):_
+
 - `DependencyScannerOrchestrator` service running platform-specific vulnerability scanners:
   - Node.js: npm audit, yarn audit, pnpm audit
   - Python: pip-audit, safety
@@ -126,7 +134,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 
 **2. Intelligence Layer Service (`packages/intelligence`)**
 
-*Research Module (Story 3.4):*
+_Research Module (Story 3.4):_
+
 - `ConceptDetector` service identifying unfamiliar terms during plan generation
   - Known API registry (local database of common APIs/frameworks)
   - Fuzzy matching against known concepts
@@ -138,7 +147,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - `ManualResearchTrigger` CLI command handler for explicit research requests
 - Integration point: Injects research findings into `PlanGenerator` context
 
-*Ambiguity Detection Module (Stories 3.5, 3.6):*
+_Ambiguity Detection Module (Stories 3.5, 3.6):_
+
 - `AmbiguityAnalyzer` service scoring issue content (0-100 scale, higher = more ambiguous)
   - NLP heuristics: vague language detection ("maybe", "probably", "should"), pronoun ambiguity, negation complexity
   - Missing components: No acceptance criteria (−20 points), Missing implementation details (−15 points)
@@ -155,7 +165,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 - Thresholds: Score > 70 → trigger clarifying questions, Score > 90 → suggest issue breakdown
 - Override mechanism: "skip-questions" label or "proceed-despite-ambiguity" label
 
-*Design Proposals Module (Story 3.7):*
+_Design Proposals Module (Story 3.7):_
+
 - `DesignProposalGenerator` service creating 2-3 alternative approaches for issues labeled "design-options-needed"
   - AI prompt template: "Generate 2-3 design approaches for [issue]. For each: description, pros/cons, implementation complexity (1-5), test strategy"
   - Response parsing into structured `DesignOption` objects
@@ -168,7 +179,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
 
 **3. Integration Points with Existing Services**
 
-*Epic 2 Workflow Engine Integration:*
+_Epic 2 Workflow Engine Integration:_
+
 - Quality gates inject checkpoints between Epic 2 workflow phases:
   - Build automation → After `PRManager.createPR()` (Story 2.8)
   - Test execution → After `CodeGenerator.generate()` (Story 2.6), after `RefactoringOrchestrator.refactor()` (Story 2.7)
@@ -180,7 +192,8 @@ Static analysis (Story 3.8) and security scanning (Story 3.9) integrate with Epi
   - Ambiguity scoring → Part of `ContextAnalyzer.analyze()` (Story 2.2)
   - Design proposals → Extended `PlanGenerator.generate()` for labeled issues (Story 2.3)
 
-*Epic 1 Provider Abstractions Integration:*
+_Epic 1 Provider Abstractions Integration:_
+
 - All AI interactions route through `AIProviderInterface` (Stories 1.1, 1.2)
 - CI/CD operations use `GitPlatformInterface` (Stories 1.4, 1.5, 1.6)
 - Configuration management via `ProviderConfigManager` and `PlatformConfigManager` (Stories 1.3, 1.7)
@@ -209,7 +222,13 @@ interface BuildExecution {
   durationMs?: number;
   logs: string;
   errorMessages: string[];
-  failureCategory?: 'compilation' | 'dependency' | 'timeout' | 'configuration' | 'resource' | 'unknown';
+  failureCategory?:
+    | 'compilation'
+    | 'dependency'
+    | 'timeout'
+    | 'configuration'
+    | 'resource'
+    | 'unknown';
   retryAttempt: number; // 0 for first attempt, increments per retry
   suggestedFix?: string; // AI-generated fix suggestion
 }
@@ -240,7 +259,12 @@ interface TestFailure {
 
 interface EscalationEvent {
   escalationId: string;
-  escalationType: 'build-failure' | 'test-failure' | 'security-critical' | 'static-analysis' | 'other';
+  escalationType:
+    | 'build-failure'
+    | 'test-failure'
+    | 'security-critical'
+    | 'static-analysis'
+    | 'other';
   issueReference: {
     platform: string;
     repository: string;
@@ -1005,8 +1029,8 @@ await eventBus.publish({
     buildId: build.id,
     ciPlatform: 'github-actions',
     triggeredBy: 'quality-gate',
-    timestamp: new Date()
-  }
+    timestamp: new Date(),
+  },
 });
 
 // Intelligence layer emits events
@@ -1017,8 +1041,8 @@ await eventBus.publish({
     score: ambiguityScore.score,
     factors: ambiguityScore.factors,
     recommendation: ambiguityScore.recommendation,
-    timestamp: new Date()
-  }
+    timestamp: new Date(),
+  },
 });
 ```
 
@@ -1064,197 +1088,235 @@ eslint --version      # Project dependency, not Tamma dependency
 ### Story 3.1: Build Automation with Retry Logic
 
 **AC-3.1.1: Build Trigger Integration**
+
 - System triggers build via platform-specific CI/CD API (GitHub Actions, GitLab CI, Gitea Actions, Forgejo Actions) after PR creation (Story 2.8)
 - Build trigger includes workflow name/path, commit SHA, PR number as metadata
 - Build trigger succeeds within 5 seconds or retries with exponential backoff (network transience)
 
 **AC-3.1.2: Build Status Monitoring**
+
 - System polls build status every 15 seconds until completion (max 10 minutes timeout)
 - Poll interval configurable via `build.pollIntervalSeconds` config
 - System parses platform-specific build status: pending → running → success/failure/cancelled
 
 **AC-3.1.3: Build Failure Analysis**
+
 - System retrieves build logs when status = failure (platform-specific log retrieval API)
 - System categorizes failure: compilation error, dependency issue, timeout, configuration error, resource error
 - Structural issues (missing build config, invalid credentials) trigger immediate escalation (no retry)
 
 **AC-3.1.4: AI-Powered Fix Generation**
+
 - System sends error logs + context to AI provider: "Analyze build failure and suggest fix"
 - AI response validated: must include concrete fix (code change, config update, dependency change)
 - Fix applied to codebase, committed with message "Fix build failure (attempt N/3)"
 
 **AC-3.1.5: Intelligent Retry Logic**
+
 - System allows maximum 3 retry attempts for transient/solvable failures
 - Retry counter increments per attempt, resets to 0 on success
 - Exponential backoff between retries: 2s → 4s → 8s
 - Idempotent retries: safe to re-trigger builds without side effects
 
 **AC-3.1.6: Escalation After Exhaustion**
+
 - After 3 failed retries, system invokes `EscalationManager.createEscalation()` with full context
 - Escalation includes: build IDs, all retry attempts with logs, error category, suggested next steps
 
 **AC-3.1.7: Event Trail Logging**
+
 - All build attempts logged as structured events: `BuildTriggeredEvent`, `BuildCompletedEvent`, `BuildRetryEvent`
 - Events include: buildId, ciPlatform, status, retryAttempt, durationMs, errorMessages
 
 ### Story 3.2: Test Execution with Retry Logic
 
 **AC-3.2.1: Test Framework Detection**
+
 - System detects test framework from project files: package.json (Jest), pytest.ini (pytest), .rspec (RSpec), Cargo.toml (cargo test), go.mod (go test)
 - Detection is automatic, no manual configuration required
 - System supports fallback to generic test command if framework undetected
 
 **AC-3.2.2: Local Test Execution**
+
 - System executes test suite after implementation (Story 2.6) and after refactoring (Story 2.7)
 - Test execution timeout: 10 minutes default, configurable via `test.timeoutSeconds`
 - System captures stdout, stderr, exit code for analysis
 
 **AC-3.2.3: Test Output Parsing**
+
 - System parses test results: pass/fail counts, error messages, stack traces
 - Parsing adapts to framework-specific output formats (JSON for Jest, JUnit XML for pytest, JSON for RSpec)
 - System differentiates test failures (assertion failures) from test errors (unexpected exceptions)
 
 **AC-3.2.4: Test Failure Analysis**
+
 - System analyzes failures: identifies failed test names, files, error types, expected vs actual values
 - Structural issues (missing test framework, corrupted test files) trigger immediate escalation (no retry)
 - Transient issues (flaky tests, network failures in tests) eligible for retry
 
 **AC-3.2.5: AI-Powered Test Fixes**
+
 - System sends failure context to AI provider: "Analyze test failures and suggest fix for test code OR implementation code"
 - AI determines whether test code is wrong or implementation code is wrong
 - Fix applied, committed with message "Fix test failure (attempt N/3)"
 
 **AC-3.2.6: Intelligent Retry Logic**
+
 - System allows maximum 3 retry attempts for test failures
 - Retry counter resets to 0 when all tests pass (not cumulative across test phases)
 - Exponential backoff: 2s → 4s → 8s between test reruns
 - All tests re-executed on retry (not just failed tests, to catch regressions)
 
 **AC-3.2.7: Escalation After Exhaustion**
+
 - After 3 failed retries, system escalates with full test output, failure history, stack traces
 
 **AC-3.2.8: Event Trail Logging**
+
 - Events logged: `TestExecutionStartedEvent`, `TestExecutionCompletedEvent`, `TestRetryEvent`
 - Events include: testRunId, framework, totalTests, passedTests, failedTests, retryAttempt, failures array
 
 ### Story 3.3: Mandatory Escalation Workflow
 
 **AC-3.3.1: Escalation Trigger Conditions**
+
 - Escalation triggered when retry limit reached (3 attempts) for build, test, or any quality gate
 - Escalation triggered immediately for structural failures (missing config, corrupted files, invalid credentials)
 - Escalation triggered immediately for critical security vulnerabilities (Story 3.9)
 
 **AC-3.3.2: Escalation Event Creation**
+
 - System creates `EscalationEvent` with unique escalationId, correlation ID, failure type
 - Event includes retry history: all attempts with timestamps, logs, fixes attempted
 - Event includes suggested next steps: actionable recommendations for human resolution
 
 **AC-3.3.3: PR Comment Notification**
+
 - System posts PR comment: "❌ Escalation Required: [issue type] failed after 3 attempts. Review needed."
 - Comment includes expandable details: retry history, error summary, links to full logs
 - System adds "needs-human-review" label to PR
 
 **AC-3.3.4: Multi-Channel Notifications**
+
 - System sends notifications via all configured channels: CLI output (standalone), webhook (orchestrator), email, Slack
 - Webhook POST includes full escalation context as JSON payload
 - Email includes formatted summary with links to PR
 - Slack notification includes interactive buttons ("Resolve", "View PR", "View Logs")
 
 **AC-3.3.5: Workflow Pause**
+
 - System pauses autonomous loop for this issue (does not auto-select next issue per Story 2.11)
 - Workflow state persisted to database, survives orchestrator restart
 - System polls for human resolution marker (e.g., "resolved" label on PR, API call to `/escalations/:id/resolve`)
 
 **AC-3.3.6: Human Resolution Tracking**
+
 - System waits for resolution marker before resuming workflow
 - Resolution includes human-provided notes explaining what was fixed
 - System logs `EscalationResolvedEvent` with resolution timestamp, notes, resolver identity
 
 **AC-3.3.7: Escalation Metrics**
+
 - System tracks escalation rate: `escalations_total{escalation_type, outcome}`
 - Alert if escalation rate >30% (indicates systemic issue)
 
 **AC-3.3.8: Event Trail Logging**
+
 - Events logged: `EscalationCreatedEvent`, `EscalationNotifiedEvent`, `EscalationResolvedEvent`
 - Events include full escalation context with correlation ID for end-to-end tracing
 
 ### Story 3.4: Research Capability for Unfamiliar Concepts
 
 **AC-3.4.1: Concept Detection**
+
 - During plan generation (Story 2.3), system identifies unfamiliar terms using `ConceptDetector`
 - Detection uses known API registry (local database) with fuzzy matching
 - Confidence threshold: <60% match triggers research query
 
 **AC-3.4.2: Research Query Generation**
+
 - System generates AI provider query: "Research [concept] for [programming language]: API documentation, common patterns, gotchas, code examples"
 - Query includes project context (language, framework) for relevance
 - Query validation: must be specific, not generic (e.g., "React hooks" not "programming")
 
 **AC-3.4.3: Research Response Validation**
+
 - AI response must be 300-500 words with at least 1 code example
 - Response parsed into `ResearchFindings` structure: summary, commonPatterns, gotchas, codeExamples
 - Invalid responses (too short, no examples) re-queried once, then skipped
 
 **AC-3.4.4: Context Incorporation**
+
 - Research findings injected into `PlanGenerator` context before code generation
 - Findings formatted as "Background Research: [concept]" section in plan
 - Code examples from research used as templates for implementation
 
 **AC-3.4.5: Research Caching**
+
 - Research findings cached in Redis with 24-hour TTL
 - Cache key: `research:{concept}:{language}:{framework}`
 - Cache hit returns findings in <100ms, cache miss triggers fresh AI query
 
 **AC-3.4.6: Manual Research Trigger**
+
 - CLI supports `--research "[query]"` flag for explicit research requests
 - Manual research bypasses concept detection, directly queries AI provider
 - Manual research logged with `manual: true` flag in `ResearchQuery` model
 
 **AC-3.4.7: Event Trail Logging**
+
 - Events logged: `ResearchQueryEvent`, `ResearchCacheHitEvent`, `ResearchFindingsReceivedEvent`
 - Events include: concept, query, cache status, findings summary, AI provider used
 
 ### Story 3.5: Clarifying Questions for Ambiguous Requirements
 
 **AC-3.5.1: Ambiguity Detection Integration**
+
 - During issue analysis (Story 2.2), system invokes `AmbiguityAnalyzer.scoreAmbiguity()`
 - If score > 70, system triggers clarifying questions workflow
 - If "skip-questions" label present, skip question generation
 
 **AC-3.5.2: Question Generation**
+
 - System generates 2-5 clarifying questions based on ambiguity factors
 - Questions prioritize multiple-choice format (easier user experience)
 - Open-ended questions used only for complex ambiguity requiring free text
 - Question quality validation: no yes/no questions without context, no redundant questions
 
 **AC-3.5.3: Interactive Q&A Session**
+
 - System presents questions via CLI (standalone mode) or webhook (orchestrator mode)
 - CLI: Interactive prompts with numbered options, "Other" option for free text
 - Orchestrator: Webhook POST with question payload, async answer collection via callback
 - Timeout handling: 10 minute timeout in orchestrator mode, escalate if no response
 
 **AC-3.5.4: Answer Incorporation**
+
 - User answers incorporated into issue context via `ContextEnricher.incorporateAnswers()`
 - Answers formatted as "Requirements Clarification:" section in plan
 - Answers logged to event trail and posted as PR comment for visibility
 
 **AC-3.5.5: Override Mechanism**
+
 - "skip-questions" label bypasses question generation entirely
 - "proceed-despite-ambiguity" label allows proceeding without answering questions
 - Override decision logged with rationale
 
 **AC-3.5.6: Event Trail Logging**
+
 - Events logged: `ClarifyingQuestionsGeneratedEvent`, `QuestionsAnsweredEvent`, `QuestionsSkippedEvent`
 - Events include: questions array, answers array, ambiguity score, override status
 
 ### Story 3.6: Ambiguity Detection Scoring
 
 **AC-3.6.1: Ambiguity Score Calculation**
+
 - System analyzes issue content and assigns score (0-100, higher = more ambiguous)
 - Score uses combined approach: NLP heuristics (70% weight) + AI scoring (30% weight)
 - Calculation completes within 5 seconds for typical issue (500-2000 words)
 
 **AC-3.6.2: Scoring Factors**
+
 - Vague language detection: "maybe", "probably", "should", "could", "might" (0-30 points)
 - Missing acceptance criteria: No "Acceptance Criteria" section (−20 points)
 - Conflicting requirements: Sentence similarity >80% with negation (0-25 points)
@@ -1262,132 +1324,157 @@ eslint --version      # Project dependency, not Tamma dependency
 - Missing implementation details: No technical specifications (0-10 points)
 
 **AC-3.6.3: Threshold-Based Interventions**
+
 - Score <70: Proceed without intervention, log score for analytics
 - Score 70-90: Prompt user: "⚠️ High ambiguity detected. Proceed with clarifying questions? [Y/n]"
 - Score >90: Suggest issue breakdown: "Consider breaking issue into smaller, clearer tasks"
 - User can accept/decline suggestions, decision logged
 
 **AC-3.6.4: Score Display**
+
 - Ambiguity score displayed in CLI output with color coding: Green (<50), Yellow (50-70), Orange (70-90), Red (>90)
 - Score included in PR description: "Ambiguity Score: 45/100 (Low Risk)"
 - Score breakdown (factors) available in event trail for debugging
 
 **AC-3.6.5: Override Mechanism**
+
 - "proceed-despite-ambiguity" label allows override for scores >90
 - Override logged with justification
 
 **AC-3.6.6: Event Trail Logging**
+
 - Events logged: `AmbiguityScoreCalculatedEvent`, `AmbiguityInterventionTriggeredEvent`
 - Events include: score, factors breakdown, recommendation, user decision
 
 ### Story 3.7: Multi-Option Design Proposals
 
 **AC-3.7.1: Label-Based Trigger**
+
 - System detects "design-options-needed" label on issue during plan generation (Story 2.3)
 - Trigger is explicit (label required), not automatic
 - If label absent, single design approach generated (default Epic 2 behavior)
 
 **AC-3.7.2: Design Proposal Generation**
+
 - System generates 2-3 alternative design approaches via AI provider
 - Each option includes: title, description (2-3 paragraphs), pros/cons lists, implementation complexity (1-5 scale), test strategy, estimated effort
 - Options validated: must have distinct tradeoffs (different pros/cons)
 
 **AC-3.7.3: Design Presentation**
+
 - System presents options via CLI with numbered list, formatted pros/cons
 - CLI includes "custom" option for user-specified design
 - Orchestrator mode: Webhook POST with design options, async selection via callback
 
 **AC-3.7.4: Design Selection**
+
 - User selects option via interactive prompt: "Select design [1/2/3/custom]"
 - If "custom", system prompts for inline design specification (multi-line text)
 - Selection timeout: 10 minutes in orchestrator mode, escalate if no response
 
 **AC-3.7.5: Design Integration**
+
 - Selected design merged into development plan via `DesignIntegrator.integrateDesign()`
 - Design incorporated as "Architectural Decision:" section in plan
 - Test strategy from design incorporated into test generation (Story 2.5)
 
 **AC-3.7.6: Design Documentation**
+
 - Design options and selection posted as PR comment for team visibility
 - Comment includes rationale for selection (user-provided or default)
 - Selection logged to event trail with full context
 
 **AC-3.7.7: Event Trail Logging**
+
 - Events logged: `DesignProposalsGeneratedEvent`, `DesignSelectedEvent`, `CustomDesignProvidedEvent`
 - Events include: options array, selectedOption, selectionRationale, integrationStatus
 
 ### Story 3.8: Static Analysis Integration
 
 **AC-3.8.1: Static Analyzer Detection**
+
 - System detects project's static analysis tools from config files: .eslintrc (ESLint), .pylintrc (Pylint), .rubocop.yml (RuboCop), .golangci.yml (golangci-lint), Cargo.toml (Clippy)
 - Detection is automatic, no manual configuration required
 - System supports multiple tools per project (e.g., ESLint + Prettier)
 
 **AC-3.8.2: Analysis Execution Timing**
+
 - System runs static analysis after implementation (Story 2.6) and after refactoring (Story 2.7)
 - Analysis runs before PR creation (Story 2.8) as pre-commit gate
 - Analysis timeout: 5 minutes default, configurable via `staticAnalysis.timeoutSeconds`
 
 **AC-3.8.3: Analysis Output Parsing**
+
 - System captures analysis output (errors, warnings, suggestions)
 - Parsing adapts to tool-specific output formats (JSON for ESLint, JSON for Pylint, JSON for RuboCop)
 - System categorizes findings by severity: error (blocking), warning (non-blocking), info (suggestions)
 
 **AC-3.8.4: Auto-Fix Application**
+
 - If critical errors found, system applies auto-fixes (formatting, import sorting, simple rule violations)
 - Auto-fixes applied via tool's built-in fixer (e.g., `eslint --fix`, `rubocop --auto-correct`)
 - System re-runs analysis after auto-fixes to verify fixes
 - Auto-fix count logged: `static_analysis_autofixes_applied{tool}`
 
 **AC-3.8.5: AI-Powered Fix Suggestions**
+
 - If errors remain after auto-fixes, system sends to AI provider for fix suggestions
 - AI fixes subject to intelligent retry logic: 3 attempts with exponential backoff
 - Structural issues (missing tool config, invalid syntax in config) trigger immediate escalation
 
 **AC-3.8.6: PR Description Integration**
+
 - Static analysis results included in PR description: "Static Analysis: X errors, Y warnings, Z auto-fixes applied"
 - Link to detailed findings in PR comment
 - Findings formatted as checklist for reviewer visibility
 
 **AC-3.8.7: Event Trail Logging**
+
 - Events logged: `StaticAnalysisStartedEvent`, `StaticAnalysisCompletedEvent`, `StaticAnalysisFixAppliedEvent`
 - Events include: tool, executionTime, findings count by severity, autoFixesApplied
 
 ### Story 3.9: Security Scanning Integration
 
 **AC-3.9.1: Dependency Scanning**
+
 - System runs dependency vulnerability scanner before PR creation (Story 2.8)
 - Platform-specific scanners: npm audit (Node.js), pip-audit (Python), bundle-audit (Ruby), govulncheck (Go), cargo-audit (Rust)
 - Scanner invoked via CLI with JSON output: `npm audit --json`, `pip-audit --format json`
 
 **AC-3.9.2: Code Scanning (SAST)**
+
 - System runs code security scanner on changed files only (not full codebase)
 - Primary tool: Semgrep (multi-language support), fallback: Snyk Code, Bandit (Python), Brakeman (Ruby)
 - Scanner invoked via CLI: `semgrep --json`, `bandit -f json`
 
 **AC-3.9.3: Vulnerability Classification**
+
 - System categorizes findings by severity: critical (CVSS ≥9.0), high (CVSS 7.0-8.9), medium (CVSS 4.0-6.9), low (CVSS <4.0)
 - Critical vulnerabilities trigger immediate escalation (no retry, blocks PR creation)
 - High vulnerabilities escalate if no fix available
 - Medium/low vulnerabilities allow PR creation with PR comment
 
 **AC-3.9.4: Vulnerability Patching**
+
 - For medium/low vulnerabilities with fixes available (e.g., dependency updates), system auto-applies patches
 - Patches applied: `npm update [package]`, `pip install --upgrade [package]`
 - System re-scans after patching to verify fix
 - Patch count logged: `security_patches_applied_total{severity}`
 
 **AC-3.9.5: Critical Vulnerability Blocking**
+
 - If critical vulnerabilities detected, system blocks PR creation immediately (no bypass)
 - System invokes `EscalationManager.createEscalation()` with security-specific context
 - Escalation notification includes CVE IDs, affected packages, exploit details (if public)
 
 **AC-3.9.6: PR Comment Integration**
+
 - Security scan results included in PR description: "Security Scan: X critical, Y high, Z medium vulnerabilities"
 - Remaining vulnerabilities (after patching) posted as PR comment with recommended actions
 - Critical/high vulnerabilities marked as "Action Required"
 
 **AC-3.9.7: Event Trail Logging**
+
 - Events logged: `SecurityScanStartedEvent`, `VulnerabilityDetectedEvent`, `SecurityPatchAppliedEvent`, `SecurityEscalationTriggeredEvent`
 - Events include: scanner tools, vulnerabilities by severity, CVE IDs, patches applied, escalation status
 
@@ -1395,43 +1482,44 @@ eslint --version      # Project dependency, not Tamma dependency
 
 ### PRD Functional Requirements → Epic 3 Stories
 
-| PRD Requirement | Epic 3 Story | Implementation Detail |
-|-----------------|--------------|----------------------|
+| PRD Requirement                                                                            | Epic 3 Story              | Implementation Detail                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **FR-16:** Quality gates at build, test, CI/CD with 3-retry limit and mandatory escalation | **Stories 3.1, 3.2, 3.3** | Build automation (3.1) + test execution (3.2) implement intelligent retry logic with counter reset on success. Mandatory escalation (3.3) triggered after 3 retries OR immediately for structural failures. No bypass allowed. |
-| **FR-17:** Automated testing with retry logic and escalation | **Story 3.2** | Test execution module runs after code generation/refactoring, parses framework-specific output, retries with AI-powered fixes, escalates after 3 attempts. |
-| **FR-18:** Automated code review and feedback | **Story 3.8** | Static analysis integration runs linters/formatters, applies auto-fixes, sends remaining issues to AI provider for fix suggestions. |
-| **FR-3:** Clarifying questions for ambiguous specifications | **Stories 3.5, 3.6** | Ambiguity scoring (3.6) quantifies ambiguity (0-100 scale), clarifying questions (3.5) generated for scores >70 with interactive Q&A session. |
-| **FR-4:** Multi-option design proposals with tradeoffs | **Story 3.7** | Design proposal generator creates 2-3 alternatives with pros/cons for issues labeled "design-options-needed", user selects via CLI or webhook. |
-| **FR-33:** Security vulnerability scanning and auto-fix | **Story 3.9** | Dependency + code scanning before PR creation, critical vulnerabilities block PR with escalation, medium/low auto-patched if fixes available. |
+| **FR-17:** Automated testing with retry logic and escalation                               | **Story 3.2**             | Test execution module runs after code generation/refactoring, parses framework-specific output, retries with AI-powered fixes, escalates after 3 attempts.                                                                     |
+| **FR-18:** Automated code review and feedback                                              | **Story 3.8**             | Static analysis integration runs linters/formatters, applies auto-fixes, sends remaining issues to AI provider for fix suggestions.                                                                                            |
+| **FR-3:** Clarifying questions for ambiguous specifications                                | **Stories 3.5, 3.6**      | Ambiguity scoring (3.6) quantifies ambiguity (0-100 scale), clarifying questions (3.5) generated for scores >70 with interactive Q&A session.                                                                                  |
+| **FR-4:** Multi-option design proposals with tradeoffs                                     | **Story 3.7**             | Design proposal generator creates 2-3 alternatives with pros/cons for issues labeled "design-options-needed", user selects via CLI or webhook.                                                                                 |
+| **FR-33:** Security vulnerability scanning and auto-fix                                    | **Story 3.9**             | Dependency + code scanning before PR creation, critical vulnerabilities block PR with escalation, medium/low auto-patched if fixes available.                                                                                  |
 
 ### PRD Non-Functional Requirements → Epic 3 Implementation
 
-| PRD NFR | Epic 3 Implementation | Verification Method |
-|---------|----------------------|---------------------|
-| **NFR-1:** <2 hour autonomous loop completion | Build monitoring 15s poll, test execution <10min, static analysis <5min, security scan <4min | Performance testing with representative codebases |
-| **NFR-2:** 70%+ autonomous completion rate | Retry logic resolves 50-60% of transient failures, intelligence layer prevents 10-15% of ambiguous issue failures | Telemetry tracking over 100+ issues |
-| **NFR-2:** <5% PR rework rate | Static analysis + security scanning catch issues before PR creation | PR revision count tracking |
-| **NFR-3:** Encryption at rest for sensitive data | Clarifying question answers encrypted in event store, escalation events mask secrets | Security audit + penetration testing |
-| **NFR-1:** Real-time dashboard <500ms refresh | Build status polling <500ms, metrics exposed via Prometheus | Load testing with 10+ concurrent loops |
+| PRD NFR                                          | Epic 3 Implementation                                                                                             | Verification Method                               |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **NFR-1:** <2 hour autonomous loop completion    | Build monitoring 15s poll, test execution <10min, static analysis <5min, security scan <4min                      | Performance testing with representative codebases |
+| **NFR-2:** 70%+ autonomous completion rate       | Retry logic resolves 50-60% of transient failures, intelligence layer prevents 10-15% of ambiguous issue failures | Telemetry tracking over 100+ issues               |
+| **NFR-2:** <5% PR rework rate                    | Static analysis + security scanning catch issues before PR creation                                               | PR revision count tracking                        |
+| **NFR-3:** Encryption at rest for sensitive data | Clarifying question answers encrypted in event store, escalation events mask secrets                              | Security audit + penetration testing              |
+| **NFR-1:** Real-time dashboard <500ms refresh    | Build status polling <500ms, metrics exposed via Prometheus                                                       | Load testing with 10+ concurrent loops            |
 
 ### Epic 3 Stories → Acceptance Criteria → Test Cases
 
-| Story | Acceptance Criteria Count | Test Cases | Coverage Target |
-|-------|---------------------------|-----------|-----------------|
-| **3.1: Build Automation** | 7 ACs | 18 unit tests, 12 integration tests, 5 E2E tests | 85%+ line coverage |
-| **3.2: Test Execution** | 8 ACs | 20 unit tests, 15 integration tests, 6 E2E tests | 85%+ line coverage |
-| **3.3: Escalation Workflow** | 8 ACs | 15 unit tests, 10 integration tests, 4 E2E tests | 90%+ line coverage (critical path) |
-| **3.4: Research Capability** | 7 ACs | 12 unit tests, 8 integration tests, 3 E2E tests | 80%+ line coverage |
-| **3.5: Clarifying Questions** | 6 ACs | 14 unit tests, 10 integration tests, 4 E2E tests | 80%+ line coverage |
-| **3.6: Ambiguity Scoring** | 6 ACs | 16 unit tests, 6 integration tests, 2 E2E tests | 75%+ line coverage |
-| **3.7: Design Proposals** | 7 ACs | 12 unit tests, 8 integration tests, 3 E2E tests | 75%+ line coverage |
-| **3.8: Static Analysis** | 7 ACs | 18 unit tests, 12 integration tests, 5 E2E tests | 85%+ line coverage |
-| **3.9: Security Scanning** | 7 ACs | 20 unit tests, 15 integration tests, 6 E2E tests | 90%+ line coverage (security critical) |
-| **TOTAL** | **63 ACs** | **145 unit, 96 integration, 38 E2E = 279 total** | **82% avg coverage** |
+| Story                         | Acceptance Criteria Count | Test Cases                                       | Coverage Target                        |
+| ----------------------------- | ------------------------- | ------------------------------------------------ | -------------------------------------- |
+| **3.1: Build Automation**     | 7 ACs                     | 18 unit tests, 12 integration tests, 5 E2E tests | 85%+ line coverage                     |
+| **3.2: Test Execution**       | 8 ACs                     | 20 unit tests, 15 integration tests, 6 E2E tests | 85%+ line coverage                     |
+| **3.3: Escalation Workflow**  | 8 ACs                     | 15 unit tests, 10 integration tests, 4 E2E tests | 90%+ line coverage (critical path)     |
+| **3.4: Research Capability**  | 7 ACs                     | 12 unit tests, 8 integration tests, 3 E2E tests  | 80%+ line coverage                     |
+| **3.5: Clarifying Questions** | 6 ACs                     | 14 unit tests, 10 integration tests, 4 E2E tests | 80%+ line coverage                     |
+| **3.6: Ambiguity Scoring**    | 6 ACs                     | 16 unit tests, 6 integration tests, 2 E2E tests  | 75%+ line coverage                     |
+| **3.7: Design Proposals**     | 7 ACs                     | 12 unit tests, 8 integration tests, 3 E2E tests  | 75%+ line coverage                     |
+| **3.8: Static Analysis**      | 7 ACs                     | 18 unit tests, 12 integration tests, 5 E2E tests | 85%+ line coverage                     |
+| **3.9: Security Scanning**    | 7 ACs                     | 20 unit tests, 15 integration tests, 6 E2E tests | 90%+ line coverage (security critical) |
+| **TOTAL**                     | **63 ACs**                | **145 unit, 96 integration, 38 E2E = 279 total** | **82% avg coverage**                   |
 
 ### Test Case Traceability Examples
 
 **AC-3.1.5 (Intelligent Retry Logic) → Test Cases:**
+
 1. `BuildOrchestrator.test.ts::should reset retry counter on success` (Unit)
 2. `BuildOrchestrator.test.ts::should escalate after 3 failed retries` (Unit)
 3. `BuildOrchestrator.test.ts::should apply exponential backoff` (Unit)
@@ -1440,6 +1528,7 @@ eslint --version      # Project dependency, not Tamma dependency
 6. `AutonomousLoop.e2e.test.ts::build failure recovery within retry limit` (E2E)
 
 **AC-3.6.2 (Ambiguity Scoring Factors) → Test Cases:**
+
 1. `AmbiguityAnalyzer.test.ts::should detect vague language` (Unit)
 2. `AmbiguityAnalyzer.test.ts::should penalize missing acceptance criteria` (Unit)
 3. `AmbiguityAnalyzer.test.ts::should detect conflicting requirements` (Unit)
@@ -1447,6 +1536,7 @@ eslint --version      # Project dependency, not Tamma dependency
 5. `IntelligenceLayer.integration.test.ts::ambiguity scoring with real issues` (Integration)
 
 **AC-3.9.3 (Critical Vulnerability Blocking) → Test Cases:**
+
 1. `SecurityScanner.test.ts::should block PR for critical vulnerabilities` (Unit)
 2. `SecurityScanner.test.ts::should allow PR for medium vulnerabilities` (Unit)
 3. `SecurityWorkflow.integration.test.ts::critical vuln triggers escalation` (Integration)
@@ -1466,70 +1556,80 @@ eslint --version      # Project dependency, not Tamma dependency
 
 ### Technical Risks
 
-**R-3.1: Retry Logic Counter Reset Race Condition** *(HIGH)*
+**R-3.1: Retry Logic Counter Reset Race Condition** _(HIGH)_
+
 - **Description:** In orchestrator mode with distributed workers, retry counter reset on success could have race condition if multiple workers process same build/test event simultaneously.
 - **Impact:** Retry counter may not reset properly, leading to false escalation after 3 cumulative successes.
 - **Mitigation:** Use distributed lock (Redis) for retry counter updates, atomic increment/reset operations, include workflow execution ID in lock key to prevent cross-workflow conflicts.
 - **Likelihood:** Medium (distributed systems inherently have concurrency challenges)
 - **Detection:** Integration tests with concurrent workers, retry counter audit in event trail
 
-**R-3.2: AI Provider Availability During Quality Gates** *(HIGH)*
+**R-3.2: AI Provider Availability During Quality Gates** _(HIGH)_
+
 - **Description:** Quality gates (build fixes, test fixes, static analysis fixes) depend on AI provider for fix suggestions. If provider unavailable during critical failure, retry loop stalls.
 - **Impact:** Workflow paused indefinitely waiting for AI response, autonomous completion rate drops below 70% target.
 - **Mitigation:** Implement fallback to generic fixes for common errors (dependency version bumps, import statement fixes), circuit breaker pattern with 3-minute timeout, escalate if AI unavailable after 2 retry attempts.
 - **Likelihood:** Medium (AI providers have 99%+ uptime but occasional outages occur)
 - **Detection:** AI provider latency metrics, circuit breaker trip events
 
-**R-3.3: Security Scanner False Positives Blocking PRs** *(MEDIUM)*
+**R-3.3: Security Scanner False Positives Blocking PRs** _(MEDIUM)_
+
 - **Description:** Security scanners (Semgrep, Snyk) may report false positive critical vulnerabilities, blocking PR creation unnecessarily.
 - **Impact:** Legitimate PRs blocked by false positives, requiring manual override, reduces autonomous completion rate.
 - **Mitigation:** Implement vulnerability suppression file (`.tamma-security-suppressions.yml`) for known false positives, require human review/justification for suppressions, log suppression decisions to audit trail.
 - **Likelihood:** Medium (false positives common in SAST tools, especially for complex codebases)
 - **Detection:** Escalation metrics for security blocks, manual review of escalated security findings
 
-**R-3.4: Test Framework Detection Failures** *(MEDIUM)*
+**R-3.4: Test Framework Detection Failures** _(MEDIUM)_
+
 - **Description:** Test runner may fail to detect test framework for non-standard project structures (monorepos with custom test configs, polyglot repos).
 - **Impact:** Tests not executed, false sense of passing tests, quality gate bypassed unintentionally.
 - **Mitigation:** Support custom test command configuration override, fallback to generic test execution with configurable command, immediate escalation if no test framework detected and no custom config provided.
 - **Likelihood:** Medium (project structures vary widely, detection heuristics may miss edge cases)
 - **Detection:** Test execution events with `framework: 'unknown'`, escalation count for missing test frameworks
 
-**R-3.5: Ambiguity Scoring Accuracy Variability** *(MEDIUM)*
+**R-3.5: Ambiguity Scoring Accuracy Variability** _(MEDIUM)_
+
 - **Description:** Ambiguity scoring combines NLP heuristics (70%) and AI scoring (30%). AI scoring may be inconsistent across providers (Claude vs. OpenAI), leading to score variability.
 - **Impact:** Inconsistent triggering of clarifying questions, user confusion when scores vary for similar issues.
 - **Mitigation:** Pin AI provider for ambiguity scoring (use Claude for consistency), cache AI scores for 24 hours to reduce variability within short timeframe, log AI provider used in `AmbiguityScoreCalculatedEvent` for debugging.
 - **Likelihood:** Medium (AI providers have different scoring sensitivities)
 - **Detection:** Score distribution analytics, A/B testing across providers
 
-**R-3.6: Research Cache Stale Data** *(LOW)*
+**R-3.6: Research Cache Stale Data** _(LOW)_
+
 - **Description:** Research findings cached for 24 hours may become stale if API changes rapidly (e.g., breaking changes in beta APIs).
 - **Impact:** Implementation uses outdated API patterns, tests fail, retry logic invoked unnecessarily.
 - **Mitigation:** Allow manual cache invalidation via CLI flag `--clear-research-cache`, include cache timestamp in research findings display, reduce TTL to 12 hours for beta/unstable APIs (configurable per concept).
 - **Likelihood:** Low (most APIs stable over 24 hours)
 - **Detection:** Research-related test failures after cache hit, user reports of outdated patterns
 
-**R-3.7: Static Analysis Tool Version Compatibility** *(LOW)*
+**R-3.7: Static Analysis Tool Version Compatibility** _(LOW)_
+
 - **Description:** Static analyzers (ESLint, Pylint) are project dependencies, not Tamma dependencies. Version mismatches may cause parsing failures (unexpected output format).
 - **Impact:** Static analysis fails to parse output, treats as structural failure, escalates unnecessarily.
 - **Mitigation:** Support multiple output format versions per tool, graceful degradation if parsing fails (log warning, skip analysis for that tool), document supported tool version ranges.
 - **Likelihood:** Low (output formats rarely change drastically)
 - **Detection:** Static analysis parsing errors, escalation events with parsing failures
 
-**R-3.8: Clarifying Question Timeout in Orchestrator Mode** *(MEDIUM)*
+**R-3.8: Clarifying Question Timeout in Orchestrator Mode** _(MEDIUM)_
+
 - **Description:** Orchestrator mode sends clarifying questions via webhook, waits for async response. If webhook delivery fails or user doesn't respond within 10 minutes, workflow stalls.
 - **Impact:** Workflow paused indefinitely, autonomous loop stops, requires manual intervention.
 - **Mitigation:** Implement timeout handler with escalation after 10 minutes, send reminder notification at 5 minutes, allow admin override via API call to skip questions and proceed.
 - **Likelihood:** Medium (webhook delivery can fail, users may not be available)
 - **Detection:** Timeout events in audit trail, webhook delivery failure metrics
 
-**R-3.9: Build Log Size Exceeding AI Provider Context Limits** *(LOW)*
+**R-3.9: Build Log Size Exceeding AI Provider Context Limits** _(LOW)_
+
 - **Description:** Large build logs (>100K tokens) may exceed AI provider context limits when sending for fix suggestions.
 - **Impact:** AI provider rejects request, fix suggestion fails, escalates after 3 retries (expected behavior but suboptimal).
 - **Mitigation:** Truncate build logs to last 50K tokens before sending to AI provider, prioritize error messages and stack traces over verbose output, log truncation decision for transparency.
 - **Likelihood:** Low (most build logs <10K tokens)
 - **Detection:** AI provider context limit errors, truncation events in audit trail
 
-**R-3.10: Design Proposal Generation Cost** *(LOW)*
+**R-3.10: Design Proposal Generation Cost** _(LOW)_
+
 - **Description:** Generating 2-3 design proposals requires 3x AI provider calls (one per option), significantly increases AI provider costs for labeled issues.
 - **Impact:** Higher operational costs for design-heavy projects, potential budget overruns.
 - **Mitigation:** Design proposals only triggered by explicit label ("design-options-needed"), document cost implications in user guide, consider caching design proposals for similar issues (deferred to post-MVP).
@@ -1539,51 +1639,61 @@ eslint --version      # Project dependency, not Tamma dependency
 ### Assumptions
 
 **A-3.1: Epic 1 AI Provider Interface Stability**
+
 - Assumes Epic 1's `AIProviderInterface` API is stable and will not introduce breaking changes during Epic 3 development.
 - If API changes, quality gates and intelligence layer will require adapter updates.
 - **Validation Required:** Confirm API freeze with Epic 1 team before Epic 3 Story 3.1 begins.
 
 **A-3.2: Epic 1 Git Platform Interface Stability**
+
 - Assumes Epic 1's `GitPlatformInterface` supports CI/CD triggering and build status monitoring for all platforms (GitHub, GitLab, Gitea, Forgejo).
 - If missing, Epic 3 will need to implement direct platform API calls (breaks abstraction).
 - **Validation Required:** Verify CI/CD methods exist in `GitPlatformInterface` (Story 1.4).
 
 **A-3.3: Epic 2 Workflow State Machine Extensibility**
+
 - Assumes Epic 2's workflow state machine supports middleware pattern for quality gate injection.
 - If not, Epic 3 will require state machine refactoring (higher complexity).
 - **Validation Required:** Review Epic 2 state machine design for extension points before Story 3.1.
 
 **A-3.4: Test Frameworks Support JSON/XML Output**
+
 - Assumes all major test frameworks (Jest, pytest, RSpec, cargo test, go test) support JSON or XML structured output.
 - If not, Epic 3 will need custom parsers for plain text output (lower reliability).
 - **Validation Required:** Document supported test framework versions and output formats in user guide.
 
 **A-3.5: Static Analysis Tools Installed in Project**
+
 - Assumes static analyzers (ESLint, Pylint, etc.) are already installed as project dependencies.
 - Tamma does not install static analyzers automatically.
 - **Validation Required:** Document prerequisite in installation guide, detect missing tools and skip gracefully with warning.
 
 **A-3.6: Security Scanners Available on System Path**
+
 - Assumes security scanning tools (Semgrep, npm audit, pip-audit) are available on system PATH or as project dependencies.
 - If missing, security scanning skipped with warning (not failure).
 - **Validation Required:** Document installation instructions for Semgrep (primary SAST tool).
 
 **A-3.7: Redis Available for Research Cache (Orchestrator Mode)**
+
 - Assumes Redis instance available for research cache in orchestrator mode.
 - If unavailable, fallback to in-memory cache (node-cache), but cache not shared across workers.
 - **Validation Required:** Document Redis as recommended dependency, test fallback behavior.
 
 **A-3.8: Webhook Endpoints Accept POST with JSON Payload**
+
 - Assumes webhook endpoints (for escalations, clarifying questions, design proposals) accept HTTP POST with JSON payload.
 - If endpoint requires different format, integration will fail.
 - **Validation Required:** Document webhook payload schemas in API reference.
 
 **A-3.9: AI Provider Supports Streaming Responses**
+
 - Assumes AI provider supports streaming for long fix suggestions (build logs, test failures).
 - If not, Epic 3 falls back to non-streaming (slower but functional).
 - **Validation Required:** Verify streaming support in Epic 1 `AIProviderInterface.sendMessage()`.
 
 **A-3.10: 24-Hour Research Cache TTL Acceptable**
+
 - Assumes 24-hour TTL for research cache is acceptable trade-off between freshness and cost.
 - If APIs change more frequently, users may need manual cache invalidation.
 - **Validation Required:** Gather user feedback during alpha testing, consider configurable TTL per concept.
@@ -1591,60 +1701,70 @@ eslint --version      # Project dependency, not Tamma dependency
 ### Open Questions
 
 **Q-3.1: Should retry counter reset be per-action or per-workflow-phase?**
+
 - Current spec: Retry counter resets per action (build succeeds → counter to 0, test succeeds → counter to 0).
 - Alternative: Cumulative counter across all quality gates in single workflow execution (3 retries total for build + test + static analysis combined).
 - **Impact:** Cumulative approach reduces total retries but may escalate too quickly for minor failures.
 - **Stakeholder Decision Needed:** Product team to decide retry budget allocation.
 
 **Q-3.2: Should clarifying questions be optional for all issues or only high ambiguity (>70)?**
+
 - Current spec: Questions triggered only for ambiguity score >70.
 - Alternative: Always generate questions but hide behind "optional clarification" UI element.
 - **Impact:** Always-on approach increases AI provider costs but may improve implementation quality.
 - **Stakeholder Decision Needed:** Product team to balance cost vs. quality improvement.
 
 **Q-3.3: Should design proposals support >3 options or limit to 3?**
+
 - Current spec: 2-3 design options generated.
 - Alternative: Allow 4-5 options for highly complex features.
 - **Impact:** More options increase AI provider cost and user decision fatigue.
 - **Stakeholder Decision Needed:** UX team to determine optimal option count based on user research.
 
 **Q-3.4: Should security scanning block ALL vulnerabilities or only critical?**
+
 - Current spec: Critical vulnerabilities block PR creation, medium/low allow with comment.
 - Alternative: High vulnerabilities also block (more conservative).
 - **Impact:** Blocking high vulnerabilities may reduce autonomous completion rate if fixes unavailable.
 - **Stakeholder Decision Needed:** Security team to define risk tolerance.
 
 **Q-3.5: Should static analysis auto-fixes be applied without user approval?**
+
 - Current spec: Auto-fixes (formatting, imports) applied automatically, committed.
 - Alternative: Present auto-fixes to user for approval before applying.
 - **Impact:** Approval checkpoint slows workflow, reduces autonomy, but increases user control.
 - **Stakeholder Decision Needed:** Product team to decide autonomy vs. control trade-off.
 
 **Q-3.6: Should ambiguity scoring use AI provider scoring or pure NLP heuristics?**
+
 - Current spec: 70% NLP heuristics, 30% AI provider scoring (hybrid approach).
 - Alternative: 100% NLP heuristics (faster, deterministic, no AI cost) OR 100% AI scoring (more accurate, slower, higher cost).
 - **Impact:** Pure NLP may miss context-dependent ambiguity, pure AI increases latency and cost.
 - **Stakeholder Decision Needed:** Technical team to benchmark accuracy vs. cost trade-off.
 
 **Q-3.7: Should research cache be shared across all users or per-user?**
+
 - Current spec: Shared cache in Redis (all users benefit from cached research).
 - Alternative: Per-user cache (privacy-focused, no cross-user contamination).
 - **Impact:** Shared cache higher hit rate (60%+), per-user cache lower hit rate (20-30%).
 - **Stakeholder Decision Needed:** Product team to decide multi-tenancy strategy.
 
 **Q-3.8: Should escalation notifications include full logs or summaries?**
+
 - Current spec: Escalation includes full retry history with logs (verbose, complete context).
 - Alternative: Summaries with links to full logs (less verbose, may miss important details).
 - **Impact:** Full logs enable faster human resolution, summaries reduce notification noise.
 - **Stakeholder Decision Needed:** Engineering manager feedback on notification preferences.
 
 **Q-3.9: Should test framework detection support custom test commands?**
+
 - Current spec: Auto-detection with fallback to custom command configuration.
 - Alternative: Always require explicit test command configuration (no auto-detection).
 - **Impact:** Auto-detection reduces configuration burden, explicit config more reliable.
 - **Stakeholder Decision Needed:** UX team to balance convenience vs. reliability.
 
 **Q-3.10: Should build retries use same fix or generate new fix each time?**
+
 - Current spec: AI provider generates new fix for each retry attempt.
 - Alternative: Apply same fix for all 3 retries (faster, assumes fix is correct but environment issue).
 - **Impact:** New fix each time increases AI provider cost, same fix may miss actual problem.
@@ -1662,47 +1782,56 @@ Epic 3 testing strategy validates **quality gates enforcement** (FR-16, FR-17, F
 
 **Quality Gates Unit Tests (73 test cases):**
 
-*Build Automation (18 tests):*
+_Build Automation (18 tests):_
+
 - `BuildOrchestrator.test.ts`: Build trigger, status polling, failure categorization, retry counter logic (reset on success), exponential backoff timing, escalation invocation
 - `BuildFailureAnalyzer.test.ts`: Failure type classification (transient vs structural), log parsing for GitHub/GitLab/Gitea/Forgejo, error message extraction
 - `BuildFixGenerator.test.ts`: AI provider prompt generation, fix validation, commit message formatting, idempotency checks
 
-*Test Execution (20 tests):*
+_Test Execution (20 tests):_
+
 - `TestRunner.test.ts`: Framework detection (Jest, pytest, RSpec, cargo, go test), test command execution, timeout handling, output capture
 - `TestOutputParser.test.ts`: JSON/XML parsing for each framework, pass/fail counts, stack trace extraction, expected vs actual value parsing
 - `TestFailureAnalyzer.test.ts`: Failure vs error differentiation, transient failure detection (flaky tests), structural issue detection (missing framework)
 
-*Escalation Workflow (15 tests):*
+_Escalation Workflow (15 tests):_
+
 - `EscalationManager.test.ts`: Escalation event creation, retry history aggregation, PR comment generation, label application, notification channel routing
 - `EscalationNotifier.test.ts`: Webhook POST formatting, email template rendering, Slack message formatting, notification delivery retry logic
 
-*Static Analysis (18 tests):*
+_Static Analysis (18 tests):_
+
 - `StaticAnalyzerDetector.test.ts`: Config file detection for ESLint/Pylint/RuboCop/golangci-lint/Clippy, multi-tool support, missing tool handling
 - `StaticAnalyzerRunner.test.ts`: Tool invocation with JSON output, timeout enforcement, output parsing, error categorization
 - `AutoFixer.test.ts`: Auto-fix application (formatting, imports), rerun validation, fix count tracking
 
-*Security Scanning (20 tests):*
+_Security Scanning (20 tests):_
+
 - `DependencyScannerOrchestrator.test.ts`: Scanner selection (npm/pip/bundle/cargo audit), JSON output parsing, vulnerability extraction, CVSS scoring
 - `CodeScannerOrchestrator.test.ts`: Semgrep invocation, changed files filtering, SAST finding parsing
 - `VulnerabilityAnalyzer.test.ts`: Severity classification (critical/high/medium/low), immediate escalation trigger for critical, patching eligibility
 
 **Intelligence Layer Unit Tests (72 test cases):**
 
-*Research Capability (12 tests):*
+_Research Capability (12 tests):_
+
 - `ConceptDetector.test.ts`: Unfamiliar term detection, fuzzy matching, confidence threshold, concept registry lookup
 - `ResearchOrchestrator.test.ts`: AI provider query generation, response validation (300-500 words, code examples), findings parsing
 - `ResearchCache.test.ts`: Redis caching (set/get/expire), TTL enforcement, cache key generation, fallback to in-memory
 
-*Ambiguity Detection (22 tests - 16 for scoring, 6 for questions):*
+_Ambiguity Detection (22 tests - 16 for scoring, 6 for questions):_
+
 - `AmbiguityAnalyzer.test.ts`: Vague language detection, missing criteria detection, conflicting requirements, NLP+AI hybrid scoring, threshold triggers
 - `QuestionGenerator.test.ts`: Question generation (2-5 count), multiple-choice vs open-ended, quality validation (no yes/no), answer incorporation
 
-*Design Proposals (12 tests):*
+_Design Proposals (12 tests):_
+
 - `DesignProposalGenerator.test.ts`: AI provider prompt generation, option parsing (title, pros/cons, complexity), distinct tradeoff validation
 - `DesignSelectionInterface.test.ts`: CLI presentation formatting, custom design input, timeout handling, selection validation
 - `DesignIntegrator.test.ts`: Plan merging, test strategy incorporation, PR comment generation
 
 **Example Unit Test (Retry Counter Reset):**
+
 ```typescript
 describe('BuildOrchestrator - Retry Counter Reset', () => {
   it('should reset retry counter to 0 when build succeeds', async () => {
@@ -1738,35 +1867,44 @@ describe('BuildOrchestrator - Retry Counter Reset', () => {
 
 **Quality Gates Integration Tests (53 test cases):**
 
-*Build Automation (12 tests):*
+_Build Automation (12 tests):_
+
 - `BuildWorkflow.integration.test.ts`: Full retry cycle with eventual success, retry exhaustion triggers escalation, immediate escalation for missing config, exponential backoff timing validation
 - Platform-specific tests: GitHub Actions integration (workflow dispatch API), GitLab CI integration (pipeline trigger API), Gitea/Forgejo integration (REST API)
 
-*Test Execution (15 tests):*
+_Test Execution (15 tests):_
+
 - `TestWorkflow.integration.test.ts`: Framework detection + execution for each framework, output parsing accuracy, fix application + rerun cycle, escalation after 3 retries
 - Multi-language tests: JavaScript (Jest), Python (pytest), Ruby (RSpec), Rust (cargo test), Go (go test)
 
-*Escalation Workflow (10 tests):*
+_Escalation Workflow (10 tests):_
+
 - `EscalationWorkflow.integration.test.ts`: End-to-end escalation (trigger → notification → resolution), multi-channel notification delivery, webhook retry logic, human resolution tracking
 
-*Static Analysis (12 tests):*
+_Static Analysis (12 tests):_
+
 - `StaticAnalysisWorkflow.integration.test.ts`: Auto-detection + execution for each tool, auto-fix application + rerun, AI-powered fix suggestions with retry, PR description integration
 
-*Security Scanning (15 tests):*
+_Security Scanning (15 tests):_
+
 - `SecurityWorkflow.integration.test.ts`: Dependency scan for each platform (npm, pip, bundle, cargo), code scan (Semgrep), critical vulnerability blocking with escalation, patching + rescan cycle
 
 **Intelligence Layer Integration Tests (43 test cases):**
 
-*Research Capability (8 tests):*
+_Research Capability (8 tests):_
+
 - `ResearchWorkflow.integration.test.ts`: Concept detection → cache miss → AI query → cache store, cache hit flow (<100ms), manual research trigger, integration with PlanGenerator
 
-*Ambiguity Detection (16 tests):*
+_Ambiguity Detection (16 tests):_
+
 - `AmbiguityWorkflow.integration.test.ts`: Score calculation → question generation → user interaction → answer incorporation, high ambiguity (>70) triggers questions, very high ambiguity (>90) suggests breakdown, override labels ("skip-questions", "proceed-despite-ambiguity")
 
-*Design Proposals (8 tests):*
+_Design Proposals (8 tests):_
+
 - `DesignProposalWorkflow.integration.test.ts`: Label detection → proposal generation → user selection → plan integration, custom design input, timeout handling in orchestrator mode
 
 **Example Integration Test (Full Retry Cycle):**
+
 ```typescript
 describe('Build Workflow - Full Retry Cycle', () => {
   it('should recover from transient build failure within retry limit', async () => {
@@ -1802,41 +1940,49 @@ describe('Build Workflow - Full Retry Cycle', () => {
 ### E2E Testing Strategy (38 Test Cases)
 
 **E2E-1: Happy Path - Quality Gates Pass (8 tests)**
+
 - Setup: Test repository with passing build/tests, clean dependency scan
 - Workflow: Issue selected → plan generated → implementation → tests pass → static analysis pass → security scan pass → PR created → merged
 - Validation: No escalations, retry count = 0 for all gates, PR description includes quality gate results, autonomous completion time <2 hours
 
 **E2E-2: Build Failure Recovery (6 tests)**
+
 - Setup: Test repository with intentional build failure (missing import)
 - Workflow: Build fails → AI suggests fix (add import) → retry succeeds → workflow continues
 - Validation: Retry count = 1, fix committed with correct message, build completion event logged
 
 **E2E-3: Test Failure Recovery (6 tests)**
+
 - Setup: Test repository with failing assertion
 - Workflow: Tests fail → AI suggests fix (update expected value) → retry succeeds → workflow continues
 - Validation: Test fix applied to correct file (test or implementation), all tests pass after fix
 
 **E2E-4: Escalation Triggered (6 tests)**
+
 - Setup: Test repository with persistent build failure (missing external dependency)
 - Workflow: Build fails 3 times → escalation triggered → PR comment posted → workflow paused → human resolves → workflow resumes
 - Validation: Escalation event created, notification sent, retry history complete (3 attempts), workflow resumed after resolution
 
 **E2E-5: Security Vulnerability Blocked (4 tests)**
+
 - Setup: Test repository with critical vulnerability (lodash prototype pollution CVE)
 - Workflow: Security scan detects critical → PR creation blocked → escalation triggered → human remediates → workflow resumes
 - Validation: PR creation prevented, escalation includes CVE ID, workflow cannot proceed until resolution
 
 **E2E-6: Ambiguity Clarification (4 tests)**
+
 - Setup: Issue with high ambiguity (vague requirements, no acceptance criteria)
 - Workflow: Ambiguity score 75 → clarifying questions generated → user answers → plan incorporates answers → implementation succeeds
 - Validation: Questions logged to event trail, answers in PR comment, implementation aligned with clarified requirements
 
 **E2E-7: Design Proposal Selection (4 tests)**
+
 - Setup: Issue with "design-options-needed" label
 - Workflow: 3 design options generated → user selects option 2 → plan incorporates selected design → implementation follows design
 - Validation: All options logged, selection rationale captured, test strategy from design incorporated
 
 **Example E2E Test:**
+
 ```typescript
 describe('E2E - Full Autonomous Loop with Quality Gates', () => {
   it('should complete issue with build retry and security patching', async () => {
@@ -1844,7 +1990,7 @@ describe('E2E - Full Autonomous Loop with Quality Gates', () => {
     const testRepo = await createTestRepository({
       issues: [{ number: 1, title: 'Add user authentication' }],
       buildConfig: { initialFailure: 'missing-dependency', fixable: true },
-      dependencies: { vulnerable: ['lodash@4.17.19'] } // Known CVE
+      dependencies: { vulnerable: ['lodash@4.17.19'] }, // Known CVE
     });
 
     // Execute: Start autonomous loop
@@ -1858,20 +2004,20 @@ describe('E2E - Full Autonomous Loop with Quality Gates', () => {
     const events = await eventStore.query({ aggregateId: 'issue-1' });
 
     // Build retry occurred
-    const buildRetry = events.find(e => e.type === 'BuildRetryEvent');
+    const buildRetry = events.find((e) => e.type === 'BuildRetryEvent');
     expect(buildRetry).toBeDefined();
     expect(buildRetry.data.retryAttempt).toBe(1);
     expect(buildRetry.data.outcome).toBe('success');
 
     // Security scan patched vulnerability
-    const patchEvent = events.find(e => e.type === 'SecurityPatchAppliedEvent');
+    const patchEvent = events.find((e) => e.type === 'SecurityPatchAppliedEvent');
     expect(patchEvent).toBeDefined();
     expect(patchEvent.data.package).toBe('lodash');
     expect(patchEvent.data.fromVersion).toBe('4.17.19');
     expect(patchEvent.data.toVersion).toMatch(/^4\.17\.2[0-9]/);
 
     // PR merged
-    const pr = await testRepo.getPR(events.find(e => e.type === 'PRCreatedEvent').data.prNumber);
+    const pr = await testRepo.getPR(events.find((e) => e.type === 'PRCreatedEvent').data.prNumber);
     expect(pr.state).toBe('merged');
     expect(pr.body).toContain('Security Scan: 0 critical');
     expect(pr.body).toContain('Static Analysis: 0 errors');
@@ -1882,12 +2028,14 @@ describe('E2E - Full Autonomous Loop with Quality Gates', () => {
 ### State Machine Testing (Additional 15 Test Cases, 100% Transition Coverage)
 
 **Epic 3 extends Epic 2's state machine with quality gate checkpoints. Testing ensures:**
+
 - All state transitions from quality gates (success/failure/escalation) lead to correct next state
 - Retry logic does NOT cause infinite loops (max 3 attempts enforced)
 - Escalation pauses workflow correctly (no auto-next until resolution)
 - Counter resets propagate correctly across state transitions
 
 **Test Coverage:**
+
 - 15 test cases covering all quality gate transitions (build → test → static → security → PR)
 - 5 negative tests for invalid transitions (e.g., cannot proceed to PR creation if security scan blocked)
 - 5 edge case tests (concurrent state updates, race conditions, recovery from crash)
@@ -1895,41 +2043,49 @@ describe('E2E - Full Autonomous Loop with Quality Gates', () => {
 ### Manual Testing Scenarios (8 Scenarios)
 
 **MT-1: Standalone Mode - Full Loop with Escalation**
+
 - Execute: Tamma standalone on test repository with persistent build failure
 - Observe: Build retry attempts (1, 2, 3), escalation notification (CLI output), PR comment with retry history
 - Validate: Human can review escalation context and manually resolve (fix build config), workflow resumes after resolution marker
 
 **MT-2: Orchestrator Mode - Webhook Notifications**
+
 - Execute: Tamma orchestrator with webhook endpoint configured
 - Observe: Escalation webhook POST with JSON payload, email notification, Slack message
 - Validate: All notification channels receive escalation, webhook includes full retry history, Slack buttons functional
 
 **MT-3: Clarifying Questions - Interactive Session**
+
 - Execute: Tamma on issue with high ambiguity (>70 score)
 - Observe: Ambiguity score displayed, 3-5 questions presented with multiple-choice options
 - Validate: User can answer questions, answers incorporated into plan, plan quality improved
 
 **MT-4: Design Proposals - User Selection**
+
 - Execute: Tamma on issue with "design-options-needed" label
 - Observe: 3 design options displayed with pros/cons, user selects option 2
 - Validate: Selected design incorporated into implementation, test strategy followed
 
 **MT-5: Security Scanning - Critical Vulnerability Block**
+
 - Execute: Tamma on repository with critical vulnerability
 - Observe: Security scan detects critical CVE, PR creation blocked, escalation triggered
 - Validate: User cannot proceed without remediation, escalation notification includes CVE details
 
 **MT-6: Static Analysis - Auto-Fix Application**
+
 - Execute: Tamma on repository with formatting errors
 - Observe: ESLint detects errors, auto-fixes applied (prettier formatting), analysis rerun passes
 - Validate: Fixes committed with correct message, PR description includes auto-fix count
 
 **MT-7: Research Capability - Unfamiliar API**
+
 - Execute: Tamma on issue mentioning unfamiliar framework (e.g., SolidJS)
 - Observe: Concept detected, research query sent, findings displayed in plan context
 - Validate: Implementation uses patterns from research findings, cache hit on subsequent query
 
 **MT-8: Retry Counter Reset - Verification**
+
 - Execute: Tamma on repository with transient build failure then success
 - Observe: Build fails (retry = 1), build succeeds (retry reset to 0), tests fail (retry = 1 for test counter)
 - Validate: Counters independent per action, no cumulative escalation
@@ -1943,20 +2099,20 @@ describe('E2E - Full Autonomous Loop with Quality Gates', () => {
 
 ### Test Case Summary by Story
 
-| Story | Unit | Integration | E2E | State Machine | Manual | Total |
-|-------|------|-------------|-----|---------------|--------|-------|
-| 3.1: Build Automation | 18 | 12 | 6 | 3 | 2 | 41 |
-| 3.2: Test Execution | 20 | 15 | 6 | 3 | 1 | 45 |
-| 3.3: Escalation | 15 | 10 | 6 | 2 | 2 | 35 |
-| 3.4: Research | 12 | 8 | 4 | 1 | 1 | 26 |
-| 3.5: Clarifying Questions | 14 | 10 | 4 | 2 | 1 | 31 |
-| 3.6: Ambiguity Scoring | 16 | 6 | 4 | 1 | 1 | 28 |
-| 3.7: Design Proposals | 12 | 8 | 4 | 1 | 1 | 26 |
-| 3.8: Static Analysis | 18 | 12 | 4 | 1 | 1 | 36 |
-| 3.9: Security Scanning | 20 | 15 | 4 | 1 | 1 | 41 |
-| **TOTAL** | **145** | **96** | **38** | **15** | **8** | **302** |
+| Story                     | Unit    | Integration | E2E    | State Machine | Manual | Total   |
+| ------------------------- | ------- | ----------- | ------ | ------------- | ------ | ------- |
+| 3.1: Build Automation     | 18      | 12          | 6      | 3             | 2      | 41      |
+| 3.2: Test Execution       | 20      | 15          | 6      | 3             | 1      | 45      |
+| 3.3: Escalation           | 15      | 10          | 6      | 2             | 2      | 35      |
+| 3.4: Research             | 12      | 8           | 4      | 1             | 1      | 26      |
+| 3.5: Clarifying Questions | 14      | 10          | 4      | 2             | 1      | 31      |
+| 3.6: Ambiguity Scoring    | 16      | 6           | 4      | 1             | 1      | 28      |
+| 3.7: Design Proposals     | 12      | 8           | 4      | 1             | 1      | 26      |
+| 3.8: Static Analysis      | 18      | 12          | 4      | 1             | 1      | 36      |
+| 3.9: Security Scanning    | 20      | 15          | 4      | 1             | 1      | 41      |
+| **TOTAL**                 | **145** | **96**      | **38** | **15**        | **8**  | **302** |
 
-*Note: Test count increased from 279 to 302 after adding state machine tests (15) and manual scenarios (8).*
+_Note: Test count increased from 279 to 302 after adding state machine tests (15) and manual scenarios (8)._
 
 ### Coverage Targets and Verification
 

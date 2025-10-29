@@ -37,6 +37,11 @@ Without Epic 2, Tamma cannot perform autonomous development - this is the core w
 - **Story 2.9:** PR status monitoring for CI/CD checks and review feedback
 - **Story 2.10:** PR merge with completion checkpoint and automatic issue closure
 - **Story 2.11:** Auto-next issue selection enabling continuous autonomous operation (FR-2)
+- **Story 2.12:** Intelligent provider selection optimizing AI usage based on task type, cost, and availability
+- **Story 2.13:** Prompt engineering optimization maintaining high-quality AI responses across task types
+- **Story 2.14:** Issue decomposition engine breaking complex issues into manageable subtasks
+- **Story 2.15:** Task dependency mapping identifying and managing task relationships
+- **Story 2.16:** Incremental task sequencing enabling continuous integration and delivery
 - **Role-Based Orchestration:** Agent specialization framework with role assignment (Architect, Developer, Code Reviewer, QA, Debugger), capability-based routing, and workflow phase mapping
 
 **Out of Scope:**
@@ -62,7 +67,8 @@ The event-driven communication pattern (Architecture Section 3.3) enables workfl
 
 **1. Workflow Orchestration Engine (`packages/workflow-engine`)**
 
-*Autonomous Development Loop Coordinator (Stories 2.1-2.11):*
+_Autonomous Development Loop Coordinator (Stories 2.1-2.11):_
+
 - `WorkflowStateMachine` class managing 14-step state transitions with exponential backoff retry logic
 - `IssueSelector` service implementing label-based filtering, priority sorting, and auto-assignment (Story 2.1)
 - `ContextAnalyzer` service extracting issue metadata, related issues, commit history, and file paths (Story 2.2)
@@ -78,14 +84,16 @@ The event-driven communication pattern (Architecture Section 3.3) enables workfl
 
 **2. Role-Based Orchestration System (`packages/workflow-engine/roles`)**
 
-*Agent Role Management:*
+_Agent Role Management:_
+
 - `RoleRegistry` class defining available agent roles and their capabilities
 - `RoleRouter` service matching workflow phases to agents with required roles
 - `CapabilityMatcher` algorithm for finding optimal agent based on current load and specialization
 - `WorkflowPhaseMapper` configuration mapping each workflow step to required role(s)
 - `ParallelExecutionPlanner` service identifying independent workflow phases for concurrent execution
 
-*Supported Agent Roles:*
+_Supported Agent Roles:_
+
 - **Architect:** Plan generation (Story 2.3), ambiguity detection, multi-option design proposals
 - **Developer:** Code generation (Stories 2.5, 2.6), refactoring (Story 2.7), test implementation
 - **Code Reviewer:** PR review analysis, code quality assessment, feedback generation
@@ -95,7 +103,8 @@ The event-driven communication pattern (Architecture Section 3.3) enables workfl
 
 **3. Approval Checkpoint System (`packages/workflow-engine/approvals`)**
 
-*Human-in-the-Loop Integration:*
+_Human-in-the-Loop Integration:_
+
 - `ApprovalCheckpoint` interface for synchronous (standalone) and asynchronous (orchestrator) approvals
 - `PlanApprovalCheckpoint` implementation for Story 2.3 design review (FR-3, FR-4)
 - `RefactoringApprovalCheckpoint` implementation for Story 2.7 optional refactoring
@@ -105,7 +114,8 @@ The event-driven communication pattern (Architecture Section 3.3) enables workfl
 
 **4. Retry and Escalation Framework (`packages/workflow-engine/resilience`)**
 
-*Quality Gates Enforcement (FR-16):*
+_Quality Gates Enforcement (FR-16):_
+
 - `RetryPolicy` class implementing 3-retry limit with exponential backoff
 - `EscalationTrigger` service detecting mandatory escalation conditions
 - `FailureAnalyzer` service categorizing failures (transient vs permanent)
@@ -147,7 +157,7 @@ enum WorkflowPhase {
   PR_CREATION = 'pr-creation',
   STATUS_MONITORING = 'status-monitoring',
   MERGE = 'merge',
-  AUTO_NEXT = 'auto-next'
+  AUTO_NEXT = 'auto-next',
 }
 
 interface PhaseTransition {
@@ -183,7 +193,7 @@ enum AgentRole {
   TEST_AUTOMATION = 'test-automation',
   QA = 'qa',
   DEBUGGER = 'debugger',
-  GENERALIST = 'generalist' // fallback for agents without specialization
+  GENERALIST = 'generalist', // fallback for agents without specialization
 }
 
 interface AgentRegistration extends WorkerRegistration {
@@ -224,7 +234,7 @@ const WORKFLOW_ROLE_MAPPING: Record<WorkflowPhase, AgentRole[]> = {
   [WorkflowPhase.PR_CREATION]: [AgentRole.GENERALIST],
   [WorkflowPhase.STATUS_MONITORING]: [AgentRole.GENERALIST],
   [WorkflowPhase.MERGE]: [AgentRole.GENERALIST],
-  [WorkflowPhase.AUTO_NEXT]: [AgentRole.GENERALIST]
+  [WorkflowPhase.AUTO_NEXT]: [AgentRole.GENERALIST],
 };
 ```
 
@@ -373,7 +383,12 @@ interface IWorkflowEngine {
   listActiveWorkflows(): Promise<WorkflowExecution[]>;
 
   // Approval Handling
-  submitApproval(executionId: string, phase: WorkflowPhase, approved: boolean, feedback?: string): Promise<void>;
+  submitApproval(
+    executionId: string,
+    phase: WorkflowPhase,
+    approved: boolean,
+    feedback?: string
+  ): Promise<void>;
   getAwaitingApprovals(): Promise<ApprovalRequest[]>;
 }
 
@@ -394,7 +409,10 @@ interface PhaseResult {
 interface IRoleRouter {
   // Agent Selection
   selectAgentForPhase(phase: WorkflowPhase, context: WorkflowContext): Promise<AgentSelection>;
-  selectAgentsForParallelPhases(phases: WorkflowPhase[], context: WorkflowContext): Promise<Map<WorkflowPhase, AgentSelection>>;
+  selectAgentsForParallelPhases(
+    phases: WorkflowPhase[],
+    context: WorkflowContext
+  ): Promise<Map<WorkflowPhase, AgentSelection>>;
 
   // Capability Matching
   findAgentsWithRole(role: AgentRole): Promise<AgentRegistration[]>;
@@ -433,7 +451,11 @@ interface IApprovalCheckpoint {
   listPendingApprovals(userId?: string): Promise<ApprovalRequest[]>;
 
   // Timeout Handling
-  configureTimeout(requestId: string, timeoutMs: number, escalationAction: EscalationAction): Promise<void>;
+  configureTimeout(
+    requestId: string,
+    timeoutMs: number,
+    escalationAction: EscalationAction
+  ): Promise<void>;
 }
 
 interface ApprovalRequest {
@@ -672,6 +694,7 @@ Timeout Handling:
 ### Performance
 
 **Workflow Loop Performance (NFR-1):**
+
 - Complete autonomous loop (issue → merged PR): < 2 hours for standard feature implementation
 - Issue selection query: < 5 seconds (Git platform API response)
 - Context analysis: < 30 seconds (including related issues, commit history, file loading)
@@ -682,6 +705,7 @@ Timeout Handling:
 - Status monitoring poll interval: 30 seconds (configurable down to 10 seconds)
 
 **Role-Based Orchestration Performance:**
+
 - Agent selection latency: < 100ms (RoleRouter.selectAgentForPhase)
 - Agent load query: < 50ms (AgentLoadMetrics retrieval)
 - Workflow phase assignment: < 200ms (including capability matching)
@@ -689,17 +713,20 @@ Timeout Handling:
 - Role capability matrix lookup: < 10ms (in-memory cache)
 
 **Approval Checkpoint Performance:**
+
 - Approval request creation: < 100ms
 - Approval status query: < 50ms
 - Approval timeout check: < 10ms (background task every 60 seconds)
 - Notification delivery: < 5 seconds (webhook/email)
 
 **Retry and Escalation Performance:**
+
 - Failure analysis: < 500ms (FailureAnalyzer categorization)
 - Exponential backoff delays: 2s → 4s → 8s between retry attempts
 - Escalation notification: < 10 seconds (including email/webhook delivery)
 
 **Throughput Targets:**
+
 - Concurrent workflows: 10+ per orchestrator instance
 - Workflow phase transitions: 50+ per second across all workflows
 - Agent assignments: 100+ per minute during high load
@@ -707,6 +734,7 @@ Timeout Handling:
 ### Security
 
 **Credential Management (FR-33, NFR-3):**
+
 - Git platform credentials (PATs, OAuth tokens) encrypted at rest using AES-256
 - AI provider API keys encrypted at rest using AES-256
 - Credentials stored in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
@@ -714,23 +742,27 @@ Timeout Handling:
 - Token rotation support for expired credentials with automatic retry
 
 **Approval Security:**
+
 - Approval requests signed with HMAC-SHA256 to prevent tampering
 - Approval timeout prevents stale approvals from executing
 - Approval actions logged with user attribution and timestamp
 - Webhook endpoints require TLS 1.2+ with certificate validation
 
 **Event Trail Security (NFR-3):**
+
 - All workflow events encrypted at rest (Epic 4 dependency)
 - Events include user attribution (userId, IP address) for audit compliance
 - 100% action traceability with millisecond precision timestamps
 - Audit log retention: minimum 90 days (configurable up to 7 years)
 
 **Code Generation Security:**
+
 - AI-generated code scanned for hardcoded secrets before commit (basic regex patterns)
 - PR body includes security scan results summary (deferred to Epic 3 for full implementation)
 - Breaking changes require manual approval (FR-34: NEVER auto-approve)
 
 **Role-Based Access Control:**
+
 - Agent roles define permission boundaries (e.g., Code Reviewer cannot execute merge)
 - Orchestrator validates agent role before phase assignment
 - Approval checkpoints enforce role-based authorization
@@ -738,40 +770,47 @@ Timeout Handling:
 ### Reliability/Availability
 
 **Autonomous Completion Rate (NFR-2):**
+
 - Target: 70%+ of issues complete without human escalation
 - Measured as: (workflows completed / workflows started) over 30-day rolling window
 - Excludes human-cancelled workflows from denominator
 
 **Retry Logic Reliability (FR-16):**
+
 - 3-retry limit with exponential backoff enforced at all workflow phases
 - Transient failures (network timeouts, rate limits) automatically retried
 - Permanent failures (syntax errors, missing credentials) escalate immediately
 - Retry success rate target: 80%+ of transient failures resolved within 3 attempts
 
 **PR Rework Rate (NFR-2):**
+
 - Target: < 5% of merged PRs require follow-up fixes
 - Measured as: (PRs with follow-up commits within 7 days / total merged PRs)
 - Excludes refactoring PRs from numerator
 
 **Graceful Degradation:**
+
 - If AI provider unavailable: queue workflow phases for retry (max queue: 100 tasks)
 - If Git platform unavailable: pause workflows and alert user
 - If orchestrator unavailable: workers continue standalone operation on in-progress tasks
 - Circuit breaker triggers after 5 consecutive AI provider failures (60-second cooldown)
 
 **Workflow Fault Tolerance:**
+
 - Workflow state persisted after each phase transition (PostgreSQL)
 - Workflow resume capability after orchestrator restart
 - In-flight workflows recover from last completed phase
 - No data loss on graceful shutdown (SIGTERM handled with 30-second grace period)
 
 **Agent Availability:**
+
 - Worker health checks every 30 seconds (orchestrator to worker heartbeat)
 - Offline workers removed from agent pool after 3 failed heartbeats
 - Workflow phases reassigned to healthy workers on agent failure
 - Agent failure rate target: < 1% per 24-hour period
 
 **Approval Timeout Handling:**
+
 - Default timeout: 24 hours (configurable per approval type)
 - Timeout action: send escalation notification and cancel workflow
 - Override: admin can extend timeout or force approval (audit logged)
@@ -779,12 +818,14 @@ Timeout Handling:
 ### Observability
 
 **Structured Logging (FR-25):**
+
 - All workflow phases emit structured logs (JSON format) with trace IDs
 - Log levels: ERROR (escalations, failures), WARN (retries, timeouts), INFO (phase transitions), DEBUG (agent selection), TRACE (AI provider interactions)
 - Correlation IDs: `executionId` for workflow, `phaseId` for phase, `agentId` for agent
 - Log aggregation: stdout/stderr for standalone mode, centralized log store for orchestrator mode (Epic 5)
 
 **Metrics Collection (FR-26):**
+
 - Workflow metrics:
   - `workflow.started` (counter)
   - `workflow.completed` (counter with status: success/failed/cancelled)
@@ -804,23 +845,27 @@ Timeout Handling:
   - `retry.escalation` (counter)
 
 **Real-Time Progress Tracking:**
+
 - Workflow state changes emit events for live updates
 - CLI progress bar shows current phase and estimated time remaining (standalone mode)
 - WebSocket streaming for orchestrator mode (live phase updates to dashboard - Epic 5)
 - Phase completion percentage: based on completed phases / total phases
 
 **Event Trail (FR-20, FR-21):**
+
 - All workflow actions captured as immutable events
 - Event schema: `{ timestamp, executionId, phase, agentId, agentRole, action, result, metadata }`
 - Events stored in append-only log (PostgreSQL, Epic 4 dependency)
 - Event query API: filter by executionId, phase, agentId, dateRange
 
 **Error Context:**
+
 - Error logs include: stackTrace, retryAttempt, phaseContext (plan, test output, code diff)
 - Escalation notifications include: error summary, retry history, suggested resolution
 - Debugger agent can query error context for diagnosis
 
 **Performance Monitoring:**
+
 - Agent performance tracked: averagePhaseCompletionTime, successRate, tasksCompleted
 - Slow phase detection: alert if phase duration > 2x historical average
 - Role performance comparison: track success rates per agent role
@@ -828,6 +873,7 @@ Timeout Handling:
 ## Dependencies and Integrations
 
 **Epic 1 Internal Dependencies:**
+
 - `@tamma/providers` (^1.0.0) - AI provider abstraction layer (Story 1.1, 1.2, 1.3)
   - Required for: Plan generation (Story 2.3), test generation (Story 2.5), code generation (Story 2.6), refactoring (Story 2.7)
 - `@tamma/platforms` (^1.0.0) - Git platform abstraction layer (Story 1.4, 1.5, 1.6, 1.7)
@@ -838,6 +884,7 @@ Timeout Handling:
   - Required for: Workflow configuration, approval timeouts, retry policies
 
 **Workflow Engine Core Dependencies:**
+
 - `@fastify/websocket` (^10.0.0) - WebSocket support for real-time approval notifications (orchestrator mode)
 - `@smithy/eventstream-serde-node` (^3.0.0) - Event streaming for workflow state transitions
 - `xstate` (^5.18.0) - State machine implementation for workflow phase transitions
@@ -846,20 +893,24 @@ Timeout Handling:
 - `ioredis` (^5.4.0) - Redis client for distributed locks and task queue
 
 **AI Provider Integration:**
+
 - `@anthropic-ai/sdk` (^0.27.0) - Claude Code provider (Epic 1 dependency)
 - Provider-specific SDKs loaded dynamically via Epic 1's plugin system
 
 **Git Platform Integration:**
+
 - `@octokit/rest` (^21.0.0) - GitHub API client (Epic 1 dependency, Story 1.5)
 - `@gitbeaker/rest` (^40.2.0) - GitLab API client (Epic 1 dependency, Story 1.6)
 - Platform-specific clients loaded dynamically via Epic 1's plugin system
 
 **Retry and Resilience:**
+
 - `p-retry` (^6.2.0) - Exponential backoff retry logic with configurable strategies
 - `opossum` (^8.1.0) - Circuit breaker pattern for AI provider failures
 - `cockatiel` (^3.1.0) - Advanced resilience patterns (bulkhead, timeout, fallback)
 
 **Logging and Observability:**
+
 - `pino` (^9.3.0) - High-performance structured logging
 - `pino-pretty` (^11.2.0) - Development log formatting
 - `@opentelemetry/api` (^1.9.0) - OpenTelemetry tracing API
@@ -867,11 +918,13 @@ Timeout Handling:
 - `prom-client` (^15.1.0) - Prometheus metrics collection
 
 **Approval and Notification:**
+
 - `nodemailer` (^6.9.0) - Email notifications for approval requests
 - `webhook` (^0.1.0) - Webhook delivery for approval notifications and status updates
 - `jsonwebtoken` (^9.0.0) - JWT signing for approval request authentication
 
 **Testing Dependencies:**
+
 - `jest` (^29.7.0) - Testing framework
 - `@jest/globals` (^29.7.0) - Jest global types
 - `ts-jest` (^29.2.0) - TypeScript support for Jest
@@ -879,6 +932,7 @@ Timeout Handling:
 - `mock-socket` (^9.3.0) - WebSocket mocking for real-time tests
 
 **Development Dependencies:**
+
 - `typescript` (^5.7.2) - TypeScript compiler
 - `ts-node` (^10.9.0) - TypeScript execution for development
 - `tsx` (^4.17.0) - Fast TypeScript execution
@@ -889,6 +943,7 @@ Timeout Handling:
 **External Service Integrations:**
 
 **PostgreSQL (Required for Orchestrator Mode):**
+
 - Version: 17+
 - Purpose: Workflow state persistence, agent registry, approval queue
 - Tables:
@@ -900,6 +955,7 @@ Timeout Handling:
 - Failover: Read replicas for status queries (optional)
 
 **Redis (Optional, for Orchestrator Mode):**
+
 - Version: 7.0+
 - Purpose: Task queue (BullMQ), distributed locks, agent heartbeat tracking
 - Persistence: AOF enabled for task queue durability
@@ -907,18 +963,21 @@ Timeout Handling:
 - Fallback: PostgreSQL-based queue if Redis unavailable
 
 **AI Provider APIs (Epic 1 Dependency):**
+
 - Claude Code API (Anthropic) - Primary provider for plan/code generation
 - Future providers via plugin system (OpenCode, GLM, local LLMs)
 - Rate limiting handled by Epic 1's provider abstraction
 - Circuit breaker triggers after 5 consecutive failures
 
 **Git Platform APIs (Epic 1 Dependency):**
+
 - GitHub REST API v3 - Issue management, PR operations, CI status
 - GitHub GraphQL API v4 - Batch queries for related issues
 - GitLab REST API v4 - Issue management, PR operations, CI status
 - Authentication: PATs or OAuth tokens (Epic 1 dependency)
 
 **Notification Services (Optional):**
+
 - SMTP Server - Email notifications for approval requests
   - Fallback: Console logging if SMTP unavailable
 - Webhook Endpoints - User-configured webhooks for workflow events
@@ -926,6 +985,7 @@ Timeout Handling:
   - Timeout: 10 seconds per webhook call
 
 **Monitoring and Observability (Epic 5 Dependency):**
+
 - Prometheus - Metrics collection endpoint exposed at `/metrics`
 - Grafana - Dashboards for workflow visualization (deferred to Epic 5)
 - OpenTelemetry Collector - Trace aggregation (deferred to Epic 5)
@@ -933,24 +993,28 @@ Timeout Handling:
 **Integration Patterns:**
 
 **Workflow Engine ↔ AI Providers (via Epic 1):**
+
 ```
 WorkflowEngine → AIProviderInterface → Provider Plugin → AI API
                   (Story 2.3, 2.5, 2.6, 2.7)
 ```
 
 **Workflow Engine ↔ Git Platforms (via Epic 1):**
+
 ```
 WorkflowEngine → GitPlatformInterface → Platform Plugin → Git API
                   (Stories 2.1, 2.4, 2.8, 2.9, 2.10)
 ```
 
 **Orchestrator ↔ Workers (Role-Based):**
+
 ```
 Orchestrator → RoleRouter → AgentRegistry → Worker (filtered by role)
              → Task Queue → Worker polls → Execute phase → Report result
 ```
 
 **Approval Checkpoints ↔ Users:**
+
 ```
 Standalone Mode:
   WorkflowEngine → CLI prompt → User input → Continue workflow
@@ -961,6 +1025,7 @@ Orchestrator Mode:
 ```
 
 **Event Sourcing Integration (Epic 4 Dependency):**
+
 ```
 WorkflowEngine → Emit event → EventBus → Event Store (PostgreSQL)
                              → Event consumers (observability, audit, replay)
@@ -973,322 +1038,397 @@ All acceptance criteria are extracted from Epic 2 stories in epics.md and normal
 ### Story 2.1: Issue Selection with Filtering
 
 **AC-2.1.1:** System queries Git platform API for open issues in configured repository
+
 - **Verification:** Integration test with mock GitHub API returns issue list
 - **Implementation:** `WorkflowEngine.executePhase(ISSUE_SELECTION)` → `GitPlatformInterface.getIssues()`
 
 **AC-2.1.2:** System filters issues by configured inclusion/exclusion labels
+
 - **Verification:** Unit test validates label filtering logic against test dataset
 - **Implementation:** Filter applied in `issueSelectionCriteria` configuration
 
 **AC-2.1.3:** System prioritizes issues by age (oldest first) as default strategy
+
 - **Verification:** Integration test confirms oldest unassigned issue selected first
 - **Implementation:** Sort by `created_at ASC` in Git platform query
 
 **AC-2.1.4:** System assigns selected issue to configured bot user account
+
 - **Verification:** Integration test confirms issue assignee updated via API
 - **Implementation:** `GitPlatformInterface.assignIssue(issueId, botUserId)`
 
 **AC-2.1.5:** System logs issue selection with issue number, title, and URL
+
 - **Verification:** Log output includes structured JSON with required fields
 - **Implementation:** `IssueSelectedEvent` emitted to event bus
 
 **AC-2.1.6:** If no issues match criteria, system enters idle state and polls every 5 minutes
+
 - **Verification:** Integration test with empty issue list triggers 5-minute wait
 - **Implementation:** XState idle state with 300-second timeout transition
 
 **AC-2.1.7:** Integration test with mock Git platform API passes
+
 - **Verification:** CI pipeline runs end-to-end test with mock GitHub responses
 - **Implementation:** Jest integration test suite with nock for API mocking
 
 ### Story 2.2: Issue Context Analysis
 
 **AC-2.2.1:** System reads issue title, body, labels, and comments
+
 - **Verification:** Unit test parses issue metadata from API response fixture
 - **Implementation:** `GitPlatformInterface.getIssueDetails(issueId)` returns complete issue object
 
 **AC-2.2.2:** System identifies related issues via issue references (#123 format)
+
 - **Verification:** Unit test extracts issue numbers from markdown text containing references
 - **Implementation:** Regex pattern `/\#(\d+)/g` applied to issue body and comments
 
 **AC-2.2.3:** System loads recent commit history (last 10 commits) for project context
+
 - **Verification:** Integration test confirms 10 commits fetched from repository
 - **Implementation:** `GitPlatformInterface.getCommitHistory(repoId, limit: 10)`
 
 **AC-2.2.4:** System loads relevant file paths mentioned in issue body
+
 - **Verification:** Unit test identifies file paths in markdown code blocks and backticks
 - **Implementation:** File path extraction from issue body using pattern matching
 
 **AC-2.2.5:** System constructs context summary (500-1000 words) for AI provider
+
 - **Verification:** Unit test validates summary length and content structure
 - **Implementation:** Template-based context construction with configurable format
 
 **AC-2.2.6:** Context summary logged to event trail for transparency
+
 - **Verification:** Event store contains `ContextAnalysisCompletedEvent` with summary
 - **Implementation:** Event emitted after context construction completes
 
 **AC-2.2.7:** Unit test validates context extraction from mock issue data
+
 - **Verification:** Test suite includes fixtures for various issue formats
 - **Implementation:** Jest unit tests with mock issue API responses
 
 ### Story 2.3: Development Plan Generation with Approval Checkpoint
 
 **AC-2.3.1:** System sends issue context to AI provider with plan generation prompt
+
 - **Verification:** Integration test confirms prompt sent with context payload
 - **Implementation:** `AIProviderInterface.generatePlan(context)` with standardized prompt template
 
 **AC-2.3.2:** System receives plan with 3-7 implementation steps
+
 - **Verification:** Response validation ensures step count in valid range
 - **Implementation:** Plan schema validation using Zod or JSON Schema
 
 **AC-2.3.3:** System presents plan to user via CLI output with formatted steps
+
 - **Verification:** Manual test observes formatted plan with numbered steps
 - **Implementation:** CLI rendering using chalk for colored, structured output
 
 **AC-2.3.4:** System prompts user: "Approve plan? [Y/n/edit]"
+
 - **Verification:** Integration test simulates user input and validates response handling
 - **Implementation:** `IApprovalCheckpoint.requestApproval()` with interactive prompt
 
 **AC-2.3.5:** If user enters 'Y' or 'y', proceed to next step
+
 - **Verification:** State machine test confirms transition to BRANCH_CREATION phase
 - **Implementation:** XState event `PLAN_APPROVED` triggers phase transition
 
 **AC-2.3.6:** If user enters 'n', abort loop and unassign issue
+
 - **Verification:** Integration test confirms issue unassigned and workflow halted
 - **Implementation:** XState event `PLAN_REJECTED` triggers abort state
 
 **AC-2.3.7:** If user enters 'edit', allow inline plan modification before proceeding
+
 - **Verification:** Manual test confirms text editor launches for plan modification
 - **Implementation:** Open system editor (vim/nano/notepad) with plan content
 
 **AC-2.3.8:** Plan and approval decision logged to event trail
+
 - **Verification:** Event store contains `PlanApprovedEvent` or `PlanRejectedEvent`
 - **Implementation:** Events emitted with complete plan payload and user decision
 
 ### Story 2.4: Git Branch Creation
 
 **AC-2.4.1:** System generates branch name format: `Tamma/issue-{number}-{sanitized-title}`
+
 - **Verification:** Unit test validates branch name generation for various issue titles
 - **Implementation:** Branch name sanitization removes special characters, replaces spaces with hyphens
 
 **AC-2.4.2:** System creates branch from latest main/master branch via Git platform API
+
 - **Verification:** Integration test confirms branch created with correct base SHA
 - **Implementation:** `GitPlatformInterface.createBranch(name, baseBranch: 'main')`
 
 **AC-2.4.3:** System handles conflict if branch already exists (append timestamp suffix)
+
 - **Verification:** Integration test with existing branch name triggers timestamp suffix
 - **Implementation:** Retry logic appends Unix timestamp on `BranchAlreadyExistsError`
 
 **AC-2.4.4:** System logs branch creation with branch name and base SHA
+
 - **Verification:** Event store contains `BranchCreatedEvent` with required fields
 - **Implementation:** Event emitted after successful branch creation
 
 **AC-2.4.5:** Branch creation failure triggers graceful abort with error logging
+
 - **Verification:** Integration test with invalid branch name triggers abort state
 - **Implementation:** XState error handler transitions to abort state with error event
 
 **AC-2.4.6:** Integration test with mock Git platform API passes
+
 - **Verification:** CI pipeline runs end-to-end test with mock GitHub branch creation
 - **Implementation:** Jest integration test with nock mocking GitHub REST API
 
 ### Story 2.5: Test-First Development - Write Failing Tests
 
 **AC-2.5.1:** System sends plan to AI provider with test generation prompt
+
 - **Verification:** Integration test confirms prompt includes plan step details
 - **Implementation:** `AIProviderInterface.generateTests(plan, step)` with TDD-specific prompt
 
 **AC-2.5.2:** System receives test code with clear test cases
+
 - **Verification:** Response validation ensures test syntax matches project conventions
 - **Implementation:** Test code validation using language-specific parser
 
 **AC-2.5.3:** System writes test files to appropriate test directory
+
 - **Verification:** Integration test confirms test file created in correct location
 - **Implementation:** File path resolution based on project conventions (e.g., `__tests__/`, `test/`, `spec/`)
 
 **AC-2.5.4:** System commits tests to feature branch with standardized message
+
 - **Verification:** Integration test confirms commit created with message "Add tests for [issue title]"
 - **Implementation:** `GitPlatformInterface.createCommit(message, files)`
 
 **AC-2.5.5:** System runs tests locally and verifies they fail (red phase)
+
 - **Verification:** Test execution returns non-zero exit code and failure output
 - **Implementation:** Execute test command (e.g., `npm test`) via child process
 
 **AC-2.5.6:** Test output logged to event trail
+
 - **Verification:** Event store contains `TestExecutionEvent` with stdout/stderr
 - **Implementation:** Event emitted with test results and execution time
 
 **AC-2.5.7:** If tests unexpectedly pass, system flags for human review
+
 - **Verification:** Integration test with passing tests triggers escalation event
 - **Implementation:** XState conditional transition to escalation state on unexpected pass
 
 ### Story 2.6: Implementation Code Generation
 
 **AC-2.6.1:** System sends plan and failing tests to AI provider with implementation prompt
+
 - **Verification:** Integration test confirms prompt includes test code and error messages
 - **Implementation:** `AIProviderInterface.generateCode(plan, tests, errors)` with implementation prompt
 
 **AC-2.6.2:** System receives implementation code with necessary changes
+
 - **Verification:** Response validation ensures code syntax is valid
 - **Implementation:** Code validation using language-specific parser (TypeScript, Python, etc.)
 
 **AC-2.6.3:** System writes implementation files to appropriate source directories
+
 - **Verification:** Integration test confirms files created in correct locations
 - **Implementation:** File path resolution based on test file locations and project structure
 
 **AC-2.6.4:** System commits implementation with standardized message
+
 - **Verification:** Integration test confirms commit with message "Implement [issue title]"
 - **Implementation:** `GitPlatformInterface.createCommit()` with standardized format
 
 **AC-2.6.5:** System runs tests locally and verifies they pass (green phase)
+
 - **Verification:** Test execution returns zero exit code with all tests passing
 - **Implementation:** Execute test command and validate exit code === 0
 
 **AC-2.6.6:** Test output logged to event trail
+
 - **Verification:** Event store contains `TestExecutionEvent` with pass/fail counts
 - **Implementation:** Event emitted with complete test results
 
 **AC-2.6.7:** If tests still fail, system enters retry loop (max 3 attempts)
+
 - **Verification:** Integration test with persistent failures triggers 3 retries then escalation
 - **Implementation:** XState retry counter with exponential backoff, escalation after 3 failures
 
 ### Story 2.7: Code Refactoring Pass
 
 **AC-2.7.1:** System sends implementation code to AI provider with refactoring prompt
+
 - **Verification:** Integration test confirms prompt includes current code and refactoring guidelines
 - **Implementation:** `AIProviderInterface.suggestRefactoring(code)` with quality focus
 
 **AC-2.7.2:** If AI suggests refactoring, system presents approval prompt
+
 - **Verification:** Manual test observes prompt "Apply refactoring? [Y/n]"
 - **Implementation:** `IApprovalCheckpoint.requestApproval()` with refactoring preview
 
 **AC-2.7.3:** If user approves, system applies refactoring and commits
+
 - **Verification:** Integration test confirms refactoring applied and committed
 - **Implementation:** Apply code changes and commit with message "Refactor [issue title]"
 
 **AC-2.7.4:** System re-runs tests to verify refactoring didn't break functionality
+
 - **Verification:** Test execution after refactoring returns passing results
 - **Implementation:** Execute test command and validate all tests still pass
 
 **AC-2.7.5:** If user rejects or AI suggests no refactoring, proceed to next step
+
 - **Verification:** State machine test confirms transition to PR_CREATION phase
 - **Implementation:** XState conditional transition based on user decision
 
 **AC-2.7.6:** Refactoring decision logged to event trail
+
 - **Verification:** Event store contains `RefactoringApprovedEvent` or `RefactoringSkippedEvent`
 - **Implementation:** Event emitted with decision and code changes (if applied)
 
 ### Story 2.8: Pull Request Creation
 
 **AC-2.8.1:** System generates PR title format: "[Tamma] {issue title}"
+
 - **Verification:** Unit test validates PR title generation for various issue titles
 - **Implementation:** Title template with bracket prefix and issue title
 
 **AC-2.8.2:** System generates PR body including issue reference, plan summary, test results
+
 - **Verification:** Unit test confirms PR body includes all required sections
 - **Implementation:** Markdown template with sections for context, plan, test results
 
 **AC-2.8.3:** System creates PR via Git platform API
+
 - **Verification:** Integration test confirms PR created with correct base and head branches
 - **Implementation:** `GitPlatformInterface.createPullRequest(title, body, base, head)`
 
 **AC-2.8.4:** System adds labels to PR (e.g., "automated", "Tamma-generated")
+
 - **Verification:** Integration test confirms labels added to created PR
 - **Implementation:** `GitPlatformInterface.addLabels(prId, labels)`
 
 **AC-2.8.5:** System requests review from configured reviewers (if configured)
+
 - **Verification:** Integration test with configured reviewers confirms review requests sent
 - **Implementation:** `GitPlatformInterface.requestReview(prId, reviewers)`
 
 **AC-2.8.6:** System logs PR creation with PR URL
+
 - **Verification:** Event store contains `PRCreatedEvent` with URL
 - **Implementation:** Event emitted with complete PR metadata
 
 **AC-2.8.7:** Integration test with mock Git platform API passes
+
 - **Verification:** CI pipeline runs end-to-end test with mock PR creation
 - **Implementation:** Jest integration test with nock mocking GitHub PR API
 
 ### Story 2.9: PR Status Monitoring
 
 **AC-2.9.1:** System polls PR status every 30 seconds (configurable interval)
+
 - **Verification:** Integration test confirms polling at configured interval
 - **Implementation:** XState delayed transition with configurable timeout
 
 **AC-2.9.2:** System checks CI/CD status via Git platform API
+
 - **Verification:** Integration test confirms status check queries made
 - **Implementation:** `GitPlatformInterface.getPRStatus(prId)` returns CI status
 
 **AC-2.9.3:** System checks review status (approved, changes requested, commented)
+
 - **Verification:** Integration test confirms review status retrieved
 - **Implementation:** `GitPlatformInterface.getPRReviews(prId)` returns review list
 
 **AC-2.9.4:** System logs status changes to event trail
+
 - **Verification:** Event store contains `PRStatusChangedEvent` for each status update
 - **Implementation:** Event emitted when status differs from previous poll
 
 **AC-2.9.5:** If CI/CD fails, system retrieves failure logs and presents to user
+
 - **Verification:** Integration test with failed CI triggers log retrieval
 - **Implementation:** `GitPlatformInterface.getCILogs(prId)` and display to user
 
 **AC-2.9.6:** If reviews request changes, system presents feedback to user
+
 - **Verification:** Manual test confirms review comments displayed to user
 - **Implementation:** Format review comments and display via CLI
 
 **AC-2.9.7:** System supports manual intervention: "Continue monitoring? [Y/retry/abort]"
+
 - **Verification:** Manual test confirms intervention prompt displayed on failure
 - **Implementation:** `IApprovalCheckpoint.requestApproval()` with retry/abort options
 
 ### Story 2.10: PR Merge with Completion Checkpoint
 
 **AC-2.10.1:** System waits for CI/CD success and required review approvals
+
 - **Verification:** State machine test confirms merge only proceeds when conditions met
 - **Implementation:** XState guard condition validates CI status and review approvals
 
 **AC-2.10.2:** System presents merge checkpoint: "PR ready to merge. Proceed? [Y/n]"
+
 - **Verification:** Manual test observes merge approval prompt
 - **Implementation:** `IApprovalCheckpoint.requestApproval()` with merge context
 
 **AC-2.10.3:** If user approves, system merges PR via Git platform API
+
 - **Verification:** Integration test confirms PR merged with configured merge strategy
 - **Implementation:** `GitPlatformInterface.mergePR(prId, strategy)` with strategy from config
 
 **AC-2.10.4:** System deletes feature branch after successful merge (if configured)
+
 - **Verification:** Integration test with branch deletion enabled confirms branch removed
 - **Implementation:** `GitPlatformInterface.deleteBranch(branchName)` conditional on config
 
 **AC-2.10.5:** System updates issue status to closed with comment linking to merged PR
+
 - **Verification:** Integration test confirms issue closed with PR link comment
 - **Implementation:** `GitPlatformInterface.closeIssue(issueId, comment)`
 
 **AC-2.10.6:** System logs merge completion with merge SHA
+
 - **Verification:** Event store contains `PRMergedEvent` with merge commit SHA
 - **Implementation:** Event emitted with complete merge metadata
 
 **AC-2.10.7:** If merge fails (conflicts), system alerts user and waits for manual resolution
+
 - **Verification:** Integration test with merge conflict triggers alert and pauses workflow
 - **Implementation:** XState error handler transitions to manual resolution state
 
 ### Story 2.11: Auto-Next Issue Selection
 
 **AC-2.11.1:** After successful merge, system waits 10 seconds (cooldown period)
+
 - **Verification:** Integration test confirms 10-second delay before next issue selection
 - **Implementation:** XState delayed transition with 10-second timeout
 
 **AC-2.11.2:** System returns to Story 2.1 (issue selection) logic
+
 - **Verification:** State machine test confirms transition back to ISSUE_SELECTION phase
 - **Implementation:** XState transition to ISSUE_SELECTION state
 
 **AC-2.11.3:** System maintains loop counter and logs iteration number
+
 - **Verification:** Log output includes iteration count for each loop cycle
 - **Implementation:** Workflow context tracks `iterationCount` incremented on each loop
 
 **AC-2.11.4:** System supports max iterations limit (configurable, default: infinite)
+
 - **Verification:** Integration test with max iterations set to 2 stops after 2 cycles
 - **Implementation:** XState guard condition checks `iterationCount < maxIterations`
 
 **AC-2.11.5:** System supports graceful shutdown signal (SIGINT/SIGTERM)
+
 - **Verification:** Integration test sends SIGINT and confirms graceful shutdown
 - **Implementation:** Signal handlers set shutdown flag, workflow completes current iteration then exits
 
 **AC-2.11.6:** System logs loop continuation to event trail
+
 - **Verification:** Event store contains `LoopIterationStartedEvent` for each cycle
 - **Implementation:** Event emitted at start of each autonomous loop iteration
 
@@ -1296,94 +1436,94 @@ All acceptance criteria are extracted from Epic 2 stories in epics.md and normal
 
 This table maps each acceptance criterion to PRD requirements, technical components, and test strategies, ensuring complete coverage and traceability from requirements through implementation to verification.
 
-| AC ID | PRD Requirement | Tech Spec Section | Component/API | Test Strategy |
-|-------|----------------|-------------------|---------------|---------------|
-| **Story 2.1: Issue Selection** |
-| AC-2.1.1 | FR-1 (Issue Selection) | Workflow Engine Service | `WorkflowEngine.executePhase()`, `GitPlatformInterface.getIssues()` | Integration test: Mock GitHub API returns issue list, verify query parameters |
-| AC-2.1.2 | FR-1 (Issue Selection) | Workflow Engine Service | `IssueSelectionCriteria` configuration | Unit test: Validate label filtering against test dataset with various label combinations |
-| AC-2.1.3 | FR-1 (Issue Selection) | Workflow Engine Service | Sort logic in Git platform query | Integration test: Create issues with different timestamps, verify oldest selected first |
-| AC-2.1.4 | FR-1 (Issue Selection) | Workflow Engine Service, Git Platform | `GitPlatformInterface.assignIssue()` | Integration test: Mock API call, verify assignee field updated with bot user ID |
-| AC-2.1.5 | FR-1 (Issue Selection) | Workflow Engine Service, Event System | `IssueSelectedEvent` data model | Unit test: Validate event payload contains required fields (number, title, URL) |
-| AC-2.1.6 | FR-1 (Issue Selection) | Workflow Engine Service | XState idle state with delayed transition | Integration test: Empty issue list triggers idle state, verify 5-minute timeout |
-| AC-2.1.7 | FR-1 (Issue Selection) | Workflow Engine Service | Integration test suite | CI/CD test: End-to-end workflow with nock mocking GitHub REST API responses |
-| **Story 2.2: Context Analysis** |
-| AC-2.2.1 | FR-1 (Context Analysis) | Workflow Engine Service | `GitPlatformInterface.getIssueDetails()` | Unit test: Parse issue API response fixture, validate all fields extracted |
-| AC-2.2.2 | FR-1 (Context Analysis) | Workflow Engine Service | Issue reference extraction regex | Unit test: Extract issue numbers from markdown with various reference formats (#123, GH-456) |
-| AC-2.2.3 | FR-1 (Context Analysis) | Workflow Engine Service, Git Platform | `GitPlatformInterface.getCommitHistory()` | Integration test: Mock commit history API, verify limit parameter set to 10 |
-| AC-2.2.4 | FR-1 (Context Analysis) | Workflow Engine Service | File path extraction pattern matching | Unit test: Extract file paths from markdown code blocks and backticks |
-| AC-2.2.5 | FR-1 (Context Analysis) | Workflow Engine Service | Context summary template | Unit test: Validate summary length between 500-1000 words, verify structure |
-| AC-2.2.6 | FR-1 (Context Analysis) | Workflow Engine Service, Event System | `ContextAnalysisCompletedEvent` | Unit test: Verify event emitted with context summary after analysis completes |
-| AC-2.2.7 | FR-1 (Context Analysis) | Workflow Engine Service | Unit test suite | Unit test: Fixtures for various issue formats (short, long, with/without references) |
-| **Story 2.3: Plan Generation** |
-| AC-2.3.1 | FR-1 (Plan Generation), FR-3 (Ambiguity Detection) | Workflow Engine Service, AI Provider | `AIProviderInterface.generatePlan()` | Integration test: Mock AI provider, verify prompt includes context payload |
-| AC-2.3.2 | FR-1 (Plan Generation) | Workflow Engine Service | Plan validation schema (Zod/JSON Schema) | Unit test: Validate plan with 2 steps fails, 3-7 steps pass, 8 steps fails |
-| AC-2.3.3 | FR-1 (Plan Generation) | Workflow Engine Service, CLI Renderer | Chalk formatting for CLI output | Manual test: Observe formatted output with colors and numbered steps |
-| AC-2.3.4 | FR-19 (Approval Checkpoints) | Approval Checkpoints Service | `IApprovalCheckpoint.requestApproval()` | Integration test: Mock user input, verify prompt displayed and response captured |
-| AC-2.3.5 | FR-19 (Approval Checkpoints) | Workflow Engine Service | XState `PLAN_APPROVED` event transition | State machine test: Trigger event, verify transition to BRANCH_CREATION phase |
-| AC-2.3.6 | FR-19 (Approval Checkpoints) | Workflow Engine Service | XState `PLAN_REJECTED` event transition | Integration test: Reject plan, verify issue unassigned and workflow halts |
-| AC-2.3.7 | FR-19 (Approval Checkpoints) | Approval Checkpoints Service | System editor integration (vim/nano/notepad) | Manual test: Edit plan in system editor, verify changes reflected in workflow |
-| AC-2.3.8 | FR-19 (Approval Checkpoints) | Workflow Engine Service, Event System | `PlanApprovedEvent`, `PlanRejectedEvent` | Unit test: Verify events emitted with complete plan payload and user decision |
-| **Story 2.4: Branch Creation** |
-| AC-2.4.1 | FR-1 (Branch Creation) | Workflow Engine Service | Branch name generation function | Unit test: Validate sanitization (special chars removed, spaces → hyphens) |
-| AC-2.4.2 | FR-1 (Branch Creation) | Git Platform Service | `GitPlatformInterface.createBranch()` | Integration test: Mock branch creation API, verify base set to main/master |
-| AC-2.4.3 | FR-16 (Retry Logic) | Git Platform Service | Retry handler with timestamp suffix | Integration test: Mock existing branch error, verify timestamp appended |
-| AC-2.4.4 | FR-1 (Branch Creation) | Workflow Engine Service, Event System | `BranchCreatedEvent` | Unit test: Verify event contains branch name and base SHA |
-| AC-2.4.5 | FR-16 (Escalation) | Workflow Engine Service | XState error handler → abort state | Integration test: Invalid branch name triggers abort with error event |
-| AC-2.4.6 | FR-1 (Branch Creation) | Git Platform Service | Integration test suite | CI/CD test: Mock GitHub branch creation API with nock |
-| **Story 2.5: Test Generation (TDD Red Phase)** |
-| AC-2.5.1 | FR-5 (Test-First Development) | Workflow Engine Service, AI Provider | `AIProviderInterface.generateTests()` | Integration test: Mock AI provider, verify prompt includes plan step details |
-| AC-2.5.2 | FR-5 (Test-First Development) | Workflow Engine Service | Test code syntax validation parser | Unit test: Validate TypeScript/Python/etc. test syntax with AST parser |
-| AC-2.5.3 | FR-5 (Test-First Development) | Workflow Engine Service | File path resolution based on conventions | Integration test: Verify test file created in __tests__/ or test/ directory |
-| AC-2.5.4 | FR-5 (Test-First Development) | Git Platform Service | `GitPlatformInterface.createCommit()` | Integration test: Verify commit message format "Add tests for [title]" |
-| AC-2.5.5 | FR-5 (Test-First Development) | Workflow Engine Service | Test execution via child process | Integration test: Execute test command, verify non-zero exit code (red phase) |
-| AC-2.5.6 | FR-5 (Test-First Development) | Workflow Engine Service, Event System | `TestExecutionEvent` | Unit test: Verify event emitted with stdout/stderr and execution time |
-| AC-2.5.7 | FR-5 (Test-First Development) | Workflow Engine Service | XState conditional transition to escalation | Integration test: Tests unexpectedly pass, verify escalation event triggered |
+| AC ID                                           | PRD Requirement                                    | Tech Spec Section                     | Component/API                                                       | Test Strategy                                                                                |
+| ----------------------------------------------- | -------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Story 2.1: Issue Selection**                  |
+| AC-2.1.1                                        | FR-1 (Issue Selection)                             | Workflow Engine Service               | `WorkflowEngine.executePhase()`, `GitPlatformInterface.getIssues()` | Integration test: Mock GitHub API returns issue list, verify query parameters                |
+| AC-2.1.2                                        | FR-1 (Issue Selection)                             | Workflow Engine Service               | `IssueSelectionCriteria` configuration                              | Unit test: Validate label filtering against test dataset with various label combinations     |
+| AC-2.1.3                                        | FR-1 (Issue Selection)                             | Workflow Engine Service               | Sort logic in Git platform query                                    | Integration test: Create issues with different timestamps, verify oldest selected first      |
+| AC-2.1.4                                        | FR-1 (Issue Selection)                             | Workflow Engine Service, Git Platform | `GitPlatformInterface.assignIssue()`                                | Integration test: Mock API call, verify assignee field updated with bot user ID              |
+| AC-2.1.5                                        | FR-1 (Issue Selection)                             | Workflow Engine Service, Event System | `IssueSelectedEvent` data model                                     | Unit test: Validate event payload contains required fields (number, title, URL)              |
+| AC-2.1.6                                        | FR-1 (Issue Selection)                             | Workflow Engine Service               | XState idle state with delayed transition                           | Integration test: Empty issue list triggers idle state, verify 5-minute timeout              |
+| AC-2.1.7                                        | FR-1 (Issue Selection)                             | Workflow Engine Service               | Integration test suite                                              | CI/CD test: End-to-end workflow with nock mocking GitHub REST API responses                  |
+| **Story 2.2: Context Analysis**                 |
+| AC-2.2.1                                        | FR-1 (Context Analysis)                            | Workflow Engine Service               | `GitPlatformInterface.getIssueDetails()`                            | Unit test: Parse issue API response fixture, validate all fields extracted                   |
+| AC-2.2.2                                        | FR-1 (Context Analysis)                            | Workflow Engine Service               | Issue reference extraction regex                                    | Unit test: Extract issue numbers from markdown with various reference formats (#123, GH-456) |
+| AC-2.2.3                                        | FR-1 (Context Analysis)                            | Workflow Engine Service, Git Platform | `GitPlatformInterface.getCommitHistory()`                           | Integration test: Mock commit history API, verify limit parameter set to 10                  |
+| AC-2.2.4                                        | FR-1 (Context Analysis)                            | Workflow Engine Service               | File path extraction pattern matching                               | Unit test: Extract file paths from markdown code blocks and backticks                        |
+| AC-2.2.5                                        | FR-1 (Context Analysis)                            | Workflow Engine Service               | Context summary template                                            | Unit test: Validate summary length between 500-1000 words, verify structure                  |
+| AC-2.2.6                                        | FR-1 (Context Analysis)                            | Workflow Engine Service, Event System | `ContextAnalysisCompletedEvent`                                     | Unit test: Verify event emitted with context summary after analysis completes                |
+| AC-2.2.7                                        | FR-1 (Context Analysis)                            | Workflow Engine Service               | Unit test suite                                                     | Unit test: Fixtures for various issue formats (short, long, with/without references)         |
+| **Story 2.3: Plan Generation**                  |
+| AC-2.3.1                                        | FR-1 (Plan Generation), FR-3 (Ambiguity Detection) | Workflow Engine Service, AI Provider  | `AIProviderInterface.generatePlan()`                                | Integration test: Mock AI provider, verify prompt includes context payload                   |
+| AC-2.3.2                                        | FR-1 (Plan Generation)                             | Workflow Engine Service               | Plan validation schema (Zod/JSON Schema)                            | Unit test: Validate plan with 2 steps fails, 3-7 steps pass, 8 steps fails                   |
+| AC-2.3.3                                        | FR-1 (Plan Generation)                             | Workflow Engine Service, CLI Renderer | Chalk formatting for CLI output                                     | Manual test: Observe formatted output with colors and numbered steps                         |
+| AC-2.3.4                                        | FR-19 (Approval Checkpoints)                       | Approval Checkpoints Service          | `IApprovalCheckpoint.requestApproval()`                             | Integration test: Mock user input, verify prompt displayed and response captured             |
+| AC-2.3.5                                        | FR-19 (Approval Checkpoints)                       | Workflow Engine Service               | XState `PLAN_APPROVED` event transition                             | State machine test: Trigger event, verify transition to BRANCH_CREATION phase                |
+| AC-2.3.6                                        | FR-19 (Approval Checkpoints)                       | Workflow Engine Service               | XState `PLAN_REJECTED` event transition                             | Integration test: Reject plan, verify issue unassigned and workflow halts                    |
+| AC-2.3.7                                        | FR-19 (Approval Checkpoints)                       | Approval Checkpoints Service          | System editor integration (vim/nano/notepad)                        | Manual test: Edit plan in system editor, verify changes reflected in workflow                |
+| AC-2.3.8                                        | FR-19 (Approval Checkpoints)                       | Workflow Engine Service, Event System | `PlanApprovedEvent`, `PlanRejectedEvent`                            | Unit test: Verify events emitted with complete plan payload and user decision                |
+| **Story 2.4: Branch Creation**                  |
+| AC-2.4.1                                        | FR-1 (Branch Creation)                             | Workflow Engine Service               | Branch name generation function                                     | Unit test: Validate sanitization (special chars removed, spaces → hyphens)                   |
+| AC-2.4.2                                        | FR-1 (Branch Creation)                             | Git Platform Service                  | `GitPlatformInterface.createBranch()`                               | Integration test: Mock branch creation API, verify base set to main/master                   |
+| AC-2.4.3                                        | FR-16 (Retry Logic)                                | Git Platform Service                  | Retry handler with timestamp suffix                                 | Integration test: Mock existing branch error, verify timestamp appended                      |
+| AC-2.4.4                                        | FR-1 (Branch Creation)                             | Workflow Engine Service, Event System | `BranchCreatedEvent`                                                | Unit test: Verify event contains branch name and base SHA                                    |
+| AC-2.4.5                                        | FR-16 (Escalation)                                 | Workflow Engine Service               | XState error handler → abort state                                  | Integration test: Invalid branch name triggers abort with error event                        |
+| AC-2.4.6                                        | FR-1 (Branch Creation)                             | Git Platform Service                  | Integration test suite                                              | CI/CD test: Mock GitHub branch creation API with nock                                        |
+| **Story 2.5: Test Generation (TDD Red Phase)**  |
+| AC-2.5.1                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, AI Provider  | `AIProviderInterface.generateTests()`                               | Integration test: Mock AI provider, verify prompt includes plan step details                 |
+| AC-2.5.2                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Test code syntax validation parser                                  | Unit test: Validate TypeScript/Python/etc. test syntax with AST parser                       |
+| AC-2.5.3                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | File path resolution based on conventions                           | Integration test: Verify test file created in **tests**/ or test/ directory                  |
+| AC-2.5.4                                        | FR-5 (Test-First Development)                      | Git Platform Service                  | `GitPlatformInterface.createCommit()`                               | Integration test: Verify commit message format "Add tests for [title]"                       |
+| AC-2.5.5                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Test execution via child process                                    | Integration test: Execute test command, verify non-zero exit code (red phase)                |
+| AC-2.5.6                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, Event System | `TestExecutionEvent`                                                | Unit test: Verify event emitted with stdout/stderr and execution time                        |
+| AC-2.5.7                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | XState conditional transition to escalation                         | Integration test: Tests unexpectedly pass, verify escalation event triggered                 |
 | **Story 2.6: Implementation (TDD Green Phase)** |
-| AC-2.6.1 | FR-5 (Test-First Development) | Workflow Engine Service, AI Provider | `AIProviderInterface.generateCode()` | Integration test: Mock AI provider, verify prompt includes test code and errors |
-| AC-2.6.2 | FR-5 (Test-First Development) | Workflow Engine Service | Code syntax validation parser (TypeScript/Python/etc.) | Unit test: Validate code syntax with language-specific AST parser |
-| AC-2.6.3 | FR-5 (Test-First Development) | Workflow Engine Service | File path resolution based on test locations | Integration test: Verify implementation file created in correct source directory |
-| AC-2.6.4 | FR-5 (Test-First Development) | Git Platform Service | `GitPlatformInterface.createCommit()` | Integration test: Verify commit message format "Implement [title]" |
-| AC-2.6.5 | FR-5 (Test-First Development) | Workflow Engine Service | Test execution validation (exit code === 0) | Integration test: Execute test command, verify zero exit code (green phase) |
-| AC-2.6.6 | FR-5 (Test-First Development) | Workflow Engine Service, Event System | `TestExecutionEvent` | Unit test: Verify event emitted with pass/fail counts and test results |
-| AC-2.6.7 | FR-16 (Retry Logic), FR-16 (Escalation) | Retry/Escalation Service | XState retry counter with exponential backoff | Integration test: Persistent failures trigger 3 retries → escalation after final failure |
+| AC-2.6.1                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, AI Provider  | `AIProviderInterface.generateCode()`                                | Integration test: Mock AI provider, verify prompt includes test code and errors              |
+| AC-2.6.2                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Code syntax validation parser (TypeScript/Python/etc.)              | Unit test: Validate code syntax with language-specific AST parser                            |
+| AC-2.6.3                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | File path resolution based on test locations                        | Integration test: Verify implementation file created in correct source directory             |
+| AC-2.6.4                                        | FR-5 (Test-First Development)                      | Git Platform Service                  | `GitPlatformInterface.createCommit()`                               | Integration test: Verify commit message format "Implement [title]"                           |
+| AC-2.6.5                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Test execution validation (exit code === 0)                         | Integration test: Execute test command, verify zero exit code (green phase)                  |
+| AC-2.6.6                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, Event System | `TestExecutionEvent`                                                | Unit test: Verify event emitted with pass/fail counts and test results                       |
+| AC-2.6.7                                        | FR-16 (Retry Logic), FR-16 (Escalation)            | Retry/Escalation Service              | XState retry counter with exponential backoff                       | Integration test: Persistent failures trigger 3 retries → escalation after final failure     |
 | **Story 2.7: Refactoring (TDD Refactor Phase)** |
-| AC-2.7.1 | FR-5 (Test-First Development) | Workflow Engine Service, AI Provider | `AIProviderInterface.suggestRefactoring()` | Integration test: Mock AI provider, verify prompt includes code and guidelines |
-| AC-2.7.2 | FR-19 (Approval Checkpoints) | Approval Checkpoints Service | `IApprovalCheckpoint.requestApproval()` | Manual test: Observe refactoring preview and approval prompt |
-| AC-2.7.3 | FR-5 (Test-First Development) | Workflow Engine Service | Apply refactoring and commit with standardized message | Integration test: Apply refactoring, verify commit message "Refactor [title]" |
-| AC-2.7.4 | FR-5 (Test-First Development) | Workflow Engine Service | Test execution after refactoring | Integration test: Re-run tests, verify all tests still pass (exit code === 0) |
-| AC-2.7.5 | FR-5 (Test-First Development) | Workflow Engine Service | XState conditional transition to PR_CREATION | State machine test: Skip refactoring, verify transition to next phase |
-| AC-2.7.6 | FR-5 (Test-First Development) | Workflow Engine Service, Event System | `RefactoringApprovedEvent`, `RefactoringSkippedEvent` | Unit test: Verify events emitted with decision and code changes (if applied) |
-| **Story 2.8: PR Creation** |
-| AC-2.8.1 | FR-1 (PR Creation) | Workflow Engine Service | PR title generation template | Unit test: Validate title format "[Tamma] {issue title}" for various titles |
-| AC-2.8.2 | FR-1 (PR Creation) | Workflow Engine Service | PR body markdown template | Unit test: Verify PR body includes issue reference, plan summary, test results |
-| AC-2.8.3 | FR-1 (PR Creation) | Git Platform Service | `GitPlatformInterface.createPullRequest()` | Integration test: Mock PR creation API, verify base/head branches correct |
-| AC-2.8.4 | FR-1 (PR Creation) | Git Platform Service | `GitPlatformInterface.addLabels()` | Integration test: Mock add labels API, verify automated labels added |
-| AC-2.8.5 | FR-1 (PR Creation) | Git Platform Service | `GitPlatformInterface.requestReview()` | Integration test: Mock review request API, verify reviewers notified |
-| AC-2.8.6 | FR-1 (PR Creation) | Workflow Engine Service, Event System | `PRCreatedEvent` | Unit test: Verify event emitted with PR URL and metadata |
-| AC-2.8.7 | FR-1 (PR Creation) | Git Platform Service | Integration test suite | CI/CD test: Mock GitHub PR creation API with nock |
-| **Story 2.9: PR Monitoring** |
-| AC-2.9.1 | FR-1 (PR Monitoring) | Workflow Engine Service | XState delayed transition with configurable timeout | Integration test: Verify polling occurs at 30-second intervals (configurable) |
-| AC-2.9.2 | FR-1 (PR Monitoring) | Git Platform Service | `GitPlatformInterface.getPRStatus()` | Integration test: Mock CI status API, verify status retrieved |
-| AC-2.9.3 | FR-1 (PR Monitoring) | Git Platform Service | `GitPlatformInterface.getPRReviews()` | Integration test: Mock review status API, verify review list retrieved |
-| AC-2.9.4 | FR-1 (PR Monitoring) | Workflow Engine Service, Event System | `PRStatusChangedEvent` | Unit test: Verify event emitted only when status changes from previous poll |
-| AC-2.9.5 | FR-1 (PR Monitoring) | Git Platform Service | `GitPlatformInterface.getCILogs()` | Integration test: Mock failed CI, verify logs retrieved and displayed to user |
-| AC-2.9.6 | FR-1 (PR Monitoring) | Workflow Engine Service | Review comment formatting and CLI display | Manual test: Review comments displayed to user in readable format |
-| AC-2.9.7 | FR-19 (Approval Checkpoints) | Approval Checkpoints Service | `IApprovalCheckpoint.requestApproval()` with retry/abort | Manual test: Intervention prompt displayed on failure with retry/abort options |
-| **Story 2.10: PR Merge** |
-| AC-2.10.1 | FR-1 (PR Merge) | Workflow Engine Service | XState guard condition validates CI and reviews | State machine test: Merge blocked when CI fails or reviews not approved |
-| AC-2.10.2 | FR-19 (Approval Checkpoints) | Approval Checkpoints Service | `IApprovalCheckpoint.requestApproval()` with merge context | Manual test: Merge checkpoint prompt displayed with PR details |
-| AC-2.10.3 | FR-1 (PR Merge) | Git Platform Service | `GitPlatformInterface.mergePR()` with strategy | Integration test: Mock merge API, verify merge strategy from config (merge/squash/rebase) |
-| AC-2.10.4 | FR-1 (PR Merge) | Git Platform Service | `GitPlatformInterface.deleteBranch()` conditional on config | Integration test: Verify branch deletion only if config flag enabled |
-| AC-2.10.5 | FR-1 (PR Merge) | Git Platform Service | `GitPlatformInterface.closeIssue()` | Integration test: Mock close issue API, verify comment with PR link added |
-| AC-2.10.6 | FR-1 (PR Merge) | Workflow Engine Service, Event System | `PRMergedEvent` | Unit test: Verify event emitted with merge commit SHA and metadata |
-| AC-2.10.7 | FR-16 (Escalation) | Workflow Engine Service | XState error handler → manual resolution state | Integration test: Mock merge conflict, verify alert and workflow pause |
-| **Story 2.11: Auto-Next** |
-| AC-2.11.1 | FR-2 (Auto-Next Issue) | Workflow Engine Service | XState delayed transition with 10-second timeout | Integration test: Verify 10-second cooldown before next issue selection |
-| AC-2.11.2 | FR-2 (Auto-Next Issue) | Workflow Engine Service | XState transition to ISSUE_SELECTION state | State machine test: Verify loop returns to ISSUE_SELECTION phase |
-| AC-2.11.3 | FR-2 (Auto-Next Issue) | Workflow Engine Service | Workflow context `iterationCount` tracking | Unit test: Verify iteration count incremented on each loop cycle |
-| AC-2.11.4 | FR-2 (Auto-Next Issue) | Workflow Engine Service | XState guard condition checks max iterations | Integration test: Max iterations set to 2, verify loop stops after 2 cycles |
-| AC-2.11.5 | FR-2 (Auto-Next Issue) | Workflow Engine Service | SIGINT/SIGTERM signal handlers | Integration test: Send SIGINT, verify graceful shutdown after current iteration |
-| AC-2.11.6 | FR-2 (Auto-Next Issue) | Workflow Engine Service, Event System | `LoopIterationStartedEvent` | Unit test: Verify event emitted at start of each autonomous loop iteration |
+| AC-2.7.1                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, AI Provider  | `AIProviderInterface.suggestRefactoring()`                          | Integration test: Mock AI provider, verify prompt includes code and guidelines               |
+| AC-2.7.2                                        | FR-19 (Approval Checkpoints)                       | Approval Checkpoints Service          | `IApprovalCheckpoint.requestApproval()`                             | Manual test: Observe refactoring preview and approval prompt                                 |
+| AC-2.7.3                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Apply refactoring and commit with standardized message              | Integration test: Apply refactoring, verify commit message "Refactor [title]"                |
+| AC-2.7.4                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | Test execution after refactoring                                    | Integration test: Re-run tests, verify all tests still pass (exit code === 0)                |
+| AC-2.7.5                                        | FR-5 (Test-First Development)                      | Workflow Engine Service               | XState conditional transition to PR_CREATION                        | State machine test: Skip refactoring, verify transition to next phase                        |
+| AC-2.7.6                                        | FR-5 (Test-First Development)                      | Workflow Engine Service, Event System | `RefactoringApprovedEvent`, `RefactoringSkippedEvent`               | Unit test: Verify events emitted with decision and code changes (if applied)                 |
+| **Story 2.8: PR Creation**                      |
+| AC-2.8.1                                        | FR-1 (PR Creation)                                 | Workflow Engine Service               | PR title generation template                                        | Unit test: Validate title format "[Tamma] {issue title}" for various titles                  |
+| AC-2.8.2                                        | FR-1 (PR Creation)                                 | Workflow Engine Service               | PR body markdown template                                           | Unit test: Verify PR body includes issue reference, plan summary, test results               |
+| AC-2.8.3                                        | FR-1 (PR Creation)                                 | Git Platform Service                  | `GitPlatformInterface.createPullRequest()`                          | Integration test: Mock PR creation API, verify base/head branches correct                    |
+| AC-2.8.4                                        | FR-1 (PR Creation)                                 | Git Platform Service                  | `GitPlatformInterface.addLabels()`                                  | Integration test: Mock add labels API, verify automated labels added                         |
+| AC-2.8.5                                        | FR-1 (PR Creation)                                 | Git Platform Service                  | `GitPlatformInterface.requestReview()`                              | Integration test: Mock review request API, verify reviewers notified                         |
+| AC-2.8.6                                        | FR-1 (PR Creation)                                 | Workflow Engine Service, Event System | `PRCreatedEvent`                                                    | Unit test: Verify event emitted with PR URL and metadata                                     |
+| AC-2.8.7                                        | FR-1 (PR Creation)                                 | Git Platform Service                  | Integration test suite                                              | CI/CD test: Mock GitHub PR creation API with nock                                            |
+| **Story 2.9: PR Monitoring**                    |
+| AC-2.9.1                                        | FR-1 (PR Monitoring)                               | Workflow Engine Service               | XState delayed transition with configurable timeout                 | Integration test: Verify polling occurs at 30-second intervals (configurable)                |
+| AC-2.9.2                                        | FR-1 (PR Monitoring)                               | Git Platform Service                  | `GitPlatformInterface.getPRStatus()`                                | Integration test: Mock CI status API, verify status retrieved                                |
+| AC-2.9.3                                        | FR-1 (PR Monitoring)                               | Git Platform Service                  | `GitPlatformInterface.getPRReviews()`                               | Integration test: Mock review status API, verify review list retrieved                       |
+| AC-2.9.4                                        | FR-1 (PR Monitoring)                               | Workflow Engine Service, Event System | `PRStatusChangedEvent`                                              | Unit test: Verify event emitted only when status changes from previous poll                  |
+| AC-2.9.5                                        | FR-1 (PR Monitoring)                               | Git Platform Service                  | `GitPlatformInterface.getCILogs()`                                  | Integration test: Mock failed CI, verify logs retrieved and displayed to user                |
+| AC-2.9.6                                        | FR-1 (PR Monitoring)                               | Workflow Engine Service               | Review comment formatting and CLI display                           | Manual test: Review comments displayed to user in readable format                            |
+| AC-2.9.7                                        | FR-19 (Approval Checkpoints)                       | Approval Checkpoints Service          | `IApprovalCheckpoint.requestApproval()` with retry/abort            | Manual test: Intervention prompt displayed on failure with retry/abort options               |
+| **Story 2.10: PR Merge**                        |
+| AC-2.10.1                                       | FR-1 (PR Merge)                                    | Workflow Engine Service               | XState guard condition validates CI and reviews                     | State machine test: Merge blocked when CI fails or reviews not approved                      |
+| AC-2.10.2                                       | FR-19 (Approval Checkpoints)                       | Approval Checkpoints Service          | `IApprovalCheckpoint.requestApproval()` with merge context          | Manual test: Merge checkpoint prompt displayed with PR details                               |
+| AC-2.10.3                                       | FR-1 (PR Merge)                                    | Git Platform Service                  | `GitPlatformInterface.mergePR()` with strategy                      | Integration test: Mock merge API, verify merge strategy from config (merge/squash/rebase)    |
+| AC-2.10.4                                       | FR-1 (PR Merge)                                    | Git Platform Service                  | `GitPlatformInterface.deleteBranch()` conditional on config         | Integration test: Verify branch deletion only if config flag enabled                         |
+| AC-2.10.5                                       | FR-1 (PR Merge)                                    | Git Platform Service                  | `GitPlatformInterface.closeIssue()`                                 | Integration test: Mock close issue API, verify comment with PR link added                    |
+| AC-2.10.6                                       | FR-1 (PR Merge)                                    | Workflow Engine Service, Event System | `PRMergedEvent`                                                     | Unit test: Verify event emitted with merge commit SHA and metadata                           |
+| AC-2.10.7                                       | FR-16 (Escalation)                                 | Workflow Engine Service               | XState error handler → manual resolution state                      | Integration test: Mock merge conflict, verify alert and workflow pause                       |
+| **Story 2.11: Auto-Next**                       |
+| AC-2.11.1                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service               | XState delayed transition with 10-second timeout                    | Integration test: Verify 10-second cooldown before next issue selection                      |
+| AC-2.11.2                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service               | XState transition to ISSUE_SELECTION state                          | State machine test: Verify loop returns to ISSUE_SELECTION phase                             |
+| AC-2.11.3                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service               | Workflow context `iterationCount` tracking                          | Unit test: Verify iteration count incremented on each loop cycle                             |
+| AC-2.11.4                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service               | XState guard condition checks max iterations                        | Integration test: Max iterations set to 2, verify loop stops after 2 cycles                  |
+| AC-2.11.5                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service               | SIGINT/SIGTERM signal handlers                                      | Integration test: Send SIGINT, verify graceful shutdown after current iteration              |
+| AC-2.11.6                                       | FR-2 (Auto-Next Issue)                             | Workflow Engine Service, Event System | `LoopIterationStartedEvent`                                         | Unit test: Verify event emitted at start of each autonomous loop iteration                   |
 
 **Coverage Summary:**
 
@@ -1411,7 +1551,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
 
 ### Technical Risks
 
-**R-2.1: Epic 1 Integration Dependency Risk** *(HIGH)*
+**R-2.1: Epic 1 Integration Dependency Risk** _(HIGH)_
+
 - **Description:** Epic 2 has hard dependencies on Epic 1's AI provider and Git platform abstractions. If Epic 1 components are unstable or APIs change during Epic 2 development, integration points will break.
 - **Impact:** Workflow phases that depend on AI generation (Stories 2.3, 2.5, 2.6, 2.7) or Git operations (Stories 2.1, 2.4, 2.8, 2.9, 2.10) will fail.
 - **Mitigation:**
@@ -1420,7 +1561,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Use semantic versioning for Epic 1 packages to prevent breaking changes
   - Implement adapter pattern to isolate Epic 2 from Epic 1 API changes
 
-**R-2.2: AI Provider Rate Limiting and Timeout Risk** *(MEDIUM-HIGH)*
+**R-2.2: AI Provider Rate Limiting and Timeout Risk** _(MEDIUM-HIGH)_
+
 - **Description:** AI provider APIs (Claude Code, future providers) have rate limits and timeout constraints. Plan generation (Story 2.3), test generation (Story 2.5), and code generation (Story 2.6) may hit rate limits during high load or timeout during complex requests.
 - **Impact:** Workflow phases fail unexpectedly, trigger retry logic, exhaust retry limits, cause escalations.
 - **Mitigation:**
@@ -1430,7 +1572,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement token bucket rate limiting at orchestrator level to prevent burst requests
   - Add AI provider response caching for repeated similar requests
 
-**R-2.3: Git Platform API Consistency Risk** *(MEDIUM)*
+**R-2.3: Git Platform API Consistency Risk** _(MEDIUM)_
+
 - **Description:** GitHub and GitLab APIs have subtle differences in behavior (e.g., PR status polling, merge strategies, CI/CD status queries). Epic 1's abstraction may not fully normalize these differences.
 - **Impact:** Workflow phases behave differently on GitHub vs GitLab, causing unexpected failures or escalations on specific platforms.
 - **Mitigation:**
@@ -1439,7 +1582,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement platform capability detection and graceful degradation
   - Add end-to-end tests that run against both GitHub and GitLab APIs
 
-**R-2.4: State Machine Complexity Risk** *(MEDIUM)*
+**R-2.4: State Machine Complexity Risk** _(MEDIUM)_
+
 - **Description:** The 14-step workflow with branching paths (approval/rejection, refactoring optional, retry logic) creates a complex XState state machine with 30+ states and transitions. Bugs in state transitions could cause deadlocks or incorrect phase execution.
 - **Impact:** Workflows stuck in infinite loops, skipped phases, incorrect retry counts, escalations not triggered.
 - **Mitigation:**
@@ -1449,7 +1593,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement state machine health checks with automatic reset on deadlock detection
   - Use XState inspector in development for real-time state debugging
 
-**R-2.5: Role-Based Orchestration Complexity Risk** *(MEDIUM)*
+**R-2.5: Role-Based Orchestration Complexity Risk** _(MEDIUM)_
+
 - **Description:** Role-based orchestration introduces agent selection logic, capability matching, load balancing, and parallel execution patterns. Bugs in RoleRouter or agent assignment could route phases to wrong agents or cause load imbalance.
 - **Impact:** Workflows fail due to agent capability mismatches, performance degrades due to poor load distribution, agent starvation or overload.
 - **Mitigation:**
@@ -1459,7 +1604,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement fallback to generalist agents when specialized agents unavailable
   - Create agent pool simulator for load testing role assignment logic
 
-**R-2.6: PostgreSQL Workflow State Persistence Risk** *(MEDIUM)*
+**R-2.6: PostgreSQL Workflow State Persistence Risk** _(MEDIUM)_
+
 - **Description:** Workflow state is persisted to PostgreSQL after each phase transition. Database failures, connection pool exhaustion, or transaction deadlocks could cause state loss or corruption.
 - **Impact:** Workflows lose progress on database failure, cannot resume after orchestrator restart, inconsistent state across workers.
 - **Mitigation:**
@@ -1469,7 +1615,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement workflow state checkpointing (save state every 3 phases, not just every phase)
   - Add workflow state recovery logic on orchestrator startup
 
-**R-2.7: Approval Timeout and Notification Delivery Risk** *(MEDIUM)*
+**R-2.7: Approval Timeout and Notification Delivery Risk** _(MEDIUM)_
+
 - **Description:** Approval checkpoints depend on user response via CLI (standalone) or webhook/email (orchestrator). Notification delivery failures, user unavailability, or timeout handling bugs could stall workflows indefinitely.
 - **Impact:** Workflows stuck in awaiting-approval state indefinitely, timeouts not triggering escalations, webhook delivery failures silently ignored.
 - **Mitigation:**
@@ -1479,7 +1626,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Add approval status dashboard for users to see pending approvals
   - Log all approval requests and responses with delivery status tracking
 
-**R-2.8: Concurrent Workflow Conflict Risk** *(LOW-MEDIUM)*
+**R-2.8: Concurrent Workflow Conflict Risk** _(LOW-MEDIUM)_
+
 - **Description:** Multiple workflows executing on the same repository simultaneously could create Git conflicts (e.g., two branches modifying same file, concurrent PR creation).
 - **Impact:** Branch creation failures, merge conflicts, CI/CD failures due to race conditions.
 - **Mitigation:**
@@ -1488,7 +1636,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Implement branch name conflict resolution (append timestamp suffix)
   - Add merge conflict detection and automatic escalation
 
-**R-2.9: Test Execution Environment Risk** *(LOW-MEDIUM)*
+**R-2.9: Test Execution Environment Risk** _(LOW-MEDIUM)_
+
 - **Description:** Test execution (Stories 2.5, 2.6) runs locally via child process. Test environment setup (dependencies, environment variables) may be inconsistent or missing, causing false failures.
 - **Impact:** Tests fail not due to code issues but due to environment problems, exhausting retry limits unnecessarily.
 - **Mitigation:**
@@ -1498,7 +1647,8 @@ This table maps each acceptance criterion to PRD requirements, technical compone
   - Capture and log complete test output (stdout/stderr) for debugging
   - Consider containerizing test execution in future (Epic 3)
 
-**R-2.10: Observability Overhead Risk** *(LOW)*
+**R-2.10: Observability Overhead Risk** _(LOW)_
+
 - **Description:** Comprehensive logging, metrics, and event emission could impact workflow performance if not optimized, especially for high-throughput scenarios (10+ concurrent workflows).
 - **Impact:** Workflow phase latency increases due to logging overhead, event emission slows state transitions.
 - **Mitigation:**
@@ -1510,51 +1660,61 @@ This table maps each acceptance criterion to PRD requirements, technical compone
 ### Assumptions
 
 **A-2.1: Epic 1 API Stability**
+
 - Assumes Epic 1's `AIProviderInterface` and `GitPlatformInterface` APIs are stable and will not introduce breaking changes during Epic 2 implementation.
 - If Epic 1 APIs change, Epic 2 integration tests may break and require updates.
 - **Validation Required:** Confirm Epic 1 API contracts with Epic 1 team before starting Epic 2 Story 2.1.
 
 **A-2.2: Single Repository Per Workflow**
+
 - Assumes each workflow execution targets a single Git repository. Multi-repository workflows (e.g., microservices) are out of scope for Epic 2.
 - If users need multi-repo support, Epic 2 will need significant refactoring or a new epic.
 - **Validation Required:** Confirm with stakeholders that single-repo assumption aligns with MVP requirements.
 
 **A-2.3: Test Framework Agnostic**
+
 - Assumes test generation (Story 2.5) and execution (Stories 2.5, 2.6) are framework-agnostic (Jest, Pytest, Go Test, etc.). Framework detection is based on project conventions (package.json, pytest.ini, go.mod).
 - If framework detection fails, tests may not execute correctly.
 - **Validation Required:** Test with multiple frameworks during Story 2.5 implementation to validate detection logic.
 
 **A-2.4: English Language Context**
+
 - Assumes issue descriptions, code comments, and AI-generated content are in English. Multi-language support is out of scope for Epic 2.
 - If users work in non-English repositories, AI generation quality may degrade.
 - **Validation Required:** Confirm with stakeholders if multi-language support is required for MVP or can be deferred to post-MVP.
 
 **A-2.5: Main/Master Branch Naming**
+
 - Assumes primary branch is named "main" or "master". Custom default branch names (e.g., "develop", "trunk") require configuration.
 - If repository uses non-standard branch name, branch creation (Story 2.4) will fail.
 - **Validation Required:** Add default branch detection to Git platform interface in Epic 1, or add configuration option in Epic 2.
 
 **A-2.6: Linear Git History Preferred**
+
 - Assumes merge strategy is configurable but defaults to "merge" (not squash or rebase). Linear history is not enforced.
 - If users require specific merge strategies (e.g., always squash), configuration is required.
 - **Validation Required:** Confirm default merge strategy with stakeholders, document configuration options.
 
 **A-2.7: Synchronous Approval in Standalone Mode**
+
 - Assumes standalone mode users are available to respond to approval prompts (Stories 2.3, 2.7, 2.10) immediately or within minutes.
 - If user leaves CLI unattended, workflow will block indefinitely (no timeout in standalone mode).
 - **Validation Required:** Consider adding optional timeout to standalone mode approvals, or document best practices.
 
 **A-2.8: Redis Optional for Orchestrator**
+
 - Assumes Redis is optional for orchestrator mode; PostgreSQL-based task queue is fallback.
 - If Redis unavailable, task queue performance degrades (PostgreSQL polling less efficient than Redis pub/sub).
 - **Validation Required:** Document Redis as recommended but optional, test PostgreSQL fallback performance.
 
 **A-2.9: No Multi-Tenancy in Epic 2**
+
 - Assumes single-tenant deployment. Multi-tenant orchestrator (isolating workflows per organization/team) is out of scope.
 - If multi-tenancy required, Epic 2 requires isolation logic for workflow state, agent pools, approval queues.
 - **Validation Required:** Confirm single-tenant assumption aligns with MVP requirements.
 
 **A-2.10: Agent Roles Are Static**
+
 - Assumes agent roles (Architect, Developer, etc.) are assigned at agent registration and do not change dynamically.
 - If agents need to change roles at runtime (e.g., Developer learns QA capabilities), role updates require agent re-registration.
 - **Validation Required:** Confirm role update workflow with stakeholders, document limitations.
@@ -1562,60 +1722,70 @@ This table maps each acceptance criterion to PRD requirements, technical compone
 ### Open Questions
 
 **Q-2.1: Should refactoring step (Story 2.7) be optional or always executed?**
+
 - Current spec: Refactoring is always attempted, but only applied if user approves.
 - Alternative: Make refactoring optional via configuration (e.g., `enableRefactoring: boolean`).
 - **Impact:** Affects workflow state machine transitions and approval checkpoint logic.
 - **Stakeholder Decision Needed:** Product team to decide default behavior for MVP.
 
 **Q-2.2: What is the escalation workflow for retry exhaustion?**
+
 - Current spec: After 3 retries, workflow pauses and notifies user via EscalationNotifier.
 - Question: Should escalation allow manual retry, automatic reassignment to debugger agent, or require admin intervention?
 - **Impact:** Affects EscalationNotifier API and workflow resume logic.
 - **Stakeholder Decision Needed:** Define escalation resolution workflow (manual retry vs auto-reassign).
 
 **Q-2.3: How should we handle PR review feedback iteration?**
+
 - Current spec: Story 2.9 presents review feedback to user, but workflow does not automatically address comments.
 - Question: Should workflow automatically address simple review comments (linting, formatting) or always require user intervention?
 - **Impact:** May require new workflow phase for "address review comments" between Status Monitoring and Merge.
 - **Stakeholder Decision Needed:** Confirm if automated review comment resolution is in scope for MVP or deferred to Epic 3.
 
 **Q-2.4: Should agent role preferences be configurable per workflow phase?**
+
 - Current spec: WORKFLOW_ROLE_MAPPING is hardcoded constant with role preferences per phase.
 - Question: Should users/admins be able to customize role assignments (e.g., prefer Developer over Test Automation for test generation)?
 - **Impact:** Affects RoleRouter configuration and adds complexity to role selection logic.
 - **Stakeholder Decision Needed:** Decide if role customization is MVP requirement or post-MVP enhancement.
 
 **Q-2.5: What is the CI/CD failure handling strategy?**
+
 - Current spec: Story 2.9 detects CI/CD failures and retrieves logs, but workflow does not automatically fix failures.
 - Question: Should workflow attempt to diagnose and fix CI/CD failures (e.g., linting errors, broken tests), or always escalate?
 - **Impact:** May require new workflow phase for "fix CI/CD failures" or integration with debugger agent.
 - **Stakeholder Decision Needed:** Confirm if automated CI/CD failure resolution is in scope for MVP or deferred to Epic 3.
 
 **Q-2.6: Should approval checkpoints support delegation?**
+
 - Current spec: Approval requests target the user who started the workflow (standalone) or send notifications (orchestrator).
 - Question: Should approvals support delegation to other users (e.g., senior developer approves plan generated by junior)?
 - **Impact:** Affects ApprovalCheckpoint API and notification routing logic.
 - **Stakeholder Decision Needed:** Decide if approval delegation is MVP requirement or post-MVP enhancement.
 
 **Q-2.7: How should we handle branch name conflicts beyond timestamp suffix?**
+
 - Current spec: Story 2.4 appends Unix timestamp if branch already exists.
 - Question: Should workflow detect branch naming collisions across multiple concurrent workflows and use more sophisticated conflict resolution (e.g., append workflow ID)?
 - **Impact:** Affects branch creation retry logic and conflict detection.
 - **Technical Decision Needed:** Evaluate collision probability and decide if timestamp suffix is sufficient.
 
 **Q-2.8: Should role-based orchestration metrics include per-role success rates?**
+
 - Current spec: NFR observability includes agent-level metrics (`agent.task_success_rate`).
 - Question: Should we also track role-level success rates (e.g., Developer role has 85% success rate across all agents)?
 - **Impact:** Affects metrics collection and dashboard design (Epic 5 dependency).
 - **Stakeholder Decision Needed:** Confirm if role-level metrics are valuable for users or overkill for MVP.
 
 **Q-2.9: What is the workflow state recovery strategy after orchestrator crash?**
+
 - Current spec: Workflows persist state to PostgreSQL after each phase, but recovery logic on orchestrator restart is not detailed.
 - Question: Should orchestrator automatically resume in-progress workflows on startup, or wait for admin action?
 - **Impact:** Affects orchestrator startup sequence and workflow recovery logic.
 - **Technical Decision Needed:** Define recovery strategy and test orchestrator crash scenarios.
 
 **Q-2.10: Should parallel workflow execution be limited per agent or per repository?**
+
 - Current spec: Concurrent workflow limit is mentioned in R-2.8 mitigation (3 per repo), but not formalized.
 - Question: Should we enforce concurrency limits per repository, per agent, or both?
 - **Impact:** Affects workflow scheduling logic and distributed lock implementation.
@@ -1656,17 +1826,20 @@ This table maps each acceptance criterion to PRD requirements, technical compone
 4. **State Machine Transition Tests** (7 test cases - see State Machine Testing section)
 
 **Testing Tools:**
+
 - **Jest** (^29.7.0) - Test runner and assertion library
 - **ts-jest** (^29.2.0) - TypeScript support
 - **@jest/globals** (^29.7.0) - Jest types for TypeScript
 
 **Mocking Strategy:**
+
 - Mock Epic 1 dependencies (`AIProviderInterface`, `GitPlatformInterface`) using Jest mock functions
 - Mock PostgreSQL queries using `jest.fn()` to return test fixtures
 - Mock Redis operations using `ioredis-mock`
 - Use dependency injection for all external dependencies to enable easy mocking
 
 **Example Test:**
+
 ```typescript
 describe('IssueSelector', () => {
   it('should filter issues by inclusion labels', async () => {
@@ -1674,8 +1847,8 @@ describe('IssueSelector', () => {
       getIssues: jest.fn().mockResolvedValue([
         { number: 1, labels: ['bug', 'backend'] },
         { number: 2, labels: ['feature', 'frontend'] },
-        { number: 3, labels: ['bug', 'frontend'] }
-      ])
+        { number: 3, labels: ['bug', 'frontend'] },
+      ]),
     };
     const selector = new IssueSelector(mockGitPlatform);
     const criteria = { includeLabels: ['bug'], excludeLabels: [] };
@@ -1731,18 +1904,21 @@ describe('IssueSelector', () => {
    - Email fallback: Mock SMTP failure, verify email fallback triggered
 
 **Testing Tools:**
+
 - **nock** (^13.5.0) - HTTP mocking for Git platform APIs
 - **ioredis-mock** - Redis mocking for task queue testing
 - **mock-socket** (^9.3.0) - WebSocket mocking for real-time approval notifications
 - **pg-mem** - In-memory PostgreSQL for fast database tests without external PostgreSQL instance
 
 **Mocking Strategy:**
+
 - Use `nock` to mock all external HTTP APIs (GitHub, GitLab, AI providers)
 - Use `ioredis-mock` for Redis operations in tests (no real Redis instance required)
 - Use `pg-mem` for PostgreSQL tests when possible (falls back to test database for complex queries)
 - Record and replay HTTP responses for deterministic tests
 
 **Example Test:**
+
 ```typescript
 describe('PlanGenerator Integration', () => {
   it('should generate plan with AI provider and save to database', async () => {
@@ -1819,18 +1995,21 @@ describe('PlanGenerator Integration', () => {
    - Duration: ~20 seconds per test run
 
 **Testing Tools:**
+
 - **Jest** for test orchestration
 - **nock** for mocking external APIs (GitHub, AI providers)
 - Real PostgreSQL test database (Docker container) for state persistence testing
 - Real Redis test instance (Docker container) for task queue testing in orchestrator mode
 
 **CI/CD Integration:**
+
 - E2E tests run in GitHub Actions on every PR
 - Docker Compose spins up PostgreSQL and Redis test instances
 - Tests run in parallel (3 concurrent test suites)
 - Total E2E test duration: ~2 minutes (including setup/teardown)
 
 **Example Test:**
+
 ```typescript
 describe('E2E: Happy Path', () => {
   beforeAll(async () => {
@@ -1844,14 +2023,14 @@ describe('E2E: Happy Path', () => {
       .get('/repos/test/repo/issues')
       .reply(200, [{ number: 123, title: 'Add feature', labels: ['bug'] }])
       .post('/repos/test/repo/git/refs')
-      .reply(201, { ref: 'refs/heads/Tamma/issue-123-add-feature' })
-      // ... more GitHub mocks
+      .reply(201, { ref: 'refs/heads/Tamma/issue-123-add-feature' });
+    // ... more GitHub mocks
 
     // Mock AI provider responses
     nock('https://api.anthropic.com')
       .post('/v1/messages')
-      .reply(200, { content: [{ type: 'text', text: 'Plan: ...' }] })
-      // ... more AI mocks
+      .reply(200, { content: [{ type: 'text', text: 'Plan: ...' }] });
+    // ... more AI mocks
 
     // Execute workflow
     const workflow = new WorkflowEngine(config);
@@ -1898,15 +2077,18 @@ describe('E2E: Happy Path', () => {
    - Database error: Verify error handler logs error and retries state persistence
 
 **Testing Tools:**
+
 - **@xstate/test** - XState testing utilities for state machine verification
 - **Jest** for test runner and assertions
 
 **Testing Strategy:**
+
 - Use `@xstate/test` to generate test paths automatically from state machine definition
 - Manually write tests for critical transitions not covered by auto-generated paths
 - Use XState Inspector in development to visualize state machine behavior
 
 **Example Test:**
+
 ```typescript
 import { createMachine } from 'xstate';
 import { testModel } from '@xstate/test';
@@ -1918,11 +2100,11 @@ const workflowMachine = createMachine({
 const testModel = testModel(workflowMachine);
 
 describe('Workflow State Machine', () => {
-  testModel.getPaths().forEach(path => {
+  testModel.getPaths().forEach((path) => {
     it(path.description, async () => {
       await path.test({
         // Test implementation for each state
-        ISSUE_SELECTION: async state => {
+        ISSUE_SELECTION: async (state) => {
           expect(state.context.currentPhase).toBe('ISSUE_SELECTION');
         },
         // ... more state tests
@@ -2021,6 +2203,7 @@ describe('Workflow State Machine', () => {
    - **Validation:** Shutdown graceful, no data loss, current phase completes before exit
 
 **Testing Schedule:**
+
 - Manual tests executed during Story 2.1-2.11 implementation (developer testing)
 - Manual tests re-executed during Epic 2 QA phase before Epic retrospective
 - Manual tests executed on each platform (macOS, Windows, Linux) before release

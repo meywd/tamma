@@ -2,6 +2,23 @@
 
 Status: ready-for-dev
 
+## ⚠️ MANDATORY: Before You Code
+
+**ALL contributors MUST read and follow the comprehensive development process:**
+
+📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
+
+This mandatory guide includes:
+- 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
+- Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
+- TRACE/DEBUG Logging Requirements for all functions
+- Test-Driven Development (TDD) mandatory workflow
+- 100% Test Coverage requirement
+- Build Success enforcement
+- Automatic retry and developer alert procedures
+
+**Failure to follow this process will result in rework.**
+
 ## Story
 
 As a **Tamma operator**,
@@ -119,6 +136,16 @@ so that I can use Tamma with my preferred Git hosting service regardless of vend
 - [ ] Subtask 7.12: Review documentation with stakeholders
 
 ## Dev Notes
+
+### ⚠️ Development Process Reminder
+
+**Before implementing this story, ensure you have:**
+1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
+3. ✅ Reviewed relevant documentation in `docs/` directory
+4. ✅ Checked existing code patterns for similar functionality
+5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
+
 
 ### Requirements Context Summary
 
@@ -283,6 +310,9 @@ Example multi-platform configuration:
 - Best for testing, prototyping, or air-gapped environments with manual workflows
 
 ### References
+
+- **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
+- **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 
 - [Gitea API Documentation](https://docs.gitea.com/api/1.22/)
 - [Forgejo API Documentation](https://forgejo.org/docs/latest/user/api-usage/)

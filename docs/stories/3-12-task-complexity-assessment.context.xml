@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>3.12</story-id>
+  <story-title>Task Complexity Assessment</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-3.12-1">System shall analyze multiple complexity dimensions</req>
+      <req id="FR-3.12-2">System shall provide quantitative complexity scoring with qualitative descriptors</req>
+      <req id="FR-3.12-3">System shall track historical accuracy of complexity predictions</req>
+      <req id="FR-3.12-4">System shall recommend task decomposition based on complexity scores</req>
+      <req id="FR-3.12-5">System shall identify and explain complexity factors</req>
+      <req id="FR-3.12-6">System shall assess risks for each complexity level</req>
+      <req id="FR-3.12-7">System shall correlate complexity with time estimation</req>
+      <req id="FR-3.12-8">System shall integrate with provider selection and resource allocation</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-3.12-1">Complexity assessment time &lt; 15 seconds</req>
+      <req id="NFR-3.12-2">Prediction accuracy improvement: 5% per month</req>
+      <req id="NFR-3.12-3">Complexity score precision: ±5 points</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="2.14">Issue Decomposition Engine</story>
+    <story id="2.12">Intelligent Provider Selection</story>
+    <story id="3.6">Ambiguity Detection Scoring</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-3.12-1">System analyzes multiple complexity dimensions (technical difficulty, integration points, uncertainty, scope)</criteria>
+    <criteria id="AC-3.12-2">Complexity scoring algorithm provides quantitative assessment (0-100 scale) with qualitative descriptors</criteria>
+    <criteria id="AC-3.12-3">Historical accuracy tracking compares estimated vs actual complexity to improve predictions</criteria>
+    <criteria id="AC-3.12-4">Decomposition recommendations suggest optimal task breakdown based on complexity scores</criteria>
+    <criteria id="AC-3.12-5">Complexity factors identified and explained (why task is complex/simplistic)</criteria>
+    <criteria id="AC-3.12-6">Risk assessment identifies potential blockers and failure points for each complexity level</criteria>
+    <criteria id="AC-3.12-7">Time estimation correlates with complexity scores for planning and scheduling</criteria>
+    <criteria id="AC-3.12-8">Complexity assessment integrates with provider selection and resource allocation</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/intelligence/src/complexity/</package-location>
+    <integration-points>
+      <point>Issue Decomposition (Story 2.14)</point>
+      <point>Provider Selection (Story 2.12)</point>
+      <point>Task Scheduling System</point>
+      <point>Historical Data Analysis</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Assessment time &lt; 15s</requirement>
+      <requirement>Accuracy improvement: 5%/month</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-3.12-1">Complexity scores accurately predict task difficulty</scenario>
+    <scenario id="TS-3.12-2">Historical tracking improves prediction accuracy over time</scenario>
+    <scenario id="TS-3.12-3">Decomposition recommendations optimize task sizing</scenario>
+    <scenario id="TS-3.12-4">Risk assessment identifies potential blockers</scenario>
+    <scenario id="TS-3.12-5">Time estimation correlates with actual effort</scenario>
+  </test-scenarios>
+</context>

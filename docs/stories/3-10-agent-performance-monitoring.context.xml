@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<context>
+  <story-id>3.10</story-id>
+  <story-title>Agent Performance Monitoring</story-title>
+  <status>ready-for-dev</status>
+  <created-date>2025-10-29</created-date>
+  <last-modified>2025-10-29</last-modified>
+  
+  <requirements>
+    <functional>
+      <req id="FR-3.10-1">System shall track performance metrics for each AI provider and task type</req>
+      <req id="FR-3.10-2">System shall collect response time, success rate, token usage, cost, revision count, quality score</req>
+      <req id="FR-3.10-3">System shall provide real-time dashboard with performance trends and alerts</req>
+      <req id="FR-3.10-4">System shall establish performance baselines with anomaly detection</req>
+      <req id="FR-3.10-5">System shall evaluate AI response quality based on code quality and user feedback</req>
+      <req id="FR-3.10-6">System shall trigger alerts when performance degrades beyond thresholds</req>
+      <req id="FR-3.10-7">System shall generate performance reports with optimization recommendations</req>
+      <req id="FR-3.10-8">System shall use historical data for provider selection and prompt optimization</req>
+    </functional>
+    <non-functional>
+      <req id="NFR-3.10-1">Metrics collection overhead &lt; 5% of AI response time</req>
+      <req id="NFR-3.10-2">Dashboard refresh rate: 10 seconds</req>
+      <req id="NFR-3.10-3">Metrics retention period: 1 year</req>
+    </non-functional>
+  </requirements>
+  
+  <dependencies>
+    <story id="1.1">AI Provider Interface Definition</story>
+    <story id="2.12">Intelligent Provider Selection</story>
+    <story id="2.13">Prompt Engineering Optimization</story>
+    <story id="5.2">Metrics Collection Infrastructure</story>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="AC-3.10-1">System tracks comprehensive performance metrics for each AI provider and task type combination</criteria>
+    <criteria id="AC-3.10-2">Metrics include: response time, success rate, token usage, cost per task, revision count, quality score</criteria>
+    <criteria id="AC-3.10-3">Real-time dashboard displays current performance with historical trends and alerts for anomalies</criteria>
+    <criteria id="AC-3.10-4">Performance baselines established per provider/task type with automatic deviation detection</criteria>
+    <criteria id="AC-3.10-5">Quality scoring system evaluates AI responses based on code quality, test coverage, and user feedback</criteria>
+    <criteria id="AC-3.10-6">Automated alerts trigger when performance degrades beyond thresholds (response time, success rate, cost)</criteria>
+    <criteria id="AC-3.10-7">Performance reports generated daily/weekly with insights and optimization recommendations</criteria>
+    <criteria id="AC-3.10-8">Historical performance data used to inform provider selection and prompt optimization</criteria>
+  </acceptance-criteria>
+  
+  <technical-context>
+    <package-location>packages/observability/src/performance/</package-location>
+    <integration-points>
+      <point>AI Provider Abstraction (Story 1.1)</point>
+      <point>Event Sourcing (Epic 4)</point>
+      <point>Metrics Collection (Story 5.2)</point>
+      <point>Dashboard UI (Story 5.3)</point>
+    </integration-points>
+    <performance-requirements>
+      <requirement>Collection overhead &lt; 5%</requirement>
+      <requirement>Dashboard refresh: 10s</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <test-scenarios>
+    <scenario id="TS-3.10-1">Performance metrics accurately collected for all AI interactions</scenario>
+    <scenario id="TS-3.10-2">Dashboard shows real-time performance with historical trends</scenario>
+    <scenario id="TS-3.10-3">Anomaly detection triggers alerts for performance degradation</scenario>
+    <scenario id="TS-3.10-4">Quality scoring correlates with actual code quality</scenario>
+    <scenario id="TS-3.10-5">Performance reports provide actionable optimization recommendations</scenario>
+  </test-scenarios>
+</context>
