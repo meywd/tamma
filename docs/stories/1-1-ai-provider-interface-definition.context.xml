@@ -1,0 +1,126 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>1</storyId>
+    <title>AI Provider Interface Definition</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-1-ai-provider-interface-definition.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>system architect</asA>
+    <iWant>define abstract interface contracts for AI provider operations</iWant>
+    <soThat>the system can support multiple AI providers without tight coupling</soThat>
+    <tasks>
+- [ ] Task 1: Define core AI provider interface structure (AC: 1)
+  - [ ] Subtask 1.1: Create IAIProvider interface with method signatures
+  - [ ] Subtask 1.2: Define MessageRequest and MessageResponse types
+  - [ ] Subtask 1.3: Add TypeScript documentation for all methods
+- [ ] Task 2: Implement provider capabilities discovery (AC: 2)
+  - [ ] Subtask 2.1: Define ProviderCapabilities interface
+  - [ ] Subtask 2.2: Add getCapabilities() method to IAIProvider
+  - [ ] Subtask 2.3: Create capability enums for streaming, models, limits
+- [ ] Task 3: Define error handling contracts (AC: 3)
+  - [ ] Subtask 3.1: Create provider-specific error types
+  - [ ] Subtask 3.2: Define retry policies and timeout configurations
+  - [ ] Subtask 3.3: Add error handling methods to interface
+- [ ] Task 4: Create integration documentation (AC: 4)
+  - [ ] Subtask 4.1: Write provider integration guide
+  - [ ] Subtask 4.2: Create example provider implementation
+  - [ ] Subtask 4.3: Document testing procedures for new providers
+- [ ] Task 5: Implement synchronous and asynchronous patterns (AC: 5)
+  - [ ] Subtask 5.1: Design async message streaming interface
+  - [ ] Subtask 5.2: Add sync wrapper methods for compatibility
+  - [ ] Subtask 5.3: Implement promise-based execution patterns
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Interface defines core operations: `generateCode()`, `analyzeContext()`, `suggestFix()`, `reviewChanges()`
+2. Interface includes provider capabilities discovery (supports streaming, token limits, model versions)
+3. Interface includes error handling contracts (rate limits, timeouts, context overflow)
+4. Documentation includes integration guide for adding new providers
+5. Interface supports both synchronous and asynchronous invocation patterns
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Core Interfaces" snippet="Interface IAIProvider with initialize, sendMessage, getCapabilities, dispose methods. MessageRequest and ProviderCapabilities interfaces defined.">
+      </doc>
+      <doc path="docs/epics.md" title="Tamma - Epic Breakdown" section="Story 1.1: AI Provider Interface Definition" snippet="Interface defines core operations: generateCode(), analyzeContext(), suggestFix(), reviewChanges(). Interface includes provider capabilities discovery and error handling contracts.">
+      </doc>
+      <doc path="docs/PRD.md" title="Tamma Product Requirements Document" section="AI Provider Integration" snippet="FR-7: System shall provide abstract interface supporting multiple AI providers with seamless provider switching. FR-8: System shall maintain provider feature matrix documentation for capability comparison.">
+      </doc>
+      <doc path="docs/architecture.md" title="Tamma - Technical Architecture" section="Technology Stack" snippet="TypeScript 5.7+ strict mode, Node.js 22 LTS, pnpm workspaces. Interface-based design pattern and plugin architecture for extensibility.">
+      </doc>
+    </docs>
+    <code>
+      <!-- No existing code found - this is a foundational story -->
+    </code>
+    <dependencies>
+      <ecosystem name="nodejs">
+        <package name="@anthropic-ai/sdk" version="^0.20.0" reason="Anthropic Claude API client for reference implementation" />
+        <package name="@modelcontextprotocol/sdk" version="^1.0.0" reason="MCP protocol for tool integration" />
+        <package name="typescript" version="^5.7.0" reason="Type system and compiler for interface definitions" />
+        <package name="zod" version="^3.22.0" reason="Runtime type validation for interface schemas" />
+      </ecosystem>
+      <ecosystem name="pnpm-workspace">
+        <package name="@tamma/types" version="workspace:*" reason="Shared TypeScript types and interfaces" />
+        <package name="@tamma/config" version="workspace:*" reason="Shared configuration management" />
+        <package name="@tamma/logger" version="workspace:*" reason="Shared logging infrastructure" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="package-location">Interface definitions must be placed in packages/providers/src/types.ts following monorepo structure</constraint>
+    <constraint type="typescript-config">Use TypeScript 5.7+ strict mode with proper interface definitions and generic types for extensibility</constraint>
+    <constraint type="naming-conventions">Follow established patterns: IAIProvider interface, ProviderCapabilities type, error classes with descriptive names</constraint>
+    <constraint type="interface-design">Interface must support both synchronous and asynchronous invocation patterns as per AC 5</constraint>
+    <constraint type="error-handling">Must define error handling contracts for rate limits, timeouts, and context overflow as per AC 3</constraint>
+    <constraint type="capabilities-discovery">Interface must include getCapabilities() method for provider capabilities discovery as per AC 2</constraint>
+    <constraint type="core-operations">Interface must define core operations: generateCode(), analyzeContext(), suggestFix(), reviewChanges() as per AC 1</constraint>
+    <constraint type="documentation">Must include integration guide for adding new providers as per AC 4</constraint>
+    <constraint type="plugin-architecture">Interface must support plugin-based architecture for dynamic provider loading</constraint>
+    <constraint type="streaming-support">Interface must support streaming responses via AsyncIterable<MessageChunk> return type</constraint>
+  </constraints>
+  <interfaces>
+    <interface name="IAIProvider" kind="TypeScript interface" signature="interface IAIProvider { initialize(config: ProviderConfig): Promise<void>; sendMessage(request: MessageRequest): Promise<AsyncIterable<MessageChunk>>; getCapabilities(): ProviderCapabilities; dispose(): Promise<void>; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="MessageRequest" kind="TypeScript interface" signature="interface MessageRequest { messages: Message[]; systemPrompt?: string; tools?: Tool[]; maxTokens?: number; temperature?: number; model?: string; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="ProviderCapabilities" kind="TypeScript interface" signature="interface ProviderCapabilities { supportsStreaming: boolean; supportsTools: boolean; supportedModels: string[]; maxContextTokens: number; maxOutputTokens: number; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="Message" kind="TypeScript interface" signature="interface Message { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCallId?: string; toolCalls?: ToolCall[]; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="Tool" kind="TypeScript interface" signature="interface Tool { name: string; description: string; parameters: JSONSchema; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="MessageChunk" kind="TypeScript interface" signature="interface MessageChunk { type: 'text' | 'tool_call' | 'error'; content: string; delta?: string; done: boolean; }" path="packages/providers/src/types.ts">
+    </interface>
+    <interface name="ProviderConfig" kind="TypeScript interface" signature="interface ProviderConfig { providerId: string; providerType: 'claude-code' | 'copilot' | 'custom'; apiKey?: string; baseUrl?: string; model?: string; defaultParams?: { temperature?: number; maxTokens?: number; }; }" path="packages/providers/src/types.ts">
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>Unit testing using Jest 29+ with TypeScript support. Interface contract tests to validate all interface methods have correct signatures. Mock implementations for testing consumers. Line coverage: 80% minimum, branch coverage: 75% minimum, function coverage: 85% minimum. Critical paths (error handling, retry logic): 100% coverage.</standards>
+    <locations>packages/providers/src/**/*.test.ts, packages/providers/test/**/*.test.ts</locations>
+    <ideas>
+      <test idea="Validate IAIProvider interface contract" acceptanceCriteria="1">
+        Test that all required methods exist with correct signatures
+      </test>
+      <test idea="Test provider capabilities discovery" acceptanceCriteria="2">
+        Verify getCapabilities() returns structured metadata for streaming, token limits, model versions
+      </test>
+      <test idea="Test error handling contracts" acceptanceCriteria="3">
+        Validate error types for rate limits, timeouts, context overflow scenarios
+      </test>
+      <test idea="Test synchronous invocation patterns" acceptanceCriteria="5">
+        Verify interface supports both sync and async method calls
+      </test>
+      <test idea="Test asynchronous streaming patterns" acceptanceCriteria="5">
+        Validate AsyncIterable<MessageChunk> return type works correctly
+      </test>
+    </ideas>
+  </tests>
+</story-context>

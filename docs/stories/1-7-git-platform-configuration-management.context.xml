@@ -1,0 +1,139 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>7</storyId>
+    <title>Git Platform Configuration Management</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>F:\Code\Repos\Tamma\docs\stories\1-7-git-platform-configuration-management.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>DevOps engineer</asA>
+    <iWant>centralized configuration for Git platform settings</iWant>
+    <soThat>I can easily specify which platform to use and configure platform-specific parameters</soThat>
+    <tasks>- [ ] Task 1: Design configuration schema and interfaces (AC: 1, 2)
+  - [ ] Subtask 1.1: Create PlatformConfig interface with platform-specific fields
+  - [ ] Subtask 1.2: Define authentication method types (PAT, OAuth, App)
+  - [ ] Subtask 1.3: Create configuration validation schemas
+  - [ ] Subtask 1.4: Design platform detection logic from repository URLs
+
+- [ ] Task 2: Implement configuration loading and validation (AC: 3, 4)
+  - [ ] Subtask 2.1: Create PlatformConfigManager class
+  - [ ] Subtask 2.2: Implement configuration file loading (JSON/YAML)
+  - [ ] Subtask 2.3: Add environment variable override support
+  - [ ] Subtask 2.4: Implement endpoint reachability validation
+  - [ ] Subtask 2.5: Add credential validation with test API calls
+
+- [ ] Task 3: Implement platform registry and selection (AC: 1, 5)
+  - [ ] Subtask 3.1: Create PlatformRegistry for platform registration
+  - [ ] Subtask 3.2: Implement platform detection from repository URLs
+  - [ ] Subtask 3.3: Add default branch configuration per platform
+  - [ ] Subtask 3.4: Implement PR template path configuration
+  - [ ] Subtask 3.5: Add label conventions configuration
+
+- [ ] Task 4: Create comprehensive documentation and examples (AC: 6)
+  - [ ] Subtask 4.1: Write configuration guide with all platform examples
+  - [ ] Subtask 4.2: Create troubleshooting section for common issues
+  - [ ] Subtask 4.3: Document environment variable reference
+  - [ ] Subtask 4.4: Add migration guide from single-platform to multi-platform
+  - [ ] Subtask 4.5: Include security best practices for credential storage
+
+- [ ] Task 5: Implement comprehensive testing (AC: 3, 4)
+  - [ ] Subtask 5.1: Test configuration loading with valid/invalid files
+  - [ ] Subtask 5.2: Test environment variable overrides
+  - [ ] Subtask Subtask 5.3: Test credential validation with mock APIs
+  - [ ] Subtask 5.4: Test platform detection logic
+  - [ ] Subtask 5.5: Integration test with real platform credentials</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Configuration file supports platform entries (GitHub, GitLab, Gitea, Forgejo)
+2. Each platform entry includes: type, base URL, authentication method, webhook secret
+3. Configuration validates on load (reachable endpoints, valid credentials)
+4. System supports environment variable overrides for sensitive values (tokens)
+5. Configuration includes default branch name, PR template path, and label conventions
+6. Documentation includes example configurations for all supported platforms</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Platform Configuration Service (Story 1-7)" snippet="Platform Configuration Service: PlatformConfigManager class for credential and platform management, OAuth token storage with encryption at rest, Personal Access Token (PAT) validation and refresh, Platform selection logic based on repository URL patterns, Multi-account support, Credential rotation and expiry handling" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Data Models and Contracts - Platform Models" snippet="interface PlatformConfig { platformId: string; platformType: 'github' | 'gitlab'; baseUrl?: string; authType: 'oauth' | 'pat' | 'app'; credentials: { accessToken?: string; refreshToken?: string; expiresAt?: Date; }; }" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="APIs and Interfaces - Git Platform Plugin API" snippet="interface PlatformPlugin { name: string; version: string; createPlatform(config: PlatformConfig): IGitPlatform; validateConfig(config: PlatformConfig): ValidationResult; detectFromUrl(repoUrl: string): boolean; }" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Security Requirements" snippet="Credential Management: All API keys and tokens encrypted at rest using AES-256, Credentials stored in OS-specific secure storage, Config files with credentials: chmod 600 (owner read/write only), No credentials in logs, error messages, or debug output" />
+      <doc path="docs/architecture.md" title="Tamma - Technical Architecture" section="Project Structure" snippet="packages/platforms/: Git platform abstraction with base-platform.ts, github.ts, gitlab.ts, gitea.ts, forgejo.ts" />
+      <doc path="docs/stories/1-3-provider-configuration-management.md" title="Story 1.3: Provider Configuration Management" section="Configuration Patterns" snippet="Configuration file supports multiple provider entries, Each provider entry includes: name, API endpoint, API key reference, capabilities, priority, Configuration validates on load, System supports environment variable overrides for sensitive values" />
+    </docs>
+    <code>
+      <code path="packages/platforms/src/config/types.ts" kind="interface" symbol="PlatformConfig" lines="1-20" reason="Core configuration interface for Git platforms, defines platformId, platformType, baseUrl, authType, and credentials structure" />
+      <code path="packages/platforms/src/config/types.ts" kind="interface" symbol="AuthenticationMethod" lines="21-30" reason="Defines supported authentication types: PAT, OAuth, App for different Git platforms" />
+      <code path="packages/platforms/src/config/types.ts" kind="interface" symbol="PlatformRegistry" lines="31-45" reason="Registry pattern for platform registration and discovery, supports dynamic platform loading" />
+      <code path="packages/platforms/src/config/platform-config-manager.ts" kind="class" symbol="PlatformConfigManager" lines="1-50" reason="Main class for loading, validating, and managing platform configurations, handles environment variable overrides" />
+      <code path="packages/platforms/src/config/platform-config-manager.ts" kind="method" symbol="loadConfig" lines="51-80" reason="Loads configuration from JSON/YAML files with validation and environment variable override support" />
+      <code path="packages/platforms/src/config/platform-config-manager.ts" kind="method" symbol="validateConfig" lines="81-120" reason="Validates platform configurations including endpoint reachability and credential testing" />
+      <code path="packages/platforms/src/config/platform-detection.ts" kind="function" symbol="detectPlatformFromUrl" lines="1-30" reason="Analyzes repository URLs to determine Git platform type (GitHub, GitLab, Gitea, Forgejo)" />
+      <code path="packages/platforms/src/config/validation.ts" kind="function" symbol="validateEndpointReachability" lines="1-25" reason="Tests if platform base URLs are reachable and responsive" />
+      <code path="packages/platforms/src/config/validation.ts" kind="function" symbol="validateCredentials" lines="26-60" reason="Validates authentication credentials using test API calls to platform endpoints" />
+    </code>
+    <dependencies>
+      <ecosystem name="nodejs">
+        <package name="@tamma/config" version="workspace:*" reason="Shared configuration management infrastructure" />
+        <package name="@tamma/types" version="workspace:*" reason="Shared TypeScript types and interfaces" />
+        <package name="@tamma/logger" version="workspace:*" reason="Shared logging infrastructure" />
+        <package name="zod" version="^3.22.0" reason="Runtime type validation for configuration schemas" />
+        <package name="ajv" version="^8.12.0" reason="JSON Schema validation for configuration files" />
+        <package name="cosmiconfig" version="^9.0.0" reason="Configuration file discovery and loading" />
+        <package name="keytar" version="^7.9.0" reason="OS keychain/credential manager access" />
+        <package name="node-fetch" version="^3.3.0" reason="HTTP client for endpoint reachability testing" />
+        <package name="yaml" version="^2.3.0" reason="YAML configuration file parsing" />
+      </ecosystem>
+      <ecosystem name="typescript">
+        <package name="typescript" version="^5.7.0" reason="TypeScript compiler and language service" />
+        <package name="@types/node" version="^22.0.0" reason="Node.js type definitions" />
+      </ecosystem>
+      <ecosystem name="testing">
+        <package name="vitest" version="^3.2.0" reason="Unit testing framework" />
+        <package name="@vitest/mock" version="^3.2.0" reason="Mocking utilities for tests" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="security" description="Sensitive values (tokens, secrets) must support environment variable overrides" source="Story Dev Notes - Security Considerations" />
+    <constraint type="security" description="Configuration files with credentials should have restricted permissions (600)" source="Story Dev Notes - Security Considerations" />
+    <constraint type="security" description="No plaintext credentials in logs or error messages" source="Story Dev Notes - Security Considerations" />
+    <constraint type="security" description="Credential validation should use test API calls, not store responses" source="Story Dev Notes - Security Considerations" />
+    <constraint type="architecture" description="Follows configuration patterns from Story 1.3 (Provider Configuration Management)" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Integrates with platform abstractions from Stories 1.4-1.6" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Uses shared configuration infrastructure from @tamma/config package" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Implements validation patterns consistent with provider configuration" source="Story Dev Notes - Architecture Context" />
+    <constraint type="project-structure" description="Implementation location: packages/platforms/src/config/" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Configuration schemas: packages/platforms/src/config/types.ts" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Manager class: packages/platforms/src/config/platform-config-manager.ts" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Tests: packages/platforms/src/config/*.test.ts" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="technology" description="TypeScript 5.7+ strict mode for all interfaces and implementations" source="Architecture.md - Technology Stack" />
+    <constraint type="technology" description="Use Zod for runtime type validation of configuration schemas" source="Architecture.md - Technology Stack" />
+    <constraint type="technology" description="Use keytar library for OS-specific secure credential storage" source="Tech Spec - Dependencies" />
+  </constraints>
+  <interfaces>
+    <interface name="PlatformConfig" kind="TypeScript interface" signature="interface PlatformConfig { platformId: string; platformType: 'github' | 'gitlab' | 'gitea' | 'forgejo'; baseUrl?: string; authType: 'oauth' | 'pat' | 'app'; credentials: { accessToken?: string; refreshToken?: string; expiresAt?: Date; }; defaultBranch?: string; prTemplatePath?: string; labelConventions?: Record<string, string[]>; webhookSecret?: string; }" path="packages/platforms/src/config/types.ts" />
+    <interface name="PlatformPlugin" kind="TypeScript interface" signature="interface PlatformPlugin { name: string; version: string; createPlatform(config: PlatformConfig): IGitPlatform; validateConfig(config: PlatformConfig): ValidationResult; detectFromUrl(repoUrl: string): boolean; }" path="packages/platforms/src/types.ts" />
+    <interface name="PlatformRegistry" kind="TypeScript class" signature="class PlatformRegistry { register(plugin: PlatformPlugin): void; getPlatform(name: string): IGitPlatform; detectPlatform(repoUrl: string): IGitPlatform; listPlatforms(): string[]; }" path="packages/platforms/src/config/platform-registry.ts" />
+    <interface name="IConfigService" kind="TypeScript interface" signature="interface IConfigService { load(configPath: string): Promise<TammaConfig>; save(config: TammaConfig, configPath: string): Promise<void>; validate(config: TammaConfig): ValidationResult; merge(base: TammaConfig, override: Partial<TammaConfig>): TammaConfig; }" path="packages/config/src/types.ts" />
+    <interface name="ValidationResult" kind="TypeScript interface" signature="interface ValidationResult { isValid: boolean; errors: string[]; warnings: string[]; }" path="packages/shared/src/types.ts" />
+  </interfaces>
+  <tests>
+    <standards>Unit testing using Vitest 3.2+ with TypeScript support. Coverage targets: Line coverage 80% minimum, Branch coverage 75% minimum, Function coverage 85% minimum, Critical paths (error handling, retry logic) 100%. Mock external APIs using MSW (Mock Service Worker). Mock database using in-memory SQLite for fast tests. Mock filesystem operations using memfs.</standards>
+    <locations>packages/platforms/src/config/*.test.ts for configuration management tests, packages/platforms/src/config/*.spec.ts for interface compliance tests, packages/platforms/src/config/__mocks__/ for mock data and fixtures, packages/platforms/test/integration/ for integration tests with real platform APIs</locations>
+    <ideas>
+      <test idea="Test configuration loading with valid/invalid files" acceptanceCriteria="3,4" description="Verify PlatformConfigManager loads valid JSON/YAML configs and rejects invalid schemas with clear error messages" />
+      <test idea="Test environment variable overrides" acceptanceCriteria="4" description="Verify sensitive values (tokens, secrets) can be overridden via environment variables and take precedence over config files" />
+      <test idea="Test credential validation with mock APIs" acceptanceCriteria="3" description="Mock GitHub/GitLab API endpoints to test credential validation without real API calls" />
+      <test idea="Test platform detection logic" acceptanceCriteria="1" description="Test URL pattern matching for github.com, gitlab.com, and self-hosted instances" />
+      <test idea="Integration test with real platform credentials" acceptanceCriteria="3" description="Optional test using real test accounts to validate end-to-end configuration (requires GITHUB_TOKEN_TEST, GITLAB_TOKEN_TEST)" />
+      <test idea="Test configuration validation schemas" acceptanceCriteria="3" description="Test JSON Schema validation catches missing required fields, invalid URLs, malformed credentials" />
+      <test idea="Test platform registry and selection" acceptanceCriteria="1,5" description="Verify PlatformRegistry can register platforms and detect correct platform from repository URLs" />
+      <test idea="Test security constraints" acceptanceCriteria="4" description="Verify config files are created with 600 permissions and credentials are not logged" />
+    </ideas>
+  </tests>
+</story-context>

@@ -1,0 +1,377 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext xmlns="http://tamma.dev/schema/story-context"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xsi:schemaLocation="http://tamma.dev/schema/story-context ../schema/story-context.xsd">
+  
+  <storyId>1-5-github-platform-implementation</storyId>
+  <storyTitle>GitHub Platform Implementation</storyTitle>
+  <lastUpdated>2025-10-28T12:00:00Z</lastUpdated>
+  
+  <!-- Story content loaded from story file -->
+  <storyContent>
+    <story>
+      As a **developer**,
+      I want GitHub implemented as the first Git platform,
+      so that I can validate the platform abstraction with the most popular Git hosting service.
+    </story>
+    
+    <acceptanceCriteria>
+      <criteria id="1">GitHub provider implements all interface operations from Story 1.4</criteria>
+      <criteria id="2">Provider handles authentication via Personal Access Token (PAT) or GitHub App</criteria>
+      <criteria id="3">Provider integrates with GitHub Actions API for CI/CD triggering</criteria>
+      <criteria id="4">Provider integrates with GitHub Review API for automated review workflows</criteria>
+      <criteria id="5">Unit tests cover happy path, error cases, and GitHub-specific quirks</criteria>
+      <criteria id="6">Integration test demonstrates end-to-end PR creation and merge</criteria>
+    </acceptanceCriteria>
+    
+    <tasks>
+      <task id="1" ac="1">Implement GitHub platform class structure
+        <subtask id="1.1">Create GitHubPlatform class implementing IGitPlatform</subtask>
+        <subtask id="1.2">Implement initialize() method with authentication setup</subtask>
+        <subtask id="1.3">Implement dispose() method for cleanup</subtask>
+      </task>
+      <task id="2" ac="1">Implement repository operations
+        <subtask id="2.1">Implement getRepository() method using GitHub API</subtask>
+        <subtask id="2.2">Implement listIssues() method with filtering support</subtask>
+        <subtask id="2.3">Implement getIssue() method for individual issue retrieval</subtask>
+      </task>
+      <task id="3" ac="1">Implement branch operations
+        <subtask id="3.1">Implement createBranch() method using GitHub refs API</subtask>
+        <subtask id="3.2">Implement getBranch() method for branch information</subtask>
+        <subtask id="3.3">Add branch validation and error handling</subtask>
+      </task>
+      <task id="4" ac="1">Implement pull request operations
+        <subtask id="4.1">Implement createPullRequest() method using GitHub PR API</subtask>
+        <subtask id="4.2">Implement getPullRequest() method with full PR details</subtask>
+        <subtask id="4.3">Implement updatePullRequest() method for PR modifications</subtask>
+        <subtask id="4.4">Implement mergePullRequest() method with merge strategies</subtask>
+      </task>
+      <task id="5" ac="2">Add authentication and security
+        <subtask id="5.1">Implement PAT authentication with token validation</subtask>
+        <subtask id="5.2">Add GitHub App authentication support</subtask>
+        <subtask id="5.3">Implement secure credential storage and rotation</subtask>
+      </task>
+      <task id="6" ac="3,4">Integrate GitHub Actions and Review APIs
+        <subtask id="6.1">Implement triggerCI() method for GitHub Actions</subtask>
+        <subtask id="6.2">Add commentOnPR() method for review workflows</subtask>
+        <subtask id="6.3">Implement getPRStatus() and getChecks() methods</subtask>
+      </task>
+      <task id="7" ac="5">Add pagination and rate limit handling
+        <subtask id="7.1">Implement pagination for large result sets</subtask>
+        <subtask id="7.2">Add rate limit detection and handling</subtask>
+        <subtask id="7.3">Implement exponential backoff retry logic</subtask>
+      </task>
+      <task id="8" ac="5,6">Create comprehensive test suite
+        <subtask id="8.1">Write unit tests for happy path scenarios</subtask>
+        <subtask id="8.2">Write unit tests for error cases and GitHub quirks</subtask>
+        <subtask id="8.3">Write integration test for end-to-end PR workflow</subtask>
+        <subtask id="8.4">Add tests for authentication and rate limiting</subtask>
+      </task>
+    </tasks>
+  </storyContent>
+  
+  <!-- Technical specifications from tech-spec-epic-1.md -->
+  <technicalSpec>
+    <implementation>
+      <package>packages/platforms</package>
+      <class>GitHubPlatform implements IGitPlatform</class>
+      <apis>
+        <api name="GitHub REST API v4" sdk="@octokit/rest"/>
+        <api name="GitHub GraphQL API" sdk="@octokit/graphql"/>
+        <api name="GitHub Webhooks" sdk="@octokit/webhooks"/>
+      </apis>
+      <features>
+        <feature>Pagination handling for large result sets</feature>
+        <feature>Rate limit awareness with exponential backoff</feature>
+        <feature>Webhook signature verification for event handling</feature>
+        <feature>GitHub Actions integration for PR checks</feature>
+        <feature>GitHub Review API integration for automated workflows</feature>
+      </features>
+    </implementation>
+    
+    <performance>
+      <metric name="Platform API calls" target="&lt;1000ms (p95)"/>
+      <metric name="Issue list operations" target="&lt;2000ms for up to 100 issues (p95)"/>
+      <metric name="PR creation" target="&lt;3000ms including validation (p95)"/>
+      <metric name="Platform configuration load" target="&lt;200ms (p95)"/>
+    </performance>
+    
+    <security>
+      <requirement>Personal Access Token (PAT) authentication</requirement>
+      <requirement>GitHub App authentication support</requirement>
+      <requirement>API key validation on initialization</requirement>
+      <requirement>Secure credential storage with encryption at rest</requirement>
+      <requirement>Webhook signature verification</requirement>
+    </security>
+    
+    <reliability>
+      <pattern>Retry logic with exponential backoff for API failures</pattern>
+      <pattern>Circuit breaker for GitHub API calls (5 failures in 60s → open for 300s)</pattern>
+      <pattern>Timeout configuration for all network calls (default 30s)</pattern>
+      <pattern>Graceful degradation if GitHub unavailable</pattern>
+    </reliability>
+  </technicalSpec>
+  
+  <!-- Epic context from epics.md -->
+  <epicContext>
+    <epic id="1" title="Foundation & Core Infrastructure">
+      <goal>Establish foundational architecture decisions and integration capabilities before feature development begins</goal>
+      <value>Multi-provider AI flexibility (no vendor lock-in), multi-platform Git support (GitHub, GitLab, Gitea, Forgejo), architectural foundation for autonomous loops</value>
+      
+      <storyPosition>
+        <previous>1-4-git-platform-interface-definition</previous>
+        <current>1-5-github-platform-implementation</current>
+        <next>1-6-gitlab-platform-implementation</next>
+      </storyPosition>
+      
+      <dependencies>
+        <dependency story="1-4">Git Platform Interface Definition must exist</dependency>
+      </dependencies>
+      
+      <outOfScope>
+        <item>Issue selection and analysis workflows (Epic 2)</item>
+        <item>Development plan generation and code implementation (Epic 2)</item>
+        <item>Quality gates, testing automation, and intelligence layer (Epic 3)</item>
+        <item>Event sourcing backend implementation and audit trail (Epic 4)</item>
+        <item>Observability dashboards and production readiness (Epic 5)</item>
+      </outOfScope>
+    </epic>
+  </epicContext>
+  
+  <!-- Architecture context from architecture.md -->
+  <architectureContext>
+    <technologyStack>
+      <language>TypeScript 5.7+</language>
+      <runtime>Node.js 22 LTS</runtime>
+      <packageManager>pnpm 9+</packageManager>
+      <framework>Fastify for API services</framework>
+      <database>PostgreSQL 17</database>
+    </technologyStack>
+    
+    <projectStructure>
+      <package location="packages/platforms">Git platform abstraction</package>
+      <package location="packages/shared">Shared utilities and types</package>
+      <package location="packages/config">Configuration management</package>
+    </projectStructure>
+    
+    <patterns>
+      <pattern name="Interface-Based Design">IGitPlatform interface with dependency inversion</pattern>
+      <pattern name="Plugin Architecture">GitHub platform as plugin implementing interface</pattern>
+      <pattern name="Hybrid Architecture">Orchestrator/worker modes with shared components</pattern>
+    </patterns>
+    
+    <implementation>
+      <location>packages/platforms/src/github.ts</location>
+      <exports>GitHubPlatform class implementing IGitPlatform</exports>
+      <dependencies>@octokit/rest, @octokit/graphql, @octokit/webhooks</dependencies>
+    </implementation>
+  </architectureContext>
+  
+  <!-- Interfaces from story 1-4 and tech spec -->
+  <interfaces>
+    <interface name="IGitPlatform">
+      <methods>
+        <method name="initialize">initialize(config: PlatformConfig): Promise&lt;void&gt;</method>
+        <method name="getRepository">getRepository(owner: string, repo: string): Promise&lt;Repository&gt;</method>
+        <method name="listIssues">listIssues(repo: Repository, filters: IssueFilters): Promise&lt;Issue[]&gt;;</method>
+        <method name="getIssue">getIssue(repo: Repository, issueNumber: number): Promise&lt;Issue&gt;;</method>
+        <method name="createBranch">createBranch(repo: Repository, branchName: string, fromRef: string): Promise&lt;Branch&gt;;</method>
+        <method name="getBranch">getBranch(repo: Repository, branchName: string): Promise&lt;Branch&gt;;</method>
+        <method name="createPullRequest">createPullRequest(repo: Repository, params: PRCreateParams): Promise&lt;PullRequest&gt;;</method>
+        <method name="getPullRequest">getPullRequest(repo: Repository, prNumber: number): Promise&lt;PullRequest&gt;;</method>
+        <method name="updatePullRequest">updatePullRequest(pr: PullRequest, updates: PRUpdate): Promise&lt;PullRequest&gt;;</method>
+        <method name="mergePullRequest">mergePullRequest(pr: PullRequest, method: MergeMethod): Promise&lt;MergeResult&gt;;</method>
+        <method name="getPRStatus">getPRStatus(pr: PullRequest): Promise&lt;PRStatus&gt;;</method>
+        <method name="getChecks">getChecks(pr: PullRequest): Promise&lt;Check[]&gt;;</method>
+        <method name="dispose">dispose(): Promise&lt;void&gt;;</method>
+      </methods>
+    </interface>
+    
+    <dataModels>
+      <model name="Repository">
+        <field name="owner" type="string"/>
+        <field name="name" type="string"/>
+        <field name="defaultBranch" type="string"/>
+        <field name="cloneUrl" type="string"/>
+        <field name="platform" type="'github' | 'gitlab'"/>
+      </model>
+      
+      <model name="Issue">
+        <field name="number" type="number"/>
+        <field name="title" type="string"/>
+        <field name="body" type="string"/>
+        <field name="state" type="'open' | 'closed'"/>
+        <field name="labels" type="string[]"/>
+        <field name="assignees" type="string[]"/>
+        <field name="createdAt" type="Date"/>
+        <field name="updatedAt" type="Date"/>
+      </model>
+      
+      <model name="PullRequest">
+        <field name="number" type="number"/>
+        <field name="title" type="string"/>
+        <field name="body" type="string"/>
+        <field name="state" type="'open' | 'closed' | 'merged'"/>
+        <field name="sourceBranch" type="string"/>
+        <field name="targetBranch" type="string"/>
+        <field name="author" type="string"/>
+        <field name="createdAt" type="Date"/>
+        <field name="updatedAt" type="Date"/>
+        <field name="mergedAt" type="Date?"/>
+        <field name="url" type="string"/>
+      </model>
+      
+      <model name="Check">
+        <field name="name" type="string"/>
+        <field name="status" type="'pending' | 'success' | 'failure' | 'error'"/>
+        <field name="conclusion" type="string?"/>
+        <field name="detailsUrl" type="string?"/>
+      </model>
+    </dataModels>
+  </interfaces>
+  
+  <!-- Dependencies from tech spec and architecture -->
+  <dependencies>
+    <external>
+      <package name="@octokit/rest" version="^20.0.0">GitHub REST API client</package>
+      <package name="@octokit/graphql" version="^7.0.0">GitHub GraphQL API client</package>
+      <package name="@octokit/webhooks" version="^12.0.0">GitHub webhook verification</package>
+    </external>
+    
+    <internal>
+      <package name="@tamma/types">Shared TypeScript types and interfaces</package>
+      <package name="@tamma/config">Shared configuration management</package>
+      <package name="@tamma/logger">Shared logging infrastructure</package>
+    </internal>
+    
+    <workspace>
+      <package name="packages/platforms">Current package containing GitHub implementation</package>
+      <package name="packages/shared">Shared utilities and error classes</package>
+    </workspace>
+  </dependencies>
+  
+  <!-- Testing standards from tech spec -->
+  <testingStandards>
+    <framework>
+      <unit>Jest 29+ with TypeScript support</unit>
+      <integration>Jest with real HTTP clients (no mocks)</integration>
+      <e2e>Playwright (deferred to Epic 5)</e2e>
+    </framework>
+    
+    <coverage>
+      <line>80% minimum</line>
+      <branch>75% minimum</branch>
+      <function>85% minimum</function>
+      <critical>100% for error handling, retry logic</critical>
+    </coverage>
+    
+    <testCategories>
+      <category name="Interface Contract Tests">
+        <description>Validate all interface methods have correct signatures</description>
+        <description>Validate interface compliance for GitHubPlatform implementation</description>
+      </category>
+      
+      <category name="Platform Tests">
+        <description>Happy path: PR creation, issue retrieval, branch operations</description>
+        <description>Error cases: authentication failures, API errors, network timeouts</description>
+        <description>Pagination: multi-page result sets, cursor-based pagination</description>
+        <description>Rate limiting: backoff behavior, retry-after header handling</description>
+        <description>Normalization: GitHub API response → standard model</description>
+      </category>
+    </testCategories>
+    
+    <mocking>
+      <external>Mock GitHub APIs using MSW (Mock Service Worker)</external>
+      <database>Use in-memory SQLite for fast tests</database>
+      <filesystem>Mock filesystem operations using memfs</filesystem>
+    </mocking>
+  </testingStandards>
+  
+  <!-- Test ideas mapped to acceptance criteria -->
+  <testIdeas>
+    <testIdea ac="1" title="Interface Implementation Compliance">
+      <description>Test that GitHubPlatform implements all IGitPlatform methods with correct signatures</description>
+      <type>unit</type>
+      <priority>high</priority>
+    </testIdea>
+    
+    <testIdea ac="2" title="PAT Authentication Flow">
+      <description>Test authentication using Personal Access Token with validation</description>
+      <type>integration</type>
+      <priority>high</priority>
+      <setup>Requires GITHUB_TOKEN_TEST environment variable</setup>
+    </testIdea>
+    
+    <testIdea ac="2" title="GitHub App Authentication">
+      <description>Test authentication using GitHub App with JWT tokens</description>
+      <type>integration</type>
+      <priority>medium</priority>
+      <setup>Requires GitHub App credentials for testing</setup>
+    </testIdea>
+    
+    <testIdea ac="3" title="GitHub Actions Integration">
+      <description>Test triggerCI() method successfully triggers GitHub Actions workflow</description>
+      <type>integration</type>
+      <priority>high</priority>
+      <setup>Test repository with GitHub Actions workflow configured</setup>
+    </testIdea>
+    
+    <testIdea ac="4" title="GitHub Review API Integration">
+      <description>Test automated review workflows using GitHub Review API</description>
+      <type>integration</type>
+      <priority>high</priority>
+      <setup>Test repository with review permissions</setup>
+    </testIdea>
+    
+    <testIdea ac="5" title="Error Handling and GitHub Quirks">
+      <description>Test handling of GitHub-specific errors: rate limits, API changes, edge cases</description>
+      <type>unit</type>
+      <priority>high</priority>
+      <cases>
+        <case>Rate limit (403) with exponential backoff</case>
+        <case>Repository not found (404)</case>
+        <case>Authentication failure (401)</case>
+        <case>API validation errors (422)</case>
+        <case>GitHub API downtime scenarios</case>
+      </cases>
+    </testIdea>
+    
+    <testIdea ac="6" title="End-to-End PR Workflow">
+      <description>Test complete PR creation and merge workflow from start to finish</description>
+      <type>integration</type>
+      <priority>high</priority>
+      <workflow>
+        <step>1. Create feature branch</step>
+        <step>2. Make changes and commit</step>
+        <step>3. Create pull request</step>
+        <step>4. Wait for CI checks</step>
+        <step>5. Merge pull request</step>
+        <step>6. Verify branch cleanup</step>
+      </workflow>
+      <setup>Test repository with write permissions and CI configured</setup>
+    </testIdea>
+    
+    <testIdea ac="1,5" title="Pagination and Rate Limits">
+      <description>Test pagination for large issue lists and rate limit handling</description>
+      <type>unit</type>
+      <priority>medium</priority>
+      <scenarios>
+        <scenario>Issue list with >100 items requiring pagination</scenario>
+        <scenario>Rate limit hit during API calls</scenario>
+        <scenario>Retry-after header handling</scenario>
+      </scenarios>
+    </testIdea>
+    
+    <testIdea ac="3,4" title="CI/CD Status Monitoring">
+      <description>Test getPRStatus() and getChecks() methods for CI/CD integration</description>
+      <type>integration</type>
+      <priority>medium</priority>
+      <verification>
+        <check>Correct status reporting (pending, success, failure)</check>
+        <check>Check results parsing and normalization</check>
+        <check>Webhook event handling for status updates</check>
+      </verification>
+    </testIdea>
+  </testIdeas>
+  
+</storyContext>

@@ -137,3 +137,9 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# AI assistant directories
+.claude/
+.opencode/
+.github/chatmodes/
+bmad/

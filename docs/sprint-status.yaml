@@ -1,0 +1,102 @@
+# generated: 2025-10-28
+# project: Tamma
+# project_key: Tamma
+# tracking_system: file-system
+# story_location: {project-root}/docs/stories
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic exists in epic file but not contexted
+#   - contexted: Epic tech context created (required before drafting stories)
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - drafted: Story file created in stories folder
+#   - ready-for-dev: Draft approved and story context created
+#   - in-progress: Developer actively working on implementation
+#   - review: Under SM review (via review-story workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - completed: Retrospective has been done
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epics should be 'contexted' before stories can be 'drafted'
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically drafts next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', SM reviews, then Dev moves to 'done'
+
+generated: 2025-10-28
+project: Tamma
+project_key: Tamma
+tracking_system: file-system
+story_location: "{project-root}/docs/stories"
+
+development_status:
+  epic-1: contexted
+  1-0-ai-provider-strategy-research: ready-for-dev
+  1-1-ai-provider-interface-definition: ready-for-dev
+  1-2-claude-code-provider-implementation: ready-for-dev
+  1-3-provider-configuration-management: ready-for-dev
+  1-4-git-platform-interface-definition: ready-for-dev
+  1-5-github-platform-implementation: ready-for-dev
+  1-6-gitlab-platform-implementation: ready-for-dev
+  1-7-git-platform-configuration-management: ready-for-dev
+  1-8-hybrid-orchestrator-worker-architecture-design: ready-for-dev
+  1-9-basic-cli-scaffolding-with-mode-selection: ready-for-dev
+  1-10-additional-ai-provider-implementations: ready-for-dev
+  1-11-additional-git-platform-implementations: ready-for-dev
+  epic-1-retrospective: optional
+
+  epic-2: contexted
+  2-1-issue-selection-with-filtering: backlog
+  2-2-issue-context-analysis: backlog
+  2-3-development-plan-generation-with-approval-checkpoint: backlog
+  2-4-git-branch-creation: backlog
+  2-5-test-first-development-write-failing-tests: backlog
+  2-6-implementation-code-generation: backlog
+  2-7-code-refactoring-pass: backlog
+  2-8-pull-request-creation: backlog
+  2-9-pr-status-monitoring: backlog
+  2-10-pr-merge-with-completion-checkpoint: backlog
+  2-11-auto-next-issue-selection: backlog
+  epic-2-retrospective: optional
+
+  epic-3: contexted
+  3-1-build-automation-with-retry-logic: backlog
+  3-2-test-execution-with-retry-logic: backlog
+  3-3-mandatory-escalation-workflow: backlog
+  3-4-research-capability-for-unfamiliar-concepts: backlog
+  3-5-clarifying-questions-for-ambiguous-requirements: backlog
+  3-6-ambiguity-detection-scoring: backlog
+  3-7-multi-option-design-proposals: backlog
+  3-8-static-analysis-integration: backlog
+  3-9-security-scanning-integration: backlog
+  epic-3-retrospective: optional
+
+  epic-4: contexted
+  4-1-event-schema-design: backlog
+  4-2-event-store-backend-selection: backlog
+  4-3-event-capture-issue-selection-analysis: backlog
+  4-4-event-capture-ai-provider-interactions: backlog
+  4-5-event-capture-code-changes-git-operations: backlog
+  4-6-event-capture-approvals-escalations: backlog
+  4-7-event-query-api-for-time-travel: backlog
+  4-8-black-box-replay-for-debugging: backlog
+  epic-4-retrospective: optional
+
+  epic-5: contexted
+  5-1-structured-logging-implementation: backlog
+  5-2-metrics-collection-infrastructure: backlog
+  5-3-real-time-dashboard-system-health: backlog
+  5-4-real-time-dashboard-development-velocity: backlog
+  5-5-event-trail-exploration-ui: backlog
+  5-6-alert-system-for-critical-issues: backlog
+  5-7-feedback-collection-system: backlog
+  5-8-integration-testing-suite: backlog
+  5-9-documentation-user-guide-api-reference: backlog
+  5-10-alpha-release-preparation: backlog
+  epic-5-retrospective: optional

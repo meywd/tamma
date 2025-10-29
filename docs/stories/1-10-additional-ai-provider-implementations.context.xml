@@ -1,0 +1,210 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>10</storyId>
+    <title>Additional AI Provider Implementations</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>F:\Code\Repos\Tamma\docs\stories\1-10-additional-ai-provider-implementations.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a Tamma operator</asA>
+    <iWant>support for multiple AI providers (OpenAI, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, and local LLMs)</iWant>
+    <soThat>I can choose optimal provider based on cost, capability, and deployment requirements</soThat>
+    <tasks>### Task 1: OpenAI Provider Implementation (AC: 1, 7, 9)
+
+- [ ] Subtask 1.1: Create OpenAIProvider class implementing IAIProvider
+- [ ] Subtask 1.2: Integrate `openai` SDK (^4.x) for API access
+- [ ] Subtask 1.3: Implement model selection (GPT-4, GPT-3.5-turbo, o1-preview, o1-mini)
+- [ ] Subtask 1.4: Add streaming support with Server-Sent Events
+- [ ] Subtask 1.5: Implement function calling for tool integration
+- [ ] Subtask 1.6: Add error handling (rate limits, token limits, content policy violations)
+- [ ] Subtask 1.7: Implement retry logic with exponential backoff
+- [ ] Subtask 1.8: Add telemetry (latency, token usage, cost tracking)
+- [ ] Subtask 1.9: Write unit and integration tests
+
+### Task 2: GitHub Copilot Provider Implementation (AC: 2, 7, 9)
+
+- [ ] Subtask 2.1: Create GitHubCopilotProvider class implementing IAIProvider
+- [ ] Subtask 2.2: Integrate GitHub Copilot API (authentication via GitHub App or OAuth)
+- [ ] Subtask 2.3: Implement code completion and generation endpoints
+- [ ] Subtask 2.4: Add streaming support for real-time completions
+- [ ] Subtask 2.5: Implement context awareness (file context, repository context)
+- [ ] Subtask 2.6: Add error handling (rate limits, auth failures, quota exceeded)
+- [ ] Subtask 2.7: Implement retry logic with exponential backoff
+- [ ] Subtask 2.8: Add telemetry (request counts, completion quality metrics)
+- [ ] Subtask 2.9: Write unit and integration tests
+
+### Task 3: Google Gemini Provider Implementation (AC: 3, 7, 9)
+
+- [ ] Subtask 3.1: Create GeminiProvider class implementing IAIProvider
+- [ ] Subtask 3.2: Integrate `@google/generative-ai` SDK for Gemini API
+- [ ] Subtask 3.3: Implement model selection (Gemini Pro, Gemini Ultra, Gemini 1.5)
+- [ ] Subtask 3.4: Add streaming support with SSE
+- [ ] Subtask 3.5: Implement function calling for tool integration
+- [ ] Subtask 3.6: Add multimodal support (if needed for code analysis)
+- [ ] Subtask 3.7: Add error handling (rate limits, quota, safety filters)
+- [ ] Subtask 3.8: Implement retry logic with exponential backoff
+- [ ] Subtask 3.9: Add telemetry (latency, token usage, model version tracking)
+- [ ] Subtask 3.10: Write unit and integration tests
+
+### Task 4: OpenCode Provider Implementation (AC: 4, 9, 11)
+
+- [ ] Subtask 4.1: Research OpenCode API capabilities and authentication
+- [ ] Subtask 4.2: Create OpenCodeProvider class implementing IAIProvider
+- [ ] Subtask 4.3: Integrate OpenCode SDK or REST API client
+- [ ] Subtask 4.4: Implement model selection (if multiple models available)
+- [ ] Subtask 4.5: Add streaming support (if available)
+- [ ] Subtask 4.6: Implement tool integration (if supported)
+- [ ] Subtask 4.7: Add error handling (API-specific errors, rate limits)
+- [ ] Subtask 4.8: Implement retry logic with exponential backoff
+- [ ] Subtask 4.9: Add telemetry (latency, usage tracking, cost if applicable)
+- [ ] Subtask 4.10: Write unit and integration tests
+
+### Task 5: z.ai Provider Implementation (AC: 5, 9, 11)
+
+- [ ] Subtask 5.1: Research z.ai API capabilities and authentication
+- [ ] Subtask 5.2: Create ZAIProvider class implementing IAIProvider
+- [ ] Subtask 5.3: Integrate z.ai SDK or REST API client
+- [ ] Subtask 5.4: Implement model selection (if multiple models available)
+- [ ] Subtask 5.5: Add streaming support (if available)
+- [ ] Subtask 5.6: Implement tool integration (if supported)
+- [ ] Subtask 5.7: Add error handling (API-specific errors, rate limits)
+- [ ] Subtask 5.8: Implement retry logic with exponential backoff
+- [ ] Subtask 5.9: Add telemetry (latency, usage tracking)
+- [ ] Subtask 5.10: Write unit and integration tests
+
+### Task 6: Zen MCP Provider Implementation (AC: 6, 9, 11)
+
+- [ ] Subtask 6.1: Research Zen MCP protocol and authentication requirements
+- [ ] Subtask 6.2: Create ZenMCPProvider class implementing IAIProvider
+- [ ] Subtask 6.3: Integrate Model Context Protocol (MCP) SDK
+- [ ] Subtask 6.4: Implement MCP server connection and model selection
+- [ ] Subtask 6.5: Add streaming support via MCP protocol
+- [ ] Subtask 6.6: Implement MCP tool/resource integration for context access
+- [ ] Subtask 6.7: Add error handling (MCP-specific errors, connection failures)
+- [ ] Subtask 6.8: Implement retry logic with exponential backoff
+- [ ] Subtask 6.9: Add telemetry (latency, MCP message counts, context usage)
+- [ ] Subtask 6.10: Write unit and integration tests with MCP server mock
+
+### Task 7: OpenRouter Provider Implementation (AC: 7, 9, 11)
+
+- [ ] Subtask 7.1: Create OpenRouterProvider class implementing IAIProvider
+- [ ] Subtask 7.2: Integrate OpenRouter API (unified API for multiple models)
+- [ ] Subtask 7.3: Implement model routing (support for 100+ models: GPT, Claude, Llama, etc.)
+- [ ] Subtask 7.4: Add streaming support with SSE
+- [ ] Subtask 7.5: Implement cost-optimized model selection (per-request cost awareness)
+- [ ] Subtask 7.6: Add error handling (model unavailability, rate limits, auth failures)
+- [ ] Subtask 7.7: Implement retry logic with model fallback on failure
+- [ ] Subtask 7.8: Add telemetry (per-model latency, cost tracking, model selection decisions)
+- [ ] Subtask 7.9: Write unit and integration tests
+
+### Task 8: Local LLM Provider Implementation (AC: 8, 9, 11)
+
+- [ ] Subtask 8.1: Create LocalLLMProvider class implementing IAIProvider
+- [ ] Subtask 8.2: Add Ollama backend integration (HTTP API at localhost:11434)
+- [ ] Subtask 8.3: Add LM Studio backend integration (OpenAI-compatible API)
+- [ ] Subtask 8.4: Add vLLM backend integration (OpenAI-compatible API)
+- [ ] Subtask 8.5: Implement model discovery (list available local models)
+- [ ] Subtask 8.6: Add streaming support (SSE from local server)
+- [ ] Subtask 8.7: Implement function calling (if supported by local model)
+- [ ] Subtask 8.8: Add error handling (server unreachable, model not loaded, OOM errors)
+- [ ] Subtask 8.9: Implement retry logic (with model restart on OOM)
+- [ ] Subtask 8.10: Add telemetry (inference latency, VRAM usage, model performance)
+- [ ] Subtask 8.11: Add model recommendation guide (hardware requirements, recommended models for code generation)
+- [ ] Subtask 8.12: Write unit and integration tests (mock local server)
+
+### Task 9: Provider Selection and Configuration (AC: 10)
+
+- [ ] Subtask 9.1: Extend ProviderConfigManager to support new providers
+- [ ] Subtask 9.2: Add provider auto-detection (try providers in priority order)
+- [ ] Subtask 9.3: Implement provider fallback strategy (if primary fails, try secondary)
+- [ ] Subtask 9.4: Add per-workflow-step provider selection (e.g., use GPT-4 for analysis, local LLM for code completion)
+- [ ] Subtask 9.5: Add cost-aware provider selection (switch to cheaper provider for simple tasks)
+- [ ] Subtask 9.6: Document configuration examples for each provider
+
+### Task 10: Documentation and Provider Comparison (AC: 12)
+
+- [ ] Subtask 10.1: Create provider comparison matrix (cost, speed, quality, features)
+- [ ] Subtask 10.2: Write setup guide for OpenAI provider
+- [ ] Subtask 10.3: Write setup guide for GitHub Copilot provider
+- [ ] Subtask 10.4: Write setup guide for Google Gemini provider
+- [ ] Subtask 10.5: Write setup guide for OpenCode provider
+- [ ] Subtask 10.6: Write setup guide for z.ai provider
+- [ ] Subtask 10.7: Write setup guide for Zen MCP provider
+- [ ] Subtask 10.8: Write setup guide for OpenRouter provider
+- [ ] Subtask 10.9: Write setup guide for local LLM provider (Ollama/LM Studio/vLLM installation)
+- [ ] Subtask 10.10: Create troubleshooting guide for common provider issues
+- [ ] Subtask 10.11: Document cost projection for each provider (per workflow, per month)
+- [ ] Subtask 10.12: Create provider selection decision tree (help users choose optimal provider)</tasks>
+  </story>
+
+  <acceptanceCriteria>1. OpenAI provider implements IAIProvider interface with support for GPT-4, GPT-3.5-turbo, and o1 models
+2. GitHub Copilot provider implements IAIProvider interface with Copilot API integration
+3. Google Gemini provider implements IAIProvider interface with support for Gemini Pro and Ultra models
+4. OpenCode provider implements IAIProvider interface with OpenCode API integration
+5. z.ai provider implements IAIProvider interface with z.ai API integration
+6. Zen MCP provider implements IAIProvider interface with Model Context Protocol support
+7. OpenRouter provider implements IAIProvider interface with multi-model routing support
+8. Local LLM provider implements IAIProvider interface with support for Ollama, LM Studio, and vLLM backends
+9. Each provider includes comprehensive error handling, retry logic, and streaming support
+10. Provider selection configurable via config file or environment variables
+11. Integration tests validate each provider with real API calls (or mocked for local LLMs)
+12. Documentation includes provider comparison matrix and setup instructions for each provider</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Additional AI Provider Implementations" snippet="OpenAI Provider: OpenAIProvider implements IAIProvider - supports GPT-4, GPT-3.5-turbo, o1 models via openai@^4.67.0 SDK, GitHub Copilot Provider: GitHubCopilotProvider implements IAIProvider - integrates with Copilot API, Google Gemini Provider: GeminiProvider implements IAIProvider - supports Gemini Pro/Ultra via @google/generative-ai@^0.21.0 SDK" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Additional AI Provider Implementations" snippet="OpenCode Provider: OpenCodeProvider implements IAIProvider - integrates with OpenCode API, z.ai Provider: ZAIProvider implements IAIProvider - integrates with z.ai API, Zen MCP Provider: ZenMCPProvider implements IAIProvider - Model Context Protocol support via @modelcontextprotocol/sdk@^1.0.0" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Additional AI Provider Implementations" snippet="OpenRouter Provider: OpenRouterProvider implements IAIProvider - multi-model routing aggregator (100+ models) via REST API, Local LLM Provider: LocalLLMProvider implements IAIProvider - supports Ollama (HTTP API), LM Studio (OpenAI-compatible), vLLM (high performance)" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="AI Provider SDKs" snippet="openai@^4.67.0: OpenAI GPT-4, GPT-3.5-turbo, o1 models, @google/generative-ai@^0.21.0: Google Gemini Pro/Ultra, @modelcontextprotocol/sdk@^1.0.0: MCP protocol for tool integration" />
+      <doc path="docs/stories/1-0-ai-provider-strategy-research.md" title="AI Provider Strategy Research" section="Research Findings" snippet="Cost analysis comparing 8+ AI providers: Anthropic Claude, OpenAI GPT, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local models (Ollama/LM Studio/vLLM), Pricing models: subscription plans vs pay-as-you-go API rates" />
+    </docs>
+    <code>{{code_artifacts}}</code>
+    <dependencies>
+      <ecosystem name="node">
+        <package name="openai" version="^4.67.0" purpose="OpenAI GPT-4, GPT-3.5-turbo, o1 models" />
+        <package name="@google/generative-ai" version="^0.21.0" purpose="Google Gemini Pro/Ultra models" />
+        <package name="@modelcontextprotocol/sdk" version="^1.0.0" purpose="Model Context Protocol for Zen MCP provider" />
+        <package name="axios" version="^1.7.9" purpose="HTTP client for OpenRouter, OpenCode, z.ai, local LLMs" />
+      </ecosystem>
+      <ecosystem name="workspace">
+        <package name="@tamma/config" purpose="Provider configuration management" />
+        <package name="@tamma/types" purpose="IAIProvider interface definitions" />
+        <package name="@tamma/logger" purpose="Provider operation logging" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="interface" description="All providers must implement IAIProvider interface exactly" source="docs/tech-spec-epic-1.md#AI-Provider-Abstraction" />
+    <constraint type="streaming" description="All providers must support streaming responses via Server-Sent Events" source="docs/tech-spec-epic-1.md#Additional-AI-Provider-Implementations" />
+    <constraint type="error-handling" description="All providers must include retry logic with exponential backoff for transient failures" source="docs/tech-spec-epic-1.md#Additional-AI-Provider-Implementations" />
+    <constraint type="telemetry" description="All providers must emit telemetry hooks for latency, token usage, error rates" source="docs/tech-spec-epic-1.md#Additional-AI-Provider-Implementations" />
+    <constraint type="testing" description="All providers must have unit tests and integration tests with real API calls" source="docs/tech-spec-epic-1.md#Additional-AI-Provider-Implementations" />
+    <constraint type="configuration" description="Provider selection configurable per workflow step for cost optimization" source="docs/tech-spec-epic-1.md#Additional-AI-Provider-Implementations" />
+  </constraints>
+  <interfaces>
+    <interface name="IAIProvider" kind="interface" signature="interface IAIProvider { initialize(config: ProviderConfig): Promise<void>; sendMessage(request: MessageRequest): Promise<AsyncIterable<MessageChunk>>; getCapabilities(): ProviderCapabilities; dispose(): Promise<void>; }" path="docs/tech-spec-epic-1.md#Core-Interfaces" />
+    <interface name="ProviderConfig" kind="interface" signature="interface ProviderConfig { providerId: string; providerType: string; apiKey?: string; baseUrl?: string; model?: string; defaultParams?: { temperature?: number; maxTokens?: number; }; }" path="docs/tech-spec-epic-1.md#Data-Models-and-Contracts" />
+    <interface name="MessageRequest" kind="interface" signature="interface MessageRequest { messages: Message[]; systemPrompt?: string; tools?: Tool[]; maxTokens?: number; temperature?: number; model?: string; }" path="docs/tech-spec-epic-1.md#Data-Models-and-Contracts" />
+    <interface name="ProviderCapabilities" kind="interface" signature="interface ProviderCapabilities { supportsStreaming: boolean; supportsTools: boolean; supportedModels: string[]; maxContextTokens: number; maxOutputTokens: number; }" path="docs/tech-spec-epic-1.md#Data-Models-and-Contracts" />
+  </interfaces>
+  <tests>
+    <standards>Unit tests with Jest 29+ and TypeScript support, Integration tests with real API calls (rate limited), Provider fallback tests with simulated failures, Local LLM tests with mocked localhost server, Coverage targets: 80% line, 75% branch, 85% function</standards>
+    <locations>
+      <location pattern="packages/providers/src/**/*.test.ts" purpose="Unit tests for all provider implementations" />
+      <location pattern="packages/providers/test/**/*.test.ts" purpose="Integration tests for provider APIs" />
+      <location pattern="packages/providers/test/integration/" purpose="End-to-end provider tests" />
+    </locations>
+    <ideas>
+      <test idea="OpenAI provider integration" acceptanceCriteria="1,9,11" description="Test GPT-4, GPT-3.5-turbo, o1 models with real API calls, streaming support, function calling, error handling for rate limits and token limits" />
+      <test idea="GitHub Copilot provider integration" acceptanceCriteria="2,9,11" description="Test Copilot API integration, authentication via GitHub App/OAuth, context awareness, streaming completions, error handling for auth failures and quota exceeded" />
+      <test idea="Google Gemini provider integration" acceptanceCriteria="3,9,11" description="Test Gemini Pro/Ultra models, multimodal support, function calling, streaming via SSE, error handling for rate limits and safety filters" />
+      <test idea="Local LLM provider integration" acceptanceCriteria="8,9,11" description="Test Ollama, LM Studio, vLLM backends, model discovery, streaming support, error handling for server unreachable and OOM errors" />
+      <test idea="Provider fallback and selection" acceptanceCriteria="10" description="Test provider auto-detection, fallback strategy when primary fails, per-workflow-step provider selection, cost-aware provider switching" />
+    </ideas>
+  </tests>
+</story-context>

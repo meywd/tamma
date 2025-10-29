@@ -1,0 +1,124 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>0</storyId>
+    <title>AI Provider Strategy Research</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>F:\Code\Repos\Tamma\docs\stories\1-0-ai-provider-strategy-research.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a technical architect</asA>
+    <iWant>to research AI provider options across cost models, capabilities, and workflow fit</iWant>
+    <soThat>I can make informed decisions about which AI providers to support and when to use each</soThat>
+    <tasks>- [ ] Task 1: Research AI provider cost models (AC: 2)
+  - [ ] Subtask 1.1: Document Anthropic Claude pricing (API, Teams plan, Enterprise)
+  - [ ] Subtask 1.2: Document OpenAI GPT pricing (API, ChatGPT Plus/Team/Enterprise)
+  - [ ] Subtask 1.3: Document GitHub Copilot pricing (Individual, Business, Enterprise)
+  - [ ] Subtask 1.4: Document Google Gemini pricing (API, Workspace add-on)
+  - [ ] Subtask 1.5: Document local model costs (compute, hosting, maintenance)
+  - [ ] Subtask 1.6: Calculate cost per workflow step (per issue, per PR, per analysis)
+  - [ ] Subtask 1.7: Project costs for 10 users, 100 users, 1000 users
+
+- [ ] Task 2: Evaluate provider capabilities per workflow step (AC: 3)
+  - [ ] Subtask 2.1: Test issue analysis quality (understanding requirements, ambiguity detection)
+  - [ ] Subtask 2.2: Test code generation quality (implementation correctness, idiomatic code)
+  - [ ] Subtask 2.3: Test test generation quality (coverage, edge cases, maintainability)
+  - [ ] Subtask 2.4: Test code review quality (security, performance, best practices)
+  - [ ] Subtask 2.5: Test refactoring suggestions (SOLID principles, design patterns)
+  - [ ] Subtask 2.6: Test documentation generation (clarity, completeness, accuracy)
+  - [ ] Subtask 2.7: Create capability matrix mapping providers to workflow steps
+
+- [ ] Task 3: Assess integration approaches (AC: 4)
+  - [ ] Subtask 3.1: Evaluate Anthropic Claude API/SDK (streaming, tool use, context windows)
+  - [ ] Subtask 3.2: Evaluate OpenAI API/SDK (function calling, vision, embeddings)
+  - [ ] Subtask 3.3: Evaluate GitHub Copilot integration (CLI, API, agent mode)
+  - [ ] Subtask 3.4: Evaluate Google Gemini API (multimodal, long context)
+  - [ ] Subtask 3.5: Evaluate local model deployment (Ollama, LM Studio, vLLM)
+  - [ ] Subtask 3.6: Compare integration complexity (SDK maturity, auth, error handling)
+
+- [ ] Task 4: Validate deployment compatibility (AC: 5)
+  - [ ] Subtask 4.1: Test orchestrator mode integration (background workers, async processing)
+  - [ ] Subtask 4.2: Test CI/CD environment integration (GitHub Actions, GitLab CI, headless)
+  - [ ] Subtask 4.3: Test developer workstation integration (local dev, IDE extensions)
+  - [ ] Subtask 4.4: Test air-gapped/offline scenarios (local models, caching)
+  - [ ] Subtask 4.5: Document deployment constraints per provider
+
+- [ ] Task 5: Create recommendation matrix and strategy (AC: 6, 7)
+  - [ ] Subtask 5.1: Define primary provider for MVP (balance cost, capability, ease of integration)
+  - [ ] Subtask 5.2: Define specialized providers for specific workflows (if beneficial)
+  - [ ] Subtask 5.3: Define fallback/secondary provider strategy (cost optimization, redundancy)
+  - [ ] Subtask 5.4: Define long-term multi-provider strategy (extensibility, user choice)
+  - [ ] Subtask 5.5: Calculate ROI for subscription plans vs pay-as-you-go
+  - [ ] Subtask 5.6: Create decision tree for provider selection per workflow step
+
+- [ ] Task 6: Document findings and recommendations (AC: 1-7)
+  - [ ] Subtask 6.1: Write executive summary with primary recommendation
+  - [ ] Subtask 6.2: Document cost analysis with projections
+  - [ ] Subtask 6.3: Document capability matrix with test results
+  - [ ] Subtask 6.4: Document integration approach comparison
+  - [ ] Subtask 6.5: Document deployment compatibility findings
+  - [ ] Subtask 6.6: Create recommendation matrix and strategy document
+  - [ ] Subtask 6.7: Review findings with stakeholders and finalize recommendations</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Research document compares at least 5 AI providers: Anthropic Claude, OpenAI GPT, GitHub Copilot, Google Gemini, local models (Ollama/LM Studio)
+2. Cost analysis includes: subscription plans, pay-as-you-go rates, volume discounts, free tiers
+3. Capability matrix maps providers to Tamma workflow steps: issue analysis, code generation, test generation, code review, refactoring, documentation
+4. Integration approach evaluated: SDK/API (headless), IDE extensions, CLI tools, self-hosted models
+5. Deployment compatibility assessed: orchestrator mode, worker mode, CI/CD environments, developer workstations
+6. Recommendation matrix produced: Primary provider for MVP, secondary providers for specific workflows, long-term extensibility strategy
+7. Cost projection calculated: estimated monthly spend for 10 users, 100 issues/month, 3 workflows/issue</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/PRD.md" title="Product Requirements Document" section="AI Provider Integration" snippet="FR-7: Multi-Provider AI Abstraction - Support multiple AI providers (Claude Code, OpenCode, GLM, local LLMs) with seamless switching, FR-8: Provider Capability Discovery - Dynamic capability detection for streaming, token limits, model versions" />
+      <doc path="docs/architecture.md" title="Technical Architecture" section="Technology Stack" snippet="AI Provider SDKs: @anthropic-ai/sdk for Claude API, @modelcontextprotocol/sdk for MCP protocol, Plugin Architecture with capability-based sandboxing, Interface-Based Design Pattern for provider abstraction" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="AI Provider Strategy Research" snippet="Research deliverable: docs/research/ai-provider-strategy-2025-10.md, Cost analysis comparing 8+ AI providers, Capability matrix mapping providers to Tamma workflow steps, Integration approaches: SDK/API, IDE extensions, CLI tools, self-hosted models" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Additional AI Provider Implementations" snippet="OpenAI Provider: OpenAIProvider implements IAIProvider - supports GPT-4, GPT-3.5-turbo, o1 models, GitHub Copilot Provider: GitHubCopilotProvider implements IAIProvider - integrates with Copilot API, Google Gemini Provider: GeminiProvider implements IAIProvider - supports Gemini Pro/Ultra" />
+      <doc path="docs/architecture.md" title="Technical Architecture" section="Novel Architectural Patterns" snippet="Plugin Architecture with Capability-Based Sandboxing - npm-distributed plugins with capability-based sandboxing, Interface-Based Design Pattern - dependency inversion principle for provider abstraction" />
+    </docs>
+    <code>{{code_artifacts}}</code>
+    <dependencies>
+      <ecosystem name="research">
+        <package name="axios" version="^1.7.9" purpose="HTTP client for API testing and research" />
+        <package name="csv-writer" version="^1.6.0" purpose="Export cost analysis data to CSV" />
+        <package name="markdown-table" version="^3.0.0" purpose="Generate capability matrix tables" />
+      </ecosystem>
+      <ecosystem name="workspace">
+        <package name="@tamma/types" purpose="Type definitions for research interfaces" />
+        <package name="@tamma/config" purpose="Configuration for research test scenarios" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="research-scope" description="Research must cover at least 5 AI providers with comprehensive cost and capability analysis" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+    <constraint type="cost-analysis" description="Include subscription plans, pay-as-you-go rates, volume discounts, and free tiers in cost analysis" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+    <constraint type="capability-testing" description="Test each provider against all Tamma workflow steps: issue analysis, code generation, test generation, code review, refactoring, documentation" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+    <constraint type="integration-evaluation" description="Evaluate SDK/API, IDE extensions, CLI tools, and self-hosted model integration approaches" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+    <constraint type="deployment-validation" description="Test orchestrator mode, worker mode, CI/CD environments, and developer workstation compatibility" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+    <constraint type="recommendation-clarity" description="Provide clear primary provider recommendation for MVP with confidence level and fallback strategy" source="docs/stories/1-0-ai-provider-strategy-research.md#Acceptance-Criteria" />
+  </constraints>
+  <interfaces>
+    <interface name="ResearchProvider" kind="interface" signature="interface ResearchProvider { name: string; apiEndpoint?: string; sdkAvailable: boolean; pricingModel: 'subscription' | 'pay-as-you-go' | 'hybrid'; capabilities: ProviderCapabilities; }" path="docs/stories/1-0-ai-provider-strategy-research.md#Research-Methodology" />
+    <interface name="CostAnalysis" kind="interface" signature="interface CostAnalysis { provider: string; pricingModel: string; rates: { input: number; output: number; }; subscriptionPlans?: { name: string; monthlyCost: number; includedTokens: number; }[]; }" path="docs/stories/1-0-ai-provider-strategy-research.md#Cost-Projection-Assumptions" />
+    <interface name="CapabilityMatrix" kind="interface" signature="interface CapabilityMatrix { provider: string; workflowSteps: { [step: string]: { quality: number; speed: number; cost: number; notes?: string; }; }; overallScore: number; }" path="docs/stories/1-0-ai-provider-strategy-research.md#Workflow-Step-Definitions-for-Testing" />
+  </interfaces>
+  <tests>
+    <standards>Research validation through real API testing, Cost analysis verification with provider documentation, Capability testing with standardized test scenarios, Documentation review with technical stakeholders, Peer review of research methodology and findings</standards>
+    <locations>
+      <location pattern="scripts/research/**/*.test.ts" purpose="Automated provider capability tests" />
+      <location pattern="docs/research/" purpose="Research output documents and analysis" />
+      <location pattern="test/research/" purpose="Manual research validation tests" />
+    </locations>
+    <ideas>
+      <test idea="Cost analysis verification" acceptanceCriteria="2" description="Verify calculated costs match provider pricing pages, test subscription vs pay-as-you-go scenarios, validate volume discount calculations" />
+      <test idea="Provider capability testing" acceptanceCriteria="3" description="Run standardized test scenarios through each provider, compare output quality for code generation, test generation, and code review tasks" />
+      <test idea="Integration approach evaluation" acceptanceCriteria="4" description="Test SDK integration complexity, evaluate API authentication flows, assess deployment compatibility across orchestrator/worker/CI/CD modes" />
+      <test idea="Research methodology validation" acceptanceCriteria="1,5,6,7" description="Validate research covers all required providers, ensure deployment scenarios tested, confirm recommendation matrix provides clear guidance" />
+    </ideas>
+  </tests>
+</story-context>

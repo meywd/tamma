@@ -1,0 +1,114 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>9</storyId>
+    <title>Basic CLI Scaffolding with Mode Selection</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>F:\Code\Repos\Tamma\docs\stories\1-9-basic-cli-scaffolding-with-mode-selection.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a developer</asA>
+    <iWant>a basic CLI entry point that supports both orchestrator and worker modes</iWant>
+    <soThat>I can test mode switching and validate the hybrid architecture design</soThat>
+    <tasks>- [ ] Task 1: CLI argument parsing and mode selection (AC: 1, 2, 6)
+  - [ ] Subtask 1.1: Implement commander.js-based argument parser
+  - [ ] Subtask 1.2: Add --mode flag validation (orchestrator|worker|standalone)
+  - [ ] Subtask 1.3: Add --version and --help commands
+  - [ ] Subtask 1.4: Add usage examples and error handling
+
+- [ ] Task 2: Configuration loading and validation (AC: 3)
+  - [ ] Subtask 2.1: Implement config file loading from ~/.tamma/config.json
+  - [ ] Subtask 2.2: Add environment variable override support
+  - [ ] Subtask 2.3: Add configuration validation with clear error messages
+  - [ ] Subtask 2.4: Add config initialization wizard for first-time setup
+
+- [ ] Task 3: Abstraction initialization (AC: 4)
+  - [ ] Subtask 3.1: Initialize AI provider registry from config
+  - [ ] Subtask 3.2: Initialize Git platform registry from config
+  - [ ] Subtask 3.3: Validate provider and platform credentials
+  - [ ] Subtask 3.4: Handle initialization failures gracefully
+
+- [ ] Task 4: Mode-specific startup logic (AC: 1, 2, 5)
+  - [ ] Subtask 4.1: Implement orchestrator mode startup (Fastify server)
+  - [ ] Subtask 4.2: Implement worker mode startup (task polling)
+  - [ ] Subtask 4.3: Implement standalone mode startup (direct execution)
+  - [ ] Subtask 4.4: Add mode selection logging with debug information
+
+- [ ] Task 5: Integration testing (AC: 7)
+  - [ ] Subtask 5.1: Create integration test for orchestrator mode
+  - [ ] Subtask 5.2: Create integration test for worker mode
+  - [ ] Subtask 5.3: Create integration test for standalone mode
+  - [ ] Subtask 5.4: Add test coverage for error scenarios</tasks>
+  </story>
+
+  <acceptanceCriteria>1. CLI supports `--mode orchestrator` flag for autonomous coordinator behavior
+2. CLI supports `--mode worker` flag for CI/CD-invoked single-task execution
+3. CLI loads configuration from config file and environment variables
+4. CLI initializes AI provider abstraction and Git platform abstraction
+5. CLI outputs mode selection to logs for debugging
+6. CLI includes `--version` and `--help` commands with usage examples
+7. Integration test demonstrates launching in both modes</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="CLI Application" snippet="CLI supports `--mode orchestrator` flag for autonomous coordinator behavior, `--mode worker` flag for CI/CD-invoked single-task execution, loads configuration from config file and environment variables, includes `--version` and `--help` commands with usage examples" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Technology Stack" snippet="CLI Framework: commander.js, Configuration: cosmiconfig for config discovery, Interactive prompts: inquirer for setup wizard, Validation: ajv for JSON Schema validation" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Configuration Models" snippet="TammaConfig interface with mode, providers, platforms sections, Environment variable support: TAMMA_MODE, TAMMA_CONFIG_PATH, Default config location: ~/.tamma/config.json" />
+      <doc path="docs/architecture.md" title="Technical Architecture" section="Project Structure" snippet="CLI package location: packages/cli/, Shared configuration package: @tamma/config, Provider abstraction: @tamma/providers, Platform abstraction: @tamma/platforms" />
+      <doc path="docs/architecture.md" title="Technical Architecture" section="Technology Stack" snippet="CLI Framework: Ink (React for CLIs) 5.1+, Package Manager: pnpm 9.15+, Language: TypeScript 5.7+, Runtime: Node.js 22 LTS" />
+    </docs>
+    <code>{{code_artifacts}}</code>
+    <dependencies>
+      <ecosystem name="node">
+        <package name="commander" version="^12.0.0" purpose="CLI argument parsing" />
+        <package name="inquirer" version="^9.2.0" purpose="Interactive CLI prompts" />
+        <package name="cosmiconfig" version="^9.0.0" purpose="Configuration file discovery and loading" />
+        <package name="ajv" version="^8.12.0" purpose="JSON Schema validator" />
+        <package name="pino" version="^8.19.0" purpose="Fast JSON logger" />
+        <package name="zod" version="^3.22.0" purpose="Runtime type validation" />
+      </ecosystem>
+      <ecosystem name="workspace">
+        <package name="@tamma/config" purpose="Shared configuration management" />
+        <package name="@tamma/types" purpose="Shared TypeScript types and interfaces" />
+        <package name="@tamma/logger" purpose="Shared logging infrastructure" />
+        <package name="@tamma/providers" purpose="AI provider abstraction" />
+        <package name="@tamma/platforms" purpose="Git platform abstraction" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="technology" description="TypeScript 5.7+ strict mode required" source="docs/architecture.md#Technology-Stack" />
+    <constraint type="runtime" description="Node.js 22 LTS runtime target" source="docs/architecture.md#Technology-Stack" />
+    <constraint type="monorepo" description="pnpm workspace monorepo structure" source="docs/architecture.md#Technology-Stack" />
+    <constraint type="exit-codes" description="Exit code conventions: 0=success, 1=error, 2=config error" source="docs/tech-spec-epic-1.md#CLI-Application" />
+    <constraint type="performance" description="CLI cold start < 1000ms (p95), Warm start < 300ms (p95)" source="docs/tech-spec-epic-1.md#Performance" />
+    <constraint type="memory" description="Memory usage < 256MB RSS for standalone mode" source="docs/tech-spec-epic-1.md#Memory-Constraints" />
+    <constraint type="security" description="Config file permissions set to 600, No credentials logged to stdout/stderr" source="docs/tech-spec-epic-1.md#Security-Requirements" />
+    <constraint type="validation" description="Input validation against injection attacks" source="docs/tech-spec-epic-1.md#Security-Requirements" />
+  </constraints>
+  <interfaces>
+    <interface name="TammaCLI" kind="class" signature="class TammaCLI { async run(args: string[]): Promise<number> }" path="docs/tech-spec-epic-1.md#CLI-Application" />
+    <interface name="CLIConfig" kind="interface" signature="interface CLIConfig { mode: 'orchestrator' | 'worker' | 'standalone'; configFile?: string; verbose?: boolean; }" path="docs/tech-spec-epic-1.md#CLI-Application" />
+    <interface name="TammaConfig" kind="interface" signature="interface TammaConfig { version: string; mode: 'orchestrator' | 'worker' | 'standalone'; providers: { default: string; available: ProviderConfig[]; }; platforms: { available: PlatformConfig[]; }; }" path="docs/tech-spec-epic-1.md#Configuration-Models" />
+    <interface name="IConfigService" kind="interface" signature="interface IConfigService { load(configPath: string): Promise<TammaConfig>; save(config: TammaConfig, configPath: string): Promise<void>; validate(config: TammaConfig): ValidationResult; }" path="docs/tech-spec-epic-1.md#APIs-and-Interfaces" />
+  </interfaces>
+  <tests>
+    <standards>Unit tests with Jest 29+ and TypeScript support, Integration tests with real services, Coverage targets: 80% line, 75% branch, 85% function, Mock external APIs using MSW (Mock Service Worker), Mock database using in-memory SQLite for fast tests</standards>
+    <locations>
+      <location pattern="packages/cli/src/**/*.test.ts" purpose="Unit tests for CLI components" />
+      <location pattern="packages/cli/test/**/*.test.ts" purpose="Integration tests for CLI workflows" />
+      <location pattern="packages/cli/test/integration/" purpose="End-to-end CLI tests" />
+    </locations>
+    <ideas>
+      <test idea="CLI argument parsing validation" acceptanceCriteria="1,2,6" description="Test valid and invalid --mode flag values, --version and --help commands, error handling for invalid arguments" />
+      <test idea="Configuration loading and validation" acceptanceCriteria="3" description="Test loading from ~/.tamma/config.json, environment variable overrides, validation error messages, missing config handling" />
+      <test idea="Provider and platform initialization" acceptanceCriteria="4" description="Test successful initialization of AI provider registry, Git platform registry, credential validation, graceful failure handling" />
+      <test idea="Mode-specific startup logic" acceptanceCriteria="1,2,5" description="Test orchestrator mode startup (Fastify server), worker mode startup (task polling), standalone mode startup, mode selection logging" />
+      <test idea="Integration test for both modes" acceptanceCriteria="7" description="Test launching CLI in orchestrator mode and verifying server starts, test launching CLI in worker mode and verifying registration, test mode switching functionality" />
+    </ideas>
+  </tests>
+</story-context>

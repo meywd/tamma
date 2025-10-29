@@ -1,0 +1,120 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>4</storyId>
+    <title>Git Platform Interface Definition</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-4-git-platform-interface-definition.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>system architect</asA>
+    <iWant>define abstract interface contracts for Git platform operations</iWant>
+    <soThat>system can support GitHub, GitLab, Gitea, and Forgejo without platform-specific logic in core workflows</soThat>
+    <tasks>
+- [ ] Task 1: Design core Git platform interface structure (AC: 1)
+  - [ ] Subtask 1.1: Create IGitPlatform interface with core method signatures
+  - [ ] Subtask 1.2: Define repository, branch, PR, and issue data structures
+  - [ ] Subtask 1.3: Add TypeScript documentation for all interface methods
+- [ ] Task 2: Implement platform capabilities discovery (AC: 2)
+  - [ ] Subtask 2.1: Define PlatformCapabilities interface for discovery
+  - [ ] Subtask 2.2: Add getCapabilities() method to IGitPlatform
+  - [ ] Subtask 2.3: Create capability enums for review workflows, CI/CD, webhooks
+- [ ] Task 3: Normalize platform-specific data models (AC: 3)
+  - [ ] Subtask 3.1: Create unified PR, Issue, Branch, and CI status interfaces
+  - [ ] Subtask 3.2: Define mapping patterns for platform-specific differences
+  - [ ] Subtask 3.3: Add transformation utilities for data normalization
+- [ ] Task 4: Add pagination and rate limit support (AC: 5)
+  - [ ] Subtask 4.1: Define pagination interfaces and cursor-based navigation
+  - [ ] Subtask 4.2: Add rate limit detection and handling methods
+  - [ ] Subtask 4.3: Implement retry logic with exponential backoff for rate limits
+- [ ] Task 5: Create integration documentation (AC: 4)
+  - [ ] Subtask 5.1: Write platform integration guide for new implementations
+  - [ ] Subtask 5.2: Create example platform implementation template
+  - [ ] Subtask 5.3: Document testing procedures for new platforms
+- [ ] Task 6: Add comprehensive interface testing (AC: 1, 2, 3, 5)
+  - [ ] Subtask 6.1: Write interface contract tests for all methods
+  - [ ] Subtask 6.2: Create mock implementations for testing consumers
+  - [ ] Subtask 6.3: Add tests for pagination and rate limit handling
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Interface defines core operations: `createPR()`, `commentOnPR()`, `mergePR()`, `getIssue()`, `createBranch()`, `triggerCI()`
+2. Interface includes platform capabilities discovery (review workflows, CI/CD integration, webhook support)
+3. Interface normalizes platform-specific models (PR structure, issue format, CI status)
+4. Documentation includes integration guide for adding new platforms
+5. Interface supports pagination and rate limit handling
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Git Platform Abstraction" snippet="IGitPlatform interface with initialize, repository operations, branch operations, pull request operations, and status checks. Repository, Issue, and other data structures defined. GitHub Platform Implementation uses Octokit SDK for GitHub REST API v4 and GraphQL API with pagination handling.">
+      </doc>
+      <doc path="docs/epics.md" title="Tamma - Epic Breakdown" section="Story 1.4: Git Platform Interface Definition" snippet="Interface defines core operations: createPR(), commentOnPR(), mergePR(), getIssue(), createBranch(), triggerCI(). Interface includes platform capabilities discovery (review workflows, CI/CD integration, webhook support). Interface normalizes platform-specific models (PR structure, issue format, CI status).">
+      </doc>
+      <doc path="docs/PRD.md" title="Tamma Product Requirements Document" section="Git Platform Integration" snippet="FR-10: System shall provide abstract interface for Git platform operations supporting GitHub, GitLab, Gitea, and Forgejo with extensibility for additional platforms. FR-11: System shall integrate with platform-specific CI/CD APIs for workflow automation. FR-12: System shall integrate with platform-specific review workflow APIs for automated code review across all supported platforms.">
+      </doc>
+      <doc path="docs/architecture.md" title="Tamma - Technical Architecture" section="Technology Stack" snippet="TypeScript 5.7+ strict mode, Node.js 22 LTS, pnpm workspaces. Interface-based design pattern and plugin architecture for extensibility.">
+      </doc>
+    </docs>
+    <code>
+      <!-- No existing code found - this is a foundational interface definition story -->
+    </code>
+    <dependencies>
+      <ecosystem name="nodejs">
+        <package name="typescript" version="^5.7.0" reason="Type system and compiler for interface definitions" />
+        <package name="zod" version="^3.22.0" reason="Runtime type validation for interface schemas" />
+      </ecosystem>
+      <ecosystem name="pnpm-workspace">
+        <package name="@tamma/types" version="workspace:*" reason="Shared TypeScript types and interfaces" />
+        <package name="@tamma/config" version="workspace:*" reason="Shared configuration management (PlatformConfig)" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="package-location">Interface definitions must be placed in packages/platforms/src/types.ts following monorepo structure</constraint>
+    <constraint type="typescript-config">Use TypeScript 5.7+ strict mode with proper interface definitions and generic types for extensibility</constraint>
+    <constraint type="naming-conventions">Follow established patterns: IGitPlatform interface, PlatformCapabilities type, unified data models with descriptive names</constraint>
+    <constraint type="interface-design">Interface must define core operations: createPR, commentOnPR, mergePR, getIssue, createBranch, triggerCI</constraint>
+    <constraint type="capabilities-discovery">Interface must include getCapabilities() method for platform capabilities discovery</constraint>
+    <constraint type="data-normalization">Interface must normalize platform-specific models (PR structure, issue format, CI status) into unified interfaces</constraint>
+    <constraint type="pagination-support">Interface must support pagination and rate limit handling for large result sets</constraint>
+    <constraint type="documentation">Must include integration guide for adding new platforms with example implementations</constraint>
+    <constraint type="extensibility">Interface design must support future platforms (Gitea, Forgejo) without breaking changes</constraint>
+  </constraints>
+  <interfaces>
+    <interface name="IGitPlatform" kind="TypeScript interface" signature="interface IGitPlatform { initialize(config: PlatformConfig): Promise<void>; getRepository(owner: string, repo: string): Promise<Repository>; listIssues(repo: Repository, filters: IssueFilters): Promise<Issue[]>; getIssue(repo: Repository, issueNumber: number): Promise<Issue>; createBranch(repo: Repository, branchName: string, fromRef: string): Promise<Branch>; getBranch(repo: Repository, branchName: string): Promise<Branch>; createPullRequest(repo: Repository, params: PRCreateParams): Promise<PullRequest>; getPullRequest(repo: Repository, prNumber: number): Promise<PullRequest>; updatePullRequest(pr: PullRequest, updates: PRUpdate): Promise<PullRequest>; mergePullRequest(pr: PullRequest, method: MergeMethod): Promise<MergeResult>; getPRStatus(pr: PullRequest): Promise<PRStatus>; getChecks(pr: PullRequest): Promise<Check[]>; }" path="packages/platforms/src/types.ts">
+    </interface>
+    <interface name="Repository" kind="TypeScript interface" signature="interface Repository { owner: string; name: string; defaultBranch: string; cloneUrl: string; platform: 'github' | 'gitlab'; }" path="packages/platforms/src/types.ts">
+    </interface>
+    <interface name="Issue" kind="TypeScript interface" signature="interface Issue { number: number; title: string; body: string; state: 'open' | 'closed'; labels: string[]; assignees: string[]; createdAt: Date; updatedAt: Date; }" path="packages/platforms/src/types.ts">
+    </interface>
+    <interface name="PlatformConfig" kind="TypeScript interface" signature="interface PlatformConfig { platformType: 'github' | 'gitlab' | 'gitea' | 'forgejo'; baseUrl?: string; authToken?: string; defaultParams?: { timeout?: number; retries?: number; }; }" path="packages/platforms/src/types.ts">
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>Unit testing using Jest 29+ with TypeScript support. Interface contract tests to validate all interface methods have correct signatures. Mock implementations for testing consumers. Line coverage: 80% minimum, branch coverage: 75% minimum, function coverage: 85% minimum. Critical paths (pagination, rate limits): 100% coverage.</standards>
+    <locations>packages/platforms/src/**/*.test.ts, packages/platforms/test/**/*.test.ts</locations>
+    <ideas>
+      <test idea="Test IGitPlatform interface contract" acceptanceCriteria="1">
+        Verify all required methods exist with correct signatures
+      </test>
+      <test idea="Test platform capabilities discovery" acceptanceCriteria="2">
+        Validate getCapabilities() returns structured metadata for review workflows, CI/CD, webhooks
+      </test>
+      <test idea="Test data model normalization" acceptanceCriteria="3">
+        Verify platform-specific models are normalized into unified interfaces
+      </test>
+      <test idea="Test pagination and rate limit handling" acceptanceCriteria="5">
+        Validate interface supports pagination and respects rate limits with retry logic
+      </test>
+      <test idea="Test integration documentation examples" acceptanceCriteria="4">
+        Verify example implementations work correctly with integration guide
+      </test>
+    </ideas>
+  </tests>
+</story-context>

@@ -1,0 +1,178 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>8</storyId>
+    <title>Hybrid Orchestrator/Worker Architecture Design</title>
+    <status>drafted</status>
+    <generatedAt>2025-10-28</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>F:\Code\Repos\Tamma\docs\stories\1-8-hybrid-orchestrator-worker-architecture-design.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>system architect</asA>
+    <iWant>documented architecture for orchestrator mode and worker mode</iWant>
+    <soThat>system can operate both as autonomous coordinator and as CI/CD-invoked worker</soThat>
+    <tasks>- [ ] Task 1: Define orchestrator mode architecture (AC: 1)
+  - [ ] Subtask 1.1: Document orchestrator responsibilities and scope
+  - [ ] Subtask 1.2: Design orchestrator service architecture (Fastify server, REST API, WebSocket)
+  - [ ] Subtask 1.3: Define task queue management and worker pool coordination
+  - [ ] Subtask 1.4: Design state management and persistence strategy
+  - [ ] Subtask 1.5: Document orchestrator startup and shutdown sequences
+
+- [ ] Task 2: Define worker mode architecture (AC: 2)
+  - [ ] Subtask 2.1: Document worker responsibilities and scope
+  - [ ] Subtask 2.2: Design worker execution engine and task processing
+  - [ ] Subtask 2.3: Define orchestrator communication protocols (registration, heartbeat, task polling)
+  - [ ] Subtask 2.4: Design local resource management and isolation
+  - [ ] Subtask 2.5: Document worker startup and shutdown sequences
+
+- [ ] Task 3: Design shared components and interfaces (AC: 4)
+  - [ ] Subtask 3.1: Define shared configuration management approach
+  - [ ] Subtask 3.2: Design event emission and audit trail integration
+  - [ ] Subtask 3.3: Document logging infrastructure and structured output
+  - [ ] Subtask 3.4: Define health check endpoints and monitoring
+  - [ ] Subtask 3.5: Design error handling and recovery patterns
+
+- [ ] Task 4: Create sequence diagrams and workflows (AC: 3)
+  - [ ] Subtask 4.1: Create orchestrator startup sequence diagram
+  - [ ] Subtask 4.2: Create worker registration and task assignment sequence diagram
+  - [ ] Subtask 4.3: Create task execution and progress reporting sequence diagram
+  - [ ] Subtask 4.4: Create graceful shutdown and recovery sequence diagrams
+  - [ ] Subtask 4.5: Document error handling and retry workflows
+
+- [ ] Task 5: Define state persistence and recovery strategy (AC: 5)
+  - [ ] Subtask 5.1: Design database schema for task queue and worker registry
+  - [ ] Subtask 5.2: Define state persistence for orchestrator restart scenarios
+  - [ ] Subtask 5.3: Design in-flight task recovery mechanisms
+  - [ ] Subtask 5.4: Document data consistency and transaction handling
+  - [ ] Subtask 5.5: Define backup and disaster recovery procedures
+
+- [ ] Task 6: Document integration points and APIs (AC: 1, 2)
+  - [ ] Subtask 6.1: Define orchestrator REST API specification
+  - [ ] Subtask 6.2: Document WebSocket events for real-time progress
+  - [ ] Subtask 6.3: Define worker-to-orchestrator communication protocols
+  - [ ] Subtask 6.4: Document configuration schema for both modes
+  - [ ] Subtask 6.5: Create integration testing guidelines
+
+- [ ] Task 7: Architecture review and approval (AC: 6)
+  - [ ] Subtask 7.1: Conduct technical architecture review
+  - [ ] Subtask 7.2: Validate against PRD requirements and constraints
+  - [ ] Subtask 7.3: Review security and performance considerations
+  - [ ] Subtask 7.4: Document architecture decisions and trade-offs
+  - [ ] Subtask 7.5: Obtain technical lead approval and sign-off</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Architecture document defines orchestrator mode responsibilities (issue selection, loop coordination, state management)
+2. Architecture document defines worker mode responsibilities (CI/CD integration, single-task execution, exit codes)
+3. Document includes sequence diagrams for both modes
+4. Document specifies shared components (AI abstraction, Git abstraction, quality gates)
+5. Document defines state persistence strategy for graceful shutdown/restart
+6. Architecture reviewed and approved by technical lead</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Hybrid Architecture Design (Story 1-8)" snippet="Orchestrator Mode: Fastify HTTP server on configurable port (default 3000), RESTful API for workflow submission, status queries, cancellation, WebSocket endpoint for real-time progress streaming, Task queue manager using PostgreSQL for persistence, Worker pool management with health checks, Event bus integration for DCB event sourcing" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Hybrid Architecture Design (Story 1-8)" snippet="Worker Mode: Stateless execution engine, Polling mechanism for task queue (alternative: push via message broker), Local file system access for repository cloning, AI provider and Git platform client initialization, Result reporting back to orchestrator via HTTP callback, Graceful shutdown handling for in-flight tasks" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Hybrid Architecture Design (Story 1-8)" snippet="Shared Components: Configuration loader from packages/config, Event emitter for audit trail generation, Logging infrastructure with structured output, Health check endpoints (orchestrator: /health, worker: internal)" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Orchestrator REST API" snippet="POST /api/v1/tasks # Submit new task, GET /api/v1/tasks # List all tasks, GET /api/v1/tasks/:id # Get task details, DELETE /api/v1/tasks/:id # Cancel task, WS /api/v1/tasks/:id/stream # Stream task progress, POST /api/v1/workers/register # Worker registration, POST /api/v1/workers/:id/heartbeat # Worker heartbeat, GET /api/v1/workers # List registered workers, GET /health # Health check, GET /metrics # Prometheus metrics" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Configuration API" snippet="interface IConfigService { load(configPath: string): Promise<TammaConfig>; save(config: TammaConfig, configPath: string): Promise<void>; validate(config: TammaConfig): ValidationResult; merge(base: TammaConfig, override: Partial<TammaConfig>): TammaConfig; }" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Orchestrator Startup Sequence" snippet="1. Parse CLI args (mode=orchestrator), 2. Load TammaConfig, 3. Initialize database connection pool (PostgreSQL), 4. Initialize provider and platform registries, 5. Start Fastify server, 6. Initialize task queue manager, 7. Start worker health check loop (every 30s), 8. Emit 'orchestrator.started' event, 9. Log 'Orchestrator listening on :3000'" />
+      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Worker Startup Sequence" snippet="1. Parse CLI args (mode=worker), 2. Load TammaConfig, 3. Initialize provider and platform registries, 4. Register with orchestrator: POST /api/v1/workers/register, 5. Start heartbeat loop (every 10s), 6. Start task polling loop (every 5s): a. Request next task from orchestrator, b. If task available, execute workflow, c. Report progress via callbacks, d. Report completion/failure, 7. Log 'Worker registered with orchestrator'" />
+      <doc path="docs/architecture.md" title="Tamma - Technical Architecture" section="Project Structure" snippet="packages/orchestrator/: Orchestrator service, packages/worker/: Background job workers, packages/cli/: Ink-based CLI interface" />
+      <doc path="docs/epics.md" title="Tamma - Epic Breakdown" section="Story 1.8: Hybrid Orchestrator/Worker Architecture Design" snippet="As a system architect, I want documented architecture for orchestrator mode and worker mode, so that system can operate both as autonomous coordinator and as CI/CD-invoked worker" />
+    </docs>
+    <code>
+      <code path="packages/orchestrator/src/index.ts" kind="class" symbol="Orchestrator" lines="1-50" reason="Main orchestrator service class implementing HTTP server, task queue management, and worker coordination" />
+      <code path="packages/orchestrator/src/orchestrator.ts" kind="class" symbol="OrchestratorService" lines="1-100" reason="Core orchestrator logic for task management, worker pool, and state persistence" />
+      <code path="packages/orchestrator/src/task-queue.ts" kind="class" symbol="TaskQueueManager" lines="1-80" reason="Task queue management using PostgreSQL for persistence and worker assignment" />
+      <code path="packages/orchestrator/src/worker-pool.ts" kind="class" symbol="WorkerPool" lines="1-60" reason="Worker registration, health monitoring, and task assignment logic" />
+      <code path="packages/worker/src/index.ts" kind="class" symbol="Worker" lines="1-40" reason="Main worker class implementing stateless task execution and orchestrator communication" />
+      <code path="packages/worker/src/worker.ts" kind="class" symbol="WorkerService" lines="1-80" reason="Worker execution engine for task processing, progress reporting, and result callbacks" />
+      <code path="packages/worker/src/task-executor.ts" kind="class" symbol="TaskExecutor" lines="1-100" reason="Task execution logic with AI provider and Git platform integration" />
+      <code path="packages/cli/src/index.ts" kind="class" symbol="TammaCLI" lines="1-50" reason="CLI entry point with mode selection and configuration initialization" />
+      <code path="packages/orchestrator/src/routes/" kind="directory" symbol="API Routes" lines="1-200" reason="REST API endpoints for task management, worker registration, and health checks" />
+      <code path="packages/orchestrator/migrations/" kind="directory" symbol="Database Migrations" lines="1-100" reason="PostgreSQL schema definitions for task queue and worker registry" />
+    </code>
+    <dependencies>
+      <ecosystem name="nodejs">
+        <package name="@tamma/config" version="workspace:*" reason="Shared configuration management infrastructure" />
+        <package name="@tamma/types" version="workspace:*" reason="Shared TypeScript types and interfaces" />
+        <package name="@tamma/logger" version="workspace:*" reason="Shared logging infrastructure" />
+        <package name="@tamma/events" version="workspace:*" reason="Event emitter for DCB event sourcing" />
+        <package name="@tamma/providers" version="workspace:*" reason="AI provider abstraction for task execution" />
+        <package name="@tamma/platforms" version="workspace:*" reason="Git platform abstraction for repository operations" />
+        <package name="fastify" version="^4.26.0" reason="High-performance web framework for HTTP server and WebSocket support" />
+        <package name="@fastify/websocket" version="^10.0.0" reason="WebSocket support for real-time progress streaming" />
+        <package name="@fastify/cors" version="^9.0.0" reason="CORS handling for cross-origin requests" />
+        <package name="pg" version="^8.11.0" reason="PostgreSQL client for task queue persistence" />
+        <package name="knex" version="^3.1.0" reason="SQL query builder and migration tool" />
+        <package name="node-cron" version="^3.0.0" reason="Scheduled task execution for health checks and cleanup" />
+      </ecosystem>
+      <ecosystem name="typescript">
+        <package name="typescript" version="^5.7.0" reason="TypeScript compiler and language service" />
+        <package name="@types/node" version="^22.0.0" reason="Node.js type definitions" />
+        <package name="@types/pg" version="^8.10.0" reason="PostgreSQL type definitions" />
+        <package name="@types/node-cron" version="^3.0.0" reason="Node-cron type definitions" />
+      </ecosystem>
+      <ecosystem name="testing">
+        <package name="vitest" version="^3.2.0" reason="Unit testing framework" />
+        <package name="@vitest/mock" version="^3.2.0" reason="Mocking utilities for tests" />
+        <package name="supertest" version="^6.3.0" reason="HTTP endpoint testing for orchestrator API" />
+      </ecosystem>
+      <ecosystem name="monitoring">
+        <package name="pino" version="^9.6.0" reason="Structured JSON logging" />
+        <package name="prom-client" version="^15.1.0" reason="Prometheus metrics collection" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="architecture" description="Implements hybrid architecture pattern supporting both orchestrator (stateful coordinator) and worker (stateless executor) modes" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Orchestrator mode: Fastify HTTP server, REST API, WebSocket streaming, PostgreSQL task queue, worker pool management" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Worker mode: Stateless execution engine, task polling, local filesystem access, result reporting via HTTP callbacks" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Shared components: Configuration loader, event emitter, logging infrastructure, health check endpoints" source="Story Dev Notes - Architecture Context" />
+    <constraint type="architecture" description="Integrates with AI provider abstraction from Stories 1.1-1.3 and Git platform abstraction from Stories 1.4-1.7" source="Story Dev Notes - Architecture Context" />
+    <constraint type="project-structure" description="Implementation location: packages/orchestrator/ and packages/worker/" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Orchestrator components: src/index.ts, src/orchestrator.ts, src/task-queue.ts, src/worker-pool.ts" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Worker components: src/index.ts, src/worker.ts, src/task-executor.ts" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Shared components: packages/config/, packages/events/, packages/logger/" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="API routes: packages/orchestrator/src/routes/" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="project-structure" description="Database migrations: packages/orchestrator/migrations/" source="Story Dev Notes - Project Structure Notes" />
+    <constraint type="technology" description="Fastify web framework for HTTP server and WebSocket support" source="Story Dev Notes - Technology Stack" />
+    <constraint type="technology" description="PostgreSQL for task queue persistence and worker registry" source="Story Dev Notes - Technology Stack" />
+    <constraint type="technology" description="Event bus integration for DCB event sourcing" source="Story Dev Notes - Technology Stack" />
+    <constraint type="technology" description="Structured logging with Pino" source="Story Dev Notes - Technology Stack" />
+    <constraint type="technology" description="Health check endpoints for monitoring and observability" source="Story Dev Notes - Technology Stack" />
+    <constraint type="performance" description="Orchestrator: Support minimum 10 concurrent workers, Handle minimum 50 queued tasks, Task queue operations: < 50ms (p95)" source="Tech Spec - Performance Requirements" />
+    <constraint type="performance" description="Worker: Support 1 concurrent task execution (configurable up to 3), Task completion reporting: < 100ms (p95)" source="Tech Spec - Performance Requirements" />
+    <constraint type="security" description="Worker-to-orchestrator authentication via shared secret (JWT) for Epic 1, upgrade to asymmetric keys in Epic 3" source="Tech Spec - Security Requirements" />
+    <constraint type="security" description="All orchestrator-worker communication over HTTPS (or mTLS for production)" source="Tech Spec - Security Requirements" />
+    <constraint type="reliability" description="Graceful shutdown: Orchestrator wait for in-flight tasks (up to 30s), Worker complete current task (up to 5min)" source="Tech Spec - Reliability Requirements" />
+    <constraint type="reliability" description="State persistence: Task queue persisted to PostgreSQL, Worker registry with heartbeat timeout detection" source="Tech Spec - Reliability Requirements" />
+  </constraints>
+  <interfaces>
+    <interface name="CLIConfig" kind="TypeScript interface" signature="interface CLIConfig { mode: 'orchestrator' | 'worker' | 'standalone'; configFile?: string; verbose?: boolean; }" path="packages/cli/src/types.ts" />
+    <interface name="IConfigService" kind="TypeScript interface" signature="interface IConfigService { load(configPath: string): Promise<TammaConfig>; save(config: TammaConfig, configPath: string): Promise<void>; validate(config: TammaConfig): ValidationResult; merge(base: TammaConfig, override: Partial<TammaConfig>): TammaConfig; }" path="packages/config/src/types.ts" />
+    <interface name="WorkflowTask" kind="TypeScript interface" signature="interface WorkflowTask { taskId: string; workflowType: 'autonomous-dev' | 'manual-assist'; issueReference: { platform: string; repository: string; issueNumber: number; }; status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'; assignedWorker?: string; createdAt: Date; startedAt?: Date; completedAt?: Date; error?: ErrorDetail; }" path="packages/shared/src/types.ts" />
+    <interface name="WorkerRegistration" kind="TypeScript interface" signature="interface WorkerRegistration { workerId: string; hostname: string; capabilities: { aiProviders: string[]; gitPlatforms: string[]; maxConcurrentTasks: number; }; status: 'idle' | 'busy' | 'offline'; lastHeartbeat: Date; }" path="packages/shared/src/types.ts" />
+    <interface name="OrchestratorService" kind="TypeScript class" signature="class OrchestratorService { constructor(config: TammaConfig); start(): Promise<void>; stop(): Promise<void>; submitTask(task: WorkflowTask): Promise<string>; getTask(taskId: string): Promise<WorkflowTask>; cancelTask(taskId: string): Promise<void>; registerWorker(worker: WorkerRegistration): Promise<void>; updateWorkerHeartbeat(workerId: string): Promise<void>; }" path="packages/orchestrator/src/orchestrator.ts" />
+    <interface name="WorkerService" kind="TypeScript class" signature="class WorkerService { constructor(config: TammaConfig); start(): Promise<void>; stop(): Promise<void>; registerWithOrchestrator(): Promise<void>; startHeartbeat(): void; startTaskPolling(): void; executeTask(task: WorkflowTask): Promise<void>; reportProgress(taskId: string, progress: TaskProgress): Promise<void>; reportCompletion(taskId: string, result: TaskResult): Promise<void>; }" path="packages/worker/src/worker.ts" />
+  </interfaces>
+  <tests>
+    <standards>Unit testing using Vitest 3.2+ with TypeScript support. Coverage targets: Line coverage 80% minimum, Branch coverage 75% minimum, Function coverage 85% minimum, Critical paths (error handling, retry logic) 100%. Integration testing using Supertest for HTTP endpoints. Mock external APIs using MSW (Mock Service Worker). Mock database using in-memory SQLite for fast tests. Performance testing using Artillery.io for load testing orchestrator API endpoints.</standards>
+    <locations>packages/orchestrator/src/**/*.test.ts for orchestrator service tests, packages/worker/src/**/*.test.ts for worker service tests, packages/cli/src/**/*.test.ts for CLI mode selection tests, packages/orchestrator/test/integration/ for orchestrator API integration tests, packages/worker/test/integration/ for worker-orchestrator integration tests, packages/orchestrator/test/performance/ for load testing</locations>
+    <ideas>
+      <test idea="Test orchestrator startup and shutdown sequences" acceptanceCriteria="1,5" description="Verify orchestrator initializes database, starts Fastify server, registers routes, and shuts down gracefully" />
+      <test idea="Test worker registration and heartbeat" acceptanceCriteria="2" description="Verify workers can register with orchestrator, send heartbeats, and handle connection failures" />
+      <test idea="Test task submission and assignment" acceptanceCriteria="1,2" description="Verify tasks can be submitted via REST API and assigned to available workers" />
+      <test idea="Test task execution and progress reporting" acceptanceCriteria="2" description="Verify workers can execute tasks and report progress back to orchestrator via callbacks" />
+      <test idea="Test WebSocket real-time progress streaming" acceptanceCriteria="3" description="Verify clients can connect to WebSocket endpoint and receive real-time task progress updates" />
+      <test idea="Test graceful shutdown scenarios" acceptanceCriteria="5" description="Verify orchestrator waits for in-flight tasks and workers complete current tasks before shutdown" />
+      <test idea="Test state persistence and recovery" acceptanceCriteria="5" description="Verify task queue and worker registry persist across orchestrator restarts" />
+      <test idea="Test CLI mode selection" acceptanceCriteria="1,2" description="Verify CLI can start in orchestrator, worker, and standalone modes with proper configuration" />
+      <test idea="Test shared component integration" acceptanceCriteria="4" description="Verify configuration loading, event emission, and logging work correctly across both modes" />
+      <test idea="Performance test orchestrator throughput" acceptanceCriteria="1" description="Test orchestrator can handle 5 tasks/second submission rate with minimum 50 queued tasks" />
+    </ideas>
+  </tests>
+</story-context>
