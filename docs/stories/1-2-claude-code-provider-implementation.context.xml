@@ -3,8 +3,8 @@
     <epicId>1</epicId>
     <storyId>2</storyId>
     <title>Claude Code Provider Implementation</title>
-    <status>drafted</status>
-    <generatedAt>2025-10-28</generatedAt>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-10-29</generatedAt>
     <generator>BMAD Story Context Workflow</generator>
     <sourceStoryPath>docs/stories/1-2-claude-code-provider-implementation.md</sourceStoryPath>
   </metadata>

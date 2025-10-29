@@ -78,7 +78,7 @@ so that the system can support GitHub, GitLab, Gitea, and Forgejo without platfo
 
 | Date | Version | Changes | Author |
 |------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | BMad (Scrum Master) |
+| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
 
 ## Dev Agent Record
 

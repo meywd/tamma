@@ -1,7 +1,7 @@
 # Epic Technical Specification: Autonomous Development Loop - Core
 
 Date: 2025-10-28
-Author: BMad
+Author: meywd
 Epic ID: 2
 Status: Draft
 

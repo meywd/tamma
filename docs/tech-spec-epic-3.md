@@ -1,7 +1,7 @@
 # Epic Technical Specification: Quality Gates & Intelligence Layer
 
 Date: 2025-10-28
-Author: BMad
+Author: meywd
 Epic ID: 3
 Status: Draft
 

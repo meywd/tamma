@@ -89,7 +89,7 @@ so that I can validate the platform abstraction with the most popular Git hostin
 
 | Date | Version | Changes | Author |
 |------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | BMad (Scrum Master) |
+| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
 
 ## Dev Agent Record
 

@@ -1,0 +1,163 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>12</storyId>
+    <title>Initial Marketing Website (Cloudflare Workers)</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-10-29</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/stories/1-12-initial-marketing-website.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>project maintainer</asA>
+    <iWant>an initial marketing website hosted on Cloudflare Workers</iWant>
+    <soThat>early adopters can learn about Tamma and sign up for updates before the full documentation site launches</soThat>
+    <tasks>Task 1: Design and content creation (AC: 1, 2, 6)
+  Subtask 1.1: Write homepage copy (tagline, key features, CTA)
+  Subtask 1.2: Design wireframe/mockup (responsive layout)
+  Subtask 1.3: Create logo and brand assets (or use placeholder)
+  Subtask 1.4: Write "Why Tamma?" section explaining self-maintenance goal
+  Subtask 1.5: Create roadmap visualization (timeline or milestone cards)
+
+Task 2: Cloudflare Workers setup (AC: 1)
+  Subtask 2.1: Create Cloudflare account and set up Workers project
+  Subtask 2.2: Configure custom domain (DNS, SSL certificate)
+  Subtask 2.3: Set up Cloudflare Pages for static site hosting (alternative to Workers)
+  Subtask 2.4: Configure caching and CDN settings
+
+Task 3: Email signup implementation (AC: 3)
+  Subtask 3.1: Create HTML form with email input and submit button
+  Subtask 3.2: Implement serverless function to handle form submission
+  Subtask 3.3: Store emails in Cloudflare KV or integrate with Mailchimp/ConvertKit
+  Subtask 3.4: Send confirmation email to subscribers (optional)
+  Subtask 3.5: Add email validation and anti-spam protection (reCAPTCHA or hCaptcha)
+
+Task 4: Content pages (AC: 4, 9)
+  Subtask 4.1: Create GitHub repo link with clear CTA ("Get Early Access")
+  Subtask 4.2: Write privacy policy (template from privacy policy generator)
+  Subtask 4.3: Write terms of service (template)
+  Subtask 4.4: Add footer with links to policies and GitHub
+
+Task 5: Responsive design and performance (AC: 7)
+  Subtask 5.1: Implement responsive CSS (mobile-first approach)
+  Subtask 5.2: Test on mobile devices (iOS Safari, Android Chrome)
+  Subtask 5.3: Optimize images (WebP format, lazy loading)
+  Subtask 5.4: Minimize CSS/JS (inline critical CSS, defer non-critical)
+  Subtask 5.5: Test load time with Lighthouse (<1 second target)
+
+Task 6: SEO and social sharing (AC: 8)
+  Subtask 6.1: Add meta tags (title, description, keywords)
+  Subtask 6.2: Add Open Graph tags for Facebook/LinkedIn sharing
+  Subtask 6.3: Add Twitter Card tags for Twitter sharing
+  Subtask 6.4: Add structured data (JSON-LD for rich snippets)
+  Subtask 6.5: Create sitemap.xml and robots.txt
+
+Task 7: Analytics and monitoring (AC: 10)
+  Subtask 7.1: Integrate Cloudflare Web Analytics (privacy-respecting, no cookies)
+  Subtask 7.2: Set up monitoring for email signup success rate
+  Subtask 7.3: Add error tracking (Cloudflare Workers logging)
+
+Task 8: Testing and deployment (AC: 1-10)
+  Subtask 8.1: Test all links and email signup flow
+  Subtask 8.2: Test responsive design on multiple devices
+  Subtask 8.3: Deploy to Cloudflare Workers/Pages
+  Subtask 8.4: Test production site (DNS, SSL, load time)
+  Subtask 8.5: Announce site on GitHub README and social media</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Static website hosted on Cloudflare Workers with custom domain (tamma.dev or similar)
+2. Homepage includes: project name, tagline, key features overview, "Coming Soon" message
+3. Email signup form for launch notifications (stores emails in Cloudflare KV or external service)
+4. Link to GitHub repository for early access
+5. Roadmap section showing Epic 1-5 timeline and MVP goals
+6. "Why Tamma?" section explaining self-maintenance goal and multi-provider support
+7. Responsive design (mobile, tablet, desktop) with fast load times (<1 second)
+8. SEO optimization (meta tags, Open Graph, Twitter Cards)
+9. Privacy policy and terms of service pages (basic)
+10. Analytics integration (privacy-respecting: Cloudflare Web Analytics or Plausible)</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>Goals & Background Context</section>
+        <snippet>Tamma's goal is to create an autonomous development platform that maintains itself, with 70%+ completion rate without human intervention.</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Overview</title>
+        <section>System Design</section>
+        <snippet>Hybrid orchestrator/worker architecture with event sourcing foundation for deterministic replay and audit trails.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epic Breakdown</title>
+        <section>Roadmap Timeline</section>
+        <snippet>Epic 1-5 covering Foundation, Autonomous Workflow, Intelligence, Event Sourcing, and Production Readiness across 10-week development cycle.</snippet>
+      </doc>
+      <doc>
+        <path>docs/tech-spec-epic-1.md</path>
+        <title>Epic 1 Technical Specification</title>
+        <section>Foundation Requirements</section>
+        <snippet>Multi-provider AI abstraction, Git platform integration, and hybrid deployment modes with comprehensive configuration management.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <!-- No existing code artifacts found - this is a foundational marketing story -->
+    </code>
+    <dependencies>
+      <ecosystem name="web">
+        <packages>
+          <package name="cloudflare-workers" version="latest" />
+          <package name="cloudflare-kv" version="latest" />
+          <package name="cloudflare-pages" version="latest" />
+          <package name="cloudflare-analytics" version="latest" />
+        </packages>
+      </ecosystem>
+      <ecosystem name="email">
+        <packages>
+          <package name="mailchimp-api" version="latest" optional="true" />
+          <package name="convertkit-api" version="latest" optional="true" />
+        </packages>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="Hosting Platform">Must use Cloudflare Workers or Cloudflare Pages for global CDN and serverless capabilities</constraint>
+    <constraint name="Performance">Target load times <1 second, Lighthouse score 95+ across all metrics</constraint>
+    <constraint name="Responsive Design">Mobile-first approach with support for mobile, tablet, and desktop viewports</constraint>
+    <constraint name="Privacy">Use privacy-respecting analytics (Cloudflare Web Analytics or Plausible), no cookies required</constraint>
+    <constraint name="SEO">Complete meta tags, Open Graph, Twitter Cards, structured data, sitemap.xml</constraint>
+    <constraint name="Email Collection">Simple email storage in Cloudflare KV or external service with validation and anti-spam</constraint>
+    <constraint name="Brand Consistency">Follow established color scheme (blue #2563eb, green #10b981) and typography (Inter/sans-serif)</constraint>
+    <constraint name="Content">Focus on self-maintenance value proposition and multi-provider flexibility as key differentiators</constraint>
+  </constraints>
+
+  <interfaces>
+    <!-- No existing interfaces - this is a new marketing site implementation -->
+  </interfaces>
+
+  <tests>
+    <standards>Manual testing approach for marketing site with focus on responsive design, load performance, SEO validation, and email signup functionality. Use Lighthouse for automated performance and accessibility testing.</standards>
+    <locations>
+      <location>Manual testing across devices (iOS Safari, Android Chrome, desktop browsers)</location>
+      <location>Google Lighthouse for performance, accessibility, SEO scoring</location>
+      <location>Cloudflare Workers testing environment for serverless functions</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Verify Cloudflare Workers deployment with custom domain and SSL certificate</test>
+      <test idea="AC2">Test homepage content display and "Coming Soon" messaging</test>
+      <test idea="AC3">Test email signup form submission and storage in Cloudflare KV</test>
+      <test idea="AC4">Verify GitHub repository link functionality and tracking</test>
+      <test idea="AC5">Test roadmap section display and timeline visualization</test>
+      <test idea="AC6">Verify "Why Tamma?" section content and self-maintenance messaging</test>
+      <test idea="AC7">Test responsive design on mobile (320px+), tablet (768px+), desktop (1024px+)</test>
+      <test idea="AC8">Validate SEO meta tags, Open Graph, Twitter Cards with social sharing tools</test>
+      <test idea="AC9">Test privacy policy and terms of service page accessibility</test>
+      <test idea="AC10">Verify Cloudflare Analytics integration and privacy compliance</test>
+    </ideas>
+  </tests>
+</story-context>

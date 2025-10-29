@@ -157,7 +157,7 @@ so that I can make informed decisions about which AI providers to support and wh
 
 | Date | Version | Changes | Author |
 |------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial research story creation | BMad (Scrum Master) |
+| 2025-10-28 | 1.0.0 | Initial research story creation | Bob (Scrum Master) |
 
 ## Research Agent Record
 

@@ -1,6 +1,6 @@
 # Tamma Product Requirements Document (PRD)
 
-**Author:** BMad
+**Author:** meywd
 **Date:** 2025-10-27
 **Project Level:** 3
 **Target Scale:** Complex System - 15-40 stories across 2-5 epics
@@ -132,6 +132,22 @@ Tamma is a hybrid development automation platform that orchestrates autonomous d
 **FR-33:** System shall scan code and dependencies for security vulnerabilities and auto-fix issues through fork/fix/PR workflow
 
 **FR-34:** System shall require manual approval for breaking changes (NEVER auto-approve), large refactors, and deletions
+
+**Website & Documentation:**
+
+**FR-35:** System shall provide initial marketing website (hosted on Cloudflare Workers) with project overview, key features, roadmap, email signup for launch notifications, and GitHub repository link **(MVP Critical - Epic 1.5 Story 1-12)**
+
+**FR-36:** System shall provide comprehensive documentation website with searchable docs, installation guides, configuration reference, API documentation, tutorials, and troubleshooting guides **(MVP Critical - Epic 5 Stories 5.9a-5.9d)**
+
+**Deployment & Packaging:**
+
+**FR-37:** System shall support multiple deployment modes: CLI (interactive terminal), Service Mode (background daemon), Web Server (REST API), Container (Docker), and Kubernetes (cluster) with unified configuration across all modes **(MVP Critical - Epic 1.5 Stories 1.5-1 through 1.5-5, 1.5-10 optional)**
+
+**FR-38:** System shall publish npm packages (@tamma/cli, @tamma/core, @tamma/server) to npm registry with semantic versioning and automated release pipeline **(MVP Critical - Epic 1.5 Story 1.5-8)**
+
+**FR-39:** System shall provide standalone binary releases (Windows, macOS, Linux) and OS-specific installers (Homebrew, Chocolatey, APT, Snap) for non-Node.js users **(MVP Critical - Epic 1.5 Story 1.5-9)**
+
+**FR-40:** System shall integrate with GitHub and GitLab webhooks for automatic triggering on issue assignment, PR creation, or issue comment events with webhook signature verification **(MVP Critical - Epic 1.5 Story 1.5-6)**
 
 ### Non-Functional Requirements
 

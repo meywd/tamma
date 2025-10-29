@@ -1,7 +1,7 @@
 # Epic Technical Specification: Foundation & Core Infrastructure
 
 Date: 2025-10-28
-Author: BMad
+Author: meywd
 Epic ID: 1
 Status: Draft
 

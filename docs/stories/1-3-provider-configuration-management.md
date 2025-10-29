@@ -83,7 +83,7 @@ so that I can easily switch providers or configure provider-specific parameters.
 
 | Date | Version | Changes | Author |
 |------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | BMad (Scrum Master) |
+| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
 
 ## Dev Agent Record
 

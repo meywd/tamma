@@ -87,7 +87,7 @@ so that I can validate the provider abstraction with a real implementation.
 
 | Date | Version | Changes | Author |
 |------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | BMad (Scrum Master) |
+| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
 | 2025-10-28 | 1.1.0 | Added prerequisite Story 1-0, clarified Anthropic Claude API (not Claude Code tool), made MCP integration TBD pending research | Bob (Scrum Master) |
 
 ## Dev Agent Record

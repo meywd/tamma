@@ -1,6 +1,6 @@
 # Tamma - Epic Breakdown
 
-**Author:** BMad
+**Author:** meywd
 **Date:** 2025-10-27
 **Project Level:** 3
 **Target Scale:** Complex System - 42-52 stories across 5 epics
@@ -31,9 +31,9 @@ Each epic includes:
 
 **Goal:** Establish foundational architecture decisions and integration capabilities before feature development begins.
 
-**Value Delivered:** Multi-provider AI flexibility (8 providers: Anthropic Claude, OpenAI, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local LLMs), multi-platform Git support (7 platforms: GitHub, GitLab, Gitea, Forgejo, Bitbucket, Azure DevOps, plain Git), architectural foundation for autonomous loops.
+**Value Delivered:** Multi-provider AI flexibility (8 providers: Anthropic Claude, OpenAI, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local LLMs), multi-platform Git support (7 platforms: GitHub, GitLab, Gitea, Forgejo, Bitbucket, Azure DevOps, plain Git), architectural foundation for autonomous loops, initial web presence for community building.
 
-**Estimated Stories:** 12 stories
+**Estimated Stories:** 13 stories
 
 ---
 
@@ -219,6 +219,28 @@ So that I can test mode switching and validate the hybrid architecture design.
 
 ---
 
+### **Story 1-12: Initial Marketing Website (Cloudflare Workers)**
+
+As a **project maintainer**,
+I want an initial marketing website hosted on Cloudflare Workers,
+So that early adopters can learn about Tamma and sign up for updates before the full documentation site launches.
+
+**Acceptance Criteria:**
+1. Static website hosted on Cloudflare Workers with custom domain (tamma.dev or similar)
+2. Homepage includes: project name, tagline, key features overview, "Coming Soon" message
+3. Email signup form for launch notifications (stores emails in Cloudflare KV or external service)
+4. Link to GitHub repository for early access
+5. Roadmap section showing Epic 1-5 timeline and MVP goals
+6. "Why Tamma?" section explaining self-maintenance goal and multi-provider support
+7. Responsive design (mobile, tablet, desktop) with fast load times (<1 second)
+8. SEO optimization (meta tags, Open Graph, Twitter Cards)
+9. Privacy policy and terms of service pages (basic)
+10. Analytics integration (privacy-respecting: Cloudflare Web Analytics or Plausible)
+
+**Prerequisites:** None (foundational marketing story, can be done early in Epic 1)
+
+---
+
 ### **Story 1-10: Additional AI Provider Implementations**
 
 As a **Tamma operator**,
@@ -261,6 +283,218 @@ So that I can use Tamma with my preferred Git hosting service regardless of vend
 9. Documentation includes platform comparison matrix and setup instructions for each platform
 
 **Prerequisites:** Story 1.4 (interface must exist), Story 1.5 (GitHub reference implementation), Story 1.6 (GitLab reference implementation)
+
+---
+
+## Epic 1.5: Deployment, Packaging & Operations (Weeks 2-3, Parallel with Epic 2)
+
+**Goal:** Enable flexible deployment of Tamma across multiple hosting environments (CLI, service, web, container, cluster) and package for distribution via npm, binaries, and installers.
+
+**Value Delivered:** Production-ready deployment options, npm package distribution, standalone binaries, webhook integration, system configuration management, enabling self-hosting and CI/CD integration.
+
+**MVP Critical:** Stories 1.5-1 through 1.5-9 are **MVP CRITICAL** - Tamma cannot self-maintain without deployment infrastructure, webhooks for triggering, and packaging for distribution.
+
+**MVP Optional:** Story 1.5-10 (Kubernetes deployment) deferred to post-MVP.
+
+**Estimated Stories:** 10 stories (9 MVP critical, 1 optional)
+
+---
+
+### **Story 1.5-1: Core Engine Separation** ⭐ **MVP CRITICAL**
+
+As a **system architect**,
+I want the core orchestration engine separated from launch mechanisms,
+So that Tamma can be deployed flexibly across CLI, service, web, and container environments.
+
+**Acceptance Criteria:**
+1. Core engine extracted into `@tamma/core` package (workflow, quality gates, providers)
+2. Launch wrappers created: `@tamma/cli`, `@tamma/server`, `@tamma/worker`
+3. Core engine has no dependencies on launch mechanism (HTTP server, CLI parsing)
+4. Core engine exports: `TammaEngine` class, `WorkflowOrchestrator`, `QualityGates`
+5. Launch wrappers are thin adapters (CLI parses args → calls core, server handles HTTP → calls core)
+6. All existing tests pass after refactoring (no functionality changes)
+
+**Prerequisites:** Story 1.9 (CLI scaffolding must exist to refactor)
+
+---
+
+### **Story 1.5-2: CLI Mode Enhancement** ⭐ **MVP CRITICAL**
+
+As a **developer**,
+I want enhanced CLI with interactive setup wizard and single-command execution,
+So that I can quickly configure and run Tamma without manual config file editing.
+
+**Acceptance Criteria:**
+1. `tamma init` command launches interactive setup wizard (AI provider, Git platform, config file location)
+2. `tamma run issue-123` executes autonomous loop for specific issue
+3. `tamma config list` displays current configuration
+4. `tamma config set key=value` updates configuration without editing files
+5. `tamma logs` displays structured logs with filtering (level, timestamp, correlation ID)
+6. `tamma status` shows orchestrator/worker status (running, stopped, jobs in queue)
+7. All CLI commands include `--help` with usage examples
+
+**Prerequisites:** Story 1.5-1 (core engine separation)
+
+---
+
+### **Story 1.5-3: Service Mode Implementation** ⭐ **MVP CRITICAL**
+
+As a **system administrator**,
+I want Tamma to run as a background service (daemon),
+So that it can continuously monitor for new issues and execute autonomous loops without manual invocation.
+
+**Acceptance Criteria:**
+1. `tamma service install` installs system service (systemd on Linux, Windows Service on Windows, launchd on macOS)
+2. `tamma service start|stop|restart|status` manages service lifecycle
+3. Service runs as non-root user with appropriate permissions
+4. Service logs to system journal (Linux: journalctl, Windows: Event Viewer, macOS: Console)
+5. Service survives system reboot (auto-start enabled)
+6. Service handles graceful shutdown (SIGTERM waits for current job completion, max 30s)
+7. Service PID file prevents multiple instances (`/var/run/tamma.pid` or equivalent)
+
+**Prerequisites:** Story 1.5-2 (CLI enhancement provides service commands)
+
+---
+
+### **Story 1.5-4: Web Server & API** ⭐ **MVP CRITICAL**
+
+As a **DevOps engineer**,
+I want a RESTful API for job submission and webhook receiver,
+So that Tamma can be triggered remotely from CI/CD pipelines or Git platform webhooks.
+
+**Acceptance Criteria:**
+1. `tamma server` starts Fastify HTTP server on configurable port (default: 3000)
+2. `POST /api/v1/jobs` creates new autonomous loop job (body: `{issueId, repositoryUrl}`)
+3. `GET /api/v1/jobs/:id` returns job status (pending, running, completed, failed)
+4. `POST /webhooks/github` receives GitHub webhooks (issue created, issue assigned)
+5. `POST /webhooks/gitlab` receives GitLab webhooks (issue created, issue assigned)
+6. `GET /health` returns health status (200 OK if healthy, 503 if degraded)
+7. `GET /ready` returns readiness status (200 OK if ready to accept jobs)
+8. JWT authentication required for `/api/v1/*` endpoints (configurable secret)
+9. HMAC signature verification for webhooks (GitHub/GitLab secrets)
+
+**Prerequisites:** Story 1.5-1 (core engine separation)
+
+---
+
+### **Story 1.5-5: Docker Packaging** ⭐ **MVP CRITICAL**
+
+As a **DevOps engineer**,
+I want Docker images and Docker Compose configuration,
+So that I can deploy Tamma with containers alongside PostgreSQL and workers.
+
+**Acceptance Criteria:**
+1. Multi-stage Dockerfile builds optimized production image (Node.js Alpine base, <500MB)
+2. Docker image published to Docker Hub (`tamma/tamma:latest`, `tamma/tamma:v0.1.0-alpha`)
+3. Docker Compose file includes: orchestrator service, PostgreSQL service, worker service (3 replicas)
+4. Environment variable configuration (AI_PROVIDER_KEY, DATABASE_URL, PORT, etc.)
+5. Volume mounts for configuration persistence (`/etc/tamma/config.yaml`)
+6. Health checks configured (HEALTHCHECK instruction in Dockerfile)
+7. Restart policies configured (`restart: unless-stopped`)
+8. Docker Compose `docker-compose up` starts full Tamma stack
+
+**Prerequisites:** Story 1.5-4 (web server for orchestrator)
+
+---
+
+### **Story 1.5-6: Webhook Integration** ⭐ **MVP CRITICAL**
+
+As a **repository administrator**,
+I want Tamma to automatically respond to GitHub/GitLab webhooks,
+So that autonomous loops are triggered when issues are created or assigned without manual intervention.
+
+**Acceptance Criteria:**
+1. GitHub webhook verification (HMAC-SHA256 signature validation with shared secret)
+2. GitLab webhook verification (secret token validation)
+3. Event filtering: only process `issues.opened`, `issues.assigned` events (ignore others)
+4. Webhook payload parsing: extract issue ID, repository URL, assignee
+5. Automatic job creation: create autonomous loop job when issue assigned to Tamma bot account
+6. Webhook retry handling: return 200 OK immediately, process async (avoid webhook timeout)
+7. Webhook configuration UI or CLI command (`tamma webhook add github|gitlab --url --secret`)
+8. Webhook event logging (all received webhooks logged with timestamp, event type, result)
+
+**Prerequisites:** Story 1.5-4 (web server provides webhook endpoints)
+
+---
+
+### **Story 1.5-7: System Configuration Management** ⭐ **MVP CRITICAL**
+
+As a **system administrator**,
+I want unified configuration management across all deployment modes,
+So that I can configure Tamma consistently whether running CLI, service, or container.
+
+**Acceptance Criteria:**
+1. Configuration file formats supported: YAML (preferred), JSON, TOML
+2. Configuration file locations (priority order): `./tamma.yaml`, `~/.tamma/config.yaml`, `/etc/tamma/config.yaml`
+3. Environment variable overrides (e.g., `TAMMA_AI_PROVIDER_KEY` overrides config file value)
+4. Configuration schema with validation (JSON Schema or Zod validation)
+5. Configuration migration tool for version upgrades (`tamma config migrate`)
+6. Configuration includes: database connection, AI providers, Git platforms, orchestrator port, worker count, logging level
+7. Sensitive values encrypted at rest (API keys encrypted with master key)
+8. Configuration documentation with all available options
+
+**Prerequisites:** Stories 1.3, 1.7 (provider/platform config must be integrated)
+
+---
+
+### **Story 1.5-8: NPM Package Publishing** ⭐ **MVP CRITICAL**
+
+As a **developer**,
+I want to install Tamma via npm,
+So that I can quickly set up Tamma with a single command without manual compilation.
+
+**Acceptance Criteria:**
+1. `@tamma/cli` package published to npm registry (public)
+2. `@tamma/core`, `@tamma/server`, `@tamma/worker` published as libraries
+3. Semantic versioning strategy (e.g., v0.1.0-alpha, v0.2.0, v1.0.0)
+4. Package.json with proper dependencies (production vs dev)
+5. Installation via `npm install -g @tamma/cli` (global CLI)
+6. Installation via `npm install @tamma/core` (library usage)
+7. Package includes TypeScript type definitions (.d.ts files)
+8. README with installation and usage instructions
+
+**Prerequisites:** Story 1.5-1 (packages must be separated)
+
+---
+
+### **Story 1.5-9: Binary Releases & Installers** ⭐ **MVP CRITICAL**
+
+As a **non-Node.js developer**,
+I want standalone Tamma binaries and OS-specific installers,
+So that I can install Tamma without Node.js runtime or npm.
+
+**Acceptance Criteria:**
+1. Standalone binaries built with pkg/nexe/esbuild (Windows .exe, macOS binary, Linux binary)
+2. Binaries include bundled Node.js runtime (no external dependencies)
+3. Installers created: Windows MSI (WiX Toolset), macOS DMG (create-dmg), Linux .deb/.rpm (fpm)
+4. Installers add Tamma to PATH automatically
+5. Auto-update mechanism (check for new versions on startup, prompt user)
+6. Code signing: Windows Authenticode (optional for alpha, required for GA), macOS notarization (required)
+7. GitHub Releases page with download links for all platforms
+8. Installation instructions for each platform in documentation
+
+**Prerequisites:** Story 1.5-8 (npm package must exist for binary bundling)
+
+---
+
+### **Story 1.5-10: Kubernetes Deployment** 🔵 **MVP OPTIONAL**
+
+As a **platform engineer**,
+I want Helm chart and Kubernetes manifests for Tamma,
+So that I can deploy Tamma in a Kubernetes cluster with auto-scaling and high availability.
+
+**Acceptance Criteria:**
+1. Helm chart published to Helm repository (e.g., Artifact Hub)
+2. Kubernetes manifests: Deployments (orchestrator, worker), Services (orchestrator API), ConfigMaps (config), Secrets (API keys)
+3. Orchestrator StatefulSet with persistent volume for state
+4. Worker HorizontalPodAutoscaler (scale based on queue depth: 1-10 replicas)
+5. Ingress configuration for external access (with TLS/HTTPS)
+6. PostgreSQL deployment (StatefulSet or external database reference)
+7. Resource limits configured (CPU, memory requests and limits)
+8. Liveness and readiness probes configured
+9. Helm values.yaml with configurable options (replicas, resources, database URL)
+
+**Prerequisites:** Story 1.5-5 (Docker images must exist)
 
 ---
 
@@ -1005,24 +1239,107 @@ So that regressions are caught before production deployment.
 
 ---
 
-### **Story 5.9: Documentation - User Guide & API Reference** ⭐ **MVP CRITICAL**
+### **Story 5.9a: Installation & Setup Documentation** ⭐ **MVP CRITICAL**
 
 As a **developer adopting Tamma**,
-I want comprehensive documentation covering installation, configuration, usage, and troubleshooting,
-So that I can successfully deploy and operate the system.
+I want clear installation and setup documentation,
+So that I can quickly install Tamma via npm, Docker, or binaries and complete first-time configuration.
 
-**MVP Rationale:** Essential for alpha release. Users cannot adopt Tamma without clear setup instructions, configuration reference, and troubleshooting guides. Documentation critical for self-maintenance validation (Tamma may need to reference its own docs).
+**MVP Rationale:** Essential for alpha release - users cannot adopt Tamma without installation instructions.
 
 **Acceptance Criteria:**
-1. User guide includes: installation instructions (Docker, binary, source), configuration reference (all config options), usage examples (orchestrator mode, worker mode)
-2. User guide includes: troubleshooting section (common errors, debug mode, log analysis)
-3. API reference documents: event schema, metrics endpoints, webhook payloads, CLI commands
-4. Documentation hosted on GitHub Pages or similar (publicly accessible)
-5. Documentation includes architecture diagrams (C4 model: context, containers, components)
-6. Documentation includes video walkthrough (5-10 minutes) demonstrating autonomous loop
-7. Documentation reviewed by external beta tester for clarity
+1. Installation via npm documented (`npm install -g @tamma/cli`, prerequisites, troubleshooting)
+2. Installation via Docker documented (`docker run`, Docker Compose setup, volume mounts)
+3. Installation via binaries documented (download, extract, PATH setup for Windows/macOS/Linux)
+4. Service mode setup documented (systemd, Windows Service, launchd)
+5. First-time configuration wizard walkthrough (`tamma init`)
+6. Common installation errors documented with solutions
 
-**Prerequisites:** All previous stories (documentation covers complete system)
+**Prerequisites:** Stories 1.5-5, 1.5-8, 1.5-9 (installation methods must exist)
+
+---
+
+### **Story 5.9b: Usage & Configuration Documentation** ⭐ **MVP CRITICAL**
+
+As a **Tamma operator**,
+I want comprehensive usage and configuration documentation,
+So that I can configure AI providers, Git platforms, and operate Tamma effectively.
+
+**MVP Rationale:** Essential for alpha release - users need configuration reference and usage examples.
+
+**Acceptance Criteria:**
+1. CLI command reference documented (all `tamma` commands with examples)
+2. Configuration file reference documented (all options with examples)
+3. AI provider setup guides (Anthropic, OpenAI, GitHub Copilot, local LLMs)
+4. Git platform setup guides (GitHub, GitLab, webhooks)
+5. Orchestrator mode vs worker mode explained with use cases
+6. Webhook configuration documented
+7. Environment variables documented
+
+**Prerequisites:** Stories 1.3, 1.7, 1.5-2, 1.5-6 (config and CLI must exist)
+
+---
+
+### **Story 5.9c: API Reference Documentation** ⭐ **MVP CRITICAL**
+
+As a **developer integrating with Tamma**,
+I want API reference documentation,
+So that I can programmatically interact with Tamma's REST API and webhooks.
+
+**MVP Rationale:** Essential for CI/CD integration and webhook setup.
+
+**Acceptance Criteria:**
+1. REST API endpoints documented (`POST /api/v1/jobs`, `GET /api/v1/jobs/:id`, etc.)
+2. Webhook payloads documented (GitHub, GitLab event formats)
+3. Event schema documented (all event types with examples)
+4. Metrics endpoint documented (`/metrics` Prometheus format)
+5. Authentication documented (JWT tokens, API keys)
+6. Error responses documented (status codes, error formats)
+7. Code examples provided (curl, JavaScript, Python)
+
+**Prerequisites:** Stories 1.5-4, 1.5-6, 4.1 (API and events must exist)
+
+---
+
+### **Story 5.9d: Full Documentation Website** ⭐ **MVP CRITICAL**
+
+As a **Tamma community member**,
+I want a comprehensive documentation website,
+So that I can easily search and navigate all Tamma documentation.
+
+**MVP Rationale:** Essential for alpha release - replaces "Coming Soon" marketing site with full docs.
+
+**Acceptance Criteria:**
+1. Documentation hosted on GitHub Pages or Cloudflare Pages
+2. Searchable documentation (Algolia DocSearch or similar)
+3. Navigation organized by sections (Getting Started, Configuration, API, Troubleshooting)
+4. Architecture diagrams included (C4 model: context, containers, components)
+5. Tutorials and guides (First Autonomous PR, CI/CD Integration, Self-Hosting)
+6. Troubleshooting section (common errors, debug mode, log analysis)
+7. Replaces Story 1-12 marketing site (updates domain to full docs site)
+8. Documentation reviewed by external beta tester for clarity
+
+**Prerequisites:** Stories 5.9a, 5.9b, 5.9c (content must exist), Story 1-12 (initial site exists)
+
+---
+
+### **Story 5.9e: Video Walkthrough** 🔵 **MVP OPTIONAL**
+
+As a **new Tamma user**,
+I want a video walkthrough demonstrating Tamma setup and usage,
+So that I can learn Tamma quickly through visual demonstration.
+
+**MVP Rationale:** Optional - written documentation sufficient for MVP. Video improves onboarding experience but not required for self-maintenance validation.
+
+**Acceptance Criteria:**
+1. Video created (5-10 minutes, high quality)
+2. Video covers: installation, configuration, first autonomous PR
+3. Video demonstrates self-maintenance goal (Tamma working on itself)
+4. Video hosted on YouTube with unlisted or public link
+5. Video embedded in documentation website
+6. Transcript provided for accessibility
+
+**Prerequisites:** Story 5.9d (documentation site for embedding)
 
 ---
 

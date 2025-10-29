@@ -1,7 +1,7 @@
 # Epic Technical Specification: Event Sourcing & Audit Trail
 
 Date: 2025-10-28
-Author: BMad
+Author: meywd
 Epic ID: 4
 Status: Draft
 

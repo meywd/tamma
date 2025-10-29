@@ -1,7 +1,7 @@
 # Epic Technical Specification: Observability & Production Readiness
 
 Date: 2025-10-28
-Author: BMad
+Author: meywd
 Epic ID: 5
 Status: Draft
 
@@ -13,25 +13,29 @@ Epic 5 implements the Observability & Production Readiness layer that transforms
 
 Unlike traditional observability stacks that bolt monitoring onto existing systems, Tamma's observability is **deeply integrated from the start**, leveraging Epic 4's event sourcing foundation to provide unprecedented visibility into autonomous decision-making. Every AI provider selection, every quality gate retry, every escalation is not only logged but also queryable via the Event Trail Exploration UI (Story 5.5), enabling developers to answer questions like "Why did the AI choose approach B for issue #123?" or "What caused the build to fail on attempt 2?" The real-time dashboards (Stories 5.3-5.4) transform raw metrics into actionable insights: system health indicators prevent outages, development velocity charts identify bottlenecks, and feedback trends guide product roadmap decisions.
 
-Epic 5 addresses the critical gap between "it works on my machine" and "it's ready for alpha users": Story 5.8 establishes integration testing with >80% code coverage, Story 5.9 provides user guides and API references reviewed by external beta testers, and Story 5.10 prepares multi-arch Docker images and release artifacts for the v0.1.0-alpha launch. The feedback collection system (Story 5.7) closes the loop with users, capturing satisfaction ratings and improvement suggestions directly after PR merges, ensuring Tamma evolves based on real-world usage rather than assumptions.
+Epic 5 addresses the critical gap between "it works on my machine" and "it's ready for alpha users": Story 5.8 establishes integration testing with >80% code coverage, Stories 5.9a-5.9d provide comprehensive documentation (installation, usage, API reference, searchable docs site) reviewed by external beta testers, and Story 5.10 prepares multi-arch Docker images and release artifacts for the v0.1.0-alpha launch. The feedback collection system (Story 5.7) closes the loop with users, capturing satisfaction ratings and improvement suggestions directly after PR merges, ensuring Tamma evolves based on real-world usage rather than assumptions.
 
 ## MVP Scope Clarification
 
 **Epic 5 has PARTIAL MVP scope** - essential debugging/monitoring capabilities are MVP critical, while UI dashboards are optional for self-maintenance validation:
 
-**MVP CRITICAL (6 stories):**
+**MVP CRITICAL (10 stories):**
 - **Story 5.1 (Logging)**: Essential for debugging stuck workflows when Tamma works on itself. Structured logs enable diagnosis of autonomous loop failures.
 - **Story 5.2 (Metrics)**: Essential for monitoring autonomous loop health. Tracks completion rates, escalation rates, quality metrics critical for self-maintenance validation.
 - **Story 5.6 (Basic Alerts)**: CLI output, email, Slack webhooks sufficient for MVP. Full dashboard integration optional. Detects and responds to escalations/errors.
 - **Story 5.8 (Integration Tests)**: Essential for validating self-maintenance. Comprehensive test suite ensures Tamma's self-implemented changes don't break core functionality.
-- **Story 5.9 (Documentation)**: Essential for alpha release and self-maintenance (Tamma may need to reference its own documentation).
+- **Story 5.9a (Installation & Setup Documentation)**: Essential for alpha release - users must know how to install Tamma (npm, Docker, binaries).
+- **Story 5.9b (Usage & Configuration Documentation)**: Essential for alpha release - users must know how to configure and run Tamma (CLI commands, config reference, provider setup).
+- **Story 5.9c (API Reference Documentation)**: Essential for self-maintenance - Tamma may need to reference REST API, webhooks, event schema when implementing new features.
+- **Story 5.9d (Full Documentation Website)**: Essential for alpha release - replaces "Coming Soon" marketing site with comprehensive searchable docs.
 - **Story 5.10 (Alpha Release)**: Essential for MVP launch, includes self-maintenance validation milestone.
 
-**MVP OPTIONAL (4 stories - Post-MVP):**
+**MVP OPTIONAL (5 stories - Post-MVP):**
 - **Story 5.3 (Health Dashboard UI)**: CLI-based monitoring and log tailing sufficient for MVP. UI provides better UX but not required for self-maintenance validation.
 - **Story 5.4 (Velocity Dashboard UI)**: CLI-based metrics queries and log analysis sufficient for MVP. Velocity charts provide better visualization but not required.
 - **Story 5.5 (Event Trail UI)**: Event query API (Epic 4 Story 4.7) provides programmatic access sufficient for MVP debugging. UI improves UX but not critical.
 - **Story 5.7 (Feedback Collection)**: User feedback valuable for post-MVP improvement but not required for self-maintenance validation.
+- **Story 5.9e (Video Walkthrough)**: Nice-to-have for alpha release but not required for self-maintenance validation. Can be created by community post-MVP.
 
 **Rationale**: Self-maintenance goal requires debugging capabilities (logs, metrics, alerts, tests) but NOT visual dashboards. CLI/log-based monitoring sufficient for MVP. UI dashboards deferred to post-MVP for better resource allocation.
 
@@ -47,7 +51,11 @@ Epic 5 addresses the critical gap between "it works on my machine" and "it's rea
 - **Story 5.6:** Alert System for Critical Issues - Triggers (escalation after 3 retries, uncaught exceptions, API rate limits, event store failures), channels (CLI, webhook, email), alert payload (severity, title, description, correlation ID, suggested action), rate limiting (5/min), history storage, custom rule configuration
 - **Story 5.7:** Feedback Collection System - Post-PR-merge rating prompt (thumbs up/down), negative feedback text collection, database storage (timestamp, correlation ID, rating, comment), /dashboard/feedback with satisfaction trends and keyword analysis, CSV export, privacy-respecting (no PII without consent)
 - **Story 5.8:** Integration Testing Suite - E2E tests with mock AI provider and Git API, scenarios (happy path, build failure retry, test failure escalation, ambiguous requirements), CI/CD pipeline integration, event sequence validation, <5min full suite runtime, >80% code coverage target, event trail assertions
-- **Story 5.9:** Documentation - User Guide & API Reference - Installation instructions (Docker/binary/source), configuration reference, usage examples (orchestrator/worker modes), troubleshooting guide, API reference (events/metrics/webhooks/CLI), GitHub Pages hosting, C4 architecture diagrams, 5-10min video walkthrough, external beta tester review
+- **Story 5.9a:** Installation & Setup Documentation - Installation instructions for npm (@tamma/cli), Docker (docker-compose, standalone container), binaries (Windows/macOS/Linux), source build (git clone + pnpm install), prerequisites (Node.js 22, PostgreSQL 17), initial configuration wizard, troubleshooting common installation issues
+- **Story 5.9b:** Usage & Configuration Documentation - CLI command reference (tamma run, tamma init, tamma config), configuration file reference (all options with examples), environment variable mapping, deployment modes (CLI, service, web, worker), provider setup guides (Anthropic Claude, OpenAI, GitHub, GitLab), webhook integration setup, troubleshooting guide (common errors, debug mode, log analysis)
+- **Story 5.9c:** API Reference Documentation - REST API endpoints (/api/v1/tasks, /api/v1/config, /webhooks/*), event schema (Epic 4 format), metrics endpoints (/metrics OpenMetrics spec), webhook payload formats (GitHub, GitLab JSON schemas), authentication (JWT tokens), error responses, rate limiting, versioning strategy
+- **Story 5.9d:** Full Documentation Website - GitHub Pages or Cloudflare Pages hosting, searchable documentation (Algolia DocSearch or similar), navigation organized by sections (Getting Started, Configuration, API, Troubleshooting), architecture diagrams (C4 model: context, containers, components), tutorials and guides (First Autonomous PR, CI/CD Integration, Self-Hosting), replaces Story 1-12 marketing site with full docs, external beta tester review for clarity
+- **Story 5.9e:** Video Walkthrough (OPTIONAL) - 5-10 minute screen recording demonstrating complete autonomous loop (issue selection → plan approval → PR creation → merge), side-by-side views showing logs/metrics/event trail in real-time, published to YouTube/Vimeo with embedded player in docs site
 - **Story 5.10:** Alpha Release Preparation - Release checklist validation (ACs met, tests passing, docs complete, security review), build artifacts (Docker multi-arch, binaries for Windows/macOS/Linux, source tarball), release notes (features, limitations, breaking changes, upgrade path), GitHub v0.1.0-alpha release with prerelease tag, announcement materials, telemetry consent opt-in
 
 **Out of Scope:**
@@ -73,7 +81,7 @@ Epic 5 integrates deeply with Epic 4's event sourcing foundation: Story 5.5 (Eve
 
 The alert system (Story 5.6) leverages Epic 4's event stream as the data source: escalation events (EscalationTriggeredEvent) automatically trigger critical alerts, event store write failures detected via health checks generate alerts, and custom alert rules query the event store for anomaly patterns (e.g., "more than 5 EscalationTriggeredEvents in 10 minutes"). Alert delivery uses webhook POSTs (configurable URL), CLI output (if running interactively), and email via configured SMTP (optional). Rate limiting (5 alerts/min) prevents alert storms during cascading failures.
 
-The documentation system (Story 5.9) generates API reference documentation from OpenAPI/Swagger specs defined in Fastify route handlers (decorators for response schemas), ensuring docs stay synchronized with implementation. C4 architecture diagrams (Context, Container, Component, Code) visualize the Epic 1-5 layered architecture, with Epic 5 positioned as the horizontal observability plane intersecting all layers. The video walkthrough demonstrates the complete autonomous loop (issue → PR merge) with side-by-side dashboard views showing logs, metrics, and event trail in real-time.
+The documentation system (Stories 5.9a-5.9d) generates API reference documentation (5.9c) from OpenAPI/Swagger specs defined in Fastify route handlers (decorators for response schemas), ensuring docs stay synchronized with implementation. C4 architecture diagrams included in the full documentation website (5.9d) visualize the Epic 1-5 layered architecture, with Epic 5 positioned as the horizontal observability plane intersecting all layers. Installation (5.9a) and usage guides (5.9b) provide step-by-step instructions for all deployment modes. The optional video walkthrough (5.9e) demonstrates the complete autonomous loop (issue → PR merge) with side-by-side dashboard views showing logs, metrics, and event trail in real-time.
 
 Alpha release artifacts (Story 5.10) use Docker multi-stage builds for minimal image sizes (~150MB compressed), esbuild for bundling with tree-shaking to eliminate unused code, and GitHub Actions for CI/CD pipeline automation (matrix builds for amd64/arm64). Telemetry consent follows GDPR best practices: opt-in via CLI flag (`--telemetry-opt-in`), clear consent language describing collected data (metrics only, no code/credentials), and local-only mode for privacy-sensitive deployments (all telemetry disabled).
 
@@ -1260,15 +1268,54 @@ interface AlertWebhookPayload {
 6. Test coverage report shows >80% code coverage
 7. Tests include assertions on event trail contents (verify all events captured)
 
-### Story 5.9: Documentation - User Guide & API Reference
+### Story 5.9a: Installation & Setup Documentation
 
-1. User guide includes: installation instructions (Docker, binary, source), configuration reference (all config options), usage examples (orchestrator mode, worker mode)
-2. User guide includes: troubleshooting section (common errors, debug mode, log analysis)
-3. API reference documents: event schema, metrics endpoints, webhook payloads, CLI commands
-4. Documentation hosted on GitHub Pages or similar (publicly accessible)
-5. Documentation includes architecture diagrams (C4 model: context, containers, components)
-6. Documentation includes video walkthrough (5-10 minutes) demonstrating autonomous loop
-7. Documentation reviewed by external beta tester for clarity
+1. Installation instructions for npm package: `npm install -g @tamma/cli` with prerequisites (Node.js 22+, npm 10+)
+2. Installation instructions for Docker: `docker pull tamma/tamma:latest` and `docker-compose.yml` example with PostgreSQL
+3. Installation instructions for binaries: Download from GitHub Releases for Windows (.exe), macOS (.dmg/.pkg), Linux (.deb/.rpm/.tar.gz)
+4. Installation instructions for source build: `git clone`, `pnpm install`, `pnpm build` with prerequisites
+5. Prerequisites documented: Node.js 22 LTS, PostgreSQL 17+, Redis (optional), API keys (Anthropic Claude, GitHub)
+6. Initial configuration wizard documented: `tamma init` command creates `~/.tamma/config.yaml` interactively
+7. Troubleshooting common installation issues: Node.js version mismatch, PostgreSQL connection failures, permission errors
+
+### Story 5.9b: Usage & Configuration Documentation
+
+1. CLI command reference: `tamma run`, `tamma init`, `tamma config`, `tamma start` (service mode), `tamma --help`
+2. Configuration file reference: all config options documented with examples, default values, validation rules
+3. Environment variable mapping: `TAMMA_MODE`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `DATABASE_URL`, etc.
+4. Deployment modes documented: CLI (interactive), Service (background daemon), Web (REST API), Worker (CI/CD)
+5. Provider setup guides: Anthropic Claude API key generation, OpenAI setup, GitHub token scopes, GitLab access tokens
+6. Webhook integration setup: GitHub webhook URL, secret configuration, GitLab webhook token, event filtering
+7. Troubleshooting guide: common errors (API authentication failures, provider rate limits), debug mode (`TAMMA_LOG_LEVEL=debug`), log analysis (grep patterns for stuck workflows)
+
+### Story 5.9c: API Reference Documentation
+
+1. REST API endpoints documented: `/api/v1/tasks`, `/api/v1/tasks/:id`, `/api/v1/config`, `/webhooks/github`, `/webhooks/gitlab`
+2. Event schema documented: Epic 4 event format, all event types, payload structures, examples
+3. Metrics endpoints documented: `/metrics` OpenMetrics spec, counter metrics, gauge metrics, histogram metrics
+4. Webhook payload formats: GitHub webhook JSON schemas (issue assignment, PR events), GitLab webhook schemas (issue hooks, MR hooks)
+5. Authentication documented: JWT token generation, token expiration, refresh tokens, API key authentication
+6. Error responses documented: HTTP status codes, error JSON format, common error scenarios
+7. API versioning strategy: `/api/v1`, `/api/v2`, deprecation policy, backward compatibility guarantees
+
+### Story 5.9d: Full Documentation Website
+
+1. Documentation hosted on GitHub Pages or Cloudflare Pages with custom domain (docs.tamma.dev or similar)
+2. Searchable documentation: Algolia DocSearch integration or similar (fuzzy search, instant results)
+3. Navigation organized by sections: Getting Started, Installation, Configuration, Usage, API Reference, Troubleshooting, Architecture
+4. Architecture diagrams included: C4 model diagrams (Context, Containers, Components), Epic 1-5 layered architecture visualization
+5. Tutorials and guides: "First Autonomous PR" walkthrough, "CI/CD Integration" guide, "Self-Hosting with Docker" guide
+6. Replaces Story 1-12 marketing website: domain redirect from tamma.dev to docs.tamma.dev, "Coming Soon" replaced with full docs
+7. Documentation reviewed by external beta tester for clarity: feedback incorporated via GitHub Issues (`feedback/documentation` label)
+
+### Story 5.9e: Video Walkthrough (OPTIONAL)
+
+1. Screen recording created: 5-10 minute video demonstrating complete autonomous loop
+2. Video demonstrates: `tamma start` → issue selection → plan approval → PR creation → CI/CD checks → PR merge
+3. Video includes: side-by-side views showing logs, metrics dashboard, event trail in real-time
+4. Video published: YouTube or Vimeo with public access, embedded player in documentation website
+5. Video includes: voiceover narration explaining each step, on-screen annotations for key concepts
+6. Video optimized: 1080p resolution, <100MB file size, closed captions/subtitles for accessibility
 
 ### Story 5.10: Alpha Release Preparation
 
@@ -1382,17 +1429,64 @@ interface AlertWebhookPayload {
 | 5.8.6 | Jest Coverage | Jest config: `collectCoverage: true, coverageThreshold: { global: { lines: 80 } }` → fails if <80% |
 | 5.8.7 | Integration Test | Event trail assertions: `expect(eventStore.query({ correlationId })).resolves.toMatchSnapshot()` |
 
-### Story 5.9 → Documentation (`docs/`) (Not Code - Content Deliverable)
+### Story 5.9a → Installation Documentation (`docs/installation/`) (Content Deliverable)
 
 | AC | Component | Deliverable |
 |----|-----------|-------------|
-| 5.9.1 | Documentation | `docs/user-guide.md`: Installation (Docker compose, binary download, `git clone`), Configuration (`~/.tamma/config.yaml` reference), Usage (orchestrator vs. worker mode examples) |
-| 5.9.2 | Documentation | `docs/troubleshooting.md`: Common errors (API auth failures, PostgreSQL connection), Debug mode (`TAMMA_LOG_LEVEL=debug`), Log analysis (grep patterns) |
-| 5.9.3 | Documentation | `docs/api-reference.md`: Event schema (Epic 4 format), `/metrics` endpoint (OpenMetrics spec), Webhook payload (JSON schema), CLI commands (`tamma --help` output) |
-| 5.9.4 | GitHub Pages | GitHub repo settings: Pages enabled, source = `docs/` folder, custom domain (optional) |
-| 5.9.5 | Documentation | `docs/architecture.md`: C4 diagrams (PlantUML or Mermaid), Context (Tamma + external systems), Containers (orchestrator/worker/dashboard), Components (packages) |
-| 5.9.6 | Documentation | `docs/walkthrough.mp4`: Screen recording (OBS Studio), 5-10 minutes, demonstrates: `tamma start` → issue selection → plan approval → PR creation → merge |
-| 5.9.7 | Documentation | External review: Beta tester feedback incorporated via GitHub Issues (`feedback/documentation` label) |
+| 5.9a.1 | Documentation | `docs/installation/npm.md`: NPM installation (`npm install -g @tamma/cli`), prerequisites (Node.js 22+, npm 10+) |
+| 5.9a.2 | Documentation | `docs/installation/docker.md`: Docker installation (`docker pull tamma/tamma:latest`), `docker-compose.yml` example with PostgreSQL/Redis |
+| 5.9a.3 | Documentation | `docs/installation/binaries.md`: Binary downloads from GitHub Releases, platform-specific instructions (Windows .exe, macOS .dmg/.pkg, Linux .deb/.rpm/.tar.gz) |
+| 5.9a.4 | Documentation | `docs/installation/source.md`: Source build instructions (`git clone`, `pnpm install`, `pnpm build`) |
+| 5.9a.5 | Documentation | `docs/installation/prerequisites.md`: Node.js 22 LTS, PostgreSQL 17+, Redis (optional), API keys (Anthropic Claude, GitHub) |
+| 5.9a.6 | Documentation | `docs/installation/initial-setup.md`: Configuration wizard (`tamma init`), creates `~/.tamma/config.yaml` interactively |
+| 5.9a.7 | Documentation | `docs/installation/troubleshooting.md`: Node.js version mismatch, PostgreSQL connection failures, permission errors |
+
+### Story 5.9b → Usage Documentation (`docs/usage/`) (Content Deliverable)
+
+| AC | Component | Deliverable |
+|----|-----------|-------------|
+| 5.9b.1 | Documentation | `docs/usage/cli-commands.md`: `tamma run`, `tamma init`, `tamma config`, `tamma start`, `tamma --help` |
+| 5.9b.2 | Documentation | `docs/usage/configuration.md`: All config options with examples, default values, validation rules |
+| 5.9b.3 | Documentation | `docs/usage/environment-variables.md`: `TAMMA_MODE`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `DATABASE_URL` mapping |
+| 5.9b.4 | Documentation | `docs/usage/deployment-modes.md`: CLI (interactive), Service (daemon), Web (REST API), Worker (CI/CD) |
+| 5.9b.5 | Documentation | `docs/usage/providers/`: Anthropic Claude setup, OpenAI setup, GitHub token scopes, GitLab access tokens (separate files per provider) |
+| 5.9b.6 | Documentation | `docs/usage/webhooks.md`: GitHub webhook URL/secret, GitLab webhook token, event filtering |
+| 5.9b.7 | Documentation | `docs/usage/troubleshooting.md`: API auth failures, provider rate limits, debug mode (`TAMMA_LOG_LEVEL=debug`), log analysis |
+
+### Story 5.9c → API Documentation (`docs/api/`) (Content Deliverable)
+
+| AC | Component | Deliverable |
+|----|-----------|-------------|
+| 5.9c.1 | Documentation | `docs/api/rest-api.md`: `/api/v1/tasks`, `/api/v1/tasks/:id`, `/api/v1/config`, `/webhooks/github`, `/webhooks/gitlab` endpoints with request/response examples |
+| 5.9c.2 | Documentation | `docs/api/event-schema.md`: Epic 4 event format, all event types, payload structures, JSON examples |
+| 5.9c.3 | Documentation | `docs/api/metrics.md`: `/metrics` endpoint, OpenMetrics spec, counter/gauge/histogram metrics reference |
+| 5.9c.4 | Documentation | `docs/api/webhooks.md`: GitHub webhook JSON schemas (issue assignment, PR events), GitLab webhook schemas (issue hooks, MR hooks) |
+| 5.9c.5 | Documentation | `docs/api/authentication.md`: JWT token generation, token expiration, refresh tokens, API key authentication |
+| 5.9c.6 | Documentation | `docs/api/errors.md`: HTTP status codes, error JSON format, common error scenarios |
+| 5.9c.7 | Documentation | `docs/api/versioning.md`: API versioning strategy (`/api/v1`, `/api/v2`), deprecation policy, backward compatibility |
+
+### Story 5.9d → Documentation Website (Content + Infrastructure Deliverable)
+
+| AC | Component | Deliverable |
+|----|-----------|-------------|
+| 5.9d.1 | Infrastructure | GitHub Pages or Cloudflare Pages deployment, custom domain (docs.tamma.dev) with SSL certificate |
+| 5.9d.2 | Infrastructure | Algolia DocSearch integration: `docsearch.config.json`, search indexing, instant fuzzy search |
+| 5.9d.3 | Documentation | Navigation structure: Getting Started, Installation, Configuration, Usage, API, Troubleshooting, Architecture sections |
+| 5.9d.4 | Documentation | `docs/architecture/`: C4 diagrams (Mermaid or PlantUML), Context/Containers/Components diagrams, Epic 1-5 layered architecture |
+| 5.9d.5 | Documentation | Tutorials: `docs/tutorials/first-pr.md`, `docs/tutorials/cicd-integration.md`, `docs/tutorials/self-hosting.md` |
+| 5.9d.6 | Infrastructure | Domain redirect: tamma.dev → docs.tamma.dev, replace Story 1-12 "Coming Soon" with full docs |
+| 5.9d.7 | Documentation | External beta tester review: feedback incorporated via GitHub Issues (`feedback/documentation` label) |
+
+### Story 5.9e → Video Walkthrough (OPTIONAL) (Media Deliverable)
+
+| AC | Component | Deliverable |
+|----|-----------|-------------|
+| 5.9e.1 | Video | Screen recording (OBS Studio): 5-10 minute video, 1080p resolution, MP4 format |
+| 5.9e.2 | Video | Demo flow: `tamma start` → issue selection → plan approval → PR creation → CI/CD checks → PR merge |
+| 5.9e.3 | Video | Split-screen layout: terminal logs (left), metrics dashboard (top-right), event trail (bottom-right) |
+| 5.9e.4 | Infrastructure | YouTube or Vimeo upload: public access, embedded player in `docs/getting-started/video.md` |
+| 5.9e.5 | Video | Voiceover narration: audio quality >128kbps, noise reduction, on-screen annotations for key concepts |
+| 5.9e.6 | Video | Optimization: <100MB file size, closed captions/subtitles (VTT format), accessibility compliant |
 
 ### Story 5.10 → Alpha Release (`scripts/release.sh`, `.github/workflows/release.yml`)
 
@@ -1491,7 +1585,7 @@ interface AlertWebhookPayload {
 
 **A1: PostgreSQL 17+ Available in All Deployment Environments**
 - **Assumption**: Users deploying Tamma have PostgreSQL 17+ accessible (self-hosted or cloud RDS/Cloud SQL)
-- **Validation**: Document PostgreSQL requirement prominently in installation guide (Story 5.9)
+- **Validation**: Document PostgreSQL requirement prominently in installation guide (Story 5.9a - Installation Documentation)
 - **Fallback**: If not met, Docker Compose includes PostgreSQL container (recommended for alpha)
 
 **A2: SSE Sufficient for Real-Time Updates (No WebSocket Needed)**
@@ -1501,7 +1595,7 @@ interface AlertWebhookPayload {
 
 **A3: Prometheus Self-Hosted by Operations Teams**
 - **Assumption**: Operations teams will deploy Prometheus themselves to scrape `/metrics` endpoint; Tamma does NOT bundle Prometheus
-- **Validation**: Document Prometheus setup in user guide with example `prometheus.yml` config (Story 5.9)
+- **Validation**: Document Prometheus setup in user guide with example `prometheus.yml` config (Story 5.9b - Usage Documentation)
 - **Fallback**: Metrics still collected in-memory even without Prometheus (1-hour retention, NFR Reliability #3)
 
 **A4: Alpha Users Accept CLI-Only Feedback Collection**
@@ -1788,12 +1882,27 @@ interface AlertWebhookPayload {
    - Trigger escalation scenario, verify Slack message received
    - Verify webhook payload is well-formatted for common tools (Slack, PagerDuty, Discord)
 
-4. **Documentation Review**
-   - External beta tester reviews user guide, API reference (AC 5.9.7)
-   - Tester attempts installation following docs, reports gaps/errors
+4. **Installation Documentation Review** (Story 5.9a)
+   - External beta tester attempts installation following docs (npm, Docker, binaries, source)
+   - Tester reports gaps/errors in installation instructions
+   - Verify initial configuration wizard works as documented
+
+5. **Usage Documentation Review** (Story 5.9b)
+   - External beta tester follows usage guides for all deployment modes
+   - Tester attempts provider setup following guides
    - Tester attempts common troubleshooting scenarios using docs
 
-**Test Execution**: Story 5.9 includes manual testing checklist completed before alpha release
+6. **API Documentation Review** (Story 5.9c)
+   - External beta tester reviews REST API reference
+   - Tester tests API endpoints using documentation examples
+   - Verify event schema and webhook payload examples are accurate
+
+7. **Documentation Website Review** (Story 5.9d - AC 5.9d.7)
+   - External beta tester reviews full documentation website
+   - Tester verifies search functionality works correctly
+   - Tester navigates through all sections, reports navigation issues
+
+**Test Execution**: Stories 5.9a-5.9d include manual testing checklists completed before alpha release
 
 ### Test Coverage Goals
 
