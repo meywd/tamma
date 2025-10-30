@@ -48,27 +48,42 @@ so that I can make informed decisions about which AI providers to support and wh
   - [x] Subtask 1.7: Project costs for 10 users, 100 users, 1000 users
 
 - [x] Task 2: Evaluate provider capabilities per workflow step (AC: 3)
-  - [x] Subtask 2.1: Test issue analysis quality (understanding requirements, ambiguity detection)
-  - [x] Subtask 2.2: Test code generation quality (implementation correctness, idiomatic code)
-  - [x] Subtask 2.3: Test test generation quality (coverage, edge cases, maintainability)
-  - [x] Subtask 2.4: Test code review quality (security, performance, best practices)
-  - [x] Subtask 2.5: Test refactoring suggestions (SOLID principles, design patterns)
-  - [x] Subtask 2.6: Test documentation generation (clarity, completeness, accuracy)
-  - [x] Subtask 2.7: Create capability matrix mapping providers to workflow steps
+  - [x] Subtask 2.1: Research issue analysis capabilities (documentation analysis)
+  - [ ] Subtask 2.1b: Test issue analysis quality (empirical validation - pending)
+  - [x] Subtask 2.2: Research code generation capabilities (documentation analysis)
+  - [ ] Subtask 2.2b: Test code generation quality (empirical validation - pending)
+  - [x] Subtask 2.3: Research test generation capabilities (documentation analysis)
+  - [ ] Subtask 2.3b: Test test generation quality (empirical validation - pending)
+  - [x] Subtask 2.4: Research code review capabilities (documentation analysis)
+  - [ ] Subtask 2.4b: Test code review quality (empirical validation - pending)
+  - [x] Subtask 2.5: Research refactoring capabilities (documentation analysis)
+  - [ ] Subtask 2.5b: Test refactoring suggestions (empirical validation - pending)
+  - [x] Subtask 2.6: Research documentation generation capabilities (documentation analysis)
+  - [ ] Subtask 2.6b: Test documentation generation quality (empirical validation - pending)
+  - [x] Subtask 2.7: Create capability matrix mapping providers to workflow steps (based on research)
 
 - [x] Task 3: Assess integration approaches (AC: 4)
-  - [x] Subtask 3.1: Evaluate Anthropic Claude API/SDK (streaming, tool use, context windows)
-  - [x] Subtask 3.2: Evaluate OpenAI API/SDK (function calling, vision, embeddings)
-  - [x] Subtask 3.3: Evaluate GitHub Copilot integration (CLI, API, agent mode)
-  - [x] Subtask 3.4: Evaluate Google Gemini API (multimodal, long context)
-  - [x] Subtask 3.5: Evaluate local model deployment (Ollama, LM Studio, vLLM)
+  - [x] Subtask 3.1: Research Anthropic Claude API/SDK (documentation analysis)
+  - [ ] Subtask 3.1b: Test Claude API integration (empirical validation - pending)
+  - [x] Subtask 3.2: Research OpenAI API/SDK (documentation analysis)
+  - [ ] Subtask 3.2b: Test OpenAI API integration (empirical validation - pending)
+  - [x] Subtask 3.3: Research GitHub Copilot integration (documentation analysis)
+  - [ ] Subtask 3.3b: Test Copilot integration (empirical validation - pending)
+  - [x] Subtask 3.4: Research Google Gemini API (documentation analysis)
+  - [ ] Subtask 3.4b: Test Gemini API integration (empirical validation - pending)
+  - [x] Subtask 3.5: Research local model deployment (documentation analysis)
+  - [ ] Subtask 3.5b: Test local model deployment (empirical validation - pending)
   - [x] Subtask 3.6: Compare integration complexity (SDK maturity, auth, error handling)
 
 - [x] Task 4: Validate deployment compatibility (AC: 5)
-  - [x] Subtask 4.1: Test orchestrator mode integration (background workers, async processing)
-  - [x] Subtask 4.2: Test CI/CD environment integration (GitHub Actions, GitLab CI, headless)
-  - [x] Subtask 4.3: Test developer workstation integration (local dev, IDE extensions)
-  - [x] Subtask 4.4: Test air-gapped/offline scenarios (local models, caching)
+  - [x] Subtask 4.1: Research orchestrator mode compatibility (documentation analysis)
+  - [ ] Subtask 4.1b: Test orchestrator mode integration (empirical validation - pending)
+  - [x] Subtask 4.2: Research CI/CD environment compatibility (documentation analysis)
+  - [ ] Subtask 4.2b: Test CI/CD environment integration (empirical validation - pending)
+  - [x] Subtask 4.3: Research developer workstation compatibility (documentation analysis)
+  - [ ] Subtask 4.3b: Test developer workstation integration (empirical validation - pending)
+  - [x] Subtask 4.4: Research air-gapped/offline scenarios (documentation analysis)
+  - [ ] Subtask 4.4b: Test air-gapped/offline scenarios (empirical validation - pending)
   - [x] Subtask 4.5: Document deployment constraints per provider
 
 - [x] Task 5: Create recommendation matrix and strategy (AC: 6, 7)
@@ -214,10 +229,33 @@ Claude-3.5-Sonnet (for research synthesis)
 
 ### Completion Notes List
 
-- [x] Research findings reviewed by technical leadership
-- [x] Cost projections validated by finance team
-- [x] Capability testing performed with real Tamma workflows
-- [x] Recommendations approved for Story 1-2 implementation
+- [x] Research findings documented (desk research completed)
+- [x] Cost projections calculated based on provider documentation
+- [ ] Capability testing performed with real Tamma workflows (empirical validation pending)
+- [x] Recommendations documented for Story 1-2 implementation (subject to empirical validation)
+
+### Code Review Findings (October 30, 2024)
+
+**Critical Review Issues Identified:**
+
+1. **No Empirical Testing Performed** - Research is based on desk research, not actual testing
+2. **Capability Scores Are Estimates** - Scores like 9/10 for Claude are not empirically validated
+3. **Token Usage Are Assumptions** - Not measured from actual test runs
+4. **Some Pricing Unverified** - Future model pricing is speculative
+
+**Actions Taken:**
+
+- ✅ Fixed dates from 2025 to 2024
+- ✅ Added disclaimers about capability scores being estimates
+- ✅ Updated task checkboxes to reflect research vs testing
+- ✅ Added notes about empirical validation being pending
+
+**Follow-up Required:**
+
+- Create follow-up story for empirical validation testing
+- Execute actual tests with JWT authentication scenario
+- Measure real token usage and compare outputs
+- Update capability scores with empirical data
 
 ### Key Decisions
 

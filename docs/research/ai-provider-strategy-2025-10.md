@@ -1,12 +1,14 @@
 # AI Provider Strategy Research
 
-**Date**: October 30, 2025  
+**Date**: October 30, 2024  
 **Author**: Claude (Anthropic)  
 **Status**: Completed  
 **Epic**: 1 - Foundation & Core Infrastructure  
 **Story**: 1-0 - AI Provider Strategy Research
 
 ## Executive Summary
+
+**Note:** Capability scores and performance assessments in this document are based on desk research, provider documentation analysis, and educated estimates. Empirical validation testing with actual code generation scenarios is pending and will be conducted in a follow-up story.
 
 This research document provides a comprehensive analysis of AI provider options for Tamma's autonomous development orchestration platform. The analysis covers cost models, capabilities, integration approaches, deployment compatibility, and strategic recommendations for selecting the optimal AI provider(s) for MVP and long-term scalability.
 

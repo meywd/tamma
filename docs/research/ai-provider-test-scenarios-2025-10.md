@@ -1,7 +1,9 @@
 # AI Provider Test Scenarios
 
-**Date**: October 30, 2025  
-**Purpose**: Validate AI provider capabilities against Tamma's autonomous development workflow  
+**Date**: October 30, 2024  
+**Purpose**: Test plan template for validating AI provider capabilities against Tamma's autonomous development workflow
+
+**Note**: This document contains test scenarios and evaluation criteria. Actual test execution and results collection will be performed in a follow-up story focused on empirical validation.  
 **Test Issue**: "Add user authentication with JWT tokens"
 
 ## Test Methodology
