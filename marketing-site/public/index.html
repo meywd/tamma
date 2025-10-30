@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Task 1 (#80) - Homepage Structure -->
+    <!-- Task 6 (#85) - SEO & Meta Tags -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary Meta Tags -->
+    <title>Tamma - Autonomous Development Platform</title>
+    <meta name="title" content="Tamma - Autonomous Development Platform">
+    <meta name="description" content="Tamma is an autonomous development platform that maintains itself. 70%+ completion rate with 8 AI providers and 7 Git platforms. No vendor lock-in.">
+    <meta name="keywords" content="autonomous development, AI development platform, multi-provider AI, self-maintaining software, GitOps automation, development automation">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://tamma.dev/">
+    <meta property="og:title" content="Tamma - Autonomous Development Platform">
+    <meta property="og:description" content="Self-maintaining autonomous development with multi-provider flexibility. 70%+ completion rate without human intervention.">
+    <meta property="og:image" content="https://tamma.dev/assets/og-image.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://tamma.dev/">
+    <meta property="twitter:title" content="Tamma - Autonomous Development Platform">
+    <meta property="twitter:description" content="Self-maintaining autonomous development with multi-provider flexibility. 70%+ completion rate without human intervention.">
+    <meta property="twitter:image" content="https://tamma.dev/assets/og-image.png">
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Tamma",
+        "description": "Autonomous development platform that maintains itself with 70%+ completion rate",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "url": "https://tamma.dev",
+        "codeRepository": "https://github.com/meywd/tamma"
+    }
+    </script>
+
+    <!-- Favicon (placeholder) -->
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/styles.css">
+
+    <!-- Task 7 (#86) - Cloudflare Web Analytics -->
+    <!-- TODO: Add Cloudflare Web Analytics beacon script after site deployment -->
+    <!-- <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "YOUR_TOKEN_HERE"}'></script> -->
+</head>
+<body>
+    <!-- Hero Section (AC 2) -->
+    <header class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <!-- Logo placeholder -->
+                <div class="logo">
+                    <div class="logo-placeholder">
+                        <!-- SVG placeholder for Tamma logo -->
+                        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="80" height="80" rx="12" fill="#2563eb"/>
+                            <text x="40" y="50" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="white" text-anchor="middle">T</text>
+                        </svg>
+                    </div>
+                    <h1>Tamma</h1>
+                </div>
+
+                <!-- Tagline (AC 2) -->
+                <p class="tagline">The autonomous development platform that maintains itself</p>
+
+                <!-- CTA Buttons (AC 4) -->
+                <div class="cta-buttons">
+                    <a href="https://github.com/meywd/tamma" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
+                        Get Early Access
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="margin-left: 8px; display: inline-block;">
+                            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                        </svg>
+                    </a>
+                    <a href="#signup" class="btn btn-secondary">Notify Me at Launch</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Key Features Section (AC 2) -->
+    <section class="features">
+        <div class="container">
+            <h2>Key Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>Autonomous Development Loop</h3>
+                    <p>70%+ completion rate without human intervention. Handles issue selection, planning, implementation, testing, and PR creation automatically.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔀</div>
+                    <h3>Multi-Provider Flexibility</h3>
+                    <p>8 AI providers (OpenAI, Anthropic, Google, Azure, AWS, Mistral, Groq, Ollama) and 7 Git platforms. No vendor lock-in.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Production-Ready Quality</h3>
+                    <p>Mandatory escalation gates, comprehensive testing, and transparency. Never gets stuck—always knows when to ask for help.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">🛠️</div>
+                    <h3>Self-Maintenance</h3>
+                    <p>Tamma maintains its own codebase as MVP validation. Proves production-readiness through dogfooding.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Tamma? Section (AC 6) -->
+    <section class="why-tamma">
+        <div class="container">
+            <h2>Why Tamma?</h2>
+            <div class="why-content">
+                <div class="why-item">
+                    <h3>The Problem</h3>
+                    <p>Development teams waste 40-60% of their time on repetitive toil: dependency updates, bug fixes, refactoring, and maintenance tasks that could be automated.</p>
+                </div>
+
+                <div class="why-item">
+                    <h3>The Solution</h3>
+                    <p>Autonomous development with quality gates and complete transparency. Tamma handles routine tasks while maintaining production-ready quality standards through mandatory escalation.</p>
+                </div>
+
+                <div class="why-item">
+                    <h3>Unique Value</h3>
+                    <p>Self-maintenance capability proves production-readiness. Tamma doesn't just automate development—it maintains its own codebase, validating the entire autonomous development loop.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Roadmap Section (AC 5) -->
+    <section class="roadmap">
+        <div class="container">
+            <h2>Development Roadmap</h2>
+            <p class="roadmap-intro">Tamma is being built in 5 focused epics leading to Alpha Launch at Week 10</p>
+
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-marker">1</div>
+                    <div class="timeline-content">
+                        <h3>Epic 1: Foundation</h3>
+                        <p class="timeline-duration">Weeks 0-2</p>
+                        <p>Core infrastructure, AI provider abstractions, and multi-provider support</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">2</div>
+                    <div class="timeline-content">
+                        <h3>Epic 2: Autonomous Loop</h3>
+                        <p class="timeline-duration">Weeks 2-4</p>
+                        <p>Complete development loop: issue selection, planning, implementation, testing, PR creation</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">3</div>
+                    <div class="timeline-content">
+                        <h3>Epic 3: Quality Gates</h3>
+                        <p class="timeline-duration">Weeks 4-6</p>
+                        <p>Intelligence layer, quality gates, escalation workflows, and cost awareness</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">4</div>
+                    <div class="timeline-content">
+                        <h3>Epic 4: Event Sourcing</h3>
+                        <p class="timeline-duration">Weeks 6-8</p>
+                        <p>Complete audit trail, state recovery, and event-driven architecture</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">5</div>
+                    <div class="timeline-content">
+                        <h3>Epic 5: Production Ready</h3>
+                        <p class="timeline-duration">Weeks 8-10</p>
+                        <p>Observability, monitoring, deployment automation, and production hardening</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item timeline-milestone">
+                    <div class="timeline-marker">🚀</div>
+                    <div class="timeline-content">
+                        <h3>Alpha Launch</h3>
+                        <p class="timeline-duration">Week 10</p>
+                        <p><strong>MVP Self-Maintenance Validation:</strong> Tamma begins maintaining its own codebase</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Coming Soon Section (AC 2) -->
+    <section class="coming-soon">
+        <div class="container">
+            <h2>Coming Soon</h2>
+            <p class="coming-soon-message">Tamma is currently in active development. Sign up below to be notified when we launch the Alpha release.</p>
+        </div>
+    </section>
+
+    <!-- Email Signup Section (AC 3) -->
+    <section class="signup" id="signup">
+        <div class="container">
+            <h2>Get Launch Notifications</h2>
+            <p>Be the first to know when Tamma Alpha launches</p>
+
+            <form id="signup-form" class="signup-form">
+                <div class="form-group">
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        placeholder="Enter your email address"
+                        required
+                        pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+                        aria-label="Email address"
+                    >
+                    <button type="submit" class="btn btn-primary">Notify Me</button>
+                </div>
+                <div id="form-message" class="form-message" role="alert"></div>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer (AC 4, 9) -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>Tamma</h4>
+                    <p>The autonomous development platform that maintains itself</p>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Links</h4>
+                    <ul>
+                        <li><a href="https://github.com/meywd/tamma" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+                        <li><a href="/privacy.html">Privacy Policy</a></li>
+                        <li><a href="/terms.html">Terms of Service</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <p>
+                        <a href="https://github.com/meywd/tamma" target="_blank" rel="noopener noreferrer" class="github-link">
+                            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                            </svg>
+                            Star on GitHub
+                        </a>
+                    </p>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <p>&copy; 2025 Tamma Project. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript for form submission -->
+    <script>
+        // Task 3 (#82) - Email signup form handling
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const messageEl = document.getElementById('form-message');
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+
+            // Basic email validation (browser does pattern matching too)
+            const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
+            if (!emailRegex.test(email)) {
+                messageEl.textContent = 'Please enter a valid email address.';
+                messageEl.className = 'form-message error';
+                return;
+            }
+
+            // Disable submit button during request
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+
+            try {
+                const response = await fetch('/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email }),
+                });
+
+                if (response.ok) {
+                    messageEl.textContent = '✓ Success! You\'ll be notified when we launch.';
+                    messageEl.className = 'form-message success';
+                    document.getElementById('email').value = '';
+                } else {
+                    const errorData = await response.text();
+                    messageEl.textContent = errorData || 'Failed to sign up. Please try again.';
+                    messageEl.className = 'form-message error';
+                }
+            } catch (error) {
+                messageEl.textContent = 'Network error. Please check your connection and try again.';
+                messageEl.className = 'form-message error';
+            } finally {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Notify Me';
+            }
+        });
+    </script>
+</body>
+</html>

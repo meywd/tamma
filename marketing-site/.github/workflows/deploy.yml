@@ -1,0 +1,70 @@
+name: Deploy to Cloudflare Pages
+
+# This workflow deploys the marketing site to Cloudflare Pages
+# Triggered on push to main branch or manual workflow dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'marketing-site/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Cloudflare Pages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'marketing-site/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: ./marketing-site
+        run: npm ci
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=tamma-marketing-site
+          workingDirectory: ./marketing-site
+
+      - name: Comment deployment URL on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚀 Preview deployment: https://${{ env.CLOUDFLARE_DEPLOYMENT_ID }}.tamma-marketing-site.pages.dev'
+            })
+
+      - name: Performance audit
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          urls: |
+            https://tamma-marketing-site.pages.dev
+          uploadArtifacts: true
+          temporaryPublicStorage: true
