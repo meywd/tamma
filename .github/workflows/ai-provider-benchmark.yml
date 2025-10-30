@@ -1,0 +1,185 @@
+name: AI Provider Benchmark
+
+on:
+  # Manual trigger via GitHub UI
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Providers to test (comma-separated: gemini,openai,anthropic,openrouter)'
+        required: false
+        default: 'gemini'
+      iterations:
+        description: 'Number of iterations per test'
+        required: false
+        default: '3'
+      scenarios:
+        description: 'Scenarios to test (comma-separated: issue-analysis,code-generation,test-generation,code-review)'
+        required: false
+        default: 'all'
+
+  # Optionally run on PR to Story 1.0 branch
+  pull_request:
+    branches:
+      - story/1-0-ai-provider-strategy-research
+    paths:
+      - '.dev/spikes/**'
+      - 'docs/research/**'
+
+  # Can be called from other workflows
+  workflow_call:
+    inputs:
+      providers:
+        type: string
+        required: false
+        default: 'gemini'
+      iterations:
+        type: string
+        required: false
+        default: '1'
+    secrets:
+      GOOGLE_AI_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENROUTER_API_KEY:
+        required: false
+
+jobs:
+  benchmark:
+    name: Run AI Provider Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install tsx globally
+        run: npm install -g tsx typescript
+
+      - name: Run benchmark
+        working-directory: .dev/spikes
+        env:
+          # API keys from GitHub secrets
+          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # Determine providers and iterations
+          PROVIDERS="${{ github.event.inputs.providers || 'gemini' }}"
+          ITERATIONS="${{ github.event.inputs.iterations || '1' }}"
+          SCENARIOS="${{ github.event.inputs.scenarios || 'all' }}"
+
+          echo "Running benchmark with:"
+          echo "  Providers: $PROVIDERS"
+          echo "  Iterations: $ITERATIONS"
+          echo "  Scenarios: $SCENARIOS"
+
+          # Build command
+          CMD="tsx run-benchmark.ts --providers $PROVIDERS --iterations $ITERATIONS"
+
+          if [ "$SCENARIOS" != "all" ]; then
+            CMD="$CMD --scenarios $SCENARIOS"
+          fi
+
+          echo "Command: $CMD"
+          eval $CMD
+
+      - name: Upload JSON results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-json
+          path: .dev/spikes/results/batch-results-*.json
+          retention-days: 30
+
+      - name: Upload markdown report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-md
+          path: .dev/spikes/results/benchmark-report-*.md
+          retention-days: 30
+
+      - name: Display summary
+        if: always()
+        run: |
+          echo "### 📊 Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find the latest report
+          REPORT=$(ls -t .dev/spikes/results/benchmark-report-*.md 2>/dev/null | head -1)
+
+          if [ -f "$REPORT" ]; then
+            echo "Benchmark completed successfully!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Extract executive summary section
+            sed -n '/## Executive Summary/,/## Overall Rankings/p' "$REPORT" | head -n -1 >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📥 Full results available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No benchmark report generated. Check logs for errors." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Find latest report
+            const resultsDir = '.dev/spikes/results';
+            const files = fs.readdirSync(resultsDir)
+              .filter(f => f.startsWith('benchmark-report-'))
+              .sort()
+              .reverse();
+
+            if (files.length === 0) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '⚠️ AI Provider Benchmark failed to generate report. Check workflow logs.'
+              });
+              return;
+            }
+
+            const reportPath = path.join(resultsDir, files[0]);
+            const reportContent = fs.readFileSync(reportPath, 'utf8');
+
+            // Extract executive summary
+            const summaryMatch = reportContent.match(/## Executive Summary\n([\s\S]*?)## Overall Rankings/);
+            const summary = summaryMatch ? summaryMatch[1].trim() : 'Summary not available';
+
+            const comment = `## 🤖 AI Provider Benchmark Results
+
+            ${summary}
+
+            <details>
+            <summary>📊 View Full Report</summary>
+
+            ${reportContent}
+
+            </details>
+
+            **Artifacts:** Download full results from workflow run
+            `;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

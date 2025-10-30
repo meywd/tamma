@@ -267,15 +267,61 @@ npx tsx test-providers-poc.ts --provider gemini --scenario issue-analysis
 4. **Document findings** in the spike document
 5. **Update Story 1.0** research if significant discrepancies found
 
+## Testing Like GitHub Check
+
+### Automated Setup and Test
+
+```bash
+# One-command setup
+./setup-local-test.sh
+
+# Edit .env with your API keys
+nano .env
+
+# Run quick test
+./run-quick-test.sh
+```
+
+### Manual GitHub Actions Trigger
+
+1. Go to: https://github.com/meywd/tamma/actions
+2. Select "AI Provider Benchmark"
+3. Click "Run workflow"
+4. Configure options:
+   - Providers: `gemini,openai,anthropic`
+   - Iterations: `3`
+   - Scenarios: `all`
+5. Click "Run workflow" button
+6. Wait 5-10 minutes
+7. Download artifacts or view summary
+
+### Setting Up GitHub Secrets
+
+For automated CI/CD testing:
+
+1. Go to: https://github.com/meywd/tamma/settings/secrets/actions
+2. Click "New repository secret"
+3. Add secrets:
+   - `GOOGLE_AI_API_KEY`
+   - `OPENAI_API_KEY`
+   - `ANTHROPIC_API_KEY`
+   - `OPENROUTER_API_KEY`
+
+**See [TESTING.md](TESTING.md) for complete CI/CD integration guide.**
+
 ## Security Notes
 
 - **Never commit API keys** to Git
 - API keys in environment variables only
 - Add `results/*.json` to .gitignore (may contain sensitive responses)
 - Use free tier limits to avoid unexpected charges
+- GitHub secrets are encrypted and never exposed in logs
 
 ## References
 
-- Spike Document: `2024-10-30-ai-provider-free-tier-poc.md`
-- Related Story: `docs/stories/1-0-ai-provider-strategy-research.md`
-- Research Findings: `docs/research/ai-provider-strategy-2025-10.md`
+- **Testing Guide**: [TESTING.md](TESTING.md) - Complete local and CI/CD testing instructions
+- **Benchmark Guide**: [BENCHMARK-GUIDE.md](BENCHMARK-GUIDE.md) - Comprehensive usage guide
+- **Spike Document**: `2024-10-30-ai-provider-free-tier-poc.md`
+- **GitHub Workflow**: `.github/workflows/ai-provider-benchmark.yml`
+- **Related Story**: `docs/stories/1-0-ai-provider-strategy-research.md`
+- **Research Findings**: `docs/research/ai-provider-strategy-2025-10.md`
