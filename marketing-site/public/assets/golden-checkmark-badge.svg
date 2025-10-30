@@ -1,0 +1,125 @@
+<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Golden Checkmark Badge - No Text, Transparent Background -->
+
+  <defs>
+    <!-- Polished metallic gold gradient -->
+    <radialGradient id="goldPolish" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" style="stop-color:#fffacd;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#ffd700;stop-opacity:1" />
+      <stop offset="60%" style="stop-color:#daa520;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#b8860b;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Darker gold for depth -->
+    <radialGradient id="darkGold" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#daa520;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b6914;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Light gold for highlights -->
+    <linearGradient id="lightGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff9e6;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#ffe55c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffd700;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Inner shadow effect -->
+    <filter id="innerShadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feOffset in="blur" dx="2" dy="2" result="offsetBlur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3" result="color"/>
+      <feComposite in="color" in2="offsetBlur" operator="in" result="shadow"/>
+      <feComposite in="shadow" in2="SourceAlpha" operator="in" result="innerShadow"/>
+    </filter>
+
+    <!-- Emboss effect for checkmark -->
+    <filter id="emboss">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+      <feSpecularLighting in="blur" surfaceScale="4" specularConstant="0.8"
+                          specularExponent="15" lighting-color="white" result="specOut">
+        <fePointLight x="-100" y="-100" z="150"/>
+      </feSpecularLighting>
+      <feComposite in="specOut" in2="SourceAlpha" operator="in" result="specOut"/>
+      <feComposite in="SourceGraphic" in2="specOut" operator="arithmetic"
+                   k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+
+    <!-- Soft drop shadow -->
+    <filter id="dropShadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.4"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Outer glow/shadow -->
+  <circle cx="250" cy="250" r="200" fill="#000000" opacity="0.15" filter="url(#dropShadow)"/>
+
+  <!-- Layered crest rim - Outer layer -->
+  <circle cx="250" cy="250" r="190" fill="none" stroke="url(#darkGold)" stroke-width="8"/>
+
+  <!-- Main badge circle -->
+  <circle cx="250" cy="250" r="180" fill="url(#goldPolish)" filter="url(#innerShadow)"/>
+
+  <!-- Layered crest rim - Middle decorative ring -->
+  <circle cx="250" cy="250" r="170" fill="none" stroke="url(#lightGold)" stroke-width="3"/>
+  <circle cx="250" cy="250" r="165" fill="none" stroke="url(#darkGold)" stroke-width="1" stroke-dasharray="8,4"/>
+
+  <!-- Subtle laurel wreath engraving pattern -->
+  <g opacity="0.25" fill="none" stroke="url(#darkGold)" stroke-width="2">
+    <!-- Left laurel branch -->
+    <path d="M 160,250 Q 155,235 165,225 Q 175,215 180,200" stroke-linecap="round"/>
+    <path d="M 165,245 Q 160,235 168,228" stroke-linecap="round"/>
+    <path d="M 170,255 Q 165,248 172,243" stroke-linecap="round"/>
+    <path d="M 175,265 Q 170,258 177,253" stroke-linecap="round"/>
+
+    <!-- Right laurel branch -->
+    <path d="M 340,250 Q 345,235 335,225 Q 325,215 320,200" stroke-linecap="round"/>
+    <path d="M 335,245 Q 340,235 332,228" stroke-linecap="round"/>
+    <path d="M 330,255 Q 335,248 328,243" stroke-linecap="round"/>
+    <path d="M 325,265 Q 330,258 323,253" stroke-linecap="round"/>
+  </g>
+
+  <!-- Inner circle for depth -->
+  <circle cx="250" cy="250" r="155" fill="url(#darkGold)" opacity="0.2"/>
+  <circle cx="250" cy="250" r="150" fill="url(#lightGold)" opacity="0.5"/>
+
+  <!-- High contrast highlight arc -->
+  <path d="M 150,180 A 120,120 0 0,1 350,180"
+        fill="none"
+        stroke="#ffffff"
+        stroke-width="8"
+        opacity="0.6"
+        stroke-linecap="round"/>
+
+  <!-- Smaller highlight for polish effect -->
+  <ellipse cx="200" cy="180" rx="40" ry="25" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Embossed checkmark at center -->
+  <path d="M 205,245 L 235,275 L 295,215"
+        fill="none"
+        stroke="url(#darkGold)"
+        stroke-width="20"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        filter="url(#emboss)"
+        opacity="0.9"/>
+
+  <!-- Highlight on checkmark for 3D effect -->
+  <path d="M 205,245 L 235,275 L 295,215"
+        fill="none"
+        stroke="#ffffff"
+        stroke-width="4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.3"/>
+
+  <!-- Inner rim for layered look -->
+  <circle cx="250" cy="250" r="140" fill="none" stroke="url(#darkGold)" stroke-width="2"/>
+</svg>

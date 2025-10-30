@@ -1,0 +1,50 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Option D3: Modern Arabic "تَمّ" Badge - Clean and Contemporary -->
+
+  <defs>
+    <linearGradient id="modernGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Checkmark path -->
+    <path id="checkmark" d="M150,200 L180,230 L250,160" fill="none" stroke="#10b981" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </defs>
+
+  <!-- Main rounded square -->
+  <rect x="50" y="50" width="300" height="300" rx="60" fill="url(#modernGradient)"/>
+
+  <!-- Inner white area -->
+  <rect x="70" y="70" width="260" height="260" rx="50" fill="white"/>
+
+  <!-- Subtle checkmark background element -->
+  <use href="#checkmark" opacity="0.15" transform="translate(0, -10)"/>
+
+  <!-- Arabic Text: تَمّ (Tam - Done) -->
+  <text
+    x="200"
+    y="230"
+    font-family="'SF Arabic', 'Helvetica Neue Arabic', 'Segoe UI Arabic', 'Traditional Arabic', sans-serif"
+    font-size="110"
+    font-weight="700"
+    fill="url(#modernGradient)"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">
+    تَمّ
+  </text>
+
+  <!-- Small "Done" in English below -->
+  <text
+    x="200"
+    y="280"
+    font-family="'Inter', 'SF Pro', 'Helvetica Neue', sans-serif"
+    font-size="18"
+    font-weight="600"
+    fill="#6b7280"
+    text-anchor="middle"
+    letter-spacing="2">
+    DONE
+  </text>
+</svg>

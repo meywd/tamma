@@ -1,0 +1,120 @@
+<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Golden Stamp with Arabic "تَمّ" (Tam - Done) -->
+
+  <defs>
+    <!-- Golden gradient -->
+    <linearGradient id="goldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffd700;stop-opacity:1" />
+      <stop offset="25%" style="stop-color:#ffed4e;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#ffc107;stop-opacity:1" />
+      <stop offset="75%" style="stop-color:#ff9800;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f57c00;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Radial gold for center -->
+    <radialGradient id="goldRadial" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fff9e6;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#ffd700;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#ffc107;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff9800;stop-opacity:1" />
+    </radialGradient>
+
+    <!-- Dark gold for depth -->
+    <linearGradient id="darkGold" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#b8860b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b6914;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Drop shadow -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="4" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Metallic shine -->
+    <linearGradient id="shine" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.7" />
+      <stop offset="50%" style="stop-color:#ffffff;stop-opacity:0" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0.3" />
+    </linearGradient>
+  </defs>
+
+  <!-- Shadow -->
+  <circle cx="250" cy="255" r="200" fill="#000000" opacity="0.2" filter="url(#shadow)"/>
+
+  <!-- Outer decorative ring - thin stroke only -->
+  <circle cx="250" cy="250" r="220" fill="none" stroke="url(#darkGold)" stroke-width="4"/>
+
+  <!-- Main golden ring (transparent center) -->
+  <circle cx="250" cy="250" r="200" fill="none" stroke="url(#goldRadial)" stroke-width="40"/>
+
+  <!-- Decorative serrated edge -->
+  <g fill="url(#goldGradient)">
+    <!-- Create serrated/scalloped edge pattern -->
+    <circle cx="250" cy="50" r="15"/>
+    <circle cx="310" cy="65" r="15"/>
+    <circle cx="365" cy="105" r="15"/>
+    <circle cx="405" cy="165" r="15"/>
+    <circle cx="420" cy="235" r="15"/>
+    <circle cx="405" cy="305" r="15"/>
+    <circle cx="365" cy="365" r="15"/>
+    <circle cx="305" cy="405" r="15"/>
+    <circle cx="235" cy="420" r="15"/>
+    <circle cx="165" cy="405" r="15"/>
+    <circle cx="105" cy="365" r="15"/>
+    <circle cx="65" cy="305" r="15"/>
+    <circle cx="50" cy="235" r="15"/>
+    <circle cx="65" cy="165" r="15"/>
+    <circle cx="105" cy="105" r="15"/>
+    <circle cx="165" cy="65" r="15"/>
+  </g>
+
+  <!-- Inner ring decoration -->
+  <circle cx="250" cy="250" r="180" fill="none" stroke="url(#darkGold)" stroke-width="3"/>
+
+  <!-- Transparent center area -->
+  <!-- Removed white fill for transparency -->
+
+  <!-- Metallic shine on ring only -->
+  <circle cx="250" cy="250" r="200" fill="none" stroke="url(#shine)" stroke-width="40" opacity="0.4"/>
+
+  <!-- Decorative ribbon banner removed for transparency -->
+  <!-- Ribbon removed to keep center fully transparent -->
+
+  <!-- Arabic Text: تَمّ (Tam - Done) -->
+  <text
+    x="250"
+    y="270"
+    font-family="'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', 'Damascus', 'Al Bayan', serif"
+    font-size="140"
+    font-weight="bold"
+    fill="url(#darkGold)"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">
+    تَمّ
+  </text>
+
+  <!-- Small "DONE" subtitle in English -->
+  <text
+    x="250"
+    y="330"
+    font-family="'Inter', 'SF Pro', 'Helvetica Neue', sans-serif"
+    font-size="22"
+    font-weight="700"
+    fill="url(#darkGold)"
+    text-anchor="middle"
+    letter-spacing="4">
+    DONE
+  </text>
+
+  <!-- Top decorative element -->
+  <path d="M250,80 L260,60 L270,80 L260,75 Z" fill="url(#goldGradient)"/>
+</svg>

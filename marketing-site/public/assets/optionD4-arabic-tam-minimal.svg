@@ -1,0 +1,37 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Option D4: Minimal Arabic "تَمّ" - Ultra Clean -->
+
+  <defs>
+    <linearGradient id="minimalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Simple circle background -->
+  <circle cx="200" cy="200" r="180" fill="white" stroke="url(#minimalGradient)" stroke-width="6"/>
+
+  <!-- Arabic Text: تَمّ (Tam - Done) - Large and Bold -->
+  <text
+    x="200"
+    y="240"
+    font-family="'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', serif"
+    font-size="140"
+    font-weight="bold"
+    fill="url(#minimalGradient)"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">
+    تَمّ
+  </text>
+
+  <!-- Small checkmark accent -->
+  <path
+    d="M310,100 L320,110 L345,85"
+    fill="none"
+    stroke="#10b981"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.7"/>
+</svg>

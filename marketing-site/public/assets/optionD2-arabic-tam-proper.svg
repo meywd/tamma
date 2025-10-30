@@ -1,0 +1,72 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Option D2 Corrected: Arabic "تَمّ" Seal with proper Arabic text -->
+
+  <!-- Outer circle gradient -->
+  <defs>
+    <linearGradient id="circleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="innerGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563eb;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Geometric pattern inspired by Islamic art -->
+    <pattern id="geometricPattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M0,20 L20,0 L40,20 L20,40 Z" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- Outer decorative circle -->
+  <circle cx="200" cy="200" r="190" fill="url(#circleGradient)" opacity="0.95"/>
+
+  <!-- Geometric pattern overlay -->
+  <circle cx="200" cy="200" r="190" fill="url(#geometricPattern)"/>
+
+  <!-- Inner circle -->
+  <circle cx="200" cy="200" r="160" fill="white"/>
+
+  <!-- Inner accent circle -->
+  <circle cx="200" cy="200" r="150" fill="none" stroke="url(#innerGradient)" stroke-width="3"/>
+
+  <!-- Arabic Text: تَمّ (Tam - Done) -->
+  <!-- Using proper Arabic Unicode characters with correct rendering -->
+  <text
+    x="200"
+    y="230"
+    font-family="'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', 'Damascus', 'Al Bayan', 'Baghdad', serif"
+    font-size="120"
+    font-weight="bold"
+    fill="url(#innerGradient)"
+    text-anchor="middle"
+    direction="rtl"
+    unicode-bidi="bidi-override">
+    تَمّ
+  </text>
+
+  <!-- Decorative corner elements (Islamic geometric style) -->
+  <g opacity="0.6" fill="white">
+    <!-- Top -->
+    <circle cx="200" cy="35" r="4"/>
+    <!-- Right -->
+    <circle cx="365" cy="200" r="4"/>
+    <!-- Bottom -->
+    <circle cx="200" cy="365" r="4"/>
+    <!-- Left -->
+    <circle cx="35" cy="200" r="4"/>
+  </g>
+
+  <!-- Small decorative stars -->
+  <g opacity="0.7" fill="white">
+    <!-- Top-right -->
+    <path d="M280,80 L283,87 L290,87 L284,92 L287,99 L280,94 L273,99 L276,92 L270,87 L277,87 Z"/>
+    <!-- Top-left -->
+    <path d="M120,80 L123,87 L130,87 L124,92 L127,99 L120,94 L113,99 L116,92 L110,87 L117,87 Z"/>
+    <!-- Bottom-right -->
+    <path d="M280,320 L283,327 L290,327 L284,332 L287,339 L280,334 L273,339 L276,332 L270,327 L277,327 Z"/>
+    <!-- Bottom-left -->
+    <path d="M120,320 L123,327 L130,327 L124,332 L127,339 L120,334 L113,339 L116,332 L110,327 L117,327 Z"/>
+  </g>
+</svg>
