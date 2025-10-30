@@ -303,8 +303,8 @@ To improve the test bed:
 ## References
 
 - **Story 1.0**: `docs/stories/1-0-ai-provider-strategy-research.md`
-- **Research Findings**: `docs/research/ai-provider-strategy-2025-10.md`
-- **Cost Analysis**: `docs/research/ai-provider-cost-analysis-2025-10.md`
+- **Research Findings**: `docs/research/ai-provider-strategy-2024-10.md`
+- **Cost Analysis**: `docs/research/ai-provider-cost-analysis-2024-10.md`
 - **Integration Guide**: `packages/providers/INTEGRATION.md`
 
 ---

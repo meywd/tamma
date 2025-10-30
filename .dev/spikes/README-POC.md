@@ -324,4 +324,4 @@ For automated CI/CD testing:
 - **Spike Document**: `2024-10-30-ai-provider-free-tier-poc.md`
 - **GitHub Workflow**: `.github/workflows/ai-provider-benchmark.yml`
 - **Related Story**: `docs/stories/1-0-ai-provider-strategy-research.md`
-- **Research Findings**: `docs/research/ai-provider-strategy-2025-10.md`
+- **Research Findings**: `docs/research/ai-provider-strategy-2024-10.md`
