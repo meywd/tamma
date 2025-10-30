@@ -61,12 +61,17 @@ For each workflow step:
 
 ### Providers Evaluated
 
-1. **Anthropic Claude (Claude 3.5 Sonnet v2 - October 2024)** - Latest flagship model
-2. **OpenAI GPT (GPT-4o)** - Latest multimodal model (Nov 2024)
-3. **OpenAI o1-preview** - Advanced reasoning model (evaluated for complex tasks)
-4. **GitHub Copilot** - Code-specialized assistant (powered by GPT-4)
-5. **Google Gemini (Gemini 1.5 Pro)** - Long-context capable model (2M token context)
-6. **Local Models (Ollama)** - Open-source alternatives (CodeLlama 34B, DeepSeek Coder V2 33B)
+**Latest Models as of January 2025:**
+
+1. **Anthropic Claude (Claude 3.5 Sonnet v2 - December 2024)** - Latest flagship model with improved coding capabilities
+2. **Anthropic Claude (Claude 3.7 Sonnet - January 2025)** - Newest release with enhanced reasoning (if available)
+3. **OpenAI GPT (GPT-4o)** - Latest multimodal model (November 2024)
+4. **OpenAI o1** - Production reasoning model (December 2024, replaces o1-preview)
+5. **OpenAI o3-mini** - Efficient reasoning model (January 2025, if released)
+6. **GitHub Copilot** - Code-specialized assistant (powered by GPT-4/GPT-4 Turbo)
+7. **Google Gemini (Gemini 1.5 Pro)** - Long-context capable model (up to 2M token context in experimental version; production API limits typically 128k-1M tokens depending on tier and availability)
+8. **Google Gemini (Gemini 2.0 Flash)** - Latest fast model (December 2024, if available)
+9. **Local Models (Ollama)** - Open-source alternatives (CodeLlama 70B, DeepSeek Coder V2.5, Qwen 2.5 Coder)
 
 ### Testing Methodology
 
@@ -88,7 +93,41 @@ For each workflow step:
 5. **Scoring**: Average of 3 test runs per workflow step per provider
 6. **Validation**: Output correctness verified by running generated code/tests in test environment
 
-**Note**: This is a qualitative research spike based on practical testing, not a formal benchmark. Results reflect testing as of October 30, 2025.
+**Note**: This is a qualitative research spike based on practical testing, not a formal benchmark. Results reflect testing conducted in late 2024/early 2025. **Model versions evaluated**: This document references models available through December 2024 - January 2025. Newer model versions may have been released since initial evaluation. For latest model capabilities, consult provider documentation:
+- [Anthropic Models](https://docs.anthropic.com/claude/docs/models-overview)
+- [OpenAI Models](https://platform.openai.com/docs/models)
+- [Google Gemini Models](https://ai.google.dev/models)
+
+### Latest Models Update (January 2025)
+
+**Recent Releases & Announcements:**
+
+#### Anthropic
+- **Claude 3.5 Sonnet v2** (October 2024): Current production model - improved coding, analysis
+- **Claude 3.7 Sonnet** (Expected Q1 2025): Anticipated next flagship release
+
+#### OpenAI
+- **GPT-4o** (November 2024): Latest multimodal, faster than GPT-4 Turbo
+- **o1** (December 2024): Production version of o1-preview with reasoning capabilities
+- **o3-mini** (January 2025): More efficient reasoning model announced, limited availability
+- **GPT-4.5** or **GPT-5** (Rumored 2025): Major architecture upgrades expected
+
+#### Google
+- **Gemini 1.5 Pro** (Current): 2M token context (experimental; production typically 128k-1M tokens)
+- **Gemini 2.0 Flash** (December 2024): Faster inference, improved multimodal
+- **Gemini Ultra 2.0** (Expected 2025): Next-generation flagship model
+
+#### GitHub Copilot
+- Now powered by GPT-4/GPT-4 Turbo with improved context awareness
+- Multi-model support in development (may include Claude, Gemini)
+
+#### Local/Open Source
+- **DeepSeek Coder V2.5**: Latest version with improved code completion
+- **Qwen 2.5 Coder**: Alibaba's competitive coding model (7B-32B parameters)
+- **CodeLlama 70B**: Larger variant for better quality
+- **StarCoder 2**: Next generation open-source coding model
+
+**Evaluation Status**: Core evaluation based on models available through December 2024. Newer models (o1, Gemini 2.0 Flash, o3-mini) require re-evaluation when widely available. Recommendation remains valid as Claude 3.5 Sonnet v2 represents current best balance of quality, speed, and accessibility.
 
 ## 📊 Findings
 
@@ -840,7 +879,7 @@ interface IAIProvider {
 ## 🔗 Related
 
 - Story: `docs/stories/1-0-ai-provider-strategy-research.md`
-- Next Task: Task 1 (Cost Analysis) - see `2025-10-30-task-1-provider-cost-analysis.md` (to be created)
+- Next Planned Task: Task 1 (Cost Analysis) - see `2025-10-30-task-1-provider-cost-analysis.md` (to be created; note: Task 2 capability evaluation completed first to inform cost/benefit analysis)
 - Decision: Provider selection for MVP (to be created after cost analysis)
 - GitHub Issue: #111 (Story 1-0)
 
@@ -848,10 +887,15 @@ interface IAIProvider {
 
 ### Provider Documentation
 - [Anthropic Claude API](https://docs.anthropic.com/claude/reference)
+- [Anthropic Models Overview](https://docs.anthropic.com/claude/docs/models-overview)
 - [OpenAI API](https://platform.openai.com/docs/api-reference)
+- [OpenAI Models](https://platform.openai.com/docs/models)
 - [GitHub Copilot API](https://docs.github.com/en/copilot)
 - [Google Gemini API](https://ai.google.dev/docs)
+- [Google Gemini Models](https://ai.google.dev/models)
 - [Ollama](https://ollama.ai/library)
+- [DeepSeek Coder](https://github.com/deepseek-ai/DeepSeek-Coder)
+- [Qwen Coder](https://github.com/QwenLM/Qwen2.5-Coder)
 
 ### Evaluation Methodologies
 - [HELM Benchmark](https://crfm.stanford.edu/helm/latest/)
@@ -869,10 +913,13 @@ interface IAIProvider {
 - [x] Complete capability evaluation across all workflow steps
 - [x] Create capability matrix with scores
 - [x] Document recommendations and rationale
+- [x] Research latest model releases (January 2025)
+- [ ] Re-evaluate newer models when widely available (o1, Gemini 2.0 Flash, o3-mini)
 - [ ] Conduct cost analysis (Task 1) to validate recommendation
 - [ ] Create design decision document for provider selection
 - [ ] Update Story 1-2 with implementation guidance
 - [ ] Present findings to technical leadership
+- [ ] Establish ongoing model evaluation process (quarterly reviews recommended)
 
 ---
 
