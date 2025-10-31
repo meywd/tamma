@@ -58,22 +58,62 @@
 <body>
     <!-- Hero Section (AC 2) -->
     <header class="hero">
+        <!-- Dark Mode Toggle Button -->
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
+            <svg class="sun-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg class="moon-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
+
         <div class="container">
             <div class="hero-content">
-                <!-- Logo placeholder -->
+                <!-- Logo with golden badge -->
                 <div class="logo">
-                    <div class="logo-placeholder">
-                        <!-- SVG placeholder for Tamma logo -->
-                        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect width="80" height="80" rx="12" fill="#2563eb"/>
-                            <text x="40" y="50" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="white" text-anchor="middle">T</text>
-                        </svg>
+                    <div class="tamma-badge tamma-badge--size-120 tamma-badge--badge-5 tamma-badge--arabic tamma-badge--logo">
+                        <!-- Badge 5 - Arabic - Black Ribbon Banner (textSize: 3, verticalAlign: 49%) -->
+                        <img src="/assets/SVG/badge-5-arabic.svg" alt="Tamma Logo - تَمّ" class="tamma-badge__image">
                     </div>
-                    <h1>Tamma</h1>
+                    <h1>Tam, it's Done</h1>
                 </div>
 
                 <!-- Tagline (AC 2) -->
                 <p class="tagline">The autonomous development platform that maintains itself</p>
+
+                <!-- Trust indicators -->
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <div class="stat-icon">
+                            <!-- Mini Badge 11 - English -->
+                            <div class="tamma-badge tamma-badge--size-32 tamma-badge--badge-11 tamma-badge--english">
+                                <img src="/assets/1x/Artboard ١١.png" alt="Check" class="tamma-badge__image">
+                                <span class="tamma-badge__text tamma-badge__text--english" style="color: #ece1a0;">✓</span>
+                            </div>
+                        </div>
+                        <div class="stat-value">70%+</div>
+                        <div class="stat-label">Completion Rate</div>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <div class="stat-value">8</div>
+                        <div class="stat-label">AI Providers</div>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <div class="stat-value">7</div>
+                        <div class="stat-label">Git Platforms</div>
+                    </div>
+                </div>
 
                 <!-- CTA Buttons (AC 4) -->
                 <div class="cta-buttons">
@@ -85,6 +125,15 @@
                     </a>
                     <a href="#signup" class="btn btn-secondary">Notify Me at Launch</a>
                 </div>
+
+                <!-- Trust badge -->
+                <div class="hero-trust">
+                    <!-- Badge 5 - English - Black Ribbon Banner -->
+                    <div class="tamma-badge tamma-badge--size-40 tamma-badge--badge-5 tamma-badge--english">
+                        <img src="/assets/SVG/badge-5-english.svg" alt="Premium Quality - DONE" class="tamma-badge__image">
+                    </div>
+                    <span>Production-Ready Quality · Self-Maintained</span>
+                </div>
             </div>
         </div>
     </header>
@@ -95,27 +144,43 @@
             <h2>Key Features</h2>
             <div class="features-grid">
                 <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--arabic feature-badge-overlay">
+                        <!-- Badge 11 - Arabic - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-arabic.svg" alt="Premium - تَمّ" class="tamma-badge__image">
+                    </div>
                     <div class="feature-icon">🤖</div>
-                    <h3>Autonomous Development Loop</h3>
-                    <p>70%+ completion rate without human intervention. Handles issue selection, planning, implementation, testing, and PR creation automatically.</p>
+                    <h3>14-Step Autonomous Loop</h3>
+                    <p>Complete development cycle from issue assignment → planning → design → code → build → test → review → merge → deploy. Achieves 70%+ completion rate without human intervention while maintaining strategic approval checkpoints at critical decision points.</p>
                 </div>
 
                 <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-5 tamma-badge--english feature-badge-overlay">
+                        <!-- Badge 5 - English - Black Ribbon -->
+                        <img src="/assets/SVG/badge-5-english.svg" alt="Complete - DONE" class="tamma-badge__image">
+                    </div>
                     <div class="feature-icon">🔀</div>
-                    <h3>Multi-Provider Flexibility</h3>
-                    <p>8 AI providers (OpenAI, Anthropic, Google, Azure, AWS, Mistral, Groq, Ollama) and 7 Git platforms. No vendor lock-in.</p>
+                    <h3>Multi-Provider Ecosystem</h3>
+                    <p>Support for 8+ AI providers (Anthropic, OpenAI, GitHub Copilot, Google Gemini, z.ai, Groq, Ollama, local LLMs) and 7+ Git platforms (GitHub, GitLab, Gitea, Forgejo, Bitbucket, Azure DevOps, plain Git). Intelligent routing optimizes costs by 20-30% while eliminating vendor lock-in.</p>
                 </div>
 
                 <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--english feature-badge-overlay">
+                        <!-- Badge 11 - English - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-english.svg" alt="Premium - DONE" class="tamma-badge__image">
+                    </div>
                     <div class="feature-icon">🔒</div>
-                    <h3>Production-Ready Quality</h3>
-                    <p>Mandatory escalation gates, comprehensive testing, and transparency. Never gets stuck—always knows when to ask for help.</p>
+                    <h3>Quality Gates & Error Recovery</h3>
+                    <p>Mandatory quality gates at build, test, and CI/CD stages with 3-retry limit and automatic escalation. System never gets stuck—all workflow states have exit conditions. Comprehensive event sourcing provides complete audit trail for compliance and debugging.</p>
                 </div>
 
                 <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--arabic feature-badge-overlay">
+                        <!-- Badge 11 - Arabic - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-arabic.svg" alt="Premium - تَمّ" class="tamma-badge__image">
+                    </div>
                     <div class="feature-icon">🛠️</div>
-                    <h3>Self-Maintenance</h3>
-                    <p>Tamma maintains its own codebase as MVP validation. Proves production-readiness through dogfooding.</p>
+                    <h3>Self-Maintenance Validation</h3>
+                    <p>Tamma maintains its own codebase as MVP validation—autonomously fixing bugs, implementing features, and updating dependencies in its own repository. This dogfooding approach proves production-readiness for mission-critical software.</p>
                 </div>
             </div>
         </div>
@@ -128,17 +193,17 @@
             <div class="why-content">
                 <div class="why-item">
                     <h3>The Problem</h3>
-                    <p>Development teams waste 40-60% of their time on repetitive toil: dependency updates, bug fixes, refactoring, and maintenance tasks that could be automated.</p>
+                    <p>Development teams spend 40-60% of their time on repetitive, low-creativity toil—writing boilerplate tests, fixing linting errors, addressing review comments, and managing CI/CD coordination. Existing tools provide basic automation without end-to-end orchestration, are tightly coupled to specific platforms (GitHub-only solutions), or lack the transparency teams need for production use. Business stakeholders fear autonomous systems making breaking changes without control, while open-source maintainers struggle with review burden that doesn't scale.</p>
                 </div>
 
                 <div class="why-item">
                     <h3>The Solution</h3>
-                    <p>Autonomous development with quality gates and complete transparency. Tamma handles routine tasks while maintaining production-ready quality standards through mandatory escalation.</p>
+                    <p>Tamma is a hybrid autonomous development platform that orchestrates complete development workflows across 8+ AI providers and 7+ Git platforms through intelligent abstraction layers. It provides complete transparency through CQRS event sourcing, enabling time-travel debugging and audit compliance. The 14-step autonomous loop completes 70%+ of development issues without human escalation while maintaining strategic checkpoints at business decisions, breaking changes, and deployments. Smart quality gates prevent issues rather than just detecting them, with mandatory escalation after 3 retry attempts ensuring the system never gets stuck.</p>
                 </div>
 
                 <div class="why-item">
                     <h3>Unique Value</h3>
-                    <p>Self-maintenance capability proves production-readiness. Tamma doesn't just automate development—it maintains its own codebase, validating the entire autonomous development loop.</p>
+                    <p>Tamma's MVP goal is self-maintenance—the platform must be robust enough to maintain its own codebase autonomously, demonstrating production-readiness for mission-critical software. This dogfooding approach validates that Tamma can handle complex, real-world codebases safely. Combined with multi-provider flexibility (no vendor lock-in), complete audit trails for compliance, context-aware modes (Dev Mode for speed vs Business Mode for control), and prevention-first quality gates, Tamma enables 3x productivity gains by reducing repetitive toil from 40-60% to under 20% of development time.</p>
                 </div>
             </div>
         </div>
@@ -326,6 +391,33 @@
                 submitBtn.textContent = 'Notify Me';
             }
         });
+
+        // Dark Mode Toggle
+        (function() {
+            const themeToggle = document.getElementById('theme-toggle');
+            const html = document.documentElement;
+
+            // Check for saved theme preference or default to system preference
+            const savedTheme = localStorage.getItem('theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            // Set initial theme
+            if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+                html.setAttribute('data-theme', 'dark');
+            } else if (savedTheme === 'light') {
+                html.setAttribute('data-theme', 'light');
+            }
+            // If no saved theme and system prefers light, leave data-theme unset (default)
+
+            // Toggle theme on button click
+            themeToggle.addEventListener('click', () => {
+                const currentTheme = html.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+                html.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        })();
     </script>
 </body>
 </html>
