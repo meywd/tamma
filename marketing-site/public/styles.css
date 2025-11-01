@@ -1254,12 +1254,12 @@ a:hover {
     gap: var(--spacing-lg);
     padding: var(--spacing-lg);
     margin: var(--spacing-xl) 0;
-    background: rgba(255, 255, 255, 0.08);
-    backdrop-filter: blur(15px);
-    -webkit-backdrop-filter: blur(15px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: var(--border-radius-xl);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .stat-item {
@@ -2089,6 +2089,32 @@ a:hover {
 /* ============================================
    ACCESSIBILITY & PERFORMANCE
    ============================================ */
+
+/* Focus indicators with golden outline for better visibility */
+:focus-visible {
+    outline: 3px solid #F4B223;
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+
+/* Skip link for keyboard navigation */
+.skip-link {
+    position: absolute;
+    top: -100px;
+    left: 0;
+    background: var(--color-gold-500);
+    color: var(--color-charcoal-900);
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-decoration: none;
+    font-weight: 700;
+    z-index: 10000;
+    border-radius: 0 0 var(--border-radius) 0;
+    transition: top 0.3s ease;
+}
+
+.skip-link:focus {
+    top: 0;
+}
 
 /* Reduce animations on low-power devices */
 @media (prefers-reduced-motion: reduce) {

@@ -56,8 +56,11 @@
     <!-- <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "YOUR_TOKEN_HERE"}'></script> -->
 </head>
 <body>
+    <!-- Skip link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
     <!-- Hero Section (AC 2) -->
-    <header class="hero">
+    <header class="hero" id="main-content">
         <!-- Dark Mode Toggle Button -->
         <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
             <svg class="sun-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -289,7 +292,7 @@
                         name="email"
                         placeholder="Enter your email address"
                         required
-                        pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$"
+                        pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}"
                         aria-label="Email address"
                     >
                     <button type="submit" class="btn btn-primary">Notify Me</button>
