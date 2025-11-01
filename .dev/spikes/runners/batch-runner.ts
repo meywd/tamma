@@ -184,16 +184,28 @@ export class BatchRunner {
     console.log(`${'='.repeat(80)}`);
     console.log(`Providers: ${providers.map(p => p.name).join(', ')}`);
     console.log(`Scenarios: ${this.config.scenarios.join(', ')}`);
-    console.log(`Iterations: ${this.config.iterations} per provider/scenario`);
-    console.log(`Total tests: ${providers.length * this.config.scenarios.length * this.config.iterations}`);
+    console.log(`Iterations: ${this.config.iterations} per model/scenario`);
+    console.log(`\nModels to test:`);
+
+    // List all models for each provider
+    let totalModelCount = 0;
+    for (const provider of providers) {
+      console.log(`  ${provider.name}:`);
+      for (const model of provider.models) {
+        console.log(`    - ${model}`);
+        totalModelCount++;
+      }
+    }
+
+    const totalTests = totalModelCount * this.config.scenarios.length * this.config.iterations;
+    console.log(`\nTotal: ${totalModelCount} models × ${this.config.scenarios.length} scenarios × ${this.config.iterations} iterations = ${totalTests} tests`);
     console.log(`${'='.repeat(80)}\n`);
 
     let testCount = 0;
-    const totalTests = providers.length * this.config.scenarios.length * this.config.iterations;
 
     // Run tests
     for (const provider of providers) {
-      for (const model of provider.models.slice(0, 2)) { // Test up to 2 models per provider
+      for (const model of provider.models) { // Test ALL models per provider
         for (const scenario of this.config.scenarios) {
           const prompt = SCENARIOS[scenario as keyof typeof SCENARIOS];
           if (!prompt) continue;
