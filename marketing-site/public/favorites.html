@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Favorites - مفضلتي</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #fbbf24;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+
+        .back-btn {
+            background: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: #fbbf24;
+            transform: scale(1.05);
+        }
+
+        .clear-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .clear-btn:hover {
+            background: #dc2626;
+            transform: scale(1.05);
+        }
+
+        .export-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .export-btn:hover {
+            background: #059669;
+            transform: scale(1.05);
+        }
+
+        .favorites-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 30px;
+            padding: 20px;
+        }
+
+        .favorite-item {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            position: relative;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .favorite-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+        }
+
+        .badge-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1;
+            margin-bottom: 20px;
+        }
+
+        .badge-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .badge-text-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 80%;
+            pointer-events: none;
+        }
+
+        .badge-text {
+            font-size: 3rem;
+            font-weight: bold;
+        }
+
+        .badge-text.arabic {
+            font-family: 'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', serif;
+        }
+
+        .badge-text.english {
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 2.2rem;
+            letter-spacing: 3px;
+        }
+
+        .favorite-info {
+            margin-bottom: 15px;
+        }
+
+        .favorite-name {
+            font-size: 1.2rem;
+            color: #1e40af;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .favorite-color {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 5px;
+        }
+
+        .color-swatch {
+            width: 30px;
+            height: 30px;
+            border-radius: 5px;
+            border: 2px solid #ddd;
+        }
+
+        .favorite-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .edit-btn {
+            background: #fbbf24;
+            color: #1e40af;
+        }
+
+        .edit-btn:hover {
+            background: #f59e0b;
+        }
+
+        .delete-btn {
+            background: #ef4444;
+            color: white;
+        }
+
+        .delete-btn:hover {
+            background: #dc2626;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .empty-state h2 {
+            color: #1e40af;
+            margin-bottom: 15px;
+            font-size: 2rem;
+        }
+
+        .empty-state p {
+            color: #666;
+            margin-bottom: 25px;
+            font-size: 1.1rem;
+        }
+
+        .browse-btn {
+            background: #fbbf24;
+            color: #1e40af;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 25px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .browse-btn:hover {
+            background: #f59e0b;
+            transform: scale(1.05);
+        }
+
+        .stats {
+            text-align: center;
+            color: white;
+            margin-bottom: 20px;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⭐ مفضلتي ⭐</h1>
+        <p class="subtitle">تصميماتك المحفوظة - Saved Designs</p>
+
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← العودة للقائمة</button>
+            <div style="display: flex; gap: 10px;">
+                <button class="export-btn" onclick="exportFavorites()" id="exportBtn" style="display: none;">💾 تصدير</button>
+                <button class="clear-btn" onclick="clearAll()" id="clearBtn" style="display: none;">🗑️ مسح الكل</button>
+            </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div id="favoritesContainer"></div>
+    </div>
+
+    <script>
+        // Arabic number mapping
+        const arabicNums = { '2': '٢', '3': '٣', '4': '٤', '5': '٥', '6': '٦', '7': '٧', '8': '٨', '9': '٩', '10': '١٠', '11': '١١', '12': '١٢', '13': '١٣' };
+
+        function init() {
+            loadFavorites();
+        }
+
+        function loadFavorites() {
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+            const container = document.getElementById('favoritesContainer');
+            const statsEl = document.getElementById('stats');
+            const clearBtn = document.getElementById('clearBtn');
+            const exportBtn = document.getElementById('exportBtn');
+
+            if (favorites.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>💔 لا توجد تصميمات محفوظة</h2>
+                        <p>لم تقم بحفظ أي تصميم بعد. ابدأ باستكشاف الشارات وحفظ المفضل لديك!</p>
+                        <button class="browse-btn" onclick="goBack()">تصفح الشارات</button>
+                    </div>
+                `;
+                statsEl.textContent = '';
+                clearBtn.style.display = 'none';
+                exportBtn.style.display = 'none';
+                return;
+            }
+
+            statsEl.textContent = `لديك ${favorites.length} تصميم محفوظ`;
+            clearBtn.style.display = 'block';
+            exportBtn.style.display = 'block';
+
+            const grid = document.createElement('div');
+            grid.className = 'favorites-grid';
+
+            favorites.forEach((fav, index) => {
+                const item = document.createElement('div');
+                item.className = 'favorite-item';
+
+                const textContent = fav.lang === 'english' ? 'DONE' : 'تَمّ';
+                const textClass = fav.lang === 'english' ? 'english' : 'arabic';
+
+                // Calculate text shadow
+                const shadowOpacity = fav.shadowOpacity / 100;
+                const shadowBlur = fav.shadowBlur;
+                const glowSize = fav.colorGlow;
+
+                let shadows = [];
+                if (shadowBlur > 0) {
+                    shadows.push(`0 2px ${shadowBlur}px rgba(0,0,0,${shadowOpacity})`);
+                }
+                if (glowSize > 0) {
+                    const rgb = hexToRgb(fav.color);
+                    shadows.push(`0 0 ${glowSize}px rgba(${rgb.r},${rgb.g},${rgb.b},0.6)`);
+                }
+                const textShadow = shadows.join(', ');
+
+                // Calculate text size - scale down for smaller preview (0.65 factor for grid display)
+                const textSize = fav.textSize || 3.5;
+                const scaledSize = textSize * 0.65; // Scale down for grid preview
+                const fontSize = fav.lang === 'english' ? (scaledSize * 0.7) : scaledSize;
+
+                // Calculate text position
+                const verticalAlign = fav.verticalAlign || 50;
+                const horizontalAlign = fav.horizontalAlign || 50;
+
+                item.innerHTML = `
+                    <div class="badge-wrapper">
+                        <img src="/assets/1x/Artboard ${arabicNums[fav.badge]}.png" alt="${fav.name}" class="badge-img">
+                        <div class="badge-text-overlay" style="top: ${verticalAlign}%; left: ${horizontalAlign}%;">
+                            <span class="badge-text ${textClass}" style="color: ${fav.color}; font-size: ${fontSize}rem; text-shadow: ${textShadow};">${textContent}</span>
+                        </div>
+                    </div>
+                    <div class="favorite-info">
+                        <div class="favorite-name">${fav.name}</div>
+                        <div class="favorite-color">
+                            <div class="color-swatch" style="background-color: ${fav.color};"></div>
+                            <span>${fav.color}</span>
+                        </div>
+                        <small style="color: #999;">اللغة: ${fav.lang === 'english' ? 'English' : 'العربية'}</small>
+                    </div>
+                    <div class="favorite-actions">
+                        <button class="action-btn edit-btn" onclick="editFavorite('${fav.badge}', '${fav.lang}')">✏️ تعديل</button>
+                        <button class="action-btn delete-btn" onclick="deleteFavorite(${index})">🗑️ حذف</button>
+                    </div>
+                `;
+
+                grid.appendChild(item);
+            });
+
+            container.innerHTML = '';
+            container.appendChild(grid);
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        function editFavorite(badge, lang) {
+            window.location.href = `/badge-detail.html?badge=${badge}&lang=${lang}`;
+        }
+
+        function deleteFavorite(index) {
+            if (!confirm('هل أنت متأكد من حذف هذا التصميم؟')) return;
+
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+            favorites.splice(index, 1);
+            localStorage.setItem('badgeFavorites', JSON.stringify(favorites));
+            loadFavorites();
+        }
+
+        function clearAll() {
+            if (!confirm('هل أنت متأكد من حذف جميع التصميمات المحفوظة؟')) return;
+
+            localStorage.removeItem('badgeFavorites');
+            loadFavorites();
+        }
+
+        function exportFavorites() {
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+
+            // Create JSON blob
+            const dataStr = JSON.stringify(favorites, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+
+            // Create download link
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `badge-favorites-${new Date().toISOString().split('T')[0]}.json`;
+
+            // Trigger download
+            document.body.appendChild(link);
+            link.click();
+
+            // Cleanup
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            alert('تم تصدير المفضلات بنجاح! ✓');
+        }
+
+        function goBack() {
+            window.location.href = '/artboard-badges.html';
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>

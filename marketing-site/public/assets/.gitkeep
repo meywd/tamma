@@ -1,0 +1,25 @@
+# Asset Directory
+
+This directory will contain:
+
+- `logo.svg` - Tamma logo (to be created)
+- `og-image.png` - Open Graph image for social sharing (1200x630px, to be created)
+- Any additional images or assets
+
+## TODO: Create Assets
+
+1. **Logo (logo.svg):**
+   - Format: SVG
+   - Usage: Header, favicon
+   - Requirements: Simple, scalable, recognizable
+
+2. **Open Graph Image (og-image.png):**
+   - Format: PNG
+   - Size: 1200x630px
+   - Usage: Social media sharing (Facebook, LinkedIn, Twitter)
+   - Content: Tamma logo + tagline + branded background
+
+3. **Favicon (favicon.ico):**
+   - Format: ICO
+   - Sizes: 16x16, 32x32, 48x48
+   - Generated from logo.svg

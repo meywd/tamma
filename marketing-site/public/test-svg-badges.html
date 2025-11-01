@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Badges with Embedded Text</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            min-height: 100vh;
+            padding: 40px;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+            font-size: 2.5rem;
+        }
+
+        .badges-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+
+        .badge-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+
+        .badge-wrapper {
+            width: 100%;
+            max-width: 250px;
+            margin: 0 auto 20px;
+        }
+
+        .badge-wrapper img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .badge-info {
+            color: #1e40af;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        .badge-details {
+            color: #6b7280;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏆 SVG Badges with Embedded Text 🏆</h1>
+
+        <div class="badges-grid">
+            <div class="badge-card">
+                <div class="badge-wrapper">
+                    <img src="/assets/SVG/badge-11-arabic.svg" alt="Badge 11 Arabic">
+                </div>
+                <div class="badge-info">Badge 11 - Arabic</div>
+                <div class="badge-details">Crown Banner & Star - "تَمّ"</div>
+                <div class="badge-details">Color: #f4f2b7 | Position: 47%</div>
+            </div>
+
+            <div class="badge-card">
+                <div class="badge-wrapper">
+                    <img src="/assets/SVG/badge-11-english.svg" alt="Badge 11 English">
+                </div>
+                <div class="badge-info">Badge 11 - English</div>
+                <div class="badge-details">Crown Banner & Star - "DONE"</div>
+                <div class="badge-details">Color: #ece1a0 | Position: 48%</div>
+            </div>
+
+            <div class="badge-card">
+                <div class="badge-wrapper">
+                    <img src="/assets/SVG/badge-5-arabic.svg" alt="Badge 5 Arabic">
+                </div>
+                <div class="badge-info">Badge 5 - Arabic</div>
+                <div class="badge-details">Black Ribbon Banner - "تَمّ"</div>
+                <div class="badge-details">Color: #efeaac | Position: 49% | Size: 3rem</div>
+            </div>
+
+            <div class="badge-card">
+                <div class="badge-wrapper">
+                    <img src="/assets/SVG/badge-5-english.svg" alt="Badge 5 English">
+                </div>
+                <div class="badge-info">Badge 5 - English</div>
+                <div class="badge-details">Black Ribbon Banner - "DONE"</div>
+                <div class="badge-details">Color: #eade9c | Position: 50%</div>
+            </div>
+        </div>
+
+        <div style="text-align: center; color: white; margin-top: 40px;">
+            <p>✨ These are true SVG components with text permanently embedded</p>
+            <p>Scale to any size without quality loss!</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple robot icon for favicon -->
+  <g transform="translate(2, 2) scale(0.0135)">
+    <!-- Main robot body -->
+    <rect x="640" y="568" width="768" height="768" rx="120" fill="#2563eb"/>
+
+    <!-- Left eye -->
+    <circle cx="880" cy="856" r="80" fill="#10b981"/>
+
+    <!-- Right eye -->
+    <circle cx="1168" cy="856" r="80" fill="#10b981"/>
+
+    <!-- Mouth -->
+    <rect x="840" y="1050" width="368" height="100" rx="50" fill="#10b981"/>
+
+    <!-- Antennas -->
+    <circle cx="447" cy="880" r="40" fill="#2563eb"/>
+    <rect x="487" y="868" width="153" height="24" rx="12" fill="#2563eb"/>
+
+    <circle cx="1601" cy="880" r="40" fill="#2563eb"/>
+    <rect x="1408" y="868" width="153" height="24" rx="12" fill="#2563eb"/>
+
+    <!-- Base -->
+    <rect x="495" y="1433" width="1058" height="335" rx="40" fill="#2563eb"/>
+  </g>
+</svg>

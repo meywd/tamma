@@ -1,0 +1,54 @@
+[
+  {
+    "badge": "11",
+    "lang": "arabic",
+    "color": "#f4f2b7",
+    "shadowOpacity": "50",
+    "shadowBlur": "4",
+    "colorGlow": "0",
+    "textSize": "3.5",
+    "verticalAlign": "47",
+    "horizontalAlign": "50",
+    "name": "Crown Banner & Star",
+    "timestamp": 1761872384947
+  },
+  {
+    "badge": "5",
+    "lang": "english",
+    "color": "#eade9c",
+    "shadowOpacity": "50",
+    "shadowBlur": "4",
+    "colorGlow": "0",
+    "textSize": "3.5",
+    "verticalAlign": "50",
+    "horizontalAlign": "50",
+    "name": "Black Ribbon Banner",
+    "timestamp": 1761872403652
+  },
+  {
+    "badge": "11",
+    "lang": "english",
+    "color": "#ece1a0",
+    "shadowOpacity": "50",
+    "shadowBlur": "4",
+    "colorGlow": "0",
+    "textSize": "3.5",
+    "verticalAlign": "48",
+    "horizontalAlign": "50",
+    "name": "Crown Banner & Star",
+    "timestamp": 1761872423156
+  },
+  {
+    "badge": "5",
+    "lang": "arabic",
+    "color": "#efeaac",
+    "shadowOpacity": "50",
+    "shadowBlur": "4",
+    "colorGlow": "0",
+    "textSize": "3",
+    "verticalAlign": "49",
+    "horizontalAlign": "50",
+    "name": "Black Ribbon Banner",
+    "timestamp": 1761872452567
+  }
+]

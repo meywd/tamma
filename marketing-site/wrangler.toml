@@ -1,0 +1,61 @@
+# Task 2 (#81) - Cloudflare Workers Configuration (AC 1)
+# Wrangler configuration for Tamma marketing site
+
+name = "tamma-marketing-site"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# KV Namespace bindings for email signups
+[[kv_namespaces]]
+binding = "SIGNUPS"
+id = "REPLACE_WITH_DEV_KV_ID"  # Replace with development KV namespace ID after creation
+
+# Environment variables
+[vars]
+ENVIRONMENT = "development"
+
+# Assets configuration for serving static files
+[assets]
+directory = "./public"
+
+# Production configuration
+[env.production]
+name = "tamma-marketing-site"
+
+[[env.production.kv_namespaces]]
+binding = "SIGNUPS"
+id = "1a777a77eea149db80b01dd54392756f" 
+
+[env.production.vars]
+ENVIRONMENT = "production"
+
+# Preview configuration
+[env.preview]
+name = "tamma-marketing-site-preview"
+
+[[env.preview.kv_namespaces]]
+binding = "SIGNUPS"
+id = "REPLACE_WITH_PREVIEW_KV_ID"  # Replace with preview KV namespace ID
+
+[env.preview.vars]
+ENVIRONMENT = "preview"
+
+# Build configuration
+[build]
+command = "npm run build"
+cwd = "."
+
+# Route configuration (after domain setup)
+# Uncomment and update after custom domain is configured
+# routes = [
+#   { pattern = "tamma.dev/*", zone_name = "tamma.dev" }
+# ]
+
+# Custom domain configuration
+# Uncomment after domain setup in Cloudflare
+# [site]
+# domain = "tamma.dev"
+
+# Observability
+[observability]
+enabled = true

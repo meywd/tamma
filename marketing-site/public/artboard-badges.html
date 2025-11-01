@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tamma Badges - تَمّ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 20px;
+            font-size: 2.5rem;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #fbbf24;
+            margin-bottom: 40px;
+            font-size: 1.2rem;
+        }
+
+        .toggle-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .toggle-btn {
+            background: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+
+        .toggle-btn.active {
+            background: #fbbf24;
+            transform: scale(1.05);
+        }
+
+        .badges-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 40px;
+            padding: 20px;
+        }
+
+        .badge-item {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .badge-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+        }
+
+        .badge-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .badge-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .badge-text-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 80%;
+            pointer-events: none;
+        }
+
+        .badge-text-arabic {
+            font-family: 'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', serif;
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #2c1810;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            display: block;
+        }
+
+        .badge-text-english {
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 900;
+            letter-spacing: 4px;
+            color: #2c1810;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            display: none;
+        }
+
+        .badge-label {
+            text-align: center;
+            margin-top: 15px;
+            color: #1e40af;
+            font-weight: 600;
+        }
+
+        /* Special positioning for specific badges */
+        .badge-item[data-badge="5"] .badge-text-overlay,
+        .badge-item[data-badge="11"] .badge-text-overlay,
+        .badge-item[data-badge="13"] .badge-text-overlay {
+            /* Badges with horizontal ribbons - text goes in the ribbon */
+            top: 50%;
+        }
+
+        .badge-item[data-badge="10"] .badge-text-overlay {
+            /* Badge with red ribbon at bottom - text in center */
+            top: 45%;
+        }
+
+        body.english-mode .badge-text-arabic {
+            display: none;
+        }
+
+        body.english-mode .badge-text-english {
+            display: block;
+        }
+
+        /* Adjust text for ribbon badges */
+        .badge-item[data-badge="5"] .badge-text-arabic,
+        .badge-item[data-badge="11"] .badge-text-arabic,
+        .badge-item[data-badge="13"] .badge-text-arabic {
+            font-size: 2.5rem;
+        }
+
+        .badge-item[data-badge="5"] .badge-text-english,
+        .badge-item[data-badge="11"] .badge-text-english,
+        .badge-item[data-badge="13"] .badge-text-english {
+            font-size: 1.8rem;
+        }
+
+        /* Badge 2 - Radial gold center - dark brown text */
+        .badge-item[data-badge="2"] .badge-text-arabic,
+        .badge-item[data-badge="2"] .badge-text-english {
+            color: #5a4420;
+            text-shadow: 0 2px 8px rgba(255, 215, 0, 0.6),
+                         0 0 20px rgba(255, 215, 0, 0.3);
+        }
+
+        /* Badge 3 - Black center - bright gold text */
+        .badge-item[data-badge="3"] .badge-text-arabic,
+        .badge-item[data-badge="3"] .badge-text-english {
+            color: #ffed4e;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.8),
+                         0 2px 4px rgba(0,0,0,0.8);
+        }
+
+        /* Badge 4 - Gold center with black rings - dark text */
+        .badge-item[data-badge="4"] .badge-text-arabic,
+        .badge-item[data-badge="4"] .badge-text-english {
+            color: #3a2817;
+            text-shadow: 0 1px 3px rgba(255, 215, 0, 0.5);
+        }
+
+        /* Badge 5 - Black ribbon - bright gold text in ribbon */
+        .badge-item[data-badge="5"] .badge-text-arabic,
+        .badge-item[data-badge="5"] .badge-text-english {
+            color: #ffd700;
+            text-shadow: 0 0 8px rgba(255, 215, 0, 0.6),
+                         0 2px 4px rgba(0,0,0,0.9);
+        }
+
+        /* Badge 6 - White pearl center with crown - elegant dark text */
+        .badge-item[data-badge="6"] .badge-text-arabic,
+        .badge-item[data-badge="6"] .badge-text-english {
+            color: #3d3939;
+            text-shadow: 0 2px 4px rgba(255, 255, 255, 0.5);
+        }
+
+        /* Badge 7 - Black center with red star - gold text */
+        .badge-item[data-badge="7"] .badge-text-arabic,
+        .badge-item[data-badge="7"] .badge-text-english {
+            color: #d4af37;
+            text-shadow: 0 0 12px rgba(212, 175, 55, 0.7),
+                         0 2px 4px rgba(0,0,0,0.8);
+        }
+
+        /* Badge 8 - Octagonal black center - bright gold */
+        .badge-item[data-badge="8"] .badge-text-arabic,
+        .badge-item[data-badge="8"] .badge-text-english {
+            color: #ffc107;
+            text-shadow: 0 0 10px rgba(255, 193, 7, 0.6),
+                         0 2px 4px rgba(0,0,0,0.9);
+        }
+
+        /* Badge 9 - Black center with stars - golden yellow */
+        .badge-item[data-badge="9"] .badge-text-arabic,
+        .badge-item[data-badge="9"] .badge-text-english {
+            color: #f9d71c;
+            text-shadow: 0 0 15px rgba(249, 215, 28, 0.7),
+                         0 2px 5px rgba(0,0,0,0.8);
+        }
+
+        /* Badge 10 - Gold center with red ribbon - brown text */
+        .badge-item[data-badge="10"] .badge-text-arabic,
+        .badge-item[data-badge="10"] .badge-text-english {
+            color: #5c4827;
+            text-shadow: 0 1px 3px rgba(255, 215, 0, 0.4);
+        }
+
+        /* Badge 11 - Black banner with crown - gold text in banner */
+        .badge-item[data-badge="11"] .badge-text-arabic,
+        .badge-item[data-badge="11"] .badge-text-english {
+            color: #d4af37;
+            text-shadow: 0 0 10px rgba(212, 175, 55, 0.6),
+                         0 2px 4px rgba(0,0,0,0.9);
+        }
+
+        /* Badge 12 - Circular gold center - deep brown */
+        .badge-item[data-badge="12"] .badge-text-arabic,
+        .badge-item[data-badge="12"] .badge-text-english {
+            color: #4a3619;
+            text-shadow: 0 1px 4px rgba(255, 215, 0, 0.5);
+        }
+
+        /* Badge 13 - Black center with gold banner - gold text */
+        .badge-item[data-badge="13"] .badge-text-arabic,
+        .badge-item[data-badge="13"] .badge-text-english {
+            color: #2c1810;
+            text-shadow: 0 1px 3px rgba(255, 215, 0, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏆 مجموعة شارات تَمّ 🏆</h1>
+        <p class="subtitle">Tamma Badge Collection - تَمّ = Done</p>
+
+        <div class="toggle-container">
+            <button class="toggle-btn active" onclick="setLanguage('arabic')">العربية (تَمّ)</button>
+            <button class="toggle-btn" onclick="setLanguage('english')">English (DONE)</button>
+        </div>
+
+        <div class="badges-grid">
+            <div class="badge-item" data-badge="2">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٢.png" alt="Badge 2" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Classic Radial Gold</div>
+            </div>
+
+            <div class="badge-item" data-badge="3">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٣.png" alt="Badge 3" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Black Center with Stars</div>
+            </div>
+
+            <div class="badge-item" data-badge="4">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٤.png" alt="Badge 4" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Golden Center with Stars</div>
+            </div>
+
+            <div class="badge-item" data-badge="5">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٥.png" alt="Badge 5" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Black Ribbon Banner</div>
+            </div>
+
+            <div class="badge-item" data-badge="6">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٦.png" alt="Badge 6" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Royal Crown & Laurels</div>
+            </div>
+
+            <div class="badge-item" data-badge="7">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٧.png" alt="Badge 7" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Red Star & Laurels</div>
+            </div>
+
+            <div class="badge-item" data-badge="8">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٨.png" alt="Badge 8" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Octagonal Premium</div>
+            </div>
+
+            <div class="badge-item" data-badge="9">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ٩.png" alt="Badge 9" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Star Bottom Ribbon</div>
+            </div>
+
+            <div class="badge-item" data-badge="10">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ١٠.png" alt="Badge 10" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Red Ribbon Award</div>
+            </div>
+
+            <div class="badge-item" data-badge="11">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ١١.png" alt="Badge 11" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Crown Banner & Star</div>
+            </div>
+
+            <div class="badge-item" data-badge="12">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ١٢.png" alt="Badge 12" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Circular Premium</div>
+            </div>
+
+            <div class="badge-item" data-badge="13">
+                <div class="badge-wrapper">
+                    <img src="/assets/1x/Artboard ١٣.png" alt="Badge 13" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span class="badge-text-arabic">تَمّ</span>
+                        <span class="badge-text-english">DONE</span>
+                    </div>
+                </div>
+                <div class="badge-label">Golden Banner Star</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function setLanguage(lang) {
+            const buttons = document.querySelectorAll('.toggle-btn');
+            buttons.forEach(btn => btn.classList.remove('active'));
+
+            if (lang === 'english') {
+                document.body.classList.add('english-mode');
+                buttons[1].classList.add('active');
+            } else {
+                document.body.classList.remove('english-mode');
+                buttons[0].classList.add('active');
+            }
+        }
+
+        // Handle badge clicks
+        document.addEventListener('DOMContentLoaded', function() {
+            const badges = document.querySelectorAll('.badge-item');
+            badges.forEach(badge => {
+                badge.addEventListener('click', function() {
+                    const badgeNum = this.getAttribute('data-badge');
+                    const lang = document.body.classList.contains('english-mode') ? 'english' : 'arabic';
+                    window.location.href = `/badge-detail.html?badge=${badgeNum}&lang=${lang}`;
+                });
+            });
+        });
+    </script>
+</body>
+</html>

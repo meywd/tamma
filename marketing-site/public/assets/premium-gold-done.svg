@@ -1,0 +1,104 @@
+<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Premium Gold Seal with "DONE" in English -->
+
+  <defs>
+    <!-- Luxury gold gradient -->
+    <linearGradient id="luxuryGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f9d423;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#d4af37;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#aa8e39;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Rose gold accent -->
+    <linearGradient id="roseGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f9d423;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#d4af37;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#cd7f32;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 3D emboss effect -->
+    <filter id="emboss">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="blur"/>
+      <feSpecularLighting in="blur" surfaceScale="5" specularConstant="0.75"
+                          specularExponent="20" lighting-color="white" result="specOut">
+        <fePointLight x="-200" y="-200" z="200"/>
+      </feSpecularLighting>
+      <feComposite in="specOut" in2="SourceAlpha" operator="in" result="specOut"/>
+      <feComposite in="SourceGraphic" in2="specOut" operator="arithmetic"
+                   k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+  </defs>
+
+  <!-- Star burst removed for transparency -->
+  <!-- Removed filled star burst to keep background transparent -->
+
+  <!-- Main octagonal seal - transparent center, golden border only -->
+  <polygon points="250,50 350,100 400,200 400,300 350,400 250,450 150,400 100,300 100,200 150,100"
+           fill="none"
+           stroke="url(#luxuryGold)"
+           stroke-width="30"
+           filter="url(#emboss)"/>
+
+  <!-- Inner octagon - rose gold accent ring -->
+  <polygon points="250,80 330,120 370,200 370,300 330,380 250,420 170,380 130,300 130,200 170,120"
+           fill="none"
+           stroke="url(#roseGold)"
+           stroke-width="20"/>
+
+  <!-- Transparent center circle -->
+  <!-- Removed white fill for transparency -->
+
+  <!-- Decorative border circle -->
+  <circle cx="250" cy="250" r="140" fill="none" stroke="url(#luxuryGold)" stroke-width="4"/>
+
+  <!-- Inner decorative ring -->
+  <circle cx="250" cy="250" r="125" fill="none" stroke="url(#luxuryGold)" stroke-width="2" stroke-dasharray="5,5"/>
+
+  <!-- Checkmark icon -->
+  <path d="M220,235 L240,255 L280,215"
+        fill="none"
+        stroke="url(#luxuryGold)"
+        stroke-width="9"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.7"/>
+
+  <!-- "DONE" Text in English -->
+  <text
+    x="250"
+    y="300"
+    font-family="'Inter', 'SF Pro', 'Helvetica Neue', 'Arial Black', sans-serif"
+    font-size="70"
+    font-weight="900"
+    fill="url(#luxuryGold)"
+    text-anchor="middle"
+    letter-spacing="6"
+    filter="url(#emboss)">
+    DONE
+  </text>
+
+  <!-- Premium label -->
+  <text
+    x="250"
+    y="330"
+    font-family="'Playfair Display', 'Baskerville', 'Georgia', serif"
+    font-size="16"
+    font-weight="600"
+    font-style="italic"
+    fill="url(#luxuryGold)"
+    text-anchor="middle"
+    letter-spacing="3">
+    CERTIFIED COMPLETE
+  </text>
+
+  <!-- Corner ornaments -->
+  <g opacity="0.7" fill="url(#luxuryGold)">
+    <!-- Top ornament -->
+    <circle cx="250" cy="60" r="6"/>
+    <path d="M250,50 L253,57 L260,57 L254,61 L257,68 L250,63 L243,68 L246,61 L240,57 L247,57 Z"/>
+
+    <!-- Bottom ornament -->
+    <circle cx="250" cy="440" r="6"/>
+    <path d="M250,430 L253,437 L260,437 L254,441 L257,448 L250,443 L243,448 L246,441 L240,437 L247,437 Z"/>
+  </g>
+</svg>
