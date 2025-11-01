@@ -553,6 +553,15 @@ html[data-theme="dark"] .hero-trust:hover {
     border-color: rgba(251, 191, 36, 0.6);
 }
 
+/* Dark mode - all link hover effects use golden */
+html[data-theme="dark"] a:hover {
+    color: var(--color-gold-400);
+}
+
+html[data-theme="dark"] .footer a:hover {
+    color: var(--color-gold-300);
+}
+
 /* ============================================
    RESET AND BASE STYLES
    ============================================ */
