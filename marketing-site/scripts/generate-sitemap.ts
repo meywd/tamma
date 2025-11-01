@@ -1,4 +1,14 @@
-<?xml version="1.0" encoding="UTF-8"?>
+/**
+ * Generates sitemap.xml with current date
+ * Run during build process to ensure lastmod dates are always current
+ */
+
+import { writeFileSync } from 'fs';
+import { join } from 'path';
+
+const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <!-- Task 6 (#85) - SEO Optimization: Sitemap for search engines -->
 <!-- Auto-generated during build with current date -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
@@ -9,7 +19,7 @@
     <!-- Homepage -->
     <url>
         <loc>https://tamma.dev/</loc>
-        <lastmod>2025-11-01</lastmod>
+        <lastmod>${currentDate}</lastmod>
         <changefreq>weekly</changefreq>
         <priority>1.0</priority>
     </url>
@@ -17,7 +27,7 @@
     <!-- Privacy Policy -->
     <url>
         <loc>https://tamma.dev/privacy.html</loc>
-        <lastmod>2025-11-01</lastmod>
+        <lastmod>${currentDate}</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.3</priority>
     </url>
@@ -25,9 +35,15 @@
     <!-- Terms of Service -->
     <url>
         <loc>https://tamma.dev/terms.html</loc>
-        <lastmod>2025-11-01</lastmod>
+        <lastmod>${currentDate}</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.3</priority>
     </url>
 
 </urlset>
+`;
+
+const sitemapPath = join(__dirname, '..', 'public', 'sitemap.xml');
+writeFileSync(sitemapPath, sitemap, 'utf-8');
+
+console.log(`✓ Generated sitemap.xml with date: ${currentDate}`);

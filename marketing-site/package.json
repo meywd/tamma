@@ -4,7 +4,7 @@
   "description": "Marketing website for Tamma - The autonomous development platform that maintains itself",
   "private": true,
   "scripts": {
-    "build": "tsc",
+    "build": "tsx scripts/generate-sitemap.ts && tsc",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:prod": "wrangler deploy --env production",
@@ -37,6 +37,7 @@
   "homepage": "https://tamma.dev",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "wrangler": "^4.45.3"
   },
