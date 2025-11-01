@@ -24,7 +24,7 @@ name = "tamma-marketing-site"
 
 [[env.production.kv_namespaces]]
 binding = "SIGNUPS"
-id = "REPLACE_WITH_PROD_KV_ID"  # Replace with production KV namespace ID
+id = "1a777a77eea149db80b01dd54392756f"  # Replace with production KV namespace ID
 
 [env.production.vars]
 ENVIRONMENT = "production"
