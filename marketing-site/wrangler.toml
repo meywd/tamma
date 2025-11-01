@@ -8,7 +8,7 @@ compatibility_date = "2025-01-01"
 # KV Namespace bindings for email signups
 [[kv_namespaces]]
 binding = "SIGNUPS"
-id = "1a777a77eea149db80b01dd54392756f"  # Replace with actual KV namespace ID after creation
+id = "REPLACE_WITH_DEV_KV_ID"  # Replace with development KV namespace ID after creation
 
 # Environment variables
 [vars]
@@ -24,7 +24,7 @@ name = "tamma-marketing-site"
 
 [[env.production.kv_namespaces]]
 binding = "SIGNUPS"
-id = "1a777a77eea149db80b01dd54392756f"  # Replace with production KV namespace ID
+id = "REPLACE_WITH_PROD_KV_ID"  # Replace with production KV namespace ID
 
 [env.production.vars]
 ENVIRONMENT = "production"
@@ -35,7 +35,7 @@ name = "tamma-marketing-site-preview"
 
 [[env.preview.kv_namespaces]]
 binding = "SIGNUPS"
-id = "1a777a77eea149db80b01dd54392756f"  # Replace with preview KV namespace ID
+id = "REPLACE_WITH_PREVIEW_KV_ID"  # Replace with preview KV namespace ID
 
 [env.preview.vars]
 ENVIRONMENT = "preview"
@@ -55,10 +55,6 @@ cwd = "."
 # Uncomment after domain setup in Cloudflare
 # [site]
 # domain = "tamma.dev"
-
-# Build configuration
-# [build]
-# command = ""  # No build step needed for static site
 
 # Observability
 [observability]

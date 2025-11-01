@@ -87,7 +87,15 @@ export async function onRequestPost(context: {
 
   try {
     // Parse request body
-    const body = await request.json() as SignupRequest;
+    let body: SignupRequest;
+    try {
+      body = await request.json() as SignupRequest;
+    } catch (err) {
+      return new Response('Invalid request body', {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+      });
+    }
     const { email } = body;
 
     // Validate email presence
@@ -124,12 +132,18 @@ export async function onRequestPost(context: {
     // Check if email already exists
     const existingSignup = await env.SIGNUPS.get(`email:${normalizedEmail}`);
     if (existingSignup) {
+      // Increment rate limit even for existing emails to prevent email enumeration
+      await incrementRateLimit(env, clientIP);
+
       // Return success even if email exists (don't reveal if email is already signed up)
       return new Response('Success', {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
       });
     }
+
+    // Increment rate limit counter BEFORE storing to prevent abuse if storage fails
+    await incrementRateLimit(env, clientIP);
 
     // Store email in KV with metadata
     const signupData = {
@@ -148,9 +162,6 @@ export async function onRequestPost(context: {
         },
       }
     );
-
-    // Increment rate limit counter
-    await incrementRateLimit(env, clientIP);
 
     // Log signup (visible in Cloudflare Workers logs)
     console.log(`New signup: ${normalizedEmail} from ${clientIP}`);
