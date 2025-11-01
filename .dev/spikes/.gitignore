@@ -1,0 +1,8 @@
+# Environment variables with API keys
+.env
+
+# Test results may contain sensitive data
+results/*.json
+
+# Keep the results directory structure
+!results/.gitkeep

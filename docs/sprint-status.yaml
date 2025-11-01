@@ -37,7 +37,7 @@ story_location: "{project-root}/docs/stories"
 
 development_status:
   epic-1: contexted
-  1-0-ai-provider-strategy-research: ready-for-dev
+  1-0-ai-provider-strategy-research: done
   1-1-ai-provider-interface-definition: ready-for-dev
   1-2-claude-code-provider-implementation: ready-for-dev
   1-3-provider-configuration-management: ready-for-dev

@@ -48,7 +48,7 @@ Epic 1 directly implements the core architectural components defined in sections
 **1. AI Provider Abstraction (`packages/providers`)**
 
 *AI Provider Strategy Research (Story 1-0):*
-- Research deliverable: `docs/research/ai-provider-strategy-2025-10.md`
+- Research deliverable: `docs/research/ai-provider-strategy-2024-10.md`
 - Cost analysis comparing 8+ AI providers: Anthropic Claude, OpenAI GPT, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local models (Ollama/LM Studio/vLLM)
 - Pricing models: subscription plans (Anthropic Teams, OpenAI Teams, GitHub Copilot Business) vs pay-as-you-go API rates
 - Capability matrix mapping providers to Tamma workflow steps: issue analysis, code generation, test generation, code review, refactoring, documentation
