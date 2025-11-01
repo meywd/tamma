@@ -10,10 +10,37 @@ import { scoreResponse } from '../scorers/index.js';
 
 export class GeminiProvider extends BaseProvider {
   name = 'Google Gemini';
-  models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+  defaultModels = ['gemini-1.5-flash', 'gemini-1.5-pro'];
 
   getApiKeyEnvVar(): string {
     return 'GOOGLE_AI_API_KEY';
+  }
+
+  async getModels(): Promise<string[]> {
+    try {
+      const apiKey = this.getApiKey();
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        { signal: AbortSignal.timeout(5000) }
+      );
+
+      if (!response.ok) {
+        console.warn(`Gemini: Failed to fetch models, using defaults`);
+        return this.defaultModels;
+      }
+
+      const data = await response.json();
+
+      // Filter for generative models only (exclude embedding models)
+      const models = data.models
+        ?.filter((m: any) => m.name?.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
+        .map((m: any) => m.name.replace('models/', '')) || [];
+
+      return models.length > 0 ? models : this.defaultModels;
+    } catch (error) {
+      console.warn(`Gemini: Error fetching models - ${error instanceof Error ? error.message : 'Unknown'}`);
+      return this.defaultModels;
+    }
   }
 
   async test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult> {

@@ -185,13 +185,18 @@ export class BatchRunner {
     console.log(`Providers: ${providers.map(p => p.name).join(', ')}`);
     console.log(`Scenarios: ${this.config.scenarios.join(', ')}`);
     console.log(`Iterations: ${this.config.iterations} per model/scenario`);
-    console.log(`\nModels to test:`);
+    console.log(`\nDiscovering available models...`);
 
-    // List all models for each provider
+    // Fetch models dynamically for each provider
+    const providerModels = new Map<string, string[]>();
     let totalModelCount = 0;
+
     for (const provider of providers) {
-      console.log(`  ${provider.name}:`);
-      for (const model of provider.models) {
+      console.log(`  ${provider.name}: Fetching models...`);
+      const models = await provider.getModels();
+      providerModels.set(provider.name, models);
+
+      for (const model of models) {
         console.log(`    - ${model}`);
         totalModelCount++;
       }
@@ -205,7 +210,8 @@ export class BatchRunner {
 
     // Run tests
     for (const provider of providers) {
-      for (const model of provider.models) { // Test ALL models per provider
+      const models = providerModels.get(provider.name) || [];
+      for (const model of models) { // Test ALL discovered models per provider
         for (const scenario of this.config.scenarios) {
           const prompt = SCENARIOS[scenario as keyof typeof SCENARIOS];
           if (!prompt) continue;

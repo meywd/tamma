@@ -10,10 +10,17 @@ import { scoreResponse } from '../scorers/index.js';
 
 export class AnthropicProvider extends BaseProvider {
   name = 'Anthropic Claude';
-  models = ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307', 'claude-3-opus-20240229'];
+  defaultModels = ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307', 'claude-3-opus-20240229'];
 
   getApiKeyEnvVar(): string {
     return 'ANTHROPIC_API_KEY';
+  }
+
+  async getModels(): Promise<string[]> {
+    // Anthropic doesn't have a public models API endpoint
+    // Return the known current models
+    // Could be extended to check model availability via test requests
+    return this.defaultModels;
   }
 
   async test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult> {

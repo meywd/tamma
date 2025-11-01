@@ -10,10 +10,38 @@ import { scoreResponse } from '../scorers/index.js';
 
 export class OpenAIProvider extends BaseProvider {
   name = 'OpenAI';
-  models = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
+  defaultModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
 
   getApiKeyEnvVar(): string {
     return 'OPENAI_API_KEY';
+  }
+
+  async getModels(): Promise<string[]> {
+    try {
+      const apiKey = this.getApiKey();
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!response.ok) {
+        console.warn(`OpenAI: Failed to fetch models, using defaults`);
+        return this.defaultModels;
+      }
+
+      const data = await response.json();
+
+      // Filter for GPT models suitable for chat/completion
+      const models = data.data
+        ?.filter((m: any) => m.id.startsWith('gpt-') && !m.id.includes('instruct'))
+        .map((m: any) => m.id)
+        .sort((a: string, b: string) => b.localeCompare(a)) || []; // Newest first
+
+      return models.length > 0 ? models.slice(0, 10) : this.defaultModels; // Limit to 10 most recent
+    } catch (error) {
+      console.warn(`OpenAI: Error fetching models - ${error instanceof Error ? error.message : 'Unknown'}`);
+      return this.defaultModels;
+    }
   }
 
   async test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult> {

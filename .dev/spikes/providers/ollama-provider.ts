@@ -11,7 +11,7 @@ import { scoreResponse } from '../scorers/index.js';
 
 export class OllamaProvider extends BaseProvider {
   name = 'Ollama (Local)';
-  models = [
+  defaultModels = [
     'codellama:7b',
     'mistral:7b',
     'deepseek-coder:6.7b',
@@ -21,6 +21,30 @@ export class OllamaProvider extends BaseProvider {
   getApiKeyEnvVar(): string {
     // Ollama doesn't require API key (local)
     return 'OLLAMA_ENABLED'; // Can set to 'true' to enable
+  }
+
+  async getModels(): Promise<string[]> {
+    try {
+      const baseUrl = 'http://localhost:11434';
+      const response = await fetch(`${baseUrl}/api/tags`, {
+        signal: AbortSignal.timeout(2000)
+      });
+
+      if (!response.ok) {
+        console.warn(`Ollama: Failed to fetch models, using defaults`);
+        return this.defaultModels;
+      }
+
+      const data = await response.json();
+
+      // Get all locally installed models
+      const installedModels = data.models?.map((m: any) => m.name) || [];
+
+      return installedModels.length > 0 ? installedModels : this.defaultModels;
+    } catch (error) {
+      console.warn(`Ollama: Not running or error fetching models - ${error instanceof Error ? error.message : 'Unknown'}`);
+      return this.defaultModels;
+    }
   }
 
   async isAvailable(): Promise<boolean> {

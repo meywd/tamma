@@ -10,7 +10,7 @@ import { scoreResponse } from '../scorers/index.js';
 
 export class OpenRouterProvider extends BaseProvider {
   name = 'OpenRouter';
-  models = [
+  defaultModels = [
     'mistralai/mistral-7b-instruct:free',
     'meta-llama/llama-2-70b-chat:free',
     'google/gemma-7b-it:free',
@@ -19,6 +19,31 @@ export class OpenRouterProvider extends BaseProvider {
 
   getApiKeyEnvVar(): string {
     return 'OPENROUTER_API_KEY';
+  }
+
+  async getModels(): Promise<string[]> {
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/models', {
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (!response.ok) {
+        console.warn(`OpenRouter: Failed to fetch models, using defaults`);
+        return this.defaultModels;
+      }
+
+      const data = await response.json();
+
+      // Filter for free models only
+      const freeModels = data.data
+        ?.filter((m: any) => m.id.includes(':free'))
+        .map((m: any) => m.id) || [];
+
+      return freeModels.length > 0 ? freeModels : this.defaultModels;
+    } catch (error) {
+      console.warn(`OpenRouter: Error fetching models - ${error instanceof Error ? error.message : 'Unknown'}`);
+      return this.defaultModels;
+    }
   }
 
   async test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult> {
