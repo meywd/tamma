@@ -553,6 +553,10 @@ html[data-theme="dark"] .btn-secondary:hover {
     border-color: var(--color-gold-500);
 }
 
+html[data-theme="dark"] .btn-primary:hover {
+    color: #ffffff;
+}
+
 html[data-theme="dark"] .hero-stats {
     background: rgba(17, 24, 39, 0.3);
     border: 1px solid rgba(251, 191, 36, 0.2);
