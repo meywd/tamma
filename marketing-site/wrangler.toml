@@ -2,34 +2,48 @@
 # Wrangler configuration for Tamma marketing site
 
 name = "tamma-marketing-site"
+main = "src/index.ts"
 compatibility_date = "2025-01-01"
 
-# Cloudflare Pages configuration
-pages_build_output_dir = "public"
-
 # KV Namespace bindings for email signups
-# Note: You'll need to create this KV namespace in Cloudflare dashboard
-# Production: wrangler kv:namespace create "SIGNUPS"
-# Development: wrangler kv:namespace create "SIGNUPS" --preview
-
 [[kv_namespaces]]
 binding = "SIGNUPS"
-id = "YOUR_KV_NAMESPACE_ID_HERE"  # Replace with actual KV namespace ID after creation
+id = "1a777a77eea149db80b01dd54392756f"  # Replace with actual KV namespace ID after creation
 
-# Environment variables (optional)
+# Environment variables
 [vars]
+ENVIRONMENT = "development"
+
+# Assets configuration for serving static files
+[assets]
+directory = "./public"
+
+# Production configuration
+[env.production]
+name = "tamma-marketing-site"
+
+[[env.production.kv_namespaces]]
+binding = "SIGNUPS"
+id = "1a777a77eea149db80b01dd54392756f"  # Replace with production KV namespace ID
+
+[env.production.vars]
 ENVIRONMENT = "production"
 
-# Development configuration
-[env.development]
-name = "tamma-marketing-site-dev"
+# Preview configuration
+[env.preview]
+name = "tamma-marketing-site-preview"
 
-[[env.development.kv_namespaces]]
+[[env.preview.kv_namespaces]]
 binding = "SIGNUPS"
-id = "YOUR_DEV_KV_NAMESPACE_ID_HERE"  # Replace with dev KV namespace ID
+id = "1a777a77eea149db80b01dd54392756f"  # Replace with preview KV namespace ID
 
-[env.development.vars]
-ENVIRONMENT = "development"
+[env.preview.vars]
+ENVIRONMENT = "preview"
+
+# Build configuration
+[build]
+command = "npm run build"
+cwd = "."
 
 # Route configuration (after domain setup)
 # Uncomment and update after custom domain is configured
