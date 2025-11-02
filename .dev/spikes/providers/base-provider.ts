@@ -36,7 +36,7 @@ export interface AIProvider {
   name: string;
   defaultModels: string[]; // Fallback if API fetch fails
   isAvailable(): Promise<boolean>;
-  getModels(): Promise<string[]>; // Dynamic model discovery
+  getModels(includePaid?: boolean): Promise<string[]>; // Dynamic model discovery
   test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult>;
 }
 
@@ -51,7 +51,7 @@ export abstract class BaseProvider implements AIProvider {
   }
 
   abstract getApiKeyEnvVar(): string;
-  abstract getModels(): Promise<string[]>; // Must be implemented by each provider
+  abstract getModels(includePaid?: boolean): Promise<string[]>; // Must be implemented by each provider
   abstract test(scenario: string, prompt: string, config?: ProviderConfig): Promise<TestResult>;
 
   protected getApiKey(config?: ProviderConfig): string {

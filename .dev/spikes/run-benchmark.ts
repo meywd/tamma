@@ -20,6 +20,7 @@ interface CliArgs {
   scenarios?: string[];
   iterations?: number;
   quick?: boolean;
+  includePaid?: boolean;
   help?: boolean;
 }
 
@@ -33,6 +34,10 @@ function parseArgs(argv: string[]): CliArgs {
       args.help = true;
     } else if (arg === '--quick') {
       args.quick = true;
+    } else if (arg === '--include-paid') {
+      args.includePaid = true;
+    } else if (arg === '--free-only') {
+      args.includePaid = false;
     } else if (arg === '--providers' && argv[i + 1]) {
       args.providers = argv[i + 1].split(',').map(s => s.trim());
       i++;
@@ -70,13 +75,18 @@ Options:
   --iterations <n>        Number of test iterations per provider/scenario (default: 3)
                           Example: --iterations 5
 
+  --include-paid          Include paid/premium models in testing (default: free only)
+                          ⚠️  WARNING: May incur API costs for paid models
+
+  --free-only             Test only free/free-tier models (default)
+
   --quick                 Quick test mode: 1 iteration, free providers only
                           (gemini, openrouter, ollama)
 
   --help, -h              Show this help message
 
 Examples:
-  # Full benchmark with all available providers
+  # Full benchmark with all available providers (free models only)
   tsx run-benchmark.ts
 
   # Quick test with free providers only
@@ -90,6 +100,12 @@ Examples:
 
   # Test Ollama only (local models)
   tsx run-benchmark.ts --providers ollama
+
+  # Include paid models (⚠️  may cost money)
+  tsx run-benchmark.ts --include-paid --providers openrouter
+
+  # Explicitly test only free models
+  tsx run-benchmark.ts --free-only
 
 Environment Variables:
   GOOGLE_AI_API_KEY       Google Gemini API key (get from https://aistudio.google.com/app/apikey)
@@ -140,7 +156,8 @@ async function main() {
     scenarios: args.scenarios,
     providers: args.providers,
     delayMs: args.quick ? 1000 : 2000,
-    outputDir: './results'
+    outputDir: './results',
+    includePaid: args.includePaid
   });
 
   try {

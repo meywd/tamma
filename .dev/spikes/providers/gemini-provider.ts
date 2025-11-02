@@ -16,7 +16,7 @@ export class GeminiProvider extends BaseProvider {
     return 'GOOGLE_AI_API_KEY';
   }
 
-  async getModels(): Promise<string[]> {
+  async getModels(includePaid: boolean = false): Promise<string[]> {
     try {
       const apiKey = this.getApiKey();
       const response = await fetch(
@@ -32,6 +32,7 @@ export class GeminiProvider extends BaseProvider {
       const data = await response.json();
 
       // Filter for generative models only (exclude embedding models)
+      // Note: includePaid parameter not currently used - Gemini has generous free tier for all models
       const models = data.models
         ?.filter((m: any) => m.name?.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
         .map((m: any) => m.name.replace('models/', '')) || [];

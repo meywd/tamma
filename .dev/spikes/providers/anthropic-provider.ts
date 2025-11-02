@@ -16,9 +16,10 @@ export class AnthropicProvider extends BaseProvider {
     return 'ANTHROPIC_API_KEY';
   }
 
-  async getModels(): Promise<string[]> {
+  async getModels(includePaid: boolean = false): Promise<string[]> {
     // Anthropic doesn't have a public models API endpoint
     // Return the known current models
+    // Note: includePaid parameter not currently used - all Anthropic models are paid
     // Could be extended to check model availability via test requests
     return this.defaultModels;
   }

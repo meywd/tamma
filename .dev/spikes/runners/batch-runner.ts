@@ -15,6 +15,7 @@ export interface BatchConfig {
   providers?: string[]; // Provider names to test (default: all available)
   delayMs?: number; // Delay between tests to avoid rate limits (default: 2000)
   outputDir?: string; // Directory for results (default: ./results)
+  includePaid?: boolean; // Include paid models (default: false, free only)
 }
 
 export interface BatchResults {
@@ -159,7 +160,8 @@ export class BatchRunner {
       scenarios: config.scenarios || Object.keys(SCENARIOS),
       providers: config.providers || [],
       delayMs: config.delayMs || 2000,
-      outputDir: config.outputDir || './results'
+      outputDir: config.outputDir || './results',
+      includePaid: config.includePaid || false
     };
   }
 
@@ -193,7 +195,7 @@ export class BatchRunner {
 
     for (const provider of providers) {
       console.log(`  ${provider.name}: Fetching models...`);
-      const models = await provider.getModels();
+      const models = await provider.getModels(this.config.includePaid);
       providerModels.set(provider.name, models);
 
       for (const model of models) {

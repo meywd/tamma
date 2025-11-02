@@ -23,7 +23,7 @@ export class OllamaProvider extends BaseProvider {
     return 'OLLAMA_ENABLED'; // Can set to 'true' to enable
   }
 
-  async getModels(): Promise<string[]> {
+  async getModels(includePaid: boolean = false): Promise<string[]> {
     try {
       const baseUrl = 'http://localhost:11434';
       const response = await fetch(`${baseUrl}/api/tags`, {
@@ -38,6 +38,7 @@ export class OllamaProvider extends BaseProvider {
       const data = await response.json();
 
       // Get all locally installed models
+      // Note: includePaid parameter not applicable - all Ollama models are free (local execution)
       const installedModels = data.models?.map((m: any) => m.name) || [];
 
       return installedModels.length > 0 ? installedModels : this.defaultModels;

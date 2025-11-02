@@ -16,7 +16,7 @@ export class OpenAIProvider extends BaseProvider {
     return 'OPENAI_API_KEY';
   }
 
-  async getModels(): Promise<string[]> {
+  async getModels(includePaid: boolean = false): Promise<string[]> {
     try {
       const apiKey = this.getApiKey();
       const response = await fetch('https://api.openai.com/v1/models', {
@@ -32,6 +32,7 @@ export class OpenAIProvider extends BaseProvider {
       const data = await response.json();
 
       // Filter for GPT models suitable for chat/completion
+      // Note: includePaid parameter not currently used - all OpenAI models are paid (have $5 trial credits)
       const models = data.data
         ?.filter((m: any) => m.id.startsWith('gpt-') && !m.id.includes('instruct'))
         .map((m: any) => m.id)

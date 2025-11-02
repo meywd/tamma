@@ -21,7 +21,7 @@ export class OpenRouterProvider extends BaseProvider {
     return 'OPENROUTER_API_KEY';
   }
 
-  async getModels(): Promise<string[]> {
+  async getModels(includePaid: boolean = false): Promise<string[]> {
     try {
       const response = await fetch('https://openrouter.ai/api/v1/models', {
         signal: AbortSignal.timeout(5000)
@@ -34,12 +34,21 @@ export class OpenRouterProvider extends BaseProvider {
 
       const data = await response.json();
 
-      // Filter for free models only
-      const freeModels = data.data
-        ?.filter((m: any) => m.id.includes(':free'))
-        .map((m: any) => m.id) || [];
+      if (!includePaid) {
+        // Filter for free models only (default behavior)
+        const freeModels = data.data
+          ?.filter((m: any) => m.id.includes(':free'))
+          .map((m: any) => m.id) || [];
 
-      return freeModels.length > 0 ? freeModels : this.defaultModels;
+        return freeModels.length > 0 ? freeModels : this.defaultModels;
+      } else {
+        // Include all models, but limit to top 20 to avoid hundreds
+        const allModels = data.data
+          ?.map((m: any) => m.id)
+          .slice(0, 20) || [];
+
+        return allModels.length > 0 ? allModels : this.defaultModels;
+      }
     } catch (error) {
       console.warn(`OpenRouter: Error fetching models - ${error instanceof Error ? error.message : 'Unknown'}`);
       return this.defaultModels;
