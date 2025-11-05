@@ -9,25 +9,9 @@
     <!-- Homepage -->
     <url>
         <loc>https://tamma.dev/</loc>
-        <lastmod>2025-11-01</lastmod>
+        <lastmod>2025-11-05</lastmod>
         <changefreq>weekly</changefreq>
         <priority>1.0</priority>
-    </url>
-
-    <!-- Privacy Policy -->
-    <url>
-        <loc>https://tamma.dev/privacy.html</loc>
-        <lastmod>2025-11-01</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.3</priority>
-    </url>
-
-    <!-- Terms of Service -->
-    <url>
-        <loc>https://tamma.dev/terms.html</loc>
-        <lastmod>2025-11-01</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.3</priority>
     </url>
 
 </urlset>

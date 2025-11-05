@@ -37,6 +37,7 @@
   "homepage": "https://tamma.dev",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241127.0",
+    "sharp": "^0.34.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "wrangler": "^4.45.3"

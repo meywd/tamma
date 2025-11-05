@@ -24,22 +24,6 @@ const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
         <priority>1.0</priority>
     </url>
 
-    <!-- Privacy Policy -->
-    <url>
-        <loc>https://tamma.dev/privacy.html</loc>
-        <lastmod>${currentDate}</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.3</priority>
-    </url>
-
-    <!-- Terms of Service -->
-    <url>
-        <loc>https://tamma.dev/terms.html</loc>
-        <lastmod>${currentDate}</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.3</priority>
-    </url>
-
 </urlset>
 `;
 
