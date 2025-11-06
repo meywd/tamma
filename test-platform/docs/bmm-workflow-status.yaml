@@ -26,7 +26,7 @@ project: "test-platform"
 project_type: "software"
 project_level: "2"
 field_type: "greenfield"
-workflow_path: "greenfield-level-2.yaml"
+workflow_path: "test-platform/docs/greenfield-level-2.yaml"
 
 workflow_status: "  # Phase 1: Analysis
   brainstorm-project: optional
@@ -34,16 +34,17 @@ workflow_status: "  # Phase 1: Analysis
   product-brief: recommended
 
   # Phase 2: Planning
-  prd: required
+  prd: test-platform/docs/PRD.md
+  create-epics-and-stories: test-platform/docs/epics.md
   validate-prd: optional
   create-design: conditional
   tech-spec: optional
 
   # Phase 3: Solutioning
-  create-architecture: test-platform/ARCHITECTURE.md
+  create-architecture: test-platform/docs/ARCHITECTURE.md
   validate-architecture: optional
-  solutioning-gate-check: required
+  solutioning-gate-check: test-platform/docs/implementation-readiness-report-2025-11-03.md
 
   # Phase 4: Implementation
-  sprint-planning: required
+  sprint-planning: test-platform/docs/sprint-status.yaml
 "
