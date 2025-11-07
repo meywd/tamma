@@ -107,84 +107,254 @@ As a **benchmark maintainer**, I want to **prevent AI models from training on ou
 
 **Key Design Decisions:**
 
-- Follow established architectural patterns from previous stories
-- Implement comprehensive error handling and logging
-- Ensure scalability and performance requirements are met
-- Maintain security best practices throughout implementation
+- **Zero-Knowledge Architecture**: Private test cases encrypted with AES-256-GCM, decryption only during execution
+- **Semantic Variation Generation**: Use LLM-powered task variation while preserving functional requirements and difficulty
+- **Multi-Layer Monitoring**: GitHub API scanning, training dataset analysis, and model output monitoring for contamination detection
+- **Canary Task Strategy**: Embed unique watermark tasks to detect memorization patterns across model evaluations
 
 **Technical Specifications:**
 
-**Core Interface:**
+**Core Contamination Prevention Interface:**
 
 ```typescript
-interface StoryInterface {
-  // Define core interface based on story requirements
-  id: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
+interface ContaminationPreventionSystem {
+  // Private test suite management
+  encryptPrivateTests(taskId: string, testCases: TestCase[]): Promise<EncryptedTests>;
+  decryptPrivateTests(
+    encryptedTests: EncryptedTests,
+    executionContext: ExecutionContext
+  ): Promise<TestCase[]>;
+
+  // Task variation generation
+  generateTaskVariation(originalTask: Task, variationSeed: string): Promise<TaskVariation>;
+  validateVariationIntegrity(
+    original: Task,
+    variation: TaskVariation
+  ): Promise<VariationValidation>;
+
+  // Contamination monitoring
+  scanPublicRepositories(taskSignature: string): Promise<ContaminationScan[]>;
+  analyzeTrainingDataExposure(taskPatterns: string[]): Promise<ExposureReport>;
+
+  // Canary task management
+  createCanaryTask(baseTask: Task, watermarkId: string): Promise<CanaryTask>;
+  detectCanaryMemorization(evaluationResults: EvaluationResult[]): Promise<MemorizationReport>;
 }
+
+interface EncryptedTests {
+  taskId: string;
+  encryptedData: string; // AES-256-GCM encrypted
+  encryptionKeyId: string;
+  iv: string; // Initialization vector
+  authTag: string; // Authentication tag
+  accessLog: AccessEntry[];
+}
+
+interface TaskVariation {
+  id: string;
+  originalTaskId: string;
+  variationType: 'OBFUSCATION' | 'SEMANTIC' | 'STRUCTURAL';
+  seed: string;
+  obfuscatedCode: string;
+  preservedRequirements: string[];
+  difficultyDelta: number; // Difficulty change from original
+  generatedAt: string;
+}
+
+interface ContaminationScan {
+  repository: string;
+  fileUrl: string;
+  matchType: 'EXACT' | 'SIMILAR' | 'DERIVED';
+  similarityScore: number;
+  discoveredAt: string;
+  remediationStatus: 'PENDING' | 'REMOVED' | 'IGNORED';
+}
+
+interface CanaryTask {
+  id: string;
+  watermarkId: string;
+  baseTaskId: string;
+  hiddenSignature: string;
+  expectedBehavior: string;
+  memorizationThreshold: number;
+  deploymentStatus: 'ACTIVE' | 'RETIRED';
+}
+```
+
+**Database Schema Extensions:**
+
+```sql
+-- Private test suite encryption
+CREATE TABLE encrypted_test_suites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id UUID NOT NULL REFERENCES tasks(id),
+  encrypted_data BYTEA NOT NULL, -- AES-256-GCM encrypted
+  encryption_key_id VARCHAR(255) NOT NULL,
+  iv BYTEA NOT NULL,
+  auth_tag BYTEA NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  access_count INTEGER DEFAULT 0,
+  last_accessed TIMESTAMP WITH TIME ZONE
+);
+
+-- Task variations tracking
+CREATE TABLE task_variations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_task_id UUID NOT NULL REFERENCES tasks(id),
+  variation_type VARCHAR(50) NOT NULL,
+  seed VARCHAR(255) NOT NULL,
+  obfuscated_code TEXT NOT NULL,
+  preserved_requirements JSONB,
+  difficulty_delta INTEGER DEFAULT 0,
+  validation_status VARCHAR(50) DEFAULT 'PENDING',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Contamination monitoring results
+CREATE TABLE contamination_scans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_signature VARCHAR(255) NOT NULL,
+  repository_url VARCHAR(500) NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  match_type VARCHAR(50) NOT NULL,
+  similarity_score DECIMAL(5,4) NOT NULL,
+  discovered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  remediation_status VARCHAR(50) DEFAULT 'PENDING',
+  reviewed_by UUID REFERENCES users(id)
+);
+
+-- Canary task tracking
+CREATE TABLE canary_tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  watermark_id VARCHAR(255) UNIQUE NOT NULL,
+  base_task_id UUID NOT NULL REFERENCES tasks(id),
+  hidden_signature VARCHAR(500) NOT NULL,
+  expected_behavior TEXT NOT NULL,
+  memorization_threshold DECIMAL(5,4) DEFAULT 0.95,
+  deployment_status VARCHAR(50) DEFAULT 'ACTIVE',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  retired_at TIMESTAMP WITH TIME ZONE
+);
 ```
 
 **Implementation Pipeline:**
 
-1. **Setup**: Initialize project structure and dependencies
-2. **Core Logic**: Implement primary functionality
-3. **Integration**: Connect with existing systems
-4. **Testing**: Comprehensive test coverage
-5. **Documentation**: Update technical documentation
-6. **Deployment**: Prepare for production deployment
+1. **Phase 1 - Encryption Foundation**: Implement AES-256-GCM encryption system with key management
+2. **Phase 2 - Variation Engine**: Build semantic variation generation with LLM integration
+3. **Phase 3 - Monitoring System**: Deploy GitHub scanning and training data analysis
+4. **Phase 4 - Canary Deployment**: Implement watermark task creation and detection
+5. **Phase 5 - Integration**: Connect with task repository and quality assurance systems
+6. **Phase 6 - Testing**: Comprehensive security and performance testing
+7. **Phase 7 - Documentation**: Complete security and operational documentation
 
 **Configuration Requirements:**
 
-- Environment-specific configuration management
-- Feature flags for gradual rollout
-- Monitoring and alerting configuration
-- Security and access control settings
+```typescript
+interface ContaminationConfig {
+  encryption: {
+    algorithm: 'AES-256-GCM';
+    keyRotationDays: number;
+    keyDerivationIterations: number;
+  };
+  variation: {
+    llmProvider: 'anthropic' | 'openai' | 'local';
+    maxVariationsPerTask: number;
+    semanticSimilarityThreshold: number;
+  };
+  monitoring: {
+    githubScanIntervalHours: number;
+    trainingDataProviders: string[];
+    contaminationThreshold: number;
+  };
+  canary: {
+    watermarkComplexity: number;
+    deploymentPercentage: number;
+    memorizationDetectionWindow: number;
+  };
+}
+```
 
 **Performance Considerations:**
 
-- Efficient data processing and storage
-- Optimized query performance
-- Scalable architecture for growth
-- Resource management and cleanup
+- **Encryption Operations**: <50ms per test suite encrypt/decrypt with hardware acceleration
+- **Variation Generation**: <5 seconds per task variation with parallel processing
+- **Repository Scanning**: Full GitHub scan within 24 hours for 10M+ repositories
+- **Canary Detection**: Real-time memorization detection with <100ms latency
+- **Database Performance**: Index optimization for signature-based queries (<10ms)
 
 **Security Requirements:**
 
-- Input validation and sanitization
-- Authentication and authorization
-- Data encryption at rest and in transit
-- Audit logging and compliance
+- **Zero-Knowledge Storage**: Private tests never stored in plaintext
+- **Key Management**: AWS KMS or HashiCorp Vault integration with rotation
+- **Access Controls**: RBAC with just-in-time access for test decryption
+- **Audit Logging**: Immutable logs for all private test access and modifications
+- **Compliance**: SOC2 Type II and ISO27001 compliant data handling
+
+**Obfuscation Techniques Implementation:**
+
+```typescript
+interface ObfuscationStrategy {
+  // Variable and function name randomization
+  randomizeIdentifiers(code: string, semanticMap: SemanticMap): Promise<ObfuscatedCode>;
+
+  // Code structure randomization
+  randomizeStructure(ast: ProgramAST, constraints: StructureConstraints): Promise<ProgramAST>;
+
+  // Comment and documentation obfuscation
+  obfuscateDocumentation(docs: Documentation, preserveHints: string[]): Promise<ObfuscatedDocs>;
+
+  // Control flow transformation
+  transformControlFlow(ast: ProgramAST, preserveSemantics: boolean): Promise<ProgramAST>;
+}
+
+interface SemanticMap {
+  originalToObfuscated: Map<string, string>;
+  preservedIdentifiers: Set<string>;
+  semanticEquivalence: Map<string, string[]>;
+}
+```
 
 ### Testing Strategy
 
 **Unit Test Requirements:**
 
-- Core functionality testing with edge cases
-- Error handling and validation testing
-- Performance and load testing
-- Security testing and vulnerability assessment
+- **Encryption Testing**: AES-256-GCM implementation with known-answer tests
+- **Variation Validation**: Semantic preservation tests across all 7 languages
+- **Obfuscation Testing**: Functionality preservation after transformation
+- **Canary Detection**: Memorization pattern recognition accuracy
+- **Key Management**: Rotation, expiration, and access control testing
 
 **Integration Test Requirements:**
 
-- End-to-end workflow testing
-- API integration testing
-- Database integration testing
-- Third-party service integration testing
+- **End-to-End Contamination Flow**: Task creation → encryption → variation → deployment → monitoring
+- **GitHub API Integration**: Repository scanning with rate limiting and error handling
+- **LLM Integration**: Variation generation with provider fallbacks and cost controls
+- **Database Integration**: Encrypted data storage and retrieval with performance validation
+- **Quality Gate Integration**: Contamination scoring integration with task quality pipeline
 
 **Performance Test Requirements:**
 
-- Load testing with expected traffic
-- Stress testing beyond normal limits
-- Scalability testing for growth scenarios
-- Resource utilization optimization
+- **Encryption Throughput**: 1000+ test suites encrypted/decrypted per second
+- **Variation Generation**: 100+ concurrent task variations with <5s latency
+- **Repository Scanning**: 10M+ repositories scanned within 24-hour window
+- **Canary Analysis**: Real-time memorization detection with <100ms processing time
+- **Database Performance**: Encrypted queries with <50ms average response time
+
+**Security Test Requirements:**
+
+- **Penetration Testing**: External security audit of encryption and access controls
+- **Key Security**: Key extraction and brute force resistance testing
+- **Data Leakage**: Memory dump analysis and side-channel attack testing
+- **Access Control**: Privilege escalation and unauthorized access testing
+- **Audit Trail**: Log integrity and tamper resistance validation
 
 **Edge Cases to Consider:**
 
-- Network failures and timeouts
-- Data corruption and recovery
-- Concurrent access and race conditions
-- Resource exhaustion and degradation
+- **Encryption Failures**: Key corruption, algorithm failures, hardware acceleration issues
+- **Variation Quality**: LLM hallucinations, semantic drift, difficulty changes
+- **False Positives**: Benign code similarity flagged as contamination
+- **Canary Compromise**: Watermark discovery and bypass attempts
+- **Resource Exhaustion**: Memory limits during large-scale encryption operations
 
 ### Dependencies
 
@@ -204,20 +374,22 @@ interface StoryInterface {
 
 ### Risks and Mitigations
 
-| Risk | Severity | Mitigation |
-| ---- | -------- | ---------- |
-| Technical complexity | Medium | Incremental development, thorough testing |
-| Integration challenges | Medium | Early integration testing, clear interfaces |
-| Performance bottlenecks | Low | Performance monitoring, optimization |
-| Security vulnerabilities | High | Security reviews, penetration testing |
+| Risk                     | Severity | Mitigation                                  |
+| ------------------------ | -------- | ------------------------------------------- |
+| Technical complexity     | Medium   | Incremental development, thorough testing   |
+| Integration challenges   | Medium   | Early integration testing, clear interfaces |
+| Performance bottlenecks  | Low      | Performance monitoring, optimization        |
+| Security vulnerabilities | High     | Security reviews, penetration testing       |
 
 ### Success Metrics
 
-- [ ] Metric 1: Functional completeness - 100% of acceptance criteria met
-- [ ] Metric 2: Test coverage - 90%+ code coverage achieved
-- [ ] Metric 3: Performance - Meets specified performance requirements
-- [ ] Metric 4: Security - Passes security assessment
-- [ ] Metric 5: Documentation - Complete technical documentation
+- [ ] Metric 1: Encryption Coverage - 100% of private test cases encrypted with AES-256-GCM
+- [ ] Metric 2: Variation Quality - 95%+ semantic preservation with <10% difficulty drift
+- [ ] Metric 3: Contamination Detection - 90%+ accuracy in identifying leaked tasks with <5% false positives
+- [ ] Metric 4: Canary Effectiveness - 98%+ memorization detection in known compromised models
+- [ ] Metric 5: Performance Standards - Encryption <50ms, variation generation <5s, scanning <24h for 10M repos
+- [ ] Metric 6: Security Compliance - Zero knowledge architecture with SOC2 Type II and ISO27001 compliance
+- [ ] Metric 7: Access Audit Trail - 100% coverage of private test access with immutable logging
 
 ## Related
 

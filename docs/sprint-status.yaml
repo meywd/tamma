@@ -1,4 +1,5 @@
 # generated: 2025-10-29
+# updated: 2025-11-06 (epic-2-retrospective completed, epic-1-emergency-recovery-plan-created)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -50,7 +51,7 @@ development_status:
   1-10-additional-ai-provider-implementations: ready-for-dev
   1-11-additional-git-platform-implementations: ready-for-dev
   1-12-initial-marketing-website: ready-for-dev
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   epic-1.5: contexted
   1.5-1-core-engine-separation: ready-for-dev
@@ -68,6 +69,7 @@ development_status:
   epic-2: contexted
   2-1-issue-selection-with-filtering: ready-for-dev
   2-2-issue-context-analysis: ready-for-dev
+  2-2-anthropic-claude-provider-implementation: drafted
   2-3-development-plan-generation-with-approval-checkpoint: ready-for-dev
   2-4-git-branch-creation: ready-for-dev
   2-5-test-first-development-write-failing-tests: ready-for-dev
@@ -82,7 +84,7 @@ development_status:
    2-14-issue-decomposition-engine: ready-for-dev
    2-15-task-dependency-mapping: ready-for-dev
    2-16-incremental-task-sequencing: ready-for-dev
-   epic-2-retrospective: optional
+   epic-2-retrospective: completed
 
   epic-3: contexted
   3-1-build-automation-gate-implementation: ready-for-dev

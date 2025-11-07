@@ -38,36 +38,37 @@ story_location: '{project-root}/docs/stories'
 development_status:
   # Epic 1: Foundation & Infrastructure
   epic-1: backlog
-  1-1-database-schema-migration-system: backlog
-  1-2-authentication-authorization-system: backlog
-  1-3-organization-management-multi-tenancy: backlog
-  1-4-basic-api-infrastructure-documentation: backlog
-  1-5-configuration-management-environment-setup: backlog
-  epic-1-retrospective: optional
+  1-1-database-schema-migration-system: drafted
+  1-2-authentication-authorization-system: drafted
+  1-3-organization-management-multi-tenancy: drafted
+  1-4-basic-api-infrastructure-documentation: drafted
+  1-5-configuration-management-environment-setup: drafted
+  epic-1-retrospective: completed
 
   # Epic 2: AI Provider Integration
   epic-2: backlog
-  2-1-ai-provider-abstraction-interface: backlog
-  2-2-anthropic-claude-provider-implementation: backlog
-  2-3-openai-provider-implementation: backlog
-  2-4-dynamic-model-discovery-service: backlog
-  2-5-additional-provider-implementations: backlog
-  epic-2-retrospective: optional
+  2-1-ai-provider-abstraction-interface: drafted
+  2-2-anthropic-claude-provider-implementation: drafted
+  2-3-openai-provider-implementation: drafted
+  2-4-dynamic-model-discovery-service: drafted
+  2-5-additional-provider-implementations: drafted
+  epic-2-retrospective: completed
 
   # Epic 3: Test Bank Management
   epic-3: backlog
-  3-1-task-repository-schema-storage: backlog
-  3-2-task-quality-assurance-system: backlog
-  3-3-contamination-prevention-system: backlog
-  3-4-initial-test-bank-creation: backlog
-  epic-3-retrospective: optional
+  3-1-task-repository-schema-storage: ready-for-dev
+  3-2-task-quality-assurance-system: ready-for-dev
+  3-3-contamination-prevention-system: ready-for-dev
+  3-4-initial-test-bank-creation: ready-for-dev
+  epic-3-retrospective: completed
+  epic-3-story-content-standardization: completed
 
   # Epic 4: Benchmark Execution Engine
   epic-4: backlog
-  4-1-task-execution-engine: backlog
-  4-2-automated-scoring-system: backlog
-  4-3-result-storage-time-series-management: backlog
-  4-4-benchmark-orchestration-scheduling: backlog
+  4-1-task-execution-engine: drafted
+  4-2-automated-scoring-system: drafted
+  4-3-result-storage-time-series-management: drafted
+  4-4-benchmark-orchestration-scheduling: drafted
   epic-4-retrospective: optional
 
   # Epic 5: Multi-Judge Evaluation System
