@@ -114,6 +114,238 @@ const storyTemplates: Record<string, Partial<StoryTemplate>> = {
       },
     ],
   },
+  '3-4-initial-test-bank-creation': {
+    title: 'Initial Test Bank Creation',
+    description:
+      'As a **benchmark maintainer**, I want to **create the initial comprehensive set of benchmark tasks across multiple programming languages and scenarios**, so that **we have a robust foundation for AI model evaluation with balanced coverage and validated quality**.',
+    acceptanceCriteria: [
+      'Comprehensive Task Coverage: Create 3,150 tasks total (7 languages × 3 scenarios × 150 tasks) with balanced distribution across all dimensions',
+      'MVP Scenario Focus: Prioritize Code Generation, Testing, and Code Review scenarios for initial implementation with clear success criteria',
+      'Balanced Difficulty Distribution: Ensure equal representation of Easy, Medium, and Hard difficulty levels (50 each per scenario per language)',
+      'Language Priority Implementation: Complete TypeScript and Python tasks first, followed by C#, Java, Go, Ruby, and Rust implementations',
+      'Quality Assurance Validation: All tasks must pass automated compilation, test execution, and code quality analysis before inclusion',
+      'Comprehensive Documentation: Each task includes detailed descriptions, examples, expected outputs, and evaluation criteria',
+      'Performance Baseline Establishment: Create complexity metrics and execution time baselines for each task category',
+      'Complete Metadata Management: All tasks tagged with language, scenario, difficulty, dependencies, and prerequisite knowledge',
+    ],
+    tasks: [
+      {
+        title: 'Task Generation Framework',
+        subtasks: [
+          'Design automated task generation templates for each scenario type',
+          'Implement language-specific code generation patterns and best practices',
+          'Create difficulty calibration system with objective complexity metrics',
+          'Build task validation pipeline with compilation and testing verification',
+        ],
+      },
+      {
+        title: 'TypeScript Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks (50 easy, 50 medium, 50 hard)',
+          'Create 150 Testing tasks with unit test and integration test scenarios',
+          'Develop 150 Code Review tasks with common TypeScript patterns and anti-patterns',
+          'Validate all TypeScript tasks with automated quality checks',
+        ],
+      },
+      {
+        title: 'Python Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks covering Python idioms and libraries',
+          'Create 150 Testing tasks with pytest, unittest, and property-based testing',
+          'Develop 150 Code Review tasks focusing on Python-specific best practices',
+          'Ensure Python tasks follow PEP 8 and community standards',
+        ],
+      },
+      {
+        title: 'C# Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks using .NET ecosystem patterns',
+          'Create 150 Testing tasks with xUnit, NUnit, and MSTest frameworks',
+          'Develop 150 Code Review tasks covering C# language features and patterns',
+          'Validate C# tasks with Visual Studio and .NET CLI tooling',
+        ],
+      },
+      {
+        title: 'Java Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks using Java 17+ features and ecosystem',
+          'Create 150 Testing tasks with JUnit 5, Mockito, and testing best practices',
+          'Develop 150 Code Review tasks covering Java design patterns and conventions',
+          'Ensure Java tasks follow Spring Boot and enterprise development patterns',
+        ],
+      },
+      {
+        title: 'Go Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks following Go idioms and concurrency patterns',
+          'Create 150 Testing tasks with Go testing package and table-driven tests',
+          'Develop 150 Code Review tasks focusing on Go-specific best practices',
+          'Validate Go tasks with go fmt, vet, and standard tooling',
+        ],
+      },
+      {
+        title: 'Ruby Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks using Ruby on Rails and ecosystem patterns',
+          'Create 150 Testing tasks with RSpec, Minitest, and testing conventions',
+          'Develop 150 Code Review tasks covering Ruby idioms and metaprogramming',
+          'Ensure Ruby tasks follow community standards and best practices',
+        ],
+      },
+      {
+        title: 'Rust Task Implementation',
+        subtasks: [
+          'Generate 150 Code Generation tasks using Rust ownership and type system',
+          'Create 150 Testing tasks with built-in testing and external test frameworks',
+          'Develop 150 Code Review tasks covering Rust safety patterns and performance',
+          'Validate Rust tasks with cargo check, clippy, and security audits',
+        ],
+      },
+      {
+        title: 'Quality Assurance Pipeline',
+        subtasks: [
+          'Implement automated compilation validation for all generated tasks',
+          'Create test suite execution with coverage reporting for each task',
+          'Build code quality analysis with language-specific linting and formatting',
+          'Develop manual review workflow for task approval and improvement',
+        ],
+      },
+      {
+        title: 'Documentation and Examples',
+        subtasks: [
+          'Create comprehensive task descriptions with clear objectives',
+          'Generate example solutions with detailed explanations',
+          'Build evaluation criteria documentation for each scenario type',
+          'Develop prerequisite knowledge guides for each difficulty level',
+        ],
+      },
+      {
+        title: 'Performance Baseline Development',
+        subtasks: [
+          'Establish complexity metrics for each task category and language',
+          'Create execution time baselines for different solution approaches',
+          'Develop memory usage benchmarks for resource-intensive tasks',
+          'Build performance regression detection for task validation',
+        ],
+      },
+      {
+        title: 'Metadata Management System',
+        subtasks: [
+          'Tag all tasks with language, scenario, difficulty, and topic metadata',
+          'Create dependency tracking for tasks requiring prerequisite knowledge',
+          'Build search and filtering system for task discovery and selection',
+          'Develop analytics dashboard for task distribution and coverage analysis',
+        ],
+      },
+    ],
+  },
+  '4-2-automated-scoring-system': {
+    title: 'Automated Scoring System',
+    description:
+      'As a **benchmark runner**, I want to **automated scoring of AI-generated code with comprehensive evaluation metrics**, so that **we can objectively evaluate code quality, correctness, and performance across multiple dimensions**.',
+    acceptanceCriteria: [
+      'Compilation Success Validation: Automated checking of code compilation with proper error capture, language-specific compiler integration, and detailed failure reporting',
+      'Test Suite Execution: Comprehensive test execution with pass/fail reporting, coverage analysis, performance benchmarking, and detailed test result analytics',
+      'Code Quality Metrics: Multi-dimensional quality analysis including complexity metrics (cyclomatic, cognitive), maintainability indices, style compliance, and code smell detection',
+      'Performance Analysis: Detailed performance profiling including execution time measurement, memory usage tracking, resource consumption analysis, and performance regression detection',
+      'Security Vulnerability Scanning: Automated security assessment with vulnerability detection, dependency analysis, security pattern validation, and risk scoring',
+      'Plagiarism Detection: Advanced code similarity analysis using AST comparison, token-based similarity, semantic analysis, and cross-reference checking against known solutions',
+      'Normalized Scoring System: Standardized scoring across different task types with difficulty weighting, language-specific normalization, and balanced metric aggregation',
+      'Score Aggregation Framework: Flexible scoring system with configurable weights, custom scoring algorithms, statistical analysis, and confidence interval calculation',
+    ],
+    tasks: [
+      {
+        title: 'Compilation Validation Engine',
+        subtasks: [
+          'Implement language-specific compiler integrations (TypeScript, Python, C#, Java, Go, Ruby, Rust)',
+          'Create sandboxed compilation environment with resource limits and security isolation',
+          'Build comprehensive error capture and parsing system with categorized error types',
+          'Develop compilation timeout handling and resource management for long-running builds',
+        ],
+      },
+      {
+        title: 'Test Execution Framework',
+        subtasks: [
+          'Create universal test runner supporting multiple testing frameworks and languages',
+          'Implement test result collection with detailed pass/fail reporting and coverage metrics',
+          'Build performance benchmarking integration with execution time and memory profiling',
+          'Develop test isolation and cleanup procedures for reliable test execution',
+        ],
+      },
+      {
+        title: 'Code Quality Analysis System',
+        subtasks: [
+          'Implement complexity analysis algorithms (cyclomatic, cognitive, halstead metrics)',
+          'Create maintainability index calculation with language-specific adaptations',
+          'Build code style validation with configurable linting rules and formatting checks',
+          'Develop code smell detection and anti-pattern recognition system',
+        ],
+      },
+      {
+        title: 'Performance Profiling Engine',
+        subtasks: [
+          'Create execution time measurement with high-precision timing and statistical analysis',
+          'Implement memory usage tracking with heap analysis and leak detection',
+          'Build resource consumption monitoring for CPU, I/O, and network usage',
+          'Develop performance regression detection with baseline comparison and trend analysis',
+        ],
+      },
+      {
+        title: 'Security Vulnerability Scanner',
+        subtasks: [
+          'Integrate static analysis security testing (SAST) tools for vulnerability detection',
+          'Create dependency vulnerability scanning with CVE database integration',
+          'Build security pattern validation for common security anti-patterns',
+          'Develop risk scoring system with severity classification and remediation suggestions',
+        ],
+      },
+      {
+        title: 'Plagiarism Detection System',
+        subtasks: [
+          'Implement AST-based code similarity analysis with structural comparison',
+          'Create token-based similarity detection with n-gram analysis and fuzzy matching',
+          'Build semantic similarity analysis using code embedding and machine learning',
+          'Develop cross-reference checking against known solution databases and web sources',
+        ],
+      },
+      {
+        title: 'Score Normalization Engine',
+        subtasks: [
+          'Create difficulty-based scoring adjustment with calibrated difficulty metrics',
+          'Implement language-specific normalization to account for language characteristics',
+          'Build balanced metric aggregation with configurable weight distributions',
+          'Develop statistical normalization using z-scores and percentile rankings',
+        ],
+      },
+      {
+        title: 'Scoring Configuration Management',
+        subtasks: [
+          'Design flexible scoring configuration system with YAML/JSON configuration files',
+          'Implement custom scoring algorithm support with plugin architecture',
+          'Create scoring rule validation and testing framework',
+          'Build scoring analytics and reporting with detailed breakdown and explanations',
+        ],
+      },
+      {
+        title: 'Result Storage and Analytics',
+        subtasks: [
+          'Implement efficient result storage with time-series database integration',
+          'Create scoring analytics dashboard with trend analysis and visualization',
+          'Build historical comparison tools for performance tracking over time',
+          'Develop export capabilities for scoring data in multiple formats (JSON, CSV, PDF)',
+        ],
+      },
+      {
+        title: 'Quality Assurance and Validation',
+        subtasks: [
+          'Create comprehensive test suite for all scoring components with edge case coverage',
+          'Implement scoring accuracy validation against known ground truth datasets',
+          'Build performance testing for scoring system scalability and throughput',
+          'Develop continuous monitoring and alerting for scoring system health',
+        ],
+      },
+    ],
+  },
 };
 
 function parseArgs(): StoryConfig {
