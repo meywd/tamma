@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Badge Customizer - تخصيص الشارة</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .back-btn {
+            background: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: #fbbf24;
+            transform: scale(1.05);
+        }
+
+        .favorites-btn {
+            background: #fbbf24;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .favorites-btn:hover {
+            background: #f59e0b;
+            transform: scale(1.05);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .preview-panel {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .badge-preview {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            aspect-ratio: 1;
+        }
+
+        .badge-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .badge-text-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            width: 80%;
+            pointer-events: none;
+        }
+
+        .badge-text {
+            font-size: 3.5rem;
+            font-weight: bold;
+            transition: color 0.3s, text-shadow 0.3s;
+        }
+
+        .badge-text.arabic {
+            font-family: 'Traditional Arabic', 'Arabic Typesetting', 'Geeza Pro', serif;
+        }
+
+        .badge-text.english {
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 2.5rem;
+            letter-spacing: 4px;
+        }
+
+        .controls-panel {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .control-section {
+            margin-bottom: 30px;
+        }
+
+        .control-section h3 {
+            color: #1e40af;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        .color-picker-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .color-input {
+            width: 80px;
+            height: 50px;
+            border: 3px solid #ddd;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+
+        .color-input:hover {
+            border-color: #fbbf24;
+        }
+
+        .color-hex {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 1rem;
+        }
+
+        .preset-colors {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .preset-color {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .preset-color:hover {
+            transform: scale(1.1);
+            border-color: #1e40af;
+        }
+
+        .slider-group {
+            margin-bottom: 15px;
+        }
+
+        .slider-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #1e40af;
+            font-weight: 600;
+        }
+
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #ddd;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fbbf24;
+            cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fbbf24;
+            cursor: pointer;
+        }
+
+        .value-display {
+            display: inline-block;
+            margin-left: 10px;
+            color: #666;
+            font-weight: bold;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .favorite-btn {
+            background: #fbbf24;
+            color: #1e40af;
+        }
+
+        .favorite-btn:hover {
+            background: #f59e0b;
+            transform: scale(1.05);
+        }
+
+        .favorite-btn.favorited {
+            background: #ef4444;
+            color: white;
+        }
+
+        .reset-btn {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .reset-btn:hover {
+            background: #d1d5db;
+        }
+
+        .info-section {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .info-section p {
+            color: #374151;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+
+        .success-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transform: translateX(400px);
+            transition: transform 0.3s;
+            z-index: 1000;
+        }
+
+        .success-message.show {
+            transform: translateX(0);
+        }
+
+        .eyedropper-active {
+            cursor: crosshair !important;
+            position: relative;
+        }
+
+        .eyedropper-active::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 3px dashed #06b6d4;
+            border-radius: 10px;
+            pointer-events: none;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        #eyedropperBtn:hover {
+            background: #0891b2;
+        }
+
+        #eyedropperBtn.active {
+            background: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button class="back-btn" onclick="goBack()">← العودة للقائمة</button>
+            <button class="favorites-btn" onclick="goToFavorites()">⭐ المفضلة</button>
+        </div>
+
+        <div class="main-content">
+            <div class="preview-panel">
+                <h2 style="text-align: center; color: #1e40af; margin-bottom: 20px;" id="badgeTitle">معاينة الشارة</h2>
+                <div class="badge-preview">
+                    <img id="badgeImage" src="" alt="Badge" class="badge-img">
+                    <div class="badge-text-overlay">
+                        <span id="badgeText" class="badge-text"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls-panel">
+                <div class="control-section">
+                    <h3>🎨 اختيار اللون</h3>
+                    <div class="color-picker-group">
+                        <input type="color" id="colorPicker" class="color-input" value="#ffd700">
+                        <input type="text" id="colorHex" class="color-hex" value="#ffd700" placeholder="#RRGGBB">
+                    </div>
+
+                    <button class="action-btn" id="eyedropperBtn" style="width: 100%; margin: 10px 0; background: #06b6d4; color: white;">
+                        🔍 اختر لون من الشارة
+                    </button>
+                    <p id="inspectorHint" style="display: none; color: #06b6d4; font-size: 0.9rem; text-align: center; margin: 5px 0;">
+                        👆 انقر على الشارة لاختيار اللون
+                    </p>
+
+                    <p style="margin: 10px 0; color: #666; font-size: 0.9rem;">الألوان المقترحة:</p>
+                    <div class="preset-colors" id="presetColors"></div>
+                </div>
+
+                <div class="control-section">
+                    <h3>📏 حجم النص</h3>
+
+                    <div class="slider-group">
+                        <label>حجم الخط <span class="value-display" id="textSizeValue">3.5rem</span></label>
+                        <input type="range" id="textSize" class="slider" min="1.5" max="6" step="0.1" value="3.5">
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>📍 موضع النص</h3>
+
+                    <div class="slider-group">
+                        <label>موضع عمودي <span class="value-display" id="verticalValue">50%</span></label>
+                        <input type="range" id="verticalAlign" class="slider" min="30" max="70" step="1" value="50">
+                    </div>
+
+                    <div class="slider-group">
+                        <label>موضع أفقي <span class="value-display" id="horizontalValue">50%</span></label>
+                        <input type="range" id="horizontalAlign" class="slider" min="30" max="70" step="1" value="50">
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h3>💡 تأثيرات الظل</h3>
+
+                    <div class="slider-group">
+                        <label>عتامة الظل <span class="value-display" id="opacityValue">50%</span></label>
+                        <input type="range" id="shadowOpacity" class="slider" min="0" max="100" value="50">
+                    </div>
+
+                    <div class="slider-group">
+                        <label>ضبابية الظل <span class="value-display" id="blurValue">4px</span></label>
+                        <input type="range" id="shadowBlur" class="slider" min="0" max="20" value="4">
+                    </div>
+
+                    <div class="slider-group">
+                        <label>توهج اللون <span class="value-display" id="glowValue">0px</span></label>
+                        <input type="range" id="colorGlow" class="slider" min="0" max="30" value="0">
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="action-btn favorite-btn" id="favoriteBtn" onclick="toggleFavorite()">
+                        ⭐ حفظ في المفضلة
+                    </button>
+                    <button class="action-btn reset-btn" onclick="resetToDefault()">
+                        🔄 إعادة تعيين
+                    </button>
+                </div>
+
+                <div class="info-section">
+                    <p><strong>💡 نصيحة:</strong> جرب الألوان المختلفة لتجد التصميم المثالي!</p>
+                    <p><strong>📌 المفضلة:</strong> احفظ تصميماتك المفضلة وشاهدها في صفحة المفضلة</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="success-message" id="successMessage">
+        ✓ تم الحفظ في المفضلة!
+    </div>
+
+    <script>
+        // Badge configurations matching the original page
+        const badgeConfig = {
+            '2': { name: 'Classic Radial Gold', defaultColor: '#5a4420', defaultShadow: 'rgba(255, 215, 0, 0.6)' },
+            '3': { name: 'Black Center with Stars', defaultColor: '#ffed4e', defaultShadow: 'rgba(255, 215, 0, 0.8)' },
+            '4': { name: 'Golden Center with Stars', defaultColor: '#3a2817', defaultShadow: 'rgba(255, 215, 0, 0.5)' },
+            '5': { name: 'Black Ribbon Banner', defaultColor: '#ffd700', defaultShadow: 'rgba(255, 215, 0, 0.6)' },
+            '6': { name: 'Royal Crown & Laurels', defaultColor: '#3d3939', defaultShadow: 'rgba(255, 255, 255, 0.5)' },
+            '7': { name: 'Red Star & Laurels', defaultColor: '#d4af37', defaultShadow: 'rgba(212, 175, 55, 0.7)' },
+            '8': { name: 'Octagonal Premium', defaultColor: '#ffc107', defaultShadow: 'rgba(255, 193, 7, 0.6)' },
+            '9': { name: 'Star Bottom Ribbon', defaultColor: '#f9d71c', defaultShadow: 'rgba(249, 215, 28, 0.7)' },
+            '10': { name: 'Red Ribbon Award', defaultColor: '#5c4827', defaultShadow: 'rgba(255, 215, 0, 0.4)' },
+            '11': { name: 'Crown Banner & Star', defaultColor: '#d4af37', defaultShadow: 'rgba(212, 175, 55, 0.6)' },
+            '12': { name: 'Circular Premium', defaultColor: '#4a3619', defaultShadow: 'rgba(255, 215, 0, 0.5)' },
+            '13': { name: 'Golden Banner Star', defaultColor: '#2c1810', defaultShadow: 'rgba(255, 215, 0, 0.8)' }
+        };
+
+        const presetColors = [
+            '#ffd700', '#ffed4e', '#ffc107', '#f9d71c', '#d4af37',
+            '#8b6914', '#5a4420', '#3a2817', '#2c1810', '#4a3619',
+            '#ffff00', '#fffacd', '#fff9e6', '#3d3939', '#ef4444'
+        ];
+
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const badgeNum = urlParams.get('badge');
+        const lang = urlParams.get('lang') || 'arabic';
+
+        // Eyedropper state
+        let eyedropperActive = false;
+
+        // Arabic number mapping
+        const arabicNums = { '2': '٢', '3': '٣', '4': '٤', '5': '٥', '6': '٦', '7': '٧', '8': '٨', '9': '٩', '10': '١٠', '11': '١١', '12': '١٢', '13': '١٣' };
+
+        // Initialize page
+        function init() {
+            const config = badgeConfig[badgeNum];
+            if (!config) {
+                window.location.href = '/artboard-badges.html';
+                return;
+            }
+
+            // Set badge image
+            document.getElementById('badgeImage').src = `/assets/1x/Artboard ${arabicNums[badgeNum]}.png`;
+            document.getElementById('badgeTitle').textContent = config.name;
+
+            // Set badge text
+            const textEl = document.getElementById('badgeText');
+            textEl.textContent = lang === 'english' ? 'DONE' : 'تَمّ';
+            textEl.className = `badge-text ${lang}`;
+
+            // Set default color
+            document.getElementById('colorPicker').value = config.defaultColor;
+            document.getElementById('colorHex').value = config.defaultColor;
+            updateTextColor(config.defaultColor);
+
+            // Load preset colors
+            loadPresetColors();
+
+            // Setup event listeners
+            setupEventListeners();
+
+            // Load saved favorite values if exists
+            loadSavedValues();
+
+            // Check if already favorited
+            checkIfFavorited();
+        }
+
+        function loadSavedValues() {
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+            const saved = favorites.find(f => f.badge === badgeNum && f.lang === lang);
+
+            if (saved) {
+                // Load saved values
+                if (saved.color) {
+                    document.getElementById('colorPicker').value = saved.color;
+                    document.getElementById('colorHex').value = saved.color;
+                }
+                if (saved.shadowOpacity) {
+                    document.getElementById('shadowOpacity').value = saved.shadowOpacity;
+                    document.getElementById('opacityValue').textContent = saved.shadowOpacity + '%';
+                }
+                if (saved.shadowBlur) {
+                    document.getElementById('shadowBlur').value = saved.shadowBlur;
+                    document.getElementById('blurValue').textContent = saved.shadowBlur + 'px';
+                }
+                if (saved.colorGlow) {
+                    document.getElementById('colorGlow').value = saved.colorGlow;
+                    document.getElementById('glowValue').textContent = saved.colorGlow + 'px';
+                }
+                if (saved.textSize) {
+                    document.getElementById('textSize').value = saved.textSize;
+                    document.getElementById('textSizeValue').textContent = saved.textSize + 'rem';
+                }
+                if (saved.verticalAlign) {
+                    document.getElementById('verticalAlign').value = saved.verticalAlign;
+                    document.getElementById('verticalValue').textContent = saved.verticalAlign + '%';
+                }
+                if (saved.horizontalAlign) {
+                    document.getElementById('horizontalAlign').value = saved.horizontalAlign;
+                    document.getElementById('horizontalValue').textContent = saved.horizontalAlign + '%';
+                }
+
+                // Apply all the loaded values
+                updateTextColor(saved.color);
+                updateTextSize();
+                updateTextPosition();
+            }
+        }
+
+        function loadPresetColors() {
+            const container = document.getElementById('presetColors');
+            presetColors.forEach(color => {
+                const div = document.createElement('div');
+                div.className = 'preset-color';
+                div.style.backgroundColor = color;
+                div.onclick = () => selectPresetColor(color);
+                container.appendChild(div);
+            });
+        }
+
+        function selectPresetColor(color) {
+            document.getElementById('colorPicker').value = color;
+            document.getElementById('colorHex').value = color;
+            updateTextColor(color);
+        }
+
+        function setupEventListeners() {
+            document.getElementById('colorPicker').addEventListener('input', (e) => {
+                document.getElementById('colorHex').value = e.target.value;
+                updateTextColor(e.target.value);
+            });
+
+            document.getElementById('colorHex').addEventListener('input', (e) => {
+                const color = e.target.value;
+                if (/^#[0-9A-F]{6}$/i.test(color)) {
+                    document.getElementById('colorPicker').value = color;
+                    updateTextColor(color);
+                }
+            });
+
+            document.getElementById('shadowOpacity').addEventListener('input', (e) => {
+                document.getElementById('opacityValue').textContent = e.target.value + '%';
+                updateTextStyle();
+            });
+
+            document.getElementById('shadowBlur').addEventListener('input', (e) => {
+                document.getElementById('blurValue').textContent = e.target.value + 'px';
+                updateTextStyle();
+            });
+
+            document.getElementById('colorGlow').addEventListener('input', (e) => {
+                document.getElementById('glowValue').textContent = e.target.value + 'px';
+                updateTextStyle();
+            });
+
+            document.getElementById('textSize').addEventListener('input', (e) => {
+                document.getElementById('textSizeValue').textContent = e.target.value + 'rem';
+                updateTextSize();
+            });
+
+            document.getElementById('verticalAlign').addEventListener('input', (e) => {
+                document.getElementById('verticalValue').textContent = e.target.value + '%';
+                updateTextPosition();
+            });
+
+            document.getElementById('horizontalAlign').addEventListener('input', (e) => {
+                document.getElementById('horizontalValue').textContent = e.target.value + '%';
+                updateTextPosition();
+            });
+
+            // Eyedropper button
+            document.getElementById('eyedropperBtn').addEventListener('click', toggleEyedropper);
+
+            // Badge image click for color picking
+            document.getElementById('badgeImage').addEventListener('click', handleImageClick);
+        }
+
+        function updateTextColor(color) {
+            updateTextStyle(color);
+        }
+
+        function updateTextSize() {
+            const textEl = document.getElementById('badgeText');
+            const size = document.getElementById('textSize').value;
+
+            if (lang === 'english') {
+                // English text is typically smaller
+                textEl.style.fontSize = (size * 0.7) + 'rem';
+            } else {
+                textEl.style.fontSize = size + 'rem';
+            }
+        }
+
+        function updateTextPosition() {
+            const overlay = document.querySelector('.badge-text-overlay');
+            const vertical = document.getElementById('verticalAlign').value;
+            const horizontal = document.getElementById('horizontalAlign').value;
+
+            overlay.style.top = vertical + '%';
+            overlay.style.left = horizontal + '%';
+        }
+
+        function updateTextStyle(color) {
+            const textEl = document.getElementById('badgeText');
+            const currentColor = color || document.getElementById('colorPicker').value;
+            const shadowOpacity = document.getElementById('shadowOpacity').value / 100;
+            const shadowBlur = document.getElementById('shadowBlur').value;
+            const glowSize = document.getElementById('colorGlow').value;
+
+            textEl.style.color = currentColor;
+
+            let shadows = [];
+            if (shadowBlur > 0) {
+                shadows.push(`0 2px ${shadowBlur}px rgba(0,0,0,${shadowOpacity})`);
+            }
+            if (glowSize > 0) {
+                const rgb = hexToRgb(currentColor);
+                shadows.push(`0 0 ${glowSize}px rgba(${rgb.r},${rgb.g},${rgb.b},0.6)`);
+            }
+
+            textEl.style.textShadow = shadows.join(', ');
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        function resetToDefault() {
+            const config = badgeConfig[badgeNum];
+            document.getElementById('colorPicker').value = config.defaultColor;
+            document.getElementById('colorHex').value = config.defaultColor;
+            document.getElementById('shadowOpacity').value = 50;
+            document.getElementById('opacityValue').textContent = '50%';
+            document.getElementById('shadowBlur').value = 4;
+            document.getElementById('blurValue').textContent = '4px';
+            document.getElementById('colorGlow').value = 0;
+            document.getElementById('glowValue').textContent = '0px';
+            document.getElementById('textSize').value = 3.5;
+            document.getElementById('textSizeValue').textContent = '3.5rem';
+            document.getElementById('verticalAlign').value = 50;
+            document.getElementById('verticalValue').textContent = '50%';
+            document.getElementById('horizontalAlign').value = 50;
+            document.getElementById('horizontalValue').textContent = '50%';
+            updateTextColor(config.defaultColor);
+            updateTextSize();
+            updateTextPosition();
+        }
+
+        function toggleFavorite() {
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+            const favoriteData = {
+                badge: badgeNum,
+                lang: lang,
+                color: document.getElementById('colorPicker').value,
+                shadowOpacity: document.getElementById('shadowOpacity').value,
+                shadowBlur: document.getElementById('shadowBlur').value,
+                colorGlow: document.getElementById('colorGlow').value,
+                textSize: document.getElementById('textSize').value,
+                verticalAlign: document.getElementById('verticalAlign').value,
+                horizontalAlign: document.getElementById('horizontalAlign').value,
+                name: badgeConfig[badgeNum].name,
+                timestamp: Date.now()
+            };
+
+            const existingIndex = favorites.findIndex(f => f.badge === badgeNum && f.lang === lang);
+
+            if (existingIndex >= 0) {
+                favorites.splice(existingIndex, 1);
+                showMessage('تم الإزالة من المفضلة');
+            } else {
+                favorites.push(favoriteData);
+                showMessage('✓ تم الحفظ في المفضلة!');
+            }
+
+            localStorage.setItem('badgeFavorites', JSON.stringify(favorites));
+            checkIfFavorited();
+        }
+
+        function checkIfFavorited() {
+            const favorites = JSON.parse(localStorage.getItem('badgeFavorites') || '[]');
+            const isFavorited = favorites.some(f => f.badge === badgeNum && f.lang === lang);
+            const btn = document.getElementById('favoriteBtn');
+
+            if (isFavorited) {
+                btn.classList.add('favorited');
+                btn.innerHTML = '💔 إزالة من المفضلة';
+            } else {
+                btn.classList.remove('favorited');
+                btn.innerHTML = '⭐ حفظ في المفضلة';
+            }
+        }
+
+        function showMessage(text) {
+            const msg = document.getElementById('successMessage');
+            msg.textContent = text;
+            msg.classList.add('show');
+            setTimeout(() => {
+                msg.classList.remove('show');
+            }, 3000);
+        }
+
+        function goBack() {
+            window.location.href = '/artboard-badges.html';
+        }
+
+        function goToFavorites() {
+            window.location.href = '/favorites.html';
+        }
+
+        // Eyedropper functionality
+        function toggleEyedropper() {
+            eyedropperActive = !eyedropperActive;
+            const btn = document.getElementById('eyedropperBtn');
+            const hint = document.getElementById('inspectorHint');
+            const preview = document.querySelector('.badge-preview');
+
+            if (eyedropperActive) {
+                btn.textContent = '✖️ إلغاء الاختيار';
+                btn.classList.add('active');
+                preview.classList.add('eyedropper-active');
+                hint.style.display = 'block';
+            } else {
+                btn.textContent = '🔍 اختر لون من الشارة';
+                btn.classList.remove('active');
+                preview.classList.remove('eyedropper-active');
+                hint.style.display = 'none';
+            }
+        }
+
+        function handleImageClick(e) {
+            if (!eyedropperActive) return;
+
+            const img = e.target;
+            const rect = img.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Create canvas to extract pixel color
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            ctx.drawImage(img, 0, 0);
+
+            // Scale coordinates to actual image size
+            const scaleX = img.naturalWidth / rect.width;
+            const scaleY = img.naturalHeight / rect.height;
+            const pixelX = Math.floor(x * scaleX);
+            const pixelY = Math.floor(y * scaleY);
+
+            // Get pixel data
+            const pixelData = ctx.getImageData(pixelX, pixelY, 1, 1).data;
+            const r = pixelData[0];
+            const g = pixelData[1];
+            const b = pixelData[2];
+
+            // Convert to hex
+            const hexColor = '#' + [r, g, b].map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+
+            // Update color inputs
+            document.getElementById('colorPicker').value = hexColor;
+            document.getElementById('colorHex').value = hexColor;
+            updateTextColor(hexColor);
+
+            // Show success message
+            showMessage(`تم اختيار اللون: ${hexColor}`);
+
+            // Deactivate eyedropper
+            toggleEyedropper();
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>

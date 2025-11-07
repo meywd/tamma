@@ -1,0 +1,49 @@
+{
+  "name": "tamma-marketing-site",
+  "version": "1.0.0",
+  "description": "Marketing website for Tamma - The autonomous development platform that maintains itself",
+  "private": true,
+  "scripts": {
+    "build": "tsx scripts/generate-sitemap.ts && tsc",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "preview": "wrangler deploy --env preview",
+    "kv:create": "wrangler kv:namespace create SIGNUPS",
+    "kv:create:preview": "wrangler kv:namespace create SIGNUPS --preview",
+    "kv:list": "wrangler kv:key list --binding=SIGNUPS",
+    "logs": "wrangler tail",
+    "validate": "npm run validate:html && npm run validate:css",
+    "validate:html": "echo 'HTML validation: Run locally with html-validator'",
+    "validate:css": "echo 'CSS validation: Run locally with stylelint'"
+  },
+  "keywords": [
+    "tamma",
+    "autonomous-development",
+    "ai-platform",
+    "cloudflare-pages",
+    "marketing-site"
+  ],
+  "author": "Tamma Project",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/meywd/tamma.git",
+    "directory": "marketing-site"
+  },
+  "bugs": {
+    "url": "https://github.com/meywd/tamma/issues"
+  },
+  "homepage": "https://tamma.dev",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "sharp": "^0.34.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.45.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

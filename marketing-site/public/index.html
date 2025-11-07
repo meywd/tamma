@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Task 1 (#80) - Homepage Structure -->
+    <!-- Task 6 (#85) - SEO & Meta Tags -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary Meta Tags -->
+    <title>Tamma - Autonomous Development Platform</title>
+    <meta name="title" content="Tamma - Autonomous Development Platform">
+    <meta name="description" content="Tamma is an autonomous development platform that maintains itself. 70%+ completion rate with 8 AI providers and 7 Git platforms. No vendor lock-in.">
+    <meta name="keywords" content="autonomous development, AI development platform, multi-provider AI, self-maintaining software, GitOps automation, development automation">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://tamma.dev/">
+    <meta property="og:title" content="Tamma - Autonomous Development Platform">
+    <meta property="og:description" content="Self-maintaining autonomous development with multi-provider flexibility. 70%+ completion rate without human intervention.">
+    <meta property="og:image" content="https://tamma.dev/assets/og-image.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://tamma.dev/">
+    <meta property="twitter:title" content="Tamma - Autonomous Development Platform">
+    <meta property="twitter:description" content="Self-maintaining autonomous development with multi-provider flexibility. 70%+ completion rate without human intervention.">
+    <meta property="twitter:image" content="https://tamma.dev/assets/og-image.png">
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Tamma",
+        "description": "Autonomous development platform that maintains itself with 70%+ completion rate",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "url": "https://tamma.dev",
+        "codeRepository": "https://github.com/meywd/tamma"
+    }
+    </script>
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://tamma.dev/">
+
+    <!-- Favicon (placeholder) -->
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/styles.css">
+
+    <!-- Task 7 (#86) - Cloudflare Web Analytics -->
+    <!-- TODO: Add Cloudflare Web Analytics beacon script after site deployment -->
+    <!-- <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "YOUR_TOKEN_HERE"}'></script> -->
+</head>
+<body>
+    <!-- Skip link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Hero Section (AC 2) -->
+    <header class="hero" id="main-content">
+        <!-- Dark Mode Toggle Button -->
+        <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode">
+            <svg class="sun-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg class="moon-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
+
+        <div class="container">
+            <div class="hero-content">
+                <!-- Logo with golden badge -->
+                <div class="logo">
+                    <div class="tamma-badge tamma-badge--size-120 tamma-badge--badge-5 tamma-badge--arabic tamma-badge--logo">
+                        <!-- Badge 5 - Arabic - Black Ribbon Banner (textSize: 3, verticalAlign: 49%) -->
+                        <img src="/assets/SVG/Tam 2.svg" alt="Tamma Logo - تَمّ" class="tamma-badge__image">
+                    </div>
+                    <h1>Tam, it's Done</h1>
+                </div>
+
+                <!-- Tagline (AC 2) -->
+                <p class="tagline">Ship features 3x faster while eliminating 60% of repetitive development toil</p>
+                <p class="hero-subtitle">The first autonomous development platform trusted enough to maintain its own codebase</p>
+
+                <!-- Trust indicators -->
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <div class="stat-value">3x</div>
+                        <div class="stat-label">Faster Delivery</div>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <div class="stat-value">70%+</div>
+                        <div class="stat-label">Tasks Completed</div>
+                    </div>
+                    <div class="stat-divider"></div>
+                    <div class="stat-item">
+                        <div class="stat-value">Zero</div>
+                        <div class="stat-label">Vendor Lock-in</div>
+                    </div>
+                </div>
+
+                <!-- CTA Buttons (AC 4) -->
+                <div class="cta-buttons">
+                    <a href="https://github.com/meywd/tamma" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
+                        Check us on GitHub
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="margin-left: 8px; display: inline-block;">
+                            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                        </svg>
+                    </a>
+                    <a href="#signup" class="btn btn-secondary">Notify Me at Launch</a>
+                </div>
+
+                <!-- Trust badge -->
+                <div class="hero-trust">
+                    <!-- Badge 5 - English - Black Ribbon Banner -->
+                    <div class="tamma-badge tamma-badge--size-40 tamma-badge--badge-5 tamma-badge--english">
+                        <img src="/assets/SVG/badge-5-english.svg" alt="Premium Quality - DONE" class="tamma-badge__image">
+                    </div>
+                    <span>Production-Ready Quality · Self-Maintained</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Key Features Section (AC 2) -->
+    <section class="features">
+        <div class="container">
+            <h2>Key Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--arabic feature-badge-overlay">
+                        <!-- Badge 11 - Arabic - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-arabic.svg" alt="Premium - تَمّ" class="tamma-badge__image">
+                    </div>
+                    <div class="feature-icon">
+                        <!-- Lucide: Repeat icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m17 2 4 4-4 4"/>
+                            <path d="M3 11v-1a4 4 0 0 1 4-4h14"/>
+                            <path d="m7 22-4-4 4-4"/>
+                            <path d="M21 13v1a4 4 0 0 1-4 4H3"/>
+                        </svg>
+                    </div>
+                    <h3>14-Step Autonomous Loop</h3>
+                    <p>Full development cycle from issue to deployment with 70%+ completion rate. Strategic approval checkpoints maintain control over critical decisions.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-5 tamma-badge--english feature-badge-overlay">
+                        <!-- Badge 5 - English - Black Ribbon -->
+                        <img src="/assets/SVG/badge-5-english.svg" alt="Complete - DONE" class="tamma-badge__image">
+                    </div>
+                    <div class="feature-icon">
+                        <!-- Lucide: Network icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="16" y="16" width="6" height="6" rx="1"/>
+                            <rect x="2" y="16" width="6" height="6" rx="1"/>
+                            <rect x="9" y="2" width="6" height="6" rx="1"/>
+                            <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/>
+                            <path d="M12 12V8"/>
+                        </svg>
+                    </div>
+                    <h3>Multi-Provider Ecosystem</h3>
+                    <p>8+ AI providers and 7+ Git platforms with intelligent routing. Reduces costs by 20-30% while eliminating vendor lock-in.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--english feature-badge-overlay">
+                        <!-- Badge 11 - English - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-english.svg" alt="Premium - DONE" class="tamma-badge__image">
+                    </div>
+                    <div class="feature-icon">
+                        <!-- Lucide: Shield Check icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                            <path d="m9 12 2 2 4-4"/>
+                        </svg>
+                    </div>
+                    <h3>Quality Gates & Error Recovery</h3>
+                    <p>Mandatory quality gates with smart retry logic and escalation. Complete audit trail for compliance and debugging.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="tamma-badge tamma-badge--size-50 tamma-badge--badge-11 tamma-badge--arabic feature-badge-overlay">
+                        <!-- Badge 11 - Arabic - Crown Banner -->
+                        <img src="/assets/SVG/badge-11-arabic.svg" alt="Premium - تَمّ" class="tamma-badge__image">
+                    </div>
+                    <div class="feature-icon">
+                        <!-- Lucide: Settings icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </div>
+                    <h3>Self-Maintenance Validation</h3>
+                    <p>Tamma maintains its own codebase as MVP validation—proving production-readiness for mission-critical software.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why Tamma? Section (AC 6) -->
+    <section class="why-tamma">
+        <div class="container">
+            <h2>Why Tamma?</h2>
+            <div class="why-content">
+                <div class="why-item">
+                    <h3>The Problem</h3>
+                    <p>Development teams spend 40-60% of their time on repetitive toil—boilerplate tests, CI/CD coordination, and review comments. Existing tools lack end-to-end orchestration, are tightly coupled to specific platforms, or don't provide the transparency teams need for production use.</p>
+                </div>
+
+                <div class="why-item">
+                    <h3>The Solution</h3>
+                    <p>Tamma orchestrates complete development workflows across 8+ AI providers and 7+ Git platforms with full transparency through event sourcing. The 14-step autonomous loop completes 70%+ of issues while maintaining strategic checkpoints for business decisions and deployments.</p>
+                </div>
+
+                <div class="why-item">
+                    <h3>Unique Value</h3>
+                    <p>Tamma's MVP goal is self-maintenance—proving production-readiness by maintaining its own codebase autonomously. Combined with multi-provider flexibility, complete audit trails, and prevention-first quality gates, Tamma enables 3x productivity gains by reducing repetitive toil from 40-60% to under 20%.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Roadmap Section (AC 5) -->
+    <section class="roadmap">
+        <div class="container">
+            <h2>Development Roadmap</h2>
+            <p class="roadmap-intro">Tamma is being built in 5 focused epics leading to Alpha Launch at Week 10</p>
+
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-marker">1</div>
+                    <div class="timeline-content">
+                        <h3>Epic 1: Foundation</h3>
+                        <p class="timeline-duration">Weeks 0-2</p>
+                        <p>Core infrastructure, AI provider abstractions, and multi-provider support</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">2</div>
+                    <div class="timeline-content">
+                        <h3>Epic 2: Autonomous Loop</h3>
+                        <p class="timeline-duration">Weeks 2-4</p>
+                        <p>Complete development loop: issue selection, planning, implementation, testing, PR creation</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">3</div>
+                    <div class="timeline-content">
+                        <h3>Epic 3: Quality Gates</h3>
+                        <p class="timeline-duration">Weeks 4-6</p>
+                        <p>Intelligence layer, quality gates, escalation workflows, and cost awareness</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">4</div>
+                    <div class="timeline-content">
+                        <h3>Epic 4: Event Sourcing</h3>
+                        <p class="timeline-duration">Weeks 6-8</p>
+                        <p>Complete audit trail, state recovery, and event-driven architecture</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item">
+                    <div class="timeline-marker">5</div>
+                    <div class="timeline-content">
+                        <h3>Epic 5: Production Ready</h3>
+                        <p class="timeline-duration">Weeks 8-10</p>
+                        <p>Observability, monitoring, deployment automation, and production hardening</p>
+                    </div>
+                </div>
+
+                <div class="timeline-item timeline-milestone">
+                    <div class="timeline-marker">🚀</div>
+                    <div class="timeline-content">
+                        <h3>Alpha Launch</h3>
+                        <p class="timeline-duration">Week 10</p>
+                        <p><strong>MVP Self-Maintenance Validation:</strong> Tamma begins maintaining its own codebase</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Coming Soon Section (AC 2) -->
+    <section class="coming-soon">
+        <div class="container">
+            <h2>Coming Soon</h2>
+            <p class="coming-soon-message">Tamma is currently in active development. Sign up below to be notified when we launch the Alpha release.</p>
+        </div>
+    </section>
+
+    <!-- Email Signup Section (AC 3) -->
+    <section class="signup" id="signup">
+        <div class="container">
+            <h2>Get Launch Notifications</h2>
+            <p>Be the first to know when Tamma Alpha launches</p>
+
+            <form id="signup-form" class="signup-form">
+                <div class="form-group">
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        placeholder="Enter your email address"
+                        required
+                        pattern="[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}"
+                        aria-label="Email address"
+                    >
+                    <button type="submit" class="btn btn-primary">Notify Me</button>
+                </div>
+                <div id="form-message" class="form-message" role="alert"></div>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer (AC 4, 9) -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>Tamma</h4>
+                    <p>The autonomous development platform that maintains itself</p>
+                </div>
+
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <p>
+                        <a href="https://github.com/meywd/tamma" target="_blank" rel="noopener noreferrer" class="github-link">
+                            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+                                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                            </svg>
+                            Star on GitHub
+                        </a>
+                    </p>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <p>&copy; 2025 Tamma Project. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript for form submission -->
+    <script>
+        // Task 3 (#82) - Email signup form handling
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const messageEl = document.getElementById('form-message');
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+
+            // Basic email validation (browser does pattern matching too)
+            const emailRegex = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
+            if (!emailRegex.test(email)) {
+                messageEl.textContent = 'Please enter a valid email address.';
+                messageEl.className = 'form-message error';
+                return;
+            }
+
+            // Disable submit button during request
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Submitting...';
+
+            try {
+                const response = await fetch('/signup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email }),
+                });
+
+                if (response.ok) {
+                    messageEl.textContent = '✓ Success! You\'ll be notified when we launch.';
+                    messageEl.className = 'form-message success';
+                    document.getElementById('email').value = '';
+                } else {
+                    const errorData = await response.text();
+                    messageEl.textContent = errorData || 'Failed to sign up. Please try again.';
+                    messageEl.className = 'form-message error';
+                }
+            } catch (error) {
+                messageEl.textContent = 'Network error. Please check your connection and try again.';
+                messageEl.className = 'form-message error';
+            } finally {
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Notify Me';
+            }
+        });
+
+        // Dark Mode Toggle
+        (function() {
+            const themeToggle = document.getElementById('theme-toggle');
+            const html = document.documentElement;
+
+            // Check for saved theme preference or default to system preference
+            const savedTheme = localStorage.getItem('theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            // Set initial theme
+            if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+                html.setAttribute('data-theme', 'dark');
+            } else if (savedTheme === 'light') {
+                html.setAttribute('data-theme', 'light');
+            }
+            // If no saved theme and system prefers light, leave data-theme unset (default)
+
+            // Toggle theme on button click
+            themeToggle.addEventListener('click', () => {
+                const currentTheme = html.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+                html.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            });
+        })();
+    </script>
+</body>
+</html>
