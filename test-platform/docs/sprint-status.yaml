@@ -1,4 +1,5 @@
 # generated: 2025-11-03T18:00:00.000Z
+# updated: 2025-11-07 (research-spikes-added-to-sprint-status)
 # project: test-platform
 # project_key: test-platform
 # tracking_system: file-system
@@ -21,6 +22,11 @@
 # Retrospective Status:
 #   - optional: Can be completed but not required
 #   - completed: Retrospective has been done
+#
+# Spike Status:
+#   - in-progress: Research spike currently being worked on
+#   - completed: Research spike finished with documented findings
+#   - blocked: Spike blocked by dependencies or external factors
 #
 # WORKFLOW NOTES:
 # ===============
@@ -64,63 +70,50 @@ development_status:
   epic-3-story-content-standardization: completed
 
   # Epic 4: Benchmark Execution Engine
-  epic-4: backlog
+  epic-4: contexted
   4-1-task-execution-engine: drafted
   4-2-automated-scoring-system: drafted
   4-3-result-storage-time-series-management: drafted
   4-4-benchmark-orchestration-scheduling: drafted
-  epic-4-retrospective: optional
+  4-5-agent-customization-benchmarking-suite: drafted
+  4-6-cross-platform-intelligence-engine: drafted
+  4-7-user-benchmarking-dashboard: drafted
+  epic-4-retrospective: completed
 
   # Epic 5: Multi-Judge Evaluation System
   epic-5: backlog
-  5-1-staff-review-interface: backlog
-  5-2-community-voting-system: backlog
-  5-3-ai-self-review-system: backlog
-  5-4-elite-panel-review-system: backlog
-  5-5-multi-judge-score-aggregation: backlog
+  # Epic 5 stories not yet drafted - currently in epic file only
   epic-5-retrospective: optional
 
   # Epic 6: User Interface & Dashboard
   epic-6: backlog
-  6-1-public-leaderboard: backlog
-  6-2-organization-dashboard: backlog
-  6-3-trend-analysis-visualization: backlog
-  6-4-alert-management-system: backlog
+  # Epic 6 stories not yet drafted - currently in epic file only
   epic-6-retrospective: optional
 
   # Epic 7: API & Integration Layer
   epic-7: backlog
-  7-1-restful-api-implementation: backlog
-  7-2-webhook-system: backlog
-  7-3-cicd-integration: backlog
-  7-4-data-export-reporting: backlog
+  # Epic 7 stories not yet drafted - currently in epic file only
   epic-7-retrospective: optional
 
   # Epic 8: SaaS B2B Features
   epic-8: backlog
-  8-1-subscription-management-billing: backlog
-  8-2-resource-quotas-limits: backlog
-  8-3-enterprise-sso-integration: backlog
-  8-4-white-label-customization: backlog
+  # Epic 8 stories not yet drafted - currently in epic file only
   epic-8-retrospective: optional
 
   # Epic 9: Real-time Infrastructure & Event Streaming
   epic-9: backlog
-  9-1-server-sent-events-sse-implementation: backlog
-  9-2-websocket-integration-bidirectional-communication: backlog
-  9-3-real-time-cache-invalidation-updates: backlog
-  9-4-live-benchmark-progress-tracking: backlog
+  # Epic 9 stories not yet drafted - currently in epic file only
   epic-9-retrospective: optional
 
   # Epic 10: Monitoring, Observability & Alerting
   epic-10: backlog
-  10-1-prometheus-metrics-collection: backlog
-  10-2-centralized-logging-infrastructure: backlog
-  10-3-grafana-dashboard-suite: backlog
-  10-4-alerting-notification-system: backlog
-  10-5-error-tracking-performance-monitoring: backlog
+  # Epic 10 stories not yet drafted - currently in epic file only
   epic-10-retrospective: optional
 
-  # Epic 5 Enhancement: Advanced Analytics & Intelligence
-  5-5-advanced-analytics-service: backlog
-  5-6-business-intelligence-dashboard: backlog
+  # Research Spikes (Support Epic 4 Stories 4.5-4.7)
+  agent-performance-metrics-definition: in-progress
+  cross-platform-learning-architecture: in-progress
+  customization-impact-measurement: in-progress
+  statistical-significance-testing-framework: in-progress
+# Epic 5 Enhancement: Advanced Analytics & Intelligence
+# Enhancement stories not yet drafted - currently in epic file only

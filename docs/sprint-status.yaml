@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2025-11-06 (epic-2-retrospective completed, epic-1-emergency-recovery-plan-created)
+# updated: 2025-11-07 (story-renaming-1-6-1-7-to-1-13-1-14-completed)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -51,6 +51,8 @@ development_status:
   1-10-additional-ai-provider-implementations: ready-for-dev
   1-11-additional-git-platform-implementations: ready-for-dev
   1-12-initial-marketing-website: ready-for-dev
+  1-13-agent-customization-system: ready-for-dev
+  1-14-performance-impact-analysis: ready-for-dev
   epic-1-retrospective: done
 
   epic-1.5: contexted
@@ -102,29 +104,9 @@ development_status:
    epic-3-retrospective: optional
 
   epic-4: contexted
-  4-1-event-schema-design: backlog
-  4-2-event-store-backend-selection: backlog
-  4-3-event-capture-issue-selection-analysis: backlog
-  4-4-event-capture-ai-provider-interactions: backlog
-  4-5-event-capture-code-changes-git-operations: backlog
-  4-6-event-capture-approvals-escalations: backlog
-  4-7-event-query-api-for-time-travel: backlog
-  4-8-black-box-replay-for-debugging: backlog
+  # Epic 4 stories not yet drafted - currently in epic file only
   epic-4-retrospective: optional
 
   epic-5: contexted
-  5-1-structured-logging-implementation: backlog
-  5-2-metrics-collection-infrastructure: backlog
-  5-3-real-time-dashboard-system-health: backlog
-  5-4-real-time-dashboard-development-velocity: backlog
-  5-5-event-trail-exploration-ui: backlog
-  5-6-alert-system-for-critical-issues: backlog
-  5-7-feedback-collection-system: backlog
-  5-8-integration-testing-suite: backlog
-  5-9a-installation-setup-documentation: backlog
-  5-9b-usage-configuration-documentation: backlog
-  5-9c-api-reference-documentation: backlog
-  5-9d-full-documentation-website: backlog
-  5-9e-video-walkthrough: backlog
-  5-10-alpha-release-preparation: backlog
+  # Epic 5 stories not yet drafted - currently in epic file only
   epic-5-retrospective: optional

@@ -1,9 +1,9 @@
 # Epic Technical Specification: Foundation & Core Infrastructure
 
-Date: 2025-10-28
+Date: 2025-11-07
 Author: meywd
 Epic ID: 1
-Status: Draft
+Status: Updated
 
 ---
 
@@ -16,6 +16,7 @@ This epic delivers the scaffolding that all subsequent development workflows wil
 ## Objectives and Scope
 
 **In Scope:**
+
 - Story 1-0: AI Provider Strategy Research - cost analysis, capability matrix, provider selection recommendations
 - Story 1-1: AI Provider Interface definition with provider lifecycle, streaming, context management
 - Story 1-2: Anthropic Claude API provider implementation as reference and default (via SDK, headless)
@@ -28,8 +29,11 @@ This epic delivers the scaffolding that all subsequent development workflows wil
 - Story 1-9: Basic CLI scaffolding with mode selection (orchestrator vs worker) and config initialization
 - Story 1-10: Additional AI Provider Implementations - OpenAI, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local LLMs (Ollama/LM Studio/vLLM)
 - Story 1-11: Additional Git Platform Implementations - Gitea, Forgejo, Bitbucket, Azure DevOps, plain Git
+- Story 1-13: Agent Customization System - Customizable AI agents with performance optimization and A/B testing framework
+- Story 1-14: Performance Impact Analysis - Comprehensive analysis of agent customizations on development metrics
 
 **Out of Scope:**
+
 - Issue selection and analysis workflows (Epic 2)
 - Development plan generation and code implementation (Epic 2)
 - Quality gates, testing automation, and intelligence layer (Epic 3)
@@ -47,7 +51,8 @@ Epic 1 directly implements the core architectural components defined in sections
 
 **1. AI Provider Abstraction (`packages/providers`)**
 
-*AI Provider Strategy Research (Story 1-0):*
+_AI Provider Strategy Research (Story 1-0):_
+
 - Research deliverable: `docs/research/ai-provider-strategy-2024-10.md`
 - Cost analysis comparing 8+ AI providers: Anthropic Claude, OpenAI GPT, GitHub Copilot, Google Gemini, OpenCode, z.ai, Zen MCP, OpenRouter, local models (Ollama/LM Studio/vLLM)
 - Pricing models: subscription plans (Anthropic Teams, OpenAI Teams, GitHub Copilot Business) vs pay-as-you-go API rates
@@ -58,7 +63,8 @@ Epic 1 directly implements the core architectural components defined in sections
 - Cost projections: 10/100/1000 user scenarios with monthly spend estimates
 - Informs provider selection decisions for Stories 1-2 and 1-10
 
-*Core Interfaces (Story 1-1):*
+_Core Interfaces (Story 1-1):_
+
 ```typescript
 interface IAIProvider {
   initialize(config: ProviderConfig): Promise<void>;
@@ -85,7 +91,8 @@ interface ProviderCapabilities {
 }
 ```
 
-*Anthropic Claude API Provider (Story 1-2):*
+_Anthropic Claude API Provider (Story 1-2):_
+
 - Implementation class: `AnthropicClaudeProvider implements IAIProvider`
 - Uses Anthropic Claude API via `@anthropic-ai/sdk` for programmatic/headless access (NOT Claude Code IDE tool)
 - Streaming response handler with Server-Sent Events (SSE) chunk parsing
@@ -95,7 +102,8 @@ interface ProviderCapabilities {
 - Telemetry hooks for latency, token usage, error rates
 - Tool integration approach TBD by Story 1-0 research (API native tools vs MCP)
 
-*Provider Configuration Service (Story 1-3):*
+_Provider Configuration Service (Story 1-3):_
+
 - `ProviderConfigManager` class for loading/validating provider configs
 - Configuration sources: environment variables (`TAMMA_AI_PROVIDER`), JSON files (`~/.tamma/providers.json`), runtime API
 - Provider registry pattern for dynamic provider discovery
@@ -103,7 +111,8 @@ interface ProviderCapabilities {
 - Hot-reload capability for config changes
 - Secrets management integration for API keys
 
-*Additional AI Provider Implementations (Story 1-10):*
+_Additional AI Provider Implementations (Story 1-10):_
+
 - **OpenAI Provider**: `OpenAIProvider implements IAIProvider` - supports GPT-4, GPT-3.5-turbo, o1 models via `openai@^4.67.0` SDK
 - **GitHub Copilot Provider**: `GitHubCopilotProvider implements IAIProvider` - integrates with Copilot API (research integration approach)
 - **Google Gemini Provider**: `GeminiProvider implements IAIProvider` - supports Gemini Pro/Ultra via `@google/generative-ai@^0.21.0` SDK
@@ -117,9 +126,32 @@ interface ProviderCapabilities {
 - Integration tests validate each provider with real API calls (or mocked for local LLMs)
 - Documentation includes provider comparison matrix (cost, speed, quality, features) and setup instructions
 
+_Agent Customization System (Story 1-13):_
+
+- `AgentConfigManager` class for managing AI agent configurations with version control
+- Agent customization framework supporting prompt engineering, tool selection, and parameter tuning
+- A/B testing system for comparing agent configurations across development scenarios
+- Performance measurement integration with Test Platform benchmark results
+- Context window optimization algorithms for efficient token utilization
+- Privacy-preserving learning from agent performance while protecting competitive advantages
+- Configuration validation and rollback capabilities for failed customizations
+- Cross-context agent capability testing (development vs code review vs testing scenarios)
+
+_Performance Impact Analysis (Story 1-14):_
+
+- `PerformanceAnalyzer` class for comprehensive analysis of agent customizations
+- Statistical significance testing framework for measuring improvement effectiveness
+- Multi-dimensional performance tracking: speed, quality, cost, success rate metrics
+- Historical trend analysis for agent performance over time with regression detection
+- Cost-benefit analysis algorithms for customizations vs stock configurations
+- Automated insight generation identifying effective customization patterns
+- Cross-agent comparison system showing relative performance of different configurations
+- Integration with Test Platform's dual-purpose benchmarking results for data-driven decisions
+
 **2. Git Platform Abstraction (`packages/platforms`)**
 
-*Core Interfaces (Story 1-4):*
+_Core Interfaces (Story 1-4):_
+
 ```typescript
 interface IGitPlatform {
   initialize(config: PlatformConfig): Promise<void>;
@@ -164,7 +196,8 @@ interface Issue {
 }
 ```
 
-*GitHub Platform Implementation (Story 1-5):*
+_GitHub Platform Implementation (Story 1-5):_
+
 - `GitHubPlatform implements IGitPlatform`
 - Uses Octokit SDK for GitHub REST API v4 and GraphQL API
 - Pagination handling for large result sets
@@ -172,7 +205,8 @@ interface Issue {
 - Webhook signature verification for event handling
 - GitHub Actions integration for PR checks
 
-*GitLab Platform Implementation (Story 1-6):*
+_GitLab Platform Implementation (Story 1-6):_
+
 - `GitLabPlatform implements IGitPlatform`
 - Uses GitLab Node SDK for REST API v4
 - API parity mapping: GitLab merge requests → PR abstraction
@@ -180,7 +214,8 @@ interface Issue {
 - Group/subgroup namespace handling
 - Self-hosted GitLab support via custom base URL
 
-*Platform Configuration Service (Story 1-7):*
+_Platform Configuration Service (Story 1-7):_
+
 - `PlatformConfigManager` class for credential and platform management
 - OAuth token storage with encryption at rest
 - Personal Access Token (PAT) validation and refresh
@@ -188,7 +223,8 @@ interface Issue {
 - Multi-account support (e.g., personal GitHub + work GitLab)
 - Credential rotation and expiry handling
 
-*Additional Git Platform Implementations (Story 1-11):*
+_Additional Git Platform Implementations (Story 1-11):_
+
 - **Gitea Provider**: `GiteaPlatform implements IGitPlatform` - REST API v1 (similar to GitHub API v3), self-hosted, Gitea Actions CI/CD
 - **Forgejo Provider**: `ForgejoPlatform implements IGitPlatform` - Gitea-compatible API (forked from Gitea), may reuse GiteaPlatform client
 - **Bitbucket Provider**: `BitbucketPlatform implements IGitPlatform` - Cloud (REST API v2) and Server (REST API 1.0-8.0), handles API differences between versions
@@ -201,9 +237,10 @@ interface Issue {
 
 **3. Orchestrator/Worker Architecture (`packages/orchestrator`, `packages/worker`)**
 
-*Hybrid Architecture Design (Story 1-8):*
+_Hybrid Architecture Design (Story 1-8):_
 
 **Orchestrator Mode:**
+
 - Fastify HTTP server on configurable port (default 3000)
 - RESTful API for workflow submission, status queries, cancellation
 - WebSocket endpoint for real-time progress streaming
@@ -212,6 +249,7 @@ interface Issue {
 - Event bus integration for DCB event sourcing
 
 **Worker Mode:**
+
 - Stateless execution engine
 - Polling mechanism for task queue (alternative: push via message broker)
 - Local file system access for repository cloning
@@ -220,6 +258,7 @@ interface Issue {
 - Graceful shutdown handling for in-flight tasks
 
 **Shared Components:**
+
 - Configuration loader from `packages/config`
 - Event emitter for audit trail generation
 - Logging infrastructure with structured output
@@ -227,7 +266,8 @@ interface Issue {
 
 **4. CLI Application (`packages/cli`)**
 
-*Basic CLI Scaffolding (Story 1-9):*
+_Basic CLI Scaffolding (Story 1-9):_
+
 ```typescript
 // CLI entry point
 interface CLIConfig {
@@ -252,7 +292,8 @@ class TammaCLI {
 }
 ```
 
-*Features:*
+_Features:_
+
 - Command parsing using commander.js
 - Mode selection via `--mode` flag or `TAMMA_MODE` env var
 - Config initialization wizard for first-time setup
@@ -267,7 +308,16 @@ class TammaCLI {
 ```typescript
 interface ProviderConfig {
   providerId: string;
-  providerType: 'anthropic-claude' | 'openai' | 'github-copilot' | 'gemini' | 'opencode' | 'zai' | 'zen-mcp' | 'openrouter' | 'local-llm';
+  providerType:
+    | 'anthropic-claude'
+    | 'openai'
+    | 'github-copilot'
+    | 'gemini'
+    | 'opencode'
+    | 'zai'
+    | 'zen-mcp'
+    | 'openrouter'
+    | 'local-llm';
   apiKey?: string;
   baseUrl?: string;
   model?: string;
@@ -303,7 +353,14 @@ interface MessageChunk {
 ```typescript
 interface PlatformConfig {
   platformId: string;
-  platformType: 'github' | 'gitlab' | 'gitea' | 'forgejo' | 'bitbucket' | 'azure-devops' | 'plain-git';
+  platformType:
+    | 'github'
+    | 'gitlab'
+    | 'gitea'
+    | 'forgejo'
+    | 'bitbucket'
+    | 'azure-devops'
+    | 'plain-git';
   baseUrl?: string; // For self-hosted instances
   authType: 'oauth' | 'pat' | 'app' | 'ssh'; // ssh for plain-git
   credentials: {
@@ -347,7 +404,7 @@ interface Check {
 
 **3. Orchestrator Models**
 
-```typescript
+````typescript
 interface WorkflowTask {
   taskId: string;
   workflowType: 'autonomous-dev' | 'manual-assist';
@@ -375,7 +432,81 @@ interface WorkerRegistration {
   status: 'idle' | 'busy' | 'offline';
   lastHeartbeat: Date;
 }
-```
+
+**5. Agent Configuration Models**
+
+```typescript
+interface AgentConfig {
+  agentId: string;
+  name: string;
+  version: string;
+  provider: string;
+  model?: string;
+  systemPrompt: string;
+  tools: Tool[];
+  parameters: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+  };
+  capabilities: AgentCapabilities;
+  optimizationSettings: OptimizationSettings;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface AgentCapabilities {
+  supportedTasks: ('code-generation' | 'code-review' | 'testing' | 'documentation' | 'refactoring')[];
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+  supportsStreaming: boolean;
+  supportsTools: boolean;
+  averageLatency: number; // milliseconds
+  costPerToken: number; // USD
+}
+
+interface OptimizationSettings {
+  enableABTesting: boolean;
+  performanceThreshold: number; // minimum improvement percentage
+  statisticalSignificance: number; // p-value threshold (0.05 default)
+  contextOptimization: boolean;
+  costOptimization: boolean;
+  qualityOptimization: boolean;
+}
+
+interface PerformanceMetrics {
+  agentId: string;
+  taskId: string;
+  taskType: string;
+  startTime: Date;
+  endTime: Date;
+  duration: number; // milliseconds
+  tokensUsed: number;
+  cost: number; // USD
+  quality: number; // 0-100 score
+  success: boolean;
+  errorType?: string;
+  contextEfficiency: number; // tokens used / context window size
+}
+
+interface ABTestResult {
+  testId: string;
+  agentA: string;
+  agentB: string;
+  taskType: string;
+  sampleSize: number;
+  confidence: number;
+  effectSize: number;
+  winner: 'agentA' | 'agentB' | 'inconclusive';
+  improvement: number; // percentage
+  statisticalSignificance: boolean;
+  createdAt: Date;
+}
+````
+
+````
 
 **4. Configuration Models**
 
@@ -391,6 +522,13 @@ interface TammaConfig {
 
   platforms: {
     available: PlatformConfig[];
+  };
+
+  agents?: {
+    default: string;
+    available: AgentConfig[];
+    optimizationEnabled: boolean;
+    abTestingEnabled: boolean;
   };
 
   orchestrator?: {
@@ -414,7 +552,7 @@ interface TammaConfig {
     password: string;
   };
 }
-```
+````
 
 ### APIs and Interfaces
 
@@ -483,6 +621,58 @@ interface IConfigService {
   save(config: TammaConfig, configPath: string): Promise<void>;
   validate(config: TammaConfig): ValidationResult;
   merge(base: TammaConfig, override: Partial<TammaConfig>): TammaConfig;
+}
+```
+
+**5. Agent Configuration API**
+
+```typescript
+interface IAgentConfigManager {
+  createAgent(config: AgentConfig): Promise<string>;
+  updateAgent(agentId: string, updates: Partial<AgentConfig>): Promise<void>;
+  deleteAgent(agentId: string): Promise<void>;
+  getAgent(agentId: string): Promise<AgentConfig>;
+  listAgents(): Promise<AgentConfig[]>;
+  rollbackAgent(agentId: string, targetVersion: string): Promise<void>;
+  validateAgent(config: AgentConfig): ValidationResult;
+}
+
+// Performance Analysis API
+interface IPerformanceAnalyzer {
+  recordMetrics(metrics: PerformanceMetrics): Promise<void>;
+  getPerformanceReport(agentId: string, timeRange: TimeRange): Promise<PerformanceReport>;
+  compareAgents(agentA: string, agentB: string, timeRange: TimeRange): Promise<ComparisonResult>;
+  runABTest(
+    configA: AgentConfig,
+    configB: AgentConfig,
+    testPlan: ABTestPlan
+  ): Promise<ABTestResult>;
+  generateOptimizationRecommendations(agentId: string): Promise<OptimizationRecommendation[]>;
+  analyzeTrends(agentId: string, timeRange: TimeRange): Promise<TrendAnalysis>;
+}
+
+interface PerformanceReport {
+  agentId: string;
+  timeRange: TimeRange;
+  metrics: {
+    averageDuration: number;
+    averageCost: number;
+    averageQuality: number;
+    successRate: number;
+    throughput: number; // tasks per hour
+    contextEfficiency: number;
+  };
+  trends: TrendData[];
+  comparisons: AgentComparison[];
+  recommendations: OptimizationRecommendation[];
+}
+
+interface ABTestPlan {
+  taskTypes: string[];
+  sampleSize: number;
+  confidenceLevel: number; // 0.95 default
+  minimumEffectSize: number; // 0.05 default
+  duration: number; // days
 }
 ```
 
@@ -588,17 +778,81 @@ User runs: tamma init
 6. Output: "Configuration saved to ~/.tamma/config.json"
 ```
 
+**7. Agent Configuration Initialization Workflow**
+
+```
+User runs: tamma agent create --name "custom-reviewer" --provider claude
+
+1. AgentConfigManager.validateAgent() against schema
+2. Prompt user for customization options:
+   a. "Select task types: [code-generation, code-review, testing, documentation]"
+   b. "Set temperature (0.0-1.0): [default: 0.7]"
+   c. "Enable A/B testing? [y/N]"
+   d. "Set performance threshold (5-50%): [default: 10%]"
+3. Create AgentConfig with user selections
+4. AgentConfigManager.createAgent(config) → returns agentId
+5. Initialize performance tracking for new agent
+6. Output: "Agent 'custom-reviewer' created with ID: agent-uuid-v7"
+```
+
+**8. Performance Analysis Workflow**
+
+```
+System runs automated analysis (daily/weekly):
+
+1. PerformanceAnalyzer.getPerformanceReport() for all active agents
+2. Compare current week vs previous week metrics
+3. Run statistical significance tests on performance changes
+4. Generate optimization recommendations:
+   a. Context window efficiency improvements
+   b. Cost optimization opportunities
+   c. Quality enhancement suggestions
+5. For agents with A/B testing enabled:
+   a. RunABTest() between current and recommended config
+   b. Analyze results for statistical significance
+   c. Apply winning configuration if improvement > threshold
+6. Store analysis results in database
+7. Emit 'performance.analysis.completed' event
+8. Log summary of findings and actions taken
+```
+
+**9. A/B Testing Execution Workflow**
+
+```
+Trigger: Manual request or automated optimization
+
+1. Validate ABTestPlan parameters (sample size, duration, confidence level)
+2. Create two agent configurations: control (A) and variant (B)
+3. Initialize task distribution: 50% to A, 50% to B
+4. For each task in test period:
+   a. Randomly assign to A or B
+   b. Record PerformanceMetrics for both
+   c. Track task completion and quality scores
+5. After sample size reached:
+   a. Calculate statistical significance using t-test
+   b. Compute effect size and confidence intervals
+   c. Determine winner based on primary metric (quality, cost, or speed)
+6. Generate ABTestResult with detailed analysis
+7. If winner has significant improvement:
+   a. Prompt user for approval to apply winning config
+   b. Auto-apply if improvement > threshold and auto-approve enabled
+8. Archive test data for future reference
+9. Emit 'abtest.completed' event with results
+```
+
 ## Non-Functional Requirements
 
 ### Performance
 
 **Provider Response Time:**
+
 - AI provider message initialization: < 500ms (p95)
 - Streaming message chunks: < 100ms between chunks (p95)
 - Provider configuration load: < 200ms (p95)
 - Provider registry lookup: < 10ms (p99)
 
 **Platform API Performance:**
+
 - Git platform API calls: < 1000ms for single operations (p95)
 - Issue list operations: < 2000ms for up to 100 issues (p95)
 - PR creation: < 3000ms including validation (p95)
@@ -606,6 +860,7 @@ User runs: tamma init
 - Platform registry lookup: < 10ms (p99)
 
 **Orchestrator Scalability:**
+
 - Support minimum 10 concurrent workers
 - Handle minimum 50 queued tasks
 - Task queue operations: < 50ms (p95)
@@ -614,17 +869,20 @@ User runs: tamma init
 - Database connection pool: 10-50 connections
 
 **CLI Startup:**
+
 - Cold start (config load + validation): < 1000ms (p95)
 - Warm start (cached config): < 300ms (p95)
 - Config initialization wizard: Interactive (no timeout)
 
 **Memory Constraints:**
+
 - Standalone mode: < 256MB RSS
 - Worker mode: < 512MB RSS
 - Orchestrator mode: < 1GB RSS (base) + 100MB per worker
 - Provider context caching: < 100MB per provider instance
 
 **Throughput:**
+
 - Orchestrator: 5 tasks/second submission rate
 - Worker: 1 concurrent task execution (configurable up to 3)
 - Provider streaming: 50 chunks/second minimum
@@ -632,6 +890,7 @@ User runs: tamma init
 ### Security
 
 **Credential Management:**
+
 - All API keys and tokens encrypted at rest using AES-256
 - Credentials stored in OS-specific secure storage:
   - Windows: Credential Manager
@@ -642,6 +901,7 @@ User runs: tamma init
 - Credential rotation support with zero-downtime
 
 **Authentication & Authorization:**
+
 - Provider API keys validated on initialization
 - Platform OAuth2 tokens with refresh token support
 - Platform PATs validated via test API call on load
@@ -649,6 +909,7 @@ User runs: tamma init
 - Orchestrator API authentication: Bearer token required for all endpoints except `/health`
 
 **Network Security:**
+
 - All provider API calls over HTTPS/TLS 1.3+
 - All platform API calls over HTTPS/TLS 1.3+
 - Orchestrator-worker communication over HTTPS (or mTLS for production)
@@ -656,6 +917,7 @@ User runs: tamma init
 - Webhook signature verification for platform events
 
 **Input Validation:**
+
 - All user inputs sanitized against injection attacks
 - Provider messages validated against schema before sending
 - Platform API parameters validated before API calls
@@ -663,6 +925,7 @@ User runs: tamma init
 - File path inputs validated to prevent directory traversal
 
 **Dependency Security:**
+
 - All npm dependencies scanned with `npm audit` in CI
 - Critical vulnerabilities: block PR merge
 - High vulnerabilities: require justification + timeline for fix
@@ -670,12 +933,14 @@ User runs: tamma init
 - Pinned dependencies in package-lock.json
 
 **Secrets in Code:**
+
 - No hardcoded secrets, API keys, or credentials
 - Environment variable validation: reject if secrets detected in public env vars
 - Pre-commit hooks to scan for accidentally committed secrets
 - GitHub secret scanning enabled on repository
 
 **Plugin Sandboxing:**
+
 - Provider plugins: NO filesystem access beyond config
 - Platform plugins: READ-ONLY filesystem access for Git operations
 - Plugin resource limits: CPU 80%, memory 256MB per plugin
@@ -685,6 +950,7 @@ User runs: tamma init
 ### Reliability/Availability
 
 **Error Handling:**
+
 - All async operations wrapped in try-catch with proper logging
 - Provider API failures: retry with exponential backoff (3 attempts, 1s/2s/4s)
 - Platform API failures: retry with exponential backoff (3 attempts, 2s/4s/8s)
@@ -692,6 +958,7 @@ User runs: tamma init
 - Graceful degradation: if provider unavailable, return user-friendly error
 
 **Resilience Patterns:**
+
 - Circuit breaker for provider API calls (5 failures in 60s → open for 300s)
 - Circuit breaker for platform API calls (5 failures in 60s → open for 300s)
 - Timeout configuration for all network calls (default 30s, configurable)
@@ -699,6 +966,7 @@ User runs: tamma init
 - Worker failure detection via heartbeat timeout (3 missed = offline)
 
 **Data Durability:**
+
 - Orchestrator task queue persisted to PostgreSQL
 - Task state updates atomic (no partial updates)
 - Configuration file writes atomic (write to temp → rename)
@@ -706,6 +974,7 @@ User runs: tamma init
 - No data loss on orchestrator restart (tasks resume from queue)
 
 **Startup Validation:**
+
 - Config validation on startup: fail fast if invalid
 - Database connectivity test on orchestrator startup
 - Provider credential test on initialization (can be skipped with `--skip-validation`)
@@ -713,6 +982,7 @@ User runs: tamma init
 - Clear error messages for misconfiguration
 
 **Graceful Shutdown:**
+
 - SIGTERM/SIGINT handlers for all modes
 - Orchestrator: wait for in-flight tasks (up to 30s), then force shutdown
 - Worker: complete current task (up to 5min), then shutdown
@@ -721,12 +991,14 @@ User runs: tamma init
 - Event emission for shutdown events
 
 **Availability Targets:**
+
 - Orchestrator uptime: 99.5% (allows 3.65 hours/month downtime)
 - Worker availability: best effort (stateless, auto-restart on failure)
 - Database availability: 99.9% (managed PostgreSQL service recommended)
 - Configuration: degraded mode if config unavailable (use defaults, log warning)
 
 **Monitoring Hooks:**
+
 - Health check endpoints return 200 OK if healthy, 503 if degraded
 - Health checks include: database connectivity, provider reachability, worker heartbeats
 - Prometheus metrics endpoint: `/metrics` (orchestrator only)
@@ -735,6 +1007,7 @@ User runs: tamma init
 ### Observability
 
 **Logging:**
+
 - Structured JSON logs using pino logger
 - Log levels: trace, debug, info, warn, error, fatal
 - Default log level: info (configurable via `TAMMA_LOG_LEVEL`)
@@ -743,6 +1016,7 @@ User runs: tamma init
 - Sensitive data redaction: automatically redact API keys, tokens, passwords
 
 **Log Events:**
+
 - Provider operations: initialization, message sent, message received, error, dispose
 - Platform operations: API call start, API call success, API call failure, rate limit
 - Orchestrator: task submitted, task assigned, task completed, task failed, worker registered, worker offline
@@ -751,6 +1025,7 @@ User runs: tamma init
 - CLI: command invoked, mode selected, initialization complete
 
 **Metrics (Prometheus):**
+
 - Counter: `tamma_provider_messages_total{provider, status}`
 - Histogram: `tamma_provider_latency_seconds{provider, operation}`
 - Counter: `tamma_platform_api_calls_total{platform, operation, status}`
@@ -764,6 +1039,7 @@ User runs: tamma init
 - Counter: `tamma_config_loads_total{status}`
 
 **Tracing:**
+
 - OpenTelemetry instrumentation (optional, enabled via env var)
 - Trace spans for: provider calls, platform API calls, task execution, workflow steps
 - Span attributes: operation name, provider/platform ID, task ID, status, error
@@ -771,12 +1047,14 @@ User runs: tamma init
 - Export to OTLP endpoint (configurable, default: none)
 
 **Error Tracking:**
+
 - Error context includes: stack trace, correlation ID, operation name, user inputs (sanitized)
 - Error aggregation: group by error type and stack trace fingerprint
 - Integration hooks for Sentry, Bugsnag, or custom error tracking
 - Error rate monitoring: alert if error rate > 5% over 5min window
 
 **Debug Capabilities:**
+
 - Debug mode: `TAMMA_DEBUG=1` or `--debug` flag
 - Verbose mode: `--verbose` flag for CLI output
 - Dry-run mode: `--dry-run` for operations without side effects
@@ -784,6 +1062,7 @@ User runs: tamma init
 - Config dump: `tamma config show` command to display active config (redacted)
 
 **Audit Trail:**
+
 - All operations emit events for DCB event sourcing (Epic 4 dependency)
 - Event schema: `{ eventType, timestamp, actor, operation, target, status, metadata }`
 - Events persisted for compliance and debugging
@@ -794,49 +1073,59 @@ User runs: tamma init
 ### External Dependencies
 
 **Core Runtime:**
+
 - Node.js 22 LTS (≥22.0.0): JavaScript runtime
 - TypeScript 5.7+ (≥5.7.0): Type system and compiler
 - pnpm 9+ (≥9.0.0): Package manager and workspace tool
 
 **AI Provider SDKs:**
+
 - `@anthropic-ai/sdk` (^0.20.0): Anthropic Claude API client
 - `@modelcontextprotocol/sdk` (^1.0.0): MCP protocol for tool integration
 
 **Git Platform SDKs:**
+
 - `@octokit/rest` (^20.0.0): GitHub REST API client
 - `@octokit/graphql` (^7.0.0): GitHub GraphQL API client
 - `@gitbeaker/node` (^38.0.0): GitLab API client
 
 **Web Framework & Server:**
+
 - `fastify` (^4.26.0): High-performance web framework
 - `@fastify/websocket` (^10.0.0): WebSocket support for Fastify
 - `@fastify/cors` (^9.0.0): CORS handling
 
 **Database:**
+
 - `pg` (^8.11.0): PostgreSQL client
 - `knex` (^3.1.0): SQL query builder and migration tool
 
 **CLI & Configuration:**
+
 - `commander` (^12.0.0): CLI argument parsing
 - `inquirer` (^9.2.0): Interactive CLI prompts
 - `cosmiconfig` (^9.0.0): Configuration file discovery and loading
 - `ajv` (^8.12.0): JSON Schema validator
 
 **Logging & Monitoring:**
+
 - `pino` (^8.19.0): Fast JSON logger
 - `pino-pretty` (^11.0.0): Pretty print for development
 - `prom-client` (^15.1.0): Prometheus metrics
 
 **Observability (Optional):**
+
 - `@opentelemetry/api` (^1.8.0): OpenTelemetry API
 - `@opentelemetry/sdk-node` (^0.48.0): OpenTelemetry SDK
 - `@opentelemetry/exporter-trace-otlp-http` (^0.48.0): OTLP exporter
 
 **Security & Crypto:**
+
 - `keytar` (^7.9.0): OS keychain/credential manager access
 - `crypto` (built-in): Encryption utilities
 
 **Utilities:**
+
 - `zod` (^3.22.0): Runtime type validation
 - `date-fns` (^3.3.0): Date manipulation
 - `uuid` (^9.0.0): UUID generation
@@ -844,6 +1133,7 @@ User runs: tamma init
 ### Internal Dependencies
 
 **Workspace Packages (pnpm workspace):**
+
 - `@tamma/config`: Shared configuration management
 - `@tamma/types`: Shared TypeScript types and interfaces
 - `@tamma/logger`: Shared logging infrastructure
@@ -857,12 +1147,14 @@ User runs: tamma init
 ### External Service Integrations
 
 **AI Provider Services:**
+
 - Anthropic Claude API (api.anthropic.com): Claude Code provider
   - Authentication: API key via header
   - Rate limits: Tier-dependent (1000-10000 RPM)
   - Endpoints: `/v1/messages` (streaming), `/v1/complete`
 
 **Git Platform Services:**
+
 - GitHub API (api.github.com): Issue tracking, PR management, repository operations
   - Authentication: Personal Access Token, OAuth App, or GitHub App
   - Rate limits: 5000 requests/hour (authenticated), 60 requests/hour (unauthenticated)
@@ -874,6 +1166,7 @@ User runs: tamma init
   - Self-hosted: Custom base URL support
 
 **Database:**
+
 - PostgreSQL 17: Task queue persistence, worker registry, configuration cache
   - Connection: Standard PostgreSQL wire protocol
   - Authentication: Username/password or peer authentication
@@ -883,6 +1176,7 @@ User runs: tamma init
 ### Integration Points
 
 **1. Provider Integration (Epic 1 ← AI Services)**
+
 ```
 packages/providers → Anthropic API
 ├── Authentication: API key in Authorization header
@@ -892,6 +1186,7 @@ packages/providers → Anthropic API
 ```
 
 **2. Platform Integration (Epic 1 ← Git Services)**
+
 ```
 packages/platforms → GitHub/GitLab API
 ├── GitHub REST: CRUD operations for issues, PRs, branches
@@ -902,6 +1197,7 @@ packages/platforms → GitHub/GitLab API
 ```
 
 **3. Orchestrator-Worker Integration (Epic 1 internal)**
+
 ```
 packages/orchestrator ↔ packages/worker
 ├── Worker Registration: POST /api/v1/workers/register
@@ -912,6 +1208,7 @@ packages/orchestrator ↔ packages/worker
 ```
 
 **4. CLI-Orchestrator Integration (Epic 1 internal)**
+
 ```
 packages/cli → packages/orchestrator
 ├── Standalone mode: Direct in-process calls (no HTTP)
@@ -921,6 +1218,7 @@ packages/cli → packages/orchestrator
 ```
 
 **5. Database Integration (Epic 1 → PostgreSQL)**
+
 ```
 packages/orchestrator → PostgreSQL
 ├── Task Queue: tasks table with status, assignments, metadata
@@ -932,29 +1230,34 @@ packages/orchestrator → PostgreSQL
 ### Cross-Epic Dependencies
 
 **Epic 1 Provides Foundation for:**
+
 - Epic 2 (Autonomous Dev Loop): Requires AI provider abstraction, Git platform abstraction, orchestrator/worker architecture
 - Epic 3 (Quality Gates): Requires platform integration for PR checks, test execution
 - Epic 4 (Event Sourcing): Requires event emission hooks from all Epic 1 components
 - Epic 5 (Observability): Requires logging, metrics, health check infrastructure
 
 **Epic 1 Dependencies on Future Epics:**
+
 - Epic 4 (Event Store Backend): Epic 1 emits events but doesn't persist them (Epic 4 will add persistence)
 - Epic 5 (Dashboards): Epic 1 exposes metrics but doesn't visualize them (Epic 5 will add UI)
 
 ### Development Environment Dependencies
 
 **Required Tools:**
+
 - Git 2.40+: Version control
 - Node.js 22 LTS: Runtime (with corepack enabled)
 - PostgreSQL 17: Database (Docker or native)
 - pnpm 9+: Package manager
 
 **Optional Tools:**
+
 - Docker 24+: For local PostgreSQL instance
 - VS Code: Recommended IDE with TypeScript extensions
 - Postman/Insomnia: API testing for orchestrator endpoints
 
 **CI/CD Dependencies:**
+
 - GitHub Actions: For automated testing and builds
 - npm audit: Security scanning
 - ESLint: Linting
@@ -965,6 +1268,7 @@ packages/orchestrator → PostgreSQL
 ### Configuration Dependencies
 
 **Environment Variables Required:**
+
 - `TAMMA_MODE`: orchestrator | worker | standalone (default: standalone)
 - `TAMMA_LOG_LEVEL`: trace | debug | info | warn | error (default: info)
 - `ANTHROPIC_API_KEY`: Claude API key (required for AI operations)
@@ -973,6 +1277,7 @@ packages/orchestrator → PostgreSQL
 - `GITLAB_TOKEN`: GitLab PAT (optional, for GitLab operations)
 
 **Optional Environment Variables:**
+
 - `TAMMA_CONFIG_PATH`: Override default config file location
 - `TAMMA_DEBUG`: Enable debug mode (1 or true)
 - `TAMMA_ORCHESTRATOR_URL`: Orchestrator URL (worker mode only)
@@ -1060,11 +1365,34 @@ packages/orchestrator → PostgreSQL
 6. CLI includes `--version` and `--help` commands with usage examples
 7. Integration test demonstrates launching in both modes
 
+### Story 1.13: Agent Customization System
+
+1. Agent configuration management system with version control and rollback capabilities
+2. Performance impact measurement for agent customizations across speed, quality, and cost
+3. Cross-context agent capability testing (development vs code review vs testing scenarios)
+4. Automated optimization recommendations based on Test Platform benchmark results
+5. Integration with Test Platform's dual-purpose benchmarking system
+6. Context window efficiency analysis and optimization recommendations
+7. Privacy-preserving learning from customizations while protecting competitive advantages
+8. A/B testing framework for agent configuration improvements
+
+### Story 1.14: Performance Impact Analysis
+
+1. Comprehensive performance impact analysis across speed, quality, cost, and success rate metrics
+2. Statistical significance testing for agent customization improvements
+3. Context window efficiency measurement and optimization recommendations
+4. Cross-agent comparison showing relative performance of customizations
+5. Historical trend analysis for agent performance over time
+6. Cost-benefit analysis for agent customizations vs. stock configurations
+7. Automated insight generation identifying effective customization patterns
+8. Integration with Test Platform's dual-purpose benchmarking results
+
 ## Traceability Mapping
 
 ### PRD Requirements → Epic 1 Stories
 
 **FR-7: Multi-Provider AI Abstraction**
+
 - Story 1.1: AI Provider Interface Definition
   - Deliverable: `IAIProvider` interface in `packages/providers/src/types.ts`
   - Validation: Interface supports `generateCode()`, `analyzeContext()`, `suggestFix()`, `reviewChanges()`
@@ -1076,6 +1404,7 @@ packages/orchestrator → PostgreSQL
   - Validation: Config file loads multiple provider entries with validation
 
 **FR-8: Provider Capability Discovery**
+
 - Story 1.1: AI Provider Interface Definition
   - Deliverable: `ProviderCapabilities` interface with streaming, token limits, model versions
   - Validation: Interface method `getCapabilities()` returns structured metadata
@@ -1084,6 +1413,7 @@ packages/orchestrator → PostgreSQL
   - Validation: `ClaudeCodeProvider.getCapabilities()` returns accurate Claude limits
 
 **FR-9: AI Provider Error Handling**
+
 - Story 1.1: AI Provider Interface Definition
   - Deliverable: Error handling contracts for rate limits, timeouts, context overflow
   - Validation: Interface defines error types and retry semantics
@@ -1092,6 +1422,7 @@ packages/orchestrator → PostgreSQL
   - Validation: Unit tests verify retry behavior for transient failures
 
 **FR-10: Multi-Platform Git Abstraction**
+
 - Story 1.4: Git Platform Interface Definition
   - Deliverable: `IGitPlatform` interface in `packages/platforms/src/types.ts`
   - Validation: Interface supports `createPR()`, `getIssue()`, `createBranch()`, `mergePR()`
@@ -1106,6 +1437,7 @@ packages/orchestrator → PostgreSQL
   - Validation: Config file loads GitHub, GitLab, Gitea, Forgejo entries
 
 **FR-11: Platform Capability Normalization**
+
 - Story 1.4: Git Platform Interface Definition
   - Deliverable: Normalized models for PR, Issue, Branch, CI status
   - Validation: Interface defines common data structures abstracting platform differences
@@ -1117,6 +1449,7 @@ packages/orchestrator → PostgreSQL
   - Validation: `GitLabPlatform` returns standard `PullRequest` model (mapped from Merge Request)
 
 **FR-12: Platform Pagination and Rate Limiting**
+
 - Story 1.4: Git Platform Interface Definition
   - Deliverable: Pagination and rate limit handling contracts
   - Validation: Interface methods support cursor-based pagination
@@ -1128,6 +1461,7 @@ packages/orchestrator → PostgreSQL
   - Validation: Unit test verifies pagination and rate limit backoff
 
 **FR-13: Hybrid Orchestrator Mode**
+
 - Story 1.8: Hybrid Orchestrator/Worker Architecture Design
   - Deliverable: Architecture document defining orchestrator responsibilities
   - Validation: Document specifies issue selection, loop coordination, state management
@@ -1136,6 +1470,7 @@ packages/orchestrator → PostgreSQL
   - Validation: CLI starts orchestrator service, loads config, initializes abstractions
 
 **FR-14: Hybrid Worker Mode**
+
 - Story 1.8: Hybrid Orchestrator/Worker Architecture Design
   - Deliverable: Architecture document defining worker responsibilities
   - Validation: Document specifies CI/CD integration, single-task execution, exit codes
@@ -1144,6 +1479,7 @@ packages/orchestrator → PostgreSQL
   - Validation: CLI executes single task, returns appropriate exit code
 
 **FR-15: Shared Component Architecture**
+
 - Story 1.8: Hybrid Orchestrator/Worker Architecture Design
   - Deliverable: Architecture document specifying shared components
   - Validation: Document identifies AI abstraction, Git abstraction, quality gates as shared
@@ -1151,31 +1487,45 @@ packages/orchestrator → PostgreSQL
   - Deliverable: CLI initialization of provider and platform abstractions in both modes
   - Validation: Both orchestrator and worker modes successfully initialize shared components
 
+**Agent Optimization Requirements (Stories 1.13, 1.14)**
+
+- Story 1.13: Agent Customization System
+  - Deliverable: `AgentConfigManager` with version control and A/B testing
+  - Validation: System supports agent customization with performance measurement
+- Story 1.14: Performance Impact Analysis
+  - Deliverable: `PerformanceAnalyzer` with statistical analysis and trend tracking
+  - Validation: System provides comprehensive performance analysis and optimization recommendations
+
 ### Architecture Alignment → Epic 1 Stories
 
 **Architecture Section 2.1: Technology Stack → Stories 1.1-1.9**
+
 - TypeScript 5.7+ strict mode: All packages use strict TypeScript
 - Node.js 22 LTS: All services target Node.js 22
 - pnpm workspaces: Monorepo structure with `@tamma/*` packages
 
 **Architecture Section 3.1: Interface-Based Design Pattern → Stories 1.1, 1.4**
+
 - Story 1.1: `IAIProvider` interface
 - Story 1.4: `IGitPlatform` interface
 - Both follow dependency inversion principle
 
 **Architecture Section 3.2: Plugin Architecture → Stories 1.2, 1.5, 1.6**
+
 - Story 1.2: Claude Code provider as plugin
 - Story 1.5: GitHub platform as plugin
 - Story 1.6: GitLab platform as plugin
 - All implement defined interfaces for dynamic loading
 
 **Architecture Section 3.3: Hybrid Architecture Pattern → Story 1.8, 1.9**
+
 - Story 1.8: Architecture design document
 - Story 1.9: CLI mode selection implementation
 - Orchestrator mode: Stateful coordinator
 - Worker mode: Stateless executor
 
 **Architecture Section 4.3: Project Structure → Stories 1.1-1.9**
+
 - `packages/providers`: Stories 1.1, 1.2, 1.3
 - `packages/platforms`: Stories 1.4, 1.5, 1.6, 1.7
 - `packages/orchestrator`: Story 1.8, 1.9 (orchestrator mode)
@@ -1184,6 +1534,7 @@ packages/orchestrator → PostgreSQL
 - `packages/config`: Stories 1.3, 1.7
 
 **Architecture Section 5.0: Epic-to-Architecture Mapping**
+
 - Epic 1 directly implements foundational packages
 - Establishes patterns for Epic 2-5 to follow
 - Delivers plugin system, hybrid architecture, configuration management
@@ -1191,21 +1542,25 @@ packages/orchestrator → PostgreSQL
 ### NFR Requirements → Epic 1 Stories
 
 **NFR-1: Performance Targets**
+
 - Story 1.2: Provider response time < 500ms (p95)
 - Story 1.5, 1.6: Platform API calls < 1000ms (p95)
 - Story 1.9: CLI cold start < 1000ms (p95)
 
 **NFR-2: Security Requirements**
+
 - Story 1.3: Provider API keys encrypted at rest
 - Story 1.7: Platform tokens stored in OS keychain
 - Story 1.9: Config file permissions set to 600
 
 **NFR-3: Reliability Requirements**
+
 - Story 1.2: Retry logic with exponential backoff for provider failures
 - Story 1.5, 1.6: Circuit breaker pattern for platform API failures
 - Story 1.8: State persistence for graceful shutdown/restart
 
 **NFR-4: Observability Requirements**
+
 - Story 1.2, 1.5, 1.6: Structured logging for all operations
 - Story 1.9: Health check endpoints for orchestrator mode
 - All stories: Event emission for DCB event sourcing (Epic 4)
@@ -1215,6 +1570,7 @@ packages/orchestrator → PostgreSQL
 ### Risks
 
 **Risk 1: AI Provider API Changes**
+
 - Likelihood: Medium
 - Impact: High
 - Description: Anthropic may change Claude API contracts, breaking ClaudeCodeProvider implementation
@@ -1226,6 +1582,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Implement provider version negotiation; support multiple API versions simultaneously
 
 **Risk 2: Git Platform Rate Limiting**
+
 - Likelihood: High
 - Impact: Medium
 - Description: GitHub/GitLab rate limits may throttle operations, especially for free tier accounts
@@ -1237,6 +1594,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Queue operations and batch where possible; provide clear user feedback on rate limit status
 
 **Risk 3: Provider Configuration Complexity**
+
 - Likelihood: Medium
 - Impact: Medium
 - Description: Multi-provider configuration may overwhelm users, especially with credential management
@@ -1248,6 +1606,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Provide migration tool from simple single-provider config to multi-provider config
 
 **Risk 4: Platform Detection Ambiguity**
+
 - Likelihood: Low
 - Impact: Medium
 - Description: Self-hosted GitLab instances on custom domains may not be auto-detected correctly
@@ -1258,6 +1617,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Fallback to manual platform selection; provide clear error messages
 
 **Risk 5: Orchestrator Database Availability**
+
 - Likelihood: Medium
 - Impact: High
 - Description: PostgreSQL downtime blocks orchestrator operations, preventing task queue management
@@ -1269,6 +1629,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Implement in-memory fallback queue for temporary database outages (lossy mode)
 
 **Risk 6: Worker Registration Race Conditions**
+
 - Likelihood: Medium
 - Impact: Medium
 - Description: Multiple workers registering simultaneously may cause database conflicts
@@ -1279,6 +1640,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Implement registration queue with serialization
 
 **Risk 7: CLI Mode Selection Confusion**
+
 - Likelihood: High
 - Impact: Low
 - Description: Users may be confused about when to use orchestrator vs worker vs standalone mode
@@ -1290,6 +1652,7 @@ packages/orchestrator → PostgreSQL
 - Contingency: Provide mode auto-detection based on environment (CI env vars indicate worker mode)
 
 **Risk 8: Keychain/Credential Manager Unavailability**
+
 - Likelihood: Low
 - Impact: Medium
 - Description: Some Linux environments may lack Secret Service API, blocking secure credential storage
@@ -1302,41 +1665,49 @@ packages/orchestrator → PostgreSQL
 ### Assumptions
 
 **A1: Claude API Stability**
+
 - Assumption: Anthropic's Claude API remains backward compatible within major versions
 - Validation: Monitor Anthropic release notes and deprecation timeline
 - Risk if False: Risk 1 (API breaking changes)
 
 **A2: PostgreSQL Availability**
+
 - Assumption: Users can provide PostgreSQL 17 instance for orchestrator mode (Docker or managed)
 - Validation: Document PostgreSQL setup in installation guide
 - Risk if False: Risk 5 (database unavailability blocks operations)
 
 **A3: Network Connectivity**
+
 - Assumption: Orchestrator and workers have reliable network connectivity to AI providers and Git platforms
 - Validation: Implement connection health checks on startup
 - Risk if False: Operations fail, but handled by retry logic and circuit breakers
 
 **A4: User Understanding of Hybrid Architecture**
+
 - Assumption: Users understand difference between orchestrator/worker/standalone modes
 - Validation: User testing of documentation and CLI help text
 - Risk if False: Risk 7 (mode selection confusion)
 
 **A5: API Key Availability**
+
 - Assumption: Users have access to Anthropic API keys and Git platform tokens
 - Validation: Setup wizard validates credentials before proceeding
 - Risk if False: System cannot function; clear error messages guide user to obtain credentials
 
 **A6: TypeScript Ecosystem Maturity**
+
 - Assumption: TypeScript 5.7+ and Node.js 22 LTS provide stable foundation
 - Validation: Use LTS versions only; monitor security advisories
 - Risk if False: Runtime errors or security vulnerabilities require rapid patching
 
 **A7: pnpm Workspace Support**
+
 - Assumption: pnpm 9+ workspace features work reliably for monorepo management
 - Validation: CI pipeline validates build and test across all packages
 - Risk if False: Build failures or dependency resolution issues; fallback to npm workspaces
 
 **A8: OS Credential Storage Compatibility**
+
 - Assumption: keytar library works across Windows, macOS, Linux
 - Validation: Test on all three platforms in CI
 - Risk if False: Risk 8 (credential storage unavailability)
@@ -1344,6 +1715,7 @@ packages/orchestrator → PostgreSQL
 ### Open Questions
 
 **Q1: Should we support additional AI providers beyond Claude in Epic 1?**
+
 - Options:
   1. Only Claude Code in Epic 1; defer other providers to future epics
   2. Add GitHub Copilot in Story 1.2b (parallel to Claude implementation)
@@ -1352,6 +1724,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Sprint planning (before Story 1.2 starts)
 
 **Q2: Should GitLab MR API differences justify a separate abstraction layer?**
+
 - Context: GitLab Merge Requests have different approval workflow than GitHub PRs
 - Options:
   1. Normalize all differences in `IGitPlatform` interface (current approach)
@@ -1361,6 +1734,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Before Story 1.4 (interface design)
 
 **Q3: Should configuration support hot-reload in Epic 1?**
+
 - Context: Story 1.3 AC 5 requires "configuration reload without restart"
 - Options:
   1. Full hot-reload support (watch config file for changes)
@@ -1370,6 +1744,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Story 1.3 implementation
 
 **Q4: Should orchestrator mode support horizontal scaling in Epic 1?**
+
 - Context: Current design assumes single orchestrator instance
 - Options:
   1. Single orchestrator instance only (current design)
@@ -1379,6 +1754,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Story 1.8 (architecture design)
 
 **Q5: Should worker authentication use JWT or shared secret?**
+
 - Context: Workers need to authenticate with orchestrator
 - Options:
   1. Shared secret (symmetric key) configured in environment
@@ -1388,6 +1764,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Story 1.8 (architecture design)
 
 **Q6: Should CLI support interactive mode in Epic 1?**
+
 - Context: Story 1.9 creates basic CLI; user approval checkpoints come in Epic 2
 - Options:
   1. CLI output only in Epic 1; defer interactive prompts to Epic 2
@@ -1396,6 +1773,7 @@ packages/orchestrator → PostgreSQL
 - Decision Needed By: Story 1.9 implementation
 
 **Q7: Should we use Docker for local PostgreSQL in development?**
+
 - Context: Developers need PostgreSQL for orchestrator mode testing
 - Options:
   1. Require native PostgreSQL installation (documented in setup guide)
@@ -1413,6 +1791,7 @@ packages/orchestrator → PostgreSQL
 **Framework:** Jest 29+ with TypeScript support
 
 **Coverage Targets:**
+
 - Line coverage: 80% minimum
 - Branch coverage: 75% minimum
 - Function coverage: 85% minimum
@@ -1460,6 +1839,7 @@ packages/orchestrator → PostgreSQL
    - Initialization: provider setup, platform setup, logging setup
 
 **Mocking Strategy:**
+
 - Mock external APIs (Anthropic, GitHub, GitLab) using MSW (Mock Service Worker)
 - Mock database using in-memory SQLite for fast tests
 - Mock filesystem operations using memfs
@@ -1504,6 +1884,7 @@ packages/orchestrator → PostgreSQL
    - Prerequisites: Valid config file, API credentials
 
 **Test Data Management:**
+
 - Test repositories: `tamma-test-github`, `tamma-test-gitlab`
 - Test issues: Create before test run, cleanup after
 - Test branches: Prefix with `test-` for easy identification and cleanup
@@ -1546,6 +1927,7 @@ packages/orchestrator → PostgreSQL
    - Iterations: 100 cold starts
 
 **Resource Usage Benchmarks:**
+
 - Memory profiling: heap snapshots at steady state, leak detection
 - CPU profiling: flame graphs for hot paths, optimization targets
 - Network monitoring: request counts, payload sizes, bandwidth usage
@@ -1615,6 +1997,7 @@ packages/orchestrator → PostgreSQL
    - Comment on PR if regression detected (> 10% slowdown)
 
 **Test Environment Matrix:**
+
 - OS: Ubuntu 22.04, macOS 14, Windows Server 2022
 - Node.js: 22.0.0, 22.x (latest LTS)
 - Database: PostgreSQL 17 (Docker container)
@@ -1622,21 +2005,25 @@ packages/orchestrator → PostgreSQL
 ### Test Execution Guidance
 
 **Pre-Commit:**
+
 - Run unit tests for changed packages only
 - Run linting and formatting
 - Estimated time: 30-60 seconds
 
 **Pre-Push:**
+
 - Run full unit test suite
 - Run integration tests (if credentials available)
 - Estimated time: 3-5 minutes
 
 **CI Pipeline:**
+
 - Full test suite (unit + integration + security)
 - All OS/Node combinations
 - Estimated time: 10-15 minutes
 
 **Release Candidate:**
+
 - Full test suite + performance tests
 - Manual smoke testing of CLI in all three modes
 - Estimated time: 30-45 minutes
