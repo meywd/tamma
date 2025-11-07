@@ -47,4 +47,5 @@ workflow_status: "  # Phase 1: Analysis
 
   # Phase 4: Implementation
   sprint-planning: test-platform/docs/sprint-status.yaml
+  story-creation: test-platform/docs/stories/4-2-automated-scoring-system.md
 "
