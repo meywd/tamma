@@ -346,6 +346,220 @@ const storyTemplates: Record<string, Partial<StoryTemplate>> = {
       },
     ],
   },
+  '4-3-result-storage-time-series-management': {
+    title: 'Result Storage and Time-Series Management',
+    description:
+      'As a **benchmark analyst**, I want to **comprehensive result storage and time-series management for benchmark results**, so that **we can track performance trends, analyze historical data, and generate insights across multiple dimensions with efficient querying and visualization capabilities**.',
+    acceptanceCriteria: [
+      'Time-Series Database Integration: Implement efficient time-series database storage with optimized indexing for temporal queries, data compression, and high-performance analytics',
+      'Multi-Dimensional Data Model: Comprehensive data model supporting results by provider, model, task, language, scenario, difficulty, and custom dimensions with flexible schema evolution',
+      'Historical Data Management: Automated data retention policies, archival procedures, and lifecycle management with configurable retention periods and tiered storage',
+      'Real-Time Data Ingestion: High-throughput data ingestion pipeline supporting concurrent benchmark runs with streaming updates and batch processing capabilities',
+      'Advanced Querying Interface: Flexible query interface supporting complex filters, aggregations, time windows, and statistical analysis with optimized query performance',
+      'Performance Analytics Engine: Built-in analytics for trend analysis, performance regression detection, statistical comparisons, and automated insight generation',
+      'Data Export and Reporting: Comprehensive export capabilities supporting multiple formats (JSON, CSV, Parquet), scheduled reports, and customizable visualization dashboards',
+      'Scalable Storage Architecture: Horizontally scalable storage system supporting petabyte-scale data with automatic sharding, replication, and disaster recovery',
+    ],
+    tasks: [
+      {
+        title: 'Time-Series Database Architecture',
+        subtasks: [
+          'Select and configure time-series database (InfluxDB, TimescaleDB, or ClickHouse) with optimal settings',
+          'Design data schema with proper tagging and field organization for efficient querying',
+          'Implement data retention policies and continuous query optimization',
+          'Create backup and disaster recovery procedures with automated testing',
+        ],
+      },
+      {
+        title: 'Multi-Dimensional Data Model',
+        subtasks: [
+          'Design flexible schema supporting provider, model, task, language, scenario, and custom dimensions',
+          'Implement schema evolution system for adding new dimensions without breaking existing data',
+          'Create data validation and type checking for all dimensions and metrics',
+          'Build dimension management API for dynamic dimension creation and configuration',
+        ],
+      },
+      {
+        title: 'Real-Time Ingestion Pipeline',
+        subtasks: [
+          'Implement high-throughput message queue system (Kafka or RabbitMQ) for result streaming',
+          'Create data transformation and enrichment pipeline with validation and normalization',
+          'Build batch processing system for bulk data imports and historical data migration',
+          'Implement monitoring and alerting for ingestion pipeline health and performance',
+        ],
+      },
+      {
+        title: 'Advanced Querying System',
+        subtasks: [
+          'Create query language DSL supporting complex filters, aggregations, and time-based operations',
+          'Implement query optimization with intelligent indexing and caching strategies',
+          'Build query execution engine with parallel processing and result streaming',
+          'Develop query performance monitoring and optimization recommendations',
+        ],
+      },
+      {
+        title: 'Performance Analytics Engine',
+        subtasks: [
+          'Implement trend analysis algorithms with statistical significance testing',
+          'Create performance regression detection with automated alerting and root cause analysis',
+          'Build comparative analysis tools for model-to-model and provider-to-provider comparisons',
+          'Develop automated insight generation with anomaly detection and pattern recognition',
+        ],
+      },
+      {
+        title: 'Data Export and Reporting',
+        subtasks: [
+          'Create export system supporting JSON, CSV, Parquet, and Excel formats with customizable schemas',
+          'Implement scheduled report generation with automated distribution and notification',
+          'Build customizable dashboard system with real-time updates and interactive visualizations',
+          'Develop API integration for external analytics tools and business intelligence platforms',
+        ],
+      },
+      {
+        title: 'Storage Scalability and Performance',
+        subtasks: [
+          'Implement horizontal scaling with automatic sharding and load balancing',
+          'Create data compression and optimization algorithms for storage efficiency',
+          'Build performance monitoring with query optimization and capacity planning',
+          'Develop disaster recovery procedures with multi-region replication and failover testing',
+        ],
+      },
+      {
+        title: 'Data Quality and Governance',
+        subtasks: [
+          'Implement data validation rules with automated quality checks and anomaly detection',
+          'Create data lineage tracking with complete audit trail for all data transformations',
+          'Build data governance framework with access controls and compliance monitoring',
+          'Develop data quality dashboards with metrics, trends, and improvement recommendations',
+        ],
+      },
+      {
+        title: 'API and Integration Layer',
+        subtasks: [
+          'Create RESTful API with comprehensive endpoints for data access and management',
+          'Implement GraphQL interface for flexible querying with schema introspection',
+          'Build WebSocket integration for real-time data streaming and live updates',
+          'Develop SDK libraries for popular programming languages with comprehensive documentation',
+        ],
+      },
+      {
+        title: 'Monitoring and Operations',
+        subtasks: [
+          'Implement comprehensive monitoring with metrics collection, alerting, and health checks',
+          'Create operational dashboards for system performance, data quality, and usage analytics',
+          'Build automated maintenance procedures with database optimization and cleanup tasks',
+          'Develop incident response procedures with runbooks and escalation protocols',
+        ],
+      },
+    ],
+  },
+  '4-4-benchmark-orchestration-scheduling': {
+    title: 'Benchmark Orchestration and Scheduling System',
+    description:
+      'As a **benchmark administrator**, I want to **comprehensive benchmark orchestration and scheduling system for managing automated benchmark execution across multiple providers and models**, so that **we can efficiently coordinate large-scale benchmark runs with resource optimization, fault tolerance, and real-time monitoring capabilities**.',
+    acceptanceCriteria: [
+      'Multi-Provider Orchestration: Unified orchestration system supporting 8+ AI providers with concurrent execution, resource allocation, and load balancing across provider APIs',
+      'Advanced Scheduling Engine: Intelligent scheduling system with priority queues, dependency management, resource constraints, and optimal execution planning for benchmark workflows',
+      'Resource Management System: Comprehensive resource management including compute resource allocation, memory management, network bandwidth optimization, and cost-aware scheduling decisions',
+      'Fault Tolerance and Recovery: Robust error handling with automatic retry mechanisms, circuit breaker patterns, failover strategies, and graceful degradation under provider failures',
+      'Real-Time Monitoring Dashboard: Live monitoring interface with execution progress tracking, performance metrics, resource utilization, and alerting for system health and anomalies',
+      'Scalable Execution Architecture: Horizontally scalable execution system supporting distributed processing, parallel task execution, and dynamic scaling based on workload demands',
+      'Configuration Management: Flexible configuration system for benchmark parameters, provider settings, scheduling policies, and runtime behavior with hot-reload capabilities',
+      'Comprehensive Audit Logging: Complete audit trail of all orchestration activities, scheduling decisions, resource allocations, and execution outcomes for compliance and debugging',
+    ],
+    tasks: [
+      {
+        title: 'Orchestration Core Engine',
+        subtasks: [
+          'Design orchestration engine architecture with plugin-based provider integration',
+          'Implement unified provider abstraction layer with standardized interfaces',
+          'Create execution workflow management with state machine implementation',
+          'Build orchestration API with comprehensive control and monitoring endpoints',
+        ],
+      },
+      {
+        title: 'Advanced Scheduling System',
+        subtasks: [
+          'Implement priority-based scheduling queues with configurable weightings',
+          'Create dependency resolution system for complex benchmark workflows',
+          'Build resource-aware scheduling algorithms with constraint optimization',
+          'Develop scheduling policy engine with customizable rules and strategies',
+        ],
+      },
+      {
+        title: 'Resource Management Framework',
+        subtasks: [
+          'Design resource allocation system with dynamic capacity planning',
+          'Implement resource monitoring with real-time usage tracking and prediction',
+          'Create cost optimization algorithms for provider selection and usage',
+          'Build resource pooling and sharing mechanisms for efficiency gains',
+        ],
+      },
+      {
+        title: 'Fault Tolerance Infrastructure',
+        subtasks: [
+          'Implement circuit breaker patterns for provider API failure handling',
+          'Create automatic retry mechanisms with exponential backoff and jitter',
+          'Build failover strategies with alternative provider routing',
+          'Develop graceful degradation procedures for partial system failures',
+        ],
+      },
+      {
+        title: 'Real-Time Monitoring System',
+        subtasks: [
+          'Create live execution dashboard with real-time progress tracking',
+          'Implement performance metrics collection and visualization',
+          'Build alerting system with configurable thresholds and escalation',
+          'Develop historical trend analysis and capacity planning tools',
+        ],
+      },
+      {
+        title: 'Scalable Execution Architecture',
+        subtasks: [
+          'Design distributed execution system with horizontal scaling capabilities',
+          'Implement parallel task execution with load balancing and coordination',
+          'Create dynamic scaling mechanisms based on workload demands',
+          'Build execution node management with health monitoring and recovery',
+        ],
+      },
+      {
+        title: 'Configuration Management System',
+        subtasks: [
+          'Implement hierarchical configuration system with environment-specific overrides',
+          'Create configuration validation and schema enforcement mechanisms',
+          'Build hot-reload capabilities for runtime configuration updates',
+          'Develop configuration versioning and rollback procedures',
+        ],
+      },
+      {
+        title: 'Audit and Compliance Framework',
+        subtasks: [
+          'Implement comprehensive audit logging for all orchestration activities',
+          'Create immutable audit trail with tamper-proof storage and verification',
+          'Build compliance reporting tools with customizable report generation',
+          'Develop audit analytics for pattern detection and optimization insights',
+        ],
+      },
+      {
+        title: 'API and Integration Layer',
+        subtasks: [
+          'Create RESTful API with comprehensive orchestration control endpoints',
+          'Implement GraphQL interface for flexible querying and subscription',
+          'Build webhook system for external system integration and notifications',
+          'Develop SDK libraries for popular programming languages and frameworks',
+        ],
+      },
+      {
+        title: 'Testing and Quality Assurance',
+        subtasks: [
+          'Create comprehensive test suite for all orchestration components',
+          'Implement integration testing with real provider API connections',
+          'Build performance testing for scalability and throughput validation',
+          'Develop chaos engineering tests for fault tolerance verification',
+        ],
+      },
+    ],
+  },
 };
 
 function parseArgs(): StoryConfig {
