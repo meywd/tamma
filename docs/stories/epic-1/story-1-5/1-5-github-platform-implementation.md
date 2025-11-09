@@ -9,6 +9,7 @@ Status: drafted
 📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
 
 This mandatory guide includes:
+
 - 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
 - Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
 - TRACE/DEBUG Logging Requirements for all functions
@@ -71,17 +72,28 @@ so that I can validate the platform abstraction with the most popular Git hostin
   - [ ] Subtask 8.3: Write integration test for end-to-end PR workflow
   - [ ] Subtask 8.4: Add tests for authentication and rate limiting
 
+## Task Breakdown Files
+
+- [1-5-github-platform-implementation-task-1.md](./1-5-github-platform-implementation-task-1.md) - Implement GitHub platform class structure
+- [1-5-github-platform-implementation-task-2.md](./1-5-github-platform-implementation-task-2.md) - Implement repository operations
+- [1-5-github-platform-implementation-task-3.md](./1-5-github-platform-implementation-task-3.md) - Implement branch operations
+- [1-5-github-platform-implementation-task-4.md](./1-5-github-platform-implementation-task-4.md) - Implement pull request operations
+- [1-5-github-platform-implementation-task-5.md](./1-5-github-platform-implementation-task-5.md) - Add authentication and security
+- [1-5-github-platform-implementation-task-6.md](./1-5-github-platform-implementation-task-6.md) - Integrate GitHub Actions and Review APIs
+- [1-5-github-platform-implementation-task-7.md](./1-5-github-platform-implementation-task-7.md) - Add pagination and rate limit handling
+- [1-5-github-platform-implementation-task-8.md](./1-5-github-platform-implementation-task-8.md) - Create comprehensive test suite
+
 ## Dev Notes
 
 ### ⚠️ Development Process Reminder
 
 **Before implementing this story, ensure you have:**
+
 1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
 3. ✅ Reviewed relevant documentation in `docs/` directory
 4. ✅ Checked existing code patterns for similar functionality
 5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
-
 
 ### Requirements Context Summary
 
@@ -117,9 +129,9 @@ so that I can validate the platform abstraction with the most popular Git hostin
 
 ## Change Log
 
-| Date | Version | Changes | Author |
-|------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
+| Date       | Version | Changes                | Author             |
+| ---------- | ------- | ---------------------- | ------------------ |
+| 2025-10-28 | 1.0.0   | Initial story creation | Bob (Scrum Master) |
 
 ## Dev Agent Record
 
