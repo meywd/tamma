@@ -1,0 +1,776 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-7-backup-and-recovery" version="1.0.0">
+  <metadata>
+    <title>Backup and Recovery</title>
+    <epic>1.5</epic>
+    <story-type>infrastructure</story-type>
+    <priority>high</priority>
+    <created>2025-01-07T12:00:00.000Z</created>
+    <updated>2025-01-07T12:00:00.000Z</updated>
+    <author>Bob</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <dependencies>
+    <upstream>
+      <dependency story="1.5-1">Core Engine Separation</dependency>
+      <dependency story="1.5-2">Configuration Management</dependency>
+      <dependency story="1.5-3">Environment-Specific Deployments</dependency>
+      <dependency story="1.5-4">Secret Management Integration</dependency>
+      <dependency story="1.5-5">Docker Packaging</dependency>
+      <dependency story="1.5-6">Health Checks and Monitoring</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="2-1">Issue Selection with Filtering</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Backup and Recovery</component>
+    <layer>Infrastructure</layer>
+    <pattern>Disaster Recovery</pattern>
+    <principles>
+      <principle>Point-in-time recovery</principle>
+      <principle>Automated backup schedules</principle>
+      <principle>Multi-region redundancy</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <backup-strategies>
+      <strategy name="database">
+        <description>PostgreSQL database backups</description>
+        <type>incremental + full</type>
+        <schedule>
+          <full_backup>daily at 02:00 UTC</full_backup>
+          <incremental_backup>hourly</incremental_backup>
+          <wal_archiving>continuous</wal_archiving>
+        </schedule>
+        <retention>
+          <daily>30 days</daily>
+          <weekly>12 weeks</weekly>
+          <monthly>12 months</monthly>
+          <yearly>7 years</yearly>
+        </retention>
+        <storage>
+          <primary>local</primary>
+          <secondary>cloud</secondary>
+          <tertiary>offsite</tertiary>
+        </storage>
+        <encryption>AES-256-GCM</encryption>
+        <compression>gzip</compression>
+      </strategy>
+
+      <strategy name="configuration">
+        <description>Configuration and secrets backup</description>
+        <type>full</type>
+        <schedule>
+          <backup>every 6 hours</backup>
+          <on_change>true</on_change>
+        </schedule>
+        <retention>
+          <daily>90 days</daily>
+          <monthly>12 months</monthly>
+        </retention>
+        <storage>
+          <primary>encrypted cloud storage</primary>
+          <secondary>version control</secondary>
+        </storage>
+        <encryption>AES-256-GCM</encryption>
+      </strategy>
+
+      <strategy name="artifacts">
+        <description>Build artifacts and generated code</description>
+        <type>incremental</type>
+        <schedule>
+          <backup>daily at 03:00 UTC</backup>
+        </schedule>
+        <retention>
+          <daily>30 days</daily>
+          <weekly>12 weeks</weekly>
+        </retention>
+        <storage>
+          <primary>object storage</primary>
+          <secondary>glacier</secondary>
+        </storage>
+        <encryption>server-side</encryption>
+      </strategy>
+
+      <strategy name="logs">
+        <description>Application and system logs</description>
+        <type>streaming</type>
+        <schedule>
+          <backup>continuous</backup>
+        </schedule>
+        <retention>
+          <real_time>7 days</real_time>
+          <warm>30 days</warm>
+          <cold>90 days</cold>
+        </retention>
+        <storage>
+          <primary>log aggregation system</primary>
+          <secondary>object storage</secondary>
+        </storage>
+        <compression>snappy</compression>
+      </strategy>
+    </backup-strategies>
+
+    <recovery-procedures>
+      <procedure name="database_recovery">
+        <description>Database point-in-time recovery</description>
+        <rto>4 hours</rto>
+        <rpo>15 minutes</rpo>
+        <steps>
+          <step order="1">Identify recovery point in time</step>
+          <step order="2">Restore latest full backup</step>
+          <step order="3">Apply incremental backups</step>
+          <step order="4">Replay WAL logs to recovery point</step>
+          <step order="5">Verify data integrity</step>
+          <step order="6">Update application configuration</step>
+          <step order="7">Test application connectivity</step>
+          <step order="8">Switch traffic to recovered instance</step>
+        </steps>
+        <validation>
+          <check name="data_integrity">Checksum verification</check>
+          <check name="record_counts">Compare with expected counts</check>
+          <check name="application_tests">Run smoke tests</check>
+        </validation>
+      </procedure>
+
+      <procedure name="configuration_recovery">
+        <description>Configuration and secrets recovery</description>
+        <rto>30 minutes</rto>
+        <rpo>6 hours</rpo>
+        <steps>
+          <step order="1">Identify required configuration version</step>
+          <step order="2">Restore configuration files</step>
+          <step order="3">Restore secrets from secure storage</step>
+          <step order="4">Validate configuration schema</step>
+          <step order="5">Test service startup</step>
+          <step order="6">Verify service connectivity</step>
+        </steps>
+      </procedure>
+
+      <procedure name="disaster_recovery">
+        <description>Full system disaster recovery</description>
+        <rto>24 hours</rto>
+        <rpo>1 hour</rpo>
+        <steps>
+          <step order="1">Declare disaster and activate DR plan</step>
+          <step order="2">Provision infrastructure in DR region</step>
+          <step order="3">Restore database from latest backup</step>
+          <step order="4">Restore configuration and secrets</step>
+          <step order="5">Deploy application services</step>
+          <step order="6">Restore artifacts and logs</step>
+          <step order="7">Update DNS and load balancers</step>
+          <step order="8">Run comprehensive testing</step>
+          <step order="9">Switch production traffic</step>
+          <step order="10">Monitor system stability</step>
+        </steps>
+      </procedure>
+    </recovery-procedures>
+
+    <backup-storage>
+      <storage name="local">
+        <description>Local backup storage</description>
+        <type>disk</type>
+        <location>/backups</location>
+        <capacity>10TB</capacity>
+        <performance>high</performance>
+        <encryption>at-rest</encryption>
+        <access>direct</access>
+      </storage>
+
+      <storage name="cloud">
+        <description>Cloud backup storage</description>
+        <type>object-storage</type>
+        <provider>AWS S3 / Azure Blob</provider>
+        <capacity>unlimited</capacity>
+        <performance>medium</performance>
+        <encryption>server-side + client-side</encryption>
+        <access>api</access>
+        <redundancy>multi-region</redundancy>
+      </storage>
+
+      <storage name="offsite">
+        <description>Offsite backup storage</description>
+        <type>tape / cold-storage</type>
+        <location>secure data center</location>
+        <capacity>100TB</capacity>
+        <performance>low</performance>
+        <encryption>hardware</encryption>
+        <access>physical</access>
+      </storage>
+    </backup-storage>
+  </technical-specifications>
+
+  <data-models>
+    <backup-model>
+      <interface name="IBackup">
+        <properties>
+          <property name="id" type="string"/>
+          <property name="type" type="BackupType"/>
+          <property name="strategy" type="BackupStrategy"/>
+          <property name="status" type="BackupStatus"/>
+          <property name="size" type="number"/>
+          <property name="checksum" type="string"/>
+          <property name="created_at" type="datetime"/>
+          <property name="expires_at" type="datetime"/>
+          <property name="location" type="string[]"/>
+          <property name="metadata" type="Record&lt;string, unknown&gt;"/>
+        </properties>
+      </interface>
+
+      <interface name="IBackupJob">
+        <properties>
+          <property name="id" type="string"/>
+          <property name="type" type="BackupType"/>
+          <property name="schedule" type="ISchedule"/>
+          <property name="status" type="JobStatus"/>
+          <property name="started_at" type="datetime" optional="true"/>
+          <property name="completed_at" type="datetime" optional="true"/>
+          <property name="duration" type="number" optional="true"/>
+          <property name="backup_id" type="string" optional="true"/>
+          <property name="error" type="string" optional="true"/>
+        </properties>
+      </interface>
+
+      <interface name="IRecoveryPlan">
+        <properties>
+          <property name="id" type="string"/>
+          <property name="name" type="string"/>
+          <property name="type" type="RecoveryType"/>
+          <property name="rto" type="number"/>
+          <property name="rpo" type="number"/>
+          <property name="steps" type="IRecoveryStep[]"/>
+          <property name="dependencies" type="string[]"/>
+          <property name="validation_checks" type="IValidationCheck[]"/>
+        </properties>
+      </interface>
+    </backup-model>
+
+    <types>
+      <type name="BackupType" enum="['database', 'configuration', 'artifacts', 'logs']"/>
+      <type name="BackupStrategy" enum="['full', 'incremental', 'differential', 'streaming']"/>
+      <type name="BackupStatus" enum="['pending', 'running', 'completed', 'failed', 'expired']"/>
+      <type name="JobStatus" enum="['scheduled', 'running', 'completed', 'failed', 'cancelled']"/>
+      <type name="RecoveryType" enum="['database', 'configuration', 'disaster']"/>
+    </types>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IBackupManager">
+      <description>Central backup management interface</description>
+      <methods>
+        <method name="createBackup" returns="Promise&lt;IBackup&gt;">
+          <param name="type" type="BackupType"/>
+          <param name="strategy" type="BackupStrategy"/>
+          <param name="options" type="IBackupOptions" optional="true"/>
+        </method>
+        <method name="scheduleBackup" returns="Promise&lt;IBackupJob&gt;">
+          <param name="type" type="BackupType"/>
+          <param name="schedule" type="ISchedule"/>
+          <param name="options" type="IBackupOptions" optional="true"/>
+        </method>
+        <method name="restoreBackup" returns="Promise&lt;IRestoreResult&gt;">
+          <param name="backup_id" type="string"/>
+          <param name="target" type="string"/>
+          <param name="options" type="IRestoreOptions" optional="true"/>
+        </method>
+        <method name="listBackups" returns="Promise&lt;IBackup[]&gt;">
+          <param name="filter" type="IBackupFilter" optional="true"/>
+        </method>
+        <method name="deleteBackup" returns="Promise&lt;void&gt;">
+          <param name="backup_id" type="string"/>
+        </method>
+        <method name="verifyBackup" returns="Promise&lt;IVerificationResult&gt;">
+          <param name="backup_id" type="string"/>
+        </method>
+        <method name="getBackupStatus" returns="Promise&lt;IBackupStatus&gt;">
+          <param name="backup_id" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IRecoveryManager">
+      <description>Recovery management interface</description>
+      <methods>
+        <method name="executeRecoveryPlan" returns="Promise&lt;IRecoveryResult&gt;">
+          <param name="plan_id" type="string"/>
+          <param name="options" type="IRecoveryOptions" optional="true"/>
+        </method>
+        <method name="createRecoveryPlan" returns="Promise&lt;IRecoveryPlan&gt;">
+          <param name="name" type="string"/>
+          <param name="type" type="RecoveryType"/>
+          <param name="steps" type="IRecoveryStep[]"/>
+        </method>
+        <method name="validateRecoveryPlan" returns="Promise&lt;IValidationResult&gt;">
+          <param name="plan_id" type="string"/>
+        </method>
+        <method name="testRecoveryPlan" returns="Promise&lt;ITestResult&gt;">
+          <param name="plan_id" type="string"/>
+        </method>
+        <method name="getRecoveryStatus" returns="Promise&lt;IRecoveryStatus&gt;">
+          <param name="execution_id" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IBackupStorage">
+      <description>Backup storage interface</description>
+      <methods>
+        <method name="store" returns="Promise&lt;string&gt;">
+          <param name="data" type="Buffer"/>
+          <param name="metadata" type="IStorageMetadata"/>
+        </method>
+        <method name="retrieve" returns="Promise&lt;Buffer&gt;">
+          <param name="location" type="string"/>
+        </method>
+        <method name="delete" returns="Promise&lt;void&gt;">
+          <param name="location" type="string"/>
+        </method>
+        <method name="list" returns="Promise&lt;IStorageItem[]&gt;">
+          <param name="prefix" type="string" optional="true"/>
+        </method>
+        <method name="verify" returns="Promise&lt;boolean&gt;">
+          <param name="location" type="string"/>
+          <param name="checksum" type="string"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="BackupManager">
+      <description>Default backup manager implementation</description>
+      <properties>
+        <property name="strategies" type="Map&lt;BackupType, IBackupStrategy&gt;"/>
+        <property name="storage" type="IBackupStorage[]"/>
+        <property name="scheduler" type="IScheduler"/>
+        <property name="encryptor" type="IEncryptor"/>
+        <property name="logger" type="ILogger"/>
+      </properties>
+      <methods>
+        <method name="createBackup" returns="Promise&lt;IBackup&gt;"/>
+        <method name="scheduleBackup" returns="Promise&lt;IBackupJob&gt;"/>
+        <method name="restoreBackup" returns="Promise&lt;IRestoreResult&gt;"/>
+        <method name="listBackups" returns="Promise&lt;IBackup[]&gt;"/>
+        <method name="deleteBackup" returns="Promise&lt;void&gt;"/>
+        <method name="verifyBackup" returns="Promise&lt;IVerificationResult&gt;"/>
+        <method name="getBackupStatus" returns="Promise&lt;IBackupStatus&gt;"/>
+        <method name="_executeBackupStrategy" returns="Promise&lt;IBackup&gt;"/>
+        <method name="_storeBackup" returns="Promise&lt;string[]&gt;"/>
+        <method name="_encryptBackup" returns="Promise&lt;Buffer&gt;"/>
+        <method name="_calculateChecksum" returns="string"/>
+      </methods>
+    </class>
+
+    <class name="DatabaseBackupStrategy">
+      <description>Database backup strategy implementation</description>
+      <implements>IBackupStrategy</implements>
+      <properties>
+        <property name="db_client" type="DatabaseClient"/>
+        <property name="backup_tool" type="string"/>
+      </properties>
+      <methods>
+        <method name="createBackup" returns="Promise&lt;IBackupData&gt;"/>
+        <method name="createIncrementalBackup" returns="Promise&lt;IBackupData&gt;"/>
+        <method name="verifyBackup" returns="Promise&lt;boolean&gt;"/>
+        <method name="_executePgDump" returns="Promise&lt;Buffer&gt;"/>
+        <method name="_getWALFiles" returns="Promise&lt;string[]&gt;"/>
+      </methods>
+    </class>
+
+    <class name="CloudBackupStorage">
+      <description>Cloud backup storage implementation</description>
+      <implements>IBackupStorage</implements>
+      <properties>
+        <property name="client" type="S3Client"/>
+        <property name="bucket" type="string"/>
+        <property name="encryption_key" type="string"/>
+      </properties>
+      <methods>
+        <method name="store" returns="Promise&lt;string&gt;"/>
+        <method name="retrieve" returns="Promise&lt;Buffer&gt;"/>
+        <method name="delete" returns="Promise&lt;void&gt;"/>
+        <method name="list" returns="Promise&lt;IStorageItem[]&gt;"/>
+        <method name="verify" returns="Promise&lt;boolean&gt;"/>
+        <method name="_generateObjectKey" returns="string"/>
+        <method name="_encryptData" returns="Promise&lt;Buffer&gt;"/>
+        <method name="_decryptData" returns="Promise&lt;Buffer&gt;"/>
+      </methods>
+    </class>
+
+    <class name="RecoveryManager">
+      <description>Default recovery manager implementation</description>
+      <properties>
+        <property name="backup_manager" type="IBackupManager"/>
+        <property name="plans" type="Map&lt;string, IRecoveryPlan&gt;"/>
+        <property name="executor" type="IRecoveryExecutor"/>
+        <property name="validator" type="IRecoveryValidator"/>
+      </properties>
+      <methods>
+        <method name="executeRecoveryPlan" returns="Promise&lt;IRecoveryResult&gt;"/>
+        <method name="createRecoveryPlan" returns="Promise&lt;IRecoveryPlan&gt;"/>
+        <method name="validateRecoveryPlan" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="testRecoveryPlan" returns="Promise&lt;ITestResult&gt;"/>
+        <method name="getRecoveryStatus" returns="Promise&lt;IRecoveryStatus&gt;"/>
+        <method name="_executeRecoverySteps" returns="Promise&lt;void&gt;"/>
+        <method name="_validateRecovery" returns="Promise&lt;IValidationResult&gt;"/>
+      </methods>
+    </class>
+
+    <class name="BackupScheduler">
+      <description>Backup job scheduler</description>
+      <properties>
+        <property name="jobs" type="Map&lt;string, IBackupJob&gt;"/>
+        <property name="cron" type="CronScheduler"/>
+        <property name="backup_manager" type="IBackupManager"/>
+      </properties>
+      <methods>
+        <method name="schedule" returns="Promise&lt;IBackupJob&gt;"/>
+        <method name="unschedule" returns="Promise&lt;void&gt;"/>
+        <method name="runScheduledJobs" returns="Promise&lt;void&gt;"/>
+        <method name="_executeJob" returns="Promise&lt;void&gt;"/>
+        <method name="_updateJobStatus" returns="void"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="database">
+      <component>PostgreSQL</component>
+      <interface>Database Client</interface>
+      <description>Database backup and recovery</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>PostgreSQL protocol</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="cloud-storage">
+      <component>AWS S3 / Azure Blob</component>
+      <interface>Object Storage API</interface>
+      <description>Cloud backup storage</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>HTTP/HTTPS</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="monitoring">
+      <component>Monitoring System</component>
+      <interface>Metrics API</interface>
+      <description>Backup and recovery monitoring</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>HTTP</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <data-sources>
+    <source name="backup-metadata">
+      <type>database</type>
+      <format>JSON</format>
+      <location>PostgreSQL - backups table</location>
+      <access-pattern>read-write</access-pattern>
+    </source>
+
+    <source name="backup-storage">
+      <type>object-storage</type>
+      <format>encrypted</format>
+      <location>Cloud storage buckets</location>
+      <access-pattern>read-write</access-pattern>
+    </source>
+
+    <source name="recovery-plans">
+      <type>file</type>
+      <format>YAML</format>
+      <location>recovery/plans/</location>
+      <access-pattern>read-on-load</access-pattern>
+    </source>
+  </data-sources>
+
+  <api-endpoints>
+    <endpoint name="create-backup" method="POST" path="/api/v1/backups">
+      <description>Create a new backup</description>
+      <parameters>
+        <parameter name="type" type="BackupType">Backup type</parameter>
+        <parameter name="strategy" type="BackupStrategy">Backup strategy</parameter>
+        <parameter name="options" type="IBackupOptions" optional="true">Backup options</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Backup created</response>
+        <response code="400">Invalid backup parameters</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="list-backups" method="GET" path="/api/v1/backups">
+      <description>List available backups</description>
+      <parameters>
+        <parameter name="type" type="BackupType" optional="true">Filter by type</parameter>
+        <parameter name="status" type="BackupStatus" optional="true">Filter by status</parameter>
+        <parameter name="limit" type="number" optional="true">Maximum results</parameter>
+      </parameters>
+      <responses>
+        <response code="200">List of backups</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="restore-backup" method="POST" path="/api/v1/backups/{backup_id}/restore">
+      <description>Restore from backup</description>
+      <parameters>
+        <parameter name="backup_id" type="string">Backup identifier</parameter>
+        <parameter name="target" type="string">Restore target</parameter>
+        <parameter name="options" type="IRestoreOptions" optional="true">Restore options</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Restore started</response>
+        <response code="404">Backup not found</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="execute-recovery" method="POST" path="/api/v1/recovery">
+      <description>Execute recovery plan</description>
+      <parameters>
+        <parameter name="plan_id" type="string">Recovery plan identifier</parameter>
+        <parameter name="options" type="IRecoveryOptions" optional="true">Recovery options</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Recovery started</response>
+        <response code="404">Recovery plan not found</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="backup-status" method="GET" path="/api/v1/backups/{backup_id}/status">
+      <description>Get backup status</description>
+      <parameters>
+        <parameter name="backup_id" type="string">Backup identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Backup status</response>
+        <response code="404">Backup not found</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>90%</coverage>
+      <focus>
+        <area>Backup creation logic</area>
+        <area>Restore procedures</area>
+        <area>Encryption/decryption</area>
+        <area>Scheduling logic</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>80%</coverage>
+      <focus>
+        <area>Database backup/restore</area>
+        <area>Cloud storage integration</area>
+        <area>Recovery plan execution</area>
+        <area>Multi-storage replication</area>
+      </focus>
+    </integration-tests>
+
+    <disaster-recovery-tests>
+      <coverage>70%</coverage>
+      <focus>
+        <area>Full disaster recovery</area>
+        <area>Point-in-time recovery</area>
+        <area>Corruption scenarios</area>
+        <area>Network failure scenarios</area>
+      </focus>
+    </disaster-recovery-tests>
+
+    <test-data>
+      <test-backups>
+        <backup name="test-database-full">Full database backup</backup>
+        <backup name="test-database-incremental">Incremental database backup</backup>
+        <backup name="test-configuration">Configuration backup</backup>
+      </test-backups>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="backup-data-exposure">
+        <description>Sensitive data exposed in backups</description>
+        <mitigation>Encryption, access controls, secure storage</mitigation>
+      </threat>
+      <threat name="backup-tampering">
+        <description>Backups tampered or corrupted</description>
+        <mitigation>Checksums, digital signatures, immutable storage</mitigation>
+      </threat>
+      <threat name="unauthorized-restore">
+        <description>Unauthorized restore operations</description>
+        <mitigation>Authentication, authorization, audit logging</mitigation>
+      </threat>
+      <threat name="backup-failure">
+        <description>Backup failures causing data loss</description>
+        <mitigation>Monitoring, verification, multiple storage locations</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="encryption">
+        <description>Encrypt all backup data</description>
+        <implementation>AES-256-GCM, key management</implementation>
+      </control>
+      <control name="access-control">
+        <description>Control access to backup operations</description>
+        <implementation>RBAC, MFA, audit logging</implementation>
+      </control>
+      <control name="integrity-verification">
+        <description>Verify backup integrity</description>
+        <implementation>Checksums, digital signatures, regular verification</implementation>
+      </control>
+      <control name="multi-location">
+        <description>Store backups in multiple locations</description>
+        <implementation>Local, cloud, offsite storage</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="backup_duration" type="histogram">Backup execution time</metric>
+      <metric name="backup_success_rate" type="counter">Successful vs failed backups</metric>
+      <metric name="backup_size" type="histogram">Backup file sizes</metric>
+      <metric name="restore_duration" type="histogram">Restore execution time</metric>
+      <metric name="storage_utilization" type="gauge">Backup storage usage</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="backup_failure">
+        <condition>backup_success_rate &lt; 95%</condition>
+        <severity>critical</severity>
+        <action>Investigate backup failures</action>
+      </alert>
+      <alert name="backup_duration_high">
+        <condition>backup_duration p95 &gt; 3600000ms</condition>
+        <severity>warning</severity>
+        <action>Investigate slow backups</action>
+      </alert>
+      <alert name="storage_full">
+        <condition>storage_utilization &gt; 90%</condition>
+        <severity>critical</severity>
+        <action>Cleanup old backups or expand storage</action>
+      </alert>
+      <alert name="restore_failure">
+        <condition>restore_success_rate &lt; 90%</condition>
+        <severity>critical</severity>
+        <action>Investigate restore failures</action>
+      </alert>
+    </alerts>
+
+    <dashboards>
+      <dashboard name="backup-overview">
+        <widgets>
+          <widget type="chart">Backup success rate over time</widget>
+          <widget type="table">Recent backup jobs</widget>
+          <widget type="gauge">Storage utilization</widget>
+          <widget type="chart">Backup duration distribution</widget>
+        </widgets>
+      </dashboard>
+    </dashboards>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/backup-recovery.schema.ts</file-location>
+    <backup-configs>
+      <config name="database">config/backup/database.yaml</config>
+      <config name="configuration">config/backup/configuration.yaml</config>
+      <config name="artifacts">config/backup/artifacts.yaml</config>
+      <config name="logs">config/backup/logs.yaml</config>
+    </backup-configs>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <user-docs>
+      <doc name="backup-guide">User guide for backup operations</doc>
+      <doc name="recovery-guide">Recovery procedures guide</doc>
+      <doc name="disaster-recovery">Disaster recovery procedures</doc>
+    </user-docs>
+
+    <developer-docs>
+      <doc name="backup-api">API documentation for backup operations</doc>
+      <doc name="custom-backup-strategies">Creating custom backup strategies</doc>
+      <doc name="recovery-planning">Planning recovery procedures</doc>
+    </developer-docs>
+
+    <operations-docs>
+      <doc name="backup-runbook">Backup operations runbook</doc>
+      <doc name="recovery-runbook">Recovery operations runbook</doc>
+      <doc name="disaster-recovery-runbook">Disaster recovery runbook</doc>
+    </operations-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>System creates automated backups for all critical data types</description>
+      <verification>Automated backup schedule testing</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Backups are encrypted and stored in multiple locations</description>
+      <verification>Encryption and multi-location testing</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>System can restore data to any point in time within RPO</description>
+      <verification>Point-in-time recovery testing</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Recovery procedures meet RTO and RPO objectives</description>
+      <verification>Recovery time testing</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Backup integrity is verified automatically</description>
+      <verification>Integrity verification testing</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Disaster recovery can be executed with minimal manual intervention</description>
+      <verification>DR procedure testing</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>System provides backup and recovery monitoring dashboards</description>
+      <verification>Dashboard functionality testing</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="critical">
+      <description>Data loss due to backup failures</description>
+      <mitigation>Multiple backup strategies, verification, monitoring</mitigation>
+    </risk>
+
+    <risk id="risk2" level="high">
+      <description>Recovery time exceeds RTO requirements</description>
+      <mitigation>Automated procedures, documentation, regular testing</mitigation>
+    </risk>
+
+    <risk id="risk3" level="medium">
+      <description>Backup storage costs become prohibitive</description>
+      <mitigation>Retention policies, compression, tiered storage</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="backup_success_rate" target="&gt; 99%">Percentage of successful backups</metric>
+    <metric name="rto_achievement" target="&lt; 4h">Recovery time objective achievement</metric>
+    <metric name="rpo_achievement" target="&lt; 15min">Recovery point objective achievement</metric>
+    <metric name="backup_verification_rate" target="100%">Percentage of verified backups</metric>
+  </success-metrics>
+</story-context>

@@ -1,0 +1,1143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>2-8</story-id>
+  <title>Error Handling and Recovery</title>
+  <epic>2</epic>
+  <theme>Autonomous Loop</theme>
+  <created-at>2025-11-08T11:00:00.000Z</created-at>
+  <updated-at>2025-11-08T11:00:00.000Z</updated-at>
+  
+  <summary>
+    Implements comprehensive error handling and recovery mechanisms for autonomous 
+    development workflows. Provides intelligent error classification, automated recovery 
+    strategies, and resilient failure handling across all system components.
+  </summary>
+
+  <dependencies>
+    <dependency story-id="2-7">Notification System</dependency>
+    <dependency story-id="2-6">PR Creation and Management</dependency>
+    <dependency story-id="2-3">Workflow Orchestration</dependency>
+  </dependencies>
+
+  <acceptance-criteria>
+    <criteria id="AC1" priority="MUST">
+      Classify errors by type, severity, and recoverability
+    </criteria>
+    <criteria id="AC2" priority="MUST">
+      Implement automated recovery strategies for common failures
+    </criteria>
+    <criteria id="AC3" priority="MUST">
+      Provide circuit breaker patterns for external service failures
+    </criteria>
+    <criteria id="AC4" priority="MUST">
+      Support retry mechanisms with exponential backoff
+    </criteria>
+    <criteria id="AC5" priority="SHOULD">
+      Implement graceful degradation for non-critical failures
+    </criteria>
+    <criteria id="AC6" priority="SHOULD">
+      Provide comprehensive error logging and alerting
+    </criteria>
+    <criteria id="AC7" priority="COULD">
+      Support self-healing mechanisms for infrastructure issues
+    </criteria>
+    <criteria id="AC8" priority="COULD">
+      Implement predictive failure detection and prevention
+    </criteria>
+  </acceptance-criteria>
+
+  <technical-context>
+    <data-models>
+      <model name="Error">
+        <description>Represents an error in the system</description>
+        <fields>
+          <field name="id" type="string" required="true">Unique error identifier</field>
+          <field name="type" type="ErrorType" required="true">Error type classification</field>
+          <field name="severity" type="ErrorSeverity" required="true">Error severity level</field>
+          <field name="category" type="ErrorCategory" required="true">Error category</field>
+          <field name="code" type="string" required="true">Error code</field>
+          <field name="message" type="string" required="true">Error message</field>
+          <field name="description" type="string" required="false">Detailed error description</field>
+          <field name="source" type="ErrorSource" required="true">Error source information</field>
+          <field name="context" type="Record&lt;string, unknown&gt;" required="false">Error context</field>
+          <field name="stackTrace" type="string" required="false">Stack trace</field>
+          <field name="recoverable" type="boolean" required="true">Whether error is recoverable</field>
+          <field name="retryable" type="boolean" required="true">Whether error is retryable</field>
+          <field name="maxRetries" type="number" required="false">Maximum retry attempts</field>
+          <field name="retryCount" type="number" required="true">Current retry count</field>
+          <field name="recoveryStrategy" type="RecoveryStrategy" required="false">Recovery strategy to apply</field>
+          <field name="status" type="ErrorStatus" required="true">Current error status</field>
+          <field name="resolvedAt" type="string" required="false">Resolution timestamp</field>
+          <field name="createdAt" type="string" required="true">Creation timestamp</field>
+          <field name="updatedAt" type="string" required="true">Last update timestamp</field>
+        </fields>
+      </model>
+
+      <model name="ErrorType">
+        <description>Enumeration of error types</description>
+        <values>
+          <value>SYSTEM</value>
+          <value>NETWORK</value>
+          <value>DATABASE</value>
+          <value>API</value>
+          <value>AUTHENTICATION</value>
+          <value>AUTHORIZATION</value>
+          <value>VALIDATION</value>
+          <value>BUSINESS_LOGIC</value>
+          <value>EXTERNAL_SERVICE</value>
+          <value>TIMEOUT</value>
+          <value>RESOURCE_EXHAUSTION</value>
+          <value>CONFIGURATION</value>
+          <value>DEPENDENCY</value>
+        </values>
+      </model>
+
+      <model name="ErrorSeverity">
+        <description>Enumeration of error severities</description>
+        <values>
+          <value>LOW</value>
+          <value>MEDIUM</value>
+          <value>HIGH</value>
+          <value>CRITICAL</value>
+          <value>FATAL</value>
+        </values>
+      </model>
+
+      <model name="ErrorCategory">
+        <description>Enumeration of error categories</description>
+        <values>
+          <value>TRANSIENT</value>
+          <value>PERMANENT</value>
+          <value>INTERMITTENT</value>
+          <value>DEGRADED</value>
+          <value>CASCADING</value>
+        </values>
+      </model>
+
+      <model name="ErrorStatus">
+        <description>Enumeration of error statuses</description>
+        <values>
+          <value>ACTIVE</value>
+          <value>RETRYING</value>
+          <value>RECOVERING</value>
+          <value>RESOLVED</value>
+          <value>ESCALATED</value>
+          <value>SUPPRESSED</value>
+        </values>
+      </model>
+
+      <model name="ErrorSource">
+        <description>Error source information</description>
+        <fields>
+          <field name="component" type="string" required="true">Component name</field>
+          <field name="service" type="string" required="false">Service name</field>
+          <field name="operation" type="string" required="false">Operation name</field>
+          <field name="workflowId" type="string" required="false">Workflow ID</field>
+          <field name="taskId" type="string" required="false">Task ID</field>
+          <field name="userId" type="string" required="false">User ID</field>
+          <field name="requestId" type="string" required="false">Request ID</field>
+          <field name="sessionId" type="string" required="false">Session ID</field>
+          <field name="version" type="string" required="false">Component version</field>
+        </fields>
+      </model>
+
+      <model name="RecoveryStrategy">
+        <description>Recovery strategy configuration</description>
+        <fields>
+          <field name="type" type="RecoveryType" required="true">Recovery type</field>
+          <field name="action" type="RecoveryAction" required="true">Recovery action</field>
+          <field name="parameters" type="Record&lt;string, unknown&gt;" required="false">Recovery parameters</field>
+          <field name="conditions" type="RecoveryCondition[]" required="false">Recovery conditions</field>
+          <field name="timeout" type="number" required="false">Recovery timeout in seconds</field>
+          <field name="maxAttempts" type="number" required="false">Maximum recovery attempts</field>
+        </fields>
+      </model>
+
+      <model name="RecoveryType">
+        <description>Enumeration of recovery types</description>
+        <values>
+          <value>RETRY</value>
+          <value>CIRCUIT_BREAKER</value>
+          <value>FALLBACK</value>
+          <value>GRACEFUL_DEGRADATION</value>
+          <value>MANUAL_INTERVENTION</value>
+          <value>SELF_HEALING</value>
+          <value>ESCALATION</value>
+        </values>
+      </model>
+
+      <model name="RecoveryAction">
+        <description>Enumeration of recovery actions</description>
+        <values>
+          <value>RETRY_OPERATION</value>
+          <value>RESET_CONNECTION</value>
+          <value>SWITCH_PROVIDER</value>
+          <value>USE_CACHE</value>
+          <value>SKIP_OPERATION</value>
+          <value>USE_FALLBACK</value>
+          <value>RESTART_SERVICE</value>
+          <value>SCALE_RESOURCES</value>
+          <value>NOTIFY_ADMIN</value>
+        </values>
+      </model>
+
+      <model name="RecoveryCondition">
+        <description>Condition for applying recovery strategy</description>
+        <fields>
+          <field name="field" type="string" required="true">Field to evaluate</field>
+          <field name="operator" type="ConditionOperator" required="true">Comparison operator</field>
+          <field name="value" type="string" required="true">Comparison value</field>
+        </fields>
+      </model>
+
+      <model name="ConditionOperator">
+        <description>Enumeration of condition operators</description>
+        <values>
+          <value>EQUALS</value>
+          <value>NOT_EQUALS</value>
+          <value>GREATER_THAN</value>
+          <value>LESS_THAN</value>
+          <value>CONTAINS</value>
+          <value>STARTS_WITH</value>
+          <value>ENDS_WITH</value>
+          <value>IN</value>
+          <value>NOT_IN</value>
+        </values>
+      </model>
+
+      <model name="CircuitBreaker">
+        <description>Circuit breaker state</description>
+        <fields>
+          <field name="id" type="string" required="true">Circuit breaker ID</field>
+          <field name="service" type="string" required="true">Service name</field>
+          <field name="state" type="CircuitState" required="true">Current state</field>
+          <field name="failureCount" type="number" required="true">Current failure count</field>
+          <field name="successCount" type="number" required="true">Current success count</field>
+          <field name="failureThreshold" type="number" required="true">Failure threshold</field>
+          <field name="successThreshold" type="number" required="true">Success threshold</field>
+          <field name="timeout" type="number" required="true">Timeout duration</field>
+          <field name="lastFailureTime" type="string" required="false">Last failure timestamp</field>
+          <field name="lastStateChange" type="string" required="true">Last state change timestamp</field>
+        </fields>
+      </model>
+
+      <model name="CircuitState">
+        <description>Enumeration of circuit states</description>
+        <values>
+          <value>CLOSED</value>
+          <value>OPEN</value>
+          <value>HALF_OPEN</value>
+        </values>
+      </model>
+
+      <model name="RetryPolicy">
+        <description>Retry policy configuration</description>
+        <fields>
+          <field name="id" type="string" required="true">Policy ID</field>
+          <field name="maxAttempts" type="number" required="true">Maximum retry attempts</field>
+          <field name="baseDelay" type="number" required="true">Base delay in milliseconds</field>
+          <field name="maxDelay" type="number" required="true">Maximum delay in milliseconds</field>
+          <field name="backoffMultiplier" type="number" required="true">Backoff multiplier</field>
+          <field name="jitter" type="boolean" required="true">Whether to add jitter</field>
+          <field name="retryableErrors" type="string[]" required="false">List of retryable error codes</field>
+          <field name="nonRetryableErrors" type="string[]" required="false">List of non-retryable error codes</field>
+        </fields>
+      </model>
+
+      <model name="ErrorPattern">
+        <description>Error pattern for classification</description>
+        <fields>
+          <field name="id" type="string" required="true">Pattern ID</field>
+          <field name="name" type="string" required="true">Pattern name</field>
+          <field name="description" type="string" required="false">Pattern description</field>
+          <field name="conditions" type="ErrorCondition[]" required="true">Matching conditions</field>
+          <field name="classification" type="ErrorClassification" required="true">Error classification</field>
+          <field name="recoveryStrategy" type="RecoveryStrategy" required="false">Default recovery strategy</field>
+          <field name="enabled" type="boolean" required="true">Whether pattern is enabled</field>
+        </fields>
+      </model>
+
+      <model name="ErrorCondition">
+        <description>Condition for error pattern matching</description>
+        <fields>
+          <field name="field" type="string" required="true">Field to evaluate</field>
+          <field name="operator" type="ConditionOperator" required="true">Comparison operator</field>
+          <field name="value" type="string" required="true">Comparison value</field>
+          <field name="caseSensitive" type="boolean" required="true">Whether comparison is case sensitive</field>
+        </fields>
+      </model>
+
+      <model name="ErrorClassification">
+        <description>Error classification result</description>
+        <fields>
+          <field name="type" type="ErrorType" required="true">Error type</field>
+          <field name="severity" type="ErrorSeverity" required="true">Error severity</field>
+          <field name="category" type="ErrorCategory" required="true">Error category</field>
+          <field name="recoverable" type="boolean" required="true">Whether recoverable</field>
+          <field name="retryable" type="boolean" required="true">Whether retryable</field>
+        </fields>
+      </model>
+
+      <model name="ErrorReport">
+        <description>Error analysis report</description>
+        <fields>
+          <field name="id" type="string" required="true">Report ID</field>
+          <field name="period" type="TimePeriod" required="true">Analysis period</field>
+          <field name="totalErrors" type="number" required="true">Total error count</field>
+          <field name="errorsByType" type="Record&lt;ErrorType, number&gt;" required="true">Errors by type</field>
+          <field name="errorsBySeverity" type="Record&lt;ErrorSeverity, number&gt;" required="true">Errors by severity</field>
+          <field name="errorsByComponent" type="Record&lt;string, number&gt;" required="true">Errors by component</field>
+          <field name="recoverySuccessRate" type="number" required="true">Recovery success rate</field>
+          <field name="topErrors" type="ErrorSummary[]" required="true">Top occurring errors</field>
+          <field name="trends" type="ErrorTrend[]" required="true">Error trends</field>
+          <field name="recommendations" type="string[]" required="false">Recommendations</field>
+          <field name="generatedAt" type="string" required="true">Report generation timestamp</field>
+        </fields>
+      </model>
+
+      <model name="TimePeriod">
+        <description>Time period for analysis</description>
+        <fields>
+          <field name="start" type="string" required="true">Start timestamp</field>
+          <field name="end" type="string" required="true">End timestamp</field>
+        </fields>
+      </model>
+
+      <model name="ErrorSummary">
+        <description>Error summary information</description>
+        <fields>
+          <field name="code" type="string" required="true">Error code</field>
+          <field name="message" type="string" required="true">Error message</field>
+          <field name="count" type="number" required="true">Occurrence count</field>
+          <field name="percentage" type="number" required="true">Percentage of total</field>
+          <field name="recoveryRate" type="number" required="true">Recovery success rate</field>
+        </fields>
+      </model>
+
+      <model name="ErrorTrend">
+        <description>Error trend information</description>
+        <fields>
+          <field name="period" type="string" required="true">Time period</field>
+          <field name="count" type="number" required="true">Error count</field>
+          <field name="change" type="number" required="true">Change from previous period</field>
+          <field name="changePercentage" type="number" required="true">Percentage change</field>
+        </fields>
+      </model>
+    </data-models>
+
+    <interfaces>
+      <interface name="IErrorHandler">
+        <description>Main error handler interface</description>
+        <methods>
+          <method name="handleError" async="true">
+            <param name="error" type="Error">Error to handle</param>
+            <returns type="ErrorHandlingResult">Handling result</returns>
+          </method>
+          <method name="classifyError" async="true">
+            <param name="errorData" type="unknown">Raw error data</param>
+            <returns type="ErrorClassification">Error classification</returns>
+          </method>
+          <method name="determineRecoveryStrategy" async="true">
+            <param name="error" type="Error">Classified error</param>
+            <returns type="RecoveryStrategy">Recovery strategy</returns>
+          </method>
+          <method name="executeRecovery" async="true">
+            <param name="error" type="Error">Error to recover from</param>
+            <param name="strategy" type="RecoveryStrategy">Recovery strategy</param>
+            <returns type="RecoveryResult">Recovery result</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IErrorClassifier">
+        <description>Interface for error classification</description>
+        <methods>
+          <method name="classify" async="true">
+            <param name="errorData" type="unknown">Raw error data</param>
+            <returns type="ErrorClassification">Error classification</returns>
+          </method>
+          <method name="addPattern" async="true">
+            <param name="pattern" type="ErrorPattern">Error pattern</param>
+            <returns type="boolean">Pattern addition success</returns>
+          </method>
+          <method name="removePattern" async="true">
+            <param name="patternId" type="string">Pattern ID</param>
+            <returns type="boolean">Pattern removal success</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IRecoveryEngine">
+        <description>Interface for recovery execution</description>
+        <methods>
+          <method name="executeStrategy" async="true">
+            <param name="strategy" type="RecoveryStrategy">Recovery strategy</param>
+            <param name="context" type="RecoveryContext">Recovery context</param>
+            <returns type="RecoveryResult">Recovery result</returns>
+          </method>
+          <method name="registerHandler" async="true">
+            <param name="action" type="RecoveryAction">Recovery action</param>
+            <param name="handler" type="RecoveryHandler">Recovery handler</param>
+            <returns type="boolean">Handler registration success</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="ICircuitBreakerManager">
+        <description>Interface for circuit breaker management</description>
+        <methods>
+          <method name="createCircuitBreaker">
+            <param name="config" type="CircuitBreakerConfig">Circuit breaker configuration</param>
+            <returns type="ICircuitBreaker">Circuit breaker instance</returns>
+          </method>
+          <method name="getCircuitBreaker">
+            <param name="serviceId" type="string">Service identifier</param>
+            <returns type="ICircuitBreaker">Circuit breaker instance</returns>
+          </method>
+          <method name="removeCircuitBreaker">
+            <param name="serviceId" type="string">Service identifier</param>
+            <returns type="boolean">Removal success</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="ICircuitBreaker">
+        <description>Interface for individual circuit breaker</description>
+        <methods>
+          <method name="execute" async="true">
+            <param name="operation" type="Function">Operation to execute</param>
+            <returns type="unknown">Operation result</returns>
+          </method>
+          <method name="getState">
+            <returns type="CircuitState">Current state</returns>
+          </method>
+          <method name="recordSuccess">
+            <returns type="void">Records success</returns>
+          </method>
+          <method name="recordFailure">
+            <returns type="void">Records failure</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IRetryManager">
+        <description>Interface for retry management</description>
+        <methods>
+          <method name="executeWithRetry" async="true">
+            <param name="operation" type="Function">Operation to retry</param>
+            <param name="policy" type="RetryPolicy">Retry policy</param>
+            <returns type="unknown">Operation result</returns>
+          </method>
+          <method name="createPolicy">
+            <param name="config" type="RetryPolicyConfig">Policy configuration</param>
+            <returns type="RetryPolicy">Retry policy</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IErrorReporter">
+        <description>Interface for error reporting and analytics</description>
+        <methods>
+          <method name="generateReport" async="true">
+            <param name="period" type="TimePeriod">Analysis period</param>
+            <returns type="ErrorReport">Error report</returns>
+          </method>
+          <method name="getErrorTrends" async="true">
+            <param name="period" type="TimePeriod">Analysis period</param>
+            <returns type="ErrorTrend[]">Error trends</returns>
+          </method>
+          <method name="getTopErrors" async="true">
+            <param name="period" type="TimePeriod">Analysis period</param>
+            <param name="limit" type="number">Result limit</param>
+            <returns type="ErrorSummary[]">Top errors</returns>
+          </method>
+        </methods>
+      </interface>
+    </interfaces>
+
+    <key-classes>
+      <class name="ErrorHandler">
+        <description>Main error handler implementation</description>
+        <implements>IErrorHandler</implements>
+        <dependencies>
+          <dependency>IErrorClassifier</dependency>
+          <dependency>IRecoveryEngine</dependency>
+          <dependency>ICircuitBreakerManager</dependency>
+          <dependency>IRetryManager</dependency>
+          <dependency>IEventStore</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="handleError" visibility="public" async="true">
+            <description>Handles an error with classification and recovery</description>
+            <implementation>
+              1. Create error record from raw data
+              2. Classify error using patterns
+              3. Determine recovery strategy
+              4. Execute recovery if applicable
+              5. Update error status
+              6. Emit error handling events
+              7. Return handling result
+            </implementation>
+          </method>
+          <method name="classifyError" visibility="public" async="true">
+            <description>Classifies error based on patterns</description>
+            <implementation>
+              1. Extract error features
+              2. Match against error patterns
+              3. Apply classification rules
+              4. Return classification result
+            </implementation>
+          </method>
+          <method name="determineRecoveryStrategy" visibility="public" async="true">
+            <description>Determines optimal recovery strategy</description>
+            <implementation>
+              1. Check error recoverability
+              2. Evaluate available strategies
+              3. Consider error context
+              4. Select best strategy
+              5. Return strategy configuration
+            </implementation>
+          </method>
+          <method name="executeRecovery" visibility="public" async="true">
+            <description>Executes recovery strategy</description>
+            <implementation>
+              1. Validate recovery conditions
+              2. Execute recovery action
+              3. Monitor recovery progress
+              4. Update error status
+              5. Return recovery result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="ErrorClassifier">
+        <description>Error pattern-based classifier</description>
+        <implements>IErrorClassifier</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="classify" visibility="public" async="true">
+            <description>Classifies error using pattern matching</description>
+            <implementation>
+              1. Parse error data
+              2. Extract relevant fields
+              3. Match against patterns in priority order
+              4. Apply default classification if no match
+              5. Return classification result
+            </implementation>
+          </method>
+          <method name="addPattern" visibility="public" async="true">
+            <description>Adds new error pattern</description>
+            <implementation>
+              1. Validate pattern configuration
+              2. Add to pattern registry
+              3. Update pattern index
+              4. Return addition success
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="RecoveryEngine">
+        <description>Recovery strategy execution engine</description>
+        <implements>IRecoveryEngine</implements>
+        <dependencies>
+          <dependency>ICircuitBreakerManager</dependency>
+          <dependency>IRetryManager</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="executeStrategy" visibility="public" async="true">
+            <description>Executes recovery strategy</description>
+            <implementation>
+              1. Validate strategy configuration
+              2. Select appropriate handler
+              3. Execute recovery action
+              4. Monitor execution
+              5. Handle recovery failures
+              6. Return recovery result
+            </implementation>
+          </method>
+          <method name="registerHandler" visibility="public" async="true">
+            <description>Registers recovery handler</description>
+            <implementation>
+              1. Validate handler interface
+              2. Add to handler registry
+              3. Return registration success
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="CircuitBreakerManager">
+        <description>Circuit breaker management service</description>
+        <implements>ICircuitBreakerManager</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="createCircuitBreaker" visibility="public">
+            <description>Creates new circuit breaker</description>
+            <implementation>
+              1. Validate configuration
+              2. Create circuit breaker instance
+              3. Register in manager
+              4. Return circuit breaker
+            </implementation>
+          </method>
+          <method name="getCircuitBreaker" visibility="public">
+            <description>Gets existing circuit breaker</description>
+            <implementation>
+              1. Lookup circuit breaker by service ID
+              2. Return instance or null
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="CircuitBreaker">
+        <description>Individual circuit breaker implementation</description>
+        <implements>ICircuitBreaker</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes operation with circuit breaking</description>
+            <implementation>
+              1. Check circuit state
+              2. Reject if circuit is open
+              3. Execute operation if allowed
+              4. Record success/failure
+              5. Update circuit state
+              6. Return operation result
+            </implementation>
+          </method>
+          <method name="recordSuccess" visibility="public">
+            <description>Records successful operation</description>
+            <implementation>
+              1. Increment success count
+              2. Reset failure count if needed
+              3. Update circuit state
+            </implementation>
+          </method>
+          <method name="recordFailure" visibility="public">
+            <description>Records failed operation</description>
+            <implementation>
+              1. Increment failure count
+              2. Check failure threshold
+              3. Open circuit if threshold exceeded
+              4. Update last failure time
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="RetryManager">
+        <description>Retry management service</description>
+        <implements>IRetryManager</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="executeWithRetry" visibility="public" async="true">
+            <description>Executes operation with retry logic</description>
+            <implementation>
+              1. Validate retry policy
+              2. Execute operation
+              3. Check if error is retryable
+              4. Calculate delay with backoff
+              5. Retry if within limits
+              6. Return final result or error
+            </implementation>
+          </method>
+          <method name="createPolicy" visibility="public">
+            <description>Creates retry policy</description>
+            <implementation>
+              1. Validate policy configuration
+              2. Create policy instance
+              3. Return policy
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="ErrorReporter">
+        <description>Error reporting and analytics service</description>
+        <implements>IErrorReporter</implements>
+        <dependencies>
+          <dependency>IEventStore</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="generateReport" visibility="public" async="true">
+            <description>Generates error analysis report</description>
+            <implementation>
+              1. Query error events for period
+              2. Aggregate error statistics
+              3. Calculate trends and patterns
+              4. Generate recommendations
+              5. Return error report
+            </implementation>
+          </method>
+          <method name="getErrorTrends" visibility="public" async="true">
+            <description>Calculates error trends</description>
+            <implementation>
+              1. Group errors by time periods
+              2. Calculate period-over-period changes
+              3. Identify significant trends
+              4. Return trend analysis
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="RecoveryHandlers">
+        <description>Collection of recovery handlers</description>
+        <methods>
+          <method name="retryOperation" visibility="public" async="true">
+            <description>Handler for retry recovery action</description>
+            <implementation>
+              1. Extract operation context
+              2. Re-execute original operation
+              3. Handle retry result
+              4. Return recovery status
+            </implementation>
+          </method>
+          <method name="switchProvider" visibility="public" async="true">
+            <description>Handler for provider switching</description>
+            <implementation>
+              1. Identify alternative providers
+              2. Select best alternative
+              3. Update configuration
+              4. Retry with new provider
+              5. Return recovery status
+            </implementation>
+          </method>
+          <method name="useFallback" visibility="public" async="true">
+            <description>Handler for fallback usage</description>
+            <implementation>
+              1. Identify fallback mechanism
+              2. Execute fallback operation
+              3. Validate fallback result
+              4. Return recovery status
+            </implementation>
+          </method>
+          <method name="notifyAdmin" visibility="public" async="true">
+            <description>Handler for admin notification</description>
+            <implementation>
+              1. Format error notification
+              2. Send to admin channels
+              3. Log notification
+              4. Return recovery status
+            </implementation>
+          </method>
+        </methods>
+      </class>
+    </key-classes>
+
+    <integration-points>
+      <integration name="Monitoring Integration">
+        <description>Integration with monitoring and alerting systems</description>
+        <systems>
+          <system>Prometheus</system>
+          <system>Grafana</system>
+          <system>PagerDuty</system>
+          <system>Opsgenie</system>
+        </systems>
+        <operations>
+          <operation>Error metrics collection</operation>
+          <operation>Alert triggering</operation>
+          <operation>Dashboard updates</operation>
+          <operation>Incident creation</operation>
+        </operations>
+      </integration>
+
+      <integration name="Logging Integration">
+        <description>Integration with logging systems</description>
+        <systems>
+          <system>ELK Stack</system>
+          <system>Splunk</system>
+          <system>CloudWatch Logs</system>
+          <system>Azure Monitor</system>
+        </systems>
+        <operations>
+          <operation>Structured error logging</operation>
+          <operation>Log aggregation</operation>
+          <operation>Error correlation</operation>
+          <operation>Log analysis</operation>
+        </operations>
+      </integration>
+
+      <integration name="Notification Integration">
+        <description>Integration with notification systems</description>
+        <systems>
+          <system>Email</system>
+          <system>Slack</system>
+          <system>Teams</system>
+          <system>Webhooks</system>
+        </systems>
+        <operations>
+          <operation>Error notifications</operation>
+          <operation>Recovery status updates</operation>
+          <operation>Escalation alerts</operation>
+          <operation>Admin notifications</operation>
+        </operations>
+      </integration>
+    </integration-points>
+
+    <api-endpoints>
+      <endpoint method="POST" path="/api/v1/errors">
+        <description>Report an error</description>
+        <request-body type="ErrorReportRequest">Error details</request-body>
+        <response type="Error">Created error record</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/errors/{errorId}">
+        <description>Get error details</description>
+        <response type="Error">Error details</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/errors/{errorId}/recover">
+        <description>Manually trigger error recovery</description>
+        <request-body type="ManualRecoveryRequest">Recovery request</request-body>
+        <response type="RecoveryResult">Recovery result</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+          <code>409</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/errors">
+        <description>List errors with filters</description>
+        <query-params>
+          <param name="type" type="ErrorType">Filter by type</param>
+          <param name="severity" type="ErrorSeverity">Filter by severity</param>
+          <param name="status" type="ErrorStatus">Filter by status</param>
+          <param name="component" type="string">Filter by component</param>
+          <param name="fromDate" type="string">Filter by date range (start)</param>
+          <param name="toDate" type="string">Filter by date range (end)</param>
+        </query-params>
+        <response type="Error[]">List of errors</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/errors/reports">
+        <description>Generate error analysis report</description>
+        <query-params>
+          <param name="period" type="string">Analysis period (e.g., 24h, 7d, 30d)</param>
+          <param name="format" type="string">Report format (json, csv)</param>
+        </query-params>
+        <response type="ErrorReport">Error report</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/circuit-breakers">
+        <description>List circuit breakers</description>
+        <response type="CircuitBreaker[]">List of circuit breakers</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/circuit-breakers/{serviceId}">
+        <description>Get circuit breaker details</description>
+        <response type="CircuitBreaker">Circuit breaker details</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/circuit-breakers/{serviceId}/reset">
+        <description>Reset circuit breaker</description>
+        <response type="boolean">Reset success</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/retry-policies">
+        <description>List retry policies</description>
+        <response type="RetryPolicy[]">List of retry policies</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/retry-policies">
+        <description>Create retry policy</description>
+        <request-body type="RetryPolicyConfig">Policy configuration</request-body>
+        <response type="RetryPolicy">Created policy</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+    </api-endpoints>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="ErrorHandler Tests">
+          <test-case name="should classify error correctly">
+            <description>Tests error classification with patterns</description>
+            <setup>Mock error patterns, classifier</setup>
+            <input>Raw error data</input>
+            <expected>Correct error classification</expected>
+          </test-case>
+          <test-case name="should execute recovery strategy">
+            <description>Tests recovery strategy execution</description>
+            <setup>Mock recovery engine, strategy</setup>
+            <input>Error and recovery strategy</input>
+            <expected>Successful recovery execution</expected>
+          </test-case>
+          <test-case name="should handle non-recoverable errors">
+            <description>Tests handling of non-recoverable errors</description>
+            <setup>Mock non-recoverable error</setup>
+            <input>Non-recoverable error</input>
+            <expected>Error marked as non-recoverable</expected>
+          </test-case>
+        </test-suite>
+
+        <test-suite name="CircuitBreaker Tests">
+          <test-case name="should open circuit on failure threshold">
+            <description>Tests circuit breaker opening</description>
+            <setup>Circuit breaker with failure threshold</setup>
+            <input>Multiple failures</input>
+            <expected>Circuit opens after threshold</expected>
+          </test-case>
+          <test-case name="should close circuit on success">
+            <description>Tests circuit breaker closing</description>
+            <setup>Open circuit breaker</setup>
+            <input>Successful operations</input>
+            <expected>Circuit closes after success threshold</expected>
+          </test-case>
+        </test-suite>
+
+        <test-suite name="RetryManager Tests">
+          <test-case name="should retry with exponential backoff">
+            <description>Tests retry with exponential backoff</description>
+            <setup>Retry policy with backoff</setup>
+            <input>Failing operation</input>
+            <expected>Retries with increasing delays</expected>
+          </test-case>
+          <test-case name="should respect retry limits">
+            <description>Tests retry limit enforcement</description>
+            <setup>Retry policy with max attempts</setup>
+            <input>Consistently failing operation</input>
+            <expected>Stops after max attempts</expected>
+          </test-case>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test-suite name="Error Recovery Integration">
+          <test-case name="should recover from service failure">
+            <description>Tests recovery from external service failure</description>
+            <setup>Failing external service, recovery handlers</setup>
+            <input>Service operation failure</input>
+            <expected>Successful recovery with fallback</expected>
+          </test-case>
+        </test-suite>
+
+        <test-suite name="Monitoring Integration">
+          <test-case name="should send error metrics">
+            <description>Tests error metrics collection</description>
+            <setup>Monitoring system integration</setup>
+            <input>Error occurrence</input>
+            <expected>Metrics sent to monitoring system</expected>
+          </test-case>
+        </test-suite>
+      </integration-tests>
+
+      <end-to-end-tests>
+        <test-suite name="Error Handling Lifecycle Tests">
+          <test-case name="should handle complete error lifecycle">
+            <description>Tests error from occurrence to resolution</description>
+            <setup>Complete error handling environment</setup>
+            <input>System error occurrence</input>
+            <expected>Error classified, recovered, and resolved</expected>
+          </test-case>
+        </test-suite>
+      </end-to-end-tests>
+    </testing-strategy>
+
+    <security-considerations>
+      <consideration name="Error Information Disclosure">
+        <description>Prevent sensitive information in error messages</description>
+        <implementation>
+          - Sanitize error messages
+          - Remove sensitive data from context
+          - Use generic error messages for external users
+          - Log detailed errors internally
+        </implementation>
+      </consideration>
+
+      <consideration name="Error Injection Attacks">
+        <description>Prevent error injection and manipulation</description>
+        <implementation>
+          - Validate error input data
+          - Sanitize error messages
+          - Prevent error code injection
+          - Use structured error handling
+        </implementation>
+      </consideration>
+
+      <consideration name="Recovery Security">
+        <description>Secure recovery operations</description>
+        <implementation>
+          - Validate recovery actions
+          - Authorize recovery attempts
+          - Audit recovery operations
+          - Prevent privilege escalation
+        </implementation>
+      </consideration>
+    </security-considerations>
+
+    <monitoring-requirements>
+      <metric name="error_rate">
+        <description>Rate of errors occurring</description>
+        <type>counter</type>
+        <labels>
+          <label>type</label>
+          <label>severity</label>
+          <label>component</label>
+        </labels>
+        <thresholds>
+          <threshold level="warning">5/min</threshold>
+          <threshold level="critical">10/min</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="recovery_success_rate">
+        <description>Success rate of error recovery</description>
+        <type>gauge</type>
+        <unit>percentage</unit>
+        <thresholds>
+          <threshold level="warning">80%</threshold>
+          <threshold level="critical">60%</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="circuit_breaker_state">
+        <description>Circuit breaker states</description>
+        <type>gauge</type>
+        <labels>
+          <label>service</label>
+          <label>state</label>
+        </labels>
+      </metric>
+
+      <metric name="retry_attempts">
+        <description>Number of retry attempts</description>
+        <type>counter</type>
+        <labels>
+          <label>operation</label>
+          <label>outcome</label>
+        </labels>
+      </metric>
+
+      <metric name="error_handling_duration">
+        <description>Time taken to handle errors</description>
+        <type>histogram</type>
+        <unit>milliseconds</unit>
+        <thresholds>
+          <threshold level="warning">5000ms</threshold>
+          <threshold level="critical">10000ms</threshold>
+        </thresholds>
+      </metric>
+    </monitoring-requirements>
+
+    <success-metrics>
+      <metric name="error_recovery_rate">
+        <target>90%</target>
+        <description>Percentage of errors successfully recovered</description>
+      </metric>
+
+      <metric name="mean_time_to_recovery">
+        <target>&lt;5 minutes</target>
+        <description>Average time to recover from errors</description>
+      </metric>
+
+      <metric name="circuit_breaker_effectiveness">
+        <target>95%</target>
+        <description>Percentage of cascading failures prevented</description>
+      </metric>
+
+      <metric name="error_classification_accuracy">
+        <target>95%</target>
+        <description>Accuracy of automatic error classification</description>
+      </metric>
+
+      <metric name="self_healing_success_rate">
+        <target>85%</target>
+        <description>Success rate of automated self-healing</description>
+      </metric>
+    </success-metrics>
+
+    <risk-mitigation>
+      <risk name="Recovery Failures">
+        <probability>Medium</probability>
+        <impact>High</impact>
+        <mitigation>
+          - Implement multiple recovery strategies
+          - Use fallback mechanisms
+          - Monitor recovery success rates
+          - Provide manual override options
+        </mitigation>
+      </risk>
+
+      <risk name="Circuit Breaker False Positives">
+        <probability>Low</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Tune circuit breaker thresholds
+          - Use adaptive thresholds
+          - Monitor circuit breaker states
+          - Provide manual reset capabilities
+        </mitigation>
+      </risk>
+
+      <risk name="Retry Storms">
+        <probability>Medium</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Implement jitter in retry delays
+          - Use circuit breakers with retries
+          - Monitor retry volumes
+          - Limit concurrent retries
+        </mitigation>
+      </risk>
+
+      <risk name="Error Classification Errors">
+        <probability>Low</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Validate error patterns
+          - Use multiple classification methods
+          - Monitor classification accuracy
+          - Provide manual classification override
+        </mitigation>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
+</story-context>

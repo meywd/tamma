@@ -1,0 +1,863 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="4-3-performance-metrics-collection" version="1.0.0">
+  <metadata>
+    <title>Performance Metrics Collection</title>
+    <epic>4</epic>
+    <story-type>core</story-type>
+    <priority>high</priority>
+    <created>2025-01-07T12:00:00.000Z</created>
+    <updated>2025-01-07T12:00:00.000Z</updated>
+    <author>Bob</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <dependencies>
+    <upstream>
+      <dependency story="4-1">Task Execution Engine</dependency>
+      <dependency story="4-2">Benchmark Execution Engine</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="4-4">Result Aggregation</dependency>
+      <dependency story="4-5">Benchmark Reporting</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Metrics Collection</component>
+    <layer>Core</layer>
+    <pattern>Metrics Pipeline</pattern>
+    <principles>
+      <principle>High-frequency collection</principle>
+      <principle>Low overhead</principle>
+      <principle>Real-time processing</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <metrics-collection>
+      <collector name="performance-metrics">
+        <description>High-performance metrics collection system</description>
+        <collection_frequency>
+          <high_frequency>100ms</high_frequency>
+          <medium_frequency>1s</medium_frequency>
+          <low_frequency>10s</low_frequency>
+        </collection_frequency>
+
+        <metric_types>
+          <type name="response-time">
+            <description>Response time metrics</description>
+            <unit>milliseconds</unit>
+            <collection>high_frequency</collection>
+            <aggregations>
+              <aggregation name="min">Minimum value</aggregation>
+              <aggregation name="max">Maximum value</aggregation>
+              <aggregation name="mean">Average value</aggregation>
+              <aggregation name="p50">50th percentile</aggregation>
+              <aggregation name="p95">95th percentile</aggregation>
+              <aggregation name="p99">99th percentile</aggregation>
+            </aggregations>
+          </type>
+
+          <type name="throughput">
+            <description>Throughput metrics</description>
+            <unit>requests/second</unit>
+            <collection>medium_frequency</collection>
+            <aggregations>
+              <aggregation name="rate">Current rate</aggregation>
+              <aggregation name="total">Total count</aggregation>
+              <aggregation name="average">Average rate</aggregation>
+            </aggregations>
+          </type>
+
+          <type name="error-rate">
+            <description>Error rate metrics</description>
+            <unit>percentage</unit>
+            <collection>medium_frequency</collection>
+            <aggregations>
+              <aggregation name="current">Current error rate</aggregation>
+              <aggregation name="rolling_1m">1-minute rolling average</aggregation>
+              <aggregation name="rolling_5m">5-minute rolling average</aggregation>
+            </aggregations>
+          </type>
+
+          <type name="resource-utilization">
+            <description>Resource utilization metrics</description>
+            <unit>percentage</unit>
+            <collection>low_frequency</collection>
+            <aggregations>
+              <aggregation name="cpu">CPU utilization</aggregation>
+              <aggregation name="memory">Memory utilization</aggregation>
+              <aggregation name="disk">Disk utilization</aggregation>
+              <aggregation name="network">Network utilization</aggregation>
+            </aggregations>
+          </type>
+
+          <type name="cost-metrics">
+            <description>Cost-related metrics</description>
+            <unit>USD</unit>
+            <collection>low_frequency</collection>
+            <aggregations>
+              <aggregation name="per_request">Cost per request</aggregation>
+              <aggregation name="per_minute">Cost per minute</aggregation>
+              <aggregation name="total">Total cost</aggregation>
+            </aggregations>
+          </type>
+        </metric_types>
+
+        <collection_sources>
+          <source name="ai-providers">
+            <description>AI provider performance metrics</description>
+            <metrics>
+              <metric>response-time</metric>
+              <metric>throughput</metric>
+              <metric>error-rate</metric>
+              <metric>cost-metrics</metric>
+            </metrics>
+            <collection_method>api_monitoring</collection_method>
+            <sampling_rate>100%</sampling_rate>
+          </source>
+
+          <source name="git-platforms">
+            <description>Git platform performance metrics</description>
+            <metrics>
+              <metric>response-time</metric>
+              <metric>throughput</metric>
+              <metric>error-rate</metric>
+            </metrics>
+            <collection_method>api_monitoring</collection_method>
+            <sampling_rate>100%</sampling_rate>
+          </source>
+
+          <source name="system-resources">
+            <description>System resource metrics</description>
+            <metrics>
+              <metric>resource-utilization</metric>
+            </metrics>
+            <collection_method>system_monitoring</collection_method>
+            <sampling_rate>100%</sampling_rate>
+          </source>
+
+          <source name="application-metrics">
+            <description>Application-level metrics</description>
+            <metrics>
+              <metric>response-time</metric>
+              <metric>throughput</metric>
+              <metric>error-rate</metric>
+            </metrics>
+            <collection_method>instrumentation</collection_method>
+            <sampling_rate>10%</sampling_rate>
+          </source>
+        </collection_sources>
+      </collector>
+    </metrics-collection>
+
+    <data-pipeline>
+      <pipeline name="metrics-processing">
+        <description>Real-time metrics processing pipeline</description>
+        <stages>
+          <stage id="1" name="ingestion">
+            <description>Ingest raw metrics data</description>
+            <component>MetricsIngestor</component>
+            <buffer_size>10000</buffer_size>
+            <batch_size>100</batch_size>
+            <processing>parallel</processing>
+          </stage>
+
+          <stage id="2" name="validation">
+            <description>Validate and clean metrics data</description>
+            <component>MetricsValidator</component>
+            <rules>
+              <rule name="range_check">Validate metric ranges</rule>
+              <rule name="timestamp_check">Validate timestamp format</rule>
+              <rule name="schema_check">Validate data schema</rule>
+              <rule name="duplicate_check">Remove duplicate metrics</rule>
+            </rules>
+          </stage>
+
+          <stage id="3" name="enrichment">
+            <description>Enrich metrics with metadata</description>
+            <component>MetricsEnricher</component>
+            <enrichments>
+              <enrichment name="geolocation">Add geolocation data</enrichment>
+              <enrichment name="environment">Add environment context</enrichment>
+              <enrichment name="version">Add application version</enrichment>
+              <enrichment name="tags">Add custom tags</enrichment>
+            </enrichments>
+          </stage>
+
+          <stage id="4" name="aggregation">
+            <description>Aggregate metrics over time windows</description>
+            <component>MetricsAggregator</component>
+            <windows>
+              <window name="1m">1 minute aggregation</window>
+              <window name="5m">5 minute aggregation</window>
+              <window name="15m">15 minute aggregation</window>
+              <window name="1h">1 hour aggregation</window>
+            </windows>
+          </stage>
+
+          <stage id="5" name="storage">
+            <description>Store processed metrics</description>
+            <component>MetricsStorage</component>
+            <storage_layers>
+              <layer name="hot">Recent metrics (1 hour)</layer>
+              <layer name="warm">Recent metrics (24 hours)</layer>
+              <layer name="cold">Historical metrics (30 days)</layer>
+            </storage_layers>
+          </stage>
+        </stages>
+
+        <error_handling>
+          <strategy>dead_letter_queue</strategy>
+          <retry_attempts>3</retry_attempts>
+          <retry_backoff>exponential</retry_backoff>
+          <max_backoff>30s</max_backoff>
+        </error_handling>
+      </pipeline>
+    </data-pipeline>
+
+    <storage-architecture>
+      <storage name="time-series">
+        <description>Time series database for metrics</description>
+        <technology>InfluxDB</technology>
+        <retention>
+          <hot>1 hour</hot>
+          <warm>24 hours</warm>
+          <cold>30 days</cold>
+        </retention>
+        <schema>
+          <measurement name="ai_provider_metrics">
+            <tags>
+              <tag name="provider">AI provider name</tag>
+              <tag name="model">AI model name</tag>
+              <tag name="environment">Environment</tag>
+            </tags>
+            <fields>
+              <field name="response_time" type="float"/>
+              <field name="throughput" type="float"/>
+              <field name="error_rate" type="float"/>
+              <field name="cost" type="float"/>
+            </fields>
+          </measurement>
+
+          <measurement name="git_platform_metrics">
+            <tags>
+              <tag name="platform">Git platform name</tag>
+              <tag name="operation">Operation type</tag>
+              <tag name="environment">Environment</tag>
+            </tags>
+            <fields>
+              <field name="response_time" type="float"/>
+              <field name="throughput" type="float"/>
+              <field name="error_rate" type="float"/>
+            </fields>
+          </measurement>
+
+          <measurement name="system_metrics">
+            <tags>
+              <tag name="host">Host name</tag>
+              <tag name="service">Service name</tag>
+              <tag name="environment">Environment</tag>
+            </tags>
+            <fields>
+              <field name="cpu_usage" type="float"/>
+              <field name="memory_usage" type="float"/>
+              <field name="disk_usage" type="float"/>
+              <field name="network_usage" type="float"/>
+            </fields>
+          </measurement>
+        </schema>
+      </storage>
+
+      <storage name="metadata">
+        <description>Metadata storage for metrics</description>
+        <technology>PostgreSQL</technology>
+        <tables>
+          <table name="metric_definitions">
+            <description>Metric type definitions</description>
+            <columns>
+              <column name="id" type="uuid" primary="true"/>
+              <column name="name" type="string"/>
+              <column name="type" type="string"/>
+              <column name="unit" type="string"/>
+              <column name="description" type="text"/>
+              <column name="created_at" type="timestamp"/>
+            </columns>
+          </table>
+
+          <table name="collection_sources">
+            <description>Metrics collection sources</description>
+            <columns>
+              <column name="id" type="uuid" primary="true"/>
+              <column name="name" type="string"/>
+              <column name="type" type="string"/>
+              <column name="configuration" type="jsonb"/>
+              <column name="enabled" type="boolean"/>
+              <column name="created_at" type="timestamp"/>
+            </columns>
+          </table>
+        </tables>
+      </storage>
+    </storage-architecture>
+
+    <monitoring-alerting>
+      <monitoring name="metrics-health">
+        <description>Metrics collection health monitoring</description>
+        <health_checks>
+          <check name="collection_rate">
+            <description>Metrics collection rate monitoring</description>
+            <threshold>collection_rate &gt; 1000 metrics/minute</threshold>
+            <severity>warning</severity>
+          </check>
+
+          <check name="processing_latency">
+            <description>Metrics processing latency</description>
+            <threshold>processing_latency p95 &lt; 100ms</threshold>
+            <severity>warning</severity>
+          </check>
+
+          <check name="storage_health">
+            <description>Time series database health</description>
+            <threshold>storage_availability &gt; 99.9%</threshold>
+            <severity>critical</severity>
+          </check>
+
+          <check name="data_quality">
+            <description>Metrics data quality</description>
+            <threshold>invalid_metrics_rate &lt; 1%</threshold>
+            <severity>warning</severity>
+          </check>
+        </health_checks>
+      </monitoring>
+    </monitoring-alerting>
+  </technical-specifications>
+
+  <data-models>
+    <metrics-model>
+      <interface name="IMetric">
+        <properties>
+          <property name="id" type="string"/>
+          <property name="name" type="string"/>
+          <property name="type" type="MetricType"/>
+          <property name="value" type="number"/>
+          <property name="unit" type="string"/>
+          <property name="timestamp" type="datetime"/>
+          <property name="tags" type="Record&lt;string, string&gt;"/>
+          <property name="source" type="string"/>
+          <property name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </properties>
+      </interface>
+
+      <interface name="IMetricCollection">
+        <properties>
+          <property name="id" type="string"/>
+          <property name="source" type="string"/>
+          <property name="metrics" type="IMetric[]"/>
+          <property name="collected_at" type="datetime"/>
+          <property name="collection_duration" type="number"/>
+          <property name="status" type="CollectionStatus"/>
+        </properties>
+      </interface>
+
+      <interface name="IMetricAggregation">
+        <properties>
+          <property name="metric_name" type="string"/>
+          <property name="window" type="TimeWindow"/>
+          <property name="aggregation_type" type="AggregationType"/>
+          <property name="value" type="number"/>
+          <property name="timestamp" type="datetime"/>
+          <property name="sample_count" type="number"/>
+        </properties>
+      </interface>
+    </metrics-model>
+
+    <types>
+      <type name="MetricType" enum="['response-time', 'throughput', 'error-rate', 'resource-utilization', 'cost-metrics']"/>
+      <type name="CollectionStatus" enum="['success', 'partial', 'failed']"/>
+      <type name="TimeWindow" enum="['1m', '5m', '15m', '1h']"/>
+      <type name="AggregationType" enum="['min', 'max', 'mean', 'sum', 'count', 'p50', 'p95', 'p99']"/>
+    </types>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IMetricsCollector">
+      <description>Metrics collection interface</description>
+      <methods>
+        <method name="collectMetrics" returns="Promise&lt;IMetricCollection&gt;">
+          <param name="source" type="string"/>
+          <param name="metric_types" type="MetricType[]"/>
+          <param name="window" type="TimeWindow" optional="true"/>
+        </method>
+        <method name="startCollection" returns="Promise&lt;string&gt;">
+          <param name="source" type="string"/>
+          <param name="config" type="ICollectionConfig"/>
+        </method>
+        <method name="stopCollection" returns="Promise&lt;void&gt;">
+          <param name="collection_id" type="string"/>
+        </method>
+        <method name="getCollectionStatus" returns="Promise&lt;ICollectionStatus&gt;">
+          <param name="collection_id" type="string"/>
+        </method>
+        <method name="listCollections" returns="Promise&lt;ICollectionStatus[]&gt;"/>
+      </methods>
+    </interface>
+
+    <interface name="IMetricsProcessor">
+      <description>Metrics processing interface</description>
+      <methods>
+        <method name="process" returns="Promise&lt;IProcessingResult&gt;">
+          <param name="metrics" type="IMetric[]"/>
+          <param name="config" type="IProcessingConfig"/>
+        </method>
+        <method name="validate" returns="Promise&lt;IValidationResult&gt;">
+          <param name="metrics" type="IMetric[]"/>
+        </method>
+        <method name="enrich" returns="Promise&lt;IMetric[]&gt;">
+          <param name="metrics" type="IMetric[]"/>
+          <param name="enrichments" type="IEnrichment[]"/>
+        </method>
+        <method name="aggregate" returns="Promise&lt;IMetricAggregation[]&gt;">
+          <param name="metrics" type="IMetric[]"/>
+          <param name="windows" type="TimeWindow[]"/>
+          <param name="aggregations" type="AggregationType[]"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IMetricsStorage">
+      <description>Metrics storage interface</description>
+      <methods>
+        <method name="store" returns="Promise&lt;void&gt;">
+          <param name="metrics" type="IMetric[]"/>
+        </method>
+        <method name="query" returns="Promise&lt;IMetric[]&gt;">
+          <param name="query" type="IMetricsQuery"/>
+        </method>
+        <method name="aggregate" returns="Promise&lt;IMetricAggregation[]&gt;">
+          <param name="query" type="IAggregationQuery"/>
+        </method>
+        <method name="delete" returns="Promise&lt;void&gt;">
+          <param name="criteria" type="IDeletionCriteria"/>
+        </method>
+        <method name="getHealth" returns="Promise&lt;IStorageHealth&gt;"/>
+      </methods>
+    </interface>
+
+    <interface name="IMetricsSource">
+      <description>Metrics source interface</description>
+      <methods>
+        <method name="getMetrics" returns="Promise&lt;IMetric[]&gt;">
+          <param name="metric_types" type="MetricType[]"/>
+          <param name="time_range" type="ITimeRange"/>
+        </method>
+        <method name="isAvailable" returns="Promise&lt;boolean&gt;"/>
+        <method name="getConfiguration" returns="Promise&lt;ISourceConfiguration&gt;"/>
+        <method name="testConnection" returns="Promise&lt;IConnectionTest&gt;"/>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="MetricsCollector">
+      <description>Default metrics collector implementation</description>
+      <properties>
+        <property name="sources" type="Map&lt;string, IMetricsSource&gt;"/>
+        <property name="processor" type="IMetricsProcessor"/>
+        <property name="storage" type="IMetricsStorage"/>
+        <property name="scheduler" type="IScheduler"/>
+        <property name="collections" type="Map&lt;string, ICollectionStatus&gt;"/>
+        <property name="logger" type="ILogger"/>
+      </properties>
+      <methods>
+        <method name="collectMetrics" returns="Promise&lt;IMetricCollection&gt;"/>
+        <method name="startCollection" returns="Promise&lt;string&gt;"/>
+        <method name="stopCollection" returns="Promise&lt;void&gt;"/>
+        <method name="getCollectionStatus" returns="Promise&lt;ICollectionStatus&gt;"/>
+        <method name="listCollections" returns="Promise&lt;ICollectionStatus[]&gt;"/>
+        <method name="_scheduleCollection" returns="Promise&lt;void&gt;"/>
+        <method name="_executeCollection" returns="Promise&lt;IMetricCollection&gt;"/>
+        <method name="_processAndStore" returns="Promise&lt;void&gt;"/>
+      </methods>
+    </class>
+
+    <class name="AIProviderMetricsSource">
+      <description>AI provider metrics source</description>
+      <implements>IMetricsSource</implements>
+      <properties>
+        <property name="providers" type="Map&lt;string, IAIProvider&gt;"/>
+        <property name="monitor" type="IAPIMonitor"/>
+        <property name="config" type="ISourceConfiguration"/>
+      </properties>
+      <methods>
+        <method name="getMetrics" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="isAvailable" returns="Promise&lt;boolean&gt;"/>
+        <method name="getConfiguration" returns="Promise&lt;ISourceConfiguration&gt;"/>
+        <method name="testConnection" returns="Promise&lt;IConnectionTest&gt;"/>
+        <method name="_collectResponseTime" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="_collectThroughput" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="_collectErrorRate" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="_collectCostMetrics" returns="Promise&lt;IMetric[]&gt;"/>
+      </methods>
+    </class>
+
+    <class name="MetricsProcessor">
+      <description>Default metrics processor implementation</description>
+      <implements>IMetricsProcessor</implements>
+      <properties>
+        <property name="validator" type="IMetricsValidator"/>
+        <property name="enricher" type="IMetricsEnricher"/>
+        <property name="aggregator" type="IMetricsAggregator"/>
+        <property name="config" type="IProcessingConfig"/>
+      </properties>
+      <methods>
+        <method name="process" returns="Promise&lt;IProcessingResult&gt;"/>
+        <method name="validate" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="enrich" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="aggregate" returns="Promise&lt;IMetricAggregation[]&gt;"/>
+        <method name="_applyValidationRules" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="_applyEnrichments" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="_performAggregations" returns="Promise&lt;IMetricAggregation[]&gt;"/>
+      </methods>
+    </class>
+
+    <class name="InfluxDBMetricsStorage">
+      <description>InfluxDB metrics storage implementation</description>
+      <implements>IMetricsStorage</implements>
+      <properties>
+        <property name="client" type="InfluxDBClient"/>
+        <property name="database" type="string"/>
+        <property name="retention_policies" type="Map&lt;string, IRetentionPolicy&gt;"/>
+      </properties>
+      <methods>
+        <method name="store" returns="Promise&lt;void&gt;"/>
+        <method name="query" returns="Promise&lt;IMetric[]&gt;"/>
+        <method name="aggregate" returns="Promise&lt;IMetricAggregation[]&gt;"/>
+        <method name="delete" returns="Promise&lt;void&gt;"/>
+        <method name="getHealth" returns="Promise&lt;IStorageHealth&gt;"/>
+        <method name="_formatForStorage" returns="IPoint[]"/>
+        <method name="_parseFromStorage" returns="IMetric[]"/>
+        <method name="_buildQuery" returns="string"/>
+      </methods>
+    </class>
+
+    <class name="MetricsAggregator">
+      <description>Metrics aggregation implementation</description>
+      <properties>
+        <property name="window_manager" type="IWindowManager"/>
+        <property name="aggregation_functions" type="Map&lt;AggregationType, IAggregationFunction&gt;"/>
+      </properties>
+      <methods>
+        <method name="aggregate" returns="Promise&lt;IMetricAggregation[]&gt;"/>
+        <method name="_aggregateWindow" returns="Promise&lt;IMetricAggregation&gt;"/>
+        <method name="_calculateAggregation" returns="number"/>
+        <method name="_groupMetrics" returns="Map&lt;string, IMetric[]&gt;"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="ai-providers">
+      <component>AI Provider Registry</component>
+      <interface>IAIProvider</interface>
+      <description>Collect AI provider performance metrics</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>API monitoring</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="git-platforms">
+      <component>Git Platform Registry</component>
+      <interface>IGitPlatform</interface>
+      <description>Collect Git platform performance metrics</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>API monitoring</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="time-series-db">
+      <component>InfluxDB</component>
+      <interface>InfluxDB API</interface>
+      <description>Store time series metrics data</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>InfluxDB line protocol</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <data-sources>
+    <source name="metrics-data">
+      <type>time-series</type>
+      <format>InfluxDB line protocol</format>
+      <location>InfluxDB</location>
+      <access-pattern>write-query</access-pattern>
+    </source>
+
+    <source name="metrics-metadata">
+      <type>database</type>
+      <format>JSON</format>
+      <location>PostgreSQL - metrics_metadata table</location>
+      <access-pattern>read-write</access-pattern>
+    </source>
+
+    <source name="collection-config">
+      <type>file</type>
+      <format>YAML</format>
+      <location>config/metrics/collection.yaml</location>
+      <access-pattern>read-on-load</access-pattern>
+    </source>
+  </data-sources>
+
+  <api-endpoints>
+    <endpoint name="collect-metrics" method="POST" path="/api/v1/metrics/collect">
+      <description>Trigger metrics collection</description>
+      <parameters>
+        <parameter name="source" type="string">Metrics source</parameter>
+        <parameter name="metric_types" type="MetricType[]">Metric types to collect</parameter>
+        <parameter name="window" type="TimeWindow" optional="true">Time window</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Collection started</response>
+        <response code="400">Invalid collection parameters</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="query-metrics" method="GET" path="/api/v1/metrics/query">
+      <description>Query metrics data</description>
+      <parameters>
+        <parameter name="metric_name" type="string">Metric name</parameter>
+        <parameter name="start_time" type="datetime">Start time</parameter>
+        <parameter name="end_time" type="datetime">End time</parameter>
+        <parameter name="aggregation" type="AggregationType" optional="true">Aggregation type</parameter>
+        <parameter name="window" type="TimeWindow" optional="true">Time window</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Metrics data</response>
+        <response code="400">Invalid query parameters</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-collection-status" method="GET" path="/api/v1/metrics/collections/{collection_id}">
+      <description>Get collection status</description>
+      <parameters>
+        <parameter name="collection_id" type="string">Collection identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Collection status</response>
+        <response code="404">Collection not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="list-collections" method="GET" path="/api/v1/metrics/collections">
+      <description>List active collections</description>
+      <responses>
+        <response code="200">List of collections</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>90%</coverage>
+      <focus>
+        <area>Metrics collection logic</area>
+        <area>Data validation</area>
+        <area>Aggregation calculations</area>
+        <area>Storage operations</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>80%</coverage>
+      <focus>
+        <area>AI provider integration</area>
+        <area>Time series database integration</area>
+        <area>End-to-end pipeline</area>
+        <area>Error handling</area>
+      </focus>
+    </integration-tests>
+
+    <performance-tests>
+      <coverage>75%</coverage>
+      <focus>
+        <area>High-frequency collection</area>
+        <area>Large volume processing</area>
+        <area>Query performance</area>
+        <area>Storage throughput</area>
+      </focus>
+    </performance-tests>
+
+    <test-data>
+      <test-metrics>
+        <metric name="response-time-test">Test response time metrics</metric>
+        <metric name="throughput-test">Test throughput metrics</metric>
+        <metric name="error-rate-test">Test error rate metrics</metric>
+      </test-metrics>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="metrics-tampering">
+        <description>Unauthorized modification of metrics data</description>
+        <mitigation>Authentication, authorization, audit logging</mitigation>
+      </threat>
+      <threat name="data-exposure">
+        <description>Sensitive metrics data exposure</description>
+        <mitigation>Access controls, data redaction, encryption</mitigation>
+      </threat>
+      <threat name="resource-exhaustion">
+        <description>Metrics collection exhausting system resources</description>
+        <mitigation>Resource limits, monitoring, throttling</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="access-control">
+        <description>Control access to metrics operations</description>
+        <implementation>Authentication, RBAC, API keys</implementation>
+      </control>
+      <control name="data-protection">
+        <description>Protect sensitive metrics data</description>
+        <implementation>Encryption, redaction, access logging</implementation>
+      </control>
+      <control name="resource-management">
+        <description>Manage collection resource usage</description>
+        <implementation>Limits, quotas, monitoring</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="collection_rate" type="counter">Metrics collected per second</metric>
+      <metric name="processing_latency" type="histogram">Metrics processing time</metric>
+      <metric name="storage_write_latency" type="histogram">Storage write time</metric>
+      <metric name="query_latency" type="histogram">Query response time</metric>
+      <metric name="data_quality_score" type="gauge">Metrics data quality score</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="collection_rate_low">
+        <condition>collection_rate &lt; 100 metrics/minute</condition>
+        <severity>warning</severity>
+        <action>Investigate collection issues</action>
+      </alert>
+      <alert name="processing_latency_high">
+        <condition>processing_latency p95 &gt; 1000ms</condition>
+        <severity>warning</severity>
+        <action>Investigate processing bottlenecks</action>
+      </alert>
+      <alert name="storage_health_degraded">
+        <condition>storage_availability &lt; 99%</condition>
+        <severity>critical</severity>
+        <action>Investigate storage issues</action>
+      </alert>
+    </alerts>
+
+    <dashboards>
+      <dashboard name="metrics-collection-overview">
+        <widgets>
+          <widget type="chart">Collection rate over time</widget>
+          <widget type="table">Active collections</widget>
+          <widget type="gauge">Processing latency</widget>
+          <widget type="chart">Storage performance</widget>
+        </widgets>
+      </dashboard>
+    </dashboards>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/metrics-collection.schema.ts</file-location>
+    <metrics-configs>
+      <config name="collection">config/metrics/collection.yaml</config>
+      <config name="processing">config/metrics/processing.yaml</config>
+      <config name="storage">config/metrics/storage.yaml</config>
+    </metrics-configs>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <user-docs>
+      <doc name="metrics-guide">User guide for metrics collection</doc>
+      <doc name="metrics-querying">Querying metrics data</doc>
+      <doc name="metrics-visualization">Visualizing metrics</doc>
+    </user-docs>
+
+    <developer-docs>
+      <doc name="metrics-api">API documentation for metrics</doc>
+      <doc name="custom-sources">Creating custom metrics sources</doc>
+      <doc name="metrics-processing">Metrics processing pipeline</doc>
+    </developer-docs>
+
+    <operations-docs>
+      <doc name="metrics-monitoring">Monitoring metrics collection</doc>
+      <doc name="troubleshooting-metrics">Troubleshooting metrics issues</doc>
+      <doc name="metrics-scaling">Scaling metrics collection</doc>
+    </operations-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>System collects performance metrics from AI providers and Git platforms</description>
+      <verification>Integration testing with providers and platforms</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Metrics are processed and stored in real-time with low latency</description>
+      <verification>Performance testing of processing pipeline</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>System supports multiple aggregation types and time windows</description>
+      <verification>Aggregation functionality testing</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Metrics data is validated and cleaned before storage</description>
+      <verification>Data validation testing</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>System provides high-frequency collection with configurable rates</description>
+      <verification>Collection rate configuration testing</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Metrics can be queried efficiently with various filters</description>
+      <verification>Query performance testing</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>System provides real-time metrics visualization dashboards</description>
+      <verification>Dashboard functionality testing</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="high">
+      <description>High-frequency collection overwhelms system resources</description>
+      <mitigation>Resource limits, adaptive sampling, monitoring</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Metrics data quality issues affect analysis</description>
+      <mitigation>Validation, cleaning, quality monitoring</mitigation>
+    </risk>
+
+    <risk id="risk3" level="medium">
+      <description>Storage performance degrades with data volume</description>
+      <mitigation>Tiered storage, data retention, performance monitoring</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="collection_success_rate" target="&gt; 99%">Percentage of successful collections</metric>
+    <metric name="processing_latency" target="&lt; 100ms">Average processing latency</metric>
+    <metric name="query_response_time" target="&lt; 500ms">Average query response time</metric>
+    <metric name="data_quality_score" target="&gt; 0.95">Metrics data quality score</metric>
+  </success-metrics>
+</story-context>

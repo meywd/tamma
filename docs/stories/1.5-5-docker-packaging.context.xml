@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>1.5-5-docker-packaging</story-id>
+    <title>Docker Packaging</title>
+    <status>ready-for-dev</status>
+    <last-updated>2025-11-07T12:00:00Z</last-updated>
+    <version>1.0</version>
+  </metadata>
+
+  <technical-context>
+    <architecture-alignment>
+      <component>deployment/docker</component>
+      <component>packages/core</component>
+      <pattern>Containerization</pattern>
+      <pattern>Multi-stage Builds</pattern>
+      <pattern>Infrastructure as Code</pattern>
+    </architecture-alignment>
+    
+    <dependencies>
+      <dependency story="1.5-1">Core Engine Separation</dependency>
+      <dependency story="1.5-2">CLI Mode Enhancement</dependency>
+      <dependency story="1.5-3">Service Mode Implementation</dependency>
+    </dependencies>
+    
+    <data-models>
+      <model name="DockerConfig" path="deployment/docker/src/types/docker-config.ts" />
+      <model name="ImageMetadata" path="deployment/docker/src/types/image-metadata.ts" />
+      <model name="HealthCheck" path="deployment/docker/src/types/health-check.ts" />
+    </data-models>
+  </technical-context>
+
+  <implementation-details>
+    <core-interfaces>
+      <interface name="IDockerBuilder" kind="TypeScript interface" signature="interface IDockerBuilder { buildImage(config: DockerConfig): Promise&lt;ImageMetadata&gt;; publishImage(image: ImageMetadata, registries: Registry[]): Promise&lt;void&gt;; testImage(image: ImageMetadata): Promise&lt;HealthCheck&gt;; }" path="deployment/docker/src/interfaces/docker-builder.ts" />
+      <interface name="IComposeManager" kind="TypeScript interface" signature="interface IComposeManager { startServices(config: ComposeConfig): Promise&lt;void&gt;; stopServices(): Promise&lt;void&gt;; getLogs(service: string): Promise&lt;string[]&gt;; }" path="deployment/docker/src/interfaces/compose-manager.ts" />
+    </core-interfaces>
+    
+    <key-classes>
+      <class name="DockerBuilder" kind="TypeScript class" implements="IDockerBuilder" path="deployment/docker/src/docker-builder.ts" />
+      <class name="ComposeManager" kind="TypeScript class" implements="IComposeManager" path="deployment/docker/src/compose-manager.ts" />
+      <class name="ImageOptimizer" kind="TypeScript class" path="deployment/docker/src/image-optimizer.ts" />
+      <class name="SecurityScanner" kind="TypeScript class" path="deployment/docker/src/security-scanner.ts" />
+    </key-classes>
+    
+    <algorithms>
+      <algorithm name="Multi-stage Optimization" type="build" description="Optimizes Docker image size through multi-stage builds" />
+      <algorithm name="Layer Caching" type="build" description="Implements Docker layer caching for faster builds" />
+      <algorithm name="Security Hardening" type="security" description="Applies security best practices to Docker images" />
+      <algorithm name="Dependency Analysis" type="analysis" description="Analyzes dependencies for security vulnerabilities" />
+    </algorithms>
+  </implementation-details>
+
+  <integration-points>
+    <external-integrations>
+      <integration name="Docker Registry" type="API" description="Publishes images to container registries" protocol="HTTPS" />
+      <integration name="Security Scanning" type="API" description="Scans images for vulnerabilities" protocol="HTTPS" />
+    </external-integrations>
+    
+    <internal-integrations>
+      <integration name="Core Engine" component="packages/core" description="Docker image includes Tamma core engine" />
+      <integration name="Configuration" component="packages/config" description="Environment variable configuration support" />
+      <integration name="Health Checks" component="packages/observability" description="Container health check endpoints" />
+    </internal-integrations>
+  </integration-points>
+
+  <data-sources>
+    <build-artifacts>
+      <store type="Docker images" description="Built Docker images stored locally or in registry" />
+      <store type="Build cache" description="Docker build cache for faster rebuilds" />
+    </build-artifacts>
+    
+    <configuration>
+      <store type="Environment variables" description="Runtime configuration via environment" />
+      <store type="Config files" description="Docker compose configuration files" />
+    </configuration>
+  </data-sources>
+
+  <api-endpoints>
+    <container-endpoints>
+      <endpoint method="HTTP" path="/health" description="Container health check endpoint" />
+      <endpoint method="HTTP" path="/metrics" description="Container metrics endpoint" />
+      <endpoint method="HTTP" path="/ready" description="Container readiness check endpoint" />
+    </container-endpoints>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <suite name="DockerBuilder" coverage="90%" path="deployment/docker/src/__tests__/docker-builder.test.ts" />
+      <suite name="ComposeManager" coverage="85%" path="deployment/docker/src/__tests__/compose-manager.test.ts" />
+      <suite name="ImageOptimizer" coverage="85%" path="deployment/docker/src/__tests__/image-optimizer.test.ts" />
+      <suite name="SecurityScanner" coverage="80%" path="deployment/docker/src/__tests__/security-scanner.test.ts" />
+    </unit-tests>
+    
+    <integration-tests>
+      <suite name="Docker Build Integration" path="deployment/docker/src/__tests__/integration/docker-build.test.ts" />
+      <suite name="Compose Services Integration" path="deployment/docker/src/__tests__/integration/compose-services.test.ts" />
+      <suite name="Health Check Integration" path="deployment/docker/src/__tests__/integration/health-check.test.ts" />
+    </integration-tests>
+    
+    <performance-tests>
+      <test name="Image Build Performance" target="&lt;5min" path="deployment/docker/src/__tests__/performance/image-build.test.ts" />
+      <test name="Image Size Optimization" target="&lt;500MB" path="deployment/docker/src/__tests__/performance/image-size.test.ts" />
+      <test name="Container Startup Performance" target="&lt;10s" path="deployment/docker/src/__tests__/performance/container-startup.test.ts" />
+    </performance-tests>
+  </testing-strategy>
+
+  <security-considerations>
+    <container-security>
+      <consideration type="Non-root User" description="Containers run as non-root user" />
+      <consideration type="Minimal Base Image" description="Uses minimal Alpine-based images" />
+      <consideration type="Security Scanning" description="Images scanned for vulnerabilities" />
+      <consideration type="Secrets Management" description="No secrets baked into images" />
+    </container-security>
+    
+    <runtime-security>
+      <consideration type="Read-only Filesystem" description="Filesystem mounted read-only where possible" />
+      <consideration type="Resource Limits" description="CPU and memory limits configured" />
+      <consideration type="Network Isolation" description="Network access limited to required services" />
+    </runtime-security>
+  </security-considerations>
+
+  <monitoring-and-observability>
+    <metrics>
+      <metric name="docker_builds_total" type="counter" description="Total Docker builds performed" />
+      <metric name="image_size_bytes" type="gauge" description="Size of built Docker images" />
+      <metric name="build_duration_seconds" type="histogram" description="Duration of Docker builds" />
+      <metric name="security_scan_findings" type="counter" description="Security issues found in images" />
+      <metric name="container_start_time_seconds" type="histogram" description="Container startup time" />
+    </metrics>
+    
+    <logging>
+      <event name="docker.build.started" level="info" description="Docker build started" />
+      <event name="docker.build.completed" level="info" description="Docker build completed" />
+      <event name="image.published" level="info" description="Image published to registry" />
+      <event name="security.scan.started" level="info" description="Security scan started" />
+      <event name="security.scan.completed" level="info" description="Security scan completed" />
+      <event name="container.started" level="info" description="Container started" />
+      <event name="health.check.failed" level="warn" description="Container health check failed" />
+    </logging>
+  </monitoring-and-observability>
+
+  <configuration-schema>
+    <docker-config>
+      <field name="baseImage" type="string" required="false" default="node:22-alpine" description="Base Docker image" />
+      <field name="multiStage" type="boolean" required="false" default="true" description="Enable multi-stage builds" />
+      <field name="securityScan" type="object" required="false" description="Security scanning configuration" />
+      <field name="registries" type="array" required="false" description="Target container registries" />
+      <field name="healthCheck" type="object" required="false" description="Health check configuration" />
+    </docker-config>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <deployment-docs>
+      <doc name="Docker Deployment Guide" path="docs/deployment/docker-deployment.md" />
+      <doc name="Docker Compose Reference" path="docs/deployment/docker-compose-reference.md" />
+    </deployment-docs>
+    
+    <user-guides>
+      <guide name="Local Development Setup" path="docs/tutorials/docker-local-development.md" />
+      <guide name="Container Security Best Practices" path="docs/guides/container-security.md" />
+    </user-guides>
+  </documentation-requirements>
+
+  <acceptance-criteria-mapping>
+    <ac id="1" component="DockerBuilder" test="docker-builder.test.ts" />
+    <ac id="2" component="ComposeManager" test="compose-manager.test.ts" />
+    <ac id="3" component="ImageOptimizer" test="image-optimizer.test.ts" />
+    <ac id="4" component="SecurityScanner" test="security-scanner.test.ts" />
+    <ac id="5" component="Health Check Integration" test="health-check-integration.test.ts" />
+    <ac id="6" component="Environment Configuration" test="environment-config.test.ts" />
+    <ac id="7" component="Publishing Workflow" test="publishing-workflow.test.ts" />
+  </acceptance-criteria-mapping>
+
+  <risk-mitigation>
+    <risk id="R1" description="Docker image size too large" mitigation="Multi-stage builds and layer optimization" />
+    <risk id="R2" description="Security vulnerabilities in base image" mitigation="Regular security scanning and base image updates" />
+    <risk id="R3" description="Container startup failures" mitigation="Health checks and graceful degradation" />
+    <risk id="R4" description="Registry authentication issues" mitigation="Secure credential management and retry logic" />
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Image Size" target="&lt;500MB" description="Final Docker image size" />
+    <metric name="Build Time" target="&lt;5min" description="Docker image build time" />
+    <metric name="Security Score" target="95%" description="Security scan pass rate" />
+    <metric name="Startup Time" target="&lt;10s" description="Container startup time" />
+    <metric name="Registry Publishing Success" target="99%" description="Successful image publishing rate" />
+  </success-metrics>
+</story-context>

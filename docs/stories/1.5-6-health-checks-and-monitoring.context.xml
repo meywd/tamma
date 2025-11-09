@@ -1,0 +1,799 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-6-health-checks-and-monitoring" version="1.0.0">
+  <metadata>
+    <title>Health Checks and Monitoring</title>
+    <epic>1.5</epic>
+    <story-type>infrastructure</story-type>
+    <priority>high</priority>
+    <created>2025-01-07T12:00:00.000Z</created>
+    <updated>2025-01-07T12:00:00.000Z</updated>
+    <author>Bob</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <dependencies>
+    <upstream>
+      <dependency story="1.5-1">Core Engine Separation</dependency>
+      <dependency story="1.5-2">Configuration Management</dependency>
+      <dependency story="1.5-3">Environment-Specific Deployments</dependency>
+      <dependency story="1.5-4">Secret Management Integration</dependency>
+      <dependency story="1.5-5">Docker Packaging</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="2-1">Issue Selection with Filtering</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Observability</component>
+    <layer>Infrastructure</layer>
+    <pattern>Observability-First Design</pattern>
+    <principles>
+      <principle>Three pillars of observability (logs, metrics, traces)</principle>
+      <principle>Proactive health monitoring</principle>
+      <principle>Service-level objectives</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <health-checks>
+      <check name="liveness">
+        <description>Basic liveness check for container orchestration</description>
+        <endpoint>/health/live</endpoint>
+        <method>GET</method>
+        <interval>10s</interval>
+        <timeout>5s</timeout>
+        <failure_threshold>3</failure_threshold>
+        <success_threshold>1</success_threshold>
+        <checks>
+          <check name="process_alive">Process is running</check>
+          <check name="port_listening">HTTP port is listening</check>
+        </checks>
+      </check>
+
+      <check name="readiness">
+        <description>Readiness check for traffic routing</description>
+        <endpoint>/health/ready</endpoint>
+        <method>GET</method>
+        <interval>5s</interval>
+        <timeout>3s</timeout>
+        <failure_threshold>3</failure_threshold>
+        <success_threshold>1</success_threshold>
+        <checks>
+          <check name="database_connected">Database connection is healthy</check>
+          <check name="dependencies_ready">External dependencies are available</check>
+          <check name="configuration_loaded">Configuration is loaded and valid</check>
+        </checks>
+      </check>
+
+      <check name="startup">
+        <description>Startup check for initialization status</description>
+        <endpoint>/health/startup</endpoint>
+        <method>GET</method>
+        <interval>1s</interval>
+        <timeout>1s</timeout>
+        <failure_threshold>30</failure_threshold>
+        <success_threshold>1</success_threshold>
+        <checks>
+          <check name="initialization_complete">All components initialized</check>
+          <check name="migrations_applied">Database migrations applied</check>
+        </checks>
+      </check>
+
+      <check name="deep">
+        <description>Deep health check for comprehensive monitoring</description>
+        <endpoint>/health/deep</endpoint>
+        <method>GET</method>
+        <interval>60s</interval>
+        <timeout>30s</timeout>
+        <failure_threshold>2</failure_threshold>
+        <success_threshold>1</success_threshold>
+        <checks>
+          <check name="database_performance">Database query performance</check>
+          <check name="external_apis">External API connectivity</check>
+          <check name="disk_space">Available disk space</check>
+          <check name="memory_usage">Memory usage within limits</check>
+          <check name="cpu_usage">CPU usage within limits</check>
+        </checks>
+      </check>
+    </health-checks>
+
+    <monitoring-stack>
+      <component name="metrics">
+        <technology>Prometheus</technology>
+        <description>Metrics collection and storage</description>
+        <configuration>
+          <port>9090</port>
+          <retention>15d</retention>
+          <scrape_interval>15s</scrape_interval>
+          <evaluation_interval>15s</evaluation_interval>
+        </configuration>
+        <exporters>
+          <exporter name="node">Node.js application metrics</exporter>
+          <exporter name="database">PostgreSQL metrics</exporter>
+          <exporter name="redis">Redis metrics</exporter>
+          <exporter name="kubernetes">Kubernetes cluster metrics</exporter>
+        </exporters>
+      </component>
+
+      <component name="logging">
+        <technology>Pino + Loki</technology>
+        <description>Structured logging and aggregation</description>
+        <configuration>
+          <log_level>info</log_level>
+          <format>json</format>
+          <retention>30d</retention>
+          <compression>gzip</compression>
+        </configuration>
+        <log_types>
+          <type name="application">Application logs</type>
+          <type name="access">HTTP access logs</type>
+          <type name="audit">Security audit logs</type>
+          <type name="performance">Performance logs</type>
+        </log_types>
+      </component>
+
+      <component name="tracing">
+        <technology>OpenTelemetry + Jaeger</technology>
+        <description>Distributed tracing</description>
+        <configuration>
+          <sampling_rate>0.1</sampling_rate>
+          <jaeger_endpoint>http://jaeger:14268/api/traces</jaeger_endpoint>
+          <service_name>tamma</service_name>
+        </configuration>
+        <trace_types>
+          <type name="http">HTTP request traces</type>
+          <type name="database">Database query traces</type>
+          <type name="external_api">External API call traces</type>
+          <type name="workflow">Workflow execution traces</type>
+        </trace_types>
+      </component>
+
+      <component name="visualization">
+        <technology>Grafana</technology>
+        <description>Metrics visualization and dashboards</description>
+        <configuration>
+          <port>3000</port>
+          <admin_password>env:GRAFANA_ADMIN_PASSWORD</admin_password>
+          <data_sources>
+            <source name="prometheus">Prometheus metrics</source>
+            <source name="loki">Log aggregation</source>
+            <source name="jaeger">Distributed traces</source>
+          </data_sources>
+        </configuration>
+      </component>
+
+      <component name="alerting">
+        <technology>AlertManager</technology>
+        <description>Alert routing and notification</description>
+        <configuration>
+          <port>9093</port>
+          <receivers>
+            <receiver name="email">Email notifications</receiver>
+            <receiver name="slack">Slack notifications</receiver>
+            <receiver name="pagerduty">PagerDuty escalation</receiver>
+          </receivers>
+        </configuration>
+      </component>
+    </monitoring-stack>
+
+    <service-level-objectives>
+      <slo name="availability">
+        <description>Service availability SLO</description>
+        <objective>99.9%</objective>
+        <period>30d</period>
+        <error_budget>0.1%</error_budget>
+        <alerting>
+          <burn_rate_slow>2x</burn_rate_slow>
+          <burn_rate_fast>14x</burn_rate_fast>
+        </alerting>
+      </slo>
+
+      <slo name="latency">
+        <description>API latency SLO</description>
+        <objective>95th percentile &lt; 500ms</objective>
+        <period>7d</period>
+        <alerting>
+          <threshold>95th percentile &gt; 1s</threshold>
+        </alerting>
+      </slo>
+
+      <slo name="error_rate">
+        <description>Error rate SLO</description>
+        <objective>&lt; 0.1%</objective>
+        <period>24h</period>
+        <alerting>
+          <threshold>&gt; 0.5%</threshold>
+        </alerting>
+      </slo>
+    </service-level-objectives>
+  </technical-specifications>
+
+  <data-models>
+    <health-model>
+      <interface name="IHealthCheck">
+        <properties>
+          <property name="name" type="string"/>
+          <property name="status" type="HealthStatus"/>
+          <property name="duration" type="number"/>
+          <property name="message" type="string" optional="true"/>
+          <property name="details" type="Record&lt;string, unknown&gt;" optional="true"/>
+          <property name="timestamp" type="datetime"/>
+        </properties>
+      </interface>
+
+      <interface name="IHealthReport">
+        <properties>
+          <property name="status" type="HealthStatus"/>
+          <property name="checks" type="IHealthCheck[]"/>
+          <property name="duration" type="number"/>
+          <property name="timestamp" type="datetime"/>
+        </properties>
+      </interface>
+    </health-model>
+
+    <monitoring-model>
+      <interface name="IMetric">
+        <properties>
+          <property name="name" type="string"/>
+          <property name="value" type="number"/>
+          <property name="labels" type="Record&lt;string, string&gt;" optional="true"/>
+          <property name="timestamp" type="datetime"/>
+        </properties>
+      </interface>
+
+      <interface name="ILogEntry">
+        <properties>
+          <property name="level" type="LogLevel"/>
+          <property name="message" type="string"/>
+          <property name="timestamp" type="datetime"/>
+          <property name="service" type="string"/>
+          <property name="trace_id" type="string" optional="true"/>
+          <property name="span_id" type="string" optional="true"/>
+          <property name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </properties>
+      </interface>
+
+      <interface name="ITrace">
+        <properties>
+          <property name="trace_id" type="string"/>
+          <property name="spans" type="ISpan[]"/>
+          <property name="duration" type="number"/>
+          <property name="status" type="TraceStatus"/>
+        </properties>
+      </interface>
+    </monitoring-model>
+
+    <types>
+      <type name="HealthStatus" enum="['healthy', 'unhealthy', 'degraded', 'unknown']"/>
+      <type name="LogLevel" enum="['trace', 'debug', 'info', 'warn', 'error', 'fatal']"/>
+      <type name="TraceStatus" enum="['ok', 'error', 'cancelled', 'deadline_exceeded']"/>
+    </types>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IHealthChecker">
+      <description>Health check interface</description>
+      <methods>
+        <method name="checkLiveness" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkReadiness" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkStartup" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkDeep" returns="Promise&lt;IHealthReport&gt;"/>
+        <method name="registerCheck" returns="void">
+          <param name="name" type="string"/>
+          <param name="check" type="HealthCheckFunction"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IMetricsCollector">
+      <description>Metrics collection interface</description>
+      <methods>
+        <method name="incrementCounter" returns="void">
+          <param name="name" type="string"/>
+          <param name="labels" type="Record&lt;string, string&gt;" optional="true"/>
+          <param name="value" type="number" optional="true"/>
+        </method>
+        <method name="recordHistogram" returns="void">
+          <param name="name" type="string"/>
+          <param name="value" type="number"/>
+          <param name="labels" type="Record&lt;string, string&gt;" optional="true"/>
+        </method>
+        <method name="setGauge" returns="void">
+          <param name="name" type="string"/>
+          <param name="value" type="number"/>
+          <param name="labels" type="Record&lt;string, string&gt;" optional="true"/>
+        </method>
+        <method name="createCounter" returns="ICounter">
+          <param name="name" type="string"/>
+          <param name="help" type="string"/>
+          <param name="label_names" type="string[]" optional="true"/>
+        </method>
+        <method name="createHistogram" returns="IHistogram">
+          <param name="name" type="string"/>
+          <param name="help" type="string"/>
+          <param name="label_names" type="string[]" optional="true"/>
+          <param name="buckets" type="number[]" optional="true"/>
+        </method>
+        <method name="createGauge" returns="IGauge">
+          <param name="name" type="string"/>
+          <param name="help" type="string"/>
+          <param name="label_names" type="string[]" optional="true"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="ILogger">
+      <description>Structured logging interface</description>
+      <methods>
+        <method name="trace" returns="void">
+          <param name="message" type="string"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="debug" returns="void">
+          <param name="message" type="string"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="info" returns="void">
+          <param name="message" type="string"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="warn" returns="void">
+          <param name="message" type="string"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="error" returns="void">
+          <param name="message" type="string"/>
+          <param name="error" type="Error" optional="true"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="fatal" returns="void">
+          <param name="message" type="string"/>
+          <param name="error" type="Error" optional="true"/>
+          <param name="metadata" type="Record&lt;string, unknown&gt;" optional="true"/>
+        </method>
+        <method name="child" returns="ILogger">
+          <param name="metadata" type="Record&lt;string, unknown&gt;"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="ITracer">
+      <description>Distributed tracing interface</description>
+      <methods>
+        <method name="startSpan" returns="ISpan">
+          <param name="name" type="string"/>
+          <param name="options" type="SpanOptions" optional="true"/>
+        </method>
+        <method name="startActiveSpan" returns="ISpan">
+          <param name="name" type="string"/>
+          <param name="fn" type="(span: ISpan) =&gt; Promise&lt;T&gt;"/>
+          <param name="options" type="SpanOptions" optional="true"/>
+        </method>
+        <method name="inject" returns="void">
+          <param name="carrier" type="Record&lt;string, unknown&gt;"/>
+          <param name="format" type="TextMapFormat"/>
+        </method>
+        <method name="extract" returns="SpanContext">
+          <param name="carrier" type="Record&lt;string, unknown&gt;"/>
+          <param name="format" type="TextMapFormat"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="HealthChecker">
+      <description>Default health check implementation</description>
+      <properties>
+        <property name="checks" type="Map&lt;string, HealthCheckFunction&gt;"/>
+        <property name="logger" type="ILogger"/>
+      </properties>
+      <methods>
+        <method name="checkLiveness" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkReadiness" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkStartup" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="checkDeep" returns="Promise&lt;IHealthReport&gt;"/>
+        <method name="registerCheck" returns="void"/>
+        <method name="_runCheck" returns="Promise&lt;IHealthCheck&gt;"/>
+        <method name="_aggregateResults" returns="HealthStatus"/>
+      </methods>
+    </class>
+
+    <class name="PrometheusMetricsCollector">
+      <description>Prometheus metrics collector</description>
+      <implements>IMetricsCollector</implements>
+      <properties>
+        <property name="registry" type="Registry"/>
+        <property name="counters" type="Map&lt;string, Counter&gt;"/>
+        <property name="histograms" type="Map&lt;string, Histogram&gt;"/>
+        <property name="gauges" type="Map&lt;string, Gauge&gt;"/>
+      </properties>
+      <methods>
+        <method name="incrementCounter" returns="void"/>
+        <method name="recordHistogram" returns="void"/>
+        <method name="setGauge" returns="void"/>
+        <method name="createCounter" returns="ICounter"/>
+        <method name="createHistogram" returns="IHistogram"/>
+        <method name="createGauge" returns="IGauge"/>
+        <method name="_getMetrics" returns="string"/>
+      </methods>
+    </class>
+
+    <class name="PinoLogger">
+      <description>Pino-based structured logger</description>
+      <implements>ILogger</implements>
+      <properties>
+        <property name="logger" type="PinoLogger"/>
+        <property name="base_metadata" type="Record&lt;string, unknown&gt;"/>
+      </properties>
+      <methods>
+        <method name="trace" returns="void"/>
+        <method name="debug" returns="void"/>
+        <method name="info" returns="void"/>
+        <method name="warn" returns="void"/>
+        <method name="error" returns="void"/>
+        <method name="fatal" returns="void"/>
+        <method name="child" returns="ILogger"/>
+        <method name="_formatMetadata" returns="Record&lt;string, unknown&gt;"/>
+      </methods>
+    </class>
+
+    <class name="OpenTelemetryTracer">
+      <description>OpenTelemetry distributed tracer</description>
+      <implements>ITracer</implements>
+      <properties>
+        <property name="tracer" type="Tracer"/>
+        <property name="propagator" type="TextMapPropagator"/>
+      </properties>
+      <methods>
+        <method name="startSpan" returns="ISpan"/>
+        <method name="startActiveSpan" returns="ISpan"/>
+        <method name="inject" returns="void"/>
+        <method name="extract" returns="SpanContext"/>
+      </methods>
+    </class>
+
+    <class name="MonitoringMiddleware">
+      <description>Express middleware for monitoring</description>
+      <methods>
+        <method name="requestMetrics" returns="RequestHandler"/>
+        <method name="requestLogging" returns="RequestHandler"/>
+        <method name="requestTracing" returns="RequestHandler"/>
+        <method name="errorTracking" returns="ErrorRequestHandler"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="prometheus">
+      <component>Prometheus Server</component>
+      <interface>HTTP Metrics Endpoint</interface>
+      <description>Scrapes metrics from application</description>
+      <data-flow>
+        <direction>pull</direction>
+        <protocol>HTTP</protocol>
+        <endpoint>/metrics</endpoint>
+      </data-flow>
+    </integration>
+
+    <integration name="loki">
+      <component>Loki Log Aggregation</component>
+      <interface>HTTP API</interface>
+      <description>Aggregates and stores logs</description>
+      <data-flow>
+        <direction>push</direction>
+        <protocol>HTTP</protocol>
+        <endpoint>/loki/api/v1/push</endpoint>
+      </data-flow>
+    </integration>
+
+    <integration name="jaeger">
+      <component>Jaeger Distributed Tracing</component>
+      <interface>HTTP API</interface>
+      <description>Collects and stores trace data</description>
+      <data-flow>
+        <direction>push</direction>
+        <protocol>HTTP</protocol>
+        <endpoint>/api/traces</endpoint>
+      </data-flow>
+    </integration>
+
+    <integration name="grafana">
+      <component>Grafana Visualization</component>
+      <interface>HTTP API</interface>
+      <description>Visualizes metrics, logs, and traces</description>
+      <data-flow>
+        <direction>pull</direction>
+        <protocol>HTTP</protocol>
+        <data_sources>Prometheus, Loki, Jaeger</data_sources>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <data-sources>
+    <source name="application-metrics">
+      <type>application</type>
+      <format>Prometheus format</format>
+      <location>/metrics endpoint</location>
+      <access-pattern>pull by Prometheus</access-pattern>
+    </source>
+
+    <source name="application-logs">
+      <type>application</type>
+      <format>JSON structured logs</format>
+     location>stdout/stderr</location>
+      <access-pattern>collected by Loki</access-pattern>
+    </source>
+
+    <source name="distributed-traces">
+      <type>application</type>
+      <format>OpenTelemetry format</format>
+      <location>Jaeger collector</location>
+      <access-pattern>push by application</access-pattern>
+    </source>
+
+    <source name="system-metrics">
+      <type>system</type>
+      <format>Prometheus node exporter</format>
+      <location>/metrics endpoint</location>
+      <access-pattern>pull by Prometheus</access-pattern>
+    </source>
+  </data-sources>
+
+  <api-endpoints>
+    <endpoint name="health-live" method="GET" path="/health/live">
+      <description>Liveness health check</description>
+      <responses>
+        <response code="200">Service is alive</response>
+        <response code="503">Service is not alive</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="health-ready" method="GET" path="/health/ready">
+      <description>Readiness health check</description>
+      <responses>
+        <response code="200">Service is ready</response>
+        <response code="503">Service is not ready</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="health-startup" method="GET" path="/health/startup">
+      <description>Startup health check</description>
+      <responses>
+        <response code="200">Service has started</response>
+        <response code="503">Service is still starting</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="health-deep" method="GET" path="/health/deep">
+      <description>Deep health check</description>
+      <responses>
+        <response code="200">All systems healthy</response>
+        <response code="503">Some systems unhealthy</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="metrics" method="GET" path="/metrics">
+      <description>Prometheus metrics endpoint</description>
+      <responses>
+        <response code="200">Metrics in Prometheus format</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>85%</coverage>
+      <focus>
+        <area>Health check logic</area>
+        <area>Metrics collection</area>
+        <area>Logging formatting</area>
+        <area>Tracing span creation</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>75%</coverage>
+      <focus>
+        <area>Prometheus metrics scraping</area>
+        <area>Log aggregation to Loki</area>
+        <area>Trace collection by Jaeger</area>
+        <area>Health check endpoints</area>
+      </focus>
+    </integration-tests>
+
+    <end-to-end-tests>
+      <coverage>60%</coverage>
+      <focus>
+        <area>Complete monitoring stack</area>
+        <area>Alert generation and notification</area>
+        <area>Dashboard visualization</area>
+      </focus>
+    </end-to-end-tests>
+
+    <test-data>
+      <mock-metrics>
+        <metric name="http_requests_total">HTTP request counter</metric>
+        <metric name="http_request_duration_seconds">HTTP request duration</metric>
+        <metric name="database_connections_active">Active database connections</metric>
+      </mock-metrics>
+      <test-logs>
+        <log type="application">Application event logs</log>
+        <log type="access">HTTP access logs</log>
+        <log type="error">Error logs</log>
+      </test-logs>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="metrics-exposure">
+        <description>Sensitive metrics exposed publicly</description>
+        <mitigation>Authentication, network isolation, data redaction</mitigation>
+      </threat>
+      <threat name="log-tampering">
+        <description>Log files tampered or deleted</description>
+        <mitigation>Immutable storage, log forwarding, checksums</mitigation>
+      </threat>
+      <threat name="monitoring-dos">
+        <description>Monitoring endpoints overwhelmed</description>
+        <mitigation>Rate limiting, caching, resource limits</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="access-control">
+        <description>Secure access to monitoring endpoints</description>
+        <implementation>Authentication, RBAC, network policies</implementation>
+      </control>
+      <control name="data-redaction">
+        <description>Redact sensitive data from logs and metrics</description>
+        <implementation>Automatic redaction, data classification</implementation>
+      </control>
+      <control name="integrity-protection">
+        <description>Protect monitoring data integrity</description>
+        <implementation>Checksums, immutable storage, audit trails</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="health_check_duration" type="histogram">Health check execution time</metric>
+      <metric name="health_check_status" type="gauge">Health check status (0/1)</metric>
+      <metric name="metrics_collection_errors" type="counter">Metrics collection errors</metric>
+      <metric name="log_write_errors" type="counter">Log write errors</metric>
+      <metric name="trace_span_duration" type="histogram">Trace span duration</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="service_unhealthy">
+        <condition>health_check_status == 0</condition>
+        <severity>critical</severity>
+        <action>Immediate investigation</action>
+      </alert>
+      <alert name="monitoring_failure">
+        <condition>metrics_collection_errors &gt; 0</condition>
+        <severity>warning</severity>
+        <action>Check monitoring stack</action>
+      </alert>
+      <alert name="slo_burn_rate">
+        <condition>error_budget_burn_rate &gt; 2x</condition>
+        <severity>warning</severity>
+        <action>Investigate SLO compliance</action>
+      </alert>
+    </alerts>
+
+    <dashboards>
+      <dashboard name="service-overview">
+        <widgets>
+          <widget type="status">Service health status</widget>
+          <widget type="chart">Request rate and latency</widget>
+          <widget type="table">Recent errors</widget>
+          <widget type="gauge">Resource utilization</widget>
+        </widgets>
+      </dashboard>
+      <dashboard name="infrastructure-overview">
+        <widgets>
+          <widget type="chart">System metrics</widget>
+          <widget type="table">Container status</widget>
+          <widget type="chart">Network traffic</widget>
+          <widget type="gauge">Disk usage</widget>
+        </widgets>
+      </dashboard>
+    </dashboards>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/monitoring.schema.ts</file-location>
+    <monitoring-config>
+      <config name="prometheus">config/monitoring/prometheus.yaml</config>
+      <config name="loki">config/monitoring/loki.yaml</config>
+      <config name="jaeger">config/monitoring/jaeger.yaml</config>
+      <config name="grafana">config/monitoring/grafana.yaml</config>
+    </monitoring-config>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <user-docs>
+      <doc name="monitoring-setup">Setting up monitoring stack</doc>
+      <doc name="health-checks">Understanding health checks</doc>
+      <doc name="dashboard-guide">Using Grafana dashboards</doc>
+    </user-docs>
+
+    <developer-docs>
+      <doc name="metrics-guide">Adding custom metrics</doc>
+      <doc name="logging-guide">Structured logging best practices</doc>
+      <doc name="tracing-guide">Distributed tracing implementation</doc>
+    </developer-docs>
+
+    <operations-docs>
+      <doc name="alerting-configuration">Configuring alerts and notifications</doc>
+      <doc name="slo-management">Managing service-level objectives</doc>
+      <doc name="troubleshooting-monitoring">Troubleshooting monitoring issues</doc>
+    </operations-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>System provides comprehensive health check endpoints for all orchestration types</description>
+      <verification>Health check endpoint testing</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Metrics are collected and exposed in Prometheus format</description>
+      <verification>Prometheus scraping verification</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>Structured logs are generated and aggregated centrally</description>
+      <verification>Log aggregation testing</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Distributed traces are captured for all critical operations</description>
+      <verification>Trace collection verification</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Service-level objectives are defined and monitored</description>
+      <verification>SLO monitoring verification</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Alerts are generated and routed appropriately</description>
+      <verification>Alert routing testing</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>Custom dashboards provide comprehensive observability</description>
+      <verification>Dashboard functionality testing</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="medium">
+      <description>Monitoring overhead impacts application performance</description>
+      <mitigation>Sampling, async operations, resource limits</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Monitoring stack complexity leads to operational issues</description>
+      <mitigation>Standardized deployment, automation, documentation</mitigation>
+    </risk>
+
+    <risk id="risk3" level="low">
+      <description>Alert fatigue from too many notifications</description>
+      <mitigation>Alert grouping, severity levels, suppression rules</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="health_check_latency" target="&lt; 100ms">Health check response time</metric>
+    <metric name="metrics_collection_success_rate" target="&gt; 99.9%">Successful metrics collection</metric>
+    <metric name="log_aggregation_success_rate" target="&gt; 99.9%">Successful log aggregation</metric>
+    <metric name="trace_collection_success_rate" target="&gt; 99%">Successful trace collection</metric>
+  </success-metrics>
+</story-context>

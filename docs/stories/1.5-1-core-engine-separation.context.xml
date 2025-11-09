@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>1.5-1-core-engine-separation</story-id>
+    <title>Core Engine Separation</title>
+    <status>ready-for-dev</status>
+    <last-updated>2025-11-07T12:00:00Z</last-updated>
+    <version>1.0</version>
+  </metadata>
+
+  <technical-context>
+    <architecture-alignment>
+      <component>packages/core</component>
+      <component>packages/cli</component>
+      <component>packages/orchestrator</component>
+      <component>packages/worker</component>
+      <pattern>Interface-Based Design</pattern>
+      <pattern>Dependency Inversion</pattern>
+      <pattern>Modular Architecture</pattern>
+    </architecture-alignment>
+    
+    <dependencies>
+      <dependency story="1-1">AI Provider Interface Definition</dependency>
+      <dependency story="1-4">Git Platform Interface Definition</dependency>
+      <dependency story="1-8">Hybrid Orchestrator/Worker Architecture Design</dependency>
+      <dependency story="1-9">Basic CLI Scaffolding with Mode Selection</dependency>
+    </dependencies>
+    
+    <data-models>
+      <model name="LaunchContext" path="packages/core/src/types/launch-context.ts" />
+      <model name="EngineState" path="packages/core/src/types/engine-state.ts" />
+      <model name="WorkflowStep" path="packages/core/src/types/workflow-step.ts" />
+      <model name="ExecutionResult" path="packages/core/src/types/execution-result.ts" />
+    </data-models>
+  </technical-context>
+
+  <implementation-details>
+    <core-interfaces>
+      <interface name="ITammaEngine" kind="TypeScript interface" signature="interface ITammaEngine { initialize(context: LaunchContext): Promise&lt;void&gt;; startWorkflow(issueReference: IssueReference): Promise&lt;ExecutionResult&gt;; getState(): EngineState; shutdown(): Promise&lt;void&gt;; }" path="packages/core/src/interfaces/tamma-engine.ts" />
+      <interface name="ILaunchContext" kind="TypeScript interface" signature="interface ILaunchContext { config: TammaConfig; logger: ILogger; eventEmitter: IEventEmitter; mode: 'cli' | 'service' | 'web' | 'worker'; }" path="packages/core/src/interfaces/launch-context.ts" />
+      <interface name="IWorkflowStep" kind="TypeScript interface" signature="interface IWorkflowStep { execute(context: WorkflowContext): Promise&lt;StepResult&gt;; validate(context: WorkflowContext): ValidationResult; rollback?(context: WorkflowContext): Promise&lt;void&gt;; }" path="packages/core/src/interfaces/workflow-step.ts" />
+    </core-interfaces>
+    
+    <key-classes>
+      <class name="TammaEngine" kind="TypeScript class" implements="ITammaEngine" path="packages/core/src/tamma-engine.ts" />
+      <class name="WorkflowOrchestrator" kind="TypeScript class" path="packages/core/src/workflow-orchestrator.ts" />
+      <class name="StateManager" kind="TypeScript class" path="packages/core/src/state-manager.ts" />
+      <class name="ErrorHandler" kind="TypeScript class" path="packages/core/src/error-handler.ts" />
+      <class name="ProgressTracker" kind="TypeScript class" path="packages/core/src/progress-tracker.ts" />
+    </key-classes>
+    
+    <algorithms>
+      <algorithm name="Workflow State Machine" type="orchestration" description="Manages state transitions through autonomous development workflow" />
+      <algorithm name="Step Dependency Resolution" type="scheduling" description="Resolves and executes workflow steps in correct order" />
+      <algorithm name="Rollback Strategy" type="recovery" description="Implements rollback mechanisms for failed workflow steps" />
+      <algorithm name="Progress Calculation" type="monitoring" description="Calculates overall workflow progress from individual steps" />
+    </algorithms>
+  </implementation-details>
+
+  <integration-points>
+    <internal-integrations>
+      <integration name="AI Provider Interface" component="packages/providers" description="Core engine uses IAIProvider for AI operations" />
+      <integration name="Git Platform Interface" component="packages/platforms" description="Core engine uses IGitPlatform for Git operations" />
+      <integration name="Event Sourcing" component="packages/events" description="Core engine emits events for all workflow actions" />
+      <integration name="Configuration" component="packages/config" description="Core engine loads configuration through LaunchContext" />
+      <integration name="Logging" component="packages/observability" description="Core engine uses structured logging throughout workflow" />
+    </internal-integrations>
+  </integration-points>
+
+  <data-sources>
+    <primary-storage>
+      <store type="PostgreSQL" schema="core" description="Stores workflow state and execution history" />
+    </primary-storage>
+    
+    <cache>
+      <store type="In-memory" description="Runtime cache for active workflow state" />
+      <store type="Redis" description="Optional cache for distributed deployments" />
+    </cache>
+  </data-sources>
+
+  <api-endpoints>
+    <internal-api base-path="/core">
+      <endpoint method="POST" path="/start" description="Start new workflow execution" />
+      <endpoint method="GET" path="/status/:id" description="Get workflow execution status" />
+      <endpoint method="POST" path="/pause/:id" description="Pause workflow execution" />
+      <endpoint method="POST" path="/resume/:id" description="Resume paused workflow" />
+      <endpoint method="POST" path="/cancel/:id" description="Cancel workflow execution" />
+    </internal-api>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <suite name="TammaEngine" coverage="95%" path="packages/core/src/__tests__/tamma-engine.test.ts" />
+      <suite name="WorkflowOrchestrator" coverage="90%" path="packages/core/src/__tests__/workflow-orchestrator.test.ts" />
+      <suite name="StateManager" coverage="90%" path="packages/core/src/__tests__/state-manager.test.ts" />
+      <suite name="ErrorHandler" coverage="85%" path="packages/core/src/__tests__/error-handler.test.ts" />
+      <suite name="ProgressTracker" coverage="85%" path="packages/core/src/__tests__/progress-tracker.test.ts" />
+    </unit-tests>
+    
+    <integration-tests>
+      <suite name="Core Engine Integration" path="packages/core/src/__tests__/integration/core-engine-integration.test.ts" />
+      <suite name="Launch Wrapper Integration" path="packages/core/src/__tests__/integration/launch-wrapper-integration.test.ts" />
+      <suite name="Workflow End-to-End" path="packages/core/src/__tests__/integration/workflow-e2e.test.ts" />
+    </integration-tests>
+    
+    <performance-tests>
+      <test name="Engine Startup Performance" target="&lt;1s" path="packages/core/src/__tests__/performance/engine-startup.test.ts" />
+      <test name="Workflow Execution Performance" target="&lt;5s per step" path="packages/core/src/__tests__/performance/workflow-execution.test.ts" />
+      <test name="State Management Performance" target="&lt;100ms" path="packages/core/src/__tests__/performance/state-management.test.ts" />
+    </performance-tests>
+  </testing-strategy>
+
+  <security-considerations>
+    <data-protection>
+      <consideration type="Isolation" description="Core engine isolated from deployment-specific dependencies" />
+      <consideration type="Input Validation" description="All inputs to core engine validated before processing" />
+      <consideration type="State Encryption" description="Sensitive workflow state encrypted at rest" />
+    </data-protection>
+    
+    <privacy>
+      <consideration type="Data Minimization" description="Core engine only accesses necessary data for workflow" />
+      <consideration type="Audit Trail" description="All workflow actions logged for compliance" />
+    </privacy>
+  </security-considerations>
+
+  <monitoring-and-observability>
+    <metrics>
+      <metric name="workflows_started_total" type="counter" description="Total workflows started" />
+      <metric name="workflows_completed_total" type="counter" description="Total workflows completed" />
+      <metric name="workflows_failed_total" type="counter" description="Total workflows failed" />
+      <metric name="workflow_duration_seconds" type="histogram" description="Duration of workflow executions" />
+      <metric name="step_execution_duration_seconds" type="histogram" description="Duration of individual workflow steps" />
+      <metric name="engine_state_changes_total" type="counter" description="Total engine state changes" />
+    </metrics>
+    
+    <logging>
+      <event name="workflow.started" level="info" description="Workflow execution started" />
+      <event name="workflow.completed" level="info" description="Workflow execution completed" />
+      <event name="workflow.failed" level="error" description="Workflow execution failed" />
+      <event name="step.started" level="debug" description="Workflow step started" />
+      <event name="step.completed" level="debug" description="Workflow step completed" />
+      <event name="state.changed" level="trace" description="Engine state changed" />
+      <event name="engine.initialized" level="info" description="Core engine initialized" />
+    </logging>
+  </monitoring-and-observability>
+
+  <configuration-schema>
+    <engine-config>
+      <field name="maxConcurrentWorkflows" type="number" required="false" default="1" description="Maximum concurrent workflows" />
+      <field name="workflowTimeout" type="number" required="false" default="3600" description="Workflow timeout in seconds" />
+      <field name="retryAttempts" type="number" required="false" default="3" description="Maximum retry attempts per step" />
+      <field name="statePersistence" type="object" required="false" description="State persistence configuration" />
+      <field name="progressTracking" type="object" required="false" description="Progress tracking configuration" />
+    </engine-config>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <api-docs>
+      <doc name="Core Engine API" path="docs/api/core-engine.md" />
+      <doc name="Workflow Configuration" path="docs/guides/workflow-configuration.md" />
+    </api-docs>
+    
+    <user-guides>
+      <guide name="Core Engine Usage" path="docs/tutorials/core-engine-usage.md" />
+      <guide name="Custom Workflow Steps" path="docs/guides/custom-workflow-steps.md" />
+    </user-guides>
+    
+    <technical-docs>
+      <doc name="Core Architecture" path="docs/technical/core-architecture.md" />
+      <doc name="State Management" path="docs/technical/state-management.md" />
+    </technical-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria-mapping>
+    <ac id="1" component="TammaEngine" test="tamma-engine.test.ts" />
+    <ac id="2" component="Launch Wrappers" test="launch-wrapper-integration.test.ts" />
+    <ac id="3" component="Workflow Orchestration" test="workflow-orchestrator.test.ts" />
+    <ac id="4" component="LaunchContext" test="launch-context.test.ts" />
+    <ac id="5" component="Package Dependencies" test="package-dependencies.test.ts" />
+    <ac id="6" component="Core Engine Tests" test="tamma-engine.test.ts" />
+    <ac id="7" component="Integration Tests" test="workflow-e2e.test.ts" />
+  </acceptance-criteria-mapping>
+
+  <risk-mitigation>
+    <risk id="R1" description="Core engine coupling with deployment-specific code" mitigation="Strict interface boundaries and dependency injection" />
+    <risk id="R2" description="Workflow state corruption" mitigation="State validation and atomic updates" />
+    <risk id="R3" description="Memory leaks in long-running workflows" mitigation="Resource cleanup and memory monitoring" />
+    <risk id="R4" description="Inconsistent behavior across deployment modes" mitigation="Shared test suite and behavior validation" />
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Code Reuse" target="90%" description="Percentage of core engine code reused across deployment modes" />
+    <metric name="Behavior Consistency" target="95%" description="Consistency of workflow behavior across deployment modes" />
+    <metric name="Engine Performance" target="&lt;1s startup" description="Core engine startup performance" />
+    <metric name="Workflow Success Rate" target="85%" description="Percentage of workflows completed successfully" />
+    <metric name="Test Coverage" target="90%" description="Test coverage for core engine package" />
+  </success-metrics>
+</story-context>
