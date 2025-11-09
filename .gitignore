@@ -147,7 +147,8 @@ CLAUDE.md
 .gemini/
 .cursor/
 .vscode/
-
+.clinerules/
+test-platform/.github/chatmodes/
 
 # Monorepo build artifacts
 packages/*/dist/
