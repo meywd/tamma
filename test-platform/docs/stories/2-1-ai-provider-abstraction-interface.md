@@ -1,6 +1,6 @@
 # Story 2.1: AI Provider Abstraction Interface
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -57,6 +57,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 ## Dev Notes
 
 ### Architecture Patterns
+
 - Interface-based design following dependency inversion principle
 - Plugin architecture for extensibility
 - Registry pattern for provider management
@@ -64,6 +65,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 - Circuit breaker pattern for API resilience
 
 ### Key Components
+
 - IAIProvider interface: Core abstraction for all providers
 - ProviderRegistry: Central registry for provider management
 - ProviderFactory: Factory for creating provider instances
@@ -71,6 +73,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 - Error handling: Consistent error management across providers
 
 ### Technology Stack
+
 - TypeScript 5.7+ with strict mode
 - Interface definitions for type safety
 - JSON schema validation for configurations
@@ -78,6 +81,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 - Streaming support for real-time responses
 
 ### Project Structure Notes
+
 - Interface definitions in src/providers/interfaces/
 - Provider implementations in src/providers/implementations/
 - Registry and factory in src/providers/registry/
@@ -85,6 +89,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 - Tests in tests/providers/
 
 ### References
+
 - [Source: docs/tech-spec-epic-2.md#AI-Provider-Abstraction-Interface]
 - [Source: docs/epics.md#Epic-2-AI-Provider-Integration]
 - [Source: docs/PRD.md#Multi-Provider-Support]
@@ -93,7 +98,7 @@ So that I can easily add new providers without changing core benchmarking logic.
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [2-1-ai-provider-abstraction-interface.context.xml](2-1-ai-provider-abstraction-interface.context.xml)
 
 ### Agent Model Used
 

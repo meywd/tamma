@@ -1,0 +1,871 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="5-2-community-voting-system" version="1.0.0">
+  <metadata>
+    <title>Community Voting System</title>
+    <epic>5</epic>
+    <story-type>evaluation</story-type>
+    <priority>high</priority>
+    <created>2025-01-09T12:00:00.000Z</created>
+    <updated>2025-01-09T12:00:00.000Z</updated>
+    <author>BMAD Story Context Workflow</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/5-2-community-voting-system.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a platform user</asA>
+    <iWant>to vote on the quality of AI-generated code</iWant>
+    <soThat>community feedback contributes to model evaluation</soThat>
+    <tasks>- Task 1: Voting Interface (AC: 1)
+  - Subtask 1.1: Create upvote/downvote components for benchmark results
+  - Subtask 1.2: Implement vote submission with real-time updates
+  - Subtask 1.3: Add vote display with counts and percentages
+- Task 2: Comment System (AC: 2)
+  - Subtask 2.1: Build comment submission and display interface
+  - Subtask 2.2: Implement comment threading and replies
+  - Subtask 2.3: Add comment moderation and flagging capabilities
+- Task 3: Reputation System (AC: 3)
+  - Subtask 3.1: Design reputation score calculation algorithm
+  - Subtask 3.2: Implement voting weight based on reputation levels
+  - Subtask 3.3: Create reputation history and progression tracking
+- Task 4: Fraud Detection (AC: 4)
+  - Subtask 4.1: Implement suspicious voting pattern detection
+  - Subtask 4.2: Add rate limiting and cooldown periods
+  - Subtask 4.3: Create automated flagging for review
+- Task 5: Community Leaderboard (AC: 5)
+  - Subtask 5.1: Build leaderboard displaying top contributors
+  - Subtask 5.2: Implement badges and recognition system
+  - Subtask 5.3: Add filtering and sorting capabilities
+- Task 6: Voting Analytics (AC: 6)
+  - Subtask 6.1: Create analytics dashboard for voting trends
+  - Subtask 6.2: Implement voting distribution analysis
+  - Subtask 6.3: Add export capabilities for voting data
+- Task 7: Moderation Tools (AC: 7)
+  - Subtask 7.1: Build content moderation interface
+  - Subtask 7.2: Implement automated content filtering
+  - Subtask 7.3: Add moderator escalation workflows
+- Task 8: Community Guidelines (AC: 8)
+  - Subtask 8.1: Create community guidelines documentation
+  - Subtask 8.2: Implement guideline enforcement system
+  - Subtask 8.3: Add user reporting and appeal mechanisms</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Upvote/downvote system for benchmark results
+2. Comment system for qualitative feedback
+3. User reputation and voting weight calculation
+4. Vote fraud detection and prevention
+5. Community leaderboard and recognition
+6. Voting analytics and trend analysis
+7. Moderation tools for inappropriate content
+8. Community guidelines and enforcement</acceptanceCriteria>
+
+  <dependencies>
+    <upstream>
+      <dependency story="4-1">Task Execution Engine</dependency>
+      <dependency story="4-2">Automated Scoring System</dependency>
+      <dependency story="1-2">Authentication &amp; Authorization System</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="5-5">Multi-Judge Score Aggregation</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Community Voting Framework</component>
+    <layer>Evaluation</layer>
+    <pattern>Multi-Judge Evaluation</pattern>
+    <principles>
+      <principle>Community engagement</principle>
+      <principle>Reputation-based weighting</principle>
+      <principle>Fraud prevention</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <community-voting-framework>
+      <interface name="CommunityVotingService">
+        <methods>
+          <method name="openVoting" returns="Promise&lt;VotingSession&gt;">
+            <param name="executionId" type="string"/>
+            <param name="votingConfig" type="VotingConfig"/>
+          </method>
+          <method name="submitVote" returns="Promise&lt;void&gt;">
+            <param name="vote" type="CommunityVote"/>
+          </method>
+          <method name="getVotingSession" returns="Promise&lt;VotingSession&gt;">
+            <param name="sessionId" type="string"/>
+          </method>
+          <method name="getVotingResults" returns="Promise&lt;VotingResults&gt;">
+            <param name="sessionId" type="string"/>
+          </method>
+          <method name="closeVoting" returns="Promise&lt;VotingResults&gt;">
+            <param name="sessionId" type="string"/>
+          </method>
+          <method name="getUserVotingHistory" returns="Promise&lt;CommunityVote[]&gt;">
+            <param name="userId" type="string"/>
+            <param name="filter" type="VotingHistoryFilter" optional="true"/>
+          </method>
+          <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;">
+            <param name="userId" type="string"/>
+          </method>
+        </methods>
+      </interface>
+
+      <data-models>
+        <model name="VotingSession">
+          <properties>
+            <property name="id" type="string"/>
+            <property name="executionId" type="string"/>
+            <property name="config" type="VotingConfig"/>
+            <property name="status" type="VotingStatus"/>
+            <property name="createdAt" type="Date"/>
+            <property name="closesAt" type="Date" optional="true"/>
+            <property name="participantCount" type="number"/>
+            <property name="voteCount" type="number"/>
+            <property name="currentResults" type="VotingResults" optional="true"/>
+            <property name="metadata" type="VotingSessionMetadata"/>
+          </properties>
+        </model>
+
+        <model name="CommunityVote">
+          <properties>
+            <property name="id" type="string"/>
+            <property name="sessionId" type="string"/>
+            <property name="userId" type="string"/>
+            <property name="criteriaVotes" type="CriteriaVote[]"/>
+            <property name="overallRating" type="number" optional="true"/>
+            <property name="comments" type="string" optional="true"/>
+            <property name="timestamp" type="Date"/>
+            <property name="ipAddress" type="string" optional="true"/>
+            <property name="userAgent" type="string" optional="true"/>
+            <property name="verified" type="boolean"/>
+            <property name="weight" type="number"/>
+          </properties>
+        </model>
+
+        <model name="VotingResults">
+          <properties>
+            <property name="sessionId" type="string"/>
+            <property name="totalVotes" type="number"/>
+            <property name="uniqueParticipants" type="number"/>
+            <property name="quorumMet" type="boolean"/>
+            <property name="criteriaResults" type="CriteriaResult[]"/>
+            <property name="overallScore" type="number"/>
+            <property name="confidence" type="number"/>
+            <property name="distribution" type="VoteDistribution"/>
+            <property name="metadata" type="ResultsMetadata"/>
+          </properties>
+        </model>
+
+        <model name="ReputationScore">
+          <properties>
+            <property name="userId" type="string"/>
+            <property name="overallScore" type="number"/>
+            <property name="components" type="ReputationComponent[]"/>
+            <property name="level" type="ReputationLevel"/>
+            <property name="badge" type="string[]"/>
+            <property name="history" type="ReputationHistory[]"/>
+            <property name="calculatedAt" type="Date"/>
+          </properties>
+        </model>
+      </data-models>
+
+      <enums>
+        <enum name="VotingStatus" values="['open', 'closed', 'cancelled', 'pending']"/>
+        <enum name="VotingType" values="['simple_rating', 'criteria_based', 'comparative', 'approval']"/>
+        <enum name="CriteriaType" values="['rating', 'choice', 'multiple_choice', 'text']"/>
+        <enum name="ReputationLevel" values="['newcomer', 'contributor', 'expert', 'master', 'legendary']"/>
+        <enum name="ReputationComponentType" values="['vote_participation', 'vote_quality', 'consensus_alignment', 'community_contribution', 'verification_status']"/>
+      </enums>
+    </community-voting-framework>
+
+    <frontend-components>
+      <component name="VotingInterface">
+        <description>Main voting interface for benchmark results</description>
+        <features>
+          <feature>Upvote/downvote buttons</feature>
+          <feature>Real-time vote counts</feature>
+          <feature>Comment submission</feature>
+          <feature>Vote weight display</feature>
+        </features>
+        <props>
+          <prop name="executionId" type="string"/>
+          <prop name="sessionId" type="string"/>
+          <prop name="userVote" type="CommunityVote" optional="true"/>
+          <prop name="onVote" type="(vote: CommunityVote) =&gt; void"/>
+        </props>
+      </component>
+
+      <component name="CommentThread">
+        <description>Threaded comment system for discussions</description>
+        <features>
+          <feature>Nested comments</feature>
+          <feature>Reply functionality</feature>
+          <feature>Moderation tools</feature>
+          <feature>Real-time updates</feature>
+        </features>
+        <props>
+          <prop name="comments" type="Comment[]"/>
+          <prop name="onReply" type="(parentId: string, content: string) =&gt; void"/>
+          <prop name="onFlag" type="(commentId: string) =&gt; void"/>
+        </props>
+      </component>
+
+      <component name="ReputationDisplay">
+        <description>User reputation and badge display</description>
+        <features>
+          <feature>Reputation score</feature>
+          <feature>Level indicators</feature>
+          <feature>Badge showcase</feature>
+          <feature>Progress bars</feature>
+        </features>
+        <props>
+          <prop name="reputation" type="ReputationScore"/>
+          <prop name="showDetails" type="boolean" default="false"/>
+        </props>
+      </component>
+
+      <component name="CommunityLeaderboard">
+        <description>Leaderboard showing top contributors</description>
+        <features>
+          <feature>Ranking display</feature>
+          <feature>Filtering options</feature>
+          <feature>Badge highlights</feature>
+          <feature>Trend indicators</feature>
+        </features>
+        <props>
+          <prop name="users" type="ReputationScore[]"/>
+          <prop name="period" type="string"/>
+          <prop name="category" type="string" optional="true"/>
+        </props>
+      </component>
+    </frontend-components>
+
+    <backend-services>
+      <service name="ReputationService">
+        <description>User reputation calculation and management</description>
+        <methods>
+          <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;">
+            <param name="userId" type="string"/>
+          </method>
+          <method name="updateReputation" returns="Promise&lt;void&gt;">
+            <param name="userId" type="string"/>
+            <param name="action" type="ReputationAction"/>
+          </method>
+          <method name="getReputationHistory" returns="Promise&lt;ReputationHistory[]&gt;">
+            <param name="userId" type="string"/>
+          </method>
+        </methods>
+      </service>
+
+      <service name="FraudDetectionService">
+        <description>Voting fraud detection and prevention</description>
+        <methods>
+          <method name="analyzeVotingPattern" returns="Promise&lt;FraudAnalysis&gt;">
+            <param name="votes" type="CommunityVote[]"/>
+            <param name="userId" type="string"/>
+          </method>
+          <method name="checkRateLimits" returns="Promise&lt;boolean&gt;">
+            <param name="userId" type="string"/>
+            <param name="sessionId" type="string"/>
+          </method>
+          <method name="flagSuspiciousActivity" returns="Promise&lt;void&gt;">
+            <param name="activity" type="SuspiciousActivity"/>
+          </method>
+        </methods>
+      </service>
+
+      <service name="ModerationService">
+        <description>Content moderation and community management</description>
+        <methods>
+          <method name="moderateContent" returns="Promise&lt;ModerationResult&gt;">
+            <param name="content" type="string"/>
+            <param name="contentType" type="ContentType"/>
+          </method>
+          <method name="handleReport" returns="Promise&lt;void&gt;">
+            <param name="report" type="ContentReport"/>
+          </method>
+          <method name="escalateToModerator" returns="Promise&lt;void&gt;">
+            <param name="contentId" type="string"/>
+            <param name="reason" type="string"/>
+          </method>
+        </methods>
+      </service>
+
+      <service name="VotingAnalyticsService">
+        <description>Voting analytics and trend analysis</description>
+        <methods>
+          <method name="getVotingTrends" returns="Promise&lt;VotingTrends&gt;">
+            <param name="sessionId" type="string"/>
+            <param name="period" type="TimePeriod"/>
+          </method>
+          <method name="analyzeVoteDistribution" returns="Promise&lt;VoteDistributionAnalysis&gt;">
+            <param name="sessionId" type="string"/>
+          </method>
+          <method name="exportVotingData" returns="Promise&lt;ExportData&gt;">
+            <param name="sessionId" type="string"/>
+            <param name="format" type="ExportFormat"/>
+          </method>
+        </methods>
+      </service>
+    </backend-services>
+  </technical-specifications>
+
+  <data-models>
+    <database-schema>
+      <table name="voting_sessions">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="execution_id" type="UUID" foreign="task_executions(id)"/>
+          <column name="config" type="JSONB"/>
+          <column name="status" type="VARCHAR(20)"/>
+          <column name="created_at" type="TIMESTAMPTZ"/>
+          <column name="closes_at" type="TIMESTAMPTZ" nullable="true"/>
+          <column name="participant_count" type="INTEGER" default="0"/>
+          <column name="vote_count" type="INTEGER" default="0"/>
+          <column name="metadata" type="JSONB"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="execution_id"/>
+          <index columns="status, closes_at"/>
+          <index columns="created_at"/>
+        </indexes>
+      </table>
+
+      <table name="community_votes">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="session_id" type="UUID" foreign="voting_sessions(id)"/>
+          <column name="user_id" type="UUID" foreign="users(id)"/>
+          <column name="criteria_votes" type="JSONB"/>
+          <column name="overall_rating" type="DECIMAL(5,2)" nullable="true"/>
+          <column name="comments" type="TEXT" nullable="true"/>
+          <column name="timestamp" type="TIMESTAMPTZ"/>
+          <column name="ip_address" type="INET" nullable="true"/>
+          <column name="user_agent" type="TEXT" nullable="true"/>
+          <column name="verified" type="BOOLEAN" default="true"/>
+          <column name="weight" type="DECIMAL(5,2)" default="1.0"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="session_id, timestamp"/>
+          <index columns="user_id, timestamp"/>
+          <index columns="verified, timestamp"/>
+          <index columns="session_id, user_id" unique="true"/>
+        </indexes>
+      </table>
+
+      <table name="user_reputation">
+        <columns>
+          <column name="user_id" type="UUID" primary="true" foreign="users(id)"/>
+          <column name="overall_score" type="DECIMAL(8,2)"/>
+          <column name="level" type="VARCHAR(20)"/>
+          <column name="badges" type="JSONB"/>
+          <column name="components" type="JSONB"/>
+          <column name="calculated_at" type="TIMESTAMPTZ"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="overall_score"/>
+          <index columns="level"/>
+        </indexes>
+      </table>
+
+      <table name="reputation_history">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="user_id" type="UUID" foreign="users(id)"/>
+          <column name="date" type="TIMESTAMPTZ"/>
+          <column name="type" type="VARCHAR(50)"/>
+          <column name="change" type="DECIMAL(8,2)"/>
+          <column name="reason" type="TEXT"/>
+          <column name="context" type="JSONB"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="user_id, date"/>
+          <index columns="type, date"/>
+        </indexes>
+      </table>
+
+      <table name="voting_comments">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="session_id" type="UUID" foreign="voting_sessions(id)"/>
+          <column name="user_id" type="UUID" foreign="users(id)"/>
+          <column name="parent_id" type="UUID" foreign="voting_comments(id)" nullable="true"/>
+          <column name="content" type="TEXT"/>
+          <column name="status" type="VARCHAR(20)" default="active"/>
+          <column name="flags" type="INTEGER" default="0"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="session_id, created_at"/>
+          <index columns="parent_id"/>
+          <index columns="user_id, created_at"/>
+          <index columns="status, flags"/>
+        </indexes>
+      </table>
+
+      <table name="fraud_flags">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="user_id" type="UUID" foreign="users(id)"/>
+          <column name="session_id" type="UUID" foreign="voting_sessions(id)"/>
+          <column name="type" type="VARCHAR(50)"/>
+          <column name="description" type="TEXT"/>
+          <column name="confidence" type="DECIMAL(3,2)"/>
+          <column name="status" type="VARCHAR(20)" default="pending"/>
+          <column name="resolved_by" type="UUID" foreign="users(id)" nullable="true"/>
+          <column name="resolved_at" type="TIMESTAMPTZ" nullable="true"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="user_id, status"/>
+          <index columns="session_id, status"/>
+          <index columns="type, created_at"/>
+        </indexes>
+      </table>
+    </database-schema>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="ICommunityVotingService">
+      <description>Core community voting service interface</description>
+      <methods>
+        <method name="openVoting" returns="Promise&lt;VotingSession&gt;">
+          <param name="executionId" type="string"/>
+          <param name="votingConfig" type="VotingConfig"/>
+        </method>
+        <method name="submitVote" returns="Promise&lt;void&gt;">
+          <param name="vote" type="CommunityVote"/>
+        </method>
+        <method name="getVotingSession" returns="Promise&lt;VotingSession&gt;">
+          <param name="sessionId" type="string"/>
+        </method>
+        <method name="getVotingResults" returns="Promise&lt;VotingResults&gt;">
+          <param name="sessionId" type="string"/>
+        </method>
+        <method name="closeVoting" returns="Promise&lt;VotingResults&gt;">
+          <param name="sessionId" type="string"/>
+        </method>
+        <method name="getUserVotingHistory" returns="Promise&lt;CommunityVote[]&gt;">
+          <param name="userId" type="string"/>
+          <param name="filter" type="VotingHistoryFilter" optional="true"/>
+        </method>
+        <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;">
+          <param name="userId" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IReputationService">
+      <description>Reputation calculation service interface</description>
+      <methods>
+        <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;">
+          <param name="userId" type="string"/>
+        </method>
+        <method name="updateReputation" returns="Promise&lt;void&gt;">
+          <param name="userId" type="string"/>
+          <param name="action" type="ReputationAction"/>
+        </method>
+        <method name="getReputationHistory" returns="Promise&lt;ReputationHistory[]&gt;">
+          <param name="userId" type="string"/>
+        </method>
+        <method name="calculateVoteWeight" returns="Promise&lt;number&gt;">
+          <param name="userId" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IFraudDetectionService">
+      <description>Fraud detection service interface</description>
+      <methods>
+        <method name="analyzeVotingPattern" returns="Promise&lt;FraudAnalysis&gt;">
+          <param name="votes" type="CommunityVote[]"/>
+          <param name="userId" type="string"/>
+        </method>
+        <method name="checkRateLimits" returns="Promise&lt;boolean&gt;">
+          <param name="userId" type="string"/>
+          <param name="sessionId" type="string"/>
+        </method>
+        <method name="flagSuspiciousActivity" returns="Promise&lt;void&gt;">
+          <param name="activity" type="SuspiciousActivity"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="CommunityVotingService">
+      <description>Main community voting service implementation</description>
+      <implements>ICommunityVotingService</implements>
+      <properties>
+        <property name="votingRepository" type="VotingRepository"/>
+        <property name="userRepository" type="UserRepository"/>
+        <property name="reputationService" type="ReputationService"/>
+        <property name="moderationService" type="ModerationService"/>
+        <property name="analyticsService" type="AnalyticsService"/>
+        <property name="notificationService" type="NotificationService"/>
+      </properties>
+      <methods>
+        <method name="openVoting" returns="Promise&lt;VotingSession&gt;"/>
+        <method name="submitVote" returns="Promise&lt;void&gt;"/>
+        <method name="getVotingSession" returns="Promise&lt;VotingSession&gt;"/>
+        <method name="getVotingResults" returns="Promise&lt;VotingResults&gt;"/>
+        <method name="closeVoting" returns="Promise&lt;VotingResults&gt;"/>
+        <method name="getUserVotingHistory" returns="Promise&lt;CommunityVote[]&gt;"/>
+        <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;"/>
+        <method name="validateVotingConfig" returns="Promise&lt;void&gt;"/>
+        <method name="validateUserEligibility" returns="Promise&lt;void&gt;"/>
+        <method name="validateVoteContent" returns="Promise&lt;void&gt;"/>
+        <method name="performAntiSpamChecks" returns="Promise&lt;void&gt;"/>
+        <method name="calculateVoteWeight" returns="Promise&lt;number&gt;"/>
+        <method name="updateSessionStatistics" returns="Promise&lt;void&gt;"/>
+        <method name="checkQuorum" returns="Promise&lt;void&gt;"/>
+      </methods>
+    </class>
+
+    <class name="ReputationCalculationService">
+      <description>Reputation calculation and management</description>
+      <implements>IReputationService</implements>
+      <properties>
+        <property name="reputationRepository" type="ReputationRepository"/>
+        <property name="votingRepository" type="VotingRepository"/>
+      </properties>
+      <methods>
+        <method name="calculateReputationScore" returns="Promise&lt;ReputationScore&gt;"/>
+        <method name="updateReputation" returns="Promise&lt;void&gt;"/>
+        <method name="getReputationHistory" returns="Promise&lt;ReputationHistory[]&gt;"/>
+        <method name="calculateVoteWeight" returns="Promise&lt;number&gt;"/>
+        <method name="calculateParticipationScore" returns="number"/>
+        <method name="calculateVoteQualityScore" returns="Promise&lt;number&gt;"/>
+        <method name="calculateConsensusAlignment" returns="Promise&lt;number&gt;"/>
+        <method name="calculateContributionScore" returns="Promise&lt;number&gt;"/>
+        <method name="calculateVerificationScore" returns="Promise&lt;number&gt;"/>
+        <method name="determineReputationLevel" returns="ReputationLevel"/>
+        <method name="calculateBadges" returns="Promise&lt;string[]&gt;"/>
+      </methods>
+    </class>
+
+    <class name="FraudDetectionService">
+      <description>Voting fraud detection and prevention</description>
+      <implements>IFraudDetectionService</implements>
+      <properties>
+        <property name="votingRepository" type="VotingRepository"/>
+        <property name="moderationService" type="ModerationService"/>
+      </properties>
+      <methods>
+        <method name="analyzeVotingPattern" returns="Promise&lt;FraudAnalysis&gt;"/>
+        <method name="checkRateLimits" returns="Promise&lt;boolean&gt;"/>
+        <method name="flagSuspiciousActivity" returns="Promise&lt;void&gt;"/>
+        <method name="checkSuspiciousPatterns" returns="Promise&lt;void&gt;"/>
+        <method name="findIdenticalVotes" returns="Promise&lt;CommunityVote[]&gt;"/>
+        <method name="analyzeVotingVelocity" returns="Promise&lt;VelocityAnalysis&gt;"/>
+        <method name="detectCoordination" returns="Promise&lt;CoordinationAnalysis&gt;"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="task-execution">
+      <component>Task Execution Engine</component>
+      <interface>Execution Results API</interface>
+      <description>Get execution results for voting</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>REST API</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="user-auth">
+      <component>Authentication Service</component>
+      <interface>User Authentication API</interface>
+      <description>Authenticate users and manage permissions</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>JWT/OAuth2</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="notifications">
+      <component>Notification Service</component>
+      <interface>Notification API</interface>
+      <description>Send voting notifications and updates</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>Webhook/SSE</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="score-aggregation">
+      <component>Multi-Judge Score Aggregation</component>
+      <interface>Score Submission API</interface>
+      <description>Submit community voting scores for aggregation</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>REST API</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <api-endpoints>
+    <endpoint name="open-voting" method="POST" path="/api/v1/community/voting/sessions">
+      <description>Open new voting session</description>
+      <parameters>
+        <parameter name="executionId" type="string">Execution identifier</parameter>
+        <parameter name="votingConfig" type="VotingConfig">Voting configuration</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Voting session created</response>
+        <response code="400">Invalid configuration</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="submit-vote" method="POST" path="/api/v1/community/voting/votes">
+      <description>Submit community vote</description>
+      <parameters>
+        <parameter name="vote" type="CommunityVote">Vote data</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Vote submitted</response>
+        <response code="400">Invalid vote data</response>
+        <response code="409">Duplicate vote</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-voting-session" method="GET" path="/api/v1/community/voting/sessions/{sessionId}">
+      <description>Get voting session details</description>
+      <parameters>
+        <parameter name="sessionId" type="string">Session identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Voting session</response>
+        <response code="404">Session not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-voting-results" method="GET" path="/api/v1/community/voting/sessions/{sessionId}/results">
+      <description>Get voting results</description>
+      <parameters>
+        <parameter name="sessionId" type="string">Session identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Voting results</response>
+        <response code="404">Session not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="close-voting" method="POST" path="/api/v1/community/voting/sessions/{sessionId}/close">
+      <description>Close voting session</description>
+      <parameters>
+        <parameter name="sessionId" type="string">Session identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Voting closed with results</response>
+        <response code="404">Session not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-user-reputation" method="GET" path="/api/v1/community/reputation/{userId}">
+      <description>Get user reputation score</description>
+      <parameters>
+        <parameter name="userId" type="string">User identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">User reputation</response>
+        <response code="404">User not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-community-leaderboard" method="GET" path="/api/v1/community/leaderboard">
+      <description>Get community leaderboard</description>
+      <parameters>
+        <parameter name="period" type="string" optional="true">Time period</parameter>
+        <parameter name="category" type="string" optional="true">Category filter</parameter>
+        <parameter name="limit" type="number" optional="true">Maximum results</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Leaderboard results</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>90%</coverage>
+      <focus>
+        <area>Voting logic and validation</area>
+        <area>Reputation calculation algorithms</area>
+        <area>Fraud detection algorithms</area>
+        <area>Score aggregation methods</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>80%</coverage>
+      <focus>
+        <area>End-to-end voting workflow</area>
+        <area>Database operations</area>
+        <area>API endpoint integration</area>
+        <area>Real-time updates</area>
+      </focus>
+    </integration-tests>
+
+    <performance-tests>
+      <coverage>70%</coverage>
+      <focus>
+        <area>High-volume voting scenarios</area>
+        <area>Reputation calculation performance</area>
+        <area>Fraud detection efficiency</area>
+      </focus>
+    </performance-tests>
+
+    <test-data>
+      <voting-sessions>
+        <session name="sample-voting-session">Sample voting session with full configuration</session>
+        <session name="high-participation-session">High participation voting session</session>
+        <session name="controversial-session">Session with divided opinions</session>
+      </voting-sessions>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="vote-manipulation">
+        <description>Users manipulating voting through multiple accounts</description>
+        <mitigation>Rate limiting, IP tracking, device fingerprinting</mitigation>
+      </threat>
+      <threat name="reputation-abuse">
+        <description>Users gaming reputation system</description>
+        <mitigation>Reputation algorithms, fraud detection, manual review</mitigation>
+      </threat>
+      <threat name="content-abuse">
+        <description>Inappropriate content in comments and votes</description>
+        <mitigation>Content moderation, automated filtering, user reporting</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="rate-limiting">
+        <description>Limit voting frequency</description>
+        <implementation>Per-user and per-IP rate limits</implementation>
+      </control>
+      <control name="content-moderation">
+        <description>Moderate user-generated content</description>
+        <implementation>Automated filtering + human moderation</implementation>
+      </control>
+      <control name="fraud-detection">
+        <description>Detect suspicious voting patterns</description>
+        <implementation>ML-based pattern analysis</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="voting_participation_rate" type="gauge">Percentage of eligible users voting</metric>
+      <metric name="vote_submission_rate" type="counter">Votes submitted per time period</metric>
+      <metric name="reputation_distribution" type="histogram">Distribution of reputation scores</metric>
+      <metric name="fraud_detection_rate" type="counter">Fraudulent activities detected</metric>
+      <metric name="moderation_actions" type="counter">Content moderation actions taken</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="low_participation">
+        <condition>voting_participation_rate &lt; 10%</condition>
+        <severity>warning</severity>
+        <action>Investigate voting barriers</action>
+      </alert>
+      <alert name="high_fraud_activity">
+        <condition>fraud_detection_rate &gt; 5/hour</condition>
+        <severity>critical</severity>
+        <action>Investigate fraud patterns</action>
+      </alert>
+      <alert name="moderation_backlog">
+        <condition>moderation_queue_depth &gt; 100</condition>
+        <severity>warning</severity>
+        <action>Scale moderation resources</action>
+      </alert>
+    </alerts>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/community-voting.schema.ts</file-location>
+    <voting-configs>
+      <config name="voting-rules">config/community-voting/voting-rules.yaml</config>
+      <config name="reputation-algorithm">config/community-voting/reputation-algorithm.yaml</config>
+      <config name="fraud-detection">config/community-voting/fraud-detection.yaml</config>
+      <config name="moderation-rules">config/community-voting/moderation-rules.yaml</config>
+    </voting-configs>
+  </configuration-schema>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>Upvote/downvote system for benchmark results</description>
+      <verification>Voting interface functionality test</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Comment system for qualitative feedback</description>
+      <verification>Comment threading and moderation test</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>User reputation and voting weight calculation</description>
+      <verification>Reputation algorithm and weight calculation test</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Vote fraud detection and prevention</description>
+      <verification>Fraud detection algorithms test</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Community leaderboard and recognition</description>
+      <verification>Leaderboard display and ranking test</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Voting analytics and trend analysis</description>
+      <verification>Analytics dashboard and reporting test</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="should">
+      <description>Moderation tools for inappropriate content</description>
+      <verification>Moderation interface and workflow test</verification>
+    </criteria>
+
+    <criteria id="ac8" priority="should">
+      <description>Community guidelines and enforcement</description>
+      <verification>Guideline display and enforcement test</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="high">
+      <description>Vote manipulation and fraud undermining system integrity</description>
+      <mitigation>Advanced fraud detection, rate limiting, manual review</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Low community participation affecting evaluation quality</description>
+      <mitigation>Incentive systems, user engagement features, reputation rewards</mitigation>
+    </risk>
+
+    <risk id="risk3" level="medium">
+      <description>Toxic behavior and harassment in community</description>
+      <mitigation>Strong moderation, community guidelines, user reporting</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="voting_participation_rate" target="&gt; 20%">Percentage of eligible users voting</metric>
+    <metric name="community_engagement_score" target="&gt; 0.7">Overall community engagement metric</metric>
+    <metric name="fraud_detection_accuracy" target="&gt; 95%">Accuracy of fraud detection</metric>
+    <metric name="moderation_response_time" target="&lt; 1 hour">Average time to respond to reports</metric>
+  </success-metrics>
+</story-context>

@@ -1,6 +1,6 @@
 # Story 1.2: Authentication & Authorization System
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -94,7 +94,7 @@ So that I can access the platform and manage my benchmark data with proper permi
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [1-2-authentication-authorization-system.context.xml](1-2-authentication-authorization-system.context.xml)
 
 ### Agent Model Used
 

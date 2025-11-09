@@ -265,7 +265,7 @@ interface ModelDiscoveryConfig {
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [2-4-dynamic-model-discovery-service.context.xml](2-4-dynamic-model-discovery-service.context.xml)
 
 ### Agent Model Used
 

@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-6" title="Webhook Integration" epic="1.5" created="2025-11-08T12:00:00.000Z">
+  <overview>
+    <summary>Implement GitHub and GitLab webhook processing with signature verification, event filtering, and task queue integration. Webhook integration enables Tamma to automatically respond to issue assignments, PR events, and comments, providing the foundation for autonomous development workflows triggered by external events.</summary>
+    <business-objective>Enable Tamma to receive real-time events from Git platforms and automatically trigger autonomous development workflows through secure webhook processing.</business-objective>
+    <technical-approach>Build secure webhook handlers for GitHub and GitLab that verify signatures, filter relevant events, transform payloads into standardized tasks, and enqueue them for processing by the service mode.</technical-approach>
+  </overview>
+
+  <technical-components>
+    <component name="GitHub Webhook Handler" package="@tamma/server/src/webhooks" primary="true">
+      <description>Processes GitHub webhook events with HMAC-SHA256 signature verification</description>
+      <key-classes>
+        <class name="GitHubWebhookHandler" responsibilities="GitHub webhook processing, event filtering, task creation"/>
+        <class name="GitHubWebhookEvent" responsibilities="GitHub event type definitions"/>
+        <class name="GitHubIssue" responsibilities="GitHub issue data model"/>
+        <class name="GitHubPullRequest" responsibilities="GitHub PR data model"/>
+        <class name="GitHubComment" responsibilities="GitHub comment data model"/>
+      </key-classes>
+      <dependencies>
+        <dependency package="crypto" purpose="Signature verification"/>
+        <dependency package="@tamma/queue" purpose="Task queue integration"/>
+        <dependency package="@tamma/observability" purpose="Logging"/>
+        <dependency package="@tamma/config" purpose="Configuration"/>
+      </dependencies>
+    </component>
+
+    <component name="GitLab Webhook Handler" package="@tamma/server/src/webhooks">
+      <description>Processes GitLab webhook events with token verification</description>
+      <key-classes>
+        <class name="GitLabWebhookHandler" responsibilities="GitLab webhook processing, event filtering"/>
+        <class name="GitLabWebhookEvent" responsibilities="GitLab event type definitions"/>
+        <class name="GitLabIssueAttributes" responsibilities="GitLab issue data model"/>
+        <class name="GitLabProject" responsibilities="GitLab project data model"/>
+        <class name="GitLabUser" responsibilities="GitLab user data model"/>
+      </key-classes>
+      <dependencies>
+        <dependency package="@tamma/queue" purpose="Task queue integration"/>
+        <dependency package="@tamma/observability" purpose="Logging"/>
+        <dependency package="@tamma/config" purpose="Configuration"/>
+      </dependencies>
+    </component>
+
+    <component name="Signature Verification" package="@tamma/server/src/webhooks">
+      <description>Secure signature verification for webhook authenticity</description>
+      <key-classes>
+        <class name="WebhookSignatureVerifier" responsibilities="HMAC verification, token validation"/>
+      </key-classes>
+      <security-features>
+        <feature>HMAC-SHA256 signature verification for GitHub</feature>
+        <feature>Token-based verification for GitLab</feature>
+        <feature>Timing-safe comparison to prevent timing attacks</feature>
+        <feature>Signature generation for testing</feature>
+      </security-features>
+    </component>
+
+    <component name="Webhook Routes" package="@tamma/server/src/web">
+      <description>HTTP endpoints for receiving webhook events</description>
+      <endpoints>
+        <endpoint method="POST" path="/webhooks/github" purpose="GitHub webhook receiver"/>
+        <endpoint method="POST" path="/webhooks/gitlab" purpose="GitLab webhook receiver"/>
+      </endpoints>
+      <middleware>
+        <mw name="Rate limiting" purpose="Prevent abuse (300 requests/minute)"/>
+        <mw name="Request logging" purpose="Audit trail"/>
+        <mw name="Error handling" purpose="Graceful failure responses"/>
+      </middleware>
+    </component>
+
+    <component name="Event Transformers" package="@tamma/server/src/webhooks">
+      <description>Transform platform-specific events to standardized tasks</description>
+      <transformers>
+        <transformer name="IssueAssignmentTransformer" purpose="Convert issue assignments to tasks"/>
+        <transformer name="IssueCommentTransformer" purpose="Convert bot mentions to tasks"/>
+        <transformer name="PRReviewTransformer" purpose="Convert PR review requests to tasks"/>
+      </transformers>
+      <priority-logic>
+        <logic name="Label-based priority" purpose="Critical/High/Medium/Low based on labels"/>
+        <logic name="Content-based priority" purpose="Urgent keywords in comments"/>
+        <logic name="Default priority" purpose="Low priority for standard events"/>
+      </priority-logic>
+    </component>
+  </technical-components>
+
+  <data-models>
+    <model name="WebhookConfig">
+      <fields>
+        <field name="github" type="GitHubWebhookConfig" description="GitHub webhook settings"/>
+        <field name="gitlab" type="GitLabWebhookConfig" description="GitLab webhook settings"/>
+        <field name="eventFilters" type="EventFilters" description="Event filtering rules"/>
+        <field name="processing" type="ProcessingConfig" description="Processing options"/>
+      </fields>
+    </model>
+
+    <model name="GitHubWebhookConfig">
+      <fields>
+        <field name="enabled" type="boolean" default="true" description="Enable GitHub webhooks"/>
+        <field name="secret" type="string" required="true" description="HMAC secret"/>
+        <field name="botUsername" type="string" required="true" description="Bot username for filtering"/>
+      </fields>
+    </model>
+
+    <model name="GitLabWebhookConfig">
+      <fields>
+        <field name="enabled" type="boolean" default="false" description="Enable GitLab webhooks"/>
+        <field name="token" type="string" required="true" description="Verification token"/>
+        <field name="botUsername" type="string" required="true" description="Bot username for filtering"/>
+      </fields>
+    </model>
+
+    <model name="EventFilters">
+      <fields>
+        <field name="allowedRepositories" type="string[]" description="Whitelist of repositories"/>
+        <field name="blockedRepositories" type="string[]" description="Blacklist of repositories"/>
+        <field name="allowedUsers" type="string[]" description="Whitelist of users"/>
+        <field name="blockedUsers" type="string[]" description="Blacklist of users"/>
+        <field name="requireBotMention" type="boolean" default="true" description="Require bot mention in comments"/>
+      </fields>
+    </model>
+
+    <model name="ProcessingConfig">
+      <fields>
+        <field name="maxPayloadSize" type="number" default="1048576" description="Max payload size (1MB)"/>
+        <field name="timeoutMs" type="number" default="10000" description="Processing timeout"/>
+        <field name="retryAttempts" type="number" default="3" description="Retry attempts on failure"/>
+      </fields>
+    </model>
+
+    <model name="WebhookProcessingResult">
+      <fields>
+        <field name="status" type="string" description="Processing status"/>
+        <field name="processed" type="boolean" description="Whether event was processed"/>
+        <field name="taskId" type="string" description="Created task ID (if applicable)"/>
+        <field name="processingTime" type="number" description="Processing time in ms"/>
+        <field name="error" type="string" description="Error message (if failed)"/>
+      </fields>
+    </model>
+  </data-models>
+
+  <integration-points>
+    <integration name="Task Queue" type="internal" critical="true">
+      <description>Webhook handlers enqueue tasks for asynchronous processing</description>
+      <interface>ITaskQueue</interface>
+      <operations>
+        <op name="enqueue" async="true" description="Add webhook task to queue"/>
+        <op name="list" async="true" description="List queued tasks (for testing)"/>
+      </operations>
+      <task-types>
+        <type name="ISSUE_ASSIGNED" priority="variable" description="Issue assigned to bot"/>
+        <type name="ISSUE_COMMENT" priority="variable" description="Bot mentioned in comment"/>
+        <type name="PR_REVIEW_REQUESTED" priority="HIGH" description="PR review requested"/>
+      </task-types>
+    </integration>
+
+    <integration name="Web Server" type="internal" critical="true">
+      <description>Webhook endpoints integrated into Fastify server</description>
+      <interface>TammaWebServer</interface>
+      <endpoints>
+        <endpoint path="/webhooks/github" method="POST"/>
+        <endpoint path="/webhooks/gitlab" method="POST"/>
+      </endpoints>
+      <middleware>
+        <mw name="Rate limiting" config="300 requests/minute"/>
+        <mw name="Request validation"/>
+        <mw name="Error handling"/>
+      </middleware>
+    </integration>
+
+    <integration name="Configuration Service" type="internal" critical="true">
+      <description>Webhook configuration loaded from config files</description>
+      <interface>ConfigService</interface>
+      <schema-validation>
+        <schema name="WebhookConfigSchema" purpose="Validate webhook configuration"/>
+      </schema-validation>
+    </integration>
+
+    <integration name="Observability" type="internal" critical="true">
+      <description>Structured logging and metrics for webhook processing</description>
+      <interface>ILogger</interface>
+      <metrics>
+        <metric name="webhookEventsReceived" type="counter"/>
+        <metric name="webhookEventsProcessed" type="counter"/>
+        <metric name="webhookEventsFailed" type="counter"/>
+        <metric name="webhookProcessingTime" type="histogram"/>
+      </metrics>
+    </integration>
+
+    <integration name="GitHub Platform" type="external" critical="true">
+      <description>Receive webhook events from GitHub</description>
+      <protocol>HTTPS POST</protocol>
+      <authentication>HMAC-SHA256 signature</authentication>
+      <events>
+        <event name="issues" actions="assigned"/>
+        <event name="issue_comment" actions="created"/>
+        <event name="pull_request" actions="opened, synchronize, ready_for_review, closed"/>
+        <event name="pull_request_review" actions="submitted"/>
+      </events>
+    </integration>
+
+    <integration name="GitLab Platform" type="external" critical="false">
+      <description>Receive webhook events from GitLab</description>
+      <protocol>HTTPS POST</protocol>
+      <authentication>Token verification</authentication>
+      <events>
+        <event name="Issue Hook" actions="update"/>
+        <event name="Note Hook" actions="create"/>
+        <event name="Merge Request Hook" actions="open, update, merge, close"/>
+      </events>
+    </integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-testing>
+      <framework>Vitest</framework>
+      <coverage-target>95%</coverage-target>
+      <focus-areas>
+        <area>Signature verification - HMAC validation, timing attacks</area>
+        <area>Event filtering - Bot mentions, repository filters</area>
+        <area>Priority determination - Label-based, content-based</area>
+        <area>Payload transformation - Platform-specific to standardized</area>
+        <area>Error handling - Invalid payloads, missing fields</area>
+      </focus-areas>
+      <mocks>
+        <mock name="TaskQueue" description="Mock task queue operations"/>
+        <mock name="Logger" description="Mock logging operations"/>
+        <mock name="Config" description="Mock configuration values"/>
+      </mocks>
+      <test-scenarios>
+        <scenario>Valid GitHub signature verification</scenario>
+        <scenario>Invalid GitHub signature rejection</scenario>
+        <scenario>Issue assignment to bot processing</scenario>
+        <scenario>Issue assignment to non-bot ignored</scenario>
+        <scenario>Bot mention in comment processing</scenario>
+        <scenario>Non-bot comment ignored</scenario>
+        <scenario>Priority determination based on labels</scenario>
+        <scenario>GitLab token verification</scenario>
+      </test-scenarios>
+    </unit-testing>
+
+    <integration-testing>
+      <framework>Vitest + Supertest</framework>
+      <coverage-target>85%</coverage-target>
+      <test-scenarios>
+        <scenario>End-to-end GitHub webhook flow</scenario>
+        <scenario>End-to-end GitLab webhook flow</scenario>
+        <scenario>Rate limiting enforcement</scenario>
+        <scenario>Error handling and response codes</scenario>
+        <scenario>Task queue integration</scenario>
+        <scenario>Configuration loading and validation</scenario>
+      </test-scenarios>
+      <test-setup>
+        <setup>Real Fastify server on random port</setup>
+        <setup>Memory task queue for verification</setup>
+        <setup>Test configuration with secrets</setup>
+        <setup>Real HTTP requests with proper signatures</setup>
+      </test-setup>
+    </integration-testing>
+
+    <security-testing>
+      <framework>Custom security tests</framework>
+      <test-areas>
+        <area>Signature bypass attempts</area>
+        <area>Timing attack prevention</area>
+        <area>Payload injection attacks</area>
+        <area>Rate limiting bypass</area>
+        <area>Malformed payload handling</area>
+        <area>Oversized payload rejection</area>
+      </test-areas>
+      <security-tests>
+        <test>Invalid signature rejection</test>
+        <test>Missing signature handling</test>
+        <test>Malformed JSON payload</test>
+        <test>Oversized payload (>1MB)</test>
+        <test>Rate limiting enforcement</test>
+        <test>SQL injection in payloads</test>
+      </security-tests>
+    </security-testing>
+
+    <performance-testing>
+      <framework>Artillery.io</framework>
+      <scenarios>
+        <scenario name="Webhook Load Test" description="100 webhooks/second, p95 &lt; 200ms"/>
+        <scenario name="Concurrent Processing" description="50 concurrent webhook processing"/>
+        <scenario name="Memory Usage Test" description="Monitor memory under sustained load"/>
+      </scenarios>
+      <metrics>
+        <metric name="Processing Time" target="p95 &lt; 200ms"/>
+        <metric name="Throughput" target="100+ webhooks/second"/>
+        <metric name="Error Rate" target="&lt; 0.1%"/>
+        <metric name="Memory Usage" target="&lt; 100MB steady state"/>
+      </metrics>
+    </performance-testing>
+  </testing-strategy>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="Webhook Events Received" type="counter" description="Total webhook events received"/>
+      <metric name="Webhook Events Processed" type="counter" description="Successfully processed events"/>
+      <metric name="Webhook Events Failed" type="counter" description="Failed webhook processing"/>
+      <metric name="Webhook Processing Time" type="histogram" description="Event processing latency"/>
+      <metric name="Signature Verification Failures" type="counter" description="Authentication failures"/>
+      <metric name="Tasks Created" type="counter" description="Tasks enqueued from webhooks"/>
+      <metric name="Rate Limit Hits" type="counter" description="Rate limit violations"/>
+    </metrics>
+
+    <logging>
+      <level>INFO</level>
+      <format>JSON structured</format>
+      <correlation-ids>true</correlation-ids>
+      <sensitive-data-redaction>true</sensitive-data-redaction>
+      <key-fields>
+        <field>requestId</field>
+        <field>event</field>
+        <field>repository</field>
+        <field>sender</field>
+        <field>processed</field>
+        <field>processingTime</field>
+        <field>taskId</field>
+      </key-fields>
+    </logging>
+
+    <alerts>
+      <alert name="High Webhook Failure Rate" condition="failure_rate &gt; 5%" severity="critical"/>
+      <alert name="High Processing Latency" condition="p95_latency &gt; 500ms" severity="warning"/>
+      <alert name="Signature Failure Spike" condition="signature_failures &gt; 100/min" severity="warning"/>
+      <alert name="Rate Limit Abuse" condition="rate_limit_hits &gt; 1000/min" severity="critical"/>
+    </alerts>
+
+    <health-checks>
+      <check name="Webhook Processing" type="readiness" description="Webhook handlers responsive"/>
+      <check name="Task Queue Connection" type="liveness" description="Can enqueue tasks"/>
+      <check name="Configuration Loading" type="readiness" description="Config loaded successfully"/>
+    </health-checks>
+  </monitoring-requirements>
+
+  <security-considerations>
+    <authentication>
+      <method>GitHub HMAC-SHA256 signatures</method>
+      <method>GitLab token verification</method>
+      <timing-safe-comparison>true</timing-safe-comparison>
+      <secret-management>Environment variables, encrypted storage</secret-management>
+    </authentication>
+
+    <input-validation>
+      <validation>JSON schema validation</validation>
+      <validation>Payload size limits (1MB max)</validation>
+      <validation>Required field validation</validation>
+      <validation>Data type validation</validation>
+      <sanitization>HTML sanitization for comment content</sanitization>
+    </input-validation>
+
+    <rate-limiting>
+      <default-limit>300 requests/minute per IP</default-limit>
+      <burst-limit>50 requests in 10 seconds</burst-limit>
+      <whitelist-allowed>true</whitelist-allowed>
+      <distributed-tracking>true</distributed-tracking>
+    </rate-limiting>
+
+    <audit-logging>
+      <full-audit-trail>true</full-audit-trail>
+      <log-all-events>true</log-all-events>
+      <log-signature-failures>true</log-signature-failures>
+      <log-rate-limit-hits>true</log-rate-limit-hits>
+      <retention-period>90 days</retention-period>
+    </audit-logging>
+
+    <data-protection>
+      <pii-redaction>true</pii-redaction>
+      <sensitive-data-handling>Never log webhook secrets or tokens</sensitive-data-handling>
+      <payload-encryption>Not required (transient processing)</payload-encryption>
+      <memory-cleanup>Clear sensitive data from memory after processing</memory-cleanup>
+    </data-protection>
+  </security-considerations>
+
+  <acceptance-criteria>
+    <functional>
+      <criterion id="AC-1">GitHub webhook signature verification using HMAC-SHA256 works correctly</criterion>
+      <criterion id="AC-2">GitLab webhook token verification works correctly</criterion>
+      <criterion id="AC-3">Webhook events are enqueued to task queue within 200ms</criterion>
+      <criterion id="AC-4">Issue assignment events are processed when assigned to configured bot username</criterion>
+      <criterion id="AC-5">Issue comment events are processed when bot is mentioned in comment</criterion>
+      <criterion id="AC-6">Pull request review events are processed for relevant actions</criterion>
+      <criterion id="AC-7">Configurable bot username filtering works correctly</criterion>
+      <criterion id="AC-8">Webhook failures are logged with detailed error information</criterion>
+      <criterion id="AC-9">Rate limiting prevents abuse (100 requests/minute per IP)</criterion>
+    </functional>
+
+    <non-functional>
+      <criterion id="AC-10">Webhook processing meets performance targets (p95 &lt; 200ms)</criterion>
+      <criterion id="AC-11">Signature verification prevents timing attacks</criterion>
+      <criterion id="AC-12">Input validation prevents injection attacks</criterion>
+      <criterion id="AC-13">Rate limiting enforcement prevents DoS attacks</criterion>
+      <criterion id="AC-14">Audit logging provides complete webhook processing trail</criterion>
+      <criterion id="AC-15">Error handling returns appropriate HTTP status codes</criterion>
+      <criterion id="AC-16">Configuration is externalized and validated</criterion>
+    </non-functional>
+
+    <integration>
+      <criterion id="AC-17">Webhook endpoints integrate properly with Fastify server</criterion>
+      <criterion id="AC-18">Task queue integration successfully enqueues webhook tasks</criterion>
+      <criterion id="AC-19">Configuration service loads and validates webhook settings</criterion>
+      <criterion id="AC-20">Observability integration provides structured logging and metrics</criterion>
+      <criterion id="AC-21">End-to-end webhook flow works (GitHub/GitLab → queue → processing)</criterion>
+    </integration>
+
+    <testing>
+      <criterion id="AC-22">Unit tests validate signature verification and event parsing</criterion>
+      <criterion id="AC-23">Integration tests validate end-to-end webhook flow</criterion>
+      <criterion id="AC-24">Security tests validate authentication and input validation</criterion>
+      <criterion id="AC-25">Performance tests validate processing speed and throughput</criterion>
+      <criterion id="AC-26">Test coverage meets targets (95% unit, 85% integration)</criterion>
+    </testing>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="R-1" probability="medium" impact="high" description="Webhook signature bypass vulnerabilities">
+      <mitigation>Use proven crypto libraries, timing-safe comparison, regular security audits</mitigation>
+    </risk>
+
+    <risk id="R-2" probability="low" impact="critical" description="Webhook processing DoS attacks">
+      <mitigation>Rate limiting, payload size limits, connection timeouts, monitoring</mitigation>
+    </risk>
+
+    <risk id="R-3" probability="medium" impact="medium" description="Event processing bottlenecks">
+      <mitigation>Async processing, task queue buffering, performance monitoring</mitigation>
+    </risk>
+
+    <risk id="R-4" probability="low" impact="high" description="Webhook secret leakage">
+      <mitigation>Secure secret storage, environment variables, access controls, rotation</mitigation>
+    </risk>
+
+    <risk id="R-5" probability="medium" impact="medium" description="Malformed payload crashes">
+      <mitigation>Input validation, error handling, graceful degradation, comprehensive testing</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Processing Speed" target="p95 &lt; 200ms" measurement="Webhook processing latency"/>
+    <metric name="Reliability" target="&gt;99% success rate" measurement="Webhook processing success rate"/>
+    <metric name="Security" target="Zero unauthorized events" measurement="Signature verification failures"/>
+    <metric name="Throughput" target="100+ webhooks/minute" measurement="Events processed per minute"/>
+    <metric name="Error Recovery" target="Graceful handling" measurement="Error handling effectiveness"/>
+    <metric name="Test Coverage" target="95% unit, 85% integration" measurement="Code coverage reports"/>
+  </success-metrics>
+</story-context>

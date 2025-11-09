@@ -1,0 +1,239 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>1</storyId>
+    <title>AI Provider Abstraction Interface</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-08T12:00:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/2-1-ai-provider-abstraction-interface.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>a standardized interface for all AI providers</iWant>
+    <soThat>I can easily add new providers without changing core benchmarking logic</soThat>
+    <tasks>
+- [ ] Task 1: Define IAIProvider interface (AC: 1)
+  - [ ] Subtask 1.1: Create core interface methods
+  - [ ] Subtask 1.2: Define provider capabilities structure
+  - [ ] Subtask 1.3: Specify request/response models
+- [ ] Task 2: Implement Provider Registry (AC: 2)
+  - [ ] Subtask 2.1: Create registry class with registration methods
+  - [ ] Subtask 2.2: Implement provider discovery functionality
+  - [ ] Subtask 2.3: Add provider lifecycle management
+- [ ] Task 3: Create Standardized Models (AC: 3)
+  - [ ] Subtask 3.1: Define ChatCompletionRequest interface
+  - [ ] Subtask 3.2: Define ChatCompletionResponse interface
+  - [ ] Subtask 3.3: Create token usage models
+- [ ] Task 4: Implement Error Handling (AC: 4)
+  - [ ] Subtask 4.1: Create provider-specific error classes
+  - [ ] Subtask 4.2: Implement retry logic with exponential backoff
+  - [ ] Subtask 4.3: Add error mapping between providers
+- [ ] Task 5: Add Capability Detection (AC: 5)
+  - [ ] Subtask 5.1: Define ProviderCapabilities interface
+  - [ ] Subtask 5.2: Implement capability detection methods
+  - [ ] Subtask 5.3: Create capability validation logic
+- [ ] Task 6: Create Configuration Validation (AC: 6)
+  - [ ] Subtask 6.1: Define configuration schemas
+  - [ ] Subtask 6.2: Implement validation logic
+  - [ ] Subtask 6.3: Add configuration error handling
+- [ ] Task 7: Implement Mock Provider (AC: 7)
+  - [ ] Subtask 7.1: Create mock provider class
+  - [ ] Subtask 7.2: Implement mock response generation
+  - [ ] Subtask 7.3: Add mock configuration options
+- [ ] Task 8: Create Plugin System (AC: 8)
+  - [ ] Subtask 8.1: Design plugin architecture
+  - [ ] Subtask 8.2: Implement plugin loading mechanism
+  - [ ] Subtask 8.3: Add plugin validation and security
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Abstract IAIProvider interface with standardized methods
+2. Provider registry system for dynamic provider registration
+3. Standardized request/response models for code generation tasks
+4. Error handling and retry logic at provider level
+5. Provider capability detection (supported languages, features)
+6. Configuration schema validation for each provider
+7. Mock provider for testing and development
+8. Provider plugin system for easy extensibility
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-2.md</path>
+        <title>Epic 2 Technical Specification</title>
+        <section>AI Provider Abstraction Interface</section>
+        <snippet>Core Provider Interface with standardized methods for initialization, chat completion, streaming, model discovery, and lifecycle management.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown</title>
+        <section>Epic 2: AI Provider Integration</section>
+        <snippet>Story 2.1 defines the unified abstraction layer for AI providers with dynamic model discovery, authentication, and standardized request/response handling.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>Multi-Provider Support</section>
+        <snippet>Dynamic model discovery from 5 major AI providers with unified interface for benchmarking across different provider APIs.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>interface-definition</kind>
+        <symbol>IAIProvider</symbol>
+        <lines>216-257</lines>
+        <reason>Core provider interface defining contract for all AI providers with streaming, sync messaging, capabilities, and lifecycle methods</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>interface-definition</kind>
+        <symbol>IProviderRegistry</symbol>
+        <lines>262-295</lines>
+        <reason>Registry interface for managing multiple providers with registration, retrieval, and lifecycle management</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>interface-definition</kind>
+        <symbol>IProviderFactory</symbol>
+        <lines>300-314</lines>
+        <reason>Factory interface for creating provider instances with type-based instantiation</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>MessageRequest</symbol>
+        <lines>131-149</lines>
+        <reason>Standardized request model for all providers with messages, parameters, and metadata</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>MessageResponse</symbol>
+        <lines>154-172</lines>
+        <reason>Standardized response model for non-streaming provider responses</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>MessageChunk</symbol>
+        <lines>177-196</lines>
+        <reason>Standardized chunk model for streaming provider responses</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>ProviderCapabilities</symbol>
+        <lines>90-103</lines>
+        <reason>Capabilities interface for provider feature detection and validation</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>ProviderConfig</symbol>
+        <lines>108-116</lines>
+        <reason>Configuration interface for provider initialization with API keys and settings</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/types.ts</path>
+        <kind>type-definition</kind>
+        <symbol>ProviderError</symbol>
+        <lines>201-207</lines>
+        <reason>Error interface for consistent error handling across providers with retry information</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/registry.ts</path>
+        <kind>class-implementation</kind>
+        <symbol>ProviderRegistry</symbol>
+        <lines>13-108</lines>
+        <reason>Registry implementation for managing provider instances with validation and lifecycle management</reason>
+      </artifact>
+      <artifact>
+        <path>packages/providers/src/factory.ts</path>
+        <kind>class-implementation</kind>
+        <symbol>ProviderFactory</symbol>
+        <lines>19-133</lines>
+        <reason>Factory implementation with placeholder creators for all supported provider types</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <ecosystem>node</ecosystem>
+      <packages>
+        <package name="@tamma/shared" version="workspace:*" />
+        <package name="@tamma/observability" version="workspace:*" />
+        <package name="@anthropic-ai/sdk" version="^0.68.0" />
+        <package name="openai" version="^4.77.3" />
+        <package name="typescript" version="~5.7.2" />
+      </packages>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Interface-based design following dependency inversion principle - all providers must implement IAIProvider</constraint>
+    <constraint>Plugin architecture for extensibility - providers must be dynamically discoverable and registerable</constraint>
+    <constraint>Registry pattern for provider management - centralized provider lifecycle and discovery</constraint>
+    <constraint>Factory pattern for provider instantiation - type-based creation with validation</constraint>
+    <constraint>Circuit breaker pattern for API resilience - 5 failures in 60s opens circuit for 300s</constraint>
+    <constraint>TypeScript 5.7+ strict mode - all code must compile with strict type checking</constraint>
+    <constraint>Async/await patterns only - no .then()/.catch() chains allowed</constraint>
+    <constraint>Structured error handling with ProviderError interface and retry information</constraint>
+    <constraint>Streaming support required - all providers must support real-time response streaming</constraint>
+    <constraint>Configuration validation with JSON schemas - all provider configs must be validated</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>IAIProvider</name>
+      <kind>class-interface</kind>
+      <signature>interface IAIProvider {
+  initialize(config: ProviderConfig): Promise<void>;
+  sendMessage(request: MessageRequest, options?: StreamOptions): Promise<AsyncIterable<MessageChunk>>;
+  sendMessageSync(request: MessageRequest): Promise<MessageResponse>;
+  getCapabilities(): ProviderCapabilities;
+  getModels(): Promise<ModelInfo[]>;
+  dispose(): Promise<void>;
+}</signature>
+      <path>packages/providers/src/types.ts</path>
+    </interface>
+    <interface>
+      <name>IProviderRegistry</name>
+      <kind>class-interface</kind>
+      <signature>interface IProviderRegistry {
+  register(name: string, provider: IAIProvider): void;
+  getProvider(name: string): IAIProvider | undefined;
+  getProviders(): Map<string, IAIProvider>;
+  unregister(name: string): void;
+  hasProvider(name: string): boolean;
+}</signature>
+      <path>packages/providers/src/types.ts</path>
+    </interface>
+    <interface>
+      <name>IProviderFactory</name>
+      <kind>class-interface</kind>
+      <signature>interface IProviderFactory {
+  createProvider(type: string, config: ProviderConfig): Promise<IAIProvider>;
+  getSupportedTypes(): string[];
+}</signature>
+      <path>packages/providers/src/types.ts</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests with Vitest framework, 80% line coverage, 75% branch coverage, 85% function coverage. Mock external APIs using MSW. Test critical paths (error handling, retry logic) with 100% coverage. Integration tests with real API credentials for validation.</standards>
+    <locations>packages/providers/src/*.test.ts, packages/providers/src/**/*.test.ts, tests/providers/</locations>
+    <ideas>
+      <test ac="1">Test IAIProvider interface compliance - verify all providers implement required methods correctly</test>
+      <test ac="2">Test ProviderRegistry registration and retrieval - verify dynamic provider management works</test>
+      <test ac="3">Test MessageRequest/Response models - verify standardized request/response handling</test>
+      <test ac="4">Test error handling and retry logic - verify ProviderError creation and exponential backoff</test>
+      <test ac="5">Test capability detection - verify ProviderCapabilities interface and validation</test>
+      <test ac="6">Test configuration validation - verify JSON schema validation for provider configs</test>
+      <test ac="7">Test Mock provider implementation - verify mock responses for development/testing</test>
+      <test ac="8">Test plugin system - verify dynamic provider loading and validation</test>
+    </ideas>
+  </tests>
+</story-context>

@@ -1,0 +1,151 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>5</storyId>
+    <title>Additional Provider Implementations</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-08</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/2-5-additional-provider-implementations.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>benchmark runner</asA>
+    <iWant>test models from multiple AI providers beyond Anthropic and OpenAI</iWant>
+    <soThat>our benchmarks cover the full landscape of AI code generation tools and provide comprehensive evaluation across the entire AI market</soThat>
+    <tasks>Task 1: GitHub Copilot Provider Implementation (AC: 1)
+- Subtask 1.1: Implement GitHub authentication and API integration
+- Subtask 1.2: Add Copilot model support (Copilot, Copilot Chat)
+- Subtask 1.3: Implement streaming response handling
+- Subtask 1.4: Add rate limiting and quota management
+- Subtask 1.5: Create configuration schema and validation
+
+Task 2: Google Gemini Provider Implementation (AC: 2)
+- Subtask 2.1: Integrate Google Generative AI SDK
+- Subtask 2.2: Implement Gemini Pro model support
+- Subtask 2.3: Add Gemini Ultra model access when available
+- Subtask 2.4: Implement function calling support
+- Subtask 2.5: Add streaming and token counting
+
+Task 3: OpenCode Provider Implementation (AC: 3)
+- Subtask 3.1: Implement OpenCode API integration
+- Subtask 3.2: Add support for open-source code models
+- Subtask 3.3: Implement model discovery and metadata
+- Subtask 3.4: Add authentication and configuration
+- Subtask 3.5: Create error handling for API limits
+
+Task 4: z.ai Provider Integration (AC: 4)
+- Subtask 4.1: Implement z.ai API client
+- Subtask 4.2: Add support for specialized code models
+- Subtask 4.3: Implement streaming responses
+- Subtask 4.4: Add model capability detection
+- Subtask 4.5: Create configuration and authentication
+
+Task 5: Zen MCP Provider Implementation (AC: 5)
+- Subtask 5.1: Implement Model Context Protocol client
+- Subtask 5.2: Add MCP-compliant model access
+- Subtask 5.3: Implement context management
+- Subtask 5.4: Add streaming and function calling
+- Subtask 5.5: Create MCP-specific configuration
+
+Task 6: OpenRouter Provider Implementation (AC: 6)
+- Subtask 6.1: Implement OpenRouter API integration
+- Subtask 6.2: Add support for 100+ marketplace models
+- Subtask 6.3: Implement model discovery and filtering
+- Subtask 6.4: Add cost tracking and usage limits
+- Subtask 6.5: Create fallback and load balancing
+
+Task 7: Local LLM Provider Support (AC: 7)
+- Subtask 7.1: Implement Ollama API integration
+- Subtask 7.2: Add support for local model management
+- Subtask 7.3: Implement model download and updates
+- Subtask 7.4: Add resource monitoring and limits
+- Subtask 7.5: Create local configuration management
+
+Task 8: Unified Error Handling and Retry Logic (AC: 8)
+- Subtask 8.1: Create standardized error classes for all providers
+- Subtask 8.2: Implement provider-specific retry strategies
+- Subtask 8.3: Add exponential backoff and jitter
+- Subtask 8.4: Create circuit breaker pattern implementation
+- Subtask 8.5: Add error logging and monitoring
+
+Task 9: Configuration Management System (AC: 9)
+- Subtask 9.1: Create unified configuration schema for all providers
+- Subtask 9.2: Implement configuration validation and loading
+- Subtask 9.3: Add environment variable support
+- Subtask 9.4: Create configuration hot-reload capability
+- Subtask 9.5: Add credential encryption and secure storage
+
+Task 10: Provider Capability Detection (AC: 10)
+- Subtask 10.1: Implement capability detection for all providers
+- Subtask 10.2: Create standardized model metadata format
+- Subtask 10.3: Add model feature detection (streaming, function calling)
+- Subtask 10.4: Implement capability validation and testing
+- Subtask 10.5: Create capability comparison and reporting</tasks>
+  </story>
+
+  <acceptanceCriteria>1. GitHub Copilot provider integration with proper authentication and model access
+2. Google Gemini provider implementation with support for Gemini Pro and Ultra models
+3. OpenCode provider support for open-source model access
+4. z.ai provider integration with their specialized code models
+5. Zen MCP provider implementation for Model Context Protocol support
+6. OpenRouter provider for model marketplace access with 100+ models
+7. Local LLM provider support (Ollama integration) for local model benchmarking
+8. Consistent error handling and retry logic across all providers
+9. Unified configuration management for all provider types
+10. Provider capability detection and model metadata standardization</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-2.md" title="Epic Technical Specification: AI Provider Integration" section="Additional Provider Implementations (Story 2.5)" snippet="Story 2.5: Additional Provider Implementations - Google Gemini Provider, Provider Configuration Management, and comprehensive interface definitions for multiple AI providers." />
+      <doc path="docs/epics.md" title="Epic 2: AI Provider Integration" section="Story 2.5: Additional Provider Implementations" snippet="As a benchmark runner, I want to test models from multiple AI providers, so that our benchmarks cover the full landscape of AI code generation tools." />
+      <doc path="docs/stories/2-1-ai-provider-abstraction-interface.md" title="Story 2.1: AI Provider Abstraction Interface" section="Interface Definition" snippet="Abstract IAIProvider interface with standardized methods, Provider registry system for dynamic provider registration, and Standardized request/response models for code generation tasks." />
+    </docs>
+    <code>
+      <!-- No existing source code found - this is a documentation-only project at this stage -->
+      <!-- Implementation will follow patterns defined in tech-spec-epic-2.md -->
+    </code>
+    <dependencies>
+      <ecosystem name="nodejs">
+        <package name="@google/generative-ai" version="latest" reason="Google Gemini provider SDK" />
+        <package name="@octokit/core" version="latest" reason="GitHub Copilot API integration" />
+        <package name="ollama-js" version="latest" reason="Local LLM (Ollama) integration" />
+        <package name="axios" version="latest" reason="HTTP client for provider APIs" />
+        <package name="zod" version="latest" reason="Configuration schema validation" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="Interface Compliance">All providers must implement IAIProvider interface from Story 2.1</constraint>
+    <constraint name="Streaming Support">All providers must support streaming responses with AsyncIterable</constraint>
+    <constraint name="Error Handling">Standardized error classes and retry logic across all providers</constraint>
+    <constraint name="Configuration">Unified configuration management with JSON schema validation</constraint>
+    <constraint name="Security">API key encryption, secure storage, and HTTPS/TLS enforcement</constraint>
+    <constraint name="Performance">Target &lt;500ms response time, connection pooling, rate limiting</constraint>
+    <constraint name="Technology Stack">TypeScript 5.7+ strict mode, Node.js 22 LTS, async/await patterns</constraint>
+    <constraint name="Testing">100% interface coverage, mock responses, integration tests with real APIs</constraint>
+  </constraints>
+  <interfaces>
+    <interface name="IAIProvider" kind="TypeScript interface" signature="interface IAIProvider { readonly name: string; readonly version: string; readonly capabilities: ProviderCapabilities; initialize(config: ProviderConfig): Promise&lt;void&gt;; dispose(): Promise&lt;void&gt;; createChatCompletion(request: ChatCompletionRequest): Promise&lt;ChatCompletionResponse&gt;; createChatCompletionStream(request: ChatCompletionRequest): AsyncIterable&lt;ChatCompletionChunk&gt;; listModels(): Promise&lt;Model[]&gt;; }" path="docs/tech-spec-epic-2.md" />
+    <interface name="ProviderRegistry" kind="TypeScript class" signature="class ProviderRegistry { register(provider: IAIProvider, config: ProviderConfig): void; getProvider(name: string): IAIProvider | undefined; getAllModels(): Promise&lt;Model[]&gt;; }" path="docs/tech-spec-epic-2.md" />
+    <interface name="ChatCompletionRequest" kind="TypeScript interface" signature="interface ChatCompletionRequest { model: string; messages: ChatMessage[]; temperature?: number; maxTokens?: number; stream?: boolean; }" path="docs/tech-spec-epic-2.md" />
+    <interface name="ModelCapabilities" kind="TypeScript interface" signature="interface ModelCapabilities { maxTokens: number; supportsStreaming: boolean; supportsFunctionCalling: boolean; temperatureRange: [number, number]; }" path="docs/tech-spec-epic-2.md" />
+  </interfaces>
+  <tests>
+    <standards>Unit tests with Vitest framework, 100% interface coverage, mock provider responses for consistent testing, integration tests with real provider APIs using test credentials, performance tests for response times and concurrent handling</standards>
+    <locations>tests/providers/{provider}-provider.test.ts, tests/integration/provider-integration.test.ts, tests/performance/provider-performance.test.ts</locations>
+    <ideas>
+      <test idea="Mock GitHub Copilot API responses" acceptanceCriteria="1" />
+      <test idea="Test Google Gemini streaming responses" acceptanceCriteria="2" />
+      <test idea="Validate OpenCode model discovery" acceptanceCriteria="3" />
+      <test idea="Test z.ai specialized code models" acceptanceCriteria="4" />
+      <test idea="Verify Zen MCP protocol compliance" acceptanceCriteria="5" />
+      <test idea="Test OpenRouter model marketplace access" acceptanceCriteria="6" />
+      <test idea="Validate Ollama local model management" acceptanceCriteria="7" />
+      <test idea="Test unified error handling across providers" acceptanceCriteria="8" />
+      <test idea="Verify configuration hot-reload functionality" acceptanceCriteria="9" />
+      <test idea="Test provider capability detection" acceptanceCriteria="10" />
+    </ideas>
+  </tests>
+</story-context>

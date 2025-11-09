@@ -1,0 +1,755 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>7-2-webhook-system</story-id>
+    <story-title>Webhook System</story-title>
+    <project>test-platform</project>
+    <epic>7</epic>
+    <status>drafted</status>
+    <generated-date>2025-01-09T12:00:00Z</generated-date>
+    <generator>story-context-workflow</generator>
+  </metadata>
+
+  <story-summary>
+    <narrative>
+      As a developer,
+      I want webhooks for real-time notifications of platform events,
+      so that I can build reactive integrations and automations.
+    </narrative>
+    <acceptance-criteria count="8">
+      <criteria id="1">Webhook configuration and management interface</criteria>
+      <criteria id="2">Event types for benchmark completion, results, and alerts</criteria>
+      <criteria id="3">Webhook delivery with retry logic</criteria>
+      <criteria id="4">Signature verification for security</criteria>
+      <criteria id="5">Webhook logging and monitoring</criteria>
+      <criteria id="6">Event filtering and customization</criteria>
+      <criteria id="7">Test webhook functionality</criteria>
+      <criteria id="8">Webhook analytics and delivery reports</criteria>
+    </acceptance-criteria>
+  </story-summary>
+
+  <technical-architecture>
+    <event-driven-architecture>
+      <pattern>Asynchronous event processing with publish-subscribe patterns and event sourcing</pattern>
+      <components>
+        <component>Event Store with immutable event stream</component>
+        <component>Event Bus for publish-subscribe messaging</component>
+        <component>Event Processors for transformation and routing</component>
+        <component>Webhook Delivery Service with retry mechanisms</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Integration-Architecture</source-ref>
+    </event-driven-architecture>
+
+    <webhook-framework>
+      <pattern>Reliable webhook delivery with retry mechanisms, signature verification, and monitoring</pattern>
+      <features>
+        <feature>Exponential backoff retry with jitter</feature>
+        <feature>HMAC signature verification</feature>
+        <feature>Dead letter queue for failed deliveries</feature>
+        <feature>Real-time delivery monitoring</feature>
+        <feature>Event filtering and transformation</feature>
+      </features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Integration-Architecture</source-ref>
+    </webhook-framework>
+
+    <security-architecture>
+      <pattern>HMAC signature verification, timestamp validation, replay attack prevention</pattern>
+      <mechanisms>
+        <mechanism>SHA-256/SHA-512 signature generation</mechanism>
+        <mechanism>Timestamp validation with configurable tolerance</mechanism>
+        <mechanism>Replay attack prevention with nonce tracking</mechanism>
+        <mechanism>Secret rotation and management</mechanism>
+      </mechanisms>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Security-Architecture</source-ref>
+    </security-architecture>
+
+    <reliability-patterns>
+      <pattern>Exponential backoff, dead letter queues, delivery guarantees, at-least-once semantics</pattern>
+      <guarantees>
+        <guarantee>At-least-once delivery with idempotency support</guarantee>
+        <guarantee>Configurable retry policies with maximum attempts</guarantee>
+        <guarantee>Dead letter queue for permanently failed deliveries</guarantee>
+        <guarantee>Circuit breaker pattern for endpoint protection</guarantee>
+      </guarantees>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Story-73-Webhook--Event-System</source-ref>
+    </reliability-patterns>
+  </technical-architecture>
+
+  <core-interfaces>
+    <platform-event>
+      <interface-definition>
+        <name>PlatformEvent</name>
+        <fields>
+          <field name="id" type="string">UUID v7 identifier</field>
+          <field name="type" type="EventType">Event type enumeration</field>
+          <field name="version" type="string">Event schema version</field>
+          <field name="source" type="EventSource">Event source information</field>
+          <field name="timestamp" type="Date">ISO 8601 timestamp</field>
+          <field name="data" type="EventData">Event payload data</field>
+          <field name="metadata" type="EventMetadata">Event metadata and context</field>
+          <field name="correlationId" type="string" optional="true">Correlation identifier</field>
+          <field name="causationId" type="string" optional="true">Causation identifier</field>
+          <field name="messageId" type="string" optional="true">Message identifier</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#PlatformEvent</source-ref>
+    </platform-event>
+
+    <webhook-subscription>
+      <interface-definition>
+        <name>WebhookSubscription</name>
+        <fields>
+          <field name="id" type="string">Unique subscription identifier</field>
+          <field name="name" type="string">Human-readable name</field>
+          <field name="description" type="string" optional="true">Optional description</field>
+          <field name="url" type="string">Webhook endpoint URL</field>
+          <field name="events" type="EventType[]">Array of event types to subscribe to</field>
+          <field name="filters" type="EventFilter[]">Event filtering rules</field>
+          <field name="headers" type="WebhookHeaders">Custom HTTP headers</field>
+          <field name="authentication" type="WebhookAuthentication">Authentication configuration</field>
+          <field name="retryPolicy" type="RetryPolicy">Retry policy configuration</field>
+          <field name="isActive" type="boolean">Subscription active status</field>
+          <field name="version" type="string">Subscription version</field>
+          <field name="secret" type="string" optional="true">Signature verification secret</field>
+          <field name="timeout" type="number">Request timeout in milliseconds</field>
+          <field name="rateLimit" type="RateLimit">Rate limiting configuration</field>
+          <field name="createdAt" type="Date">Creation timestamp</field>
+          <field name="updatedAt" type="Date">Last update timestamp</field>
+          <field name="createdBy" type="string">Creator identifier</field>
+          <field name="lastDelivery" type="WebhookDelivery" optional="true">Last delivery information</field>
+          <field name="deliveryStats" type="DeliveryStatistics">Delivery statistics</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#WebhookSubscription</source-ref>
+    </webhook-subscription>
+
+    <event-filter>
+      <interface-definition>
+        <name>EventFilter</name>
+        <fields>
+          <field name="field" type="string">Field path to filter on</field>
+          <field name="operator" type="FilterOperator">Filter operation</field>
+          <field name="value" type="any">Filter value</field>
+          <field name="caseSensitive" type="boolean" optional="true">Case sensitivity flag</field>
+        </fields>
+        <operators>
+          <operator>equals</operator>
+          <operator>not_equals</operator>
+          <operator>in</operator>
+          <operator>not_in</operator>
+          <operator>greater_than</operator>
+          <operator>less_than</operator>
+          <operator>contains</operator>
+          <operator>starts_with</operator>
+          <operator>ends_with</operator>
+        </operators>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#EventFilter</source-ref>
+    </event-filter>
+
+    <webhook-delivery>
+      <interface-definition>
+        <name>WebhookDelivery</name>
+        <fields>
+          <field name="id" type="string">Unique delivery identifier</field>
+          <field name="subscriptionId" type="string">Associated subscription ID</field>
+          <field name="eventId" type="string">Associated event ID</field>
+          <field name="attempt" type="number">Delivery attempt number</field>
+          <field name="status" type="DeliveryStatus">Current delivery status</field>
+          <field name="request" type="WebhookRequest">HTTP request details</field>
+          <field name="response" type="WebhookResponse" optional="true">HTTP response details</field>
+          <field name="error" type="DeliveryError" optional="true">Delivery error information</field>
+          <field name="duration" type="number">Delivery duration in milliseconds</field>
+          <field name="timestamp" type="Date">Delivery timestamp</field>
+          <field name="nextRetryAt" type="Date" optional="true">Next retry timestamp</field>
+        </fields>
+        <status-values>
+          <status>pending</status>
+          <status>in_progress</status>
+          <status>success</status>
+          <status>failed</status>
+          <status>retrying</status>
+          <status>abandoned</status>
+        </status-values>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#WebhookDelivery</source-ref>
+    </webhook-delivery>
+  </core-interfaces>
+
+  <event-types>
+    <event-categories>
+      <category name="benchmark">
+        <events>
+          <event type="BENCHMARK_CREATED">New benchmark created</event>
+          <event type="BENCHMARK_UPDATED">Benchmark configuration updated</event>
+          <event type="BENCHMARK_DELETED">Benchmark deleted</event>
+          <event type="BENCHMARK_STARTED">Benchmark execution started</event>
+          <event type="BENCHMARK_COMPLETED">Benchmark execution completed</event>
+          <event type="BENCHMARK_FAILED">Benchmark execution failed</event>
+        </events>
+      </category>
+      <category name="test">
+        <events>
+          <event type="TEST_CREATED">New test created</event>
+          <event type="TEST_UPDATED">Test configuration updated</event>
+          <event type="TEST_DELETED">Test deleted</event>
+          <event type="TEST_STARTED">Test execution started</event>
+          <event type="TEST_COMPLETED">Test execution completed</event>
+          <event type="TEST_FAILED">Test execution failed</event>
+          <event type="TEST_CANCELLED">Test execution cancelled</event>
+        </events>
+      </category>
+      <category name="result">
+        <events>
+          <event type="RESULT_GENERATED">Test result generated</event>
+          <event type="RESULT_PROCESSED">Result processing completed</event>
+          <event type="RESULT_ANALYZED">Result analysis completed</event>
+        </events>
+      </category>
+      <category name="user">
+        <events>
+          <event type="USER_CREATED">New user account created</event>
+          <event type="USER_UPDATED">User profile updated</event>
+          <event type="USER_DELETED">User account deleted</event>
+          <event type="USER_LOGIN">User login event</event>
+          <event type="USER_LOGOUT">User logout event</event>
+        </events>
+      </category>
+      <category name="system">
+        <events>
+          <event type="SYSTEM_ALERT">System alert notification</event>
+          <event type="SYSTEM_MAINTENANCE">System maintenance event</event>
+          <event type="SYSTEM_ERROR">System error occurrence</event>
+          <event type="SYSTEM_PERFORMANCE">System performance metric</event>
+        </events>
+      </category>
+      <category name="integration">
+        <events>
+          <event type="WEBHOOK_DELIVERED">Webhook successfully delivered</event>
+          <event type="WEBHOOK_FAILED">Webhook delivery failed</event>
+          <event type="API_REQUEST">API request received</event>
+          <event type="API_RESPONSE">API response sent</event>
+        </events>
+      </category>
+    </event-categories>
+    <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#EventType</source-ref>
+  </event-types>
+
+  <webhook-delivery-system>
+    <delivery-service>
+      <name>WebhookDeliveryService</name>
+      <responsibilities>
+        <responsibility>Queue webhook deliveries for processing</responsibility>
+        <responsibility>Execute HTTP requests with proper authentication</responsibility>
+        <responsibility>Handle retry logic with exponential backoff</responsibility>
+        <responsibility>Track delivery status and metrics</responsibility>
+        <responsibility>Manage dead letter queue for failed deliveries</responsibility>
+      </responsibilities>
+      <key-methods>
+        <method name="queueDelivery">Queue webhook for delivery</method>
+        <method name="processDelivery">Process webhook delivery</method>
+        <method name="retryDelivery">Retry failed webhook delivery</method>
+        <method name="generateSignature">Generate HMAC signature</method>
+        <method name="verifyEndpoint">Validate webhook endpoint</method>
+      </key-methods>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Webhook-Delivery-Service</source-ref>
+    </delivery-service>
+
+    <retry-policy>
+      <configuration>
+        <parameter name="maxAttempts" type="number" default="5">Maximum retry attempts</parameter>
+        <parameter name="backoffStrategy" type="BackoffStrategy" default="EXPONENTIAL_WITH_JITTER">Backoff strategy</parameter>
+        <parameter name="initialDelay" type="number" default="1000">Initial delay in milliseconds</parameter>
+        <parameter name="maxDelay" type="number" default="300000">Maximum delay in milliseconds</parameter>
+        <parameter name="multiplier" type="number" default="2">Delay multiplier</parameter>
+        <parameter name="jitter" type="boolean" default="true">Enable jitter</parameter>
+      </configuration>
+      <strategies>
+        <strategy>FIXED</strategy>
+        <strategy>LINEAR</strategy>
+        <strategy>EXPONENTIAL</strategy>
+        <strategy>EXPONENTIAL_WITH_JITTER</strategy>
+      </strategies>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#RetryPolicy</source-ref>
+    </retry-policy>
+
+    <dead-letter-queue>
+      <purpose>Handle permanently failed webhook deliveries</purpose>
+      <features>
+        <feature>Manual retry capabilities</feature>
+        <feature>Failure analysis and debugging</feature>
+        <feature>Automatic cleanup policies</feature>
+        <feature>Alerting for high failure rates</feature>
+      </features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Dead-Letter-Queue</source-ref>
+    </dead-letter-queue>
+  </webhook-delivery-system>
+
+  <security-implementation>
+    <signature-verification>
+      <algorithm>HMAC-SHA256 (primary), HMAC-SHA512 (optional)</algorithm>
+      <header>X-Signature</header>
+      <format>sha256={signature}</format>
+      <process>
+        <step>Generate signature using shared secret and event payload</step>
+        <step>Include signature in X-Signature header</step>
+        <step>Recipient verifies signature using shared secret</step>
+        <step>Compare signatures with constant-time comparison</step>
+      </process>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Webhook-Security</source-ref>
+    </signature-verification>
+
+    <timestamp-validation>
+      <header>X-Timestamp</header>
+      <format>Unix timestamp in milliseconds</format>
+      <tolerance>300 seconds (configurable)</tolerance>
+      <purpose>Prevent replay attacks</purpose>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Webhook-Security</source-ref>
+    </timestamp-validation>
+
+    <authentication-methods>
+      <method type="NONE">No authentication</method>
+      <method type="BASIC">HTTP Basic authentication</method>
+      <method type="BEARER">Bearer token authentication</method>
+      <method type="API_KEY">API key in header</method>
+      <method type="SIGNATURE">HMAC signature verification</method>
+      <method type="OAUTH2">OAuth 2.0 client credentials</method>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#WebhookAuthentication</source-ref>
+    </authentication-methods>
+  </security-implementation>
+
+  <monitoring-analytics>
+    <delivery-metrics>
+      <metric name="totalDeliveries" type="counter">Total webhook deliveries</metric>
+      <metric name="successfulDeliveries" type="counter">Successful deliveries</metric>
+      <metric name="failedDeliveries" type="counter">Failed deliveries</metric>
+      <metric name="deliveryRate" type="gauge">Current delivery rate</metric>
+      <metric name="successRate" type="gauge">Delivery success rate</metric>
+      <metric name="averageDeliveryTime" type="histogram">Delivery latency</metric>
+      <metric name="timeSeriesData" type="timeseries">Time series delivery data</metric>
+      <metric name="topErrors" type="ranking">Most common errors</metric>
+    </delivery-metrics>
+    <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#DeliveryMetrics</source-ref>
+
+    <subscription-health>
+      <status-values>
+        <status>HEALTHY</status>
+        <status>WARNING</status>
+        <status>CRITICAL</status>
+        <status>UNKNOWN</status>
+      </status-values>
+      <indicators>
+        <indicator>Success rate percentage</indicator>
+        <indicator>Average delivery time</indicator>
+        <indicator>Consecutive failures</indicator>
+        <indicator>Last delivery timestamp</indicator>
+        <indicator>Last success timestamp</indicator>
+      </indicators>
+      <issues>
+        <issue type="HIGH_FAILURE_RATE">Success rate below threshold</issue>
+        <issue type="CONSECUTIVE_FAILURES">Multiple consecutive failures</issue>
+        <issue type="SLOW_DELIVERY">Delivery latency above threshold</issue>
+        <issue type="UNREACHABLE_ENDPOINT">Endpoint not reachable</issue>
+        <issue type="AUTHENTICATION_FAILURE">Auth errors detected</issue>
+        <issue type="RATE_LIMIT_EXCEEDED">Rate limiting errors</issue>
+      </issues>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#SubscriptionHealth</source-ref>
+    </subscription-health>
+
+    <real-time-monitoring>
+      <features>
+        <feature>Live delivery status dashboard</feature>
+        <feature>Real-time metrics streaming</feature>
+        <feature>Alert notifications for failures</feature>
+        <feature>Performance bottleneck detection</feature>
+        <feature>Subscription health monitoring</feature>
+      </features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Monitoring--Analytics</source-ref>
+    </real-time-monitoring>
+  </monitoring-analytics>
+
+  <event-processing>
+    <event-enrichment>
+      <purpose>Add contextual data to events</purpose>
+      <enrichments>
+        <enrichment>User information from user ID</enrichment>
+        <enrichment>Tenant context and permissions</enrichment>
+        <enrichment>Geographic location data</enrichment>
+        <enrichment>System performance metrics</enrichment>
+      </enrichments>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Event-Processing--Transformation</source-ref>
+    </event-enrichment>
+
+    <data-transformation>
+      <types>
+        <type>MAP</type>
+        <type>FILTER</type>
+        <type>ENRICH</type>
+        <type>AGGREGATE</type>
+        <type>SPLIT</type>
+        <type>MERGE</type>
+        <type>VALIDATE</type>
+        <type>CUSTOM</type>
+      </types>
+      <capabilities>
+        <capability>Field mapping and renaming</capability>
+        <capability>Data type conversion</capability>
+        <capability>Conditional transformations</capability>
+        <capability>Custom transformation functions</capability>
+      </capabilities>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Event-Processing--Transformation</source-ref>
+    </data-transformation>
+
+    <conditional-routing>
+      <routing-types>
+        <type>CONDITIONAL</type>
+        <type>CONTENT_BASED</type>
+        <type>HEADER_BASED</type>
+        <type>LOAD_BALANCED</type>
+        <type>BROADCAST</type>
+        <type>CUSTOM</type>
+      </routing-types>
+      <logic>
+        <logic>Rule-based event routing</logic>
+        <logic>Content-based routing conditions</logic>
+        <logic>Load balancing across endpoints</logic>
+        <logic>Custom routing functions</logic>
+      </logic>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Event-Processing--Transformation</source-ref>
+    </conditional-routing>
+  </event-processing>
+
+  <testing-features>
+    <webhook-testing>
+      <test-endpoint>POST /api/v1/webhooks/{id}/test</test-endpoint>
+      <capabilities>
+        <capability>Send test events to webhook endpoint</capability>
+        <capability>Validate endpoint connectivity</capability>
+        <capability>Test authentication configuration</capability>
+        <capability>Verify signature generation</capability>
+        <capability>Measure response time and latency</capability>
+      </capabilities>
+      <test-events>
+        <event>SYSTEM_ALERT - Generic test event</event>
+        <event>BENCHMARK_CREATED - Benchmark lifecycle test</event>
+        <event>TEST_COMPLETED - Test completion test</event>
+        <event>CUSTOM - User-defined test event</event>
+      </test-events>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#WebhookService</source-ref>
+    </webhook-testing>
+
+    <validation-tools>
+      <url-validation>
+        <endpoint>POST /api/v1/webhooks/validate</endpoint>
+        <checks>
+          <check>URL format validation</check>
+          <check>DNS resolution</check>
+          <check>HTTP connectivity</check>
+          <check>Response time measurement</check>
+          <check>SSL certificate validation</check>
+        </checks>
+      </url-validation>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#validateWebhookUrl</source-ref>
+    </validation-tools>
+
+    <debugging-tools>
+      <delivery-history>Complete delivery history with request/response details</delivery-history>
+      <error-analysis>Detailed error information and troubleshooting</error-analysis>
+      <replay-testing>Replay failed deliveries for debugging</replay-testing>
+      <payload-inspection>View event payloads before delivery</payload-inspection>
+      <signature-debugging>Verify signature generation and validation</signature-debugging>
+    </debugging-tools>
+  </testing-features>
+
+  <performance-optimization>
+    <batching>
+      <purpose>Reduce HTTP overhead for high-volume events</purpose>
+      <configuration>
+        <parameter name="batchSize" type="number" default="10">Events per batch</parameter>
+        <parameter name="batchTimeout" type="number" default="5000">Batch timeout in milliseconds</parameter>
+        <parameter name="maxWaitTime" type="number" default="10000">Maximum wait time</parameter>
+      </configuration>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Performance-Optimization</source-ref>
+    </batching>
+
+    <connection-pooling>
+      <benefits>
+        <benefit>Reduced connection overhead</benefit>
+        <benefit>Improved throughput</benefit>
+        <benefit>Better resource utilization</benefit>
+        <benefit>Connection reuse across deliveries</benefit>
+      </benefits>
+      <configuration>
+        <parameter name="maxConnections" type="number" default="100">Maximum connections</parameter>
+        <parameter name="connectionTimeout" type="number" default="30000">Connection timeout</parameter>
+        <parameter name="idleTimeout" type="number" default="60000">Idle timeout</parameter>
+      </configuration>
+    </connection-pooling>
+
+    <async-delivery>
+      <pattern>Asynchronous delivery with queue management</pattern>
+      <benefits>
+        <benefit>Non-blocking event processing</benefit>
+        <benefit>Improved system responsiveness</benefit>
+        <benefit>Better error isolation</benefit>
+        <benefit>Scalable delivery architecture</benefit>
+      </benefits>
+    </async-delivery>
+
+    <rate-limiting>
+      <purpose>Protect webhook endpoints from overload</purpose>
+      <configuration>
+        <parameter name="requestsPerSecond" type="number" default="10">Rate limit</parameter>
+        <parameter name="burstCapacity" type="number" default="50">Burst capacity</parameter>
+        <parameter name="windowSize" type="number" default="60">Time window</parameter>
+      </configuration>
+      <algorithms>
+        <algorithm>Token bucket</algorithm>
+        <algorithm>Sliding window</algorithm>
+        <algorithm>Fixed window</algorithm>
+      </algorithms>
+    </rate-limiting>
+  </performance-optimization>
+
+  <project-structure>
+    <directory-structure>
+      <directory name="src/api/v1/webhooks">
+        <purpose>Webhook API endpoints</purpose>
+        <files>
+          <file>webhooks.routes.ts</file>
+          <file>subscriptions.controller.ts</file>
+          <file>deliveries.controller.ts</file>
+          <file>testing.controller.ts</file>
+        </files>
+      </directory>
+      <directory name="src/events">
+        <purpose>Event processing system</purpose>
+        <files>
+          <file>event.publisher.ts</file>
+          <file>event.processor.ts</file>
+          <file>event.transformer.ts</file>
+          <file>event.router.ts</file>
+        </files>
+      </directory>
+      <directory name="src/services/webhooks">
+        <purpose>Webhook delivery service</purpose>
+        <files>
+          <file>webhook.service.ts</file>
+          <file>delivery.service.ts</file>
+          <file>signature.service.ts</file>
+          <file>retry.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/models/webhooks">
+        <purpose>Webhook data models</purpose>
+        <files>
+          <file>webhook-subscription.model.ts</file>
+          <file>webhook-delivery.model.ts</file>
+          <file>platform-event.model.ts</file>
+          <file>event-filter.model.ts</file>
+        </files>
+      </directory>
+      <directory name="src/monitoring/webhooks">
+        <purpose>Webhook monitoring</purpose>
+        <files>
+          <file>webhook.metrics.ts</file>
+          <file>delivery.monitor.ts</file>
+          <file>health.checker.ts</file>
+        </files>
+      </directory>
+      <directory name="tests/webhooks">
+        <purpose>Webhook tests</purpose>
+        <files>
+          <file>webhook.service.test.ts</file>
+          <file>delivery.service.test.ts</file>
+          <file>signature.service.test.ts</file>
+          <file>integration.test.ts</file>
+        </files>
+      </directory>
+    </directory-structure>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.md#Project-Structure-Notes</source-ref>
+  </project-structure>
+
+  <integration-points>
+    <rest-api-integration>
+      <description>Reuse authentication and authorization patterns from REST API</description>
+      <components>
+        <component>OAuth 2.0 authentication flows</component>
+        <component>API key management</component>
+        <component>Rate limiting infrastructure</component>
+        <component>Error response formats</component>
+        <component>Audit logging patterns</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.md#Learnings-from-Previous-Story</source-ref>
+    </rest-api-integration>
+
+    <event-store-integration>
+      <description>Integration with platform event store for event sourcing</description>
+      <capabilities>
+        <capability>Event persistence and replay</capability>
+        <capability>Event querying and filtering</capability>
+        <capability>Event subscription and streaming</capability>
+        <capability>Event versioning and compatibility</capability>
+      </capabilities>
+    </event-store-integration>
+
+    <notification-system-integration>
+      <description>Integration with platform notification system</description>
+      <channels>
+        <channel>Email notifications for webhook failures</channel>
+        <channel>Slack notifications for critical issues</channel>
+        <channel>Dashboard alerts for monitoring</channel>
+        <channel>Mobile push notifications for urgent issues</channel>
+      </channels>
+    </notification-system-integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage-target>90% line coverage</coverage-target>
+      <focus-areas>
+        <area>Webhook subscription management</area>
+        <area>Event processing and filtering</area>
+        <area>Signature generation and verification</area>
+        <area>Retry logic and backoff strategies</area>
+        <area>Error handling and edge cases</area>
+      </focus-areas>
+    </unit-tests>
+
+    <integration-tests>
+      <scope>End-to-end webhook workflows</scope>
+      <scenarios>
+        <scenario>Complete event delivery flow</scenario>
+        <scenario>Retry mechanism validation</scenario>
+        <scenario>Signature verification flow</scenario>
+        <scenario>Dead letter queue processing</scenario>
+        <scenario>Performance under load</scenario>
+      </scenarios>
+    </integration-tests>
+
+    <security-tests>
+      <focus>Webhook security mechanisms</focus>
+      <tests>
+        <test>Signature verification bypass attempts</test>
+        <test>Replay attack prevention</test>
+        <test>Timestamp validation edge cases</test>
+        <test>Authentication bypass attempts</test>
+        <test>Rate limiting effectiveness</test>
+      </tests>
+    </security-tests>
+
+    <performance-tests>
+      <metrics>
+        <metric>Delivery throughput (events/second)</metric>
+        <metric>Delivery latency (p95, p99)</metric>
+        <metric>Memory usage under load</metric>
+        <metric>Connection pool efficiency</metric>
+        <metric>Retry queue processing speed</metric>
+      </metrics>
+      <load-scenarios>
+        <scenario>1000 concurrent webhook deliveries</scenario>
+        <scenario>Sustained load for 1 hour</scenario>
+        <scenario>Burst traffic handling</scenario>
+        <scenario>Failure scenario recovery</scenario>
+      </load-scenarios>
+    </performance-tests>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.md#Testing-Standards</source-ref>
+  </testing-strategy>
+
+  <implementation-dependencies>
+    <story-dependencies>
+      <dependency story="7-1-restful-api-implementation" status="drafted">
+        <rationale>Reuses authentication, rate limiting, and error handling patterns</rationale>
+        <components>
+          <component>OAuth 2.0 authentication system</component>
+          <component>API key management</component>
+          <component>Rate limiting infrastructure</component>
+          <component>Error response standardization</component>
+          <component>Audit logging framework</component>
+        </components>
+      </dependency>
+    </story-dependencies>
+
+    <technical-dependencies>
+      <dependency name="Event Store" required="true">
+        <description>Event persistence and replay capabilities</description>
+      </dependency>
+      <dependency name="Message Queue" required="true">
+        <description>Asynchronous webhook delivery processing</description>
+      </dependency>
+      <dependency name="HTTP Client" required="true">
+        <description>Webhook delivery with connection pooling</description>
+      </dependency>
+      <dependency name="Crypto Service" required="true">
+        <description>Signature generation and verification</description>
+      </dependency>
+      <dependency name="Metrics Service" required="true">
+        <description>Delivery monitoring and analytics</description>
+      </dependency>
+    </technical-dependencies>
+  </implementation-dependencies>
+
+  <success-metrics>
+    <delivery-metrics>
+      <metric name="Delivery Success Rate" target="&gt; 99.5%">Percentage of successful webhook deliveries</metric>
+      <metric name="Delivery Latency" target="&lt; 1s (p95)">Time from event to successful delivery</metric>
+      <metric name="Retry Success Rate" target="&gt; 95%">Percentage of successful retries</metric>
+      <metric name="Event Processing" target="10K+ events/sec">Event processing throughput</metric>
+    </delivery-metrics>
+
+    <reliability-metrics>
+      <metric name="Uptime" target="99.9%">Webhook service availability</metric>
+      <metric name="Error Rate" target="&lt; 0.5%">Overall error rate</metric>
+      <metric name="Mean Time To Recovery" target="&lt; 5 minutes">Recovery time from failures</metric>
+    </reliability-metrics>
+
+    <adoption-metrics>
+      <metric name="Active Webhooks" target="1000+">Number of active webhook subscriptions</metric>
+      <metric name="Daily Events" target="1M+">Daily webhook events delivered</metric>
+      <metric name="Developer Satisfaction" target="&gt; 4.5/5">Developer satisfaction rating</metric>
+    </adoption-metrics>
+    <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Success-Metrics</source-ref>
+  </success-metrics>
+
+  <risk-mitigation>
+    <technical-risks>
+      <risk name="Delivery Failures">
+        <mitigation>Robust retry mechanisms with exponential backoff</mitigation>
+        <mitigation>Dead letter queue for failed deliveries</mitigation>
+        <mitigation>Comprehensive monitoring and alerting</mitigation>
+        <mitigation>Manual retry capabilities and debugging tools</mitigation>
+      </risk>
+      <risk name="Security Vulnerabilities">
+        <mitigation>HMAC signature verification</mitigation>
+        <mitigation>Timestamp validation and replay prevention</mitigation>
+        <mitigation>Regular security audits and penetration testing</mitigation>
+        <mitigation>Secure secret management and rotation</mitigation>
+      </risk>
+      <risk name="Performance Bottlenecks">
+        <mitigation>Asynchronous delivery with queue management</mitigation>
+        <mitigation>Connection pooling and HTTP/2 support</mitigation>
+        <mitigation>Batching for high-volume events</mitigation>
+        <mitigation>Circuit breaker patterns for fault tolerance</mitigation>
+      </risk>
+    </technical-risks>
+    <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Risk-Mitigation</source-ref>
+  </risk-mitigation>
+
+  <references>
+    <reference type="technical-spec" path="/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md">
+      <section>Story 7.3: Webhook & Event System</section>
+      <section>Core Interfaces</section>
+      <section>Event Types</section>
+      <section>Webhook Delivery Service</section>
+      <section>Webhook Security</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.md">
+      <section>Learnings from Previous Story</section>
+      <section>Authentication & Authorization</section>
+      <section>Rate Limiting & Quotas</section>
+    </reference>
+    <reference type="project-config" path="/home/meywd/tamma/test-platform/config.yaml">
+      <section>Project configuration and paths</section>
+    </reference>
+  </references>
+</story-context>

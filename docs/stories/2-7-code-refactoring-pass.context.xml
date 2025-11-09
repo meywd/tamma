@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-7-code-refactoring-pass">
+  <metadata>
+    <title>Story 2.7: Code Refactoring Pass</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.6 (implementation code generation must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to perform code refactoring while maintaining test coverage</action>
+    <benefit>so that I can improve code quality and maintainability in TDD refactor phase</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System analyzes generated code for refactoring opportunities</criterion>
+    <criterion id="2">Refactoring maintains all existing test coverage and functionality</criterion>
+    <criterion id="3">Code improvements include performance, readability, and maintainability</criterion>
+    <criterion id="4">System validates refactored code with all tests passing</criterion>
+    <criterion id="5">Refactoring follows project conventions and best practices</criterion>
+    <criterion id="6">Refactoring changes logged to event trail with rationale</criterion>
+    <criterion id="7">Integration test validates TDD refactor phase workflow</criterion>
+    <criterion id="8">System handles refactoring failures gracefully with rollback</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="CodeRefactorer">
+        <interface>ICodeRefactorer</interface>
+        <methods>
+          <method name="analyzeCode" returns="RefactoringOpportunity[]">
+            <parameter name="code" type="GeneratedCode[]"/>
+          </method>
+          <method name="applyRefactoring" returns="RefactoringResult">
+            <parameter name="code" type="GeneratedCode[]"/>
+            <parameter name="opportunities" type="RefactoringOpportunity[]"/>
+          </method>
+          <method name="validateRefactoring" returns="ValidationResult">
+            <parameter name="originalCode" type="GeneratedCode[]"/>
+            <parameter name="refactoredCode" type="GeneratedCode[]"/>
+          </method>
+          <method name="runTests" returns="TestExecutionResult">
+            <parameter name="testFiles" type="string[]"/>
+          </method>
+          <method name="rollbackRefactoring">
+            <parameter name="refactoringId" type="string"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="RefactoringOpportunity">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="type" type="string"/>
+          <field name="description" type="string"/>
+          <field name="filePath" type="string"/>
+          <field name="lineRange" type="LineRange"/>
+          <field name="impact" type="string"/>
+          <field name="effort" type="string"/>
+          <field name="priority" type="string"/>
+          <field name="suggestion" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="RefactoringResult">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="appliedRefactorings" type="AppliedRefactoring[]"/>
+          <field name="changedFiles" type="string[]"/>
+          <field name="testResults" type="TestExecutionResult"/>
+          <field name="qualityMetrics" type="QualityMetrics"/>
+          <field name="performanceMetrics" type="PerformanceMetrics"/>
+          <field name="rollbackAvailable" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="AppliedRefactoring">
+        <fields>
+          <field name="opportunityId" type="string"/>
+          <field name="type" type="string"/>
+          <field name="description" type="string"/>
+          <field name="changes" type="CodeChange[]"/>
+          <field name="impact" type="string"/>
+          <field name="appliedAt" type="Date"/>
+        </fields>
+      </interface>
+
+      <interface name="QualityMetrics">
+        <fields>
+          <field name="complexity" type="number"/>
+          <field name="maintainability" type="number"/>
+          <field name="readability" type="number"/>
+          <field name="duplication" type="number"/>
+          <field name="testCoverage" type="number"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Code Analysis">
+        <description>Analyze code for refactoring opportunities using static analysis</description>
+        <components>
+          <component>Static code analysis</component>
+          <component>Complexity measurement</component>
+          <component>Duplication detection</component>
+          <component>Performance analysis</component>
+        </components>
+      </phase>
+
+      <phase name="Refactoring Application">
+        <description>Apply safe refactoring transformations while preserving functionality</description>
+        <components>
+          <component>Automated refactoring engine</component>
+          <component>Code transformation rules</component>
+          <component>Safety validation checks</component>
+          <component>Rollback mechanism</component>
+        </components>
+      </phase>
+
+      <phase name="Validation">
+        <description>Validate refactored code maintains functionality and improves quality</description>
+        <components>
+          <component>Test execution and verification</component>
+          <component>Quality metrics measurement</component>
+          <component>Performance benchmarking</component>
+          <component>Functionality validation</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Static Analysis Tools">
+        <description>Analyze code quality and identify refactoring opportunities</description>
+        <tools>
+          <tool>ESLint</tool>
+          <tool>TypeScript Compiler</tool>
+          <tool>Complexity analyzers</tool>
+          <tool>Duplication detectors</tool>
+        </tools>
+      </integration>
+
+      <integration name="Testing Framework">
+        <description>Ensure refactored code maintains all test coverage</description>
+        <frameworks>
+          <framework>Vitest</framework>
+          <framework>Jest</framework>
+        </frameworks>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for refactoring operations</description>
+        <events>
+          <event>REFACTORING.STARTED</event>
+          <event>REFACTORING.APPLIED</event>
+          <event>REFACTORING.VALIDATED</event>
+          <event>REFACTORING.ROLLED_BACK</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="CodeRefactorer">
+          <test>analyze code for refactoring opportunities</test>
+          <test>apply safe refactoring transformations</test>
+          <test>validate refactored code maintains functionality</test>
+          <test>measure quality improvements</test>
+          <test>handle refactoring failures with rollback</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>end-to-end TDD refactor phase workflow</test>
+        <test>refactoring with real codebases</test>
+        <test>quality metrics measurement and reporting</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="refactoring">
+        <setting name="enabled_refactorings" default="['extract_method', 'rename_variable', 'remove_duplication', 'simplify_logic']"/>
+        <setting name="max_complexity" default="10"/>
+        <setting name="min_test_coverage" default="80"/>
+        <setting name="auto_apply" default="true"/>
+        <setting name="rollback_on_failure" default="true"/>
+      </section>
+
+      <section name="quality_metrics">
+        <setting name="complexity_threshold" default="10"/>
+        <setting name="duplication_threshold" default="3"/>
+        <setting name="maintainability_threshold" default="70"/>
+        <setting name="performance_improvement_target" default="5"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="code_analysis" metric="time" value="&lt; 30 seconds"/>
+      <target name="refactoring_application" metric="time" value="&lt; 60 seconds"/>
+      <target name="validation" metric="time" value="&lt; 45 seconds"/>
+    </performance-targets>
+
+    <refactoring-types>
+      <type name="extract_method">Extract reusable methods from complex functions</type>
+      <type name="rename_variable">Improve variable naming for clarity</type>
+      <type name="remove_duplication">Eliminate code duplication</type>
+      <type name="simplify_logic">Simplify complex conditional logic</type>
+      <type name="optimize_performance">Improve algorithmic efficiency</type>
+      <type name="improve_structure">Reorganize code structure and organization</type>
+    </refactoring-types>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Refactoring must preserve all existing functionality</consideration>
+      <consideration priority="2">Maintain 100% test coverage throughout refactoring</consideration>
+      <consideration priority="3">Apply safe, incremental refactoring transformations</consideration>
+      <consideration priority="4">Measure and validate quality improvements</consideration>
+      <consideration priority="5">Provide rollback mechanism for failed refactorings</consideration>
+      <consideration priority="6">Document refactoring rationale and changes</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

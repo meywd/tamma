@@ -1,0 +1,405 @@
+<story-context id="test-platform/story-context" v="1.0">
+  <metadata>
+    <epicId>7</epicId>
+    <storyId>1</storyId>
+    <title>RESTful API Implementation</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-09T18:45:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>a complete REST API for all platform functionality</iWant>
+    <soThat>I can integrate benchmarking into my applications and workflows</soThat>
+    <tasks>Task 1: Complete CRUD operations for all platform resources (AC: 1)
+- Subtask 1.1: Create benchmark CRUD endpoints (GET, POST, PUT, DELETE)
+- Subtask 1.2: Create test CRUD endpoints with benchmark relationship
+- Subtask 1.3: Create result CRUD endpoints with test relationship
+- Subtask 1.4: Create user management endpoints
+- Subtask 1.5: Create API key management endpoints
+- Subtask 1.6: Implement proper HTTP status codes and response formats
+Task 2: Build authentication and authorization system (AC: 2)
+- Subtask 2.1: Implement OAuth 2.0 with multiple grant types
+- Subtask 2.2: Create API key authentication with secure key management
+- Subtask 2.3: Build role-based access control with granular permissions
+- Subtask 2.4: Implement JWT token validation and refresh mechanisms
+- Subtask 2.5: Add multi-tenant isolation and data segregation
+Task 3: Implement rate limiting and quota management (AC: 3)
+- Subtask 3.1: Create configurable rate limits per endpoint, user, and API key
+- Subtask 3.2: Build tiered quota management for subscription levels
+- Subtask 3.3: Add rate limit headers and informative error responses
+- Subtask 3.4: Implement burst capacity and token bucket algorithms
+- Subtask 3.5: Create fair usage policies and abuse prevention
+Task 4: Add request validation and error handling (AC: 4)
+- Subtask 4.1: Implement comprehensive request validation using JSON schemas
+- Subtask 4.2: Create consistent error response format across all endpoints
+- Subtask 4.3: Add detailed error messages with error codes
+- Subtask 4.4: Build validation middleware for automatic request validation
+- Subtask 4.5: Create error documentation with examples
+Task 5: Implement pagination, filtering, and search (AC: 5)
+- Subtask 5.1: Add pagination support with limit/offset and cursor-based pagination
+- Subtask 5.2: Create filtering capabilities for all list endpoints
+- Subtask 5.3: Implement search functionality across resource fields
+- Subtask 5.4: Add sorting capabilities with multiple field support
+- Subtask 5.5: Create pagination metadata and navigation links
+Task 6: Build bulk operations for efficiency (AC: 6)
+- Subtask 6.1: Implement bulk create operations for benchmarks and tests
+- Subtask 6.2: Create bulk update operations with partial updates
+- Subtask 6.3: Add bulk delete operations with safety checks
+- Subtask 6.4: Implement bulk operations with transaction support
+- Subtask 6.5: Create bulk operation status tracking and reporting
+Task 7: Add API versioning and backward compatibility (AC: 7)
+- Subtask 7.1: Implement semantic versioning for API endpoints
+- Subtask 7.2: Create version routing and deprecation policies
+- Subtask 7.3: Add backward compatibility support for previous versions
+- Subtask 7.4: Build version migration guides and changelog
+- Subtask 7.5: Create version discovery and negotiation mechanisms
+Task 8: Create comprehensive API documentation (AC: 8)
+- Subtask 8.1: Generate OpenAPI 3.1 specification for all endpoints
+- Subtask 8.2: Set up interactive Swagger UI for API exploration
+- Subtask 8.3: Create code examples in multiple programming languages
+- Subtask 8.4: Build API changelog and version migration documentation
+- Subtask 8.5: Create developer portal with getting started guides</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Complete CRUD operations for all platform resources
+2. Authentication via API keys and OAuth 2.0
+3. Rate limiting and quota management
+4. Request validation with detailed error responses
+5. Pagination and filtering for list endpoints
+6. Bulk operations for efficiency
+7. API versioning with backward compatibility
+8. Comprehensive OpenAPI documentation</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-7.md</path>
+        <title>Epic Technical Specification: API &amp; Integration Layer</title>
+        <section>Story 7.1: RESTful API Implementation</section>
+        <snippet>Complete REST API with comprehensive endpoints, authentication, rate limiting, and documentation. Core interfaces include APIRequest, APIResponse, APIEndpoint, APIHandler, APIMiddleware. Resource models include BenchmarkResource, TestResource, TestResult, APIUser, APIKey. Service layer includes RESTAPIService with comprehensive CRUD operations for all resources.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/ARCHITECTURE.md</path>
+        <title>AI Benchmarking as a Service (AIBaaS) - Architecture Document</title>
+        <section>API Design</section>
+        <snippet>REST API (Fastify 5.x) - Primary API for programmatic access with endpoints for providers, models, leaderboard, benchmarks, alerts, and trends. Features include authentication via JWT + API keys, rate limiting, OpenAPI 3.1 documentation, and comprehensive error handling.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Test Platform (AIBaaS) - Product Requirements Document</title>
+        <section>Growth Features (Post-MVP)</section>
+        <snippet>API access for integration into CI/CD pipelines, RESTful API: Complete API for all platform functionality with OpenAPI documentation. Features include authentication via API keys and OAuth 2.0, rate limiting and quota management, request validation with detailed error responses, pagination and filtering for list endpoints, and comprehensive OpenAPI documentation.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Test Platform (AIBaaS) - Epic Breakdown</title>
+        <section>Epic 7: API &amp; Integration Layer</section>
+        <snippet>Story 7.1: RESTful API Implementation - Complete REST API with comprehensive endpoints, authentication, rate limiting, and documentation. Provides programmatic access to all platform functionality for developers and system integrators.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <code>
+        <path>packages/api/src/index.ts</path>
+        <kind>entrypoint</kind>
+        <symbol>Fastify server setup</symbol>
+        <lines>1-20</lines>
+        <reason>Existing API package structure for implementing REST endpoints</reason>
+      </code>
+      <code>
+        <path>packages/api/package.json</path>
+        <kind>dependencies</kind>
+        <symbol>fastify, @fastify/cors, @fastify/helmet</symbol>
+        <lines>20-27</lines>
+        <reason>Current API framework dependencies for REST implementation</reason>
+      </code>
+    </code>
+    <dependencies>
+      <ecosystem name="node">
+        <packages>
+          <package name="fastify" version="^5.2.0" />
+          <package name="@fastify/cors" version="^10.0.1" />
+          <package name="@fastify/helmet" version="^12.0.1" />
+          <package name="@fastify/swagger" version="^8.0.0" />
+          <package name="@fastify/swagger-ui" version="^2.0.0" />
+          <package name="@fastify/rate-limit" version="^9.0.0" />
+          <package name="typescript" version="~5.7.2" />
+          <package name="vitest" version="^3.0.6" />
+        </packages>
+      </ecosystem>
+      <ecosystem name="auth">
+        <packages>
+          <package name="jsonwebtoken" version="latest" />
+          <package name="@fastify/jwt" version="latest" />
+          <package name="@fastify/oauth2" version="latest" />
+          <package name="bcrypt" version="latest" />
+        </packages>
+      </ecosystem>
+      <ecosystem name="validation">
+        <packages>
+          <package name="ajv" version="latest" />
+          <package name="@fastify/schema" version="latest" />
+          <package name="joi" version="latest" />
+        </packages>
+      </ecosystem>
+      <ecosystem name="documentation">
+        <packages>
+          <package name="swagger-ui-dist" version="latest" />
+          <package name="openapi-types" version="latest" />
+          <package name="redoc" version="latest" />
+        </packages>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="RESTful Design">Resource-oriented APIs with proper HTTP semantics, status codes, and content negotiation</constraint>
+    <constraint name="API Gateway">Centralized gateway with authentication, rate limiting, monitoring, and request routing</constraint>
+    <constraint name="Versioning Strategy">Semantic versioning with backward compatibility and deprecation policies</constraint>
+    <constraint name="Security Architecture">OAuth 2.0 &amp; OpenID Connect, API key management, rate limiting &amp; quotas, audit logging</constraint>
+    <constraint name="Rate Limiting">Configurable rate limits per endpoint, user, and API key with different strategies</constraint>
+    <constraint name="Authentication">OAuth 2.0 with multiple grant types (authorization code, client credentials, refresh token)</constraint>
+    <constraint name="API Key Management">Secure key generation, rotation, usage tracking, and permissions</constraint>
+    <constraint name="Error Handling">APIError class with structured error responses and proper HTTP status codes</constraint>
+    <constraint name="Documentation">OpenAPI 3.1 specification with comprehensive documentation and interactive Swagger UI</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="APIRequest" kind="data structure">
+      <signature>interface APIRequest {
+  id: string;
+  method: HTTPMethod;
+  path: string;
+  headers: Record&lt;string, string&gt;;
+  query: Record&lt;string, string&gt;;
+  body?: any;
+  user?: APIUser;
+  apiKey?: APIKey;
+  timestamp: Date;
+  ip: string;
+  userAgent: string;
+  correlationId: string;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="APIResponse" kind="data structure">
+      <signature>interface APIResponse {
+  statusCode: HTTPStatusCode;
+  headers: Record&lt;string, string&gt;;
+  body?: any;
+  timestamp: Date;
+  duration: number;
+  requestId: string;
+  correlationId: string;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="RESTAPIService" kind="service class">
+      <signature>interface RESTAPIService {
+  // Benchmark Operations
+  getBenchmarks(filters?: BenchmarkFilters): Promise&lt;PaginatedResponse&lt;BenchmarkResource&gt;&gt;;
+  getBenchmark(benchmarkId: string): Promise&lt;BenchmarkResource&gt;;
+  createBenchmark(benchmark: CreateBenchmarkRequest): Promise&lt;BenchmarkResource&gt;;
+  updateBenchmark(benchmarkId: string, updates: Partial&lt;BenchmarkResource&gt;): Promise&lt;BenchmarkResource&gt;;
+  deleteBenchmark(benchmarkId: string): Promise&lt;void&gt;;
+  // Test Operations
+  getTests(benchmarkId: string, filters?: TestFilters): Promise&lt;PaginatedResponse&lt;TestResource&gt;&gt;;
+  getTest(testId: string): Promise&lt;TestResource&gt;;
+  createTest(test: CreateTestRequest): Promise&lt;TestResource&gt;;
+  updateTest(testId: string, updates: Partial&lt;TestResource&gt;): Promise&lt;TestResource&gt;;
+  deleteTest(testId: string): Promise&lt;void&gt;;
+  runTest(testId: string, options?: RunTestOptions): Promise&lt;TestExecution&gt;;
+  // Result Operations
+  getResults(testId: string, filters?: ResultFilters): Promise&lt;PaginatedResponse&lt;TestResult&gt;&gt;;
+  getResult(resultId: string): Promise&lt;TestResult&gt;;
+  downloadArtifact(artifactId: string): Promise&lt;FileStream&gt;;
+  // User Management
+  getUsers(filters?: UserFilters): Promise&lt;PaginatedResponse&lt;APIUser&gt;&gt;;
+  getUser(userId: string): Promise&lt;APIUser&gt;;
+  createUser(user: CreateUserRequest): Promise&lt;APIUser&gt;;
+  updateUser(userId: string, updates: Partial&lt;APIUser&gt;): Promise&lt;APIUser&gt;;
+  deleteUser(userId: string): Promise&lt;void&gt;;
+  // API Key Management
+  getAPIKeys(userId: string): Promise&lt;APIKey[]&gt;;
+  createAPIKey(key: CreateAPIKeyRequest): Promise&lt;APIKey&gt;;
+  updateAPIKey(keyId: string, updates: Partial&lt;APIKey&gt;): Promise&lt;APIKey&gt;;
+  deleteAPIKey(keyId: string): Promise&lt;void&gt;;
+  rotateAPIKey(keyId: string): Promise&lt;APIKey&gt;;
+  // Analytics &amp; Monitoring
+  getUsageMetrics(filters?: UsageFilters): Promise&lt;UsageMetrics&gt;;
+  getAPIHealth(): Promise&lt;APIHealthStatus&gt;;
+  getAPIVersion(): Promise&lt;APIVersionInfo&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="BenchmarkResource" kind="data model">
+      <signature>interface BenchmarkResource {
+  id: string;
+  name: string;
+  description: string;
+  type: BenchmarkType;
+  status: BenchmarkStatus;
+  configuration: BenchmarkConfiguration;
+  metadata: ResourceMetadata;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+  tags: string[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="TestResource" kind="data model">
+      <signature>interface TestResource {
+  id: string;
+  benchmarkId: string;
+  name: string;
+  description: string;
+  type: TestType;
+  configuration: TestConfiguration;
+  dataset: DatasetReference;
+  metrics: MetricDefinition[];
+  status: TestStatus;
+  results?: TestResult;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="APIUser" kind="data model">
+      <signature>interface APIUser {
+  id: string;
+  username: string;
+  email: string;
+  roles: string[];
+  permissions: string[];
+  tenant: string;
+  isActive: boolean;
+  lastLogin?: Date;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="APIKey" kind="data model">
+      <signature>interface APIKey {
+  id: string;
+  keyId: string;
+  keyHash: string;
+  name: string;
+  userId: string;
+  permissions: string[];
+  quotas: APIQuota[];
+  isActive: boolean;
+  expiresAt?: Date;
+  lastUsed?: Date;
+  usageCount: number;
+  createdAt: Date;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="PaginatedResponse" kind="data structure">
+      <signature>interface PaginatedResponse&lt;T&gt; {
+  data: T[];
+  pagination: PaginationInfo;
+  links: PaginationLinks;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="APIError" kind="error class">
+      <signature>class APIError extends Error {
+  constructor(
+    public statusCode: number,
+    message: string,
+    public code: string,
+    public details?: Record&lt;string, any&gt;
+  );
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="Benchmark CRUD API" kind="REST endpoints">
+      <signature>GET /api/v1/benchmarks - List benchmarks with filtering and pagination
+POST /api/v1/benchmarks - Create new benchmark
+GET /api/v1/benchmarks/:id - Get specific benchmark
+PUT /api/v1/benchmarks/:id - Update benchmark
+DELETE /api/v1/benchmarks/:id - Delete benchmark</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="Test CRUD API" kind="REST endpoints">
+      <signature>GET /api/v1/benchmarks/:benchmarkId/tests - List tests for benchmark
+POST /api/v1/benchmarks/:benchmarkId/tests - Create new test
+GET /api/v1/tests/:id - Get specific test
+PUT /api/v1/tests/:id - Update test
+DELETE /api/v1/tests/:id - Delete test
+POST /api/v1/tests/:id/run - Execute test</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="User Management API" kind="REST endpoints">
+      <signature>GET /api/v1/users - List users (admin only)
+POST /api/v1/users - Create new user (admin only)
+GET /api/v1/users/:id - Get user profile
+PUT /api/v1/users/:id - Update user profile
+DELETE /api/v1/users/:id - Delete user (admin only)</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="API Key Management API" kind="REST endpoints">
+      <signature>GET /api/v1/api-keys - List user's API keys
+POST /api/v1/api-keys - Create new API key
+GET /api/v1/api-keys/:id - Get API key details
+PUT /api/v1/api-keys/:id - Update API key
+DELETE /api/v1/api-keys/:id - Delete API key
+POST /api/v1/api-keys/:id/rotate - Rotate API key</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+    <interface name="OAuth 2.0 Authentication" kind="authentication flow">
+      <signature>GET /api/v1/oauth/authorize - Authorization endpoint
+POST /api/v1/oauth/token - Token endpoint (authorization code, client credentials, refresh token)
+POST /api/v1/oauth/revoke - Token revocation
+GET /api/v1/oauth/userinfo - User information</signature>
+      <path>test-platform/docs/tech-spec-epic-7.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for all API endpoints, middleware, and service methods, Integration tests for complete API workflows with database integration, Authentication tests for all authentication methods and authorization scenarios, Rate limiting tests for rate limiting behavior under various conditions, Error handling tests for error responses and status codes for all failure scenarios, Documentation tests for OpenAPI specification validation against actual implementation, Performance tests for API performance under load with concurrent requests</standards>
+    <locations>test-platform/src/api/**/*.test.ts, test-platform/src/middleware/**/*.test.ts, test-platform/src/services/**/*.test.ts, test-platform/tests/integration/api/, test-platform/tests/performance/api/, test-platform/tests/documentation/</locations>
+    <ideas>
+      <test idea="Benchmark CRUD operations" ac="1">
+        Test all CRUD operations for benchmarks including creation, retrieval, update, and deletion with proper HTTP status codes and response formats
+      </test>
+      <test idea="Test CRUD operations" ac="1">
+        Test all CRUD operations for tests including creation, retrieval, update, deletion, and execution with benchmark relationship validation
+      </test>
+      <test idea="OAuth 2.0 authentication flow" ac="2">
+        Test complete OAuth 2.0 flow including authorization code grant, client credentials grant, and refresh token rotation
+      </test>
+      <test idea="API key authentication" ac="2">
+        Test API key generation, authentication, usage tracking, and secure key management
+      </test>
+      <test idea="Role-based access control" ac="2">
+        Test granular permissions and role-based access control for different user roles and resource access
+      </test>
+      <test idea="Rate limiting enforcement" ac="3">
+        Test configurable rate limits per endpoint, user, and API key with proper headers and error responses
+      </test>
+      <test idea="Quota management" ac="3">
+        Test tiered quota management for different subscription levels with quota exceeded handling
+      </test>
+      <test idea="Request validation" ac="4">
+        Test comprehensive request validation using JSON schemas with detailed error messages and error codes
+      </test>
+      <test idea="Pagination and filtering" ac="5">
+        Test pagination support with limit/offset and cursor-based pagination, filtering, sorting, and search functionality
+      </test>
+      <test idea="Bulk operations" ac="6">
+        Test bulk create, update, and delete operations with transaction support and status tracking
+      </test>
+      <test idea="API versioning" ac="7">
+        Test semantic versioning, version routing, deprecation policies, and backward compatibility
+      </test>
+      <test idea="OpenAPI documentation" ac="8">
+        Test OpenAPI 3.1 specification generation, Swagger UI functionality, and documentation accuracy
+      </test>
+    </ideas>
+  </tests>
+</story-context>

@@ -71,7 +71,7 @@ development_status:
   epic-2: contexted
   2-1-issue-selection-with-filtering: ready-for-dev
   2-2-issue-context-analysis: ready-for-dev
-  2-2-anthropic-claude-provider-implementation: drafted
+  2-2-anthropic-claude-provider-implementation: ready-for-dev
   2-3-development-plan-generation-with-approval-checkpoint: ready-for-dev
   2-4-git-branch-creation: ready-for-dev
   2-5-test-first-development-write-failing-tests: ready-for-dev
@@ -104,9 +104,11 @@ development_status:
    epic-3-retrospective: optional
 
   epic-4: contexted
+  4-1-task-execution-engine: ready-for-dev
   # Epic 4 stories not yet drafted - currently in epic file only
   epic-4-retrospective: optional
 
   epic-5: contexted
+  5-1-structured-logging-implementation: drafted
   # Epic 5 stories not yet drafted - currently in epic file only
   epic-5-retrospective: optional

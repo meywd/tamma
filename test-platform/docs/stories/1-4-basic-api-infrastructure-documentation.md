@@ -1,6 +1,6 @@
 # Story 1.4: Basic API Infrastructure & Documentation
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -116,7 +116,7 @@ So that I can understand and integrate with the platform endpoints effectively.
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [1-4-basic-api-infrastructure-documentation.context.xml](1-4-basic-api-infrastructure-documentation.context.xml)
 
 ### Agent Model Used
 

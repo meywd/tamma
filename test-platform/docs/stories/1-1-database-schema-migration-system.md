@@ -1,6 +1,6 @@
 # Story 1.1: Database Schema Migration System
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -87,7 +87,7 @@ So that we have reliable data storage for benchmark results and multi-tenant ope
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [1-1-database-schema-migration-system.context.xml](./1-1-database-schema-migration-system.context.xml)
 
 ### Agent Model Used
 

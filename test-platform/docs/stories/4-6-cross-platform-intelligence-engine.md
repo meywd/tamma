@@ -1,6 +1,6 @@
 # Story 4.6: Cross-Platform Intelligence Engine
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -101,7 +101,7 @@ So that I can make informed decisions based on aggregated performance data and b
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- docs/stories/4-6-cross-platform-intelligence-engine.context.xml
 
 ### Agent Model Used
 

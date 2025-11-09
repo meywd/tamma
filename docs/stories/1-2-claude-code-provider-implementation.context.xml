@@ -1,135 +1,479 @@
-<story-context id="bmad/bmm/workflows/4-implementation/story-context" v="1.0">
-  <metadata>
-    <epicId>1</epicId>
-    <storyId>2</storyId>
-    <title>Claude Code Provider Implementation</title>
-    <status>ready-for-dev</status>
-    <generatedAt>2025-10-29</generatedAt>
-    <generator>BMAD Story Context Workflow</generator>
-    <sourceStoryPath>docs/stories/1-2-claude-code-provider-implementation.md</sourceStoryPath>
-  </metadata>
-
-  <story>
-    <asA>developer</asA>
-    <iWant>Claude Code implemented as first AI provider</iWant>
-    <soThat>I can validate the provider abstraction with a real implementation</soThat>
-    <tasks>
-- [ ] Task 1: Implement Claude Code provider class structure (AC: 1)
-  - [ ] Subtask 1.1: Create ClaudeCodeProvider class implementing IAIProvider
-  - [ ] Subtask 1.2: Implement initialize() method with API key configuration
-  - [ ] Subtask 1.3: Implement dispose() method for cleanup
-- [ ] Task 2: Implement core message handling (AC: 1, 3)
-  - [ ] Subtask 2.1: Implement sendMessage() method with streaming support
-  - [ ] Subtask 2.2: Add MCP (Model Context Protocol) integration for tools
-  - [ ] Subtask 2.3: Implement streaming response handler with chunk parsing
-- [ ] Task 3: Add provider capabilities discovery (AC: 1)
-  - [ ] Subtask 3.1: Implement getCapabilities() method
-  - [ ] Subtask 3.2: Return Claude-specific capabilities (streaming, models, limits)
-  - [ ] Subtask 3.3: Map Claude models to standardized capability format
-- [ ] Task 4: Implement error handling and retry logic (AC: 4)
-  - [ ] Subtask 4.1: Create Claude-specific error types for rate limits, timeouts
-  - [ ] Subtask 4.2: Implement exponential backoff retry for transient failures
-  - [ ] Subtask 4.3: Add context overflow and token limit handling
-- [ ] Task 5: Add telemetry and monitoring (AC: 5)
-  - [ ] Subtask 5.1: Implement telemetry hooks for latency tracking
-  - [ ] Subtask 5.2: Add token usage monitoring
-  - [ ] Subtask 5.3: Add error rate tracking and reporting
-- [ ] Task 6: Create comprehensive test suite (AC: 5, 6)
-  - [ ] Subtask 6.1: Write unit tests for happy path scenarios
-  - [ ] Subtask 6.2: Write unit tests for error cases and edge cases
-  - [ ] Subtask 6.3: Write integration test for end-to-end code generation
-  - [ ] Subtask 6.4: Add tests for rate limiting and context limits
-    </tasks>
-  </story>
-
-  <acceptanceCriteria>
-1. Claude Code provider implements all interface operations from Story 1.1
-2. Provider handles authentication via API key configuration
-3. Provider supports streaming responses for real-time feedback
-4. Provider includes retry logic with exponential backoff for transient failures
-5. Unit tests cover happy path, error cases, and edge cases (context limits, rate limiting)
-6. Integration test demonstrates end-to-end code generation request
-  </acceptanceCriteria>
-
-  <artifacts>
-    <docs>
-      <doc path="docs/tech-spec-epic-1.md" title="Epic Technical Specification: Foundation & Core Infrastructure" section="Claude Code Provider" snippet="Implementation class: ClaudeCodeProvider implements IAIProvider. Uses MCP (Model Context Protocol) for tool integration. Streaming response handler with chunk parsing. Context management with conversation history. Error handling for rate limits, network failures, token limits. Telemetry hooks for latency, token usage, error rates.">
-      </doc>
-      <doc path="docs/epics.md" title="Tamma - Epic Breakdown" section="Story 1.2: Claude Code Provider Implementation" snippet="Claude Code provider implements all interface operations from Story 1.1. Provider handles authentication via API key configuration. Provider supports streaming responses for real-time feedback. Provider includes retry logic with exponential backoff for transient failures.">
-      </doc>
-      <doc path="docs/PRD.md" title="Tamma Product Requirements Document" section="AI Provider Integration" snippet="FR-7: System shall provide abstract interface supporting multiple AI providers with seamless provider switching. FR-8: System shall maintain provider feature matrix documentation for capability comparison. FR-9: System shall route tasks to optimal AI provider based on cost optimization and capability matching.">
-      </doc>
-      <doc path="docs/architecture.md" title="Tamma - Technical Architecture" section="Technology Stack" snippet="TypeScript 5.7+ strict mode, Node.js 22 LTS, pnpm workspaces. Interface-based design pattern and plugin architecture for extensibility.">
-      </doc>
-    </docs>
-    <code>
-      <!-- Reuse interfaces from story 1-1 - no existing implementation code yet -->
-    </code>
-    <dependencies>
-      <ecosystem name="nodejs">
-        <package name="@anthropic-ai/sdk" version="^0.20.0" reason="Anthropic Claude API client for provider implementation" />
-        <package name="@modelcontextprotocol/sdk" version="^1.0.0" reason="MCP protocol for tool integration" />
-        <package name="typescript" version="^5.7.0" reason="Type system and compiler for implementation" />
-        <package name="zod" version="^3.22.0" reason="Runtime type validation for interface schemas" />
-      </ecosystem>
-      <ecosystem name="pnpm-workspace">
-        <package name="@tamma/types" version="workspace:*" reason="Shared TypeScript types and interfaces (IAIProvider, etc.)" />
-        <package name="@tamma/config" version="workspace:*" reason="Shared configuration management (ProviderConfig)" />
-        <package name="@tamma/logger" version="workspace:*" reason="Shared logging infrastructure for telemetry" />
-      </ecosystem>
-    </dependencies>
-  </artifacts>
-
-  <constraints>
-    <constraint type="package-location">Implementation must be placed in packages/providers/src/claude-code-provider.ts following monorepo structure</constraint>
-    <constraint type="typescript-config">Use TypeScript 5.7+ strict mode with proper interface implementation and error type definitions</constraint>
-    <constraint type="naming-conventions">Follow established patterns: ClaudeCodeProvider class, error classes with descriptive names, proper method signatures matching IAIProvider</constraint>
-    <constraint type="interface-implementation">Must implement all IAIProvider methods: initialize, sendMessage, getCapabilities, dispose</constraint>
-    <constraint type="authentication">Provider must handle API key authentication through ProviderConfig interface</constraint>
-    <constraint type="streaming-support">Must support streaming responses via AsyncIterable<MessageChunk> return type</constraint>
-    <constraint type="error-handling">Must implement exponential backoff retry for transient failures with proper error types</constraint>
-    <constraint type="mcp-integration">Must use MCP (Model Context Protocol) for tool integration</constraint>
-    <constraint type="testing-requirements">Both unit and integration tests required to validate end-to-end functionality</constraint>
-    <constraint type="telemetry">Must include telemetry hooks for latency, token usage, and error rate tracking</constraint>
-  </constraints>
-  <interfaces>
-    <interface name="IAIProvider" kind="TypeScript interface" signature="interface IAIProvider { initialize(config: ProviderConfig): Promise<void>; sendMessage(request: MessageRequest): Promise<AsyncIterable<MessageChunk>>; getCapabilities(): ProviderCapabilities; dispose(): Promise<void>; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="MessageRequest" kind="TypeScript interface" signature="interface MessageRequest { messages: Message[]; systemPrompt?: string; tools?: Tool[]; maxTokens?: number; temperature?: number; model?: string; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="ProviderCapabilities" kind="TypeScript interface" signature="interface ProviderCapabilities { supportsStreaming: boolean; supportsTools: boolean; supportedModels: string[]; maxContextTokens: number; maxOutputTokens: number; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="Message" kind="TypeScript interface" signature="interface Message { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCallId?: string; toolCalls?: ToolCall[]; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="Tool" kind="TypeScript interface" signature="interface Tool { name: string; description: string; parameters: JSONSchema; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="MessageChunk" kind="TypeScript interface" signature="interface MessageChunk { type: 'text' | 'tool_call' | 'error'; content: string; delta?: string; done: boolean; }" path="packages/providers/src/types.ts">
-    </interface>
-    <interface name="ProviderConfig" kind="TypeScript interface" signature="interface ProviderConfig { providerId: string; providerType: 'claude-code' | 'copilot' | 'custom'; apiKey?: string; baseUrl?: string; model?: string; defaultParams?: { temperature?: number; maxTokens?: number; }; }" path="packages/providers/src/types.ts">
-    </interface>
-  </interfaces>
-  <tests>
-    <standards>Unit testing using Jest 29+ with TypeScript support. Mock external APIs (Anthropic, MCP) using MSW (Mock Service Worker). Line coverage: 80% minimum, branch coverage: 75% minimum, function coverage: 85% minimum. Critical paths (streaming, error handling, retry logic): 100% coverage. Integration tests with real API keys for end-to-end validation.</standards>
-    <locations>packages/providers/src/**/*.test.ts, packages/providers/test/**/*.test.ts</locations>
-    <ideas>
-      <test idea="Test ClaudeCodeProvider implements IAIProvider interface" acceptanceCriteria="1">
-        Verify all required methods exist with correct signatures and behavior
-      </test>
-      <test idea="Test API key authentication" acceptanceCriteria="2">
-        Validate provider initialization with valid/invalid API keys
-      </test>
-      <test idea="Test streaming response handling" acceptanceCriteria="3">
-        Verify AsyncIterable<MessageChunk> streaming works correctly with real-time feedback
-      </test>
-      <test idea="Test exponential backoff retry logic" acceptanceCriteria="4">
-        Validate retry behavior for transient failures (network, rate limits)
-      </test>
-      <test idea="Test comprehensive error scenarios" acceptanceCriteria="5">
-        Cover rate limits, timeouts, context overflow, network failures
-      </test>
-      <test idea="Test end-to-end code generation" acceptanceCriteria="6">
-        Integration test demonstrating complete request/response cycle
-      </test>
-    </ideas>
-  </tests>
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>1-2</story-id>
+  <title>Claude Code Provider Implementation</title>
+  <epic>1</epic>
+  <category>foundation</category>
+  <last-updated>2025-11-08T12:00:00Z</last-updated>
+  
+  <technical-context>
+    <overview>
+      Claude Code Provider Implementation creates the first concrete AI provider for the Tamma platform using Anthropic Claude API. This implementation serves as the reference implementation that validates the IAIProvider interface abstraction and establishes patterns for future provider implementations.
+    </overview>
+    
+    <key-components>
+      <component>
+        <name>ClaudeCodeProvider</name>
+        <description>Anthropic Claude API implementation of IAIProvider interface</description>
+        <interfaces>
+          <interface>IAIProvider</interface>
+          <interface>IStreamingProvider</interface>
+          <interface>ITelemetryProvider</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>ClaudeErrorHandler</name>
+        <description>Claude-specific error handling and retry logic</description>
+        <interfaces>
+          <interface>IErrorHandler</interface>
+          <interface>IRetryHandler</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>ClaudeCapabilities</name>
+        <description>Claude model capabilities and feature discovery</description>
+        <interfaces>
+          <interface>ICapabilityProvider</interface>
+          <interface>IModelDiscovery</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>ClaudeTelemetry</name>
+        <description>Usage monitoring and metrics collection for Claude API</description>
+        <interfaces>
+          <interface>ITelemetryCollector</interface>
+          <interface>IUsageTracker</interface>
+        </interfaces>
+      </component>
+    </key-components>
+    
+    <data-models>
+      <model>
+        <name>ClaudeConfig</name>
+        <properties>
+          <property name="apiKey" type="string" />
+          <property name="model" type="string" />
+          <property name="maxTokens" type="number" />
+          <property name="temperature" type="number" />
+          <property name="topP" type="number" />
+          <property name="timeout" type="number" />
+          <property name="retryAttempts" type="number" />
+          <property name="retryDelay" type="number" />
+          <property name="enableStreaming" type="boolean" />
+          <property name="enableTools" type="boolean" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>ClaudeMessage</name>
+        <properties>
+          <property name="role" type="MessageRole" />
+          <property name="content" type="string" />
+          <property name="toolCalls" type="ToolCall[]" />
+          <property name="toolResults" type="ToolResult[]" />
+          <property name="timestamp" type="datetime" />
+          <property name="metadata" type="Record&lt;string, any&gt;" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>ClaudeResponse</name>
+        <properties>
+          <property name="id" type="string" />
+          <property name="type" type="ResponseType" />
+          <property name="content" type="string" />
+          <property name="stopReason" type="StopReason" />
+          <property name="usage" type="TokenUsage" />
+          <property name="model" type="string" />
+          <property name="finishReason" type="string" />
+          <property name="toolCalls" type="ToolCall[]" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>ClaudeError</name>
+        <properties>
+          <property name="type" type="ClaudeErrorType" />
+          <property name="message" type="string" />
+          <property name="code" type="string" />
+          <property name="retryable" type="boolean" />
+          <property name="retryAfter" type="number" />
+          <property name="context" type="Record&lt;string, any&gt;" />
+          <property name="timestamp" type="datetime" />
+        </properties>
+      </model>
+    </data-models>
+    
+    <key-classes>
+      <class>
+        <name>ClaudeCodeProvider</name>
+        <responsibilities>
+          <responsibility>Implement IAIProvider interface for Claude API</responsibility>
+          <responsibility>Handle authentication and configuration</responsibility>
+          <responsibility>Manage streaming responses and tool integration</responsibility>
+          <responsibility>Provide capability discovery and telemetry</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="initialize" returns="Promise&lt;void&gt;">
+            <param name="config" type="ProviderConfig" />
+          </method>
+          <method name="sendMessage" returns="Promise&lt;AsyncIterable&lt;MessageChunk&gt;&gt;">
+            <param name="request" type="MessageRequest" />
+          </method>
+          <method name="getCapabilities" returns="ProviderCapabilities">
+            <param name="model" type="string" />
+          </method>
+          <method name="dispose" returns="Promise&lt;void&gt;" />
+        </methods>
+      </class>
+      
+      <class>
+        <name>ClaudeErrorHandler</name>
+        <responsibilities>
+          <responsibility>Handle Claude-specific errors and exceptions</responsibility>
+          <responsibility>Implement retry logic with exponential backoff</responsibility>
+          <responsibility>Manage rate limiting and context overflow</responsibility>
+          <responsibility>Provide error classification and recovery</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="handleError" returns="Promise&lt;ErrorHandlingResult&gt;">
+            <param name="error" type="ClaudeError" />
+            <param name="context" type="ErrorContext" />
+          </method>
+          <method name="shouldRetry" returns="boolean">
+            <param name="error" type="ClaudeError" />
+            <param name="attempt" type="number" />
+          </method>
+          <method name="calculateRetryDelay" returns="number">
+            <param name="attempt" type="number" />
+            <param name="baseDelay" type="number" />
+          </method>
+          <method name="classifyError" returns="ClaudeErrorType">
+            <param name="error" type="any" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>ClaudeCapabilities</name>
+        <responsibilities>
+          <responsibility>Discover and expose Claude model capabilities</responsibility>
+          <responsibility>Map Claude features to standardized interface</responsibility>
+          <responsibility>Provide model information and limits</responsibility>
+          <responsibility>Handle capability validation</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="getModelCapabilities" returns="ModelCapabilities">
+            <param name="model" type="string" />
+          </method>
+          <method name="getSupportedModels" returns="string[]">
+            <param name="capability" type="CapabilityType" />
+          </method>
+          <method name="validateCapability" returns="CapabilityValidation">
+            <param name="model" type="string" />
+            <param name="capability" type="CapabilityType" />
+          </method>
+          <method name="getModelLimits" returns="ModelLimits">
+            <param name="model" type="string" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>ClaudeTelemetry</name>
+        <responsibilities>
+          <responsibility>Collect usage metrics and performance data</responsibility>
+          <responsibility>Track token consumption and costs</responsibility>
+          <responsibility>Monitor response times and error rates</responsibility>
+          <responsibility>Provide telemetry data to monitoring system</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="recordRequest" returns="void">
+            <param name="request" type="TelemetryRequest" />
+          </method>
+          <method name="recordResponse" returns="void">
+            <param name="response" type="TelemetryResponse" />
+          </method>
+          <method name="recordError" returns="void">
+            <param name="error" type="TelemetryError" />
+          </method>
+          <method name="getMetrics" returns="TelemetryMetrics">
+            <param name="timeRange" type="TimeRange" />
+          </method>
+        </methods>
+      </class>
+    </key-classes>
+    
+    <integration-points>
+      <integration>
+        <component>ClaudeCodeProvider</component>
+        <target>Anthropic Claude API</target>
+        <type>External API Integration</type>
+        <description>Integrates with Anthropic Claude API via @anthropic-ai/sdk</description>
+      </integration>
+      
+      <integration>
+        <component>ClaudeErrorHandler</component>
+        <target>Retry Framework</target>
+        <type>Framework Integration</type>
+        <description>Uses platform retry framework for error handling</description>
+      </integration>
+      
+      <integration>
+        <component>ClaudeCapabilities</component>
+        <target>Provider Registry</target>
+        <type>Registry Integration</type>
+        <description>Registers capabilities with provider registry</description>
+      </integration>
+      
+      <integration>
+        <component>ClaudeTelemetry</component>
+        <target>Monitoring System</target>
+        <type>Monitoring Integration</type>
+        <description>Sends telemetry data to monitoring system</description>
+      </integration>
+    </integration-points>
+    
+    <api-endpoints>
+      <endpoint>
+        <path>/api/v1/providers/claude-code/configure</path>
+        <method>POST</method>
+        <description>Configure Claude Code provider</description>
+        <body>
+          <schema name="ClaudeConfigRequest">
+            <field name="apiKey" type="string" required="true" />
+            <field name="model" type="string" />
+            <field name="maxTokens" type="number" />
+            <field name="temperature" type="number" />
+            <field name="enableStreaming" type="boolean" />
+          </schema>
+        </body>
+      </endpoint>
+      
+      <endpoint>
+        <path>/api/v1/providers/claude-code/capabilities</path>
+        <method>GET</method>
+        <description>Get Claude provider capabilities</description>
+        <parameters>
+          <param name="model" type="string" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/api/v1/providers/claude-code/models</path>
+        <method>GET</method>
+        <description>List supported Claude models</description>
+        <parameters>
+          <param name="capability" type="string" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/api/v1/providers/claude-code/telemetry</path>
+        <method>GET</method>
+        <description>Get Claude provider telemetry</description>
+        <parameters>
+          <param name="timeRange" type="string" />
+          <param name="metrics" type="string" />
+        </parameters>
+      </endpoint>
+    </api-endpoints>
+    
+    <testing-strategy>
+      <unit-tests>
+        <focus>ClaudeCodeProvider interface implementation</focus>
+        <focus>Error handling and retry logic</focus>
+        <focus>Capability discovery and validation</focus>
+        <focus>Telemetry collection and reporting</focus>
+        <coverage>95% minimum for provider implementation</coverage>
+      </unit-tests>
+      
+      <integration-tests>
+        <focus>End-to-end Claude API integration</focus>
+        <focus>Streaming response handling</focus>
+        <focus>Authentication and configuration</focus>
+        <focus>Error scenarios and recovery</focus>
+      </integration-tests>
+      
+      <performance-tests>
+        <focus>Response time and throughput</focus>
+        <focus>Memory usage during streaming</focus>
+        <focus>Concurrent request handling</focus>
+        <focus>Retry logic performance</focus>
+      </performance-tests>
+      
+      <security-tests>
+        <focus>API key handling and storage</focus>
+        <focus>Input validation and sanitization</focus>
+        <focus>Rate limiting and abuse prevention</focus>
+        <focus>Data privacy and compliance</focus>
+      </security-tests>
+    </testing-strategy>
+    
+    <security-considerations>
+      <consideration>
+        <title>API Key Security</title>
+        <description>Claude API keys must be securely stored and transmitted</description>
+        <mitigation>Encrypted storage, secure transmission, key rotation</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Input Validation</title>
+        <description>All inputs to Claude API must be validated and sanitized</description>
+        <mitigation>Input validation, content filtering, size limits</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Rate Limiting</title>
+        <description>Claude API rate limits must be respected and handled</description>
+        <mitigation>Rate limiting, backoff strategies, request queuing</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Data Privacy</title>
+        <description>Sensitive data must be protected when sent to Claude API</description>
+        <mitigation>Data encryption, content filtering, audit logging</mitigation>
+      </consideration>
+    </security-considerations>
+    
+    <monitoring-requirements>
+      <metric>
+        <name>Request Latency</name>
+        <description>Time to receive response from Claude API</description>
+        <target>&lt; 5 seconds p95</target>
+        <alerting>p95 &gt; 10 seconds triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Error Rate</name>
+        <description>Percentage of failed requests to Claude API</description>
+        <target>&lt; 5%</target>
+        <alerting>Error rate &gt; 10% triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Token Usage</name>
+        <description>Number of tokens consumed per request</description>
+        <target>Within model limits</target>
+        <alerting>Exceeds 90% of context window</alerting>
+      </metric>
+      
+      <metric>
+        <name>Retry Rate</name>
+        <description>Percentage of requests that require retries</description>
+        <target>&lt; 10%</target>
+        <alerting>Retry rate &gt; 20% triggers alerts</alerting>
+      </metric>
+    </monitoring-requirements>
+    
+    <success-metrics>
+      <metric>
+        <name>Provider Reliability</name>
+        <description>Overall reliability of Claude provider</description>
+        <measurement>Uptime, success rate, error recovery</measurement>
+        <target>99.5% uptime, 95% success rate</target>
+      </metric>
+      
+      <metric>
+        <name>Performance</name>
+        <description>Performance characteristics of Claude provider</description>
+        <measurement>Response time, throughput, resource usage</measurement>
+        <target>&lt; 5s response, 100+ RPS capacity</target>
+      </metric>
+      
+      <metric>
+        <name>Interface Compliance</name>
+        <description>Compliance with IAIProvider interface</description>
+        <measurement>Interface implementation completeness, test coverage</measurement>
+        <target>100% interface compliance, 95% test coverage</target>
+      </metric>
+      
+      <metric>
+        <name>Reference Implementation Quality</name>
+        <description>Quality as reference for other providers</description>
+        <measurement>Code quality, documentation, patterns</measurement>
+        <target>High quality score, comprehensive documentation</target>
+      </metric>
+    </success-metrics>
+    
+    <acceptance-criteria>
+      <criteria>
+        <description>ClaudeCodeProvider implements all IAIProvider interface methods</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Provider handles authentication via API key configuration</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Provider supports streaming responses for real-time feedback</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Provider includes retry logic with exponential backoff for transient failures</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Unit tests cover happy path, error cases, and edge cases</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Integration test demonstrates end-to-end code generation request</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Provider handles context limits and token management</description>
+        <priority>Should Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Telemetry and monitoring are integrated</description>
+        <priority>Should Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Tool integration is supported (MCP or native)</description>
+        <priority>Could Have</priority>
+      </criteria>
+    </acceptance-criteria>
+    
+    <risk-mitigation>
+      <risk>
+        <title>API Changes</title>
+        <description>Anthropic Claude API changes may break implementation</description>
+        <mitigation>Version pinning, API monitoring, adapter pattern</mitigation>
+        <contingency>Fallback to previous version, rapid updates</contingency>
+      </risk>
+      
+      <risk>
+        <title>Rate Limiting</title>
+        <description>Claude API rate limits may impact performance</description>
+        <mitigation>Request queuing, backoff strategies, multiple keys</mitigation>
+        <contingency>Request throttling, alternative providers</contingency>
+      </risk>
+      
+      <risk>
+        <title>Authentication Failures</title>
+        <description>API key issues may cause service failures</description>
+        <mitigation>Key validation, secure storage, rotation procedures</mitigation>
+        <contingency>Manual key updates, emergency credentials</contingency>
+      </risk>
+      
+      <risk>
+        <title>Context Limits</title>
+        <description>Large contexts may exceed Claude limits</description>
+        <mitigation>Context management, chunking, summarization</mitigation>
+        <contingency>Context truncation, error handling</contingency>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
 </story-context>

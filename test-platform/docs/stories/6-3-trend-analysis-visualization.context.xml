@@ -1,0 +1,367 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>6</epicId>
+    <storyId>3</storyId>
+    <title>Trend Analysis & Visualization</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-09T15:30:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/6-3-trend-analysis-visualization.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a data analyst</asA>
+    <iWant>interactive charts and visualizations of benchmark trends</iWant>
+    <soThat>I can identify patterns and insights in AI model performance</soThat>
+    <tasks>- Task 1: Interactive Time-Series Charts (AC: 1)
+  - Subtask 1.1: Create time-series chart component using D3.js/Chart.js
+  - Subtask 1.2: Add zoom, pan, and brush interactions
+  - Subtask 1.3: Implement multiple time-series overlay
+  - Subtask 1.4: Add trend line and moving average calculations
+  - Subtask 1.5: Create time-series chart configuration interface
+- Task 2: Multi-Model Comparison Charts (AC: 2)
+  - Subtask 2.1: Create side-by-side comparison chart layouts
+  - Subtask 2.2: Implement model selection and filtering
+  - Subtask 2.3: Add performance delta visualization
+  - Subtask 2.4: Create correlation analysis charts
+  - Subtask 2.5: Implement statistical comparison tools
+- Task 3: Heat Map Visualizations (AC: 3)
+  - Subtask 3.1: Create heat map grid for language/scenario performance
+  - Subtask 3.2: Implement color gradient scales for performance metrics
+  - Subtask 3.3: Add interactive hover details and drill-down
+  - Subtask 3.4: Create heat map filtering and sorting options
+  - Subtask 3.5: Implement heat map export functionality
+- Task 4: Statistical Analysis Visualizations (AC: 4)
+  - Subtask 4.1: Create distribution charts (histograms, box plots)
+  - Subtask 4.2: Implement scatter plots for correlation analysis
+  - Subtask 4.3: Add confidence interval visualization
+  - Subtask 4.4: Create statistical summary tables
+  - Subtask 4.5: Implement anomaly detection visualization
+- Task 5: Custom Date Range Selection (AC: 5)
+  - Subtask 5.1: Create date range picker component
+  - Subtask 5.2: Add preset date range options (7d, 30d, 90d, etc.)
+  - Subtask 5.3: Implement custom date input validation
+  - Subtask 5.4: Add timezone support and conversion
+  - Subtask 5.5: Create date range persistence in user preferences
+- Task 6: Export Capabilities (AC: 6)
+  - Subtask 6.1: Implement chart export to PNG/SVG
+  - Subtask 6.2: Create data export to CSV/JSON
+  - Subtask 6.3: Add report generation with multiple charts
+  - Subtask 6.4: Implement scheduled export functionality
+  - Subtask 6.5: Create shareable chart links and embed codes
+- Task 7: Real-time Data Updates (AC: 7)
+  - Subtask 7.1: Connect to WebSocket for live data streaming
+  - Subtask 7.2: Implement efficient chart update mechanisms
+  - Subtask 7.3: Add real-time data point highlighting
+  - Subtask 7.4: Create live performance monitoring dashboard
+  - Subtask 7.5: Implement data buffering and smooth transitions
+- Task 8: Responsive Design (AC: 8)
+  - Subtask 8.1: Implement mobile-optimized chart layouts
+  - Subtask 8.2: Add touch gesture support for chart interaction
+  - Subtask 8.3: Create adaptive chart sizing and scaling
+  - Subtask 8.4: Implement progressive loading for large datasets
+  - Subtask 8.5: Test across all device sizes and orientations</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Interactive time-series charts for model performance
+2. Comparison charts for multiple models
+3. Heat maps for performance across languages/scenarios
+4. Statistical analysis visualizations
+5. Custom date range selection
+6. Export capabilities for charts and data
+7. Real-time data updates with live streaming
+8. Responsive design for all screen sizes</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown - Story 6.3</title>
+        <section>Epic 6: User Interface & Dashboard</section>
+        <snippet>Story 6.3: Trend Analysis & Visualization - As a data analyst, I want interactive charts and visualizations of benchmark trends, So that I can identify patterns and insights in AI model performance.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Data Visualization: Interactive charts using D3.js and Chart.js for complex visualizations, Real-time Metrics: Live data streaming with efficient update mechanisms, Performance Optimization: Virtual scrolling, lazy loading, and efficient rendering.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Data Visualization Architecture</section>
+        <snippet>Chart Library Integration: D3.js for custom visualizations, Chart.js for standard charts, Interactive Features: Zoom, pan, brush, drill-down, and cross-filtering capabilities, Real-time Data Streaming: Live data updates with efficient rendering.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Frontend Architecture</section>
+        <snippet>React-based SPA: Modern single-page application with component-based architecture, State Management: Centralized state management with Redux Toolkit for complex UI state, Real-time Updates: WebSocket integration for live dashboard updates and notifications, Responsive Design: Mobile-first responsive design with progressive enhancement.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/ARCHITECTURE.md</path>
+        <title>System Architecture Document</title>
+        <section>Web UI (Next.js 15 + React 19)</section>
+        <snippet>Features: Public leaderboard with real-time updates, Historical performance charts (Recharts + D3.js), Provider comparison tools, User authentication (Auth0/Clerk), API key management, Custom scenario builder (Pro tier), Alert configuration. Tech Stack: Next.js 15 (App Router), React 19 + Tailwind CSS 4, Charts: Recharts + D3.js, State: Zustand, Realtime: React Query + SSE.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>User Interface & Dashboard</section>
+        <snippet>Trend Analysis: Historical performance tracking with visualizations, Comparison Tools: Side-by-side model comparison across different scenarios, Alert Management: Configuration for performance degradation and improvement notifications.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/stories/6-2-organization-dashboard.md</path>
+        <title>Story 6.2: Organization Dashboard</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Widget-based Layout: Configurable dashboard with drag-and-drop widget arrangement, Data Visualization: Interactive charts using D3.js and Chart.js for complex visualizations, Real-time Metrics: Live data streaming with efficient update mechanisms, Performance Optimization: Virtual scrolling, lazy loading, and efficient rendering.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <codefile>
+        <path>packages/dashboard/package.json</path>
+        <kind>package</kind>
+        <symbol>dashboard</symbol>
+        <lines>1-25</lines>
+        <reason>Dashboard package contains React components for data visualization and trend analysis with React 18.3.1 and Vite build system</reason>
+      </codefile>
+      <codefile>
+        <path>packages/shared/package.json</path>
+        <kind>package</kind>
+        <symbol>shared</symbol>
+        <lines>1-20</lines>
+        <reason>Shared package contains chart utilities and data processing functions used across dashboard components</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/index.tsx</path>
+        <kind>typescript</kind>
+        <symbol>dashboard-entry</symbol>
+        <lines>1-10</lines>
+        <reason>Main dashboard entry point for React application with trend analysis components</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/vite.config.ts</path>
+        <kind>typescript</kind>
+        <symbol>vite-config</symbol>
+        <lines>1-30</lines>
+        <reason>Vite configuration for dashboard build system with React plugin and optimization for chart rendering</reason>
+      </codefile>
+    </code>
+    <dependencies>
+      <ecosystem>React</ecosystem>
+      <packages>
+        <package name="react" version="^18.3.1" />
+        <package name="react-dom" version="^18.3.1" />
+        <package name="@reduxjs/toolkit" version="^2.0.1" />
+        <package name="react-redux" version="^9.0.4" />
+        <package name="d3" version="^7.8.5" />
+        <package name="chart.js" version="^4.4.0" />
+        <package name="react-chartjs-2" version="^5.2.0" />
+        <package name="d3-scale" version="^4.0.2" />
+        <package name="d3-time-format" version="^4.1.0" />
+        <package name="d3-array" version="^3.2.4" />
+        <package name="date-fns" version="^2.30.0" />
+        <package name="html2canvas" version="^1.4.1" />
+        <package name="file-saver" version="^2.0.5" />
+        <package name="recharts" version="^2.8.0" />
+        <package name="zustand" version="^4.4.1" />
+        <package name="@tanstack/react-query" version="^4.32.6" />
+      </packages>
+      <database>
+        <db name="PostgreSQL" version="17" />
+        <db name="TimescaleDB" version="latest" />
+        <db name="Redis" version="7.x" />
+      </database>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Data Visualization: D3.js for custom visualizations, Chart.js for standard charts with consistent theming across all chart types</constraint>
+    <constraint>Interactive Features: Zoom, pan, brush, drill-down, and cross-filtering capabilities with smooth animations and transitions</constraint>
+    <constraint>Real-time Data Streaming: Live data updates with efficient rendering and smooth transitions using WebSocket connections</constraint>
+    <constraint>Performance: Virtual scrolling for large datasets, efficient data processing, optimized rendering with React.memo and useMemo</constraint>
+    <constraint>Responsive Design: Mobile-optimized layouts, touch gesture support, adaptive sizing for all screen sizes and orientations</constraint>
+    <constraint>Export and Sharing: Multiple export formats (PNG, SVG, CSV, JSON) and shareable visualization links with embed codes</constraint>
+    <constraint>Statistical Analysis: Time-series analysis, comparative analysis, distribution analysis with confidence intervals and anomaly detection</constraint>
+    <constraint>Accessibility: WCAG 2.1 AA compliance with keyboard navigation, screen reader support, high contrast mode for charts</constraint>
+    <constraint>State Management: Redux Toolkit for complex UI state with proper normalization and caching strategies</constraint>
+    <constraint>Component Architecture: Reusable chart components with consistent props interface and theming system</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>TrendsService</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface TrendsService {
+  getTimeSeriesData(filters: TimeSeriesFilters): Promise&lt;TimeSeriesData[]&gt;;
+  getComparisonData(models: string[], filters: ComparisonFilters): Promise&lt;ComparisonData&gt;;
+  getHeatMapData(filters: HeatMapFilters): Promise&lt;HeatMapData&gt;;
+  getStatisticalAnalysis(filters: StatisticalFilters): Promise&lt;StatisticalData&gt;;
+  exportChart(chartId: string, format: ExportFormat): Promise&lt;Blob&gt;;
+  subscribeToRealtimeUpdates(callback: (data: RealtimeUpdate) =&gt; void): () =&gt; void;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>TimeSeriesData</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface TimeSeriesData {
+  timestamp: Date;
+  value: number;
+  modelId: string;
+  metric: string;
+  metadata?: Record&lt;string, any&gt;;
+  confidenceInterval?: [number, number];
+  movingAverage?: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>HeatMapData</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface HeatMapData {
+  x: string;
+  y: string;
+  value: number;
+  label?: string;
+  metadata?: Record&lt;string, any&gt;;
+  color?: string;
+  normalizedValue?: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>StatisticalData</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface StatisticalData {
+  distribution: DistributionData;
+  correlations: CorrelationData[];
+  confidenceIntervals: ConfidenceInterval[];
+  anomalies: AnomalyData[];
+  summary: StatisticalSummary;
+  trendAnalysis: TrendAnalysis;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>ChartConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface ChartConfig {
+  type: ChartType;
+  title: string;
+  dataSource: DataSource;
+  filters: ChartFilters;
+  interactions: InteractionConfig;
+  styling: ChartStyling;
+  export: ExportConfig;
+  responsive: ResponsiveConfig;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>RealtimeUpdate</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface RealtimeUpdate {
+  type: 'data_point' | 'trend_change' | 'anomaly_detected';
+  timestamp: Date;
+  chartId: string;
+  data: any;
+  metadata?: Record&lt;string, any&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>ExportFormat</name>
+      <kind>TypeScript Enum</kind>
+      <signature>enum ExportFormat {
+  PNG = 'png',
+  SVG = 'svg',
+  CSV = 'csv',
+  JSON = 'json',
+  PDF = 'pdf'
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for React components with Jest and React Testing Library, Integration tests for API integration and data flow, E2E tests for chart interactions and data exploration, Performance tests for large datasets and real-time updates, Accessibility tests for WCAG compliance and keyboard navigation, Visual regression tests for chart rendering consistency, Real-time data tests for WebSocket integration. Target: 80% line coverage, 75% branch coverage, 85% function coverage.</standards>
+    <locations>
+      <location>packages/dashboard/src/components/trends/**/*.test.tsx</location>
+      <location>packages/dashboard/src/components/charts/**/*.test.tsx</location>
+      <location>packages/dashboard/src/services/trendsService.test.ts</location>
+      <location>packages/dashboard/src/store/slices/trendsSlice.test.ts</location>
+      <location>packages/dashboard/src/services/realtimeService.test.ts</location>
+      <location>packages/dashboard/src/utils/chartHelpers.test.ts</location>
+      <location>packages/dashboard/src/hooks/useTrendsData.test.ts</location>
+      <location>**/*.e2e.test.ts</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Test interactive time-series charts with zoom, pan, and brush interactions using mock data</test>
+      <test idea="AC2">Test multi-model comparison charts with performance delta visualization and statistical significance</test>
+      <test idea="AC3">Test heat map visualizations with color gradients, drill-down functionality, and filtering</test>
+      <test idea="AC4">Test statistical analysis visualizations with confidence intervals and anomaly detection</test>
+      <test idea="AC5">Test custom date range selection with timezone support and persistence</test>
+      <test idea="AC6">Test export capabilities for charts and data in multiple formats (PNG, SVG, CSV, JSON)</test>
+      <test idea="AC7">Test real-time data updates with WebSocket integration and smooth transitions</test>
+      <test idea="AC8">Test responsive design across all device sizes and orientations with touch gestures</test>
+      <test idea="Performance">Test chart rendering performance with datasets up to 10,000 data points</test>
+      <test idea="Accessibility">Test WCAG 2.1 AA compliance with keyboard navigation and screen reader support</test>
+      <test idea="Integration">Test end-to-end workflow from data fetching to chart rendering and export</test>
+    </ideas>
+  </tests>
+
+  <implementation>
+    <structure>
+      <directory path="packages/dashboard/src/components/trends/">
+        <component name="TimeSeriesChart" type="React Component" />
+        <component name="ComparisonChart" type="React Component" />
+        <component name="HeatMapVisualization" type="React Component" />
+        <component name="StatisticalAnalysis" type="React Component" />
+        <component name="DateRangePicker" type="React Component" />
+        <component name="ExportControls" type="React Component" />
+      </directory>
+      <directory path="packages/dashboard/src/components/charts/">
+        <component name="BaseChart" type="React Component" />
+        <component name="InteractiveChart" type="React Component" />
+        <component name="ResponsiveChart" type="React Component" />
+        <component name="ChartContainer" type="React Component" />
+      </directory>
+      <directory path="packages/dashboard/src/services/">
+        <service name="trendsService" type="API Service" />
+        <service name="realtimeService" type="WebSocket Service" />
+        <service name="exportService" type="Export Service" />
+      </directory>
+      <directory path="packages/dashboard/src/store/slices/">
+        <slice name="trendsSlice" type="Redux Slice" />
+        <slice name="chartsSlice" type="Redux Slice" />
+      </directory>
+      <directory path="packages/dashboard/src/hooks/">
+        <hook name="useTrendsData" type="Custom Hook" />
+        <hook name="useRealtimeUpdates" type="Custom Hook" />
+        <hook name="useChartExport" type="Custom Hook" />
+      </directory>
+      <directory path="packages/dashboard/src/utils/">
+        <utility name="chartHelpers" type="Utility Functions" />
+        <utility name="dataProcessors" type="Data Processing" />
+        <utility name="formatters" type="Formatting Functions" />
+      </directory>
+    </structure>
+    <patterns>
+      <pattern name="Component Composition" description="Compose complex charts from reusable base components with consistent props interface" />
+      <pattern name="State Management" description="Use Redux Toolkit for global state and local state for component-specific data" />
+      <pattern name="Data Fetching" description="Implement React Query for server state with caching and background updates" />
+      <pattern name="Real-time Updates" description="Use WebSocket connections with subscription management and automatic reconnection" />
+      <pattern name="Performance Optimization" description="Implement virtual scrolling, memoization, and efficient data processing" />
+      <pattern name="Responsive Design" description="Use CSS Grid and Flexbox with breakpoint-based layouts" />
+      <pattern name="Accessibility" description="Implement ARIA labels, keyboard navigation, and screen reader support" />
+    </patterns>
+    <integration>
+      <system name="Dashboard Framework" description="Reuse dashboard layout and widget system from Story 6.2" />
+      <system name="API Gateway" description="Integrate with existing API endpoints for trend data" />
+      <system name="WebSocket Service" description="Connect to real-time data streaming infrastructure" />
+      <system name="Authentication" description="Use existing auth system for user-specific data access" />
+      <system name="Theme System" description="Apply consistent theming across all chart components" />
+    </integration>
+  </implementation>
+</story-context>

@@ -1,6 +1,6 @@
 # Story 4.5: Agent Customization Benchmarking Suite
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -100,7 +100,7 @@ So that I can optimize agent configurations for autonomous development tasks.
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [4-5-agent-customization-benchmarking-suite.context.xml](4-5-agent-customization-benchmarking-suite.context.xml)
 
 ### Agent Model Used
 

@@ -278,3 +278,9 @@ interface TestResult {
 - **Architecture Document:** [test-platform/docs/ARCHITECTURE.md#Quality-Assurance](ARCHITECTURE.md)
 - **Product Requirements:** [test-platform/docs/PRD.md#Quality-Standards](PRD.md)
 - **Task Repository:** [test-platform/docs/stories/3-1-task-repository-schema-storage.md](3-1-task-repository-schema-storage.md)
+
+## Dev Agent Record
+
+### Context Reference
+
+- [3-2-task-quality-assurance-system.context.xml](3-2-task-quality-assurance-system.context.xml) - Generated story context with technical specifications, interfaces, and testing guidance

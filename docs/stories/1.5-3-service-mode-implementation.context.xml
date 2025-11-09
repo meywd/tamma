@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>1.5-3</story-id>
+  <title>Service Mode Implementation</title>
+  <epic>1.5</epic>
+  <category>deployment</category>
+  <last-updated>2025-11-08T12:00:00Z</last-updated>
+  
+  <technical-context>
+    <overview>
+      Service Mode Implementation provides background daemon functionality for Tamma that listens for task queue events and automatically triggers autonomous development workflows. This enables Tamma to operate without user interaction, processing webhook events, handling task queues, and managing concurrent autonomous workflows with configurable auto-approval settings.
+    </overview>
+    
+    <key-components>
+      <component>
+        <name>TammaService</name>
+        <description>Main service class for background daemon operations</description>
+        <interfaces>
+          <interface>IServiceManager</interface>
+          <interface>ITaskProcessor</interface>
+          <interface>IEventEmitter</interface>
+          <interface>IServiceLifecycle</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>Task Queue</name>
+        <description>Task queue implementations for different backends</description>
+        <interfaces>
+          <interface>ITaskQueue</interface>
+          <interface>IQueueBackend</interface>
+          <interface>ITaskManager</interface>
+          <interface>IQueueHealth</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>Task Processor</name>
+        <description>Task processing logic and workflow execution</description>
+        <interfaces>
+          <interface>ITaskExecutor</interface>
+          <interface>IAutoApprover</interface>
+          <interface>ITaskRetryHandler</interface>
+          <interface>IEscalationManager</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>Service Health</name>
+        <description>Health monitoring and status reporting</description>
+        <interfaces>
+          <interface>IHealthChecker</interface>
+          <interface>IMetricsCollector</interface>
+          <interface>IStatusReporter</interface>
+        </interfaces>
+      </component>
+    </key-components>
+    
+    <data-models>
+      <model>
+        <name>ServiceConfig</name>
+        <properties>
+          <property name="pollInterval" type="number" />
+          <property name="maxConcurrentTasks" type="number" />
+          <property name="maxRetries" type="number" />
+          <property name="retryDelay" type="number" />
+          <property name="maxRetryDelay" type="number" />
+          <property name="autoApprove" type="AutoApproveConfig" />
+          <property name="queue" type="QueueConfig" />
+          <property name="healthCheck" type="HealthCheckConfig" />
+          <property name="metrics" type="MetricsConfig" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>Task</name>
+        <properties>
+          <property name="id" type="string" />
+          <property name="type" type="TaskType" />
+          <property name="priority" type="TaskPriority" />
+          <property name="payload" type="any" />
+          <property name="status" type="TaskStatus" />
+          <property name="retries" type="number" />
+          <property name="maxRetries" type="number" />
+          <property name="createdAt" type="datetime" />
+          <property name="startedAt" type="datetime" />
+          <property name="completedAt" type="datetime" />
+          <property name="error" type="string" />
+          <property name="result" type="any" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>ServiceMetrics</name>
+        <properties>
+          <property name="startTime" type="datetime" />
+          <property name="tasksProcessed" type="number" />
+          <property name="tasksCompleted" type="number" />
+          <property name="tasksFailed" type="number" />
+          <property name="averageProcessingTime" type="number" />
+          <property name="activeTasks" type="number" />
+          <property name="queueDepth" type="number" />
+          <property name="uptime" type="number" />
+          <property name="errorRate" type="number" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>AutoApproveConfig</name>
+        <properties>
+          <property name="lowComplexity" type="boolean" />
+          <property name="mediumComplexity" type="boolean" />
+          <property name="maxEstimatedHours" type="number" />
+          <property name="blockFilePatterns" type="string[]" />
+          <property name="riskThreshold" type="string" />
+          <property name="requireTests" type="boolean" />
+        </properties>
+      </model>
+    </data-models>
+    
+    <key-classes>
+      <class>
+        <name>TammaService</name>
+        <responsibilities>
+          <responsibility>Manage service lifecycle and daemon operations</responsibility>
+          <responsibility>Coordinate task processing and concurrent execution</responsibility>
+          <responsibility>Handle graceful shutdown and signal management</responsibility>
+          <responsibility>Provide health monitoring and metrics collection</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="start" returns="Promise&lt;void&gt;">
+            <param name="config" type="ServiceConfig" />
+          </method>
+          <method name="stop" returns="Promise&lt;void&gt;" />
+          <method name="processTask" returns="Promise&lt;TaskResult&gt;">
+            <param name="task" type="Task" />
+          </method>
+          <method name="shouldAutoApprove" returns="boolean">
+            <param name="analysis" type="IssueAnalysis" />
+            <param name="plan" type="DevelopmentPlan" />
+          </method>
+          <method name="getHealthStatus" returns="Promise&lt;HealthStatus&gt;" />
+          <method name="getMetrics" returns="ServiceMetrics" />
+        </methods>
+      </class>
+      
+      <class>
+        <name>TaskProcessor</name>
+        <responsibilities>
+          <responsibility>Execute tasks based on type and payload</responsibility>
+          <responsibility>Handle task-specific workflow logic</responsibility>
+          <responsibility>Manage task state transitions and updates</responsibility>
+          <responsibility>Coordinate with core engine for workflow execution</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="executeTask" returns="Promise&lt;TaskResult&gt;">
+            <param name="task" type="Task" />
+          </method>
+          <method name="handleIssueAssigned" returns="Promise&lt;TaskResult&gt;">
+            <param name="payload" type="IssueAssignedPayload" />
+          </method>
+          <method name="handleIssueComment" returns="Promise&lt;TaskResult&gt;">
+            <param name="payload" type="IssueCommentPayload" />
+          </method>
+          <method name="handlePRReviewRequested" returns="Promise&lt;TaskResult&gt;">
+            <param name="payload" type="PRReviewRequestedPayload" />
+          </method>
+          <method name="handlePRComment" returns="Promise&lt;TaskResult&gt;">
+            <param name="payload" type="PRCommentPayload" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>MemoryTaskQueue</name>
+        <responsibilities>
+          <responsibility>Provide in-memory task queue implementation</responsibility>
+          <responsibility>Manage task ordering and priority</responsibility>
+          <responsibility>Handle task status updates and persistence</responsibility>
+          <responsibility>Provide queue statistics and health monitoring</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="connect" returns="Promise&lt;void&gt;" />
+          <method name="disconnect" returns="Promise&lt;void&gt;" />
+          <method name="enqueue" returns="Promise&lt;Task&gt;">
+            <param name="payload" type="TaskPayload" />
+          </method>
+          <method name="dequeue" returns="Promise&lt;Task | null&gt;" />
+          <method name="updateStatus" returns="Promise&lt;void&gt;">
+            <param name="taskId" type="string" />
+            <param name="status" type="TaskStatus" />
+          </method>
+          <method name="complete" returns="Promise&lt;void&gt;">
+            <param name="taskId" type="string" />
+            <param name="result" type="any" />
+          </method>
+          <method name="getHealthStatus" returns="Promise&lt;QueueHealthStatus&gt;" />
+          <method name="getDepth" returns="number" />
+        </methods>
+      </class>
+      
+      <class>
+        <name>AutoApprover</name>
+        <responsibilities>
+          <responsibility>Evaluate tasks for auto-approval eligibility</responsibility>
+          <responsibility>Apply complexity and risk thresholds</responsibility>
+          <responsibility>Check for risky file patterns and configurations</responsibility>
+          <responsibility>Provide approval decisions with reasoning</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="evaluate" returns="ApprovalDecision">
+            <param name="analysis" type="IssueAnalysis" />
+            <param name="plan" type="DevelopmentPlan" />
+            <param name="config" type="AutoApproveConfig" />
+          </method>
+          <method name="checkComplexity" returns="boolean">
+            <param name="complexity" type="string" />
+            <param name="config" type="AutoApproveConfig" />
+          </method>
+          <method name="checkRiskLevel" returns="boolean">
+            <param name="riskLevel" type="string" />
+            <param name="config" type="AutoApproveConfig" />
+          </method>
+          <method name="checkFilePatterns" returns="boolean">
+            <param name="files" type="string[]" />
+            <param name="blockedPatterns" type="string[]" />
+          </method>
+        </methods>
+      </class>
+    </key-classes>
+    
+    <integration-points>
+      <integration>
+        <component>TammaService</component>
+        <target>Core Engine</target>
+        <type>Service Integration</type>
+        <description>Service uses core engine for workflow execution</description>
+      </integration>
+      
+      <integration>
+        <component>Task Queue</component>
+        <target>Queue Backends</target>
+        <type>Backend Integration</type>
+        <description>Supports memory, Redis, and SQS queue backends</description>
+      </integration>
+      
+      <integration>
+        <component>Task Processor</component>
+        <target>Git Platforms</target>
+        <type>Platform Integration</type>
+        <description>Processes tasks from GitHub, GitLab webhook events</description>
+      </integration>
+      
+      <integration>
+        <component>Service Health</component>
+        <target>Monitoring Systems</target>
+        <type>Monitoring Integration</type>
+        <description>Provides health endpoints and metrics for monitoring</description>
+      </integration>
+    </integration-points>
+    
+    <api-endpoints>
+      <endpoint>
+        <path>/service/start</path>
+        <method>Service</method>
+        <description>Start Tamma service daemon</description>
+        <parameters>
+          <param name="--config" type="string" />
+          <param name="--poll-interval" type="number" />
+          <param name="--max-concurrent" type="number" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/service/stop</path>
+        <method>Service</method>
+        <description>Stop Tamma service daemon</description>
+        <parameters>
+          <param name="--graceful" type="boolean" />
+          <param name="--timeout" type="number" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/service/status</path>
+        <method>Service</method>
+        <description>Get service status and metrics</description>
+        <parameters>
+          <param name="--verbose" type="boolean" />
+          <param name="--format" type="string" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/health</path>
+        <method>HTTP</method>
+        <description>Health check endpoint</description>
+        <parameters>
+          <param name="detailed" type="boolean" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/metrics</path>
+        <method>HTTP</method>
+        <description>Service metrics endpoint</description>
+        <parameters>
+          <param name="format" type="string" />
+          <param name="since" type="datetime" />
+        </parameters>
+      </endpoint>
+    </api-endpoints>
+    
+    <testing-strategy>
+      <unit-tests>
+        <focus>Service lifecycle management</focus>
+        <focus>Task processing logic</focus>
+        <focus>Auto-approval decision making</focus>
+        <focus>Queue operations and health monitoring</focus>
+        <coverage>90% minimum</coverage>
+      </unit-tests>
+      
+      <integration-tests>
+        <focus>End-to-end service workflows</focus>
+        <focus>Task queue integration</focus>
+        <focus>Core engine coordination</focus>
+        <focus>Graceful shutdown scenarios</focus>
+      </integration-tests>
+      
+      <performance-tests>
+        <focus>Concurrent task processing</focus>
+        <focus>Memory usage under load</focus>
+        <focus>Queue performance and latency</focus>
+        <focus>Service startup and shutdown times</focus>
+      </performance-tests>
+      
+      <reliability-tests>
+        <focus>Error handling and recovery</focus>
+        <focus>Retry logic and backoff</focus>
+        <focus>Resource cleanup and memory leaks</focus>
+        <focus>Long-running stability</focus>
+      </reliability-tests>
+    </testing-strategy>
+    
+    <security-considerations>
+      <consideration>
+        <title>Task Validation</title>
+        <description>All task payloads must be validated before processing</description>
+        <mitigation>Input validation, schema checking, authorization verification</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Resource Limits</title>
+        <description>Service must enforce CPU and memory limits per task</description>
+        <mitigation>Resource monitoring, task isolation, limit enforcement</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Access Control</title>
+        <description>Tasks must only access authorized repositories</description>
+        <mitigation>Permission checking, repository access validation, audit logging</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Audit Trail</title>
+        <description>All task processing must be logged for security auditing</description>
+        <mitigation>Comprehensive logging, secure log storage, tamper protection</mitigation>
+      </consideration>
+    </security-considerations>
+    
+    <monitoring-requirements>
+      <metric>
+        <name>Service Uptime</name>
+        <description>Percentage of time service is running and healthy</description>
+        <target>&gt; 99%</target>
+        <alerting>Uptime drops &lt; 95% triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Task Processing Rate</name>
+        <description>Number of tasks processed per hour</description>
+        <target>&gt; 100 tasks/hour</target>
+        <alerting>Processing rate drops &lt; 50 tasks/hour</alerting>
+      </metric>
+      
+      <metric>
+        <name>Task Success Rate</name>
+        <description>Percentage of tasks completed successfully</description>
+        <target>&gt; 95%</target>
+        <alerting>Success rate drops &lt; 90% triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Average Processing Time</name>
+        <description>Average time to complete a task</description>
+        <target>&lt; 5 minutes</target>
+        <alerting>Processing time &gt; 15 minutes triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Queue Depth</name>
+        <description>Number of tasks waiting in queue</description>
+        <target>&lt; 50 tasks</target>
+        <alerting>Queue depth &gt; 100 tasks triggers alerts</alerting>
+      </metric>
+    </monitoring-requirements>
+    
+    <success-metrics>
+      <metric>
+        <name>Service Reliability</name>
+        <description>Overall service reliability and availability</description>
+        <measurement>Uptime, error rate, recovery time</measurement>
+        <target>&gt; 99% uptime, &lt; 5% error rate</target>
+      </metric>
+      
+      <metric>
+        <name>Processing Performance</name>
+        <description>Task processing efficiency and speed</description>
+        <measurement>Throughput, latency, resource usage</measurement>
+        <target>&gt; 100 tasks/hour, &lt; 5 minute processing time</target>
+      </metric>
+      
+      <metric>
+        <name>Auto-Approval Effectiveness</name>
+        <description>Accuracy and safety of auto-approval decisions</description>
+        <measurement>Approval rate, false positive rate, escalation accuracy</measurement>
+        <target>&gt; 80% auto-approval, &lt; 5% false positive</target>
+      </metric>
+      
+      <metric>
+        <name>Resource Efficiency</name>
+        <description>Efficient resource utilization and scaling</description>
+        <measurement>CPU usage, memory usage, concurrent task handling</measurement>
+        <target>&lt; 70% CPU, &lt; 2GB memory, 10+ concurrent tasks</target>
+      </metric>
+    </success-metrics>
+    
+    <acceptance-criteria>
+      <criteria>
+        <description>Service starts as background daemon and listens for task queue events</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Graceful shutdown on SIGTERM/SIGINT (finishes in-progress tasks, max 30 seconds)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Task polling interval configurable (default 5 seconds)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Maximum concurrent tasks configurable (default 3)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Auto-approval for low-complexity issues (configurable)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Retry logic with exponential backoff (max 3 retries)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Health check endpoint responds within 100ms</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Service mode runs without user interaction (no prompts)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Unit tests validate task processing logic</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Integration tests validate service lifecycle (start, process tasks, shutdown)</description>
+        <priority>Must Have</priority>
+      </criteria>
+    </acceptance-criteria>
+    
+    <risk-mitigation>
+      <risk>
+        <title>Service Failures</title>
+        <description>Service crashes or becomes unresponsive</description>
+        <mitigation>Health monitoring, automatic restarts, error handling</mitigation>
+        <contingency>Manual restart, log analysis, emergency procedures</contingency>
+      </risk>
+      
+      <risk>
+        <title>Task Queue Issues</title>
+        <description>Queue failures or connectivity problems</description>
+        <mitigation>Multiple queue backends, connection retry, fallback mechanisms</mitigation>
+        <contingency>Queue switching, manual task processing, service degradation</contingency>
+      </risk>
+      
+      <risk>
+        <title>Auto-Approval Errors</title>
+        <description>Incorrect auto-approval decisions causing issues</description>
+        <mitigation>Conservative thresholds, human oversight, rollback capabilities</mitigation>
+        <contingency>Manual intervention, approval process changes, incident response</contingency>
+      </risk>
+      
+      <risk>
+        <title>Resource Exhaustion</title>
+        <description>Service consumes excessive resources or memory leaks</description>
+        <mitigation>Resource monitoring, task limits, graceful degradation</mitigation>
+        <contingency>Service restart, resource cleanup, capacity planning</contingency>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
+</story-context>

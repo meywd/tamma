@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-5-test-first-development-write-failing-tests">
+  <metadata>
+    <title>Story 2.5: Test-First Development - Write Failing Tests</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.4 (Git branch creation must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to write failing tests first (TDD red phase)</action>
+    <benefit>so that I can ensure test coverage before implementation and validate requirements</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System generates test files based on development plan requirements</criterion>
+    <criterion id="2">Tests are written to fail initially (no implementation exists yet)</criterion>
+    <criterion id="3">Test structure follows project conventions and testing framework</criterion>
+    <criterion id="4">Tests cover edge cases, error conditions, and happy paths</criterion>
+    <criterion id="5">System validates test syntax and structure</criterion>
+    <criterion id="6">Test execution confirms tests fail as expected</criterion>
+    <criterion id="7">Test generation and execution logged to event trail</criterion>
+    <criterion id="8">Integration test validates TDD red phase workflow</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="TestFirstGenerator">
+        <interface>ITestFirstGenerator</interface>
+        <methods>
+          <method name="generateTests" returns="TestSuite[]">
+            <parameter name="plan" type="DevelopmentPlan"/>
+          </method>
+          <method name="validateTestSyntax" returns="ValidationResult">
+            <parameter name="testFiles" type="TestFile[]"/>
+          </method>
+          <method name="executeTests" returns="TestExecutionResult">
+            <parameter name="testFiles" type="TestFile[]"/>
+          </method>
+          <method name="confirmTestsFail" returns="boolean">
+            <parameter name="results" type="TestExecutionResult"/>
+          </method>
+          <method name="organizeTestFiles" returns="TestFile[]">
+            <parameter name="tests" type="TestSuite[]"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="TestSuite">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="name" type="string"/>
+          <field name="description" type="string"/>
+          <field name="targetFile" type="string"/>
+          <field name="testType" type="string"/>
+          <field name="framework" type="string"/>
+          <field name="tests" type="TestCase[]"/>
+          <field name="setup" type="string[]"/>
+          <field name="teardown" type="string[]"/>
+          <field name="mocks" type="MockDefinition[]"/>
+          <field name="fixtures" type="FixtureDefinition[]"/>
+        </fields>
+      </interface>
+
+      <interface name="TestCase">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="name" type="string"/>
+          <field name="description" type="string"/>
+          <field name="scenario" type="string"/>
+          <field name="given" type="string[]"/>
+          <field name="when" type="string[]"/>
+          <field name="then" type="string[]"/>
+          <field name="expected" type="ExpectedResult"/>
+          <field name="tags" type="string[]"/>
+          <field name="priority" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="TestExecutionResult">
+        <fields>
+          <field name="totalTests" type="number"/>
+          <field name="passedTests" type="number"/>
+          <field name="failedTests" type="number"/>
+          <field name="skippedTests" type="number"/>
+          <field name="executionTime" type="number"/>
+          <field name="testResults" type="TestResult[]"/>
+          <field name="coverage" type="CoverageReport"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Test Generation">
+        <description>AI-powered test generation based on development plan requirements</description>
+        <components>
+          <component>TestFirstGenerator class</component>
+          <component>Test case generation from requirements</component>
+          <component>Mock and fixture generation</component>
+          <component>Test file organization and structure</component>
+        </components>
+      </phase>
+
+      <phase name="Test Validation">
+        <description>Ensure tests are properly structured and fail as expected</description>
+        <components>
+          <component>Syntax validation and linting</component>
+          <component>Test execution framework</component>
+          <component>Failure confirmation logic</component>
+          <component>Coverage measurement</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="AI Provider">
+        <description>Generate test cases and implementation code</description>
+        <events>
+          <event>TEST.GENERATION.SUCCESS</event>
+          <event>TEST.GENERATION.FAILED</event>
+        </events>
+      </integration>
+
+      <integration name="Testing Framework">
+        <description>Execute tests and measure coverage</description>
+        <frameworks>
+          <framework>Vitest</framework>
+          <framework>Jest</framework>
+          <framework>Mocha</framework>
+        </frameworks>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for test generation and execution</description>
+        <events>
+          <event>TEST.CREATED.SUCCESS</event>
+          <event>TEST.EXECUTED.SUCCESS</event>
+          <event>TEST.VALIDATION.FAILED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="TestFirstGenerator">
+          <test>generate comprehensive test suites</test>
+          <test>validate test syntax and structure</test>
+          <test>confirm tests fail as expected</test>
+          <test>handle edge cases and error conditions</test>
+          <test>generate appropriate mocks and fixtures</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>end-to-end TDD red phase workflow</test>
+        <test>test execution with real frameworks</test>
+        <test>coverage measurement and reporting</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="test_first_generation">
+        <setting name="framework" default="vitest"/>
+        <setting name="coverage_threshold" default="80"/>
+        <setting name="test_types" default="['unit', 'integration']"/>
+        <setting name="mock_generation" default="true"/>
+        <setting name="fixture_generation" default="true"/>
+      </section>
+
+      <section name="test_validation">
+        <setting name="syntax_check" default="true"/>
+        <setting name="failure_confirmation" default="true"/>
+        <setting name="coverage_measurement" default="true"/>
+        <setting name="execution_timeout" default="30000"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="test_generation" metric="time" value="&lt; 30 seconds"/>
+      <target name="test_validation" metric="time" value="&lt; 10 seconds"/>
+      <target name="test_execution" metric="time" value="&lt; 60 seconds"/>
+    </performance-targets>
+
+    <tdd-principles>
+      <principle>Write failing tests before implementation</principle>
+      <principle>Ensure tests fail for the right reasons</principle>
+      <principle>Cover edge cases and error conditions</principle>
+      <principle>Use descriptive test names and scenarios</principle>
+      <principle>Generate appropriate mocks and fixtures</principle>
+    </tdd-principles>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Tests must fail initially to validate TDD approach</consideration>
+      <consideration priority="2">Comprehensive test coverage including edge cases</consideration>
+      <consideration priority="3">Proper test structure and organization</consideration>
+      <consideration priority="4">Integration with existing testing frameworks</consideration>
+      <consideration priority="5">Mock and fixture generation for isolated testing</consideration>
+      <consideration priority="6">Validation of test syntax and execution</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

@@ -1,0 +1,191 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>4</storyId>
+    <title>Dynamic Model Discovery Service</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-11-08T12:00:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/2-4-dynamic-model-discovery-service.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>benchmark platform operator</asA>
+    <iWant>a dynamic model discovery service that automatically detects and catalogs AI models from all configured providers</iWant>
+    <soThat>I can maintain an up-to-date inventory of available models with their capabilities and performance characteristics without manual intervention</soThat>
+    <tasks>Task 1: Define Model Discovery Interfaces (AC: 1, 2, 3)
+- Subtask 1.1: Create IModelDiscoveryService interface
+- Subtask 1.2: Define ModelCache interface with TTL support
+- Subtask 1.3: Specify ModelCapabilityMapper interface
+- Subtask 1.4: Create ModelUpdateSubscriber interface
+
+Task 2: Implement Core Discovery Service (AC: 1, 6)
+- Subtask 2.1: Create DynamicModelDiscovery class
+- Subtask 2.2: Implement provider enumeration and model listing
+- Subtask 2.3: Add periodic refresh with configurable intervals
+- Subtask 2.4: Implement provider health checking integration
+
+Task 3: Build Model Caching System (AC: 2, 8)
+- Subtask 3.1: Create ModelCache implementation with TTL
+- Subtask 3.2: Implement cache invalidation strategies
+- Subtask 3.3: Add persistent storage for model metadata
+- Subtask 3.4: Create version history tracking for model changes
+
+Task 4: Develop Capability Mapping (AC: 3, 7)
+- Subtask 4.1: Create standardized capability definitions
+- Subtask 4.2: Implement provider-specific capability mappers
+- Subtask 4.3: Add capability validation and normalization
+- Subtask 4.4: Create model filtering and search functionality
+
+Task 5: Implement Update Notification System (AC: 4)
+- Subtask 5.1: Create subscription management for model updates
+- Subtask 5.2: Implement real-time notification broadcasting
+- Subtask 5.3: Add update filtering and batching capabilities
+- Subtask 5.4: Create notification error handling and retry logic
+
+Task 6: Integrate Basic Benchmarking (AC: 5)
+- Subtask 6.1: Create ModelBenchmark interface and data structures
+- Subtask 6.2: Implement basic performance benchmarking tests
+- Subtask 6.3: Add benchmark result storage and retrieval
+- Subtask 6.4: Create benchmark scheduling and automation
+
+Task 7: Add Configuration and Management (AC: 1, 2, 6)
+- Subtask 7.1: Create discovery service configuration schema
+- Subtask 7.2: Implement configuration validation and loading
+- Subtask 7.3: Add service lifecycle management (start/stop/restart)
+- Subtask 7.4: Create administrative endpoints for manual operations
+
+Task 8: Create Comprehensive Testing Suite (All ACs)
+- Subtask 8.1: Unit tests for all core components
+- Subtask 8.2: Integration tests with mock providers
+- Subtask 8.3: Performance tests for large model catalogs
+- Subtask 8.4: Error handling and recovery tests</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Automatic model discovery from all registered AI providers with configurable refresh intervals
+2. Centralized model cache with TTL support and manual refresh capabilities
+3. Standardized model capability mapping across different provider APIs
+4. Real-time model update notifications for subscribed components
+5. Basic benchmarking integration to collect performance metrics for discovered models
+6. Provider health checking with automatic model list updates on provider status changes
+7. Model filtering and search capabilities by capability, provider, or custom attributes
+8. Persistent storage of model metadata with version history and change tracking</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <item>
+        <path>docs/tech-spec-epic-2.md</path>
+        <title>Epic 2 Technical Specification</title>
+        <section>Dynamic Model Discovery Service (Story 2.4)</section>
+        <snippet>Interface ModelDiscoveryService { discoverModels(): Promise&lt;Model[]&gt;; refreshModel(providerName: string): Promise&lt;Model[]&gt;; getModelCapabilities(modelId: string): Promise&lt;ModelCapabilities&gt;; benchmarkModel(modelId: string): Promise&lt;ModelBenchmark&gt;; subscribeToModelUpdates(callback: (models: Model[]) =&gt; void): void; }</snippet>
+      </item>
+      <item>
+        <path>docs/epics.md</path>
+        <title>Epic Breakdown</title>
+        <section>Story 2.4: Dynamic Model Discovery Service</section>
+        <snippet>As a platform administrator, I want the system to automatically discover available models from providers, So that new models are included in benchmarks without manual updates.</snippet>
+      </item>
+      <item>
+        <path>docs/ARCHITECTURE.md</path>
+        <title>System Architecture</title>
+        <section>Model Discovery System</section>
+        <snippet>Dynamic Detection: Automatic model discovery from provider APIs, Capability Mapping: Standardized model capabilities and metadata, Version Management: Model version tracking and compatibility, Performance Profiling: Baseline performance characteristics</snippet>
+      </item>
+      <item>
+        <path>docs/PRD.md</path>
+        <title>Product Requirements</title>
+        <section>Innovation & Novel Patterns</section>
+        <snippet>Dynamic Model Discovery: Instead of hardcoding models, platform automatically discovers available models from providers, ensuring we're always testing latest offerings without manual updates.</snippet>
+      </item>
+    </docs>
+    <code>
+      <item>
+        <path>.dev/spikes/providers/base-provider.ts</path>
+        <kind>interface</kind>
+        <symbol>AIProvider</symbol>
+        <lines>35-41</lines>
+        <reason>Base provider interface with getModels() method for dynamic model discovery</reason>
+      </item>
+      <item>
+        <path>.dev/spikes/providers/anthropic-provider.ts</path>
+        <kind>implementation</kind>
+        <symbol>AnthropicProvider.getModels()</symbol>
+        <lines>19-25</lines>
+        <reason>Example implementation of model discovery for Anthropic Claude provider</reason>
+      </item>
+      <item>
+        <path>packages/providers/package.json</path>
+        <kind>package</kind>
+        <symbol>dependencies</symbol>
+        <lines>1-20</lines>
+        <reason>Provider package structure for implementing discovery service</reason>
+      </item>
+    </code>
+    <dependencies>
+      <item>
+        <ecosystem>Node.js</ecosystem>
+        <packages>
+          <package name="@anthropic-ai/sdk" version="latest" />
+          <package name="openai" version="latest" />
+          <package name="@google/generative-ai" version="latest" />
+          <package name="ioredis" version="latest" />
+          <package name="pg" version="latest" />
+          <package name="typescript" version="~5.7.2" />
+        </packages>
+      </item>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <item>Use TypeScript 5.7+ strict mode with proper type definitions</item>
+    <item>Implement event-driven architecture using observer pattern for model updates</item>
+    <item>Use Redis for caching with TTL support and PostgreSQL for persistent storage</item>
+    <item>Follow existing provider interface patterns from .dev/spikes/providers/base-provider.ts</item>
+    <item>Implement circuit breaker pattern for provider health checking</item>
+    <item>Use structured logging with correlation IDs for all operations</item>
+    <item>Ensure 100% test coverage for critical paths (discovery, caching, notifications)</item>
+    <item>Handle provider API rate limits with exponential backoff and retry logic</item>
+  </constraints>
+
+  <interfaces>
+    <item>
+      <name>IModelDiscoveryService</name>
+      <kind>interface</kind>
+      <signature>interface IModelDiscoveryService { discoverModels(): Promise&lt;Model[]&gt;; refreshProvider(providerName: string): Promise&lt;Model[]&gt;; getModel(modelId: string): Promise&lt;Model | undefined&gt;; getModelsByCapability(capability: string): Promise&lt;Model[]&gt;; subscribeToUpdates(callback: ModelUpdateCallback): UnsubscribeFunction; start(): Promise&lt;void&gt;; stop(): Promise&lt;void&gt;; }</signature>
+      <path>src/services/model-discovery.ts</path>
+    </item>
+    <item>
+      <name>ModelCache</name>
+      <kind>interface</kind>
+      <signature>interface ModelCache { get(modelId: string): Promise&lt;Model | undefined&gt;; set(modelId: string, model: Model, ttl?: number): Promise&lt;void&gt;; invalidate(providerName?: string): Promise&lt;void&gt;; getAll(): Promise&lt;Model[]&gt;; search(filter: ModelFilter): Promise&lt;Model[]&gt;; }</signature>
+      <path>src/cache/model-cache.ts</path>
+    </item>
+    <item>
+      <name>ModelCapabilityMapper</name>
+      <kind>interface</kind>
+      <signature>interface ModelCapabilityMapper { mapCapabilities(providerModel: any, providerType: string): ModelCapabilities; normalizeCapability(capability: string): string; validateCapabilities(capabilities: ModelCapabilities): boolean; }</signature>
+      <path>src/mappers/capability-mapper.ts</path>
+    </item>
+    <item>
+      <name>REST API Endpoints</name>
+      <kind>REST</kind>
+      <signature>GET /api/v1/models - List all models across providers, GET /api/v1/models/{id} - Get model details, GET /api/v1/providers/{name}/models - List provider models, POST /api/v1/models/{id}/benchmark - Run model benchmark, GET /api/v1/discovery/refresh - Trigger manual refresh</signature>
+      <path>src/api/routes/models.ts</path>
+    </item>
+  </interfaces>
+
+  <tests>
+    <standards>Use Vitest 3.x for unit and integration tests with 100% coverage on critical paths. Mock external provider APIs using MSW. Test error scenarios including provider failures, network timeouts, and cache invalidation. Performance tests must handle 1000+ model catalogs with &lt;100MB memory usage.</standards>
+    <locations>Unit tests: src/**/*.test.ts (colocated with source), Integration tests: tests/integration/**/*.test.ts, Performance tests: tests/performance/**/*.test.ts, Mock fixtures: tests/mocks/providers/</locations>
+    <ideas>
+      <idea ac="1">Test automatic discovery across multiple providers with different API response formats</idea>
+      <idea ac="2">Test cache TTL behavior and manual refresh operations</idea>
+      <idea ac="3">Test capability mapping normalization between different provider APIs</idea>
+      <idea ac="4">Test real-time notification delivery to multiple subscribers</idea>
+      <idea ac="5">Test basic benchmarking execution and result storage</idea>
+      <idea ac="6">Test provider health checking and automatic recovery</idea>
+      <idea ac="7">Test model filtering and search with various criteria</idea>
+      <idea ac="8">Test version history tracking and change detection</idea>
+    </ideas>
+  </tests>
+</story-context>

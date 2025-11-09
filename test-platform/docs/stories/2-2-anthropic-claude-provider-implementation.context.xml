@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-2" title="Anthropic Claude Provider Implementation" generated="2025-11-08T12:00:00Z">
+  <summary>Implement Anthropic Claude AI provider integration with streaming, error handling, and advanced features for the benchmarking platform.</summary>
+  <epic>2</epic>
+  <status>ready-for-dev</status>
+  <requirements>
+    <functional>
+      - Implement IAIProvider interface for Anthropic Claude API
+      - Support Claude 3.5 Sonnet, Claude 3.5 Haiku, and Claude 3 Opus models
+      - Handle streaming responses using AsyncIterable pattern
+      - Implement proper error handling and retry logic with exponential backoff
+      - Include token counting, cost calculation, and rate limiting
+      - Support function calling and tool use capabilities
+      - Implement circuit breaker pattern for API resilience
+      - Add comprehensive logging and metrics collection
+    </functional>
+    <non-functional>
+      - Follow TypeScript strict mode compilation requirements
+      - Use structured logging with Pino for all operations
+      - Implement circuit breaker with 5 failures in 60s → open for 300s pattern
+      - Ensure async/await pattern throughout (no .then()/.catch())
+      - Maintain 80%+ unit test coverage on critical paths
+      - Support real-time streaming with minimal latency
+      - Handle rate limiting and quota management gracefully
+    </non-functional>
+  </requirements>
+  <technical-context>
+    <architecture>
+      - Must implement IAIProvider interface from Story 2.1
+      - Use AsyncIterable&lt;MessageChunk&gt; pattern for streaming responses
+      - Follow TammaError pattern with structured context for error handling
+      - Implement provider-specific configuration schema validation
+      - Use dependency injection pattern for provider registration
+    </architecture>
+    <dependencies>
+      - Story 2.1: AI Provider Interface Definition (IAIProvider interface)
+      - Shared error handling patterns from Tamma core
+      - Configuration management system for provider settings
+      - Logging and metrics infrastructure (Pino-based)
+      - Circuit breaker implementation pattern
+    </dependencies>
+    <apis>
+      - AnthropicClaudeProvider class implementing IAIProvider
+      - Model discovery and configuration APIs
+      - Streaming response handler with AsyncIterable
+      - Token counting and cost calculation utilities
+      - Function calling and tool use execution APIs
+      - Error handling and retry logic implementations
+      - Metrics collection and monitoring endpoints
+    </apis>
+  </technical-context>
+  <acceptance-criteria>
+    <criteria>
+      Implement IAIProvider interface for Anthropic Claude API
+      Support Claude 3.5 Sonnet, Claude 3.5 Haiku, and Claude 3 Opus models
+      Handle streaming responses using AsyncIterable pattern
+      Implement proper error handling and retry logic with exponential backoff
+      Include token counting, cost calculation, and rate limiting
+      Support function calling and tool use capabilities
+      Implement circuit breaker pattern for API resilience
+      Add comprehensive logging and metrics collection
+    </criteria>
+  </acceptance-criteria>
+  <implementation-notes>
+    <considerations>
+      - Use @anthropic-ai/sdk for official API integration
+      - Implement model-specific context windows and pricing configurations
+      - Create custom error types for Anthropic-specific error scenarios
+      - Design for both unit tests (mocked) and integration tests (real API)
+      - Consider performance impact of token counting on large inputs
+      - Implement proper cleanup and resource disposal patterns
+    </considerations>
+    <challenges>
+      - Handling streaming interruptions and partial response recovery
+      - Accurate token counting for complex message formats with tools
+      - Managing rate limits across concurrent benchmark executions
+      - Balancing circuit breaker sensitivity with API reliability
+      - Implementing efficient cost calculation for high-volume benchmarks
+      - Ensuring proper error propagation in streaming scenarios
+    </challenges>
+  </implementation-notes>
+</story-context>

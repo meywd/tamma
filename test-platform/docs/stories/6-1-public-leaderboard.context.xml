@@ -1,0 +1,495 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>6</epicId>
+    <storyId>1</storyId>
+    <title>Public Leaderboard</title>
+    <status>ready-for-development</status>
+    <generatedAt>2025-11-09T15:30:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/6-1-public-leaderboard.md</sourceStoryPath>
+    <projectType>test-platform</projectType>
+    <workflowVersion>2.0</workflowVersion>
+  </metadata>
+
+  <story>
+    <asA>a visitor</asA>
+    <iWant>to view a public leaderboard of AI model performance</iWant>
+    <soThat>I can compare models and make informed decisions</soThat>
+    <tasks>- Task 1: Responsive Web Layout Framework (AC: 1)
+  - Subtask 1.1: Set up React-based frontend with mobile-first design
+  - Subtask 1.2: Configure responsive breakpoints for desktop/tablet/mobile
+  - Subtask 1.3: Test cross-browser compatibility
+- Task 2: Model Ranking Table Component (AC: 2)
+  - Subtask 2.1: Design table schema with performance metrics columns
+  - Subtask 2.2: Implement sorting functionality by different metrics
+  - Subtask 2.3: Add pagination for large model lists
+- Task 3: Filtering System Implementation (AC: 3)
+  - Subtask 3.1: Create filter components for language, scenario, time period
+  - Subtask 3.2: Implement filter state management
+  - Subtask 3.3: Add filter combination logic
+- Task 4: Model Profile Pages Development (AC: 4)
+  - Subtask 4.1: Create detailed model view with score breakdowns
+  - Subtask 4.2: Add model metadata and capabilities display
+  - Subtask 4.3: Implement navigation from table to profiles
+- Task 5: Historical Performance Charts (AC: 5)
+  - Subtask 5.1: Integrate charting library (D3.js/Chart.js)
+  - Subtask 5.2: Create time-series visualization components
+  - Subtask 5.3: Add trend analysis features
+- Task 6: Export Functionality (AC: 6)
+  - Subtask 6.1: Implement data export in multiple formats (CSV, JSON, PDF)
+  - Subtask 6.2: Create export UI with format selection
+  - Subtask 6.3: Add export scheduling options
+- Task 7: Search Functionality (AC: 7)
+  - Subtask 7.1: Implement search input with autocomplete
+  - Subtask 7.2: Add search result highlighting
+  - Subtask 7.3: Create advanced search filters
+- Task 8: Social Sharing Integration (AC: 8)
+  - Subtask 8.1: Add share buttons for social platforms
+  - Subtask 8.2: Create shareable links with filters
+  - Subtask 8.3: Implement embed functionality for external sites</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Responsive web design with mobile compatibility
+2. Model ranking table with performance metrics
+3. Filtering by language, scenario, and time period
+4. Detailed model profiles with score breakdowns
+5. Historical performance charts and trends
+6. Export functionality for leaderboard data
+7. Search functionality for specific models
+8. Social sharing capabilities for results</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown - Story 6.1</title>
+        <section>Story 6.1: Public Leaderboard</section>
+        <snippet>As a visitor, I want to view a public leaderboard of AI model performance, So that I can compare models and make informed decisions.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Frontend Architecture</section>
+        <snippet>React-based SPA with component-based architecture, Redux Toolkit for state management, WebSocket integration for live updates, Mobile-first responsive design with progressive enhancement.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Widget-based layout with drag-and-drop arrangement, Interactive charts using D3.js and Chart.js, Real-time metrics with live data streaming, Performance optimization with virtual scrolling.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements - User Experience</title>
+        <section>Public Leaderboard</section>
+        <snippet>Public-facing leaderboard showing AI model rankings with filtering, search, and detailed performance metrics. Mobile-responsive design with social sharing capabilities.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Leaderboard Service Interface</title>
+        <section>Main Dashboard Framework</section>
+        <snippet>interface LeaderboardService {
+  getLeaderboardData(filters: LeaderboardFilters): Promise&lt;LeaderboardData&gt;;
+  getModelProfile(modelId: string): Promise&lt;ModelProfile&gt;;
+  exportData(format: ExportFormat, filters: LeaderboardFilters): Promise&lt;Blob&gt;;
+  searchModels(query: string, filters: SearchFilters): Promise&lt;SearchResult[]&gt;;
+}</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Data Model Definitions</title>
+        <section>Interface Definitions</section>
+        <snippet>interface LeaderboardFilters {
+  languages?: string[];
+  scenarios?: string[];
+  timeRange?: DateRange;
+  sortBy?: SortField;
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
+interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  capabilities: ModelCapabilities;
+  performance: PerformanceMetrics;
+  history: HistoricalData[];
+  metadata: ModelMetadata;
+}</snippet>
+      </doc>
+    </docs>
+    <code>
+      <codefile>
+        <path>packages/dashboard/src/components/leaderboard/LeaderboardTable.tsx</path>
+        <kind>component</kind>
+        <symbol>LeaderboardTable</symbol>
+        <lines>1-50</lines>
+        <reason>Main component for displaying AI model rankings with sorting and pagination</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/components/leaderboard/ModelProfile.tsx</path>
+        <kind>component</kind>
+        <symbol>ModelProfile</symbol>
+        <lines>1-50</lines>
+        <reason>Detailed view component for individual model performance breakdowns</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/components/leaderboard/FilterPanel.tsx</path>
+        <kind>component</kind>
+        <symbol>FilterPanel</symbol>
+        <lines>1-50</lines>
+        <reason>Filter component for language, scenario, and time period filtering</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/components/charts/PerformanceChart.tsx</path>
+        <kind>component</kind>
+        <symbol>PerformanceChart</symbol>
+        <lines>1-50</lines>
+        <reason>Chart component for historical performance visualization using D3.js/Chart.js</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/services/leaderboardService.ts</path>
+        <kind>service</kind>
+        <symbol>leaderboardService</symbol>
+        <lines>1-50</lines>
+        <reason>API service for fetching leaderboard data, model profiles, and handling exports</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/store/slices/leaderboardSlice.ts</path>
+        <kind>redux-slice</kind>
+        <symbol>leaderboardSlice</symbol>
+        <lines>1-50</lines>
+        <reason>Redux Toolkit slice for managing leaderboard state, filters, and UI interactions</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/utils/exportUtils.ts</path>
+        <kind>utility</kind>
+        <symbol>exportUtils</symbol>
+        <lines>1-50</lines>
+        <reason>Utility functions for exporting leaderboard data in CSV, JSON, and PDF formats</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/components/search/SearchBox.tsx</path>
+        <kind>component</kind>
+        <symbol>SearchBox</symbol>
+        <lines>1-50</lines>
+        <reason>Search component with autocomplete and result highlighting</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/components/sharing/SocialShare.tsx</path>
+        <kind>component</kind>
+        <symbol>SocialShare</symbol>
+        <lines>1-50</lines>
+        <reason>Social sharing component for sharing leaderboard results and embed functionality</reason>
+      </codefile>
+    </code>
+    <dependencies>
+      <ecosystem>React</ecosystem>
+      <packages>
+        <package name="react" version="^18.2.0" />
+        <package name="react-dom" version="^18.2.0" />
+        <package name="@reduxjs/toolkit" version="^2.0.1" />
+        <package name="react-redux" version="^9.0.4" />
+        <package name="d3" version="^7.8.5" />
+        <package name="chart.js" version="^4.4.0" />
+        <package name="react-chartjs-2" version="^5.2.0" />
+        <package name="react-grid-layout" version="^1.4.4" />
+        <package name="styled-components" version="^6.1.1" />
+        <package name="react-router-dom" version="^6.8.0" />
+        <package name="react-select" version="^5.7.0" />
+        <package name="react-table" version="^7.8.0" />
+        <package name="jspdf" version="^2.5.1" />
+        <package name="file-saver" version="^2.0.5" />
+        <package name="react-share" version="^4.4.1" />
+        <package name="fuse.js" version="^6.6.2" />
+      </packages>
+      <database>
+        <db name="PostgreSQL" version="17" />
+        <db name="Redis" version="7.x" />
+      </database>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>React SPA Architecture: Must use modern React with hooks, functional components, and TypeScript strict mode</constraint>
+    <constraint>Redux Toolkit: Centralized state management for complex UI state with proper slice organization</constraint>
+    <constraint>Responsive Design: Mobile-first approach with progressive enhancement, WCAG 2.1 AA compliance</constraint>
+    <constraint>Real-time Updates: WebSocket integration for live leaderboard updates and notifications</constraint>
+    <constraint>Performance: Virtual scrolling for large datasets, lazy loading, efficient rendering with React.memo</constraint>
+    <constraint>Data Visualization: D3.js for custom charts, Chart.js for standard charts with consistent theming</constraint>
+    <constraint>Accessibility: Comprehensive keyboard navigation, screen reader support, high contrast mode</constraint>
+    <constraint>Cross-browser: Support for Chrome, Firefox, Safari, Edge with consistent behavior</constraint>
+    <constraint>SEO Optimization: Server-side rendering or static generation for public leaderboard pages</constraint>
+    <constraint>Caching Strategy: Intelligent caching for leaderboard data with appropriate TTL and invalidation</constraint>
+    <constraint>Export Limits: Rate limiting and size restrictions for data exports to prevent abuse</constraint>
+    <constraint>Social Privacy: No personal data sharing, only anonymous leaderboard rankings</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>LeaderboardService</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface LeaderboardService {
+  getLeaderboardData(filters: LeaderboardFilters): Promise&lt;LeaderboardData&gt;;
+  getModelProfile(modelId: string): Promise&lt;ModelProfile&gt;;
+  exportData(format: ExportFormat, filters: LeaderboardFilters): Promise&lt;Blob&gt;;
+  searchModels(query: string, filters: SearchFilters): Promise&lt;SearchResult[]&gt;;
+  getHistoricalData(modelId: string, timeRange: DateRange): Promise&lt;HistoricalData[]&gt;;
+  getShareableUrl(filters: LeaderboardFilters): Promise&lt;string&gt;;
+  getEmbedCode(filters: LeaderboardFilters): Promise&lt;string&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>LeaderboardFilters</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface LeaderboardFilters {
+  languages?: string[];
+  scenarios?: string[];
+  timeRange?: DateRange;
+  sortBy?: SortField;
+  sortOrder?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+  providers?: string[];
+  modelTypes?: ModelType[];
+  difficulty?: DifficultyLevel[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>ModelProfile</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  capabilities: ModelCapabilities;
+  performance: PerformanceMetrics;
+  history: HistoricalData[];
+  metadata: ModelMetadata;
+  rankings: ModelRankings;
+  comparisons: ModelComparisons;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>PerformanceMetrics</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface PerformanceMetrics {
+  overallScore: number;
+  compilationSuccess: number;
+  testPassRate: number;
+  codeQuality: number;
+  executionSpeed: number;
+  memoryEfficiency: number;
+  securityScore: number;
+  documentationQuality: number;
+  costEfficiency: number;
+  latency: number;
+  reliability: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>HistoricalData</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface HistoricalData {
+  timestamp: Date;
+  score: number;
+  metrics: Partial&lt;PerformanceMetrics&gt;;
+  benchmarkVersion: string;
+  taskCount: number;
+  improvementRate: number;
+  rank: number;
+  totalModels: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>ExportFormat</name>
+      <kind>TypeScript Enum</kind>
+      <signature>enum ExportFormat {
+  CSV = 'csv',
+  JSON = 'json',
+  PDF = 'pdf',
+  EXCEL = 'excel',
+  XML = 'xml'
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>SearchFilters</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface SearchFilters {
+  query: string;
+  fields?: string[];
+  fuzzy?: boolean;
+  threshold?: number;
+  includeDescription?: boolean;
+  includeCapabilities?: boolean;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for React components with Jest and React Testing Library, Integration tests for API integration and data flow, E2E tests with Cypress or Playwright, Performance tests for large datasets, Accessibility tests with axe-core, Visual regression tests with Percy or Chromatic. Target: 80% line coverage, 75% branch coverage, 85% function coverage.</standards>
+    <locations>
+      <location>packages/dashboard/src/components/leaderboard/**/*.test.tsx</location>
+      <location>packages/dashboard/src/services/leaderboardService.test.ts</location>
+      <location>packages/dashboard/src/store/slices/leaderboardSlice.test.ts</location>
+      <location>packages/dashboard/src/utils/exportUtils.test.ts</location>
+      <location>packages/dashboard/src/components/charts/**/*.test.tsx</location>
+      <location>packages/dashboard/src/components/search/**/*.test.tsx</location>
+      <location>packages/dashboard/src/components/sharing/**/*.test.tsx</location>
+      <location>**/*.e2e.test.ts</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Test responsive design across desktop, tablet, and mobile viewports using device emulation</test>
+      <test idea="AC2">Test model ranking table with sorting, pagination, and performance metrics display</test>
+      <test idea="AC3">Test filtering functionality for languages, scenarios, and time periods with state persistence</test>
+      <test idea="AC4">Test model profile pages with score breakdowns and navigation from table</test>
+      <test idea="AC5">Test historical performance charts with trend analysis and time-series data</test>
+      <test idea="AC6">Test export functionality for CSV, JSON, and PDF formats with large datasets</test>
+      <test idea="AC7">Test search functionality with autocomplete, fuzzy matching, and result highlighting</test>
+      <test idea="AC8">Test social sharing buttons, embed functionality, and shareable links with filters</test>
+      <test idea="Performance">Test rendering performance with 1000+ models using virtual scrolling</test>
+      <test idea="Accessibility">Test WCAG 2.1 AA compliance with keyboard navigation and screen readers</test>
+      <test idea="Real-time">Test WebSocket integration for live leaderboard updates</test>
+      <test idea="Caching">Test browser caching and API response caching strategies</test>
+      <test idea="ErrorHandling">Test error states for API failures and network issues</test>
+    </ideas>
+  </tests>
+
+  <implementationNotes>
+    <prerequisites>
+      <prereq>Story 5.5: Multi-Judge Score Aggregation - Leaderboard depends on comprehensive scoring system</prereq>
+      <prereq>Story 4.3: Result Storage & Time-Series Management - Historical data required for trend analysis</prereq>
+      <prereq>Story 1.4: Basic API Infrastructure - API endpoints needed for data fetching</prereq>
+      <prereq>Story 9.1: Server-Sent Events Implementation - Real-time updates for live leaderboard</prereq>
+    </prerequisites>
+    <dataFlow>
+      <step>1. User visits public leaderboard URL</step>
+      <step>2. Component mounts and fetches initial leaderboard data with default filters</step>
+      <step>3. Data is cached in Redux store and displayed in responsive table</step>
+      <step>4. User applies filters or search - API called with updated parameters</step>
+      <step>5. Results update with animation and maintain scroll position</step>
+      <step>6. User clicks model profile - navigates to detailed view with extended data</step>
+      <step>7. Historical charts load time-series data for trend visualization</step>
+      <step>8. Export functionality processes current filtered data for download</step>
+      <step>9. Social sharing generates shareable URLs with encoded filter state</step>
+    </dataFlow>
+    <componentHierarchy>
+      <root>PublicLeaderboardPage</root>
+      <children>
+        <component>LeaderboardHeader</component>
+        <component>FilterPanel</component>
+        <component>SearchBox</component>
+        <component>LeaderboardTable</component>
+        <component>PaginationControls</component>
+        <component>ExportControls</component>
+        <component>SocialShare</component>
+      </children>
+      <modals>
+        <modal>ModelProfileModal</modal>
+        <modal>ExportModal</modal>
+        <modal>ShareModal</modal>
+      </modals>
+    </componentHierarchy>
+    <stateManagement>
+      <globalState>
+        <slice>leaderboardSlice</slice>
+        <properties>data, filters, loading, error, pagination, sortBy, sortOrder</properties>
+      </globalState>
+      <localState>
+        <component>FilterPanel</component>
+        <properties>expandedFilters, temporaryFilters</properties>
+        <component>SearchBox</component>
+        <properties>query, suggestions, isOpen</properties>
+        <component>ModelProfile</component>
+        <properties>activeTab, chartData, loadingDetails</properties>
+      </localState>
+    </stateManagement>
+    <apiEndpoints>
+      <endpoint method="GET" path="/api/v1/leaderboard">Fetch leaderboard data with filters</endpoint>
+      <endpoint method="GET" path="/api/v1/models/:id/profile">Get detailed model profile</endpoint>
+      <endpoint method="GET" path="/api/v1/models/:id/history">Get historical performance data</endpoint>
+      <endpoint method="GET" path="/api/v1/models/search">Search models with autocomplete</endpoint>
+      <endpoint method="POST" path="/api/v1/leaderboard/export">Export filtered data</endpoint>
+      <endpoint method="GET" path="/api/v1/leaderboard/share">Generate shareable URL</endpoint>
+      <endpoint method="GET" path="/api/v1/leaderboard/embed">Generate embed code</endpoint>
+    </apiEndpoints>
+    <performanceConsiderations>
+      <consideration>Virtual scrolling for tables with 1000+ models</consideration>
+      <consideration>Debounced search input to reduce API calls</consideration>
+      <consideration>Memoized chart components to prevent unnecessary re-renders</consideration>
+      <consideration>Lazy loading of historical data when scrolling to charts</consideration>
+      <consideration>Progressive image loading for model avatars/icons</consideration>
+      <consideration>Service worker caching for offline functionality</consideration>
+    </performanceConsiderations>
+    <securityConsiderations>
+      <consideration>Rate limiting on API endpoints to prevent abuse</consideration>
+      <consideration>Input sanitization for search queries to prevent XSS</consideration>
+      <consideration>CSRF protection on export and sharing endpoints</consideration>
+      <consideration>No sensitive data in shareable URLs or embed codes</consideration>
+      <consideration>Content Security Policy for external resource loading</consideration>
+    </securityConsiderations>
+  </implementationNotes>
+
+  <qualityAssurance>
+    <codeReviewChecklist>
+      <item>React components follow hooks best practices</item>
+      <item>TypeScript interfaces properly typed</item>
+      <item>Redux slices follow Toolkit conventions</item>
+      <item>Accessibility attributes implemented</item>
+      <item>Error boundaries for component trees</item>
+      <item>Performance optimizations applied</item>
+      <item>Security best practices followed</item>
+      <item>Test coverage meets requirements</item>
+    </codeReviewChecklist>
+    <acceptanceTestPlan>
+      <test>Verify responsive layout on mobile, tablet, desktop</test>
+      <test>Test all filter combinations and URL state persistence</test>
+      <test>Validate sorting on all performance metrics columns</test>
+      <test>Test pagination with large datasets</test>
+      <test>Verify model profile navigation and data accuracy</test>
+      <test>Test historical chart rendering and interactions</test>
+      <test>Validate export functionality for all formats</test>
+      <test>Test search autocomplete and result highlighting</test>
+      <test>Verify social sharing and embed functionality</test>
+      <test>Test error handling and loading states</test>
+    </acceptanceTestPlan>
+    <performanceBenchmarks>
+      <benchmark>Initial page load: &lt; 2 seconds</benchmark>
+      <benchmark>Filter application: &lt; 500ms</benchmark>
+      <benchmark>Search response: &lt; 300ms</benchmark>
+      <benchmark>Table rendering: &lt; 100ms for 100 rows</benchmark>
+      <benchmark>Chart rendering: &lt; 200ms for 500 data points</benchmark>
+      <benchmark>Export generation: &lt; 5 seconds for 1000 models</benchmark>
+    </performanceBenchmarks>
+  </qualityAssurance>
+
+  <deployment>
+    <environment>Production deployment requires CDN configuration for static assets</environment>
+    <environment>Redis cache configuration for leaderboard data caching</environment>
+    <environment>WebSocket server configuration for real-time updates</environment>
+    <environment>SSL certificate for secure API communication</environment>
+    <environment>Search engine optimization for public leaderboard pages</environment>
+    <environment>Analytics integration for usage tracking</environment>
+  </deployment>
+
+  <maintenance>
+    <monitoring>Performance monitoring for page load times and API response times</monitoring>
+    <monitoring>Error tracking for JavaScript errors and API failures</monitoring>
+    <monitoring>Usage analytics for popular filters and search terms</monitoring>
+    <monitoring>Cache hit rates and optimization opportunities</monitoring>
+    <updates>Regular chart library updates for security and performance</updates>
+    <updates>Browser compatibility testing with new releases</updates>
+    <updates>Accessibility testing with updated screen readers</updates>
+  </maintenance>
+</story-context>

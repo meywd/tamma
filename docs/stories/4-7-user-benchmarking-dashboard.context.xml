@@ -1,0 +1,190 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>4</epicId>
+    <storyId>7</storyId>
+    <title>User Benchmarking Dashboard</title>
+    <status>completed</status>
+    <generatedAt>2025-11-08T12:34:56.789Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/4-7-user-benchmarking-dashboard.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>Test Platform user</asA>
+    <iWant>a comprehensive dashboard to run benchmarks with custom instructions and view comparative results</iWant>
+    <soThat>I can optimize my AI provider selection and instruction configurations for maximum performance</soThat>
+    <tasks>8 main tasks with 32 subtasks covering dashboard framework, comparative analysis, custom instruction editor, historical analytics, export & sharing, intelligence integration, user experience, and performance & scalability</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Interactive dashboard for creating and running custom instruction benchmarks
+2. Real-time benchmark execution with progress tracking and live results
+3. Comparative analysis showing baseline vs custom instruction performance
+4. Provider comparison tools with side-by-side performance metrics
+5. Custom instruction editor with syntax highlighting and validation
+6. Historical benchmark tracking with trend analysis and performance insights
+7. Export capabilities for sharing benchmark results and insights
+8. Integration with cross-platform intelligence for optimization recommendations</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <artifact type="api" path="src/dashboard/user-benchmarking/api/" description="REST API endpoints for dashboard operations">
+        <endpoint method="GET" path="/api/dashboard/benchmarks" description="List user benchmarks"/>
+        <endpoint method="POST" path="/api/dashboard/benchmarks" description="Create new benchmark"/>
+        <endpoint method="GET" path="/api/dashboard/benchmarks/:id/results" description="Get benchmark results"/>
+        <endpoint method="GET" path="/api/dashboard/benchmarks/:id/progress" description="Get real-time progress"/>
+        <endpoint method="POST" path="/api/dashboard/benchmarks/:id/export" description="Export benchmark results"/>
+      </artifact>
+      <artifact type="component" path="src/dashboard/user-benchmarking/components/" description="React components for dashboard UI">
+        <component name="BenchmarkDashboard" description="Main dashboard container"/>
+        <component name="ComparativeAnalysis" description="Side-by-side comparison views"/>
+        <component name="InstructionEditor" description="Custom instruction editor with syntax highlighting"/>
+        <component name="HistoricalAnalytics" description="Trend analysis and performance insights"/>
+        <component name="ExportManager" description="Export and sharing functionality"/>
+      </artifact>
+      <artifact type="config" path="src/dashboard/user-benchmarking/config/" description="Dashboard configuration and settings">
+        <file name="dashboard.config.ts" description="Dashboard configuration constants"/>
+        <file name="chart.config.ts" description="Chart visualization configurations"/>
+        <file name="export.config.ts" description="Export format configurations"/>
+      </artifact>
+    </docs>
+    <code>
+      <artifact type="service" path="src/dashboard/user-benchmarking/services/" description="Business logic services">
+        <service name="BenchmarkExecutionService" description="Handles benchmark execution and progress tracking"/>
+        <service name="ComparativeAnalysisService" description="Performs comparative analysis between benchmarks"/>
+        <service name="HistoricalAnalyticsService" description="Analyzes historical trends and performance"/>
+        <service name="ExportService" description="Handles multi-format export functionality"/>
+        <service name="IntelligenceIntegrationService" description="Integrates with cross-platform intelligence"/>
+      </artifact>
+      <artifact type="hooks" path="src/dashboard/user-benchmarking/hooks/" description="React hooks for state management">
+        <hook name="useBenchmarkExecution" description="Manages benchmark execution state"/>
+        <hook name="useRealTimeProgress" description="WebSocket/SSE integration for live updates"/>
+        <hook name="useComparativeData" description="Manages comparative analysis data"/>
+        <hook name="useHistoricalData" description="Manages historical analytics data"/>
+      </artifact>
+      <artifact type="utils" path="src/dashboard/user-benchmarking/utils/" description="Utility functions">
+        <util name="performanceCalculations" description="Performance metric calculations"/>
+        <util name="chartDataTransformers" description="Data transformation for charts"/>
+        <util name="exportFormatters" description="Format data for different export types"/>
+        <util name="instructionValidator" description="Validate custom instructions"/>
+      </artifact>
+    </code>
+    <dependencies>
+      <dependency type="internal" description="Stories 4.5, 4.6 - Benchmark execution and reporting systems"/>
+      <dependency type="internal" description="Existing benchmark infrastructure and data models"/>
+      <dependency type="external" name="React" version="^18.0" description="UI framework"/>
+      <dependency type="external" name="TypeScript" version="^5.0" description="Type safety"/>
+      <dependency type="external" name="Recharts" version="^2.8" description="Chart visualization library"/>
+      <dependency type="external" name="Monaco Editor" version="^0.44" description="Code editor with syntax highlighting"/>
+      <dependency type="external" name="Socket.io" version="^4.7" description="Real-time communication"/>
+      <dependency type="external" name="React Query" version="^4.0" description="Server state management"/>
+      <dependency type="external" name="Tailwind CSS" version="^3.3" description="Styling framework"/>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="performance" description="Dashboard must support 1000+ concurrent users with sub-2 second response times" source="Task 8.1"/>
+    <constraint type="real-time" description="Live benchmark progress updates via WebSocket/SSE with &lt;100ms latency" source="Task 8.3"/>
+    <constraint type="accessibility" description="WCAG 2.1 AA compliance with keyboard navigation and screen reader support" source="Task 7.2"/>
+    <constraint type="responsive" description="Mobile-first responsive design supporting 320px to 4K displays" source="Task 7.1"/>
+    <constraint type="integration" description="Seamless integration with Stories 4.5 and 4.6 benchmark systems" source="Dev Notes - Integration Architecture"/>
+    <constraint type="security" description="User data isolation and secure benchmark result sharing" source="Task 5.4"/>
+    <constraint type="scalability" description="Efficient data visualization for 10,000+ benchmark results" source="Task 8.2"/>
+  </constraints>
+  <interfaces>
+    <interface type="api" direction="outbound" target="Stories 4.5, 4.6" description="Benchmark execution and result retrieval APIs">
+      <method name="executeBenchmark" description="Start benchmark execution with custom instructions"/>
+      <method name="getBenchmarkResults" description="Retrieve completed benchmark results"/>
+      <method name="getBenchmarkProgress" description="Get real-time execution progress"/>
+    </interface>
+    <interface type="api" direction="outbound" target="Cross-platform Intelligence" description="Optimization recommendations API">
+      <method name="getRecommendations" description="Get AI provider optimization recommendations"/>
+      <method name="getBestPractices" description="Get community best practices and patterns"/>
+    </interface>
+    <interface type="websocket" direction="bidirectional" target="Dashboard Frontend" description="Real-time progress updates">
+      <event name="benchmarkProgress" description="Real-time benchmark execution progress"/>
+      <event name="resultUpdate" description="Live result updates during execution"/>
+    </interface>
+    <interface type="ui" direction="internal" target="Dashboard Components" description="Component communication interfaces">
+      <props name="BenchmarkDashboard" description="Main dashboard component props"/>
+      <props name="ComparativeAnalysis" description="Comparison component data interfaces"/>
+      <props name="InstructionEditor" description="Editor component configuration"/>
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>
+      <standard type="unit" coverage="90%" description="Unit tests for all dashboard components and business logic">
+        <framework>Vitest</framework>
+        <library>React Testing Library</library>
+        <library>Jest DOM</library>
+      </standard>
+      <standard type="integration" coverage="80%" description="Integration tests with real benchmark execution">
+        <framework>Vitest</framework>
+        <library>MSW for API mocking</library>
+        <focus>API integration, WebSocket communication, data flow</focus>
+      </standard>
+      <standard type="performance" description="Performance tests for dashboard responsiveness">
+        <framework>Lighthouse CI</framework>
+        <framework>Artillery.io</framework>
+        <metrics>Load time &lt;2s, TTI &lt;3s, 1000+ concurrent users</metrics>
+      </standard>
+      <standard type="accessibility" description="WCAG 2.1 AA compliance testing">
+        <framework>axe-core</framework>
+        <library>jest-axe</library>
+        <coverage>100% accessibility compliance</coverage>
+      </standard>
+      <standard type="e2e" description="End-to-end user journey testing">
+        <framework>Playwright</framework>
+        <scenarios>Complete benchmark creation, execution, analysis workflow</scenarios>
+      </standard>
+    </standards>
+    <locations>
+      <location type="unit" path="tests/dashboard/user-benchmarking/unit/" description="Unit tests for individual components and services"/>
+      <location type="integration" path="tests/dashboard/user-benchmarking/integration/" description="Integration tests for API and WebSocket communication"/>
+      <location type="performance" path="tests/dashboard/user-benchmarking/performance/" description="Performance and load testing scripts"/>
+      <location type="accessibility" path="tests/dashboard/user-benchmarking/accessibility/" description="Accessibility compliance tests"/>
+      <location type="e2e" path="tests/dashboard/user-benchmarking/e2e/" description="End-to-end user scenario tests"/>
+      <location type="fixtures" path="tests/dashboard/user-benchmarking/fixtures/" description="Test data and mock responses"/>
+    </locations>
+    <ideas>
+      <test type="unit" priority="high" description="Test dashboard component rendering with different benchmark states">
+        <scenario>Empty dashboard state</scenario>
+        <scenario>Active benchmark execution</scenario>
+        <scenario>Completed benchmark results</scenario>
+        <scenario>Error handling states</scenario>
+      </test>
+      <test type="integration" priority="high" description="Test real-time benchmark execution with WebSocket updates">
+        <scenario>Progress updates during execution</scenario>
+        <scenario>Connection handling and reconnection</scenario>
+        <scenario>Multiple concurrent benchmarks</scenario>
+      </test>
+      <test type="unit" priority="medium" description="Test comparative analysis algorithms">
+        <scenario>Baseline vs custom instruction comparison</scenario>
+        <scenario>Statistical significance calculations</scenario>
+        <scenario>Performance delta visualization</scenario>
+      </test>
+      <test type="integration" priority="medium" description="Test export functionality across all formats">
+        <scenario>JSON export with complete data</scenario>
+        <scenario>CSV export with proper formatting</scenario>
+        <scenario>PDF report generation</scenario>
+        <scenario>Shareable link creation</scenario>
+      </test>
+      <test type="performance" priority="high" description="Test dashboard performance with large datasets">
+        <scenario>1000+ benchmark results loading</scenario>
+        <scenario>Real-time chart updates with streaming data</scenario>
+        <scenario>Memory usage during extended sessions</scenario>
+      </test>
+      <test type="accessibility" priority="medium" description="Test accessibility compliance">
+        <scenario>Keyboard navigation throughout dashboard</scenario>
+        <scenario>Screen reader compatibility</scenario>
+        <scenario>Color contrast and visual accessibility</scenario>
+        <scenario>Focus management and ARIA labels</scenario>
+      </test>
+      <test type="e2e" priority="high" description="Test complete user workflows">
+        <scenario>Create custom instruction benchmark</scenario>
+        <scenario>Execute benchmark and monitor progress</scenario>
+        <scenario>Analyze comparative results</scenario>
+        <scenario>Export and share results</scenario>
+      </test>
+    </ideas>
+  </tests>
+</story-context>

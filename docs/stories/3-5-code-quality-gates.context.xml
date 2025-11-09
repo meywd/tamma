@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="3-5-code-quality-gates" epic="3" story="5" title="Code Quality Gates" last-updated="2025-11-08T12:00:00.000Z">
+  <overview>
+    <summary>Implement comprehensive code quality gates that enforce coding standards, detect code smells, measure maintainability, and ensure code quality requirements are met before merging changes.</summary>
+    <acceptance-criteria>
+      <criteria id="ac1">Code quality gates support multiple programming languages and frameworks</criteria>
+      <criteria id="ac2">Automated code quality analysis integrated into CI/CD pipelines</criteria>
+      <criteria id="ac3">Configurable quality rules and thresholds per project/team</criteria>
+      <criteria id="ac4">Real-time code quality feedback and suggestions</criteria>
+      <criteria id="ac5">Code quality trend analysis and reporting</criteria>
+      <criteria id="ac6">Integration with popular code analysis tools and linters</criteria>
+    </acceptance-criteria>
+  </overview>
+
+  <technical-context>
+    <data-models>
+      <model name="CodeQualityGate" file="packages/quality/src/models/quality-gate.types.ts">
+        <interface name="ICodeQualityGate">
+          <field name="id" type="string" description="Unique gate identifier"/>
+          <field name="name" type="string" description="Gate name"/>
+          <field name="description" type="string" description="Gate description"/>
+          <field name="rules" type="QualityRule[]" description="Quality rules"/>
+          <field name="thresholds" type="QualityThreshold[]" description="Quality thresholds"/>
+          <field name="languages" type="string[]" description="Supported languages"/>
+          <field name="status" type="GateStatus" description="Gate status"/>
+          <field name="projectScope" type="string[]" description="Project scope"/>
+          <field name="createdAt" type="string" description="Creation timestamp"/>
+          <field name="updatedAt" type="string" description="Last update timestamp"/>
+        </interface>
+      </model>
+
+      <model name="QualityRule" file="packages/quality/src/models/rule.types.ts">
+        <interface name="IQualityRule">
+          <field name="id" type="string" description="Rule identifier"/>
+          <field name="name" type="string" description="Rule name"/>
+          <field name="category" type="RuleCategory" description="Rule category"/>
+          <field name="severity" type="RuleSeverity" description="Rule severity"/>
+          <field name="description" type="string" description="Rule description"/>
+          <field name="tool" type="string" description="Analysis tool"/>
+          <field name="config" type="RuleConfig" description="Rule configuration"/>
+          <field name="enabled" type="boolean" description="Rule enabled status"/>
+        </interface>
+      </model>
+
+      <model name="QualityAnalysis" file="packages/quality/src/models/analysis.types.ts">
+        <interface name="IQualityAnalysis">
+          <field name="id" type="string" description="Analysis identifier"/>
+          <field name="gateId" type="string" description="Associated gate ID"/>
+          <field name="projectId" type="string" description="Project identifier"/>
+          <field name="commitId" type="string" description="Commit identifier"/>
+          <field name="branch" type="string" description="Branch name"/>
+          <field name="timestamp" type="string" description="Analysis timestamp"/>
+          <field name="metrics" type="QualityMetrics" description="Quality metrics"/>
+          <field name="violations" type="QualityViolation[]" description="Rule violations"/>
+          <field name="score" type="number" description="Overall quality score"/>
+          <field name="status" type="AnalysisStatus" description="Analysis status"/>
+        </interface>
+      </model>
+
+      <model name="QualityMetrics" file="packages/quality/src/models/metrics.types.ts">
+        <interface name="IQualityMetrics">
+          <field name="complexity" type="ComplexityMetrics" description="Code complexity metrics"/>
+          <field name="maintainability" type="MaintainabilityMetrics" description="Maintainability metrics"/>
+          <field name="duplication" type="DuplicationMetrics" description="Code duplication metrics"/>
+          <field name="coverage" type="CoverageMetrics" description="Test coverage metrics"/>
+          <field name="security" type="SecurityMetrics" description="Security metrics"/>
+          <field name="reliability" type="ReliabilityMetrics" description="Reliability metrics"/>
+          <field name="technicalDebt" type="TechnicalDebtMetrics" description="Technical debt metrics"/>
+        </interface>
+      </model>
+
+      <model name="QualityViolation" file="packages/quality/src/models/violation.types.ts">
+        <interface name="IQualityViolation">
+          <field name="id" type="string" description="Violation identifier"/>
+          <field name="ruleId" type="string" description="Associated rule ID"/>
+          <field name="severity" type="ViolationSeverity" description="Violation severity"/>
+          <field name="category" type="ViolationCategory" description="Violation category"/>
+          <field name="message" type="string" description="Violation message"/>
+          <field name="file" type="string" description="File path"/>
+          <field name="line" type="number" description="Line number"/>
+          <field name="column" type="number" description="Column number"/>
+          <field name="suggestion" type="string" description="Fix suggestion"/>
+          <field name="effort" type="number" description="Effort to fix (minutes)"/>
+        </interface>
+      </model>
+    </data-models>
+
+    <interfaces>
+      <interface name="ICodeQualityAnalyzer" file="packages/quality/src/interfaces/analyzer.interface.ts">
+        <method name="analyzeCode" signature="(request: AnalysisRequest): Promise<IQualityAnalysis>">
+          <description>Analyze code quality and return results</description>
+        </method>
+        <method name="analyzeFile" signature="(filePath: string, rules: IQualityRule[]): Promise<IQualityAnalysis>">
+          <description>Analyze a single file for quality issues</description>
+        </method>
+        <method name="analyzeCommit" signature="(commitId: string, gateId: string): Promise<IQualityAnalysis>">
+          <description>Analyze commit changes for quality issues</description>
+        </method>
+        <method name="validateGate" signature="(analysis: IQualityAnalysis, gate: ICodeQualityGate): Promise<IGateResult>">
+          <description>Validate analysis against quality gate</description>
+        </method>
+      </interface>
+
+      <interface name="IQualityRuleEngine" file="packages/quality/src/interfaces/rule-engine.interface.ts">
+        <method name="loadRules" signature="(gateId: string): Promise<IQualityRule[]>">
+          <description>Load quality rules for a gate</description>
+        </method>
+        <method name="evaluateRules" signature="(code: string, rules: IQualityRule[]): Promise<IQualityViolation[]>">
+          <description>Evaluate code against quality rules</description>
+        </method>
+        <method name="updateRule" signature="(ruleId: string, config: RuleConfig): Promise<void>">
+          <description>Update rule configuration</description>
+        </method>
+        <method name="testRule" signature="(rule: IQualityRule, testCases: TestCase[]): Promise<RuleTestResult>">
+          <description>Test rule against test cases</description>
+        </method>
+      </interface>
+
+      <interface name="IQualityReporter" file="packages/quality/src/interfaces/reporter.interface.ts">
+        <method name="generateReport" signature="(analysis: IQualityAnalysis, format: ReportFormat): Promise<IQualityReport>">
+          <description>Generate quality report in specified format</description>
+        </method>
+        <method name="generateTrendReport" signature="(analyses: IQualityAnalysis[], timeRange: TimeRange): Promise<ITrendReport>">
+          <description>Generate quality trend report</description>
+        </method>
+        <method name="generateComparisonReport" signature="(baseline: IQualityAnalysis, current: IQualityAnalysis): Promise<IComparisonReport>">
+          <description>Generate comparison report</description>
+        </method>
+        <method name="exportMetrics" signature="(metrics: IQualityMetrics, format: ExportFormat): Promise<Buffer>">
+          <description>Export metrics in specified format</description>
+        </method>
+      </interface>
+
+      <interface name="IQualityGateService" file="packages/quality/src/interfaces/gate-service.interface.ts">
+        <method name="createGate" signature="(config: CreateGateRequest): Promise<ICodeQualityGate>">
+          <description>Create a new quality gate</description>
+        </method>
+        <method name="updateGate" signature="(gateId: string, config: UpdateGateRequest): Promise<ICodeQualityGate>">
+          <description>Update quality gate configuration</description>
+        </method>
+        <method name="evaluateGate" signature="(gateId: string, analysis: IQualityAnalysis): Promise<IGateResult>">
+          <description>Evaluate analysis against gate criteria</description>
+        </method>
+        <method name="getGateStatus" signature="(gateId: string, projectId: string): Promise<GateStatus>">
+          <description>Get current gate status</description>
+        </method>
+      </interface>
+    </interfaces>
+
+    <key-classes>
+      <class name="CodeQualityService" file="packages/quality/src/services/quality.service.ts">
+        <description>Main service for code quality management</description>
+        <methods>
+          <method name="analyzeProject" signature="(projectId: string, gateId: string): Promise<IQualityAnalysis>"/>
+          <method name="analyzePullRequest" signature="(prId: string, gateId: string): Promise<IQualityAnalysis>"/>
+          <method name="getQualityTrends" signature="(projectId: string, timeRange: TimeRange): Promise<IQualityTrend[]>"/>
+          <method name="getQualityScore" signature="(projectId: string): Promise<number>"/>
+          <method name="getTechnicalDebt" signature="(projectId: string): Promise<ITechnicalDebt>"/>
+        </methods>
+      </class>
+
+      <class name="SonarQubeAnalyzer" file="packages/quality/src/analyzers/sonarqube.analyzer.ts">
+        <description>SonarQube integration for code analysis</description>
+        <implements interface="ICodeQualityAnalyzer"/>
+        <methods>
+          <method name="connectToSonarQube" signature="(): Promise<SonarQubeClient>"/>
+          <method name="runSonarAnalysis" signature="(projectKey: string): Promise<SonarAnalysisResult>"/>
+          <method name="parseSonarResults" signature="(result: SonarAnalysisResult): Promise<IQualityAnalysis>"/>
+          <method name="syncWithSonarQube" signature="(): Promise<void>"/>
+        </methods>
+      </class>
+
+      <class name="ESLintAnalyzer" file="packages/quality/src/analyzers/eslint.analyzer.ts">
+        <description>ESLint integration for JavaScript/TypeScript analysis</description>
+        <implements interface="ICodeQualityAnalyzer"/>
+        <methods>
+          <method name="runESLint" signature="(paths: string[], config: ESLintConfig): Promise<ESLintResult>"/>
+          <method name="parseESLintResults" signature="(result: ESLintResult): Promise<IQualityAnalysis>"/>
+          <method name="generateESLintConfig" signature="(rules: IQualityRule[]): Promise<ESLintConfig>"/>
+        </methods>
+      </class>
+
+      <class name="QualityRuleEngine" file="packages/quality/src/engines/rule.engine.ts">
+        <description>Quality rule evaluation engine</description>
+        <implements interface="IQualityRuleEngine"/>
+        <methods>
+          <method name="compileRule" signature="(rule: IQualityRule): Promise<CompiledRule>"/>
+          <method name="executeRule" signature="(code: string, rule: CompiledRule): Promise<RuleResult>"/>
+          <method name="optimizeRules" signature="(rules: IQualityRule[]): Promise<IQualityRule[]>"/>
+          <method name="validateRuleSyntax" signature="(rule: IQualityRule): Promise<ValidationResult>"/>
+        </methods>
+      </class>
+
+      <class name="ComplexityAnalyzer" file="packages/quality/src/analyzers/complexity.analyzer.ts">
+        <description>Code complexity analysis</description>
+        <methods>
+          <method name="calculateCyclomaticComplexity" signature="(ast: ASTNode): number"/>
+          <method name="calculateCognitiveComplexity" signature="(ast: ASTNode): number"/>
+          <method name="calculateHalsteadMetrics" signature="(ast: ASTNode): HalsteadMetrics"/>
+          <method name="identifyComplexMethods" signature="(ast: ASTNode, threshold: number): ComplexMethod[]"/>
+        </methods>
+      </class>
+
+      <class name="DuplicationDetector" file="packages/quality/src/analyzers/duplication.detector.ts">
+        <description>Code duplication detection</description>
+        <methods>
+          <method name="detectDuplicates" signature="(files: SourceFile[]): Promise<Duplication[]>"/>
+          <method name="calculateSimilarity" signature="(code1: string, code2: string): number"/>
+          <method name="findClonePairs" signature="(ast: ASTNode[]): Promise<ClonePair[]>"/>
+          <method name="generateDuplicationReport" signature="(duplicates: Duplication[]): Promise<DuplicationReport>"/>
+        </methods>
+      </class>
+
+      <class name="QualityMetricsCalculator" file="packages/quality/src/calculators/metrics.calculator.ts">
+        <description>Quality metrics calculation</description>
+        <methods>
+          <method name="calculateMaintainabilityIndex" signature="(metrics: IQualityMetrics): number"/>
+          <method name="calculateTechnicalDebtRatio" signature="(violations: IQualityViolation[]): number"/>
+          <method name="calculateQualityScore" signature="(metrics: IQualityMetrics): number"/>
+          <method name="calculateReliabilityRating" signature="(metrics: IQualityMetrics): string"/>
+        </methods>
+      </class>
+
+      <class name="QualityGateEvaluator" file="packages/quality/src/evaluators/gate.evaluator.ts">
+        <description>Quality gate evaluation</description>
+        <methods>
+          <method name="evaluateThresholds" signature="(metrics: IQualityMetrics, thresholds: QualityThreshold[]): GateResult"/>
+          <method name="checkNewViolations" signature="(current: IQualityViolation[], baseline: IQualityViolation[]): GateResult"/>
+          <method name="evaluateQualityTrend" signature="(trend: IQualityTrend[]): GateResult"/>
+          <method name="generateGateReport" signature="(result: GateResult): Promise<GateReport>"/>
+        </methods>
+      </class>
+
+      <class name="QualityReporter" file="packages/quality/src/reporters/quality.reporter.ts">
+        <description>Quality report generation</description>
+        <implements interface="IQualityReporter"/>
+        <methods>
+          <method name="generateHTMLReport" signature="(analysis: IQualityAnalysis): Promise<string>"/>
+          <method name="generateJSONReport" signature="(analysis: IQualityAnalysis): Promise<object>"/>
+          <method name="generatePDFReport" signature="(analysis: IQualityAnalysis): Promise<Buffer>"/>
+          <method name="generateDashboardData" signature="(analyses: IQualityAnalysis[]): Promise<DashboardData>"/>
+        </methods>
+      </class>
+    </key-classes>
+
+    <integration-points>
+      <integration name="CI/CD Pipeline Integration">
+        <description>Integrate code quality gates into CI/CD pipelines</description>
+        <apis>
+          <api endpoint="POST /api/v1/quality/gates/{gateId}/evaluate" method="POST">
+            <description>Evaluate code against quality gate</description>
+            <parameters>
+              <param name="projectId" type="string" required="true"/>
+              <param name="commitId" type="string" required="true"/>
+              <param name="branch" type="string" required="true"/>
+            </parameters>
+          </api>
+          <api endpoint="GET /api/v1/quality/gates/{gateId}/status" method="GET">
+            <description>Get gate status for pipeline decisions</description>
+          </api>
+          <api endpoint="POST /api/v1/quality/analysis/external" method="POST">
+            <description>Upload external analysis results</description>
+          </api>
+        </apis>
+      </integration>
+
+      <integration name="Version Control Systems">
+        <description>Integration with Git platforms for PR analysis</description>
+        <apis>
+          <api endpoint="POST /api/v1/quality/pr/analyze" method="POST">
+            <description>Analyze pull request for quality issues</description>
+          </api>
+          <api endpoint="GET /api/v1/quality/pr/{prId}/status" method="GET">
+            <description>Get PR quality status</description>
+          </api>
+          <api endpoint="POST /api/v1/quality/pr/{prId}/comment" method="POST">
+            <description>Post quality comments to PR</description>
+          </api>
+        </apis>
+      </integration>
+
+      <integration name="Code Analysis Tools">
+        <description>Integration with popular code analysis tools</description>
+        <tools>
+          <tool name="SonarQube" description="Code quality and security analysis"/>
+          <tool name="ESLint" description="JavaScript/TypeScript linting"/>
+          <tool name="Pylint" description="Python code analysis"/>
+          <tool name="Checkstyle" description="Java code analysis"/>
+          <tool name="RuboCop" description="Ruby code analysis"/>
+          <tool name="golangci-lint" description="Go code analysis"/>
+        </tools>
+      </integration>
+    </integration-points>
+
+    <api-endpoints>
+      <endpoint path="/api/v1/quality/gates" method="POST">
+        <description>Create a new quality gate</description>
+        <request-body type="CreateGateRequest"/>
+        <response type="ICodeQualityGate"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/gates/{gateId}" method="GET">
+        <description>Get quality gate details</description>
+        <response type="ICodeQualityGate"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/gates/{gateId}" method="PUT">
+        <description>Update quality gate</description>
+        <request-body type="UpdateGateRequest"/>
+        <response type="ICodeQualityGate"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/gates/{gateId}/evaluate" method="POST">
+        <description>Evaluate code against quality gate</description>
+        <request-body type="EvaluationRequest"/>
+        <response type="IGateResult"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/analysis" method="POST">
+        <description>Perform code quality analysis</description>
+        <request-body type="AnalysisRequest"/>
+        <response type="IQualityAnalysis"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/analysis/{analysisId}" method="GET">
+        <description>Get analysis results</description>
+        <response type="IQualityAnalysis"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/projects/{projectId}/metrics" method="GET">
+        <description>Get project quality metrics</description>
+        <response type="IQualityMetrics"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/projects/{projectId}/trends" method="GET">
+        <description>Get quality trends</description>
+        <response type="IQualityTrend[]"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/rules" method="GET">
+        <description>Get available quality rules</description>
+        <response type="IQualityRule[]"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/rules" method="POST">
+        <description>Create custom quality rule</description>
+        <request-body type="CreateRuleRequest"/>
+        <response type="IQualityRule"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/reports" method="POST">
+        <description>Generate quality report</description>
+        <request-body type="ReportRequest"/>
+        <response type="IQualityReport"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/violations" method="GET">
+        <description>Get quality violations</description>
+        <response type="IQualityViolation[]"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/violations/{violationId}/resolve" method="POST">
+        <description>Mark violation as resolved</description>
+        <response type="void"/>
+      </endpoint>
+
+      <endpoint path="/api/v1/quality/technical-debt" method="GET">
+        <description>Get technical debt metrics</description>
+        <response type="ITechnicalDebt"/>
+      </endpoint>
+    </api-endpoints>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="CodeQualityService">
+          <test name="should analyze project quality correctly"/>
+          <test name="should evaluate quality gates properly"/>
+          <test name="should calculate quality scores accurately"/>
+          <test name="should handle analysis failures gracefully"/>
+        </test-suite>
+
+        <test-suite name="SonarQubeAnalyzer">
+          <test name="should connect to SonarQube server"/>
+          <test name="should run SonarQube analysis"/>
+          <test name="should parse SonarQube results"/>
+          <test name="should handle SonarQube errors"/>
+        </test-suite>
+
+        <test-suite name="QualityRuleEngine">
+          <test name="should load and compile rules"/>
+          <test name="should evaluate rules correctly"/>
+          <test name="should optimize rule execution"/>
+          <test name="should validate rule syntax"/>
+        </test-suite>
+
+        <test-suite name="ComplexityAnalyzer">
+          <test name="should calculate cyclomatic complexity"/>
+          <test name="should calculate cognitive complexity"/>
+          <test name="should calculate Halstead metrics"/>
+          <test name="should identify complex methods"/>
+        </test-suite>
+
+        <test-suite name="DuplicationDetector">
+          <test name="should detect code duplicates"/>
+          <test name="should calculate similarity scores"/>
+          <test name="should find clone pairs"/>
+          <test name="should generate duplication reports"/>
+        </test-suite>
+
+        <test-suite name="QualityGateEvaluator">
+          <test name="should evaluate thresholds correctly"/>
+          <test name="should check new violations"/>
+          <test name="should evaluate quality trends"/>
+          <test name="should generate gate reports"/>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test-suite name="Quality Tools Integration">
+          <test name="should integrate with SonarQube"/>
+          <test name="should integrate with ESLint"/>
+          <test name="should integrate with Pylint"/>
+          <test name="should integrate with Checkstyle"/>
+        </test-suite>
+
+        <test-suite name="CI/CD Integration">
+          <test name="should integrate with GitHub Actions"/>
+          <test name="should integrate with GitLab CI"/>
+          <test name="should integrate with Jenkins"/>
+          <test name="should provide gate status for pipelines"/>
+        </test-suite>
+
+        <test-suite name="End-to-End Quality Analysis">
+          <test name="should perform complete quality analysis workflow"/>
+          <test name="should generate comprehensive quality reports"/>
+          <test name="should evaluate quality gates correctly"/>
+          <test name="should handle multiple programming languages"/>
+        </test-suite>
+      </integration-tests>
+
+      <performance-tests>
+        <test-suite name="Quality Analysis Performance">
+          <test name="should analyze large codebases efficiently"/>
+          <test name="should process multiple files concurrently"/>
+          <test name="should generate reports quickly"/>
+          <test name="should handle high-volume analysis requests"/>
+        </test-suite>
+      </performance-tests>
+    </testing-strategy>
+
+    <security-considerations>
+      <consideration name="Code Privacy">
+        <description>Protect proprietary code during analysis</description>
+        <implementation>Encrypt code at rest and in transit during analysis</implementation>
+      </consideration>
+
+      <consideration name="Access Control">
+        <description>Control access to quality analysis capabilities</description>
+        <implementation>Role-based access control for analysis and reporting</implementation>
+      </consideration>
+
+      <consideration name="Data Retention">
+        <description>Manage retention of analysis data and reports</description>
+        <implementation>Configurable retention policies and data purging</implementation>
+      </consideration>
+
+      <consideration name="Audit Trail">
+        <description>Maintain audit trail of quality analysis</description>
+        <implementation>Log all analysis activities with user context</implementation>
+      </consideration>
+    </security-considerations>
+
+    <monitoring-requirements>
+      <metric name="Analysis Rate" type="counter" description="Number of quality analyses performed"/>
+      <metric name="Analysis Duration" type="histogram" description="Duration of quality analyses"/>
+      <metric name="Gate Evaluation Rate" type="counter" description="Number of gate evaluations"/>
+      <metric name="Quality Score Distribution" type="histogram" description="Distribution of quality scores"/>
+      <metric name="Violation Detection Rate" type="counter" description="Number of violations detected"/>
+      <metric name="Report Generation Time" type="histogram" description="Time to generate quality reports"/>
+      <metric name="Tool Integration Health" type="gauge" description="Health of integrated tools"/>
+    </monitoring-requirements>
+
+    <success-metrics>
+      <metric name="Code Coverage" target="85%" description="Test coverage of quality analysis code"/>
+      <metric name="Gate Accuracy" target="95%" description="Accuracy of quality gate evaluations"/>
+      <metric name="Analysis Time" target="&lt;10min" description="Average time for quality analysis"/>
+      <metric name="False Positive Rate" target="&lt;5%" description="Rate of false positive violations"/>
+      <metric name="User Adoption" target="80%" description="Percentage of projects using quality gates"/>
+      <metric name="Quality Improvement" target="20%" description="Improvement in code quality scores"/>
+    </success-metrics>
+
+    <risk-mitigation>
+      <risk name="Analysis Performance">
+        <mitigation>Implement efficient analysis algorithms and parallel processing</mitigation>
+      </risk>
+
+      <risk name="Tool Integration Failures">
+        <mitigation>Implement robust error handling and fallback mechanisms</mitigation>
+      </risk>
+
+      <risk name="False Positives">
+        <mitigation>Implement sophisticated rule tuning and machine learning</mitigation>
+      </risk>
+
+      <risk name="Configuration Complexity">
+        <mitigation>Provide sensible defaults and configuration templates</mitigation>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
+
+  <implementation-notes>
+    <dependencies>
+      <dependency name="@tamma/shared" version="workspace:*"/>
+      <dependency name="@tamma/events" version="workspace:*"/>
+      <dependency name="@tamma/observability" version="workspace:*"/>
+      <dependency name="sonarqube-scanner" version="^3.0.0"/>
+      <dependency name="eslint" version="^8.50.0"/>
+      <dependency name="@typescript-eslint/parser" version="^6.7.0"/>
+      <dependency name="@typescript-eslint/eslint-plugin" version="^6.7.0"/>
+      <dependency name="pylint" version="^3.0.0"/>
+      <dependency name="checkstyle" version="^10.12.0"/>
+      <dependency name="complexity-report" version="^2.0.0"/>
+      <dependency name="jscpd" version="^3.5.0"/>
+      <dependency name="pdfkit" version="^0.13.0"/>
+    </dependencies>
+
+    <environment-variables>
+      <variable name="QUALITY_ANALYSIS_TIMEOUT" default="1800000" description="Analysis timeout in milliseconds"/>
+      <variable name="SONARQUBE_URL" default="" description="SonarQube server URL"/>
+      <variable name="SONARQUBE_TOKEN" default="" description="SonarQube authentication token"/>
+      <variable name="MAX_CONCURRENT_ANALYSES" default="5" description="Maximum concurrent analyses"/>
+      <variable name="ANALYSIS_RETENTION_DAYS" default="365" description="Analysis retention period"/>
+      <variable name="QUALITY_GATE_TIMEOUT" default="300000" description="Gate evaluation timeout"/>
+    </environment-variables>
+
+    <configuration-files>
+      <file name="quality.config.yaml" path="packages/quality/src/config/quality.config.yaml">
+        <description>Code quality configuration</description>
+      </file>
+      <file name="sonarqube.config.yaml" path="packages/quality/src/config/sonarqube.config.yaml">
+        <description>SonarQube integration configuration</description>
+      </file>
+      <file name="quality-gates.config.yaml" path="packages/quality/src/config/gates.config.yaml">
+        <description>Quality gates configuration</description>
+      </file>
+      <file name="rules.config.yaml" path="packages/quality/src/config/rules.config.yaml">
+        <description>Quality rules configuration</description>
+      </file>
+    </configuration-files>
+  </implementation-notes>
+</story-context>

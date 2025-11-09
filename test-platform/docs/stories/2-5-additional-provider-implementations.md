@@ -1,6 +1,6 @@
 # Story 2.5: Additional Provider Implementations
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -250,7 +250,7 @@ so that our benchmarks cover the full landscape of AI code generation tools and 
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- docs/stories/2-5-additional-provider-implementations.context.xml
 
 ### Agent Model Used
 

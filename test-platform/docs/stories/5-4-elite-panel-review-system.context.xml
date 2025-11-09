@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext>
+  <storyId>5-4</storyId>
+  <title>Elite Panel Review System</title>
+  <epic>5</epic>
+  <category>Multi-Judge Evaluation</category>
+  <priority>High</priority>
+  <estimatedEffort>4 weeks</estimatedEffort>
+  <weight>7.5%</weight>
+  
+  <description>
+    Implement an elite panel review system that brings together domain experts, AI researchers, and industry specialists to provide high-quality, in-depth evaluation of AI model responses. This system contributes 7.5% to the overall evaluation score and focuses on expert-level assessment, nuanced analysis, and authoritative feedback.
+  </description>
+  
+  <technicalContext>
+    <systemArchitecture>
+      <component name="ElitePanelManager" type="Core Service">
+        <description>Manages elite panel composition, assignments, and review workflows</description>
+        <technologies>TypeScript, Node.js, Fastify</technologies>
+        <dependencies>ExpertRegistry, AssignmentEngine, ReviewCoordinator</dependencies>
+      </component>
+      
+      <component name="ExpertVettingSystem" type="Vetting Service">
+        <description>Handles expert qualification, verification, and reputation management</description>
+        <technologies>TypeScript, PostgreSQL, Blockchain</technologies>
+        <dependencies>CredentialVerification, ReputationSystem, IdentityProvider</dependencies>
+      </component>
+      
+      <component name="AdvancedReviewInterface" type="Frontend Application">
+        <description>Sophisticated interface for elite panelists to conduct detailed reviews</description>
+        <technologies>React, TypeScript, Monaco Editor, D3.js</technologies>
+        <dependencies>AnnotationTools, ComparisonEngine, AnalyticsDashboard</dependencies>
+      </component>
+      
+      <component name="ExpertConsensusEngine" type="Analysis Service">
+        <description>Calculates consensus and identifies areas of agreement/disagreement</description>
+        <technologies>Python, StatisticalAnalysis, ML</technologies>
+        <dependencies>ConsensusAlgorithms, DisagreementAnalysis, WeightedVoting</dependencies>
+      </component>
+      
+      <component name="EliteReviewStorage" type="Data Service">
+        <description>Stores expert reviews, consensus data, and panel analytics</description>
+        <technologies>PostgreSQL, JSONB, TimescaleDB</technologies>
+        <dependencies>Database, EventStore, AnalyticsEngine</dependencies>
+      </component>
+    </systemArchitecture>
+    
+    <dataModels>
+      <model name="ElitePanel">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="name" type="VARCHAR" required="true"/>
+          <field name="description" type="TEXT"/>
+          <field name="domain" type="VARCHAR" required="true"/>
+          <field name="expertiseLevel" type="ENUM" values="world-class,national,regional" required="true"/>
+          <field name="minPanelSize" type="INTEGER" default="3"/>
+          <field name="maxPanelSize" type="INTEGER" default="7"/>
+          <field name="requiredCredentials" type="JSON"/>
+          <field name="votingMechanism" type="ENUM" values="weighted,consensus,majority" default="weighted"/>
+          <field name="isActive" type="BOOLEAN" default="true"/>
+          <field name="createdAt" type="TIMESTAMP" required="true"/>
+          <field name="updatedAt" type="TIMESTAMP"/>
+        </fields>
+      </model>
+      
+      <model name="EliteExpert">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="userId" type="UUID" required="true" foreignKey="users.id"/>
+          <field name="panelId" type="UUID" required="true" foreignKey="elite_panels.id"/>
+          <field name="expertise" type="JSON" required="true"/>
+          <field name="credentials" type="JSON" required="true"/>
+          <field name="reputationScore" type="FLOAT" min="0" max="10" default="5"/>
+          <field name="reviewWeight" type="FLOAT" min="0" max="1" default="1"/>
+          <field name="specializations" type="JSON"/>
+          <field name="verificationStatus" type="ENUM" values="pending,verified,rejected" required="true"/>
+          <field name="verificationDocuments" type="JSON"/>
+          <field name="joinedAt" type="TIMESTAMP" required="true"/>
+        </fields>
+      </model>
+      
+      <model name="EliteReviewAssignment">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="expertId" type="UUID" required="true" foreignKey="elite_experts.id"/>
+          <field name="panelId" type="UUID" required="true" foreignKey="elite_panels.id"/>
+          <field name="assignedAt" type="TIMESTAMP" required="true"/>
+          <field name="dueBy" type="TIMESTAMP" required="true"/>
+          <field name="status" type="ENUM" values="assigned,in_progress,completed,expired,declined" required="true"/>
+          <field name="priority" type="ENUM" values="low,medium,high,critical" default="medium"/>
+          <field name="compensation" type="JSON"/>
+          <field name="specialInstructions" type="TEXT"/>
+        </fields>
+      </model>
+      
+      <model name="EliteReview">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="assignmentId" type="UUID" required="true" foreignKey="elite_review_assignments.id"/>
+          <field name="expertId" type="UUID" required="true" foreignKey="elite_experts.id"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="overallScore" type="FLOAT" min="0" max="10" required="true"/>
+          <field name="detailedScores" type="JSON" required="true"/>
+          <field name="qualitativeAssessment" type="TEXT" required="true"/>
+          <field name="strengths" type="JSON" required="true"/>
+          <field name="weaknesses" type="JSON" required="true"/>
+          <field name="recommendations" type="JSON" required="true"/>
+          <field name="confidenceLevel" type="ENUM" values="low,medium,high" required="true"/>
+          <field name="expertiseRelevance" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="annotations" type="JSON"/>
+          <field name="comparativeAnalysis" type="JSON"/>
+          <field name="timeSpent" type="INTEGER" required="true"/>
+          <field name="reviewedAt" type="TIMESTAMP" required="true"/>
+          <field name="isPublic" type="BOOLEAN" default="false"/>
+        </fields>
+      </model>
+      
+      <model name="PanelConsensus">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="panelId" type="UUID" required="true" foreignKey="elite_panels.id"/>
+          <field name="consensusScore" type="FLOAT" min="0" max="10" required="true"/>
+          <field name="agreementLevel" type="ENUM" values="high,medium,low" required="true"/>
+          <field name="disagreementAreas" type="JSON"/>
+          <field name="confidenceInterval" type="JSON" required="true"/>
+          <field name="weightingMethod" type="VARCHAR" required="true"/>
+          <field name="participatingExperts" type="JSON" required="true"/>
+          <field name="calculatedAt" type="TIMESTAMP" required="true"/>
+          <field name="reviewCount" type="INTEGER" required="true"/>
+        </fields>
+      </model>
+    </dataModels>
+    
+    <apiEndpoints>
+      <endpoint method="POST" path="/api/v1/elite-panel/create">
+        <description>Create a new elite review panel</description>
+        <requestBody>
+          <field name="name" type="VARCHAR" required="true"/>
+          <field name="domain" type="VARCHAR" required="true"/>
+          <field name="expertiseLevel" type="ENUM" required="true"/>
+          <field name="requiredCredentials" type="JSON" required="true"/>
+        </requestBody>
+        <responses>
+          <response code="201">Panel created successfully</response>
+          <response code="400">Invalid panel configuration</response>
+          <response code="403">Insufficient permissions</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/elite-panel/{panelId}/experts/apply">
+        <description>Apply to join an elite panel as an expert</description>
+        <requestBody>
+          <field name="expertise" type="JSON" required="true"/>
+          <field name="credentials" type="JSON" required="true"/>
+          <field name="verificationDocuments" type="JSON"/>
+        </requestBody>
+        <responses>
+          <response code="201">Application submitted</response>
+          <response code="400">Invalid application data</response>
+          <response code="404">Panel not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/elite-panel/assignment/create">
+        <description>Create elite review assignments for a submission</description>
+        <requestBody>
+          <field name="submissionId" type="UUID" required="true"/>
+          <field name="panelId" type="UUID" required="true"/>
+          <field name="expertCount" type="INTEGER" default="3"/>
+          <field name="priority" type="ENUM" default="medium"/>
+        </requestBody>
+        <responses>
+          <response code="201">Assignments created</response>
+          <response code="400">Invalid assignment request</response>
+          <response code="404">Submission or panel not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/elite-panel/expert/{expertId}/assignments">
+        <description>Get review assignments for an expert</description>
+        <queryParameters>
+          <param name="status" type="STRING"/>
+          <param name="limit" type="INTEGER" default="20"/>
+        </queryParameters>
+        <responses>
+          <response code="200">List of assignments</response>
+          <response code="404">Expert not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/elite-panel/review/submit">
+        <description>Submit an elite review</description>
+        <requestBody>
+          <field name="assignmentId" type="UUID" required="true"/>
+          <field name="overallScore" type="FLOAT" required="true"/>
+          <field name="detailedScores" type="JSON" required="true"/>
+          <field name="qualitativeAssessment" type="TEXT" required="true"/>
+          <field name="annotations" type="JSON"/>
+        </requestBody>
+        <responses>
+          <response code="201">Review submitted successfully</response>
+          <response code="400">Invalid review data</response>
+          <response code="403">Unauthorized submission</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/elite-panel/submission/{submissionId}/consensus">
+        <description>Get panel consensus for a submission</description>
+        <responses>
+          <response code="200">Consensus data</response>
+          <response code="404">No consensus available</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/elite-panel/analytics/performance">
+        <description>Get elite panel performance analytics</description>
+        <queryParameters>
+          <param name="timeRange" type="STRING" default="30d"/>
+          <param name="panelId" type="UUID"/>
+        </queryParameters>
+        <responses>
+          <response code="200">Performance analytics</response>
+        </responses>
+      </endpoint>
+    </apiEndpoints>
+    
+    <algorithms>
+      <algorithm name="ExpertSelectionAlgorithm">
+        <description>Select optimal experts for review assignments based on expertise, availability, and reputation</description>
+        <inputs>Submission domain, required expertise, expert availability</inputs>
+        <outputs>Selected experts, assignment weights</outputs>
+        <method>Multi-criteria optimization + reputation weighting</method>
+      </algorithm>
+      
+      <algorithm name="ConsensusCalculation">
+        <description>Calculate weighted consensus from expert reviews with disagreement analysis</description>
+        <inputs>Expert reviews, expert weights, confidence levels</inputs>
+        <outputs>Consensus score, agreement level, disagreement areas</outputs>
+        <method>Weighted statistical aggregation + variance analysis</method>
+      </algorithm>
+      
+      <algorithm name="ExpertReputationScoring">
+        <description>Calculate and update expert reputation based on review quality and consistency</description>
+        <inputs>Review accuracy, timeliness, peer feedback, consensus contribution</inputs>
+        <outputs>Updated reputation score, reputation factors</outputs>
+        <method>Bayesian reputation system + temporal decay</method>
+      </algorithm>
+      
+      <algorithm name="ExpertiseMatching">
+        <description>Match expert expertise to submission requirements with relevance scoring</description>
+        <inputs>Expert profile, submission characteristics, domain taxonomy</inputs>
+        <outputs>Expertise relevance score, specialization match</outputs>
+        <method>Semantic similarity + ontology matching</method>
+      </algorithm>
+    </algorithms>
+  </technicalContext>
+  
+  <implementationDetails>
+    <coreFeatures>
+      <feature name="Expert Vetting and Verification">
+        <description>Comprehensive expert qualification system with credential verification</description>
+        <acceptanceCriteria>
+          <criterion>System verifies academic credentials, publications, and industry experience</criterion>
+          <criterion>Multi-factor identity verification for all experts</criterion>
+          <criterion>Blockchain-based credential verification where applicable</criterion>
+          <criterion>Expert reputation system with historical tracking</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Advanced Review Interface">
+        <description>Sophisticated interface for detailed expert reviews with annotations and comparisons</description>
+        <acceptanceCriteria>
+          <criterion>Side-by-side comparison of multiple AI responses</criterion>
+          <criterion>Rich text editor with mathematical notation support</criterion>
+          <criterion>Code annotation and highlighting capabilities</criterion>
+          <criterion>Real-time collaboration features for panel discussions</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Intelligent Assignment System">
+        <description>Smart assignment of reviews to experts based on expertise and availability</description>
+        <acceptanceCriteria>
+          <criterion>Automatic expert selection based on domain expertise</criterion>
+          <criterion>Load balancing to prevent expert burnout</criterion>
+          <criterion>Conflict of interest detection and avoidance</criterion>
+          <criterion>Priority-based assignment routing</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Consensus Calculation">
+        <description>Calculate weighted consensus with detailed disagreement analysis</description>
+        <acceptanceCriteria>
+          <criterion>Weighted voting based on expert reputation and expertise relevance</criterion>
+          <criterion>Statistical analysis of agreement levels</criterion>
+          <criterion>Identification of outlier opinions and justification</criterion>
+          <criterion>Confidence intervals for consensus scores</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Compensation Management">
+        <description>Manage expert compensation and incentives for high-quality reviews</description>
+        <acceptanceCriteria>
+          <criterion>Flexible compensation models (per-review, hourly, retainer)</criterion>
+          <criterion>Quality-based bonus calculations</criterion>
+          <criterion>Timeliness incentives and penalties</criterion>
+          <criterion>Transparent payment tracking and reporting</criterion>
+        </acceptanceCriteria>
+      </feature>
+    </coreFeatures>
+    
+    <technicalRequirements>
+      <requirement name="Expert Verification">
+        <description>Verify expert credentials within 48 hours</description>
+        <metric>Verification time &lt; 48h</metric>
+      </requirement>
+      
+      <requirement name="Review Quality">
+        <description>Ensure high-quality expert reviews</description>
+        <metric>Average review score &gt; 7/10</metric>
+      </requirement>
+      
+      <requirement name="Consensus Accuracy">
+        <description>Accurate consensus calculation</description>
+        <metric>Statistical confidence &gt; 95%</metric>
+      </requirement>
+      
+      <requirement name="Response Time">
+        <description>Expert reviews completed within agreed timeframe</description>
+        <metric>On-time completion &gt; 90%</metric>
+      </requirement>
+    </technicalRequirements>
+    
+    <securityConsiderations>
+      <consideration name="Expert Identity">
+        <description>Verify expert identities and prevent impersonation</description>
+        <mitigation>Multi-factor authentication, identity verification services</mitigation>
+      </consideration>
+      
+      <consideration name="Review Integrity">
+        <description>Prevent review manipulation and collusion</description>
+        <mitigation>Blind reviews, statistical anomaly detection</mitigation>
+      </consideration>
+      
+      <consideration name="Compensation Security">
+        <description>Secure payment processing and financial data</description>
+        <mitigation>PCI compliance, encrypted payment processing</mitigation>
+      </consideration>
+      
+      <consideration name="Expert Privacy">
+        <description>Protect expert personal and professional information</description>
+        <mitigation>Data encryption, access controls, privacy settings</mitigation>
+      </consideration>
+    </securityConsiderations>
+  </implementationDetails>
+  
+  <testingStrategy>
+    <unitTests>
+      <test name="Expert Selection Algorithm">
+        <description>Test expert selection accuracy and efficiency</description>
+        <coverage>95%</coverage>
+      </test>
+      
+      <test name="Consensus Calculation">
+        <description>Test consensus algorithm accuracy</description>
+        <coverage>90%</coverage>
+      </test>
+      
+      <test name="Reputation Scoring">
+        <description>Test reputation calculation accuracy</description>
+        <coverage>85%</coverage>
+      </test>
+    </unitTests>
+    
+    <integrationTests>
+      <test name="End-to-End Review Workflow">
+        <description>Test complete elite review process</description>
+        <scenarios>5 scenarios</scenarios>
+      </test>
+      
+      <test name="Expert Verification">
+        <description>Test credential verification process</description>
+        <providers>Academic institutions, professional bodies</providers>
+      </test>
+    </integrationTests>
+    
+    <performanceTests>
+      <test name="Concurrent Review Processing">
+        <description>Test system under concurrent review load</description>
+        <load>50 concurrent reviews</load>
+        <duration>10 minutes</duration>
+      </test>
+    </performanceTests>
+  </testingStrategy>
+  
+  <acceptanceCriteria>
+    <criteria>
+      <criterion id="AC1">Elite panels can be created with proper domain configuration</criterion>
+      <criterion id="AC2">Expert verification process validates credentials accurately</criterion>
+      <criterion id="AC3">Review assignments are made intelligently based on expertise</criterion>
+      <criterion id="AC4">Advanced review interface supports detailed expert analysis</criterion>
+      <criterion id="AC5">Consensus calculation provides accurate weighted scores</criterion>
+      <criterion id="AC6">Compensation system handles various payment models</criterion>
+      <criterion id="AC7">System integrates with overall multi-judge evaluation framework</criterion>
+      <criterion id="AC8">Elite panel reviews contribute 7.5% to final evaluation score</criterion>
+      <criterion id="AC9">All security and privacy requirements are met</criterion>
+    </criteria>
+  </acceptanceCriteria>
+  
+  <dependencies>
+    <dependency storyId="5-1">Staff Review Interface - for review workflow integration</dependency>
+    <dependency storyId="5-2">Community Voting System - for comparison and validation</dependency>
+    <dependency storyId="2-3">Automated Scoring System - for baseline comparison</dependency>
+    <dependency storyId="4-1">User Management - for expert identity management</dependency>
+  </dependencies>
+  
+  <risks>
+    <risk level="High">
+      <description>Difficulty recruiting and retaining qualified experts</description>
+      <mitigation>Competitive compensation, professional recognition, flexible scheduling</mitigation>
+    </risk>
+    
+    <risk level="High">
+      <description>Expert bias and subjectivity in reviews</description>
+      <mitigation>Blind reviews, statistical validation, diverse panel composition</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>High operational costs for expert compensation</description>
+      <mitigation>Efficient assignment algorithms, quality-based compensation</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>Complexity in consensus calculation with diverse opinions</description>
+      <mitigation>Robust statistical methods, clear disagreement documentation</mitigation>
+    </risk>
+  </risks>
+  
+  <successMetrics>
+    <metric name="Expert Recruitment Rate" target="&gt; 80% of target experts"/>
+    <metric name="Review Completion Rate" target="&gt; 95%"/>
+    <metric name="Consensus Reliability" target="&gt; 0.8 correlation with ground truth"/>
+    <metric name="Expert Satisfaction" target="&gt; 4.5/5"/>
+    <metric name="Review Quality Score" target="&gt; 7/10 average"/>
+    <metric name="System Uptime" target="99.9%"/>
+  </successMetrics>
+</storyContext>

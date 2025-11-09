@@ -1,0 +1,785 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="5-1-staff-review-interface" version="1.0.0">
+  <metadata>
+    <title>Staff Review Interface</title>
+    <epic>5</epic>
+    <story-type>evaluation</story-type>
+    <priority>high</priority>
+    <created>2025-01-09T12:00:00.000Z</created>
+    <updated>2025-01-09T12:00:00.000Z</updated>
+    <author>BMAD Story Context Workflow</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/5-1-staff-review-interface.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a human expert</asA>
+    <iWant>a web interface to review and score AI-generated code</iWant>
+    <soThat>I can provide expert evaluation as part of the multi-judge system</soThat>
+    <tasks>- Task 1: Code Review Interface (AC: 1)
+  - Subtask 1.1: Implement syntax highlighting using Monaco Editor or similar
+  - Subtask 1.2: Create responsive layout for code display and review panels
+  - Subtask 1.3: Add diff view for comparing AI output with reference solutions
+- Task 2: Scoring Rubric System (AC: 2)
+  - Subtask 2.1: Define configurable scoring criteria interface
+  - Subtask 2.2: Implement weighted scoring calculation
+  - Subtask 2.3: Create rubric templates for different task types
+- Task 3: Review Queue Management (AC: 3)
+  - Subtask 3.1: Build assignment engine with priority-based distribution
+  - Subtask 3.2: Implement reviewer availability and workload tracking
+  - Subtask 3.3: Create queue filtering and search capabilities
+- Task 4: Review History Tracking (AC: 4)
+  - Subtask 4.1: Implement review versioning and change tracking
+  - Subtask 4.2: Create comment threading and response system
+  - Subtask 4.3: Build review history dashboard with analytics
+- Task 5: Inter-Rater Reliability (AC: 5)
+  - Subtask 5.1: Implement consistency scoring between reviewers
+  - Subtask 5.2: Create reliability metrics and reporting
+  - Subtask 5.3: Build calibration system for reviewer alignment
+- Task 6: Reviewer Performance Metrics (AC: 6)
+  - Subtask 6.1: Track review quality, speed, and consistency metrics
+  - Subtask 6.2: Create performance dashboard for reviewers
+  - Subtask 6.3: Implement feedback and improvement suggestions
+- Task 7: Batch Review Capabilities (AC: 7)
+  - Subtask 7.1: Create bulk assignment interface
+  - Subtask 7.2: Implement batch review workflow with progress tracking
+  - Subtask 7.3: Add bulk action capabilities (approve, reject, escalate)
+- Task 8: Quality Assurance (AC: 8)
+  - Subtask 8.1: Implement automated review quality checks
+  - Subtask 8.2: Create review validation and error detection
+  - Subtask 8.3: Build quality monitoring and alerting system</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Code review interface with syntax highlighting
+2. Standardized scoring rubric with multiple criteria
+3. Review queue management with assignment system
+4. Review history and comment tracking
+5. Inter-rater reliability monitoring
+6. Reviewer performance metrics and feedback
+7. Batch review capabilities for efficiency
+8. Review quality assurance and validation</acceptanceCriteria>
+
+  <dependencies>
+    <upstream>
+      <dependency story="4-1">Task Execution Engine</dependency>
+      <dependency story="4-2">Automated Scoring System</dependency>
+      <dependency story="1-2">Authentication &amp; Authorization System</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="5-5">Multi-Judge Score Aggregation</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Staff Review Framework</component>
+    <layer>Evaluation</layer>
+    <pattern>Multi-Judge Evaluation</pattern>
+    <principles>
+      <principle>Expert evaluation workflow</principle>
+      <principle>Quality assurance</principle>
+      <principle>Inter-rater reliability</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <staff-review-framework>
+      <interface name="StaffReviewService">
+        <methods>
+          <method name="assignReview" returns="Promise&lt;ReviewAssignment&gt;">
+            <param name="executionId" type="string"/>
+            <param name="reviewerId" type="string"/>
+          </method>
+          <method name="submitReview" returns="Promise&lt;void&gt;">
+            <param name="review" type="StaffReview"/>
+          </method>
+          <method name="getReviewQueue" returns="Promise&lt;ReviewAssignment[]&gt;">
+            <param name="reviewerId" type="string"/>
+          </method>
+          <method name="getReviewHistory" returns="Promise&lt;StaffReview[]&gt;">
+            <param name="reviewerId" type="string"/>
+            <param name="filter" type="ReviewHistoryFilter" optional="true"/>
+          </method>
+          <method name="calibrateReviewer" returns="Promise&lt;CalibrationResult&gt;">
+            <param name="reviewerId" type="string"/>
+            <param name="calibrationTasks" type="string[]"/>
+          </method>
+          <method name="getReviewerStats" returns="Promise&lt;ReviewerStats&gt;">
+            <param name="reviewerId" type="string"/>
+          </method>
+        </methods>
+      </interface>
+
+      <data-models>
+        <model name="ReviewAssignment">
+          <properties>
+            <property name="id" type="string"/>
+            <property name="executionId" type="string"/>
+            <property name="reviewerId" type="string"/>
+            <property name="taskId" type="string"/>
+            <property name="assignedAt" type="Date"/>
+            <property name="deadline" type="Date" optional="true"/>
+            <property name="priority" type="ReviewPriority"/>
+            <property name="status" type="AssignmentStatus"/>
+            <property name="context" type="ReviewContext"/>
+          </properties>
+        </model>
+
+        <model name="StaffReview">
+          <properties>
+            <property name="id" type="string"/>
+            <property name="assignmentId" type="string"/>
+            <property name="executionId" type="string"/>
+            <property name="reviewerId" type="string"/>
+            <property name="overallScore" type="number"/>
+            <property name="criterionScores" type="CriterionReviewScore[]"/>
+            <property name="feedback" type="ReviewFeedback"/>
+            <property name="timeSpent" type="number"/>
+            <property name="confidence" type="number"/>
+            <property name="status" type="ReviewStatus"/>
+            <property name="submittedAt" type="Date"/>
+            <property name="metadata" type="ReviewMetadata"/>
+          </properties>
+        </model>
+
+        <model name="ScoringRubric">
+          <properties>
+            <property name="criteria" type="RubricCriterion[]"/>
+            <property name="scoringScale" type="ScoringScale"/>
+            <property name="weightDistribution" type="WeightDistribution"/>
+          </properties>
+        </model>
+
+        <model name="ReviewerStats">
+          <properties>
+            <property name="reviewerId" type="string"/>
+            <property name="totalReviews" type="number"/>
+            <property name="averageScore" type="number"/>
+            <property name="averageTimePerReview" type="number"/>
+            <property name="completionRate" type="number"/>
+            <property name="qualityScore" type="number"/>
+            <property name="calibrationScore" type="number"/>
+            <property name="specializations" type="string[]"/>
+            <property name="recentActivity" type="ReviewActivity[]"/>
+            <property name="performanceTrends" type="PerformanceTrend[]"/>
+          </properties>
+        </model>
+      </data-models>
+
+      <enums>
+        <enum name="ReviewPriority" values="['low', 'normal', 'high', 'urgent']"/>
+        <enum name="AssignmentStatus" values="['assigned', 'in_progress', 'completed', 'escalated', 'cancelled']"/>
+        <enum name="ReviewStatus" values="['draft', 'submitted', 'approved', 'rejected', 'needs_revision']"/>
+      </enums>
+    </staff-review-framework>
+
+    <frontend-components>
+      <component name="CodeReviewInterface">
+        <description>Main interface for code review with syntax highlighting</description>
+        <features>
+          <feature>Monaco Editor integration</feature>
+          <feature>Responsive layout</feature>
+          <feature>Diff view comparison</feature>
+          <feature>Real-time collaboration</feature>
+        </features>
+        <props>
+          <prop name="execution" type="TaskExecutionResult"/>
+          <prop name="rubric" type="ScoringRubric"/>
+          <prop name="assignment" type="ReviewAssignment"/>
+          <prop name="onSubmit" type="(review: StaffReview) =&gt; void"/>
+        </props>
+      </component>
+
+      <component name="ScoringRubricComponent">
+        <description>Interactive scoring rubric with weighted criteria</description>
+        <features>
+          <feature>Configurable criteria</feature>
+          <feature>Weighted scoring</feature>
+          <feature>Real-time score calculation</feature>
+          <feature>Validation and error checking</feature>
+        </features>
+        <props>
+          <prop name="rubric" type="ScoringRubric"/>
+          <prop name="scores" type="CriterionReviewScore[]"/>
+          <prop name="onChange" type="(scores: CriterionReviewScore[]) =&gt; void"/>
+        </props>
+      </component>
+
+      <component name="ReviewQueueDashboard">
+        <description>Dashboard for managing review assignments</description>
+        <features>
+          <feature>Priority-based sorting</feature>
+          <feature>Filtering and search</feature>
+          <feature>Bulk operations</feature>
+          <feature>Workload tracking</feature>
+        </features>
+        <props>
+          <prop name="assignments" type="ReviewAssignment[]"/>
+          <prop name="reviewerId" type="string"/>
+          <prop name="onAssign" type="(assignmentId: string) =&gt; void"/>
+        </props>
+      </component>
+    </frontend-components>
+
+    <backend-services>
+      <service name="AssignmentEngine">
+        <description>Intelligent assignment engine for review distribution</description>
+        <methods>
+          <method name="assignReview" returns="Promise&lt;string&gt;">
+            <param name="executionId" type="string"/>
+            <param name="criteria" type="AssignmentCriteria" optional="true"/>
+          </method>
+          <method name="getAvailableReviewers" returns="Promise&lt;Reviewer[]&gt;">
+            <param name="requirements" type="ReviewerRequirements"/>
+          </method>
+          <method name="calculateWorkload" returns="Promise&lt;WorkloadInfo&gt;">
+            <param name="reviewerId" type="string"/>
+          </method>
+        </methods>
+      </service>
+
+      <service name="QualityMonitor">
+        <description>Review quality monitoring and analysis</description>
+        <methods>
+          <method name="analyzeReview" returns="Promise&lt;QualityMetrics&gt;">
+            <param name="review" type="StaffReview"/>
+            <param name="context" type="ReviewContext"/>
+          </method>
+          <method name="getReviewerQualityScore" returns="Promise&lt;number&gt;">
+            <param name="reviewerId" type="string"/>
+          </method>
+          <method name="detectQualityIssues" returns="Promise&lt;QualityIssue[]&gt;">
+            <param name="review" type="StaffReview"/>
+          </method>
+        </methods>
+      </service>
+
+      <service name="CalibrationService">
+        <description>Reviewer calibration and consistency management</description>
+        <methods>
+          <method name="saveCalibrationResult" returns="Promise&lt;void&gt;">
+            <param name="result" type="CalibrationResult"/>
+          </method>
+          <method name="getReviewerCalibrationScore" returns="Promise&lt;number&gt;">
+            <param name="reviewerId" type="string"/>
+          </method>
+          <method name="generateCalibrationTasks" returns="Promise&lt;string[]&gt;">
+            <param name="reviewerId" type="string"/>
+            <param name="count" type="number"/>
+          </method>
+        </methods>
+      </service>
+    </backend-services>
+  </technical-specifications>
+
+  <data-models>
+    <database-schema>
+      <table name="review_assignments">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="execution_id" type="UUID" foreign="task_executions(id)"/>
+          <column name="reviewer_id" type="UUID" foreign="users(id)"/>
+          <column name="task_id" type="UUID" foreign="tasks(id)"/>
+          <column name="assigned_at" type="TIMESTAMPTZ"/>
+          <column name="deadline" type="TIMESTAMPTZ" nullable="true"/>
+          <column name="priority" type="VARCHAR(20)"/>
+          <column name="status" type="VARCHAR(20)"/>
+          <column name="context" type="JSONB"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="reviewer_id, status"/>
+          <index columns="execution_id"/>
+          <index columns="priority, assigned_at"/>
+        </indexes>
+      </table>
+
+      <table name="staff_reviews">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="assignment_id" type="UUID" foreign="review_assignments(id)"/>
+          <column name="execution_id" type="UUID" foreign="task_executions(id)"/>
+          <column name="reviewer_id" type="UUID" foreign="users(id)"/>
+          <column name="overall_score" type="DECIMAL(5,2)"/>
+          <column name="criterion_scores" type="JSONB"/>
+          <column name="feedback" type="JSONB"/>
+          <column name="time_spent" type="INTEGER"/>
+          <column name="confidence" type="DECIMAL(3,2)"/>
+          <column name="status" type="VARCHAR(20)"/>
+          <column name="submitted_at" type="TIMESTAMPTZ"/>
+          <column name="metadata" type="JSONB"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="reviewer_id, submitted_at"/>
+          <index columns="execution_id"/>
+          <index columns="assignment_id"/>
+          <index columns="status, submitted_at"/>
+        </indexes>
+      </table>
+
+      <table name="scoring_rubrics">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="name" type="VARCHAR(200)"/>
+          <column name="description" type="TEXT"/>
+          <column name="task_type" type="VARCHAR(50)"/>
+          <column name="criteria" type="JSONB"/>
+          <column name="scoring_scale" type="JSONB"/>
+          <column name="weight_distribution" type="JSONB"/>
+          <column name="is_active" type="BOOLEAN" default="true"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="task_type, is_active"/>
+        </indexes>
+      </table>
+
+      <table name="reviewer_stats">
+        <columns>
+          <column name="reviewer_id" type="UUID" primary="true" foreign="users(id)"/>
+          <column name="total_reviews" type="INTEGER" default="0"/>
+          <column name="average_score" type="DECIMAL(5,2)"/>
+          <column name="average_time_per_review" type="INTEGER"/>
+          <column name="completion_rate" type="DECIMAL(5,2)"/>
+          <column name="quality_score" type="DECIMAL(5,2)"/>
+          <column name="calibration_score" type="DECIMAL(5,2)"/>
+          <column name="specializations" type="JSONB"/>
+          <column name="last_review_date" type="TIMESTAMPTZ"/>
+          <column name="updated_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+      </table>
+
+      <table name="calibration_results">
+        <columns>
+          <column name="id" type="UUID" primary="true"/>
+          <column name="reviewer_id" type="UUID" foreign="users(id)"/>
+          <column name="calibration_score" type="DECIMAL(5,2)"/>
+          <column name="bias_analysis" type="JSONB"/>
+          <column name="consistency_score" type="DECIMAL(5,2)"/>
+          <column name="recommendations" type="JSONB"/>
+          <column name="next_calibration_due" type="TIMESTAMPTZ"/>
+          <column name="created_at" type="TIMESTAMPTZ" default="NOW()"/>
+        </columns>
+        <indexes>
+          <index columns="reviewer_id, created_at"/>
+        </indexes>
+      </table>
+    </database-schema>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IStaffReviewService">
+      <description>Core staff review service interface</description>
+      <methods>
+        <method name="assignReview" returns="Promise&lt;ReviewAssignment&gt;">
+          <param name="executionId" type="string"/>
+          <param name="reviewerId" type="string"/>
+        </method>
+        <method name="submitReview" returns="Promise&lt;void&gt;">
+          <param name="review" type="StaffReview"/>
+        </method>
+        <method name="getReviewQueue" returns="Promise&lt;ReviewAssignment[]&gt;">
+          <param name="reviewerId" type="string"/>
+        </method>
+        <method name="getReviewHistory" returns="Promise&lt;StaffReview[]&gt;">
+          <param name="reviewerId" type="string"/>
+          <param name="filter" type="ReviewHistoryFilter" optional="true"/>
+        </method>
+        <method name="calibrateReviewer" returns="Promise&lt;CalibrationResult&gt;">
+          <param name="reviewerId" type="string"/>
+          <param name="calibrationTasks" type="string[]"/>
+        </method>
+        <method name="getReviewerStats" returns="Promise&lt;ReviewerStats&gt;">
+          <param name="reviewerId" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IAssignmentEngine">
+      <description>Review assignment engine interface</description>
+      <methods>
+        <method name="assignReview" returns="Promise&lt;string&gt;">
+          <param name="executionId" type="string"/>
+          <param name="criteria" type="AssignmentCriteria" optional="true"/>
+        </method>
+        <method name="getAvailableReviewers" returns="Promise&lt;Reviewer[]&gt;">
+          <param name="requirements" type="ReviewerRequirements"/>
+        </method>
+        <method name="calculateWorkload" returns="Promise&lt;WorkloadInfo&gt;">
+          <param name="reviewerId" type="string"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IQualityMonitor">
+      <description>Review quality monitoring interface</description>
+      <methods>
+        <method name="analyzeReview" returns="Promise&lt;QualityMetrics&gt;">
+          <param name="review" type="StaffReview"/>
+          <param name="context" type="ReviewContext"/>
+        </method>
+        <method name="getReviewerQualityScore" returns="Promise&lt;number&gt;">
+          <param name="reviewerId" type="string"/>
+        </method>
+        <method name="detectQualityIssues" returns="Promise&lt;QualityIssue[]&gt;">
+          <param name="review" type="StaffReview"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="StaffReviewService">
+      <description>Main staff review service implementation</description>
+      <implements>IStaffReviewService</implements>
+      <properties>
+        <property name="reviewRepository" type="ReviewRepository"/>
+        <property name="taskRepository" type="TaskRepository"/>
+        <property name="executionRepository" type="ExecutionRepository"/>
+        <property name="assignmentEngine" type="AssignmentEngine"/>
+        <property name="calibrationService" type="CalibrationService"/>
+        <property name="notificationService" type="NotificationService"/>
+        <property name="qualityMonitor" type="QualityMonitor"/>
+      </properties>
+      <methods>
+        <method name="assignReview" returns="Promise&lt;ReviewAssignment&gt;"/>
+        <method name="submitReview" returns="Promise&lt;void&gt;"/>
+        <method name="getReviewQueue" returns="Promise&lt;ReviewAssignment[]&gt;"/>
+        <method name="getReviewHistory" returns="Promise&lt;StaffReview[]&gt;"/>
+        <method name="calibrateReviewer" returns="Promise&lt;CalibrationResult&gt;"/>
+        <method name="getReviewerStats" returns="Promise&lt;ReviewerStats&gt;"/>
+        <method name="validateReview" returns="Promise&lt;void&gt;"/>
+        <method name="calculateReviewQuality" returns="Promise&lt;QualityMetrics&gt;"/>
+        <method name="checkConsensusReadiness" returns="Promise&lt;void&gt;"/>
+      </methods>
+    </class>
+
+    <class name="PriorityAssignmentEngine">
+      <description>Priority-based assignment engine</description>
+      <implements>IAssignmentEngine</implements>
+      <properties>
+        <property name="reviewerRepository" type="ReviewRepository"/>
+        <property name="taskRepository" type="TaskRepository"/>
+        <property name="workloadTracker" type="WorkloadTracker"/>
+      </properties>
+      <methods>
+        <method name="assignReview" returns="Promise&lt;string&gt;"/>
+        <method name="getAvailableReviewers" returns="Promise&lt;Reviewer[]&gt;"/>
+        <method name="calculateWorkload" returns="Promise&lt;WorkloadInfo&gt;"/>
+        <method name="calculateReviewPriority" returns="ReviewPriority"/>
+        <method name="hasConflictOfInterest" returns="Promise&lt;boolean&gt;"/>
+      </methods>
+    </class>
+
+    <class name="ReviewQualityMonitor">
+      <description>Review quality monitoring implementation</description>
+      <implements>IQualityMonitor</implements>
+      <properties>
+        <property name="reviewRepository" type="ReviewRepository"/>
+        <property name="analyticsService" type="AnalyticsService"/>
+      </properties>
+      <methods>
+        <method name="analyzeReview" returns="Promise&lt;QualityMetrics&gt;"/>
+        <method name="getReviewerQualityScore" returns="Promise&lt;number&gt;"/>
+        <method name="detectQualityIssues" returns="Promise&lt;QualityIssue[]&gt;"/>
+        <method name="calculateConsistencyWithPrevious" returns="number"/>
+        <method name="calculateTimeAppropriateness" returns="number"/>
+        <method name="calculateCompleteness" returns="number"/>
+        <method name="analyzeCommentQuality" returns="Promise&lt;number&gt;"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="task-execution">
+      <component>Task Execution Engine</component>
+      <interface>Execution Results API</interface>
+      <description>Get execution results for review</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>REST API</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="user-auth">
+      <component>Authentication Service</component>
+      <interface>User Authentication API</interface>
+      <description>Authenticate reviewers and manage permissions</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>JWT/OAuth2</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="notifications">
+      <component>Notification Service</component>
+      <interface>Notification API</interface>
+      <description>Send review assignments and updates</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>Webhook/SSE</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="score-aggregation">
+      <component>Multi-Judge Score Aggregation</component>
+      <interface>Score Submission API</interface>
+      <description>Submit staff review scores for aggregation</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>REST API</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <api-endpoints>
+    <endpoint name="get-review-queue" method="GET" path="/api/v1/staff-review/queue">
+      <description>Get reviewer's assignment queue</description>
+      <parameters>
+        <parameter name="reviewerId" type="string">Reviewer identifier</parameter>
+        <parameter name="status" type="AssignmentStatus[]" optional="true">Filter by status</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Review assignments</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="assign-review" method="POST" path="/api/v1/staff-review/assign">
+      <description>Assign review to reviewer</description>
+      <parameters>
+        <parameter name="executionId" type="string">Execution identifier</parameter>
+        <parameter name="reviewerId" type="string">Reviewer identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Review assignment created</response>
+        <response code="400">Invalid assignment</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="submit-review" method="POST" path="/api/v1/staff-review/reviews">
+      <description>Submit staff review</description>
+      <parameters>
+        <parameter name="review" type="StaffReview">Review data</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Review submitted</response>
+        <response code="400">Invalid review data</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-review-history" method="GET" path="/api/v1/staff-review/reviews/{reviewerId}">
+      <description>Get reviewer's review history</description>
+      <parameters>
+        <parameter name="reviewerId" type="string">Reviewer identifier</parameter>
+        <parameter name="limit" type="number" optional="true">Maximum results</parameter>
+        <parameter name="offset" type="number" optional="true">Pagination offset</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Review history</response>
+        <response code="404">Reviewer not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-reviewer-stats" method="GET" path="/api/v1/staff-review/stats/{reviewerId}">
+      <description>Get reviewer performance statistics</description>
+      <parameters>
+        <parameter name="reviewerId" type="string">Reviewer identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Reviewer statistics</response>
+        <response code="404">Reviewer not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="calibrate-reviewer" method="POST" path="/api/v1/staff-review/calibrate/{reviewerId}">
+      <description>Calibrate reviewer performance</description>
+      <parameters>
+        <parameter name="reviewerId" type="string">Reviewer identifier</parameter>
+        <parameter name="calibrationTasks" type="string[]">Calibration task IDs</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Calibration results</response>
+        <response code="404">Reviewer not found</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>90%</coverage>
+      <focus>
+        <area>Review assignment logic</area>
+        <area>Score calculation algorithms</area>
+        <area>Quality metrics calculation</area>
+        <area>Calibration algorithms</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>80%</coverage>
+      <focus>
+        <area>End-to-end review workflow</area>
+        <area>Database operations</area>
+        <area>API endpoint integration</area>
+        <area>Notification system integration</area>
+      </focus>
+    </integration-tests>
+
+    <performance-tests>
+      <coverage>70%</coverage>
+      <focus>
+        <area>Review queue performance</area>
+        <area>Batch review operations</area>
+        <area>Concurrent review submissions</area>
+      </focus>
+    </performance-tests>
+
+    <test-data>
+      <reviews>
+        <review name="sample-code-review">Sample code review with full rubric</review>
+        <review name="calibration-review">Calibration review with known ground truth</review>
+        <review name="batch-review">Batch review assignment set</review>
+      </reviews>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="unauthorized-review">
+        <description>Unauthorized users submitting reviews</description>
+        <mitigation>Authentication and authorization checks</mitigation>
+      </threat>
+      <threat name="review-manipulation">
+        <description>Manipulating review scores or feedback</description>
+        <mitigation>Input validation, audit logging</mitigation>
+      </threat>
+      <threat name="conflict-of-interest">
+        <description>Reviewers reviewing their own work</description>
+        <mitigation>Conflict detection and prevention</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="authentication">
+        <description>Verify reviewer identity</description>
+        <implementation>JWT tokens, session management</implementation>
+      </control>
+      <control name="authorization">
+        <description>Control review access</description>
+        <implementation>Role-based permissions, assignment checks</implementation>
+      </control>
+      <control name="audit-logging">
+        <description>Log all review actions</description>
+        <implementation>Comprehensive audit trail</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="review_completion_time" type="histogram">Time to complete reviews</metric>
+      <metric name="review_quality_score" type="gauge">Average review quality</metric>
+      <metric name="assignment_queue_depth" type="gauge">Number of pending assignments</metric>
+      <metric name="reviewer_workload" type="gauge">Current reviewer workload</metric>
+      <metric name="calibration_score" type="gauge">Reviewer calibration scores</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="review_queue_backlog">
+        <condition>assignment_queue_depth &gt; 100</condition>
+        <severity>warning</severity>
+        <action>Escalate assignments or add reviewers</action>
+      </alert>
+      <alert name="low_review_quality">
+        <condition>review_quality_score &lt; 0.7</condition>
+        <severity>warning</severity>
+        <action>Trigger reviewer calibration</action>
+      </alert>
+      <alert name="reviewer_overload">
+        <condition>reviewer_workload &gt; 10</condition>
+        <severity>warning</severity>
+        <action>Redistribute assignments</action>
+      </alert>
+    </alerts>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/staff-review.schema.ts</file-location>
+    <review-configs>
+      <config name="assignment-rules">config/staff-review/assignment-rules.yaml</config>
+      <config name="quality-thresholds">config/staff-review/quality-thresholds.yaml</config>
+      <config name="calibration-settings">config/staff-review/calibration-settings.yaml</config>
+    </review-configs>
+  </configuration-schema>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>Code review interface with syntax highlighting</description>
+      <verification>Monaco Editor integration test</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Standardized scoring rubric with multiple criteria</description>
+      <verification>Rubric configuration and scoring test</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>Review queue management with assignment system</description>
+      <verification>Assignment engine workflow test</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Review history and comment tracking</description>
+      <verification>History tracking and threading test</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Inter-rater reliability monitoring</description>
+      <verification>Consistency scoring calculation test</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Reviewer performance metrics and feedback</description>
+      <verification>Performance dashboard and metrics test</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>Batch review capabilities for efficiency</description>
+      <verification>Bulk operations workflow test</verification>
+    </criteria>
+
+    <criteria id="ac8" priority="should">
+      <description>Review quality assurance and validation</description>
+      <verification>Quality monitoring and validation test</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="medium">
+      <description>Reviewer bias affecting evaluation consistency</description>
+      <mitigation>Calibration system, bias detection, statistical monitoring</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Review bottleneck slowing down evaluation pipeline</description>
+      <mitigation>Load balancing, batch processing, reviewer pool management</mitigation>
+    </risk>
+
+    <risk id="risk3" level="low">
+      <description>Inconsistent quality across different reviewers</description>
+      <mitigation>Quality monitoring, training, standardized rubrics</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="review_completion_rate" target="&gt; 95%">Percentage of assigned reviews completed</metric>
+    <metric name="average_review_time" target="&lt; 30 minutes">Average time to complete a review</metric>
+    <metric name="inter_rater_reliability" target="&gt; 0.8">Consistency score between reviewers</metric>
+    <metric name="review_quality_score" target="&gt; 0.8">Average review quality rating</metric>
+  </success-metrics>
+</story-context>

@@ -1,189 +1,414 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<story-context>
-  <metadata>
-    <story-id>1.5-5-docker-packaging</story-id>
-    <title>Docker Packaging</title>
-    <status>ready-for-dev</status>
-    <last-updated>2025-11-07T12:00:00Z</last-updated>
-    <version>1.0</version>
-  </metadata>
+<storyContext id="1.5-5" epic="1.5" title="Docker Packaging" created="2025-01-08" updated="2025-01-08">
+  <summary>
+    Create production-ready Docker images for all Tamma components with multi-architecture support, security scanning, and optimized layer caching. This story ensures Tamma can be deployed in containerized environments with enterprise-grade security and performance.
+  </summary>
 
-  <technical-context>
-    <architecture-alignment>
-      <component>deployment/docker</component>
-      <component>packages/core</component>
-      <pattern>Containerization</pattern>
-      <pattern>Multi-stage Builds</pattern>
-      <pattern>Infrastructure as Code</pattern>
-    </architecture-alignment>
-    
-    <dependencies>
-      <dependency story="1.5-1">Core Engine Separation</dependency>
-      <dependency story="1.5-2">CLI Mode Enhancement</dependency>
-      <dependency story="1.5-3">Service Mode Implementation</dependency>
-    </dependencies>
-    
-    <data-models>
-      <model name="DockerConfig" path="deployment/docker/src/types/docker-config.ts" />
-      <model name="ImageMetadata" path="deployment/docker/src/types/image-metadata.ts" />
-      <model name="HealthCheck" path="deployment/docker/src/types/health-check.ts" />
-    </data-models>
-  </technical-context>
+  <technicalComponents>
+    <component name="Dockerfile Generation" type="build-system">
+      <description>Automated Dockerfile generation for all packages with multi-stage builds</description>
+      <files>
+        <file path="packages/*/Dockerfile" type="generated" />
+        <file path="tools/docker/generate-dockerfiles.ts" type="typescript" />
+        <file path="tools/docker/docker-templates/" type="templates" />
+      </files>
+      <dependencies>
+        <dependency name="TypeScript compiler" version="5.7+" />
+        <dependency name="esbuild" version="0.23+" />
+      </dependencies>
+    </component>
 
-  <implementation-details>
-    <core-interfaces>
-      <interface name="IDockerBuilder" kind="TypeScript interface" signature="interface IDockerBuilder { buildImage(config: DockerConfig): Promise&lt;ImageMetadata&gt;; publishImage(image: ImageMetadata, registries: Registry[]): Promise&lt;void&gt;; testImage(image: ImageMetadata): Promise&lt;HealthCheck&gt;; }" path="deployment/docker/src/interfaces/docker-builder.ts" />
-      <interface name="IComposeManager" kind="TypeScript interface" signature="interface IComposeManager { startServices(config: ComposeConfig): Promise&lt;void&gt;; stopServices(): Promise&lt;void&gt;; getLogs(service: string): Promise&lt;string[]&gt;; }" path="deployment/docker/src/interfaces/compose-manager.ts" />
-    </core-interfaces>
-    
-    <key-classes>
-      <class name="DockerBuilder" kind="TypeScript class" implements="IDockerBuilder" path="deployment/docker/src/docker-builder.ts" />
-      <class name="ComposeManager" kind="TypeScript class" implements="IComposeManager" path="deployment/docker/src/compose-manager.ts" />
-      <class name="ImageOptimizer" kind="TypeScript class" path="deployment/docker/src/image-optimizer.ts" />
-      <class name="SecurityScanner" kind="TypeScript class" path="deployment/docker/src/security-scanner.ts" />
-    </key-classes>
-    
-    <algorithms>
-      <algorithm name="Multi-stage Optimization" type="build" description="Optimizes Docker image size through multi-stage builds" />
-      <algorithm name="Layer Caching" type="build" description="Implements Docker layer caching for faster builds" />
-      <algorithm name="Security Hardening" type="security" description="Applies security best practices to Docker images" />
-      <algorithm name="Dependency Analysis" type="analysis" description="Analyzes dependencies for security vulnerabilities" />
-    </algorithms>
-  </implementation-details>
+    <component name="Multi-Architecture Builds" type="build-system">
+      <description>Support for linux/amd64, linux/arm64, and linux/arm/v7 architectures</description>
+      <files>
+        <file path="docker-compose.build.yml" type="yaml" />
+        <file path=".github/workflows/docker-build.yml" type="yaml" />
+        <file path="tools/docker/build-multiarch.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="Docker Buildx" version="0.11+" />
+        <dependency name="QEMU" version="7.0+" />
+      </dependencies>
+    </component>
 
-  <integration-points>
-    <external-integrations>
-      <integration name="Docker Registry" type="API" description="Publishes images to container registries" protocol="HTTPS" />
-      <integration name="Security Scanning" type="API" description="Scans images for vulnerabilities" protocol="HTTPS" />
-    </external-integrations>
-    
-    <internal-integrations>
-      <integration name="Core Engine" component="packages/core" description="Docker image includes Tamma core engine" />
-      <integration name="Configuration" component="packages/config" description="Environment variable configuration support" />
-      <integration name="Health Checks" component="packages/observability" description="Container health check endpoints" />
-    </internal-integrations>
-  </integration-points>
+    <component name="Container Security Scanning" type="security">
+      <description>Automated vulnerability scanning and compliance checking</description>
+      <files>
+        <file path="tools/docker/scan-containers.ts" type="typescript" />
+        <file path="docker/security-policy.json" type="json" />
+        <file path=".github/workflows/security-scan.yml" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="Trivy" version="0.48+" />
+        <dependency name="Snyk Container" version="latest" />
+      </dependencies>
+    </component>
 
-  <data-sources>
-    <build-artifacts>
-      <store type="Docker images" description="Built Docker images stored locally or in registry" />
-      <store type="Build cache" description="Docker build cache for faster rebuilds" />
-    </build-artifacts>
-    
-    <configuration>
-      <store type="Environment variables" description="Runtime configuration via environment" />
-      <store type="Config files" description="Docker compose configuration files" />
-    </configuration>
-  </data-sources>
+    <component name="Image Optimization" type="performance">
+      <description>Layer caching, size optimization, and runtime performance tuning</description>
+      <files>
+        <file path="tools/docker/optimize-images.ts" type="typescript" />
+        <file path="docker/optimization-config.json" type="json" />
+        <file path="tools/docker/analyze-layers.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="Dive" version="0.12+" />
+        <dependency name="Hadolint" version="2.12+" />
+      </dependencies>
+    </component>
 
-  <api-endpoints>
-    <container-endpoints>
-      <endpoint method="HTTP" path="/health" description="Container health check endpoint" />
-      <endpoint method="HTTP" path="/metrics" description="Container metrics endpoint" />
-      <endpoint method="HTTP" path="/ready" description="Container readiness check endpoint" />
-    </container-endpoints>
-  </api-endpoints>
+    <component name="Container Registry Integration" type="deployment">
+      <description>Multi-registry publishing with version tagging and retention policies</description>
+      <files>
+        <file path="tools/docker/publish-images.ts" type="typescript" />
+        <file path="docker/registry-config.json" type="json" />
+        <file path="tools/docker/manage-tags.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="Docker Registry API" version="2.0" />
+        <dependency name="GitHub Container Registry" />
+        <dependency name="Docker Hub" />
+      </dependencies>
+    </component>
+  </technicalComponents>
 
-  <testing-strategy>
-    <unit-tests>
-      <suite name="DockerBuilder" coverage="90%" path="deployment/docker/src/__tests__/docker-builder.test.ts" />
-      <suite name="ComposeManager" coverage="85%" path="deployment/docker/src/__tests__/compose-manager.test.ts" />
-      <suite name="ImageOptimizer" coverage="85%" path="deployment/docker/src/__tests__/image-optimizer.test.ts" />
-      <suite name="SecurityScanner" coverage="80%" path="deployment/docker/src/__tests__/security-scanner.test.ts" />
-    </unit-tests>
-    
-    <integration-tests>
-      <suite name="Docker Build Integration" path="deployment/docker/src/__tests__/integration/docker-build.test.ts" />
-      <suite name="Compose Services Integration" path="deployment/docker/src/__tests__/integration/compose-services.test.ts" />
-      <suite name="Health Check Integration" path="deployment/docker/src/__tests__/integration/health-check.test.ts" />
-    </integration-tests>
-    
-    <performance-tests>
-      <test name="Image Build Performance" target="&lt;5min" path="deployment/docker/src/__tests__/performance/image-build.test.ts" />
-      <test name="Image Size Optimization" target="&lt;500MB" path="deployment/docker/src/__tests__/performance/image-size.test.ts" />
-      <test name="Container Startup Performance" target="&lt;10s" path="deployment/docker/src/__tests__/performance/container-startup.test.ts" />
-    </performance-tests>
-  </testing-strategy>
+  <dataModels>
+    <model name="DockerImageConfig">
+      <fields>
+        <field name="name" type="string" required="true" description="Image name (e.g., tamma/orchestrator)" />
+        <field name="version" type="string" required="true" description="Semantic version" />
+        <field name="architectures" type="string[]" required="true" description="Supported architectures" />
+        <field name="baseImage" type="string" required="true" description="Base Docker image" />
+        <field name="exposePorts" type="number[]" description="Ports to expose" />
+        <field name="environment" type="Record&lt;string, string&gt;" description="Environment variables" />
+        <field name="volumes" type="string[]" description="Volume mount points" />
+        <field name="healthCheck" type="HealthCheckConfig" description="Container health check" />
+        <field name="securityContext" type="SecurityContext" description="Security configuration" />
+      </fields>
+    </model>
 
-  <security-considerations>
-    <container-security>
-      <consideration type="Non-root User" description="Containers run as non-root user" />
-      <consideration type="Minimal Base Image" description="Uses minimal Alpine-based images" />
-      <consideration type="Security Scanning" description="Images scanned for vulnerabilities" />
-      <consideration type="Secrets Management" description="No secrets baked into images" />
-    </container-security>
-    
-    <runtime-security>
-      <consideration type="Read-only Filesystem" description="Filesystem mounted read-only where possible" />
-      <consideration type="Resource Limits" description="CPU and memory limits configured" />
-      <consideration type="Network Isolation" description="Network access limited to required services" />
-    </runtime-security>
-  </security-considerations>
+    <model name="SecurityContext">
+      <fields>
+        <field name="user" type="string" description="Non-root user to run as" />
+        <field name="readOnlyRootFilesystem" type="boolean" description="Read-only root filesystem" />
+        <field name="allowPrivilegeEscalation" type="boolean" description="Allow privilege escalation" />
+        <field name="runAsNonRoot" type="boolean" description="Run as non-root user" />
+        <field name="capabilities" type="CapabilityConfig" description="Linux capabilities" />
+        <field name="seccompProfile" type="string" description="Seccomp profile" />
+      </fields>
+    </model>
 
-  <monitoring-and-observability>
-    <metrics>
-      <metric name="docker_builds_total" type="counter" description="Total Docker builds performed" />
-      <metric name="image_size_bytes" type="gauge" description="Size of built Docker images" />
-      <metric name="build_duration_seconds" type="histogram" description="Duration of Docker builds" />
-      <metric name="security_scan_findings" type="counter" description="Security issues found in images" />
-      <metric name="container_start_time_seconds" type="histogram" description="Container startup time" />
-    </metrics>
-    
-    <logging>
-      <event name="docker.build.started" level="info" description="Docker build started" />
-      <event name="docker.build.completed" level="info" description="Docker build completed" />
-      <event name="image.published" level="info" description="Image published to registry" />
-      <event name="security.scan.started" level="info" description="Security scan started" />
-      <event name="security.scan.completed" level="info" description="Security scan completed" />
-      <event name="container.started" level="info" description="Container started" />
-      <event name="health.check.failed" level="warn" description="Container health check failed" />
-    </logging>
-  </monitoring-and-observability>
+    <model name="HealthCheckConfig">
+      <fields>
+        <field name="command" type="string[]" description="Health check command" />
+        <field name="interval" type="string" description="Check interval (e.g., 30s)" />
+        <field name="timeout" type="string" description="Check timeout (e.g., 10s)" />
+        <field name="retries" type="number" description="Number of retries" />
+        <field name="startPeriod" type="string" description="Grace period on startup" />
+      </fields>
+    </model>
 
-  <configuration-schema>
-    <docker-config>
-      <field name="baseImage" type="string" required="false" default="node:22-alpine" description="Base Docker image" />
-      <field name="multiStage" type="boolean" required="false" default="true" description="Enable multi-stage builds" />
-      <field name="securityScan" type="object" required="false" description="Security scanning configuration" />
-      <field name="registries" type="array" required="false" description="Target container registries" />
-      <field name="healthCheck" type="object" required="false" description="Health check configuration" />
-    </docker-config>
-  </configuration-schema>
+    <model name="BuildResult">
+      <fields>
+        <field name="imageId" type="string" description="Built image ID" />
+        <field name="digest" type="string" description="Image digest (SHA256)" />
+        <field name="size" type="number" description="Image size in bytes" />
+        <field name="architecture" type="string" description="Build architecture" />
+        <field name="layers" type="LayerInfo[]" description="Layer information" />
+        <field name="buildTime" type="number" description="Build duration in milliseconds" />
+        <field name="securityScan" type="SecurityScanResult" description="Security scan results" />
+      </fields>
+    </model>
 
-  <documentation-requirements>
-    <deployment-docs>
-      <doc name="Docker Deployment Guide" path="docs/deployment/docker-deployment.md" />
-      <doc name="Docker Compose Reference" path="docs/deployment/docker-compose-reference.md" />
-    </deployment-docs>
-    
-    <user-guides>
-      <guide name="Local Development Setup" path="docs/tutorials/docker-local-development.md" />
-      <guide name="Container Security Best Practices" path="docs/guides/container-security.md" />
-    </user-guides>
-  </documentation-requirements>
+    <model name="SecurityScanResult">
+      <fields>
+        <field name="vulnerabilities" type="Vulnerability[]" description="Found vulnerabilities" />
+        <field name="criticalCount" type="number" description="Critical vulnerability count" />
+        <field name="highCount" type="number" description="High vulnerability count" />
+        <field name="mediumCount" type="number" description="Medium vulnerability count" />
+        <field name="lowCount" type="number" description="Low vulnerability count" />
+        <field name="complianceStatus" type="string" description="Compliance status" />
+        <field name="recommendations" type="string[]" description="Security recommendations" />
+      </fields>
+    </model>
+  </dataModels>
 
-  <acceptance-criteria-mapping>
-    <ac id="1" component="DockerBuilder" test="docker-builder.test.ts" />
-    <ac id="2" component="ComposeManager" test="compose-manager.test.ts" />
-    <ac id="3" component="ImageOptimizer" test="image-optimizer.test.ts" />
-    <ac id="4" component="SecurityScanner" test="security-scanner.test.ts" />
-    <ac id="5" component="Health Check Integration" test="health-check-integration.test.ts" />
-    <ac id="6" component="Environment Configuration" test="environment-config.test.ts" />
-    <ac id="7" component="Publishing Workflow" test="publishing-workflow.test.ts" />
-  </acceptance-criteria-mapping>
+  <integrationPoints>
+    <integration name="GitHub Actions" type="ci-cd">
+      <description>Automated building and publishing via GitHub Actions workflows</description>
+      <interface>
+        <method name="triggerBuild" type="event" />
+        <method name="publishToRegistry" type="action" />
+        <method name="securityScan" type="action" />
+        <method name="notifyResults" type="webhook" />
+      </interface>
+      <dataFlow>
+        <source name="GitHub repository" />
+        <destination name="Container registry" />
+        <protocol name="Docker Registry API" />
+        <format name="Docker image layers" />
+      </dataFlow>
+    </integration>
 
-  <risk-mitigation>
-    <risk id="R1" description="Docker image size too large" mitigation="Multi-stage builds and layer optimization" />
-    <risk id="R2" description="Security vulnerabilities in base image" mitigation="Regular security scanning and base image updates" />
-    <risk id="R3" description="Container startup failures" mitigation="Health checks and graceful degradation" />
-    <risk id="R4" description="Registry authentication issues" mitigation="Secure credential management and retry logic" />
-  </risk-mitigation>
+    <integration name="Container Registry" type="deployment">
+      <description>Multi-registry support for Docker Hub, GitHub Container Registry, and private registries</description>
+      <interface>
+        <method name="authenticate" type="rest" />
+        <method name="pushImage" type="rest" />
+        <method name="pullImage" type="rest" />
+        <method name="listTags" type="rest" />
+        <method name="deleteTag" type="rest" />
+      </interface>
+      <dataFlow>
+        <source name="Build pipeline" />
+        <destination name="Registry storage" />
+        <protocol name="Docker Registry API v2" />
+        <format name="Docker manifest" />
+      </dataFlow>
+    </integration>
 
-  <success-metrics>
-    <metric name="Image Size" target="&lt;500MB" description="Final Docker image size" />
-    <metric name="Build Time" target="&lt;5min" description="Docker image build time" />
-    <metric name="Security Score" target="95%" description="Security scan pass rate" />
-    <metric name="Startup Time" target="&lt;10s" description="Container startup time" />
-    <metric name="Registry Publishing Success" target="99%" description="Successful image publishing rate" />
-  </success-metrics>
-</story-context>
+    <integration name="Security Scanning" type="security">
+      <description>Integration with Trivy and Snyk for vulnerability scanning</description>
+      <interface>
+        <method name="scanImage" type="cli" />
+        <method name="generateReport" type="cli" />
+        <method name="checkCompliance" type="cli" />
+        <method name="exportResults" type="cli" />
+      </interface>
+      <dataFlow>
+        <source name="Docker image" />
+        <destination name="Security database" />
+        <protocol name="CLI/REST" />
+        <format name="JSON/SARIF" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Package Manager" type="build-system">
+      <description>Integration with pnpm for dependency management in containers</description>
+      <interface>
+        <method name="installDependencies" type="cli" />
+        <method name="cachePackages" type="cli" />
+        <method name="auditPackages" type="cli" />
+        <method name="generateLockfile" type="cli" />
+      </interface>
+      <dataFlow>
+        <source name="package.json" />
+        <destination name="node_modules" />
+        <protocol name="npm registry" />
+        <format name="npm packages" />
+      </dataFlow>
+    </integration>
+  </integrationPoints>
+
+  <testingStrategy>
+    <unitTesting>
+      <framework name="Vitest" version="3.x" />
+      <coverage target="90" description="Docker build utilities and configuration" />
+      <focus>
+        <area name="Dockerfile generation logic" />
+        <area name="Multi-architecture build configuration" />
+        <area name="Security scanning integration" />
+        <area name="Image optimization algorithms" />
+        <area name="Registry publishing logic" />
+      </focus>
+    </unitTesting>
+
+    <integrationTesting>
+      <framework name="Docker Compose" version="2.x" />
+      <coverage target="80" description="End-to-end container deployment" />
+      <focus>
+        <area name="Multi-container orchestration" />
+        <area name="Cross-service communication" />
+        <area name="Volume mounting and persistence" />
+        <area name="Network configuration" />
+        <area name="Environment variable injection" />
+      </focus>
+    </integrationTesting>
+
+    <securityTesting>
+      <framework name="Trivy" version="0.48+" />
+      <framework name="Snyk Container" version="latest" />
+      <coverage target="100" description="All container images must be scanned" />
+      <focus>
+        <area name="Vulnerability detection" />
+        <area name="Compliance checking" />
+        <area name="Secret detection" />
+        <area name="Malware scanning" />
+        <area name="License compliance" />
+      </focus>
+    </securityTesting>
+
+    <performanceTesting>
+      <framework name="Dive" version="0.12+" />
+      <framework name="Custom benchmarks" />
+      <coverage target="100" description="All images must meet size and performance criteria" />
+      <focus>
+        <area name="Image size optimization" />
+        <area name="Layer efficiency" />
+        <area name="Startup time" />
+        <area name="Memory usage" />
+        <area name="CPU utilization" />
+      </focus>
+    </performanceTesting>
+  </testingStrategy>
+
+  <securityConsiderations>
+    <vulnerabilityManagement>
+      <requirement name="Automated scanning" description="All images must be scanned for vulnerabilities before publishing" />
+      <requirement name="CVE threshold" description="No critical or high CVEs allowed in production images" />
+      <requirement name="Patch management" description="Base images must be updated within 30 days of security patches" />
+      <requirement name="Dependency auditing" description="npm packages must be audited for security issues" />
+    </vulnerabilityManagement>
+
+    <containerSecurity>
+      <requirement name="Non-root execution" description="All containers must run as non-root users" />
+      <requirement name="Read-only filesystem" description="Root filesystem should be read-only where possible" />
+      <requirement name="Minimal attack surface" description="Only necessary capabilities and packages included" />
+      <requirement name="Secrets management" description="No secrets embedded in images; use external secret management" />
+    </containerSecurity>
+
+    <supplyChainSecurity>
+      <requirement name="Image signing" description="Images should be signed using Docker Content Trust" />
+      <requirement name="SBOM generation" description="Software Bill of Materials generated for all images" />
+      <requirement name="Provenance tracking" description="Build provenance and reproducibility" />
+      <requirement name="Registry security" description="Use HTTPS and authentication for all registry operations" />
+    </supplyChainSecurity>
+  </securityConsiderations>
+
+  <acceptanceCriteria>
+    <functional>
+      <criteria id="AC-1" description="Docker images built successfully for all packages" priority="high" />
+      <criteria id="AC-2" description="Multi-architecture support (amd64, arm64, arm/v7)" priority="high" />
+      <criteria id="AC-3" description="Automated security scanning with vulnerability reporting" priority="high" />
+      <criteria id="AC-4" description="Image size optimization with layer caching" priority="medium" />
+      <criteria id="AC-5" description="Multi-registry publishing with version tagging" priority="medium" />
+      <criteria id="AC-6" description="Health checks and graceful shutdown support" priority="medium" />
+      <criteria id="AC-7" description="Production-ready Docker Compose configurations" priority="medium" />
+    </functional>
+
+    <nonFunctional>
+      <criteria id="NFC-1" description="Image startup time &lt; 5 seconds" priority="high" />
+      <criteria id="AC-2" description="Base image size &lt; 100MB for runtime images" priority="high" />
+      <criteria id="NFC-3" description="Zero critical/high CVEs in production images" priority="high" />
+      <criteria id="NFC-4" description="Build time &lt; 10 minutes per architecture" priority="medium" />
+      <criteria id="NFC-5" description="Registry push time &lt; 2 minutes per image" priority="medium" />
+      <criteria id="NFC-6" description="Security scan time &lt; 3 minutes per image" priority="low" />
+    </nonFunctional>
+
+    <compliance>
+      <criteria id="CC-1" description="CIS Docker Benchmark compliance" priority="high" />
+      <criteria id="CC-2" description="OWASP Container Security Verification" priority="high" />
+      <criteria id="CC-3" description="SOC2 Type II security controls" priority="medium" />
+      <criteria id="CC-4" description="GDPR data protection compliance" priority="medium" />
+    </compliance>
+  </acceptanceCriteria>
+
+  <riskMitigation>
+    <risk id="R-1" description="Container image bloat increasing deployment times" probability="medium" impact="medium">
+      <mitigation name="Multi-stage builds" description="Use multi-stage Docker builds to minimize final image size" />
+      <mitigation name="Layer optimization" description="Optimize layer ordering and caching strategies" />
+      <mitigation name="Base image selection" description="Choose minimal base images (alpine, distroless)" />
+    </risk>
+
+    <risk id="R-2" description="Security vulnerabilities in base images or dependencies" probability="high" impact="high">
+      <mitigation name="Automated scanning" description="Implement pre-publish vulnerability scanning" />
+      <mitigation name="Base image pinning" description="Pin specific base image versions with SHA digests" />
+      <mitigation name="Regular updates" description="Automated base image updates and rebuilds" />
+    </risk>
+
+    <risk id="R-3" description="Multi-architecture build complexity and failures" probability="medium" impact="medium">
+      <mitigation name="Buildx caching" description="Use Docker Buildx with persistent cache" />
+      <mitigation name="Parallel builds" description="Build architectures in parallel where possible" />
+      <mitigation name="Fallback strategies" description="Implement fallback to single-arch builds" />
+    </risk>
+
+    <risk id="R-4" description="Registry authentication and publishing failures" probability="low" impact="high">
+      <mitigation name="Credential management" description="Secure credential storage and rotation" />
+      <mitigation name="Retry mechanisms" description="Implement exponential backoff for registry operations" />
+      <mitigation name="Multi-registry support" description="Support multiple registries for redundancy" />
+    </risk>
+  </riskMitigation>
+
+  <successMetrics>
+    <technical>
+      <metric name="Build success rate" target="&gt; 95%" description="Percentage of successful container builds" />
+      <metric name="Security scan pass rate" target="100%" description="Images passing security scans" />
+      <metric name="Average image size" target="&lt; 150MB" description="Mean image size across all packages" />
+      <metric name="Build time" target="&lt; 10min" description="Average build time per architecture" />
+      <metric name="Layer efficiency" target="&gt; 80%" description="Percentage of efficient layers" />
+    </technical>
+
+    <operational>
+      <metric name="Deployment frequency" target="Daily" description="Frequency of image updates" />
+      <metric name="Registry uptime" target="99.9%" description="Container registry availability" />
+      <metric name="Pull success rate" target="&gt; 99%" description="Successful image pulls" />
+      <metric name="Vulnerability remediation time" target="&lt; 24h" description="Time to fix security issues" />
+    </operational>
+
+    <business>
+      <metric name="Adoption rate" target="&gt; 80%" description="Teams using containerized deployment" />
+      <metric name="Deployment time reduction" target="&gt; 60%" description="Reduction in deployment time" />
+      <metric name="Security incident reduction" target="&gt; 90%" description="Reduction in security incidents" />
+    </business>
+  </successMetrics>
+
+  <dependencies>
+    <internal>
+      <dependency name="Package build system" description="Completed TypeScript compilation and bundling" />
+      <dependency name="Configuration management" description="Unified configuration system for containers" />
+      <dependency name="Logging system" description="Structured logging for containerized environments" />
+      <dependency name="Health monitoring" description="Health check endpoints for all services" />
+    </internal>
+
+    <external>
+      <dependency name="Docker ecosystem" description="Docker Engine, Buildx, and Registry" />
+      <dependency name="Container registries" description="Docker Hub, GitHub Container Registry" />
+      <dependency name="Security tools" description="Trivy, Snyk, and vulnerability databases" />
+      <dependency name="CI/CD platform" description="GitHub Actions or equivalent" />
+    </external>
+  </dependencies>
+
+  <timeline>
+    <phase name="Infrastructure Setup" duration="2 days">
+      <task name="Set up Docker Buildx and QEMU" />
+      <task name="Configure multi-architecture build environment" />
+      <task name="Set up security scanning tools" />
+    </phase>
+
+    <phase name="Dockerfile Generation" duration="3 days">
+      <task name="Create Dockerfile templates for each package type" />
+      <task name="Implement automated Dockerfile generation" />
+      <task name="Add multi-stage build optimization" />
+    </phase>
+
+    <phase name="Build Pipeline" duration="3 days">
+      <task name="Create GitHub Actions workflow for building" />
+      <task name="Implement multi-architecture builds" />
+      <task name="Add caching and optimization strategies" />
+    </phase>
+
+    <phase name="Security Integration" duration="2 days">
+      <task name="Integrate Trivy vulnerability scanning" />
+      <task name="Add Snyk Container scanning" />
+      <task name="Implement security policy enforcement" />
+    </phase>
+
+    <phase name="Registry Publishing" duration="2 days">
+      <task name="Configure multi-registry publishing" />
+      <task name="Implement version tagging strategy" />
+      <task name="Add image signing and provenance" />
+    </phase>
+
+    <phase name="Testing & Validation" duration="3 days">
+      <task name="Test all container images" />
+      <task name="Validate security scanning results" />
+      <task name="Performance testing and optimization" />
+    </phase>
+
+    <phase name="Documentation & Release" duration="1 day">
+      <task name="Create deployment documentation" />
+      <task name="Publish first production images" />
+      <task name="Create getting started guide" />
+    </phase>
+  </timeline>
+</storyContext>

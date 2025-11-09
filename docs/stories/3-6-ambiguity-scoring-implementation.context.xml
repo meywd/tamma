@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="3-6-ambiguity-scoring-implementation">
+  <metadata>
+    <title>Story 3.6: Ambiguity Scoring Implementation</title>
+    <epic>Epic 3 - Quality Gates & Intelligence Layer</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want ambiguity scoring system to quantify requirement clarity</action>
+    <benefit>so that I can prioritize clarification efforts and measure improvement</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System analyzes requirements and calculates ambiguity scores (0-1 scale)</criterion>
+    <criterion id="2">Scoring considers multiple factors (vagueness, completeness, consistency)</criterion>
+    <criterion id="3">System identifies specific ambiguity sources and their impact</criterion>
+    <criterion id="4">Scores are tracked over time to show improvement trends</criterion>
+    <criterion id="5">System provides recommendations for reducing ambiguity</criterion>
+    <criterion id="6">Scoring process and results logged to event trail</criterion>
+    <criterion id="7">Integration test validates ambiguity scoring accuracy</criterion>
+    <criterion id="8">System handles edge cases and ambiguous scoring itself</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="AmbiguityScorer">
+        <interface>IAmbiguityScorer</interface>
+        <methods>
+          <method name="calculateAmbiguityScore" returns="AmbiguityScore">
+            <parameter name="requirements" type="Requirement[]"/>
+            <parameter name="context" type="ScoringContext"/>
+          </method>
+          <method name="analyzeAmbiguityFactors" returns="AmbiguityFactor[]">
+            <parameter name="text" type="string"/>
+            <parameter name="context" type="ScoringContext"/>
+          </method>
+          <method name="identifyAmbiguitySources" returns="AmbiguitySource[]">
+            <parameter name="requirements" type="Requirement[]"/>
+          </method>
+          <method name="generateRecommendations" returns="Recommendation[]">
+            <parameter name="score" type="AmbiguityScore"/>
+            <parameter name="factors" type="AmbiguityFactor[]"/>
+          </method>
+          <method name="trackScoreHistory" returns="ScoreHistory">
+            <parameter name="issueId" type="string"/>
+            <parameter name="score" type="AmbiguityScore"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="AmbiguityScore">
+        <fields>
+          <field name="overallScore" type="number"/>
+          <field name="vaguenessScore" type="number"/>
+          <field name="completenessScore" type="number"/>
+          <field name="consistencyScore" type="number"/>
+          <field name="specificityScore" type="number"/>
+          <field name="measurabilityScore" type="number"/>
+          <field name="factors" type="AmbiguityFactor[]"/>
+          <field name="sources" type="AmbiguitySource[]"/>
+          <field name="confidence" type="number"/>
+          <field name="calculatedAt" type="Date"/>
+        </fields>
+      </interface>
+
+      <interface name="AmbiguityFactor">
+        <fields>
+          <field name="type" type="string"/>
+          <field name="name" type="string"/>
+          <field name="description" type="string"/>
+          <field name="score" type="number"/>
+          <field name="weight" type="number"/>
+          <field name="evidence" type="Evidence[]"/>
+          <field name="impact" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="AmbiguitySource">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="type" type="string"/>
+          <field name="location" type="TextLocation"/>
+          <field name="text" type="string"/>
+          <field name="issue" type="string"/>
+          <field name="severity" type="string"/>
+          <field name="suggestedFix" type="string"/>
+          <field name="examples" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="TextLocation">
+        <fields>
+          <field name="file" type="string"/>
+          <field name="line" type="number"/>
+          <field name="column" type="number"/>
+          <field name="length" type="number"/>
+          <field name="context" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="Evidence">
+        <fields>
+          <field name="type" type="string"/>
+          <field name="description" type="string"/>
+          <field name="text" type="string"/>
+          <field name="confidence" type="number"/>
+          <field name="source" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="Recommendation">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="type" type="string"/>
+          <field name="priority" type="string"/>
+          <field name="description" type="string"/>
+          <field name="action" type="string"/>
+          <field name="expectedImpact" type="number"/>
+          <field name="effort" type="string"/>
+          <field name="examples" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="ScoreHistory">
+        <fields>
+          <field name="issueId" type="string"/>
+          <field name="scores" type="HistoricalScore[]"/>
+          <field name="trend" type="Trend"/>
+          <field name="improvement" type="number"/>
+          <field name="averageScore" type="number"/>
+        </fields>
+      </interface>
+
+      <interface name="HistoricalScore">
+        <fields>
+          <field name="score" type="number"/>
+          <field name="calculatedAt" type="Date"/>
+          <field name="version" type="string"/>
+          <field name="changes" type="string[]"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Text Analysis">
+        <description>Analyze requirement text for ambiguity indicators</description>
+        <components>
+          <component>Natural language processing</component>
+          <component>Semantic analysis</component>
+          <component>Syntactic analysis</component>
+          <component>Pattern recognition</component>
+        </components>
+      </phase>
+
+      <phase name="Factor Calculation">
+        <description>Calculate individual ambiguity factors</description>
+        <components>
+          <component>Vagueness detection</component>
+          <component>Completeness assessment</component>
+          <component>Consistency checking</component>
+          <component>Specificity measurement</component>
+        </components>
+      </phase>
+
+      <phase name="Score Aggregation">
+        <description>Combine factors into overall ambiguity score</description>
+        <components>
+          <component>Weighted scoring</component>
+          <component>Confidence calculation</component>
+          <component>Normalization</component>
+          <component>Trend analysis</component>
+        </components>
+      </phase>
+
+      <phase name="Recommendation Generation">
+        <description>Generate recommendations for reducing ambiguity</description>
+        <components>
+          <component>Pattern-based recommendations</component>
+          <component>Impact assessment</component>
+          <component>Effort estimation</component>
+          <component>Example generation</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="AI Provider">
+        <description>Use AI for natural language processing</description>
+        <capabilities>
+          <capability>Semantic analysis</capability>
+          <capability>Context understanding</capability>
+          <capability>Pattern recognition</capability>
+          <capability>Recommendation generation</capability>
+        </capabilities>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for scoring activities</description>
+        <events>
+          <event>AMBIGUITY.SCORE.CALCULATED</event>
+          <event>AMBIGUITY.FACTOR.ANALYZED</event>
+          <event>AMBIGUITY.RECOMMENDATION.GENERATED</event>
+          <event>AMBIGUITY.TREND.UPDATED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="AmbiguityScorer">
+          <test>calculate accurate ambiguity scores</test>
+          <test>analyze ambiguity factors correctly</test>
+          <test>identify ambiguity sources</test>
+          <test>generate relevant recommendations</test>
+          <test>track score history</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>score real requirements</test>
+        <test>track improvement over time</test>
+        <test>recommendation effectiveness</test>
+        <test>edge case handling</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="scoring_weights">
+        <setting name="vagueness_weight" default="0.3"/>
+        <setting name="completeness_weight" default="0.25"/>
+        <setting name="consistency_weight" default="0.2"/>
+        <setting name="specificity_weight" default="0.15"/>
+        <setting name="measurability_weight" default="0.1"/>
+      </section>
+
+      <section name="thresholds">
+        <setting name="high_ambiguity" default="0.7"/>
+        <setting name="medium_ambiguity" default="0.4"/>
+        <setting name="low_ambiguity" default="0.2"/>
+        <setting name="confidence_threshold" default="0.8"/>
+      </section>
+
+      <section name="recommendations">
+        <setting name="max_recommendations" default="5"/>
+        <setting name="min_impact_threshold" default="0.1"/>
+        <setting name="include_examples" default="true"/>
+        <setting name="prioritize_by_effort" default="true"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="text_analysis" metric="time" value="&lt; 10 seconds"/>
+      <target name="factor_calculation" metric="time" value="&lt; 15 seconds"/>
+      <target name="score_aggregation" metric="time" value="&lt; 5 seconds"/>
+      <target name="recommendation_generation" metric="time" value="&lt; 10 seconds"/>
+    </performance-targets>
+
+    <ambiguity-factors>
+      <factor name="vagueness">
+        <description>Use of unclear or imprecise language</description>
+        <indicators>maybe, possibly, about, approximately, some</indicators>
+        <weight>0.3</weight>
+      </factor>
+      <factor name="incompleteness">
+        <description>Missing information or requirements</description>
+        <indicators>incomplete lists, missing edge cases, undefined behavior</indicators>
+        <weight>0.25</weight>
+      </factor>
+      <factor name="inconsistency">
+        <description>Contradictory or conflicting statements</description>
+        <indicators>contradictory conditions, conflicting requirements</indicators>
+        <weight>0.2</weight>
+      </factor>
+      <factor name="lack_specificity">
+        <description>General statements without specific details</description>
+        <indicators>good, fast, user-friendly, efficient</indicators>
+        <weight>0.15</weight>
+      </factor>
+      <factor name="non_measurable">
+        <description>Criteria that cannot be objectively measured</description>
+        <indicators>better, improved, optimized, enhanced</indicators>
+        <weight>0.1</weight>
+      </factor>
+    </ambiguity-factors>
+
+    <scoring-algorithm>
+      <step name="text_preprocessing">Clean and normalize input text</step>
+      <step name="factor_analysis">Calculate individual ambiguity factors</step>
+      <step name="weight_application">Apply configured weights to factors</step>
+      <step name="score_aggregation">Combine weighted factors into overall score</step>
+      <step name="confidence_calculation">Calculate confidence in scoring accuracy</step>
+      <step name="trend_analysis">Analyze historical trends</step>
+    </scoring-algorithm>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Accurate natural language processing</consideration>
+      <consideration priority="2">Comprehensive factor analysis</consideration>
+      <consideration priority="3">Configurable scoring weights</consideration>
+      <consideration priority="4">Historical trend tracking</consideration>
+      <consideration priority="5">Actionable recommendations</consideration>
+      <consideration priority="6">Confidence assessment</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

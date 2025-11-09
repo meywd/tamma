@@ -1,0 +1,631 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>6</epicId>
+    <storyId>2</storyId>
+    <title>Organization Dashboard</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-09T15:30:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/6-2-organization-dashboard.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>an organization member</asA>
+    <iWant>a private dashboard to manage our benchmarks and results</iWant>
+    <soThat>our team can track performance and collaborate effectively</soThat>
+    <tasks>- Task 1: Organization-Specific Data Isolation (AC: 1)
+  - Subtask 1.1: Create organization-scoped data queries
+  - Subtask 1.2: Implement data filtering by organization ID
+  - Subtask 1.3: Add organization context to all API calls
+  - Subtask 1.4: Test data isolation between organizations
+- Task 2: Custom Benchmark Management Interface (AC: 2)
+  - Subtask 2.1: Create benchmark creation wizard for organizations
+  - Subtask 2.2: Implement benchmark template system
+  - Subtask 2.3: Add benchmark scheduling and configuration
+  - Subtask 2.4: Create benchmark cloning and modification tools
+- Task 3: Team Member Management System (AC: 3)
+  - Subtask 3.1: Create user invitation and onboarding flow
+  - Subtask 3.2: Implement role-based permission system
+  - Subtask 3.3: Add team member directory and profiles
+  - Subtask 3.4: Create role assignment and management interface
+- Task 4: Private Result Comparison Tools (AC: 4)
+  - Subtask 4.1: Build organization-specific result views
+  - Subtask 4.2: Implement side-by-side comparison features
+  - Subtask 4.3: Add organization performance analytics
+  - Subtask 4.4: Create custom report generation
+- Task 5: Organization Settings and Preferences (AC: 5)
+  - Subtask 5.1: Create organization settings dashboard
+  - Subtask 5.2: Implement preference management system
+  - Subtask 5.3: Add organization branding options
+  - Subtask 5.4: Create notification and alert settings
+- Task 6: Usage Analytics and Reporting (AC: 6)
+  - Subtask 6.1: Implement usage tracking and metrics collection
+  - Subtask 6.2: Create analytics dashboard for organization admins
+  - Subtask 6.3: Add custom report generation and scheduling
+  - Subtask 6.4: Implement data export and sharing features
+- Task 7: Organization SSO Integration (AC: 7)
+  - Subtask 7.1: Implement SAML 2.0 integration
+  - Subtask 7.2: Add OAuth 2.0 / OpenID Connect support
+  - Subtask 7.3: Create just-in-time user provisioning
+  - Subtask 7.4: Implement group-based role assignment
+- Task 8: White-Label Customization Options (AC: 8)
+  - Subtask 8.1: Create custom branding configuration
+  - Subtask 8.2: Implement custom domain support
+  - Subtask 8.3: Add white-label email templates
+  - Subtask 8.4: Create custom CSS injection system</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Organization-specific benchmark results
+2. Custom benchmark creation and management
+3. Team member management and role assignment
+4. Private result comparison tools
+5. Organization settings and preferences
+6. Usage analytics and reporting
+7. Integration with organization SSO
+8. White-label customization options</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown - Story 6.2</title>
+        <section>Story 6.2: Organization Dashboard</section>
+        <snippet>As an organization member, I want a private dashboard to manage our benchmarks and results, So that our team can track performance and collaborate effectively.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Integration Architecture</section>
+        <snippet>Multi-tenancy with organization-scoped data isolation, Role-based access control with granular permissions, Enterprise authentication integration with SAML and OAuth, White-label support with customizable branding.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Widget-based layout with drag-and-drop arrangement, Interactive charts using D3.js and Chart.js, Real-time metrics with live data streaming, Performance optimization with virtual scrolling.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Frontend Architecture</section>
+        <snippet>React-based SPA with component-based architecture, Centralized state management with Redux Toolkit, WebSocket integration for live dashboard updates, Mobile-first responsive design with progressive enhancement, WCAG 2.1 AA compliance with comprehensive keyboard navigation.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements - Enterprise Features</title>
+        <section>Organization Management</section>
+        <snippet>Private workspaces with team collaboration, Role-based access control, Custom benchmark creation, Usage analytics and reporting, Enterprise SSO integration.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements - SaaS B2B Features</title>
+        <section>Multi-Tenancy Architecture</section>
+        <snippet>Organization-based isolation: Each customer has private workspaces and data, Role-based access control: Admin, Developer, Viewer roles with appropriate permissions, Resource quotas: Tier-based limits on benchmark executions, API calls, and data retention, White-label options: Enterprise customers can brand their benchmark dashboards.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/stories/1-3-organization-management-multi-tenancy.md</path>
+        <title>Story 1.3: Organization Management & Multi-Tenancy</title>
+        <section>Foundation for Organization Dashboard</section>
+        <snippet>Organization creation with name, description, and settings, Role-based access control (Admin, Developer, Viewer), Team member invitation system with email invitations, Organization-scoped data isolation in all queries, Organization settings management (quotas, branding), User can belong to multiple organizations with role switching, Audit logging for organization management actions, Resource quota enforcement and monitoring.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/stories/6-1-public-leaderboard.md</path>
+        <title>Story 6.1: Public Leaderboard</title>
+        <section>Dashboard Framework Foundation</section>
+        <snippet>React-based SPA: Use modern single-page application with component-based architecture, State Management: Implement centralized state management with Redux Toolkit for complex UI state, Real-time Updates: WebSocket integration for live dashboard updates and notifications, Responsive Design: Mobile-first responsive design with progressive enhancement, Accessibility: WCAG 2.1 AA compliance with comprehensive keyboard navigation.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <codefile>
+        <path>packages/dashboard/package.json</path>
+        <kind>package</kind>
+        <symbol>dashboard</symbol>
+        <lines>1-20</lines>
+        <reason>Dashboard package contains React components for organization dashboard and management interfaces</reason>
+      </codefile>
+      <codefile>
+        <path>packages/api/package.json</path>
+        <kind>package</kind>
+        <symbol>api</symbol>
+        <lines>1-20</lines>
+        <reason>API package handles organization management, authentication, and data isolation endpoints</reason>
+      </codefile>
+      <codefile>
+        <path>src/organizations/</path>
+        <kind>directory</kind>
+        <symbol>organization-service</symbol>
+        <lines>1-50</lines>
+        <reason>Organization service and controllers for multi-tenancy and team management</reason>
+      </codefile>
+      <codefile>
+        <path>src/middleware/</path>
+        <kind>directory</kind>
+        <symbol>tenant-context</symbol>
+        <lines>1-30</lines>
+        <reason>Tenant context and RBAC middleware for organization-scoped data access</reason>
+      </codefile>
+      <codefile>
+        <path>src/components/organization/</path>
+        <kind>directory</kind>
+        <symbol>organization-components</symbol>
+        <lines>1-100</lines>
+        <reason>React components for organization dashboard, team management, and settings</reason>
+      </codefile>
+      <codefile>
+        <path>src/services/organizationService.js</path>
+        <kind>service</kind>
+        <symbol>organization-api</symbol>
+        <lines>1-200</lines>
+        <reason>API service layer for organization management, benchmark operations, and analytics</reason>
+      </codefile>
+      <codefile>
+        <path>src/store/slices/organizationSlice.js</path>
+        <kind>state</kind>
+        <symbol>organization-state</symbol>
+        <lines>1-150</lines>
+        <reason>Redux Toolkit slice for organization dashboard state management</reason>
+      </codefile>
+      <codefile>
+        <path>src/auth/sso/</path>
+        <kind>directory</kind>
+        <symbol>sso-integration</symbol>
+        <lines>1-80</lines>
+        <reason>SSO integration components for SAML and OAuth authentication</reason>
+      </codefile>
+      <codefile>
+        <path>database/migrations/</path>
+        <kind>directory</kind>
+        <symbol>organization-schema</symbol>
+        <lines>1-40</lines>
+        <reason>Database migrations for organization tables and RLS policies</reason>
+      </codefile>
+    </code>
+    <dependencies>
+      <ecosystem>React</ecosystem>
+      <packages>
+        <package name="react" version="^18.2.0" />
+        <package name="react-dom" version="^18.2.0" />
+        <package name="@reduxjs/toolkit" version="^2.0.1" />
+        <package name="react-redux" version="^9.0.4" />
+        <package name="d3" version="^7.8.5" />
+        <package name="chart.js" version="^4.4.0" />
+        <package name="react-chartjs-2" version="^5.2.0" />
+        <package name="react-grid-layout" version="^1.4.4" />
+        <package name="styled-components" version="^6.1.1" />
+        <package name="passport-saml" version="^3.2.4" />
+        <package name="passport-openidconnect" version="^0.1.0" />
+        <package name="react-router-dom" version="^6.8.0" />
+        <package name="axios" version="^1.3.0" />
+        <package name="socket.io-client" version="^4.6.0" />
+        <package name="date-fns" version="^2.29.0" />
+        <package name="react-hook-form" version="^7.43.0" />
+        <package name="react-query" version="^3.39.0" />
+      </packages>
+      <database>
+        <db name="PostgreSQL" version="17" />
+        <db name="Redis" version="7.x" />
+        <db name="TimescaleDB" version="2.x" />
+      </database>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Multi-tenancy: Organization-scoped data isolation with proper security boundaries using PostgreSQL RLS policies</constraint>
+    <constraint>Role-based Access Control: Granular permissions system with role inheritance (Admin, Developer, Viewer)</constraint>
+    <constraint>SSO Integration: Enterprise authentication integration with SAML 2.0 and OAuth 2.0 / OpenID Connect</constraint>
+    <constraint>White-label Support: Customizable branding and theming system with custom domain support</constraint>
+    <constraint>Data Privacy: Complete data isolation between organizations with comprehensive audit logging</constraint>
+    <constraint>Performance: Efficient querying with organization-specific indexing and Redis caching for dashboard responsiveness</constraint>
+    <constraint>Security: Row-level security policies, encrypted sensitive data, comprehensive audit trails, and secure API key management</constraint>
+    <constraint>Scalability: Support for large organizations with many users and benchmarks through horizontal scaling</constraint>
+    <constraint>Real-time Updates: WebSocket integration for live dashboard updates and notifications</constraint>
+    <constraint>Accessibility: WCAG 2.1 AA compliance with comprehensive keyboard navigation and screen reader support</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>OrganizationService</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface OrganizationService {
+  getOrganizationData(orgId: string, userId: string): Promise&lt;OrganizationData&gt;;
+  createBenchmark(orgId: string, benchmark: BenchmarkConfig): Promise&lt;Benchmark&gt;;
+  manageTeamMembers(orgId: string, operations: TeamOperations): Promise&lt;void&gt;;
+  getUsageAnalytics(orgId: string, filters: AnalyticsFilters): Promise&lt;UsageAnalytics&gt;;
+  updateSettings(orgId: string, settings: OrganizationSettings): Promise&lt;void&gt;;
+  inviteUsers(orgId: string, invitations: UserInvitation[]): Promise&lt;InvitationResult&gt;;
+  updateMemberRole(orgId: string, userId: string, role: OrganizationRole): Promise&lt;void&gt;;
+  getOrganizationResults(orgId: string, filters: ResultFilters): Promise&lt;BenchmarkResult[]&gt;;
+  exportData(orgId: string, exportConfig: ExportConfig): Promise&lt;ExportResult&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>OrganizationData</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface OrganizationData {
+  id: string;
+  name: string;
+  description: string;
+  settings: OrganizationSettings;
+  benchmarks: Benchmark[];
+  teamMembers: TeamMember[];
+  usage: UsageMetrics;
+  analytics: OrganizationAnalytics;
+  branding: BrandingConfig;
+  subscription: SubscriptionInfo;
+  createdAt: Date;
+  updatedAt: Date;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>TeamMember</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface TeamMember {
+  id: string;
+  userId: string;
+  email: string;
+  name: string;
+  avatar?: string;
+  role: OrganizationRole;
+  permissions: Permission[];
+  joinedAt: Date;
+  lastActive: Date;
+  status: MemberStatus;
+  invitationStatus?: InvitationStatus;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>OrganizationSettings</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface OrganizationSettings {
+  branding: BrandingConfig;
+  sso: SSOConfig;
+  notifications: NotificationConfig;
+  preferences: OrganizationPreferences;
+  quotas: ResourceQuotas;
+  security: SecuritySettings;
+  integrations: IntegrationSettings;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>SSOConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface SSOConfig {
+  enabled: boolean;
+  provider: 'saml' | 'oidc';
+  config: SAMLConfig | OIDCConfig;
+  jitProvisioning: boolean;
+  groupMapping: Record&lt;string, OrganizationRole&gt;;
+  defaultRole: OrganizationRole;
+  autoJoin: boolean;
+  domainRestrictions: string[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>BrandingConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface BrandingConfig {
+  logo?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  customCSS?: string;
+  customDomain?: string;
+  favicon?: string;
+  theme: 'light' | 'dark' | 'auto';
+  companyName: string;
+  supportEmail?: string;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>UsageAnalytics</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface UsageAnalytics {
+  period: DateRange;
+  benchmarks: BenchmarkUsageMetrics;
+  apiCalls: APIUsageMetrics;
+  storage: StorageUsageMetrics;
+  users: UserUsageMetrics;
+  costs: CostMetrics;
+  performance: PerformanceMetrics;
+  trends: UsageTrends[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>BenchmarkConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface BenchmarkConfig {
+  name: string;
+  description: string;
+  scenario: BenchmarkScenario;
+  languages: ProgrammingLanguage[];
+  difficulty: DifficultyLevel;
+  customInstructions?: string;
+  providers: ProviderConfig[];
+  schedule?: ScheduleConfig;
+  notifications: NotificationConfig;
+  privacy: PrivacyConfig;
+  tags: string[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>DashboardWidgetConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface DashboardWidgetConfig {
+  id: string;
+  type: WidgetType;
+  title: string;
+  position: WidgetPosition;
+  size: WidgetSize;
+  config: WidgetSpecificConfig;
+  dataSource: DataSource;
+  refreshInterval: number;
+  permissions: WidgetPermissions;
+  organizationScoped: boolean;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+  </interfaces>
+
+  <implementation>
+    <architecture>
+      <pattern>Multi-tenant SaaS Architecture</pattern>
+      <description>Organization-based data isolation using PostgreSQL Row-Level Security (RLS) policies with tenant context middleware for automatic data filtering</description>
+    </architecture>
+    <architecture>
+      <pattern>React-based Dashboard Framework</pattern>
+      <description>Component-based SPA using Redux Toolkit for state management, with widget-based layout system and real-time WebSocket updates</description>
+    </architecture>
+    <architecture>
+      <pattern>Enterprise SSO Integration</pattern>
+      <description>SAML 2.0 and OAuth 2.0/OpenID Connect integration with just-in-time user provisioning and group-based role assignment</description>
+    </architecture>
+    <architecture>
+      <pattern>White-label Customization System</pattern>
+      <description>Configurable branding, custom domain support, and CSS injection for enterprise white-labeling requirements</description>
+    </architecture>
+    <projectStructure>
+      <directory name="src/components/organization/">
+        <purpose>React components for organization dashboard</purpose>
+        <files>
+          <file>OrganizationDashboard.tsx</file>
+          <file>TeamManagement.tsx</file>
+          <file>BenchmarkManagement.tsx</file>
+          <file>SettingsPanel.tsx</file>
+          <file>AnalyticsView.tsx</file>
+          <file>ResultComparison.tsx</file>
+          <file>SSOConfiguration.tsx</file>
+          <file>BrandingEditor.tsx</file>
+        </files>
+      </directory>
+      <directory name="src/services/organization/">
+        <purpose>API service layer for organization operations</purpose>
+        <files>
+          <file>organizationService.ts</file>
+          <file>teamService.ts</file>
+          <file>benchmarkService.ts</file>
+          <file>analyticsService.ts</file>
+          <file>settingsService.ts</file>
+          <file>ssoService.ts</file>
+        </files>
+      </directory>
+      <directory name="src/store/slices/organization/">
+        <purpose>Redux state management for organization features</purpose>
+        <files>
+          <file>organizationSlice.ts</file>
+          <file>teamSlice.ts</file>
+          <file>benchmarkSlice.ts</file>
+          <file>analyticsSlice.ts</file>
+          <file>settingsSlice.ts</file>
+        </files>
+      </directory>
+      <directory name="src/middleware/">
+        <purpose>Server-side middleware for organization context</purpose>
+        <files>
+          <file>tenantContext.ts</file>
+          <file>organizationAuth.ts</file>
+          <file>rbacMiddleware.ts</file>
+        </files>
+      </directory>
+      <directory name="src/auth/sso/">
+        <purpose>SSO integration components</purpose>
+        <files>
+          <file>SAMLProvider.ts</file>
+          <file>OIDCProvider.ts</file>
+          <file>JITProvisioning.ts</file>
+          <file>GroupMapping.ts</file>
+        </files>
+      </directory>
+    </projectStructure>
+    <apiEndpoints>
+      <endpoint method="GET" path="/api/v1/organizations/:orgId/dashboard">
+        <purpose>Get organization dashboard data</purpose>
+        <auth>Required</auth>
+        <permissions>organization.view</permissions>
+      </endpoint>
+      <endpoint method="POST" path="/api/v1/organizations/:orgId/benchmarks">
+        <purpose>Create custom benchmark</purpose>
+        <auth>Required</auth>
+        <permissions>benchmark.create</permissions>
+      </endpoint>
+      <endpoint method="GET" path="/api/v1/organizations/:orgId/team">
+        <purpose>Get team members</purpose>
+        <auth>Required</auth>
+        <permissions>team.view</permissions>
+      </endpoint>
+      <endpoint method="POST" path="/api/v1/organizations/:orgId/team/invite">
+        <purpose>Invite team members</purpose>
+        <auth>Required</auth>
+        <permissions>team.manage</permissions>
+      </endpoint>
+      <endpoint method="GET" path="/api/v1/organizations/:orgId/analytics">
+        <purpose>Get usage analytics</purpose>
+        <auth>Required</auth>
+        <permissions>analytics.view</permissions>
+      </endpoint>
+      <endpoint method="PUT" path="/api/v1/organizations/:orgId/settings">
+        <purpose>Update organization settings</purpose>
+        <auth>Required</auth>
+        <permissions>settings.manage</permissions>
+      </endpoint>
+      <endpoint method="POST" path="/api/v1/organizations/:orgId/sso/configure">
+        <purpose>Configure SSO</purpose>
+        <auth>Required</auth>
+        <permissions>sso.manage</permissions>
+      </endpoint>
+      <endpoint method="POST" path="/api/v1/organizations/:orgId/export">
+        <purpose>Export organization data</purpose>
+        <auth>Required</auth>
+        <permissions>data.export</permissions>
+      </endpoint>
+    </apiEndpoints>
+    <databaseSchema>
+      <table name="organizations">
+        <columns>
+          <column name="id" type="UUID" primary="true" />
+          <column name="name" type="VARCHAR(255)" notNull="true" />
+          <column name="description" type="TEXT" />
+          <column name="settings" type="JSONB" />
+          <column name="branding" type="JSONB" />
+          <column name="subscription_id" type="UUID" />
+          <column name="created_at" type="TIMESTAMP" default="NOW()" />
+          <column name="updated_at" type="TIMESTAMP" default="NOW()" />
+        </columns>
+        <indexes>
+          <index columns="name" />
+          <index columns="subscription_id" />
+        </indexes>
+      </table>
+      <table name="organization_members">
+        <columns>
+          <column name="id" type="UUID" primary="true" />
+          <column name="organization_id" type="UUID" notNull="true" />
+          <column name="user_id" type="UUID" notNull="true" />
+          <column name="role" type="VARCHAR(50)" notNull="true" />
+          <column name="permissions" type="JSONB" />
+          <column name="joined_at" type="TIMESTAMP" default="NOW()" />
+          <column name="last_active" type="TIMESTAMP" />
+        </columns>
+        <indexes>
+          <index columns="organization_id" />
+          <index columns="user_id" />
+          <index columns="role" />
+        </indexes>
+      </table>
+      <table name="organization_benchmarks">
+        <columns>
+          <column name="id" type="UUID" primary="true" />
+          <column name="organization_id" type="UUID" notNull="true" />
+          <column name="name" type="VARCHAR(255)" notNull="true" />
+          <column name="config" type="JSONB" notNull="true" />
+          <column name="created_by" type="UUID" notNull="true" />
+          <column name="created_at" type="TIMESTAMP" default="NOW()" />
+          <column name="updated_at" type="TIMESTAMP" default="NOW()" />
+        </columns>
+        <indexes>
+          <index columns="organization_id" />
+          <index columns="created_by" />
+        </indexes>
+      </table>
+      <table name="sso_configurations">
+        <columns>
+          <column name="id" type="UUID" primary="true" />
+          <column name="organization_id" type="UUID" notNull="true" />
+          <column name="provider" type="VARCHAR(50)" notNull="true" />
+          <column name="config" type="JSONB" notNull="true" />
+          <column name="enabled" type="BOOLEAN" default="true" />
+          <column name="created_at" type="TIMESTAMP" default="NOW()" />
+        </columns>
+        <indexes>
+          <index columns="organization_id" />
+          <index columns="provider" />
+        </indexes>
+      </table>
+    </databaseSchema>
+  </implementation>
+
+  <tests>
+    <standards>Unit tests for React components with Jest and React Testing Library, Integration tests for API integration and data flow, E2E tests for user workflows with Cypress or Playwright, Security tests for data isolation and permission boundaries, Performance tests for large datasets, Accessibility tests for WCAG compliance with axe-core, SSO integration tests with enterprise providers. Target: 80% line coverage, 75% branch coverage, 85% function coverage.</standards>
+    <locations>
+      <location>packages/dashboard/src/components/organization/**/*.test.tsx</location>
+      <location>packages/dashboard/src/services/organizationService.test.ts</location>
+      <location>packages/dashboard/src/store/slices/organizationSlice.test.ts</location>
+      <location>packages/dashboard/src/auth/sso/**/*.test.ts</location>
+      <location>packages/api/src/controllers/organization.test.ts</location>
+      <location>packages/api/src/middleware/tenantContext.test.ts</location>
+      <location>packages/api/src/middleware/rbac.test.ts</location>
+      <location>**/*.e2e.test.ts</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Test organization data isolation and security boundaries between different organizations</test>
+      <test idea="AC2">Test custom benchmark creation wizard with template system and scheduling</test>
+      <test idea="AC3">Test team member management workflows including invitation, role assignment, and permissions</test>
+      <test idea="AC4">Test private result comparison tools with side-by-side analytics and reporting</test>
+      <test idea="AC5">Test organization settings and preference management with branding customization</test>
+      <test idea="AC6">Test usage analytics dashboard with metrics collection and report generation</test>
+      <test idea="AC7">Test SSO integration with SAML and OIDC providers including JIT provisioning</test>
+      <test idea="AC8">Test white-label customization options including custom domains and CSS injection</test>
+      <test idea="Security">Test Row-Level Security policies prevent cross-organization data access</test>
+      <test idea="Performance">Test dashboard rendering performance with large datasets and real-time updates</test>
+      <test idea="Accessibility">Test WCAG 2.1 AA compliance with keyboard navigation and screen readers</test>
+    </ideas>
+  </tests>
+
+  <dependencies>
+    <prerequisites>
+      <story id="1.3">Organization Management & Multi-Tenancy - Foundation for organization data model and RBAC</story>
+      <story id="6.1">Public Leaderboard - Dashboard framework and component architecture</story>
+      <story id="4.7">User Benchmarking Dashboard - Benchmark management and result visualization</story>
+      <story id="5.5">Multi-Judge Score Aggregation - Scoring system for benchmark results</story>
+    </prerequisites>
+    <integration>
+      <component name="Organization Service">Leverages organization management from Story 1.3</component>
+      <component name="Dashboard Framework">Reuses dashboard components from Story 6.1</component>
+      <component name="Benchmark Engine">Integrates with benchmark execution from Story 4.7</component>
+      <component name="Scoring System">Uses multi-judge scoring from Story 5.5</component>
+    </integration>
+  </dependencies>
+
+  <security>
+    <consideration>Data Isolation</consideration>
+    <description>Implement PostgreSQL Row-Level Security (RLS) policies to ensure complete data isolation between organizations. All database queries must include organization context filtering.</description>
+    <consideration>Role-Based Access Control</consideration>
+    <description>Granular permission system with Admin, Developer, and Viewer roles. Permission checks must be enforced at both API and UI levels.</description>
+    <consideration>SSO Security</consideration>
+    <description>Secure SAML and OIDC integration with proper certificate validation, signature verification, and secure token handling.</description>
+    <consideration>Audit Logging</consideration>
+    <description>Comprehensive audit trail for all organization management actions, benchmark operations, and data access.</description>
+    <consideration>Input Validation</consideration>
+    <description>Validate all user inputs including organization settings, benchmark configurations, and team member data.</description>
+  </security>
+
+  <performance>
+    <requirement>Dashboard Load Time</requirement>
+    <description>Initial dashboard load must complete within 2 seconds, subsequent interactions under 500ms.</description>
+    <requirement>Real-time Updates</requirement>
+    <description>WebSocket updates must be delivered within 100ms of data changes.</description>
+    <requirement>Large Dataset Handling</requirement>
+    <description>Support organizations with 1000+ benchmarks and 100+ team members without performance degradation.</description>
+    <requirement>Database Optimization</requirement>
+    <description>Organization-specific indexing and query optimization for fast data retrieval.</description>
+  </performance>
+
+  <accessibility>
+    <standard>WCAG 2.1 AA</standard>
+    <requirement>Keyboard Navigation</requirement>
+    <description>All dashboard features must be fully operable via keyboard.</description>
+    <requirement>Screen Reader Support</requirement>
+    <description>Proper ARIA labels and semantic HTML structure for screen reader compatibility.</description>
+    <requirement>Color Contrast</requirement>
+    <description>Minimum 4.5:1 contrast ratios for all text elements.</description>
+    <requirement>Focus Management</requirement>
+    <description>Clear focus indicators and logical tab order throughout the interface.</description>
+  </accessibility>
+</story-context>

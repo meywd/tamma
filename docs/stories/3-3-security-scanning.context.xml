@@ -1,0 +1,1559 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>3-3</story-id>
+  <title>Security Scanning</title>
+  <epic>3</epic>
+  <theme>Quality Gates</theme>
+  <created-at>2025-11-08T14:00:00.000Z</created-at>
+  <updated-at>2025-11-08T14:00:00.000Z</updated-at>
+  
+  <summary>
+    Implements comprehensive security scanning system for code, dependencies, 
+    and artifacts. Provides vulnerability detection, security policy enforcement, 
+    and compliance checking with multiple scanning tools and integrations.
+  </summary>
+
+  <dependencies>
+    <dependency story-id="3-2">Artifact Management</dependency>
+    <dependency story-id="3-1">Build System Integration</dependency>
+    <dependency story-id="2-5">Quality Gate Integration</dependency>
+  </dependencies>
+
+  <acceptance-criteria>
+    <criteria id="AC1" priority="MUST">
+      Scan code for security vulnerabilities and issues
+    </criteria>
+    <criteria id="AC2" priority="MUST">
+      Scan dependencies for known vulnerabilities (CVEs)
+    </criteria>
+    <criteria id="AC3" priority="MUST">
+      Support multiple security scanning tools (SAST, DAST, SCA)
+    </criteria>
+    <criteria id="AC4" priority="MUST">
+      Enforce security policies and compliance requirements
+    </criteria>
+    <criteria id="AC5" priority="SHOULD">
+      Provide security risk assessment and scoring
+    </criteria>
+    <criteria id="AC6" priority="SHOULD">
+      Support custom security rules and policies
+    </criteria>
+    <criteria id="AC7" priority="COULD">
+      Implement security trend analysis and reporting
+    </criteria>
+    <criteria id="AC8" priority="COULD">
+      Provide security remediation recommendations
+    </criteria>
+  </acceptance-criteria>
+
+  <technical-context>
+    <data-models>
+      <model name="SecurityScan">
+        <description>Represents a security scan execution</description>
+        <fields>
+          <field name="id" type="string" required="true">Unique scan identifier</field>
+          <field name="type" type="ScanType" required="true">Scan type</field>
+          <field name="target" type="ScanTarget" required="true">Scan target</field>
+          <field name="tools" type="ScanTool[]" required="true">Scanning tools used</field>
+          <field name="config" type="ScanConfig" required="true">Scan configuration</field>
+          <field name="status" type="ScanStatus" required="true">Scan status</field>
+          <field name="startTime" type="string" required="true">Start timestamp</field>
+          <field name="endTime" type="string" required="false">End timestamp</field>
+          <field name="duration" type="number" required="false">Duration in seconds</field>
+          <field name="results" type="ScanResult" required="true">Scan results</field>
+          <field name="policy" type="SecurityPolicy" required="false">Applied security policy</field>
+          <field name="compliance" type="ComplianceResult" required="false">Compliance results</field>
+          <field name="metadata" type="Record&lt;string, unknown&gt;" required="false">Additional metadata</field>
+        </fields>
+      </model>
+
+      <model name="ScanType">
+        <description>Enumeration of scan types</description>
+        <values>
+          <value>SAST</value>
+          <value>DAST</value>
+          <value>SCA</value>
+          <value>CONTAINER</value>
+          <value>INFRASTRUCTURE</value>
+          <value>SECRET</value>
+          <value>LICENSE</value>
+          <value>COMPLIANCE</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="ScanTarget">
+        <description>Scan target configuration</description>
+        <fields>
+          <field name="type" type="TargetType" required="true">Target type</field>
+          <field name="location" type="string" required="true">Target location</field>
+          <field name="branch" type="string" required="false">Target branch</field>
+          <field name="commit" type="string" required="false">Target commit</field>
+          <field name="paths" type="string[]" required="false">Specific paths to scan</field>
+          <field name="excludePaths" type="string[]" required="false">Paths to exclude</field>
+          <field name="environment" type="string" required="false">Target environment</field>
+        </fields>
+      </model>
+
+      <model name="TargetType">
+        <description>Enumeration of target types</description>
+        <values>
+          <value>REPOSITORY</value>
+          <value>ARTIFACT</value>
+          <value>CONTAINER_IMAGE</value>
+          <value>DEPLOYMENT</value>
+          <value>INFRASTRUCTURE</value>
+          <value>FILE</value>
+          <value>DIRECTORY</value>
+          <value>URL</value>
+        </values>
+      </model>
+
+      <model name="ScanTool">
+        <description>Scanning tool configuration</description>
+        <fields>
+          <field name="name" type="string" required="true">Tool name</field>
+          <field name="version" type="string" required="false">Tool version</field>
+          <field name="type" type="ScanType" required="true">Tool type</field>
+          <field name="config" type="Record&lt;string, unknown&gt;" required="false">Tool configuration</field>
+          <field name="enabled" type="boolean" required="true">Tool enabled</field>
+          <field name="priority" type="number" required="false">Tool priority</field>
+        </fields>
+      </model>
+
+      <model name="ScanConfig">
+        <description>Scan configuration</description>
+        <fields>
+          <field name="depth" type="number" required="false">Scan depth</field>
+          <field name="parallel" type="boolean" required="true">Parallel scanning</field>
+          <field name="failOn" type="FailOnConfig" required="false">Failure criteria</field>
+          <field name="timeout" type="number" required="false">Scan timeout in seconds</field>
+          <field name="language" type="string[]" required="false">Target languages</field>
+          <field name="severity" type="SeverityLevel[]" required="false">Severity levels to include</field>
+          <field name="rules" type="string[]" required="false">Specific rules to run</field>
+          <field name="excludeRules" type="string[]" required="false">Rules to exclude</field>
+        </fields>
+      </model>
+
+      <model name="FailOnConfig">
+        <description>Failure criteria configuration</description>
+        <fields>
+          <field name="severity" type="SeverityLevel" required="false">Fail on severity level</field>
+          <field name="count" type="number" required="false">Fail on issue count</field>
+          <field name="newIssues" type="boolean" required="true">Fail on new issues only</field>
+          <field name="compliance" type="boolean" required="true">Fail on compliance failures</field>
+        </fields>
+      </model>
+
+      <model name="SeverityLevel">
+        <description>Enumeration of severity levels</description>
+        <values>
+          <value>CRITICAL</value>
+          <value>HIGH</value>
+          <value>MEDIUM</value>
+          <value>LOW</value>
+          <value>INFO</value>
+        </values>
+      </model>
+
+      <model name="ScanStatus">
+        <description>Enumeration of scan statuses</description>
+        <values>
+          <value>PENDING</value>
+          <value>RUNNING</value>
+          <value>COMPLETED</value>
+          <value>FAILED</value>
+          <value>CANCELLED</value>
+          <value>TIMEOUT</value>
+        </values>
+      </model>
+
+      <model name="ScanResult">
+        <description>Security scan results</description>
+        <fields>
+          <field name="summary" type="ScanSummary" required="true">Scan summary</field>
+          <field name="issues" type="SecurityIssue[]" required="true">Security issues found</field>
+          <field name="metrics" type="SecurityMetrics" required="true">Security metrics</field>
+          <field name="trends" type="SecurityTrend[]" required="false">Security trends</field>
+          <field name="recommendations" type="SecurityRecommendation[]" required="false">Security recommendations</field>
+          <field name="reports" type="ScanReport[]" required="false">Generated reports</field>
+        </fields>
+      </model>
+
+      <model name="ScanSummary">
+        <description>Scan execution summary</description>
+        <fields>
+          <field name="totalIssues" type="number" required="true">Total issues found</field>
+          <field name="criticalIssues" type="number" required="true">Critical issues</field>
+          <field name="highIssues" type="number" required="true">High issues</field>
+          <field name="mediumIssues" type="number" required="true">Medium issues</field>
+          <field name="lowIssues" type="number" required="true">Low issues</field>
+          <field name="infoIssues" type="number" required="true">Info issues</field>
+          <field name="newIssues" type="number" required="true">New issues</field>
+          <field name="fixedIssues" type="number" required="true">Fixed issues</field>
+          <field name="riskScore" type="number" required="true">Overall risk score</field>
+          <field name="complianceScore" type="number" required="true">Compliance score</field>
+        </fields>
+      </model>
+
+      <model name="SecurityIssue">
+        <description>Security issue found during scan</description>
+        <fields>
+          <field name="id" type="string" required="true">Issue identifier</field>
+          <field name="title" type="string" required="true">Issue title</field>
+          <field name="description" type="string" required="true">Issue description</field>
+          <field name="type" type="IssueType" required="true">Issue type</field>
+          <field name="severity" type="SeverityLevel" required="true">Issue severity</field>
+          <field name="confidence" type="ConfidenceLevel" required="true">Confidence level</field>
+          <field name="cve" type="string" required="false">CVE identifier</field>
+          <field name="owasp" type="string" required="false">OWASP category</field>
+          <field name="cwe" type="string" required="false">CWE identifier</field>
+          <field name="tool" type="string" required="true">Tool that found issue</field>
+          <field name="location" type="IssueLocation" required="true">Issue location</field>
+          <field name="evidence" type="string" required="false">Supporting evidence</field>
+          <field name="remediation" type="RemediationInfo" required="false">Remediation information</field>
+          <field name="references" type="string[]" required="false">Reference URLs</field>
+          <field name="firstSeen" type="string" required="true">First seen timestamp</field>
+          <field name="lastSeen" type="string" required="true">Last seen timestamp</field>
+          <field name="status" type="IssueStatus" required="true">Issue status</field>
+          <field name="falsePositive" type="boolean" required="true">Marked as false positive</field>
+          <field name="suppressed" type="boolean" required="true">Issue suppressed</field>
+          <field name="assignee" type="string" required="false">Issue assignee</field>
+          <field name="tags" type="string[]" required="false">Issue tags</field>
+        </fields>
+      </model>
+
+      <model name="IssueType">
+        <description>Enumeration of issue types</description>
+        <values>
+          <value>VULNERABILITY</value>
+          <value>WEAKNESS</value>
+          <value>MISCONFIGURATION</value>
+          <value>SECRET</value>
+          <value>LICENSE</value>
+          <value>DEPENDENCY</value>
+          <value>CODE_SMELL</value>
+          <value>COMPLIANCE</value>
+          <value>POLICY</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="ConfidenceLevel">
+        <description>Enumeration of confidence levels</description>
+        <values>
+          <value>HIGH</value>
+          <value>MEDIUM</value>
+          <value>LOW</value>
+          <value>UNKNOWN</value>
+        </values>
+      </model>
+
+      <model name="IssueLocation">
+        <description>Issue location information</description>
+        <fields>
+          <field name="file" type="string" required="true">File path</field>
+          <field name="line" type="number" required="false">Line number</field>
+          <field name="column" type="number" required="false">Column number</field>
+          <field name="function" type="string" required="false">Function name</field>
+          <field name="class" type="string" required="false">Class name</field>
+          <field name="method" type="string" required="false">Method name</field>
+          <field name="package" type="string" required="false">Package name</field>
+          <field name="url" type="string" required="false">URL for web issues</field>
+          <field name="startLine" type="number" required="false">Start line for multi-line issues</field>
+          <field name="endLine" type="number" required="false">End line for multi-line issues</field>
+        </fields>
+      </model>
+
+      <model name="RemediationInfo">
+        <description>Remediation information</description>
+        <fields>
+          <field name="type" type="RemediationType" required="true">Remediation type</field>
+          <field name="description" type="string" required="true">Remediation description</field>
+          <field name="steps" type="string[]" required="false">Remediation steps</field>
+          <field name="code" type="string" required="false">Code fix example</field>
+          <field name="effort" type="RemediationEffort" required="true">Remediation effort</field>
+          <field name="priority" type="RemediationPriority" required="true">Remediation priority</field>
+          <field name="automated" type="boolean" required="true">Automated fix available</field>
+        </fields>
+      </model>
+
+      <model name="RemediationType">
+        <description>Enumeration of remediation types</description>
+        <values>
+          <value>CODE_CHANGE</value>
+          <value>CONFIGURATION_CHANGE</value>
+          <value>DEPENDENCY_UPDATE</value>
+          <value>ENVIRONMENT_CHANGE</value>
+          <value>PROCESS_CHANGE</value>
+          <value>EDUCATION</value>
+          <value>MONITORING</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="RemediationEffort">
+        <description>Enumeration of remediation efforts</description>
+        <values>
+          <value>TRIVIAL</value>
+          <value>LOW</value>
+          <value>MEDIUM</value>
+          <value>HIGH</value>
+          <value>EXTENSIVE</value>
+        </values>
+      </model>
+
+      <model name="RemediationPriority">
+        <description>Enumeration of remediation priorities</description>
+        <values>
+          <value>IMMEDIATE</value>
+          <value>URGENT</value>
+          <value>HIGH</value>
+          <value>MEDIUM</value>
+          <value>LOW</value>
+        </values>
+      </model>
+
+      <model name="IssueStatus">
+        <description>Enumeration of issue statuses</description>
+        <values>
+          <value>OPEN</value>
+          <value>IN_PROGRESS</value>
+          <value>RESOLVED</value>
+          <value>CLOSED</value>
+          <value>REOPENED</value>
+          <value>SUPPRESSED</value>
+          <value>FALSE_POSITIVE</value>
+        </values>
+      </model>
+
+      <model name="SecurityMetrics">
+        <description>Security metrics</description>
+        <fields>
+          <field name="riskScore" type="number" required="true">Overall risk score</field>
+          <field name="vulnerabilityDensity" type="number" required="true">Vulnerability density</field>
+          <field name="meanTimeToRemediate" type="number" required="false">Mean time to remediate</field>
+          <field name="coverage" type="number" required="true">Scan coverage percentage</field>
+          <field name="complianceScore" type="number" required="true">Compliance score</field>
+          <field name="trend" type="TrendDirection" required="true">Security trend</field>
+          <field name="benchmarks" type="SecurityBenchmark[]" required="false">Security benchmarks</field>
+        </fields>
+      </model>
+
+      <model name="TrendDirection">
+        <description>Enumeration of trend directions</description>
+        <values>
+          <value>IMPROVING</value>
+          <value>STABLE</value>
+          <value>DECLINING</value>
+          <value>UNKNOWN</value>
+        </values>
+      </model>
+
+      <model name="SecurityBenchmark">
+        <description>Security benchmark comparison</description>
+        <fields>
+          <field name="name" type="string" required="true">Benchmark name</field>
+          <field name="value" type="number" required="true">Current value</field>
+          <field name="benchmark" type="number" required="true">Benchmark value</field>
+          <field name="percentile" type="number" required="true">Percentile rank</field>
+          <field name="trend" type="TrendDirection" required="true">Trend direction</field>
+        </fields>
+      </model>
+
+      <model name="SecurityTrend">
+        <description>Security trend data</description>
+        <fields>
+          <field name="period" type="string" required="true">Time period</field>
+          <field name="totalIssues" type="number" required="true">Total issues</field>
+          <field name="criticalIssues" type="number" required="true">Critical issues</field>
+          <field name="highIssues" type="number" required="true">High issues</field>
+          <field name="riskScore" type="number" required="true">Risk score</field>
+          <field name="complianceScore" type="number" required="true">Compliance score</field>
+        </fields>
+      </model>
+
+      <model name="SecurityRecommendation">
+        <description>Security recommendation</description>
+        <fields>
+          <field name="id" type="string" required="true">Recommendation ID</field>
+          <field name="title" type="string" required="true">Recommendation title</field>
+          <field name="description" type="string" required="true">Recommendation description</field>
+          <field name="type" type="RecommendationType" required="true">Recommendation type</field>
+          <field name="priority" type="RecommendationPriority" required="true">Recommendation priority</field>
+          <field name="category" type="string" required="true">Recommendation category</field>
+          <field name="effort" type="RemediationEffort" required="true">Implementation effort</field>
+          <field name="impact" type="RecommendationImpact" required="true">Security impact</field>
+          <field name="actions" type="RecommendationAction[]" required="true">Recommended actions</field>
+          <field name="relatedIssues" type="string[]" required="false">Related issue IDs</field>
+          <field name="estimatedReduction" type="number" required="false">Estimated risk reduction</field>
+        </fields>
+      </model>
+
+      <model name="RecommendationType">
+        <description>Enumeration of recommendation types</description>
+        <values>
+          <value>IMMEDIATE_ACTION</value>
+          <value>SHORT_TERM</value>
+          <value>LONG_TERM</value>
+          <value>PROCESS_IMPROVEMENT</value>
+          <value>TOOL_UPGRADE</value>
+          <value>TRAINING</value>
+          <value>POLICY_CHANGE</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="RecommendationPriority">
+        <description>Enumeration of recommendation priorities</description>
+        <values>
+          <value>CRITICAL</value>
+          <value>HIGH</value>
+          <value>MEDIUM</value>
+          <value>LOW</value>
+        </values>
+      </model>
+
+      <model name="RecommendationImpact">
+        <description>Enumeration of recommendation impacts</description>
+        <values>
+          <value>HIGH</value>
+          <value>MEDIUM</value>
+          <value>LOW</value>
+        </values>
+      </model>
+
+      <model name="RecommendationAction">
+        <description>Recommended action</description>
+        <fields>
+          <field name="description" type="string" required="true">Action description</field>
+          <field name="type" type="ActionType" required="true">Action type</field>
+          <field name="target" type="string" required="false">Action target</field>
+          <field name="timeline" type="string" required="false">Implementation timeline</field>
+          <field name="resources" type="string[]" required="false">Required resources</field>
+        </fields>
+      </model>
+
+      <model name="ActionType">
+        <description>Enumeration of action types</description>
+        <values>
+          <value>CODE_CHANGE</value>
+          <value>CONFIGURATION</value>
+          <value>DEPENDENCY_UPDATE</value>
+          <value>TOOL_INSTALL</value>
+          <value>PROCESS_UPDATE</value>
+          <value>TRAINING</value>
+          <value>MONITORING</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="ScanReport">
+        <description>Generated scan report</description>
+        <fields>
+          <field name="id" type="string" required="true">Report ID</field>
+          <field name="type" type="ReportType" required="true">Report type</field>
+          <field name="format" type="ReportFormat" required="true">Report format</field>
+          <field name="title" type="string" required="true">Report title</field>
+          <field name="content" type="string" required="true">Report content</field>
+          <field name="url" type="string" required="false">Report URL</field>
+          <field name="size" type="number" required="false">Report size</field>
+          <field name="generatedAt" type="string" required="true">Generation timestamp</field>
+        </fields>
+      </model>
+
+      <model name="ReportType">
+        <description>Enumeration of report types</description>
+        <values>
+          <value>EXECUTIVE_SUMMARY</value>
+          <value>DETAILED_FINDINGS</value>
+          <value>COMPLIANCE_REPORT</value>
+          <value>TREND_ANALYSIS</value>
+          <value>REMEDIATION_PLAN</value>
+          <value>VULNERABILITY_REPORT</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="ReportFormat">
+        <description>Enumeration of report formats</description>
+        <values>
+          <value>HTML</value>
+          <value>PDF</value>
+          <value>JSON</value>
+          <value>XML</value>
+          <value>CSV</value>
+          <value>MARKDOWN</value>
+        </values>
+      </model>
+
+      <model name="SecurityPolicy">
+        <description>Security policy configuration</description>
+        <fields>
+          <field name="id" type="string" required="true">Policy ID</field>
+          <field name="name" type="string" required="true">Policy name</field>
+          <field name="description" type="string" required="false">Policy description</field>
+          <field name="version" type="string" required="true">Policy version</field>
+          <field name="category" type="PolicyCategory" required="true">Policy category</field>
+          <field name="rules" type="SecurityRule[]" required="true">Security rules</field>
+          <field name="exceptions" type="PolicyException[]" required="false">Policy exceptions</field>
+          <field name="enforcement" type="EnforcementLevel" required="true">Enforcement level</field>
+          <field name="enabled" type="boolean" required="true">Policy enabled</field>
+          <field name="createdAt" type="string" required="true">Creation timestamp</field>
+          <field name="updatedAt" type="string" required="true">Last update timestamp</field>
+        </fields>
+      </model>
+
+      <model name="PolicyCategory">
+        <description>Enumeration of policy categories</description>
+        <values>
+          <value>CODE_SECURITY</value>
+          <value>DEPENDENCY_SECURITY</value>
+          <value>INFRASTRUCTURE_SECURITY</value>
+          <value>DATA_SECURITY</value>
+          <value>COMPLIANCE</value>
+          <value>ACCESS_CONTROL</value>
+          <value>ENCRYPTION</value>
+          <value>MONITORING</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="SecurityRule">
+        <description>Security rule definition</description>
+        <fields>
+          <field name="id" type="string" required="true">Rule ID</field>
+          <field name="name" type="string" required="true">Rule name</field>
+          <field name="description" type="string" required="true">Rule description</field>
+          <field name="type" type="RuleType" required="true">Rule type</field>
+          <field name="condition" type="RuleCondition" required="true">Rule condition</field>
+          <field name="action" type="RuleAction" required="true">Rule action</field>
+          <field name="severity" type="SeverityLevel" required="true">Rule severity</field>
+          <field name="enabled" type="boolean" required="true">Rule enabled</field>
+        </fields>
+      </model>
+
+      <model name="RuleType">
+        <description>Enumeration of rule types</description>
+        <values>
+          <value>VULNERABILITY</value>
+          <value>COMPLIANCE</value>
+          <value>THRESHOLD</value>
+          <value>PATTERN</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="RuleCondition">
+        <description>Rule condition</description>
+        <fields>
+          <field name="field" type="string" required="true">Field to evaluate</field>
+          <field name="operator" type="ConditionOperator" required="true">Comparison operator</field>
+          <field name="value" type="string" required="true">Comparison value</field>
+          <field name="aggregation" type="AggregationType" required="false">Aggregation type</field>
+        </fields>
+      </model>
+
+      <model name="AggregationType">
+        <description>Enumeration of aggregation types</description>
+        <values>
+          <value>COUNT</value>
+          <value>SUM</value>
+          <value>AVG</value>
+          <value>MAX</value>
+          <value>MIN</value>
+          <value>PERCENTAGE</value>
+        </values>
+      </model>
+
+      <model name="RuleAction">
+        <description>Rule action</description>
+        <fields>
+          <field name="type" type="RuleActionType" required="true">Action type</field>
+          <field name="parameters" type="Record&lt;string, unknown&gt;" required="false">Action parameters</field>
+        </fields>
+      </model>
+
+      <model name="RuleActionType">
+        <description>Enumeration of rule action types</description>
+        <values>
+          <value>BLOCK</value>
+          <value>WARN</value>
+          <value>NOTIFY</value>
+          <value>LOG</value>
+          <value>CREATE_TICKET</value>
+          <value>ESCALATE</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="PolicyException">
+        <description>Policy exception</description>
+        <fields>
+          <field name="id" type="string" required="true">Exception ID</field>
+          <field name="ruleId" type="string" required="true">Rule ID</field>
+          <field name="reason" type="string" required="true">Exception reason</field>
+          <field name="scope" type="string" required="true">Exception scope</field>
+          <field name="expiresAt" type="string" required="false">Expiration date</field>
+          <field name="approvedBy" type="string" required="true">Approved by</field>
+          <field name="createdAt" type="string" required="true">Creation timestamp</field>
+        </fields>
+      </model>
+
+      <model name="EnforcementLevel">
+        <description>Enumeration of enforcement levels</description>
+        <values>
+          <value>ADVISORY</value>
+          <value>WARNING</value>
+          <value>ENFORCED</value>
+          <value>BLOCKING</value>
+        </values>
+      </model>
+
+      <model name="ComplianceResult">
+        <description>Compliance check results</description>
+        <fields>
+          <field name="framework" type="ComplianceFramework" required="true">Compliance framework</field>
+          <field name="version" type="string" required="true">Framework version</field>
+          <field name="score" type="number" required="true">Compliance score</field>
+          <field name="status" type="ComplianceStatus" required="true">Compliance status</field>
+          <field name="requirements" type="ComplianceRequirement[]" required="true">Compliance requirements</field>
+          <field name="violations" type="ComplianceViolation[]" required="false">Compliance violations</field>
+          <field name="evidence" type="ComplianceEvidence[]" required="false">Compliance evidence</field>
+        </fields>
+      </model>
+
+      <model name="ComplianceFramework">
+        <description>Enumeration of compliance frameworks</description>
+        <values>
+          <value>SOC2</value>
+          <value>ISO27001</value>
+          <value>PCI_DSS</value>
+          <value>HIPAA</value>
+          <value>GDPR</value>
+          <value>NIST</value>
+          <value>CIS</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+
+      <model name="ComplianceStatus">
+        <description>Enumeration of compliance statuses</description>
+        <values>
+          <value>COMPLIANT</value>
+          <value>NON_COMPLIANT</value>
+          <value>PARTIALLY_COMPLIANT</value>
+          <value>NOT_APPLICABLE</value>
+          <value>UNKNOWN</value>
+        </values>
+      </model>
+
+      <model name="ComplianceRequirement">
+        <description>Compliance requirement</description>
+        <fields>
+          <field name="id" type="string" required="true">Requirement ID</field>
+          <field name="title" type="string" required="true">Requirement title</field>
+          <field name="description" type="string" required="true">Requirement description</field>
+          <field name="category" type="string" required="true">Requirement category</field>
+          <field name="status" type="ComplianceStatus" required="true">Requirement status</field>
+          <field name="score" type="number" required="false">Requirement score</field>
+          <field name="controls" type="ComplianceControl[]" required="false">Related controls</field>
+        </fields>
+      </model>
+
+      <model name="ComplianceControl">
+        <description>Compliance control</description>
+        <fields>
+          <field name="id" type="string" required="true">Control ID</field>
+          <field name="title" type="string" required="true">Control title</field>
+          <field name="description" type="string" required="true">Control description</field>
+          <field name="status" type="ComplianceStatus" required="true">Control status</field>
+          <field name="evidence" type="string[]" required="false">Supporting evidence</field>
+        </fields>
+      </model>
+
+      <model name="ComplianceViolation">
+        <description>Compliance violation</description>
+        <fields>
+          <field name="id" type="string" required="true">Violation ID</field>
+          <field name="requirementId" type="string" required="true">Requirement ID</field>
+          <field name="description" type="string" required="true">Violation description</field>
+          <field name="severity" type="SeverityLevel" required="true">Violation severity</field>
+          <field name="risk" type="string" required="true">Risk description</field>
+          <field name="remediation" type="string" required="false">Remediation steps</field>
+        </fields>
+      </model>
+
+      <model name="ComplianceEvidence">
+        <description>Compliance evidence</description>
+        <fields>
+          <field name="id" type="string" required="true">Evidence ID</field>
+          <field name="type" type="EvidenceType" required="true">Evidence type</field>
+          <field name="description" type="string" required="true">Evidence description</field>
+          <field name="source" type="string" required="true">Evidence source</field>
+          <field name="timestamp" type="string" required="true">Evidence timestamp</field>
+          <field name="url" type="string" required="false">Evidence URL</field>
+          <field name="hash" type="string" required="false">Evidence hash</field>
+        </fields>
+      </model>
+
+      <model name="EvidenceType">
+        <description>Enumeration of evidence types</description>
+        <values>
+          <value>SCAN_REPORT</value>
+          <value>CONFIGURATION</value>
+          <value>LOG</value>
+          <value>SCREENSHOT</value>
+          <value>DOCUMENTATION</value>
+          <value>CERTIFICATE</value>
+          <value>AUDIT_TRAIL</value>
+          <value>CUSTOM</value>
+        </values>
+      </model>
+    </data-models>
+
+    <interfaces>
+      <interface name="ISecurityScanner">
+        <description>Main security scanning interface</description>
+        <methods>
+          <method name="executeScan" async="true">
+            <param name="request" type="ScanRequest">Scan request</param>
+            <returns type="SecurityScan">Scan execution</returns>
+          </method>
+          <method name="getScan" async="true">
+            <param name="scanId" type="string">Scan ID</param>
+            <returns type="SecurityScan">Scan details</returns>
+          </method>
+          <method name="listScans" async="true">
+            <param name="filters" type="ScanFilters">Filter criteria</param>
+            <returns type="SecurityScan[]">List of scans</returns>
+          </method>
+          <method name="cancelScan" async="true">
+            <param name="scanId" type="string">Scan ID</param>
+            <returns type="boolean">Cancellation success</returns>
+          </method>
+          <method name="getScanResults" async="true">
+            <param name="scanId" type="string">Scan ID</param>
+            <returns type="ScanResult">Scan results</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IScanTool">
+        <description>Individual scanning tool interface</description>
+        <methods>
+          <method name="execute" async="true">
+            <param name="target" type="ScanTarget">Scan target</param>
+            <param name="config" type="ScanConfig">Scan configuration</param>
+            <returns type="ToolResult">Tool execution result</returns>
+          </method>
+          <method name="getCapabilities">
+            <returns type="ToolCapabilities">Tool capabilities</returns>
+          </method>
+          <method name="validateConfig" async="true">
+            <param name="config" type="ScanConfig">Configuration to validate</param>
+            <returns type="ValidationResult">Validation result</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="ISecurityPolicy">
+        <description>Security policy management interface</description>
+        <methods>
+          <method name="evaluatePolicy" async="true">
+            <param name="scanResult" type="ScanResult">Scan results</param>
+            <param name="policy" type="SecurityPolicy">Security policy</param>
+            <returns type="PolicyEvaluationResult">Policy evaluation result</returns>
+          </method>
+          <method name="createPolicy" async="true">
+            <param name="policy" type="SecurityPolicy">Policy to create</param>
+            <returns type="SecurityPolicy">Created policy</returns>
+          </method>
+          <method name="updatePolicy" async="true">
+            <param name="policyId" type="string">Policy ID</param>
+            <param name="updates" type="PolicyUpdateRequest">Policy updates</param>
+            <returns type="SecurityPolicy">Updated policy</returns>
+          </method>
+          <method name="deletePolicy" async="true">
+            <param name="policyId" type="string">Policy ID</param>
+            <returns type="boolean">Deletion success</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IComplianceChecker">
+        <description>Compliance checking interface</description>
+        <methods>
+          <method name="checkCompliance" async="true">
+            <param name="scanResult" type="ScanResult">Scan results</param>
+            <param name="framework" type="ComplianceFramework">Compliance framework</param>
+            <returns type="ComplianceResult">Compliance result</returns>
+          </method>
+          <method name="getFrameworkRequirements" async="true">
+            <param name="framework" type="ComplianceFramework">Compliance framework</param>
+            <returns type="ComplianceRequirement[]">Framework requirements</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="ISecurityReporter">
+        <description>Security reporting interface</description>
+        <methods>
+          <method name="generateReport" async="true">
+            <param name="scanResult" type="ScanResult">Scan results</param>
+            <param name="template" type="ReportTemplate">Report template</param>
+            <returns type="ScanReport">Generated report</returns>
+          </method>
+          <method name="getReportTemplates">
+            <returns type="ReportTemplate[]">Available templates</returns>
+          </method>
+        </methods>
+      </interface>
+
+      <interface name="IVulnerabilityDatabase">
+        <description>Vulnerability database interface</description>
+        <methods>
+          <method name="lookupVulnerability" async="true">
+            <param name="cve" type="string">CVE identifier</param>
+            <returns type="VulnerabilityInfo">Vulnerability information</returns>
+          </method>
+          <method name="searchVulnerabilities" async="true">
+            <param name="query" type="VulnerabilityQuery">Search query</param>
+            <returns type="VulnerabilityInfo[]">Matching vulnerabilities</returns>
+          </method>
+          <method name="getUpdates" async="true">
+            <param name="since" type="string">Update since timestamp</param>
+            <returns type="VulnerabilityUpdate[]">Vulnerability updates</returns>
+          </method>
+        </methods>
+      </interface>
+    </interfaces>
+
+    <key-classes>
+      <class name="SecurityScanner">
+        <description>Main security scanning service</description>
+        <implements>ISecurityScanner</implements>
+        <dependencies>
+          <dependency>IScanTool[]</dependency>
+          <dependency>ISecurityPolicy</dependency>
+          <dependency>IComplianceChecker</dependency>
+          <dependency>ISecurityReporter</dependency>
+          <dependency>IVulnerabilityDatabase</dependency>
+          <dependency>IEventStore</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="executeScan" visibility="public" async="true">
+            <description>Executes security scan</description>
+            <implementation>
+              1. Validate scan request
+              2. Select appropriate tools
+              3. Prepare scan environment
+              4. Execute tools in parallel
+              5. Aggregate scan results
+              6. Apply security policies
+              7. Check compliance requirements
+              8. Generate reports
+              9. Store scan results
+              10. Return scan execution
+            </implementation>
+          </method>
+          <method name="getScanResults" visibility="public" async="true">
+            <description>Retrieves scan results</description>
+            <implementation>
+              1. Validate scan ID
+              2. Retrieve scan execution
+              3. Check access permissions
+              4. Return scan results
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="SastTool">
+        <description>Static Application Security Testing tool</description>
+        <implements>IScanTool</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes SAST scan</description>
+            <implementation>
+              1. Prepare source code
+              2. Configure SAST tool
+              3. Execute scan
+              4. Parse results
+              5. Normalize findings
+              6. Return tool result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="DastTool">
+        <description>Dynamic Application Security Testing tool</description>
+        <implements>IScanTool</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes DAST scan</description>
+            <implementation>
+              1. Prepare target application
+              2. Configure DAST tool
+              3. Execute scan
+              4. Parse results
+              5. Normalize findings
+              6. Return tool result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="ScaTool">
+        <description>Software Composition Analysis tool</description>
+        <implements>IScanTool</implements>
+        <dependencies>
+          <dependency>IVulnerabilityDatabase</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes SCA scan</description>
+            <implementation>
+              1. Analyze dependencies
+              2. Query vulnerability database
+              3. Match vulnerabilities
+              4. Assess risk levels
+              5. Return tool result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="ContainerScanner">
+        <description>Container image security scanner</description>
+        <implements>IScanTool</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes container scan</description>
+            <implementation>
+              1. Pull container image
+              2. Extract layers
+              3. Scan for vulnerabilities
+              4. Check configuration
+              5. Return tool result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="SecretScanner">
+        <description>Secret detection scanner</description>
+        <implements>IScanTool</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="execute" visibility="public" async="true">
+            <description>Executes secret scan</description>
+            <implementation>
+              1. Scan code patterns
+              2. Check for secrets
+              3. Validate findings
+              4. Return tool result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="SecurityPolicy">
+        <description>Security policy management service</description>
+        <implements>ISecurityPolicy</implements>
+        <dependencies>
+          <dependency>IDatabase</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="evaluatePolicy" visibility="public" async="true">
+            <description>Evaluates security policy against scan results</description>
+            <implementation>
+              1. Load policy rules
+              2. Apply rules to scan results
+              3. Check policy exceptions
+              4. Generate policy violations
+              5. Return evaluation result
+            </implementation>
+          </method>
+          <method name="createPolicy" visibility="public" async="true">
+            <description>Creates new security policy</description>
+            <implementation>
+              1. Validate policy structure
+              2. Check rule validity
+              3. Store policy in database
+              4. Index for search
+              5. Return created policy
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="ComplianceChecker">
+        <description>Compliance checking service</description>
+        <implements>IComplianceChecker</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="checkCompliance" visibility="public" async="true">
+            <description>Checks compliance against framework</description>
+            <implementation>
+              1. Load framework requirements
+              2. Map scan results to requirements
+              3. Evaluate compliance status
+              4. Generate compliance report
+              5. Return compliance result
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="SecurityReporter">
+        <description>Security reporting service</description>
+        <implements>ISecurityReporter</implements>
+        <dependencies>
+          <dependency>ITemplateEngine</dependency>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="generateReport" visibility="public" async="true">
+            <description>Generates security report</description>
+            <implementation>
+              1. Load report template
+              2. Process scan results
+              3. Apply template formatting
+              4. Generate report in requested format
+              5. Return generated report
+            </implementation>
+          </method>
+        </methods>
+      </class>
+
+      <class name="VulnerabilityDatabase">
+        <description>Vulnerability database service</description>
+        <implements>IVulnerabilityDatabase</implements>
+        <dependencies>
+          <dependency>ILogger</dependency>
+        </dependencies>
+        <methods>
+          <method name="lookupVulnerability" visibility="public" async="true">
+            <description>Looks up vulnerability by CVE</description>
+            <implementation>
+              1. Query vulnerability database
+              2. Parse vulnerability data
+              3. Cache result
+              4. Return vulnerability info
+            </implementation>
+          </method>
+          <method name="searchVulnerabilities" visibility="public" async="true">
+            <description>Searches vulnerabilities</description>
+            <implementation>
+              1. Parse search query
+              2. Execute database search
+              3. Rank results
+              4. Return matching vulnerabilities
+            </implementation>
+          </method>
+        </methods>
+      </class>
+    </key-classes>
+
+    <integration-points>
+      <integration name="Security Tool Integration">
+        <description>Integration with security scanning tools</description>
+        <tools>
+          <tool>SonarQube</tool>
+          <tool>Checkmarx</tool>
+          <tool>Veracode</tool>
+          <tool>Fortify</tool>
+          <tool>Snyk</tool>
+          <tool>Trivy</tool>
+          <tool>Clair</tool>
+          <tool>OWASP ZAP</tool>
+          <tool>Nessus</tool>
+        </tools>
+        <operations>
+          <operation>Vulnerability scanning</operation>
+          <option>Code analysis</option>
+          <option>Dependency checking</option>
+          <option>Container scanning</option>
+        </operations>
+      </integration>
+
+      <integration name="Vulnerability Database Integration">
+        <description>Integration with vulnerability databases</description>
+        <databases>
+          <database>NVD</database>
+          <database>CVE</database>
+          <database>GitHub Advisory</database>
+          <database>OSV Database</database>
+          <database>Snyk Vulnerability DB</database>
+        </databases>
+        <operations>
+          <operation>Vulnerability lookup</operation>
+          <option>Security advisory updates</option>
+          <option>CVE matching</option>
+          <option>Risk assessment</option>
+        </operations>
+      </integration>
+
+      <integration name="Compliance Framework Integration">
+        <description>Integration with compliance frameworks</description>
+        <frameworks>
+          <framework>SOC 2</framework>
+          <framework>ISO 27001</framework>
+          <framework>PCI DSS</framework>
+          <framework>HIPAA</framework>
+          <framework>GDPR</framework>
+          <framework>NIST</framework>
+        </frameworks>
+        <operations>
+          <operation>Compliance checking</operation>
+          <option>Requirement mapping</option>
+          <option>Evidence collection</option>
+          <option>Audit trail</option>
+        </operations>
+      </integration>
+
+      <integration name="Notification Integration">
+        <description>Integration with notification systems</description>
+        <systems>
+          <system>Email</system>
+          <system>Slack</system>
+          <system>Teams</system>
+          <system>Jira</system>
+          <system>ServiceNow</system>
+        </systems>
+        <operations>
+          <operation>Security alerts</operation>
+          <option>Vulnerability notifications</option>
+          <option>Compliance reports</option>
+          <option>Remediation reminders</option>
+        </operations>
+      </integration>
+    </integration-points>
+
+    <api-endpoints>
+      <endpoint method="POST" path="/api/v1/security-scans">
+        <description>Execute security scan</description>
+        <request-body type="ScanRequest">Scan request</request-body>
+        <response type="SecurityScan">Scan execution</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/security-scans/{scanId}">
+        <description>Get security scan details</description>
+        <response type="SecurityScan">Scan details</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/security-scans/{scanId}/results">
+        <description>Get security scan results</description>
+        <response type="ScanResult">Scan results</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/security-scans/{scanId}/cancel">
+        <description>Cancel security scan</description>
+        <response type="boolean">Cancellation success</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+          <code>409</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/security-scans">
+        <description>List security scans</description>
+        <query-params>
+          <param name="type" type="ScanType">Filter by scan type</param>
+          <param name="status" type="ScanStatus">Filter by status</param>
+          <param name="fromDate" type="string">Filter by date range (start)</param>
+          <param name="toDate" type="string">Filter by date range (end)</param>
+        </query-params>
+        <response type="SecurityScan[]">List of scans</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/security-policies">
+        <description>Create security policy</description>
+        <request-body type="SecurityPolicy">Policy configuration</request-body>
+        <response type="SecurityPolicy">Created policy</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/security-policies/{policyId}">
+        <description>Get security policy</description>
+        <response type="SecurityPolicy">Policy details</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="PATCH" path="/api/v1/security-policies/{policyId}">
+        <description>Update security policy</description>
+        <request-body type="PolicyUpdateRequest">Policy updates</request-body>
+        <response type="SecurityPolicy">Updated policy</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="DELETE" path="/api/v1/security-policies/{policyId}">
+        <description>Delete security policy</description>
+        <response type="boolean">Deletion success</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/security-policies">
+        <description>List security policies</description>
+        <query-params>
+          <param name="category" type="PolicyCategory">Filter by category</param>
+          <param name="enabled" type="boolean">Filter by enabled status</param>
+        </query-params>
+        <response type="SecurityPolicy[]">List of policies</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/compliance-checks">
+        <description>Check compliance</description>
+        <request-body type="ComplianceCheckRequest">Compliance check request</request-body>
+        <response type="ComplianceResult">Compliance result</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/vulnerabilities/{cve}">
+        <description>Get vulnerability information</description>
+        <response type="VulnerabilityInfo">Vulnerability details</response>
+        <status-codes>
+          <code>200</code>
+          <code>404</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/vulnerabilities">
+        <description>Search vulnerabilities</description>
+        <query-params>
+          <param name="q" type="string">Search query</param>
+          <param name="severity" type="SeverityLevel">Filter by severity</param>
+          <param name="fromDate" type="string">Filter by date range (start)</param>
+          <param name="toDate" type="string">Filter by date range (end)</param>
+        </query-params>
+        <response type="VulnerabilityInfo[]">Search results</response>
+        <status-codes>
+          <code>200</code>
+        </status-codes>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/security-reports">
+        <description>Generate security report</description>
+        <request-body type="ReportRequest">Report request</request-body>
+        <response type="ScanReport">Generated report</response>
+        <status-codes>
+          <code>201</code>
+          <code>400</code>
+          <code>422</code>
+        </status-codes>
+      </endpoint>
+    </api-endpoints>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="SecurityScanner Tests">
+          <test-case name="should execute scan successfully">
+            <description>Tests security scan execution</description>
+            <setup>Mock scan tools, policy engine</setup>
+            <input>Valid ScanRequest</input>
+            <expected>Created SecurityScan</expected>
+          </test-case>
+          <test-case name="should handle scan cancellation">
+            <description>Tests scan cancellation</description>
+            <setup>Running scan execution</setup>
+            <input>Scan ID to cancel</input>
+            <expected>Successful cancellation</expected>
+          </test-case>
+          <test-case name="should aggregate scan results">
+            <description>Tests scan result aggregation</description>
+            <setup>Multiple tool results</setup>
+            <input>Tool results from different scanners</input>
+            <expected>Aggregated ScanResult</expected>
+          </test-case>
+        </test-suite>
+
+        <test-suite name="ScanTool Tests">
+          <test-case name="should execute SAST scan">
+            <description>Tests SAST tool execution</description>
+            <setup>Mock SAST tool, source code</setup>
+            <input>Scan target and configuration</input>
+            <expected>SAST scan results</expected>
+          </test-case>
+          <test-case name="should execute DAST scan">
+            <description>Tests DAST tool execution</description>
+            <setup>Mock DAST tool, running application</setup>
+            <input>Scan target and configuration</input>
+            <expected>DAST scan results</expected>
+          </test-case>
+          <test-case name="should execute SCA scan">
+            <description>Tests SCA tool execution</description>
+            <setup>Mock SCA tool, dependencies</setup>
+            <input>Scan target and configuration</input>
+            <expected>SCA scan results</expected>
+          </test-case>
+        </test-suite>
+
+        <test-suite name="SecurityPolicy Tests">
+          <test-case name="should evaluate policy correctly">
+            <description>Tests security policy evaluation</description>
+            <setup>Mock policy, scan results</setup>
+            <input>Scan results and policy</input>
+            <expected>Policy evaluation result</expected>
+          </test-case>
+          <test-case name="should handle policy exceptions">
+            <description>Tests policy exception handling</description>
+            <setup>Policy with exceptions, scan results</setup>
+            <input>Scan results with exceptions</input>
+            <expected>Exceptions applied correctly</expected>
+          </test-case>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test-suite name="Security Tool Integration">
+          <test-case name="should integrate with real SAST tool">
+            <description>Tests SAST tool integration</description>
+            <setup>Real SAST tool, test code</setup>
+            <input>Test codebase</input>
+            <expected>Successful SAST scan</expected>
+          </test-case>
+          <test-case name="should integrate with vulnerability database">
+            <description>Tests vulnerability database integration</description>
+            <setup>Real vulnerability database, CVE lookup</setup>
+            <input>CVE identifier</input>
+            <expected>Vulnerability information</expected>
+          </test-case>
+        </test-suite>
+      </integration-tests>
+
+      <end-to-end-tests>
+        <test-suite name="Security Scan Lifecycle Tests">
+          <test-case name="should handle complete security scan workflow">
+            <description>Tests end-to-end security scanning</description>
+            <setup>Complete security scanning environment</setup>
+            <input>Security scan request</input>
+            <expected>Complete scan with results and reports</expected>
+          </test-case>
+        </test-suite>
+      </end-to-end-tests>
+    </testing-strategy>
+
+    <security-considerations>
+      <consideration name="Scan Data Protection">
+        <description>Protect sensitive data during scanning</description>
+        <implementation>
+          - Sanitize scan inputs
+          - Encrypt scan results
+          - Control access to findings
+          - Implement data retention policies
+        </implementation>
+      </consideration>
+
+      <consideration name="Tool Security">
+        <description>Secure scanning tools and integrations</description>
+        <implementation>
+          - Validate tool configurations
+          - Use secure communication
+          - Monitor tool behavior
+          - Update tools regularly
+        </implementation>
+      </consideration>
+
+      <consideration name="Result Integrity">
+        <description>Ensure integrity of scan results</description>
+        <implementation>
+          - Digitally sign results
+          - Maintain audit trails
+          - Validate result authenticity
+          - Prevent result tampering
+        </implementation>
+      </consideration>
+
+      <consideration name="Access Control">
+        <description>Control access to security information</description>
+        <implementation>
+          - Implement role-based access
+          - Use principle of least privilege
+          - Monitor access patterns
+          - Audit security operations
+        </implementation>
+      </consideration>
+    </security-considerations>
+
+    <monitoring-requirements>
+      <metric name="scan_execution_time">
+        <description>Time taken to execute security scans</description>
+        <type>histogram</type>
+        <unit>milliseconds</unit>
+        <thresholds>
+          <threshold level="warning">300000ms</threshold>
+          <threshold level="critical">600000ms</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="vulnerability_detection_rate">
+        <description>Rate of vulnerability detection</description>
+        <type>counter</type>
+        <unit>percentage</unit>
+        <thresholds>
+          <threshold level="warning">5%</threshold>
+          <threshold level="critical">10%</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="false_positive_rate">
+        <description>Rate of false positive findings</description>
+        <type>gauge</type>
+        <unit>percentage</unit>
+        <thresholds>
+          <threshold level="warning">20%</threshold>
+          <threshold level="critical">30%</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="compliance_score">
+        <description>Overall compliance score</description>
+        <type>gauge</type>
+        <unit>percentage</unit>
+        <thresholds>
+          <threshold level="warning">80%</threshold>
+          <threshold level="critical">70%</threshold>
+        </thresholds>
+      </metric>
+
+      <metric name="scan_coverage">
+        <description>Percentage of codebase scanned</description>
+        <type>gauge</type>
+        <unit>percentage</unit>
+        <thresholds>
+          <threshold level="warning">80%</threshold>
+          <threshold level="critical">70%</threshold>
+        </thresholds>
+      </metric>
+    </monitoring-requirements>
+
+    <success-metrics>
+      <metric name="vulnerability_detection_accuracy">
+        <target>95%</target>
+        <description>Accuracy of vulnerability detection</description>
+      </metric>
+
+      <metric name="scan_performance">
+        <target>&lt;5 minutes</target>
+        <description>Average scan execution time</description>
+      </metric>
+
+      <metric name="compliance_achievement">
+        <target>90%</target>
+        <description>Percentage of compliance requirements met</description>
+      </metric>
+
+      <metric name="false_positive_reduction">
+        <target>&lt;10%</target>
+        <description>False positive rate reduction</description>
+      </metric>
+
+      <metric name="remediation_time">
+        <target>&lt;30 days</target>
+        <description>Average time to remediate vulnerabilities</description>
+      </metric>
+    </success-metrics>
+
+    <risk-mitigation>
+      <risk name="False Positives">
+        <probability>Medium</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Use multiple scanning tools
+          - Implement result correlation
+          - Allow false positive marking
+          - Continuously tune rules
+        </mitigation>
+      </risk>
+
+      <risk name="Scan Failures">
+        <probability>Medium</probability>
+        <impact>High</impact>
+        <mitigation>
+          - Implement retry mechanisms
+          - Use fallback tools
+          - Monitor scan health
+          - Provide manual override
+        </mitigation>
+      </risk>
+
+      <risk name="Vulnerability Database Outdated">
+        <probability>Medium</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Regular database updates
+          - Use multiple sources
+          - Implement change monitoring
+          - Provide update notifications
+        </mitigation>
+      </risk>
+
+      <risk name="Security Fatigue">
+        <probability>High</probability>
+        <impact>Medium</impact>
+        <mitigation>
+          - Prioritize critical findings
+          - Provide remediation guidance
+          - Automate where possible
+          - Track progress metrics
+        </mitigation>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
+</story-context>

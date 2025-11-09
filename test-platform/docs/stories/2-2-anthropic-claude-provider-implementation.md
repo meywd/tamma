@@ -1,6 +1,6 @@
 # Story 2.2: Anthropic Claude Provider Implementation
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -97,7 +97,7 @@ So that I can run benchmarks using Claude's advanced reasoning capabilities for 
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- /home/meywd/tamma/docs/stories/2-2-anthropic-claude-provider-implementation.context.xml
 
 ### Agent Model Used
 

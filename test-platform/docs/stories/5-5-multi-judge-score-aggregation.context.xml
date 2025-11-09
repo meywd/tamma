@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext>
+  <storyId>5-5</storyId>
+  <title>Multi-Judge Score Aggregation</title>
+  <epic>5</epic>
+  <category>Multi-Judge Evaluation</category>
+  <priority>Critical</priority>
+  <estimatedEffort>3 weeks</estimatedEffort>
+  <weight>Integration Component</weight>
+  
+  <description>
+    Implement a comprehensive score aggregation system that combines evaluations from all five judge types (automated scoring, staff review, community voting, AI self-review, and elite panel) into a unified, weighted final score. This system serves as the final integration point for the multi-judge evaluation framework, ensuring fair, transparent, and statistically sound score combination with detailed confidence intervals and disagreement analysis.
+  </description>
+  
+  <technicalContext>
+    <systemArchitecture>
+      <component name="ScoreAggregationEngine" type="Core Service">
+        <description>Orchestrates the collection and aggregation of scores from all judge types</description>
+        <technologies>TypeScript, Node.js, Fastify</technologies>
+        <dependencies>JudgeRegistry, WeightCalculator, AggregationAlgorithms</dependencies>
+      </component>
+      
+      <component name="WeightManagementSystem" type="Configuration Service">
+        <description>Manages dynamic weight allocation for different judge types and contexts</description>
+        <technologies>TypeScript, PostgreSQL, Redis</technologies>
+        <dependencies>ConfigurationManager, ValidationEngine</dependencies>
+      </component>
+      
+      <component name="DisagreementAnalyzer" type="Analysis Service">
+        <description>Analyzes disagreements between different judge types and provides insights</description>
+        <technologies>Python, StatisticalAnalysis, ML</technologies>
+        <dependencies>StatisticalLibrary, VisualizationEngine</dependencies>
+      </component>
+      
+      <component name="ConfidenceCalculator" type="Scoring Service">
+        <description>Calculates confidence intervals and reliability metrics for aggregated scores</description>
+        <technologies>TypeScript, StatisticalAnalysis</technologies>
+        <dependencies>ProbabilityModels, BootstrapMethods</dependencies>
+      </component>
+      
+      <component name="AggregationStorage" type="Data Service">
+        <description>Stores aggregated scores, weight configurations, and analysis results</description>
+        <technologies>PostgreSQL, JSONB, TimescaleDB</technologies>
+        <dependencies>Database, EventStore, AnalyticsEngine</dependencies>
+      </component>
+    </systemArchitecture>
+    
+    <dataModels>
+      <model name="AggregationConfiguration">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="name" type="VARCHAR" required="true"/>
+          <field name="description" type="TEXT"/>
+          <field name="domain" type="VARCHAR" required="true"/>
+          <field name="judgeWeights" type="JSON" required="true"/>
+          <field name="aggregationMethod" type="ENUM" values="weighted_average,median,robust,bayesian" required="true"/>
+          <field name="disagreementThreshold" type="FLOAT" min="0" max="1" default="0.3"/>
+          <field name="minimumJudgeCount" type="INTEGER" default="3"/>
+          <field name="outlierDetection" type="BOOLEAN" default="true"/>
+          <field name="confidenceLevel" type="FLOAT" min="0.8" max="0.99" default="0.95"/>
+          <field name="isActive" type="BOOLEAN" default="true"/>
+          <field name="createdAt" type="TIMESTAMP" required="true"/>
+          <field name="updatedAt" type="TIMESTAMP"/>
+        </fields>
+      </model>
+      
+      <model name="JudgeScore">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="judgeType" type="ENUM" values="automated,staff,community,self,elite" required="true"/>
+          <field name="judgeId" type="UUID" required="true"/>
+          <field name="rawScore" type="FLOAT" required="true"/>
+          <field name="normalizedScore" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="confidence" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="weight" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="metadata" type="JSON"/>
+          <field name="scoredAt" type="TIMESTAMP" required="true"/>
+          <field name="isValid" type="BOOLEAN" default="true"/>
+          <field name="validationNotes" type="TEXT"/>
+        </fields>
+      </model>
+      
+      <model name="AggregatedScore">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="configurationId" type="UUID" required="true" foreignKey="aggregation_configurations.id"/>
+          <field name="finalScore" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="confidenceInterval" type="JSON" required="true"/>
+          <field name="standardError" type="FLOAT" required="true"/>
+          <field name="disagreementIndex" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="participatingJudges" type="JSON" required="true"/>
+          <field name="weightDistribution" type="JSON" required="true"/>
+          <field name="aggregationMethod" type="VARCHAR" required="true"/>
+          <field name="outlierCount" type="INTEGER" default="0"/>
+          <field name="reliabilityScore" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="aggregatedAt" type="TIMESTAMP" required="true"/>
+          <field name="version" type="INTEGER" default="1"/>
+        </fields>
+      </model>
+      
+      <model name="DisagreementAnalysis">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="aggregatedScoreId" type="UUID" required="true" foreignKey="aggregated_scores.id"/>
+          <field name="judgePair" type="JSON" required="true"/>
+          <field name="scoreDifference" type="FLOAT" required="true"/>
+          <field name="significanceLevel" type="FLOAT" required="true"/>
+          <field name="disagreementType" type="ENUM" values="systematic,random,contextual" required="true"/>
+          <field name="potentialCauses" type="JSON"/>
+          <field name="recommendation" type="TEXT"/>
+          <field name="analyzedAt" type="TIMESTAMP" required="true"/>
+        </fields>
+      </model>
+      
+      <model name="WeightAdjustment">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="configurationId" type="UUID" required="true" foreignKey="aggregation_configurations.id"/>
+          <field name="judgeType" type="ENUM" values="automated,staff,community,self,elite" required="true"/>
+          <field name="originalWeight" type="FLOAT" required="true"/>
+          <field name="adjustedWeight" type="FLOAT" required="true"/>
+          <field name="adjustmentReason" type="TEXT" required="true"/>
+          <field name="adjustmentFactor" type="FLOAT" required="true"/>
+          <field name="effectiveFrom" type="TIMESTAMP" required="true"/>
+          <field name="adjustedBy" type="UUID" foreignKey="users.id"/>
+        </fields>
+      </model>
+    </dataModels>
+    
+    <apiEndpoints>
+      <endpoint method="POST" path="/api/v1/aggregation/configure">
+        <description>Create or update aggregation configuration</description>
+        <requestBody>
+          <field name="name" type="VARCHAR" required="true"/>
+          <field name="domain" type="VARCHAR" required="true"/>
+          <field name="judgeWeights" type="JSON" required="true"/>
+          <field name="aggregationMethod" type="ENUM" required="true"/>
+        </requestBody>
+        <responses>
+          <response code="201">Configuration created</response>
+          <response code="400">Invalid configuration</response>
+          <response code="403">Insufficient permissions</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/aggregation/aggregate">
+        <description>Aggregate scores for a submission</description>
+        <requestBody>
+          <field name="submissionId" type="UUID" required="true"/>
+          <field name="configurationId" type="UUID"/>
+          <field name="forceRecalculate" type="BOOLEAN" default="false"/>
+        </requestBody>
+        <responses>
+          <response code="200">Aggregated score results</response>
+          <response code="400">Invalid aggregation request</response>
+          <response code="404">Submission not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/aggregation/submission/{submissionId}/result">
+        <description>Get aggregated score result for a submission</description>
+        <queryParameters>
+          <param name="includeDetails" type="BOOLEAN" default="false"/>
+          <param name="version" type="INTEGER"/>
+        </queryParameters>
+        <responses>
+          <response code="200">Aggregated score details</response>
+          <response code="404">No aggregated score found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/aggregation/submission/{submissionId}/disagreement">
+        <description>Get disagreement analysis for a submission</description>
+        <responses>
+          <response code="200">Disagreement analysis</response>
+          <response code="404">No analysis available</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/aggregation/weights/adjust">
+        <description>Adjust weights for specific judge types</description>
+        <requestBody>
+          <field name="configurationId" type="UUID" required="true"/>
+          <field name="adjustments" type="JSON" required="true"/>
+          <field name="reason" type="TEXT" required="true"/>
+        </requestBody>
+        <responses>
+          <response code="200">Weights adjusted successfully</response>
+          <response code="400">Invalid adjustment request</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/aggregation/analytics/performance">
+        <description>Get aggregation system performance analytics</description>
+        <queryParameters>
+          <param name="timeRange" type="STRING" default="30d"/>
+          <param name="domain" type="STRING"/>
+        </queryParameters>
+        <responses>
+          <response code="200">Performance analytics</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/aggregation/configurations">
+        <description>List all aggregation configurations</description>
+        <queryParameters>
+          <param name="domain" type="STRING"/>
+          <param name="isActive" type="BOOLEAN"/>
+        </queryParameters>
+        <responses>
+          <response code="200">List of configurations</response>
+        </responses>
+      </endpoint>
+    </apiEndpoints>
+    
+    <algorithms>
+      <algorithm name="WeightedAverageAggregation">
+        <description>Calculate weighted average of normalized scores from all judge types</description>
+        <inputs>Normalized scores, weights, confidence levels</inputs>
+        <outputs>Aggregated score, confidence interval</outputs>
+        <method>Weighted arithmetic mean with confidence propagation</method>
+      </algorithm>
+      
+      <algorithm name="RobustAggregation">
+        <description>Robust aggregation method resistant to outliers and extreme values</description>
+        <inputs>Normalized scores, weights, outlier detection parameters</inputs>
+        <outputs>Robust aggregated score, outlier flags</outputs>
+        <method>Trimmed mean + M-estimation + influence functions</method>
+      </algorithm>
+      
+      <algorithm name="BayesianAggregation">
+        <description>Bayesian aggregation incorporating prior knowledge and uncertainty</description>
+        <inputs>Scores, weights, prior distributions, likelihood models</inputs>
+        <outputs>Posterior distribution, credible intervals</outputs>
+        <method>Bayesian hierarchical modeling + MCMC sampling</method>
+      </algorithm>
+      
+      <algorithm name="DisagreementQuantification">
+        <description>Quantify disagreement between different judge types</description>
+        <inputs>Judge scores, weights, confidence levels</inputs>
+        <outputs>Disagreement index, significance tests, disagreement types</outputs>
+        <method>Cohen's kappa + Bland-Altman + variance decomposition</method>
+      </algorithm>
+      
+      <algorithm name="DynamicWeightOptimization">
+        <description>Optimize weights based on historical performance and accuracy</description>
+        <inputs>Historical scores, ground truth, performance metrics</inputs>
+        <outputs>Optimized weights, performance predictions</outputs>
+        <method>Gradient descent + cross-validation + regularization</method>
+      </algorithm>
+    </algorithms>
+  </technicalContext>
+  
+  <implementationDetails>
+    <coreFeatures>
+      <feature name="Multi-Method Aggregation">
+        <description>Support multiple aggregation methods (weighted average, robust, Bayesian)</description>
+        <acceptanceCriteria>
+          <criterion>System supports at least 3 different aggregation methods</criterion>
+          <criterion>Methods can be selected per domain or submission type</criterion>
+          <criterion>Method selection is validated and audited</criterion>
+          <criterion>Performance comparison between methods is available</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Dynamic Weight Management">
+        <description>Flexible weight configuration and adjustment system</description>
+        <acceptanceCriteria>
+          <criterion>Weights can be configured per domain, submission type, and context</criterion>
+          <criterion>Weight adjustments are tracked with audit trail</criterion>
+          <criterion>System validates weight constraints (sum to 1, min/max limits)</criterion>
+          <criterion>Historical weight performance is tracked and analyzed</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Disagreement Analysis">
+        <description>Comprehensive analysis of disagreements between judge types</description>
+        <acceptanceCriteria>
+          <criterion>System identifies systematic vs random disagreements</criterion>
+          <criterion>Statistical significance testing for score differences</criterion>
+          <criterion>Visual representation of disagreement patterns</criterion>
+          <criterion>Recommendations for resolving high disagreement</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Confidence Intervals">
+        <description>Calculate and report confidence intervals for aggregated scores</description>
+        <acceptanceCriteria>
+          <criterion>Confidence intervals calculated using appropriate statistical methods</criterion>
+          <criterion>Multiple confidence levels supported (80%, 90%, 95%, 99%)</criterion>
+          <criterion>Bootstrap methods for non-parametric confidence intervals</criterion>
+          <criterion>Confidence interval width is tracked and optimized</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Real-Time Aggregation">
+        <description>Real-time score aggregation as new judge scores become available</description>
+        <acceptanceCriteria>
+          <criterion>Aggregated scores update automatically when new scores arrive</criterion>
+          <criterion>Incremental aggregation algorithms for efficiency</criterion>
+          <criterion>Real-time notifications for significant score changes</criterion>
+          <criterion>Version control for aggregated score history</criterion>
+        </acceptanceCriteria>
+      </feature>
+    </coreFeatures>
+    
+    <technicalRequirements>
+      <requirement name="Aggregation Accuracy">
+        <description>Ensure accurate statistical aggregation</description>
+        <metric>Numerical precision &gt; 6 decimal places</metric>
+      </requirement>
+      
+      <requirement name="Performance">
+        <description>Fast aggregation processing</description>
+        <metric>Aggregation time &lt; 100ms p95</metric>
+      </requirement>
+      
+      <requirement name="Reliability">
+        <description>Consistent aggregation results</description>
+        <metric>Reproducibility = 100%</metric>
+      </requirement>
+      
+      <requirement name="Scalability">
+        <description>Handle large volumes of scores</description>
+        <metric>Throughput &gt; 1000 aggregations/second</metric>
+      </requirement>
+    </technicalRequirements>
+    
+    <securityConsiderations>
+      <consideration name="Score Integrity">
+        <description>Prevent unauthorized score manipulation</description>
+        <mitigation>Digital signatures, audit trails, access controls</mitigation>
+      </consideration>
+      
+      <consideration name="Weight Security">
+        <description>Protect weight configuration from unauthorized changes</description>
+        <mitigation>Role-based access, change approval workflows</mitigation>
+      </consideration>
+      
+      <consideration name="Data Privacy">
+        <description>Protect sensitive judge and submission data</description>
+        <mitigation>Encryption, anonymization, privacy controls</mitigation>
+      </consideration>
+    </securityConsiderations>
+  </implementationDetails>
+  
+  <testingStrategy>
+    <unitTests>
+      <test name="Aggregation Algorithms">
+        <description>Test all aggregation methods for accuracy</description>
+        <coverage>95%</coverage>
+      </test>
+      
+      <test name="Weight Management">
+        <description>Test weight configuration and validation</description>
+        <coverage>90%</coverage>
+      </test>
+      
+      <test name="Disagreement Analysis">
+        <description>Test disagreement detection and analysis</description>
+        <coverage>85%</coverage>
+      </test>
+    </unitTests>
+    
+    <integrationTests>
+      <test name="End-to-End Aggregation">
+        <description>Test complete aggregation workflow</description>
+        <scenarios>10 scenarios</scenarios>
+      </test>
+      
+      <test name="Multi-Judge Integration">
+        <description>Test integration with all judge types</description>
+        <judges>automated, staff, community, self, elite</judges>
+      </test>
+    </integrationTests>
+    
+    <performanceTests>
+      <test name="High-Volume Aggregation">
+        <description>Test system under high aggregation load</description>
+        <load>1000 concurrent aggregations</load>
+        <duration>5 minutes</duration>
+      </test>
+    </performanceTests>
+    
+    <statisticalValidation>
+      <test name="Aggregation Accuracy">
+        <description>Validate aggregation against ground truth</description>
+        <method>Monte Carlo simulation, statistical testing</method>
+      </test>
+      
+      <test name="Confidence Interval Coverage">
+        <description>Validate confidence interval coverage rates</description>
+        <method>Empirical coverage testing</method>
+      </test>
+    </statisticalValidation>
+  </testingStrategy>
+  
+  <acceptanceCriteria>
+    <criteria>
+      <criterion id="AC1">System aggregates scores from all five judge types accurately</criterion>
+      <criterion id="AC2">Multiple aggregation methods are supported and configurable</criterion>
+      <criterion id="AC3">Weight management system is flexible and auditable</criterion>
+      <criterion id="AC4">Disagreement analysis provides meaningful insights</criterion>
+      <criterion id="AC5">Confidence intervals are calculated and reported correctly</criterion>
+      <criterion id="AC6">Real-time aggregation updates work efficiently</criterion>
+      <criterion id="AC7">System integrates seamlessly with all judge components</criterion>
+      <criterion id="AC8">Final score weights: Automated (40%), Staff (25%), Community (20%), Self (7.5%), Elite (7.5%)</criterion>
+      <criterion id="AC9">All security and performance requirements are met</criterion>
+    </criteria>
+  </acceptanceCriteria>
+  
+  <dependencies>
+    <dependency storyId="5-1">Staff Review Interface - for staff score integration</dependency>
+    <dependency storyId="5-2">Community Voting System - for community score integration</dependency>
+    <dependency storyId="5-3">AI Self-Review System - for self-review score integration</dependency>
+    <dependency storyId="5-4">Elite Panel Review System - for elite panel score integration</dependency>
+    <dependency storyId="2-3">Automated Scoring System - for automated score integration</dependency>
+  </dependencies>
+  
+  <risks>
+    <risk level="High">
+      <description>Statistical errors in aggregation leading to incorrect final scores</description>
+      <mitigation>Rigorous testing, statistical validation, peer review of algorithms</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>Performance bottlenecks with real-time aggregation</description>
+      <mitigation>Efficient algorithms, caching, incremental updates</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>Complexity in handling missing or invalid judge scores</description>
+      <mitigation>Robust error handling, imputation methods, graceful degradation</mitigation>
+    </risk>
+    
+    <risk level="Low">
+      <description>Weight configuration conflicts or inconsistencies</description>
+      <mitigation>Validation rules, constraint checking, configuration templates</mitigation>
+    </risk>
+  </risks>
+  
+  <successMetrics>
+    <metric name="Aggregation Accuracy" target="&gt; 99.9%"/>
+    <metric name="Processing Speed" target="&lt; 100ms p95"/>
+    <metric name="System Reliability" target="99.99%"/>
+    <metric name="Confidence Interval Coverage" target="95% ± 1%</metric>
+    <metric name="Disagreement Detection Accuracy" target="&gt; 90%</metric>
+    <metric name="User Satisfaction" target="&gt; 4.5/5</metric>
+  </successMetrics>
+</storyContext>

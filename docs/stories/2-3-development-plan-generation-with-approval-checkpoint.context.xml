@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-3-development-plan-generation-with-approval-checkpoint">
+  <metadata>
+    <title>Story 2.3: Development Plan Generation with Approval Checkpoint</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.2 (issue context analysis must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want the system to generate a development plan and wait for my approval</action>
+    <benefit>so that I can review the approach before code is written</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System generates development plan based on issue context and requirements</criterion>
+    <criterion id="2">Plan includes implementation approach, file changes, and testing strategy</criterion>
+    <criterion id="3">System detects ambiguity in requirements and flags for clarification</criterion>
+    <criterion id="4">System provides multiple implementation options when appropriate</criterion>
+    <criterion id="5">System waits for human approval before proceeding to implementation</criterion>
+    <criterion id="6">Approval can be granted via CLI command, API call, or webhook response</criterion>
+    <criterion id="7">Plan and approval status logged to event trail for audit</criterion>
+    <criterion id="8">Integration test validates plan generation and approval workflow</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="DevelopmentPlanGenerator">
+        <interface>IDevelopmentPlanGenerator</interface>
+        <methods>
+          <method name="generatePlan" returns="DevelopmentPlan">
+            <parameter name="context" type="IssueContext"/>
+          </method>
+          <method name="detectAmbiguity" returns="AmbiguityReport">
+            <parameter name="context" type="IssueContext"/>
+          </method>
+          <method name="generateOptions" returns="ImplementationOption[]">
+            <parameter name="context" type="IssueContext"/>
+          </method>
+          <method name="requestApproval" returns="ApprovalRequest">
+            <parameter name="plan" type="DevelopmentPlan"/>
+          </method>
+          <method name="waitForApproval" returns="ApprovalResult">
+            <parameter name="requestId" type="string"/>
+          </method>
+        </methods>
+      </component>
+
+      <component name="ApprovalManager">
+        <interface>IApprovalManager</interface>
+        <methods>
+          <method name="createRequest" returns="ApprovalRequest">
+            <parameter name="plan" type="DevelopmentPlan"/>
+          </method>
+          <method name="approveRequest">
+            <parameter name="requestId" type="string"/>
+            <parameter name="approvedBy" type="string"/>
+            <parameter name="modifications" type="PlanModification[]"/>
+          </method>
+          <method name="rejectRequest">
+            <parameter name="requestId" type="string"/>
+            <parameter name="rejectedBy" type="string"/>
+            <parameter name="reason" type="string"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="DevelopmentPlan">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="issueId" type="string"/>
+          <field name="issueNumber" type="number"/>
+          <field name="title" type="string"/>
+          <field name="summary" type="string"/>
+          <field name="approach" type="ImplementationApproach"/>
+          <field name="files" type="FileChange[]"/>
+          <field name="testing" type="TestingStrategy"/>
+          <field name="risks" type="Risk[]"/>
+          <field name="estimatedEffort" type="EffortEstimate"/>
+          <field name="ambiguityReport" type="AmbiguityReport"/>
+          <field name="options" type="ImplementationOption[]"/>
+          <field name="selectedOption" type="number"/>
+          <field name="generatedAt" type="Date"/>
+          <field name="status" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="ApprovalRequest">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="planId" type="string"/>
+          <field name="issueId" type="string"/>
+          <field name="issueNumber" type="number"/>
+          <field name="plan" type="DevelopmentPlan"/>
+          <field name="requestedAt" type="Date"/>
+          <field name="expiresAt" type="Date"/>
+          <field name="status" type="string"/>
+          <field name="approvedBy" type="string"/>
+          <field name="approvedAt" type="Date"/>
+          <field name="rejectionReason" type="string"/>
+          <field name="modifications" type="PlanModification[]"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Plan Generation Engine">
+        <description>AI-powered development plan generation with fallback mechanisms</description>
+        <components>
+          <component>DevelopmentPlanGenerator class</component>
+          <component>Structured prompt engineering</component>
+          <component>Plan validation and normalization</component>
+          <component>Fallback plan generation</component>
+        </components>
+      </phase>
+
+      <phase name="Approval Management">
+        <description>Human-in-the-loop approval workflow with multiple channels</description>
+        <components>
+          <component>ApprovalManager class</component>
+          <component>Multi-channel notifications (CLI, webhook, Slack, email)</component>
+          <component>Request expiration handling</component>
+          <component>Approval state management</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="AI Provider">
+        <description>Plan generation using structured prompts and ambiguity detection</description>
+        <events>
+          <event>PLAN.GENERATED.SUCCESS</event>
+          <event>PLAN.GENERATION.FAILED</event>
+        </events>
+      </integration>
+
+      <integration name="CLI">
+        <description>Approval commands and interactive workflow</description>
+        <commands>
+          <command>tamma approve &lt;request-id&gt;</command>
+          <command>tamma reject &lt;request-id&gt; "reason"</command>
+          <command>tamma plan show</command>
+        </commands>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Complete audit trail for compliance</description>
+        <events>
+          <event>APPROVAL.REQUESTED</event>
+          <event>APPROVAL.GRANTED</event>
+          <event>APPROVAL.REJECTED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="DevelopmentPlanGenerator">
+          <test>generate comprehensive development plan</test>
+          <test>handle AI generation failure gracefully</test>
+          <test>generate multiple implementation options</test>
+          <test>detect and report ambiguity</test>
+          <test>validate plan structure and content</test>
+        </test-suite>
+
+        <test-suite name="ApprovalManager">
+          <test>create approval request</test>
+          <test>wait for approval with timeout</test>
+          <test>grant approval with modifications</test>
+          <test>reject approval with reason</test>
+          <test>handle request expiration</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>end-to-end plan generation and approval workflow</test>
+        <test>multi-channel approval notifications</test>
+        <test>concurrent approval requests</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="development_planning">
+        <setting name="ai_generation.model" default="claude-3-sonnet"/>
+        <setting name="ai_generation.max_tokens" default="2000"/>
+        <setting name="ai_generation.temperature" default="0.3"/>
+        <setting name="ambiguity_detection.threshold" default="0.3"/>
+        <setting name="approval.channel" default="cli"/>
+        <setting name="approval.expiration_minutes" default="60"/>
+        <setting name="approval.poll_interval_seconds" default="10"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="plan_generation" metric="time" value="&lt; 30 seconds"/>
+      <target name="ambiguity_detection" metric="time" value="&lt; 10 seconds"/>
+      <target name="options_generation" metric="time" value="&lt; 20 seconds"/>
+      <target name="approval_response" metric="time" value="&lt; 5 minutes"/>
+    </performance-targets>
+
+    <security-considerations>
+      <consideration>Validate approval requests to prevent unauthorized access</consideration>
+      <consideration>Sanitize plan content to prevent injection attacks</consideration>
+      <consideration>Use secure channels for approval notifications</consideration>
+      <consideration>Implement proper authentication for approval endpoints</consideration>
+    </security-considerations>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Human-in-the-loop approval checkpoint is critical for maintaining control</consideration>
+      <consideration priority="2">Ambiguity handling prevents wasted implementation effort</consideration>
+      <consideration priority="3">Multiple implementation options improve plan quality</consideration>
+      <consideration priority="4">Realistic effort estimation helps with planning</consideration>
+      <consideration priority="5">Risk assessment enables proactive mitigation</consideration>
+      <consideration priority="6">Complete audit trail for compliance requirements</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

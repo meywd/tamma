@@ -1,6 +1,6 @@
 # Story 1.5: Configuration Management & Environment Setup
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -111,7 +111,7 @@ so that the application can run across different environments with proper settin
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- [test-platform/docs/stories/1-5-configuration-management-environment-setup.context.xml](test-platform/docs/stories/1-5-configuration-management-environment-setup.context.xml)
 
 ### Agent Model Used
 

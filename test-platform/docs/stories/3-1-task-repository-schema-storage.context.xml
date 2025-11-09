@@ -1,0 +1,201 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>3</epicId>
+    <storyId>1</storyId>
+    <title>Task Repository Schema & Storage</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-11-08</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/3-1-task-repository-schema-storage.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>benchmark maintainer</asA>
+    <iWant>store and organize benchmark tasks in a structured repository system</iWant>
+    <soThat>I can manage thousands of tasks across multiple languages and scenarios with proper versioning and metadata</soThat>
+    <tasks>Task 1: Task Schema Design and Implementation (AC: #1)
+- Subtask 1.1: Design comprehensive task schema with TypeScript interfaces
+- Subtask 1.2: Implement database tables for tasks, task_versions, and task_metadata
+- Subtask 1.3: Create validation schemas for task data integrity
+- Subtask 1.4: Implement JSONB storage for flexible metadata and language-specific properties
+
+Task 2: Multi-Language Categorization System (AC: #2)
+- Subtask 2.1: Define language-specific task templates and validation rules
+- Subtask 2.2: Implement language detection and classification logic
+- Subtask 2.3: Create language-specific compilation and execution configurations
+- Subtask 2.4: Build language taxonomy management with version support
+
+Task 3: Scenario Organization Framework (AC: #3)
+- Subtask 3.1: Implement scenario hierarchy and categorization system
+- Subtask 3.2: Create scenario-specific task templates and validation schemas
+- Subtask 3.3: Build scenario management interface for CRUD operations
+- Subtask 3.4: Implement scenario-based task routing and filtering
+
+Task 4: Difficulty Management System (AC: #4)
+- Subtask 4.1: Define difficulty metrics and validation criteria for each level
+- Subtask 4.2: Implement automatic difficulty assessment based on complexity analysis
+- Subtask 4.3: Create difficulty calibration tools and manual override capabilities
+- Subtask 4.4: Build difficulty-based task filtering and statistics
+
+Task 5: Version Control and Change Tracking (AC: #5)
+- Subtask 5.1: Implement task versioning with semantic version support
+- Subtask 5.2: Create change tracking system with diff capabilities
+- Subtask 5.3: Build rollback functionality with conflict resolution
+- Subtask 5.4: Implement audit trail for all task modifications
+
+Task 6: Task Dependency Management (AC: #6)
+- Subtask 6.1: Design dependency graph system for complex scenarios
+- Subtask 6.2: Implement dependency validation and circular dependency detection
+- Subtask 6.3: Create dependency resolution algorithms for task execution
+- Subtask 6.4: Build dependency visualization and management tools
+
+Task 7: Bulk Import/Export System (AC: #7)
+- Subtask 7.1: Implement JSON/YAML import/export functionality
+- Subtask 7.2: Create bulk validation and error reporting for imports
+- Subtask 7.3: Build incremental import capabilities with conflict resolution
+- Subtask 7.4: Implement export filtering and format customization
+
+Task 8: Search and Filtering Engine (AC: #8)
+- Subtask 8.1: Implement full-text search with language-specific indexing
+- Subtask 8.2: Create faceted search with multiple filter criteria
+- Subtask 8.3: Build advanced query system with boolean operators
+- Subtask 8.4: Implement search result ranking and relevance scoring</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Task Schema Implementation: Comprehensive task schema supporting language, scenario, difficulty, metadata, and versioning
+2. Multi-Language Support: Task categorization for TypeScript, C#, Java, Python, Go, Ruby, Rust with language-specific validation
+3. Scenario Organization: Structured storage for Code Generation, Testing, Review, Refactoring, Debugging, Security, Documentation scenarios
+4. Difficulty Management: Three-tier difficulty system (Easy, Medium, Hard) with validation criteria and complexity metrics
+5. Version Control System: Complete task versioning with change tracking, rollback capabilities, and audit trails
+6. Task Dependency Management: Support for complex scenarios with prerequisite relationships and dependency resolution
+7. Bulk Operations: Efficient import/export functionality for task management with JSON/YAML format support
+8. Search and Filtering: Advanced task discovery with faceted search, filtering, and sorting capabilities</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="test-platform/docs/epics.md#Epic-3-Test-Bank-Management" title="Epic 3: Test Bank Management" section="Story 3.1: Task Repository Schema & Storage" snippet="Goal: Create a comprehensive repository of benchmark tasks with quality assurance, versioning, and contamination prevention. Value Delivered: Reliable, diverse, and fair benchmark tasks that accurately measure AI capabilities." />
+      <doc path="test-platform/docs/tech-spec-epic-3.md#Task-Repository-Schema--Storage-Story-31" title="Epic 3 Technical Specification" section="Task Repository Schema & Storage" snippet="Core Database Schema: Tasks table with UUID primary key, JSONB content, metadata, versioning, quality scoring, and contamination analysis. Task Versions table for version history with change tracking." />
+      <doc path="test-platform/docs/ARCHITECTURE.md#Data-Model" title="Architecture Document" section="Database Schema" snippet="PostgreSQL 17 with JSONB support for flexible metadata storage. Core tables: providers, models, scenarios, benchmark_runs with TimescaleDB for time-series data." />
+      <doc path="test-platform/docs/PRD.md#Product-Scope" title="Product Requirements Document" section="MVP Features" snippet="7 programming languages × 3 scenarios × 150 tasks = 3,150 total tasks. Automated scoring (compilation, test execution, code quality). Basic web dashboard for viewing results." />
+      <doc path="test-platform/docs/stories/1-1-database-schema-migration-system.md" title="Database Foundation" section="Core Schema Creation" snippet="PostgreSQL 17 database with JSONB support installed and configured. Migration system using modern Node.js migration library (Knex.js or similar). Core tables created: organizations, users, user_organizations, events, api_keys." />
+    </docs>
+    <code>
+      <!-- No existing code found - this is a new project implementation -->
+    </code>
+    <dependencies>
+      <dependency ecosystem="Node.js" packages="{
+        &quot;knex&quot;: &quot;^3.0.0&quot;,
+        &quot;pg&quot;: &quot;^8.11.0&quot;,
+        &quot;uuid&quot;: &quot;^9.0.0&quot;,
+        &quot;zod&quot;: &quot;^3.22.0&quot;,
+        &quot;@types/pg&quot;: &quot;^8.10.0&quot;,
+        &quot;@types/uuid&quot;: &quot;^9.0.0&quot;
+      }" />
+      <dependency ecosystem="Database" packages="{
+        &quot;postgresql&quot;: &quot;17.x&quot;,
+        &quot;timescaledb&quot;: &quot;2.x&quot;
+      }" />
+      <dependency ecosystem="TypeScript" packages="{
+        &quot;typescript&quot;: &quot;~5.7.2&quot;,
+        &quot;@types/node&quot;: &quot;^22.10.2&quot;
+      }" />
+      <dependency ecosystem="Testing" packages="{
+        &quot;vitest&quot;: &quot;^3.0.6&quot;,
+        &quot;@vitest/coverage-v8&quot;: &quot;^3.0.6&quot;
+      }" />
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="Database Technology" description="Must use PostgreSQL 17 with JSONB support and TimescaleDB extension for time-series data" />
+    <constraint name="Migration System" description="Must use Knex.js or similar modern Node.js migration library with rollback capability" />
+    <constraint name="UUID Primary Keys" description="All tables must use gen_random_uuid() for primary keys" />
+    <constraint name="JSONB Metadata" description="Flexible schema evolution for metadata and settings fields using JSONB" />
+    <constraint name="Multi-tenancy" description="Row-level security policies needed for tenant isolation" />
+    <constraint name="Version Control" description="Git-like versioning system for task evolution with semantic versioning" />
+    <constraint name="Performance" description="Query performance targets: sub-100ms for task filtering, &lt;30s for 10,000 task imports" />
+    <constraint name="Indexing Strategy" description="Optimize indexes for frequent query patterns (language, scenario, difficulty)" />
+    <constraint name="Data Integrity" description="Comprehensive validation schemas for task data integrity and language-specific requirements" />
+    <constraint name="Audit Trail" description="Complete audit trail for all task modifications with DCB event sourcing pattern" />
+  </constraints>
+  <interfaces>
+    <interface name="Task" kind="TypeScript Interface" signature="interface Task {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  subcategory?: string;
+  difficultyLevel: DifficultyLevel;
+  taskType: TaskType;
+  content: TaskContent;
+  expectedOutput?: ExpectedOutput;
+  metadata: TaskMetadata;
+  version: number;
+  parentTaskId?: string;
+  status: TaskStatus;
+  qualityScore?: number;
+  contaminationScore?: number;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt?: Date;
+  tags: string[];
+}" path="test-platform/docs/tech-spec-epic-3.md#Task-Data-Models" />
+    
+    <interface name="TaskRepository" kind="Repository Pattern" signature="interface ITaskRepository {
+  create(task: CreateTaskDto): Promise&lt;Task&gt;;
+  findById(id: string): Promise&lt;Task | null&gt;;
+  findByCategory(category: string, filters?: TaskFilters): Promise&lt;Task[]&gt;;
+  update(id: string, updates: UpdateTaskDto): Promise&lt;Task&gt;;
+  delete(id: string): Promise&lt;void&gt;;
+  createVersion(taskId: string, version: CreateTaskVersionDto): Promise&lt;TaskVersion&gt;;
+  getVersionHistory(taskId: string): Promise&lt;TaskVersion[]&gt;;
+  search(query: SearchQuery): Promise&lt;SearchResult&gt;;
+}" path="test-platform/docs/tech-spec-epic-3.md#Services-and-Modules" />
+    
+    <interface name="Database Schema" kind="SQL Schema" signature="-- Tasks (Main test cases)
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    category VARCHAR(100) NOT NULL,
+    subcategory VARCHAR(100),
+    difficulty_level VARCHAR(50) NOT NULL,
+    task_type VARCHAR(50) NOT NULL,
+    content JSONB NOT NULL,
+    expected_output JSONB,
+    metadata JSONB DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1,
+    parent_task_id UUID REFERENCES tasks(id),
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    quality_score DECIMAL(3,2),
+    contamination_score DECIMAL(3,2),
+    created_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    published_at TIMESTAMP WITH TIME ZONE,
+    tags TEXT[]
+);" path="test-platform/docs/tech-spec-epic-3.md#Core-Database-Schema" />
+  </interfaces>
+  <tests>
+    <standards>Unit tests using Vitest with in-memory PostgreSQL for database operations. Integration tests with real PostgreSQL test database. Test coverage targets: 80% line, 75% branch, 85% function. Critical paths (schema validation, version control, dependency resolution): 100% coverage. Performance tests for query optimization and bulk operations.</standards>
+    <locations>
+      <location pattern="src/**/*.test.ts" description="Unit tests colocated with source files" />
+      <location pattern="tests/**/*.integration.test.ts" description="Integration tests in dedicated tests directory" />
+      <location pattern="tests/**/*.performance.test.ts" description="Performance tests for critical operations" />
+      <location pattern="database/migrations/**/*.test.ts" description="Migration rollback and validation tests" />
+    </locations>
+    <ideas>
+      <test idea="Task schema validation with all language types" acceptanceCriteria="1" />
+      <test idea="Version control operations (create, update, rollback)" acceptanceCriteria="5" />
+      <test idea="Dependency resolution algorithms and circular dependency detection" acceptanceCriteria="6" />
+      <test idea="Import/export functionality with various file formats" acceptanceCriteria="7" />
+      <test idea="Search and filtering with complex query combinations" acceptanceCriteria="8" />
+      <test idea="Bulk import performance with 10,000+ tasks" acceptanceCriteria="7" />
+      <test idea="Full-text search response time with large task corpus" acceptanceCriteria="8" />
+      <test idea="Database operations with PostgreSQL JSONB functionality" acceptanceCriteria="1" />
+      <test idea="Concurrent task modifications and conflict resolution" acceptanceCriteria="5" />
+      <test idea="Invalid task data during import with partial rollback" acceptanceCriteria="7" />
+    </ideas>
+  </tests>
+</story-context>

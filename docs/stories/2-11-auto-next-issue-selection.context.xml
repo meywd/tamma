@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-11-auto-next-issue-selection">
+  <metadata>
+    <title>Story 2.11: Auto Next Issue Selection</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.10 (PR merge with completion checkpoint must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to automatically select and start the next appropriate issue</action>
+    <benefit>so that I can achieve continuous autonomous development without manual intervention</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System analyzes available issues and selects next best candidate</criterion>
+    <criterion id="2">Selection considers priority, dependencies, and developer capacity</criterion>
+    <criterion id="3">System validates issue is ready for development (unblocked, assigned)</criterion>
+    <criterion id="4">System begins autonomous development loop for selected issue</criterion>
+    <criterion id="5">Selection process and criteria logged to event trail</criterion>
+    <criterion id="6">Integration test validates continuous autonomous workflow</criterion>
+    <criterion id="7">System handles no available issues scenario gracefully</criterion>
+    <criterion id="8">System respects rate limits and resource constraints</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="IssueSelector">
+        <interface>IIssueSelector</interface>
+        <methods>
+          <method name="selectNextIssue" returns="IssueSelectionResult">
+            <parameter name="context" type="SelectionContext"/>
+          </method>
+          <method name="evaluateIssue" returns="IssueScore">
+            <parameter name="issue" type="Issue"/>
+            <parameter name="context" type="SelectionContext"/>
+          </method>
+          <method name="validateReadiness" returns="ReadinessResult">
+            <parameter name="issue" type="Issue"/>
+          </method>
+          <method name="checkDependencies" returns="DependencyResult">
+            <parameter name="issue" type="Issue"/>
+          </method>
+          <method name="startDevelopment" returns="DevelopmentStartResult">
+            <parameter name="issue" type="Issue"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="IssueSelectionResult">
+        <fields>
+          <field name="selectedIssue" type="Issue"/>
+          <field name="selectionReason" type="string"/>
+          <field name="score" type="number"/>
+          <field name="alternatives" type="Issue[]"/>
+          <field name="selectionTime" type="Date"/>
+          <field name="confidence" type="number"/>
+        </fields>
+      </interface>
+
+      <interface name="IssueScore">
+        <fields>
+          <field name="totalScore" type="number"/>
+          <field name="priorityScore" type="number"/>
+          <field name="dependencyScore" type="number"/>
+          <field name="complexityScore" type="number"/>
+          <field name="capacityScore" type="number"/>
+          <field name="readinessScore" type="number"/>
+          <field name="factors" type="ScoringFactor[]"/>
+        </fields>
+      </interface>
+
+      <interface name="ScoringFactor">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="value" type="number"/>
+          <field name="weight" type="number"/>
+          <field name="description" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="ReadinessResult">
+        <fields>
+          <field name="ready" type="boolean"/>
+          <field name="blockers" type="Blocker[]"/>
+          <field name="missingRequirements" type="string[]"/>
+          <field name="recommendations" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="DependencyResult">
+        <fields>
+          <field name="dependenciesSatisfied" type="boolean"/>
+          <field name="blockingIssues" type="string[]"/>
+          <field name="completedDependencies" type="string[]"/>
+          <field name="dependencyChain" type="Dependency[]"/>
+        </fields>
+      </interface>
+
+      <interface name="SelectionContext">
+        <fields>
+          <field name="developerCapacity" type="number"/>
+          <field name="currentWorkload" type="Workload[]"/>
+          <field name="recentlyCompleted" type="string[]"/>
+          <field name="teamAvailability" type="TeamMember[]"/>
+          <field name="projectConstraints" type="ProjectConstraint[]"/>
+          <field name="timeConstraints" type="TimeConstraint[]"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Issue Discovery">
+        <description>Find and filter available issues for development</description>
+        <components>
+          <component>Issue filtering and discovery</component>
+          <component>Label and priority analysis</component>
+          <component>Assignment status checking</component>
+          <component>Blocker identification</component>
+        </components>
+      </phase>
+
+      <phase name="Issue Evaluation">
+        <description>Score and rank issues based on multiple factors</description>
+        <components>
+          <component>Multi-factor scoring algorithm</component>
+          <component>Dependency analysis</component>
+          <field name="complexity estimation</field>
+          <field name="capacity assessment</field>
+        </components>
+      </phase>
+
+      <phase name="Selection Validation">
+        <description>Validate selected issue is ready for development</description>
+        <components>
+          <component>Readiness validation</component>
+          <component>Dependency verification</component>
+          <component>Resource availability check</component>
+          <component>Risk assessment</component>
+        </components>
+      </phase>
+
+      <phase name="Development Initiation">
+        <description>Start autonomous development loop for selected issue</description>
+        <components>
+          <component>Issue assignment</component>
+          <component>Development workflow trigger</component>
+          <component>Progress tracking initialization</component>
+          <component>Notification system</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Git Platform">
+        <description>Discover and manage issues</description>
+        <operations>
+          <operation>getIssues()</operation>
+          <operation>assignIssue()</operation>
+          <operation>updateIssueStatus()</operation>
+          <operation>getIssueDependencies()</operation>
+        </operations>
+      </integration>
+
+      <integration name="Project Management">
+        <description>Integrate with project tracking systems</description>
+        <systems>
+          <system>GitHub Projects</system>
+          <system>GitLab Issues</system>
+          <system>Jira</system>
+          <system>Linear</system>
+        </systems>
+      </integration>
+
+      <integration name="AI Provider">
+        <description>Analyze issues and predict complexity</description>
+        <events>
+          <event>ISSUE.ANALYZED</event>
+          <event>COMPLEXITY.ESTIMATED</event>
+        </events>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for issue selection</description>
+        <events>
+          <event>ISSUE.SELECTION.STARTED</event>
+          <event>ISSUE.SELECTED</event>
+          <event>DEVELOPMENT.STARTED</event>
+          <event>NO.ISSUES.AVAILABLE</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="IssueSelector">
+          <test>select next best issue</test>
+          <test>evaluate and score issues</test>
+          <test>validate issue readiness</test>
+          <test>check dependencies</test>
+          <test>start development workflow</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>continuous autonomous workflow</test>
+        <test>issue selection from real repositories</test>
+        <test>dependency resolution</test>
+        <test>capacity management</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="selection_criteria">
+        <setting name="priority_weight" default="0.3"/>
+        <setting name="dependency_weight" default="0.25"/>
+        <setting name="complexity_weight" default="0.2"/>
+        <setting name="capacity_weight" default="0.15"/>
+        <setting name="readiness_weight" default="0.1"/>
+      </section>
+
+      <section name="readiness_requirements">
+        <setting name="require_assignment" default="true"/>
+        <setting name="require_dependencies" default="true"/>
+        <setting name="require_description" default="true"/>
+        <setting name="require_labels" default="false"/>
+      </section>
+
+      <section name="development_settings">
+        <setting name="max_concurrent_issues" default="1"/>
+        <setting name="min_confidence_threshold" default="0.7"/>
+        <setting name="auto_start_development" default="true"/>
+        <setting name="selection_interval_minutes" default="5"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="issue_discovery" metric="time" value="&lt; 10 seconds"/>
+      <target name="issue_evaluation" metric="time" value="&lt; 15 seconds"/>
+      <target name="selection_validation" metric="time" value="&lt; 5 seconds"/>
+      <target name="development_initiation" metric="time" value="&lt; 10 seconds"/>
+    </performance-targets>
+
+    <scoring-factors>
+      <factor name="priority">Issue priority and labels</factor>
+      <factor name="dependencies">Dependency satisfaction</factor>
+      <factor name="complexity">Estimated implementation complexity</factor>
+      <factor name="capacity">Developer capacity and workload</factor>
+      <factor name="readiness">Issue readiness for development</factor>
+      <factor name="business_value">Business impact and value</factor>
+    </scoring-factors>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Intelligent multi-factor issue scoring</consideration>
+      <consideration priority="2">Comprehensive dependency analysis</consideration>
+      <consideration priority="3">Readiness validation before selection</consideration>
+      <consideration priority="4">Capacity and resource management</consideration>
+      <consideration priority="5">Seamless continuous workflow</consideration>
+      <consideration priority="6">Graceful handling of no available issues</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

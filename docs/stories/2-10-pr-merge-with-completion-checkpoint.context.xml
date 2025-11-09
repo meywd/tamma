@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-10-pr-merge-with-completion-checkpoint">
+  <metadata>
+    <title>Story 2.10: PR Merge with Completion Checkpoint</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.9 (PR status monitoring must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to merge approved PRs and complete the development loop</action>
+    <benefit>so that I can have fully automated issue completion with proper cleanup</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System validates all merge requirements are met (approvals, checks, conflicts)</criterion>
+    <criterion id="2">System merges PR using appropriate method (merge, squash, rebase)</criterion>
+    <criterion id="3">System performs post-merge cleanup (branch deletion, status updates)</criterion>
+    <criterion id="4">System updates issue status and closes related tickets</criterion>
+    <criterion id="5">System generates completion report with metrics and summary</criterion>
+    <criterion id="6">Merge process and completion logged to event trail</criterion>
+    <criterion id="7">Integration test validates complete merge and cleanup workflow</criterion>
+    <criterion id="8">System handles merge failures and rollback scenarios</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="PRMerger">
+        <interface>IPRMerger</interface>
+        <methods>
+          <method name="validateMergeRequirements" returns="MergeValidationResult">
+            <parameter name="pr" type="PullRequest"/>
+          </method>
+          <method name="mergePullRequest" returns="MergeResult">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="method" type="MergeMethod"/>
+          </method>
+          <method name="performPostMergeCleanup" returns="CleanupResult">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="mergeResult" type="MergeResult"/>
+          </method>
+          <method name="updateIssueStatus" returns="IssueUpdateResult">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="mergeResult" type="MergeResult"/>
+          </method>
+          <method name="generateCompletionReport" returns="CompletionReport">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="mergeResult" type="MergeResult"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="MergeValidationResult">
+        <fields>
+          <field name="canMerge" type="boolean"/>
+          <field name="requirements" type="MergeRequirement[]"/>
+          <field name="blockingIssues" type="BlockingIssue[]"/>
+          <field name="warnings" type="string[]"/>
+          <field name="recommendedMethod" type="MergeMethod"/>
+        </fields>
+      </interface>
+
+      <interface name="MergeRequirement">
+        <fields>
+          <field name="type" type="string"/>
+          <field name="description" type="string"/>
+          <field name="satisfied" type="boolean"/>
+          <field name="details" type="string"/>
+          <field name="critical" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="MergeResult">
+        <fields>
+          <field name="success" type="boolean"/>
+          <field name="mergeCommit" type="string"/>
+          <field name="method" type="MergeMethod"/>
+          <field name="mergedAt" type="Date"/>
+          <field name="mergedBy" type="string"/>
+          <field name="changesIncluded" type="string[]"/>
+          <field name="conflictsResolved" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="CleanupResult">
+        <fields>
+          <field name="branchDeleted" type="boolean"/>
+          <field name="statusUpdated" type="boolean"/>
+          <field name="issuesClosed" type="string[]"/>
+          <field name="notificationsSent" type="string[]"/>
+          <field name="cleanupActions" type="CleanupAction[]"/>
+        </fields>
+      </interface>
+
+      <interface name="CompletionReport">
+        <fields>
+          <field name="issueId" type="string"/>
+          <field name="issueNumber" type="number"/>
+          <field name="title" type="string"/>
+          <field name="prNumber" type="number"/>
+          <field name="mergeCommit" type="string"/>
+          <field name="completedAt" type="Date"/>
+          <field name="duration" type="number"/>
+          <field name="metrics" type="CompletionMetrics"/>
+          <field name="summary" type="string"/>
+          <field name="nextSteps" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="CompletionMetrics">
+        <fields>
+          <field name="totalDuration" type="number"/>
+          <field name="planGenerationTime" type="number"/>
+          <field name="implementationTime" type="number"/>
+          <field name="testingTime" type="number"/>
+          <field name="reviewTime" type="number"/>
+          <field name="filesChanged" type="number"/>
+          <field name="testsAdded" type="number"/>
+          <field name="coveragePercentage" type="number"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Merge Validation">
+        <description>Validate all requirements for PR merge</description>
+        <components>
+          <component>Requirement checking</component>
+          <component>Approval verification</component>
+          <component>Check status validation</component>
+          <component>Conflict detection</component>
+        </components>
+      </phase>
+
+      <phase name="Merge Execution">
+        <description>Execute merge using appropriate method</description>
+        <components>
+          <component>Merge method selection</component>
+          <component>Merge execution</component>
+          <component>Conflict resolution</component>
+          <component>Rollback handling</component>
+        </components>
+      </phase>
+
+      <phase name="Post-Merge Cleanup">
+        <description>Cleanup and close related items</description>
+        <components>
+          <component>Branch deletion</component>
+          <component>Issue status updates</component>
+          <component>Notification sending</component>
+          <component>Documentation updates</component>
+        </components>
+      </phase>
+
+      <phase name="Completion Reporting">
+        <description>Generate comprehensive completion report</description>
+        <components>
+          <component>Metrics collection</component>
+          <component>Report generation</component>
+          <component>Summary creation</component>
+          <component>Next steps identification</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Git Platform">
+        <description>Execute merge operations and cleanup</description>
+        <operations>
+          <operation>mergePullRequest()</operation>
+          <operation>deleteBranch()</operation>
+          <operation>updateIssue()</operation>
+          <operation>closeIssue()</operation>
+        </operations>
+      </integration>
+
+      <integration name="Project Management">
+        <description>Update project tracking systems</description>
+        <systems>
+          <system>GitHub Issues</system>
+          <system>GitLab Issues</system>
+          <system>Jira</system>
+          <system>Linear</system>
+        </systems>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for merge completion</description>
+        <events>
+          <event>PR.MERGE.VALIDATED</event>
+          <event>PR.MERGE.EXECUTED</event>
+          <event>PR.CLEANUP.COMPLETED</event>
+          <event>ISSUE.COMPLETED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="PRMerger">
+          <test>validate merge requirements</test>
+          <test>execute merge with different methods</test>
+          <test>perform post-merge cleanup</test>
+          <test>update issue status appropriately</test>
+          <test>generate completion report</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>merge real PR on GitHub</test>
+        <test>complete full development loop</test>
+        <test>handle merge conflicts</test>
+        <test>cleanup and issue closure</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="merge_settings">
+        <setting name="default_method" default="squash"/>
+        <setting name="require_all_checks" default="true"/>
+        <setting name="require_approvals" default="true"/>
+        <setting name="min_approvals" default="1"/>
+        <setting name="auto_cleanup" default="true"/>
+      </section>
+
+      <section name="cleanup_settings">
+        <setting name="delete_branch" default="true"/>
+        <setting name="close_issue" default="true"/>
+        <setting name="send_notifications" default="true"/>
+        <setting name="update_documentation" default="true"/>
+      </section>
+
+      <section name="reporting">
+        <setting name="generate_report" default="true"/>
+        <setting name="include_metrics" default="true"/>
+        <setting name="include_summary" default="true"/>
+        <setting name="suggest_next_steps" default="true"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="merge_validation" metric="time" value="&lt; 10 seconds"/>
+      <target name="merge_execution" metric="time" value="&lt; 15 seconds"/>
+      <target name="cleanup" metric="time" value="&lt; 20 seconds"/>
+      <target name="report_generation" metric="time" value="&lt; 5 seconds"/>
+    </performance-targets>
+
+    <merge-methods>
+      <method name="merge">Create merge commit</method>
+      <method name="squash">Squash commits into one</method>
+      <method name="rebase">Rebase commits onto target</method>
+    </merge-methods>
+
+    <completion-metrics>
+      <metric name="cycle_time">Total time from issue assignment to completion</metric>
+      <metric name="lead_time">Time from development start to completion</metric>
+      <metric name="code_quality">Test coverage, complexity, maintainability</metric>
+      <metric name="review_efficiency">Time spent in review and changes</metric>
+    </completion-metrics>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Comprehensive merge validation before execution</consideration>
+      <consideration priority="2">Appropriate merge method selection</consideration>
+      <consideration priority="3">Complete post-merge cleanup and issue closure</consideration>
+      <consideration priority="4">Detailed completion reporting with metrics</consideration>
+      <consideration priority="5">Error handling and rollback capabilities</consideration>
+      <consideration priority="6">Integration with project management systems</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>
