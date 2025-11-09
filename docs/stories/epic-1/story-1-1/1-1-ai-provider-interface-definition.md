@@ -57,6 +57,14 @@ so that the system can support multiple AI providers without tight coupling.
   - [x] Subtask 5.2: Add sync wrapper methods for compatibility
   - [x] Subtask 5.3: Implement promise-based execution patterns
 
+## Task Breakdown Files
+
+- [1-1-ai-provider-interface-definition-task-1.md](./1-1-ai-provider-interface-definition-task-1.md) - Define core AI provider interface structure
+- [1-1-ai-provider-interface-definition-task-2.md](./1-1-ai-provider-interface-definition-task-2.md) - Implement provider capabilities discovery
+- [1-1-ai-provider-interface-definition-task-3.md](./1-1-ai-provider-interface-definition-task-3.md) - Define error handling contracts
+- [1-1-ai-provider-interface-definition-task-4.md](./1-1-ai-provider-interface-definition-task-4.md) - Create integration documentation
+- [1-1-ai-provider-interface-definition-task-5.md](./1-1-ai-provider-interface-definition-task-5.md) - Implement synchronous and asynchronous patterns
+
 ## Dev Notes
 
 ### ⚠️ Development Process Reminder

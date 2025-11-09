@@ -9,6 +9,7 @@ Status: ready-for-dev
 📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
 
 This mandatory guide includes:
+
 - 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
 - Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
 - TRACE/DEBUG Logging Requirements for all functions
@@ -69,17 +70,26 @@ so that I can validate the provider abstraction with a real implementation.
   - [ ] Subtask 6.3: Write integration test for end-to-end code generation
   - [ ] Subtask 6.4: Add tests for rate limiting and context limits
 
+## Task Breakdown Files
+
+- [1-2-claude-code-provider-implementation-task-1.md](./1-2-claude-code-provider-implementation-task-1.md) - Implement Claude Code provider class structure
+- [1-2-claude-code-provider-implementation-task-2.md](./1-2-claude-code-provider-implementation-task-2.md) - Implement core message handling
+- [1-2-claude-code-provider-implementation-task-3.md](./1-2-claude-code-provider-implementation-task-3.md) - Add provider capabilities discovery
+- [1-2-claude-code-provider-implementation-task-4.md](./1-2-claude-code-provider-implementation-task-4.md) - Implement error handling and retry logic
+- [1-2-claude-code-provider-implementation-task-5.md](./1-2-claude-code-provider-implementation-task-5.md) - Add telemetry and monitoring
+- [1-2-claude-code-provider-implementation-task-6.md](./1-2-claude-code-provider-implementation-task-6.md) - Create comprehensive test suite
+
 ## Dev Notes
 
 ### ⚠️ Development Process Reminder
 
 **Before implementing this story, ensure you have:**
+
 1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
 3. ✅ Reviewed relevant documentation in `docs/` directory
 4. ✅ Checked existing code patterns for similar functionality
 5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
-
 
 ### Requirements Context Summary
 
@@ -115,10 +125,10 @@ so that I can validate the provider abstraction with a real implementation.
 
 ## Change Log
 
-| Date | Version | Changes | Author |
-|------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
-| 2025-10-28 | 1.1.0 | Added prerequisite Story 1-0, clarified Anthropic Claude API (not Claude Code tool), made MCP integration TBD pending research | Bob (Scrum Master) |
+| Date       | Version | Changes                                                                                                                        | Author             |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| 2025-10-28 | 1.0.0   | Initial story creation                                                                                                         | Bob (Scrum Master) |
+| 2025-10-28 | 1.1.0   | Added prerequisite Story 1-0, clarified Anthropic Claude API (not Claude Code tool), made MCP integration TBD pending research | Bob (Scrum Master) |
 
 ## Dev Agent Record
 

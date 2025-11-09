@@ -9,6 +9,7 @@ Status: ready-for-dev
 📖 **[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)**
 
 This mandatory guide includes:
+
 - 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling)
 - Knowledge Base Usage (.dev/ directory: spikes, bugs, findings, decisions)
 - TRACE/DEBUG Logging Requirements for all functions
@@ -65,17 +66,27 @@ so that I can easily switch providers or configure provider-specific parameters.
   - [ ] Subtask 7.2: Write tests for environment variable overrides
   - [ ] Subtask 7.3: Write integration tests for hot-reload functionality
 
+## Task Breakdown Files
+
+- [1-3-provider-configuration-management-task-1.md](./1-3-provider-configuration-management-task-1.md) - Design configuration schema and data structures
+- [1-3-provider-configuration-management-task-2.md](./1-3-provider-configuration-management-task-2.md) - Implement configuration loading and parsing
+- [1-3-provider-configuration-management-task-3.md](./1-3-provider-configuration-management-task-3.md) - Add environment variable override support
+- [1-3-provider-configuration-management-task-4.md](./1-3-provider-configuration-management-task-4.md) - Implement configuration hot-reload functionality
+- [1-3-provider-configuration-management-task-5.md](./1-3-provider-configuration-management-task-5.md) - Create provider discovery and selection logic
+- [1-3-provider-configuration-management-task-6.md](./1-3-provider-configuration-management-task-6.md) - Create comprehensive documentation and examples
+- [1-3-provider-configuration-management-task-7.md](./1-3-provider-configuration-management-task-7.md) - Add comprehensive testing
+
 ## Dev Notes
 
 ### ⚠️ Development Process Reminder
 
 **Before implementing this story, ensure you have:**
+
 1. ✅ Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 2. ✅ Searched `.dev/` directory for related spikes, bugs, findings, and decisions
 3. ✅ Reviewed relevant documentation in `docs/` directory
 4. ✅ Checked existing code patterns for similar functionality
 5. ✅ Planned TDD approach (Red-Green-Refactor cycle)
-
 
 ### Requirements Context Summary
 
@@ -111,9 +122,9 @@ so that I can easily switch providers or configure provider-specific parameters.
 
 ## Change Log
 
-| Date | Version | Changes | Author |
-|------|---------|----------|--------|
-| 2025-10-28 | 1.0.0 | Initial story creation | Bob (Scrum Master) |
+| Date       | Version | Changes                | Author             |
+| ---------- | ------- | ---------------------- | ------------------ |
+| 2025-10-28 | 1.0.0   | Initial story creation | Bob (Scrum Master) |
 
 ## Dev Agent Record
 
