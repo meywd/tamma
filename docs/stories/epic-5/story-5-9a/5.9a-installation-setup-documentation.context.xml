@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.9a</story-id>
+  <story-title>Installation &amp; Setup Documentation</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>true</mvp-critical>
+  <sub-story>true</sub-story>
+  <parent-story>5.9</parent-story>
+  
+  <technical-context>
+    <architecture-pattern>Comprehensive installation and setup documentation</architecture-pattern>
+    <primary-goal>Enable developers to quickly install Tamma via npm, Docker, or binaries and complete first-time configuration</primary-goal>
+    
+    <installation-methods>
+      <method name="npm Installation">
+        <command>npm install -g @tamma/cli</command>
+        <prerequisites>Node.js 22+, npm 9+, system permissions</prerequisites>
+        <verification>tamma --version</verification>
+        <troubleshooting>
+          <issue>Permission denied</issue>
+          <solution>Use sudo or configure npm global directory</solution>
+          <issue>Network timeout</issue>
+          <solution>Use npm registry mirror or VPN</solution>
+          <issue>Node.js version incompatible</issue>
+          <solution>Upgrade to Node.js 22 LTS</solution>
+        </troubleshooting>
+      </method>
+      <method name="Docker Installation">
+        <commands>
+          <command>docker run --rm -v $(pwd):/workspace tamma/tamma:latest</command>
+          <command>docker-compose up -d</command>
+        </commands>
+        <prerequisites>Docker 20+, Docker Compose 2+, volume mounts</prerequisites>
+        <verification>Container logs show Tamma startup</verification>
+        <troubleshooting>
+          <issue>Permission denied on volume mounts</issue>
+          <solution>Check Docker permissions, use proper user mapping</solution>
+          <issue>Container fails to start</issue>
+          <solution>Check Docker logs, verify image compatibility</solution>
+          <issue>Network connectivity issues</issue>
+          <solution>Configure Docker network settings</solution>
+        </troubleshooting>
+      </method>
+      <method name="Binary Installation">
+        <platforms>Windows, macOS, Linux</platforms>
+        <steps>
+          <step>Download appropriate binary from GitHub releases</step>
+          <step>Extract archive to installation directory</step>
+          <step>Add installation directory to PATH</step>
+          <step>Verify installation with tamma --version</step>
+        </steps>
+        <prerequisites>System administrator privileges, internet access</prerequisites>
+        <verification>tamma --version shows correct version</verification>
+        <troubleshooting>
+          <issue>Command not found</issue>
+          <solution>Verify PATH configuration, restart terminal</solution>
+          <issue>Permission denied on execution</issue>
+          <solution>Make binary executable (chmod +x)</solution>
+          <issue>Binary corruption</issue>
+          <solution>Verify checksum, re-download</solution>
+        </troubleshooting>
+      </method>
+    </installation-methods>
+    
+    <service-mode-setup>
+      <mode name="systemd (Linux)">
+        <file>/etc/systemd/system/tamma.service</file>
+        <commands>
+          <command>sudo systemctl enable tamma</command>
+          <command>sudo systemctl start tamma</command>
+          <command>sudo systemctl status tamma</command>
+        </commands>
+        <configuration>User, working directory, restart policy</configuration>
+      </mode>
+      <mode name="Windows Service">
+        <method>Windows Service Manager or sc.exe</method>
+        <commands>
+          <command>sc create Tamma binPath= "C:\Program Files\Tamma\tamma.exe"</command>
+          <command>sc start Tamma</command>
+          <command>sc query Tamma</command>
+        </commands>
+        <configuration>Service account, startup type, dependencies</configuration>
+      </mode>
+      <mode name="launchd (macOS)">
+        <file>~/Library/LaunchAgents/com.tamma.plist</file>
+        <commands>
+          <command>launchctl load ~/Library/LaunchAgents/com.tamma.plist</command>
+          <command>launchctl start com.tamma</command>
+          <command>launchctl list | grep tamma</command>
+        </commands>
+        <configuration>User agent, program arguments, run intervals</configuration>
+      </mode>
+    </service-mode-setup>
+    
+    <first-time-configuration>
+      <wizard name="tamma init">
+        <purpose>Interactive configuration wizard</purpose>
+        <steps>
+          <step>AI provider selection and configuration</step>
+          <step>Git platform setup and authentication</step>
+          <step>Working directory configuration</step>
+          <step>Database connection setup</step>
+          <step>Notification preferences</step>
+          <step>Test configuration</step>
+        </steps>
+        <automation>Generate configuration file with sensible defaults</automation>
+        <validation>Test each configuration component</validation>
+      </wizard>
+      <config-file name="tamma.config.yaml">
+        <location>~/.tamma/config.yaml (default)</location>
+        <structure>YAML format with sections for each component</structure>
+        <validation>Schema validation on startup</validation>
+        <security>File permissions 600 (owner read/write only)</security>
+      </config-file>
+    </first-time-configuration>
+    
+    <documentation-structure>
+      <section name="Prerequisites">
+        <content>System requirements, dependencies, permissions</content>
+      </section>
+      <section name="Installation Methods">
+        <content>npm, Docker, binary installation with detailed steps</content>
+      </section>
+      <section name="Service Setup">
+        <content>systemd, Windows Service, launchd configuration</content>
+      </section>
+      <section name="First Configuration">
+        <content>Interactive setup wizard, configuration file reference</content>
+      </section>
+      <section name="Troubleshooting">
+        <content>Common errors and solutions</content>
+      </section>
+      <section name="Verification">
+        <content>How to verify successful installation</content>
+      </section>
+    </documentation-structure>
+    
+    <common-installation-errors>
+      <error name="Permission Denied">
+        <causes>Insufficient privileges, file permissions</causes>
+        <solutions>Use appropriate privileges, check permissions</solutions>
+      </error>
+      <error name="Network Timeout">
+        <causes>Firewall, DNS issues, registry problems</causes>
+        <solutions>Check network, use mirrors, configure proxy</solutions>
+      </error>
+      <error name="Version Conflicts">
+        <causes>Multiple installations, PATH conflicts</causes>
+        <solutions>Clean installation, PATH verification</solutions>
+      </error>
+      <error name="Missing Dependencies">
+        <causes>Outdated system, missing libraries</causes>
+        <solutions>Install dependencies, update system</solutions>
+      </error>
+    </common-installation-errors>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/cli</package>
+      <package>@tamma/config</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>InstallationWizard - Interactive setup wizard</component>
+      <component>ConfigValidator - Configuration file validation</component>
+      <component>ServiceInstaller - Service mode installation</component>
+      <component>VerificationTool - Installation verification</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/cli/src/commands/init.ts</file>
+      <file>packages/config/src/validation/config-validator.ts</file>
+      <file>packages/cli/src/utils/service-installer.ts</file>
+      <file>packages/cli/src/utils/verification.ts</file>
+      <file>docs/installation/README.md</file>
+    </key-files>
+    
+    <documentation-files>
+      <file>docs/installation/npm-installation.md</file>
+      <file>docs/installation/docker-installation.md</file>
+      <file>docs/installation/binary-installation.md</file>
+      <file>docs/installation/service-setup.md</file>
+      <file>docs/installation/troubleshooting.md</file>
+      <file>docs/installation/verification.md</file>
+    </documentation-files>
+    
+    <external-dependencies>
+      <dependency>inquirer - Interactive CLI prompts</dependency>
+      <dependency>yaml - YAML configuration parsing</dependency>
+      <dependency>chalk - Colored terminal output</dependency>
+      <dependency>commander - CLI command framework</dependency>
+    </external-dependencies>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Stories 1.5-5, 1.5-8, 1.5-9 (installation methods must exist)</upstream>
+    <downstream>Story 5.9b - Usage &amp; Configuration Documentation</downstream>
+    <downstream>Story 5.10 - Alpha Release Preparation</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Installation via npm documented (npm install -g @tamma/cli, prerequisites, troubleshooting)</criteria>
+    <criteria id="2">Installation via Docker documented (docker run, Docker Compose setup, volume mounts)</criteria>
+    <criteria id="3">Installation via binaries documented (download, extract, PATH setup for Windows/macOS/Linux)</criteria>
+    <criteria id="4">Service mode setup documented (systemd, Windows Service, launchd)</criteria>
+    <criteria id="5">First-time configuration wizard walkthrough (tamma init)</criteria>
+    <criteria id="6">Common installation errors documented with solutions</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Installation success rate &gt;95% across all methods</metric>
+    <metric>Configuration wizard completion rate &gt;90%</metric>
+    <metric>Documentation clarity score &gt;4.5/5 (user feedback)</metric>
+    <metric>Troubleshooting resolution rate &gt;80%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Installation complexity preventing adoption</description>
+      <mitigation>Multiple installation methods, clear documentation, automated setup</mitigation>
+    </risk>
+    <risk>
+      <description>Platform-specific installation issues</description>
+      <mitigation>Platform-specific documentation, testing on all platforms</mitigation>
+    </risk>
+    <risk>
+      <description>Configuration wizard confusion</description>
+      <mitigation>Clear prompts, defaults, validation, help text</mitigation>
+    </risk>
+    <risk>
+      <description>Service setup security issues</description>
+      <mitigation>Security best practices, proper permissions, sandboxing</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Installation tests on all platforms</requirement>
+    <requirement>Configuration wizard testing</requirement>
+    <requirement>Service setup verification</requirement>
+    <requirement>Documentation accuracy testing</requirement>
+    <requirement>Troubleshooting guide validation</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Essential for alpha release - users cannot adopt Tamma without installation instructions</reason>
+    <explanation>Clear installation and setup documentation is fundamental for user onboarding and adoption</explanation>
+    <impact>Without proper installation documentation, potential users cannot even try Tamma, blocking all adoption</impact>
+  </mvp-rationale>
+</story-context>

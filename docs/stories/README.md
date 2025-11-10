@@ -7,8 +7,8 @@ This directory contains all user stories organized by epic for the Tamma platfor
 Stories are organized into epic-specific subdirectories:
 
 - **`epic-1/`** - Foundation & Core Infrastructure (15 stories + 10 infrastructure stories)
-- **`epic-2/`** - Autonomous Development Workflow (16 stories)
-- **`epic-3/`** - Quality Gates & Testing (12 stories)
+- **`epic-2/`** - Autonomous Development Loop - Core (16 stories)
+- **`epic-3/`** - Quality Gates & Intelligence Layer (12 stories)
 - **`epic-4/`** - Event Sourcing & Intelligence (7 stories)
 - **`epic-5/`** - Observability Dashboard & Documentation (14 stories)
 

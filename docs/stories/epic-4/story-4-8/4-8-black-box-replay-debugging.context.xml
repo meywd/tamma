@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="4-8-black-box-replay-debugging">
+  <metadata>
+    <title>Story 4.8: Black-Box Replay for Debugging</title>
+    <epic>Epic 4 - Event Sourcing & Audit Trail</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <goal>I want to replay system state at any point in time to understand past behavior</goal>
+    <benefit>so that I can diagnose why autonomous loop made specific decisions</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">
+      <description>CLI command: tamma replay --correlation-id {id} --timestamp {timestamp}</description>
+    </criterion>
+    <criterion id="2">
+      <description>Command reconstructs system state by replaying events up to specified timestamp</description>
+    </criterion>
+    <criterion id="3">
+      <description>Command displays: issue context, AI provider decisions, code changes, approval points, errors</description>
+    </criterion>
+    <criterion id="4">
+      <description>Command supports step-by-step replay (pause at each event) via --interactive flag</description>
+    </criterion>
+    <criterion id="5">
+      <description>Command exports replay to HTML report for sharing with team</description>
+    </criterion>
+    <criterion id="6">
+      <description>Replay includes diff view showing state changes between events</description>
+    </criterion>
+    <criterion id="7">
+      <description>Replay performance: complete reconstruction in &lt;5 seconds for typical development cycle (50-100 events)</description>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <package-location>packages/events/src/replay/</package-location>
+    <integration-points>
+      <point>Event store backend (Story 4.2)</point>
+      <point>Query API (Story 4.7)</point>
+      <point>CLI framework (Epic 1)</point>
+      <point>Event schema (Story 4.1)</point>
+    </integration-points>
+    <key-components>
+      <component>CLI command interface</component>
+      <component>Event replay engine</component>
+      <component>State reconstruction system</component>
+      <component>Interactive replay controls</component>
+      <component>HTML report generator</component>
+      <component>Performance optimization</component>
+    </key-components>
+  </technical-context>
+
+  <implementation-notes>
+    <considerations>
+      <item>Replay must work with only event stream (no access to live system state)</item>
+      <item>Performance optimization critical for practical debugging use</item>
+      <item>Interactive mode should allow stepping forward/backward through events</item>
+      <item>HTML reports must be self-contained and shareable</item>
+      <item>State reconstruction must handle event ordering and correlation</item>
+    </considerations>
+    <dependencies>
+      <dependency>Event store query capabilities</dependency>
+      <dependency>CLI framework implementation</dependency>
+      <dependency>Event type definitions and handlers</dependency>
+    </dependencies>
+  </implementation-notes>
+
+  <testing-strategy>
+    <unit-tests>
+      <test>Event replay engine accuracy</test>
+      <test>State reconstruction correctness</test>
+      <test>CLI argument parsing</test>
+      <test>Interactive controls functionality</test>
+    </unit-tests>
+    <integration-tests>
+      <test>End-to-end replay with real event streams</test>
+      <test>Performance benchmarks with typical development cycles</test>
+      <test>HTML report generation accuracy</test>
+    </integration-tests>
+  </testing-strategy>
+
+  <success-metrics>
+    <metric>Replay accuracy: 100% state reconstruction</metric>
+    <metric>Replay performance: &lt;5 seconds for 100 events</metric>
+    <metric>Interactive responsiveness: &lt;100ms per step</metric>
+    <metric>Report generation: &lt;2 seconds for typical replay</metric>
+  </success-metrics>
+
+  <rollback-plan>
+    <condition>Replay performance exceeds 5 seconds</condition>
+    <action>Implement event streaming, add state caching, optimize event processing</action>
+    <condition>State reconstruction produces incorrect results</condition>
+    <action>Debug event ordering, verify event handlers, add validation checks</action>
+  </rollback-plan>
+</story-context>

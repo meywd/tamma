@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.5</story-id>
+  <story-title>Event Capture - Code Changes &amp; Git Operations</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Capture all code changes and Git operations for complete visibility</primary-goal>
+    
+    <key-events>
+      <event name="CodeFileWritten">
+        <timing>For each file write operation</timing>
+        <payload-fields>
+          <field>file (path, size, encoding, language, mimeType)</field>
+          <field>change (type, linesAdded, linesRemoved, linesModified, binaryChange)</field>
+          <field>content (hash, previousHash, diffStorageId, contentStorageId, preview)</field>
+          <field>context (workflowId, correlationId, issueId, prId, step, operation)</field>
+          <field>attribution (source, aiProvider, userId, approvalRequired, approvedBy)</field>
+          <field>metadata (creationTime, modificationTime, permissions, executable)</field>
+        </payload-fields>
+        <change-types>create, update, delete, move, copy</change-types>
+      </event>
+      <event name="CommitCreated">
+        <timing>For each commit created</timing>
+        <payload-fields>
+          <field>commit (sha, message, author, committer, tree, parents)</field>
+          <field>branch (name, fullName, isDefault, isProtected)</field>
+          <field>files (path, changeType, additions, deletions, patch, diffStorageId)</field>
+          <field>context (workflowId, correlationId, issueId, prId, step, automated)</field>
+          <field>attribution (source, aiProvider, userId, approvalRequired, approvedBy)</field>
+          <field>signatures (type, keyId, signer, verified)</field>
+        </payload-fields>
+      </event>
+      <event name="BranchCreated">
+        <timing>When branch is created (Story 2.4)</timing>
+        <payload-fields>
+          <field>branch (name, fullName, isDefault, isProtected, isRemote)</field>
+          <field>source (fromBranch, fromCommit, fromTag)</field>
+          <field>target (commit, aheadBy, behindBy)</field>
+          <field>context (workflowId, correlationId, issueId, step, purpose)</field>
+          <field>attribution (source, aiProvider, userId, automated)</field>
+          <field>configuration (upstreamBranch, mergeStrategy, protectionRules)</field>
+        </payload-fields>
+        <purposes>feature, bugfix, hotfix, experimental, release</purposes>
+      </event>
+      <event name="PRCreated">
+        <timing>When PR is created (Story 2.8)</timing>
+        <payload-fields>
+          <field>pullRequest (number, title, description, url, state, isDraft, mergeable)</field>
+          <field>branches (base, head with repository info)</field>
+          <field>changes (commits, additions, deletions, changedFiles, diffStorageId)</field>
+          <field>context (workflowId, correlationId, issueId, step, automated)</field>
+          <field>attribution (source, aiProvider, userId, approvalRequired, reviewers)</field>
+          <field>metadata (createdAt, updatedAt, mergeableState, locked)</field>
+        </payload-fields>
+      </event>
+      <event name="PRMerged">
+        <timing>When PR is merged (Story 2.10)</timing>
+        <payload-fields>
+          <field>pullRequest (number, title, url, mergeCommitSha, mergeStrategy)</field>
+          <field>merge (commitSha, message, author, timestamp)</field>
+          <field>branches (base with before/after commits, head with deletion status)</field>
+          <field>integration (deployed, deploymentId, environment, rollbackEnabled)</field>
+          <field>context (workflowId, correlationId, issueId, step, automated)</field>
+          <field>attribution (source, aiProvider, userId, mergeAuthorizedBy)</field>
+          <field>quality (checksPassed, checksFailed, testsPassed, testsFailed, coverage)</field>
+        </payload-fields>
+        <merge-strategies>merge, squash, rebase</merge-strategies>
+      </event>
+    </key-events>
+    
+    <diff-storage-strategy>
+      <approach>Separate blob storage for file diffs and commit diffs</approach>
+      <storage-types>File diffs, commit diffs, full content for small files</storage-types>
+      <retention>Configurable retention based on change type and importance</retention>
+      <compression>Diff compression for storage efficiency</compression>
+      <access>Secure retrieval with proper authorization</access>
+    </diff-storage-strategy>
+    
+    <attribution-tracking>
+      <sources>ai_generated, user_written, system_generated, template, external</sources>
+      <ai-providers>anthropic-claude, openai-gpt, github-copilot, etc.</ai-providers>
+      <approval-tracking>approvalRequired, approvedBy, approvalTimestamp</approval-tracking>
+      <automation-detection>automated vs manual operation detection</automation-detection>
+    </attribution-tracking>
+    
+    <integration-points>
+      <point name="File System Operations">
+        <description>Capture all file write operations</description>
+        <timing>During file creation, modification, deletion</timing>
+        <blocking>Synchronous event capture</blocking>
+      </point>
+      <point name="Git Platform Operations">
+        <description>Capture all Git operations (commit, branch, PR)</description>
+        <timing>During Git operations</timing>
+        <blocking>Synchronous event capture</blocking>
+      </point>
+      <point name="Autonomous Workflow">
+        <description>Correlate code changes with workflow execution</description>
+        <correlation-id>Links entire development cycle</correlation-id>
+      </point>
+    </integration-points>
+    
+    <performance-requirements>
+      <requirement>Event capture adds &lt;100ms overhead to file operations</requirement>
+      <requirement>100% of file writes captured as events</requirement>
+      <requirement>100% of Git operations captured as events</requirement>
+      <requirement>Complete diff storage for all changes</requirement>
+      <requirement>Accurate attribution of all changes (AI vs user vs system)</requirement>
+    </performance-requirements>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/platforms</package>
+      <package>@tamma/workflow</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>CodeEventCapture - Main event capture service</component>
+      <component>DiffStorage - File and commit diff storage</component>
+      <component>LanguageDetector - Programming language detection</component>
+      <component>AttributionTracker - Change attribution logic</component>
+      <component>FileSystemIntegration - File system operation integration</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/events/src/capture/code-event-capture.ts</file>
+      <file>packages/events/src/storage/diff-storage.ts</file>
+      <file>packages/events/src/schemas/code-events.schema.ts</file>
+      <file>packages/events/src/types/code-event.types.ts</file>
+      <file>packages/platforms/src/integration/event-capture-integration.ts</file>
+    </key-files>
+    
+    <language-detection>
+      <languages>typescript, javascript, python, java, cpp, c, go, rust, php, ruby, csharp</languages>
+      <languages>swift, kotlin, scala, shell, yaml, json, xml, markdown, sql, html, css</languages>
+      <method>File extension-based detection with fallback to content analysis</method>
+    </language-detection>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 4.1 - Event Schema Design</upstream>
+    <upstream>Story 4.2 - Event Store Backend Selection</upstream>
+    <upstream>Story 1.4-1.7 - Git Platform Abstraction (integration point)</upstream>
+    <upstream>Story 2.4 - Branch Creation (integration point)</upstream>
+    <upstream>Story 2.8 - PR Creation (integration point)</upstream>
+    <upstream>Story 2.10 - PR Merge (integration point)</upstream>
+    <downstream>Story 4.6 - Event Capture - Approvals &amp; Escalations</downstream>
+    <downstream>Story 4.7 - Event Query API for Time-Travel</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">CodeFileWrittenEvent captured for each file write including: file path, file size, change type (create/update/delete)</criteria>
+    <criteria id="2">CommitCreatedEvent captured for each commit including: commit SHA, message, branch name, file count</criteria>
+    <criteria id="3">BranchCreatedEvent captured when branch created (Story 2.4)</criteria>
+    <criteria id="4">PRCreatedEvent captured when PR created (Story 2.8) including: PR number, URL, base/head branches</criteria>
+    <criteria id="5">PRMergedEvent captured when PR merged (Story 2.10) including: merge strategy, merge SHA</criteria>
+    <criteria id="6">Events include file diffs stored in blob storage (linked from event)</criteria>
+    <criteria id="7">Events capture who triggered the action (user approval vs autonomous decision)</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>100% of file writes captured as events</metric>
+    <metric>100% of Git operations captured as events</metric>
+    <metric>Complete diff storage for all changes</metric>
+    <metric>Event capture adds &lt;100ms overhead to file operations</metric>
+    <metric>Accurate attribution of all changes (AI vs user vs system)</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Event capture may slow down file operations</description>
+      <mitigation>Async diff storage, optimized event serialization</mitigation>
+    </risk>
+    <risk>
+      <description>Diff storage may become expensive</description>
+      <mitigation>Compression, retention policies, selective storage</mitigation>
+    </risk>
+    <risk>
+      <description>Complex Git operations may be difficult to integrate</description>
+      <mitigation>Clear integration points, comprehensive testing</mitigation>
+    </risk>
+    <risk>
+      <description>Change attribution may be inaccurate</description>
+      <mitigation>Clear attribution logic, audit trails, validation</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <compliance-requirements>
+    <compliance>Complete auditability of all code changes</compliance>
+    <compliance>Attribution tracking for AI vs human changes</compliance>
+    <compliance>Immutable storage of change history</compliance>
+    <compliance>Diff storage for detailed code review</compliance>
+    <compliance>Integration with Git platform operations</compliance>
+  </compliance-requirements>
+</story-context>

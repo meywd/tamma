@@ -1,0 +1,393 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext id="5.9c" epic="5" title="API Reference Documentation">
+  <summary>
+    Create comprehensive API reference documentation covering all REST endpoints, WebSocket connections, event schemas, and integration examples. Ensure developers have complete technical documentation for building integrations.
+  </summary>
+  
+  <technicalContext>
+    <architecture>
+      <component name="Documentation Generator" type="documentation">
+        <framework>OpenAPI 3.1 + TypeDoc</framework>
+        <source>TS comments + JSDoc</source>
+        <output>Static HTML + Markdown</output>
+        <deployment>GitHub Pages</deployment>
+      </component>
+      
+      <component name="API Reference" type="documentation">
+        <sections>
+          <section name="REST API">All HTTP endpoints</section>
+          <section name="WebSocket API">Real-time connections</section>
+          <section name="Event Schemas">DCB event types</section>
+          <section name="Authentication">Security setup</section>
+          <section name="Rate Limiting">Usage limits</section>
+          <section name="Error Codes">Error handling</section>
+        </sections>
+      </component>
+      
+      <component name="Integration Examples" type="documentation">
+        <languages>
+          <language name="TypeScript/JavaScript">Node.js examples</language>
+          <language name="Python">Requests + aiohttp</language>
+          <language name="Go">net/http package</language>
+          <language name="cURL">Command line examples</language>
+        </languages>
+      </component>
+    </architecture>
+    
+    <dependencies>
+      <upstream>
+        <dependency story="5.1">Structured Logging Implementation</dependency>
+        <dependency story="5.2">Metrics Collection Infrastructure</dependency>
+        <dependency story="5.3">Real-time Dashboard System Health</dependency>
+        <dependency story="5.8">Integration Testing Suite</dependency>
+      </upstream>
+      <downstream>
+        <dependency story="5.9d">Full Documentation Website</dependency>
+        <dependency story="5.10">Alpha Release Preparation</dependency>
+      </downstream>
+    </dependencies>
+  </technicalContext>
+  
+  <implementationDetails>
+    <documentationStructure>
+      <section name="Getting Started">
+        <page>api/overview.md</page>
+        <page>api/authentication.md</page>
+        <page>api/quick-start.md</page>
+        <page>api/rate-limits.md</page>
+      </section>
+      
+      <section name="REST API Reference">
+        <subsection name="Issues">
+          <endpoint method="GET" path="/api/v1/issues">List issues</endpoint>
+          <endpoint method="POST" path="/api/v1/issues">Create issue</endpoint>
+          <endpoint method="GET" path="/api/v1/issues/:id">Get issue</endpoint>
+          <endpoint method="PATCH" path="/api/v1/issues/:id">Update issue</endpoint>
+          <endpoint method="DELETE" path="/api/v1/issues/:id">Delete issue</endpoint>
+        </subsection>
+        
+        <subsection name="Events">
+          <endpoint method="GET" path="/api/v1/events">List events</endpoint>
+          <endpoint method="GET" path="/api/v1/events/:id">Get event</endpoint>
+          <endpoint method="GET" path="/api/v1/issues/:issueId/events">Get issue events</endpoint>
+        </subsection>
+        
+        <subsection name="Providers">
+          <endpoint method="GET" path="/api/v1/providers">List providers</endpoint>
+          <endpoint method="GET" path="/api/v1/providers/:name">Get provider</endpoint>
+          <endpoint method="POST" path="/api/v1/providers/:name/test">Test provider</endpoint>
+        </subsection>
+        
+        <subsection name="Platforms">
+          <endpoint method="GET" path="/api/v1/platforms">List platforms</endpoint>
+          <endpoint method="GET" path="/api/v1/platforms/:name">Get platform</endpoint>
+          <endpoint method="POST" path="/api/v1/platforms/:name/test">Test platform</endpoint>
+        </subsection>
+        
+        <subsection name="Workflows">
+          <endpoint method="GET" path="/api/v1/workflows">List workflows</endpoint>
+          <endpoint method="GET" path="/api/v1/workflows/:id">Get workflow</endpoint>
+          <endpoint method="POST" path="/api/v1/workflows">Start workflow</endpoint>
+        </subsection>
+        
+        <subsection name="Dashboard">
+          <endpoint method="GET" path="/api/v1/dashboard/health">System health</endpoint>
+          <endpoint method="GET" path="/api/v1/dashboard/metrics">System metrics</endpoint>
+          <endpoint method="GET" path="/api/v1/dashboard/alerts">Active alerts</endpoint>
+        </subsection>
+      </section>
+      
+      <section name="WebSocket API">
+        <page>api/websocket/overview.md</page>
+        <page>api/websocket/events-stream.md</page>
+        <page>api/websocket/dashboard-updates.md</page>
+        <page>api/websocket/authentication.md</page>
+      </section>
+      
+      <section name="Event Schemas">
+        <subsection name="Issue Events">
+          <event type="ISSUE.ASSIGNED.SUCCESS"/>
+          <event type="ISSUE.ASSIGNED.FAILED"/>
+          <event type="ISSUE.UPDATED.SUCCESS"/>
+          <event type="ISSUE.RESOLVED.SUCCESS"/>
+        </subsection>
+        
+        <subsection name="Code Events">
+          <event type="CODE.GENERATED.SUCCESS"/>
+          <event type="CODE.GENERATED.FAILED"/>
+          <event type="CODE.REVIEWED.SUCCESS"/>
+          <event type="CODE.MERGED.SUCCESS"/>
+        </subsection>
+        
+        <subsection name="Workflow Events">
+          <event type="WORKFLOW.STARTED"/>
+          <event type="WORKFLOW.STEP_COMPLETED"/>
+          <event type="WORKFLOW.COMPLETED.SUCCESS"/>
+          <event type="WORKFLOW.COMPLETED.FAILED"/>
+        </subsection>
+        
+        <subsection name="System Events">
+          <event type="SYSTEM.HEALTH.CHECK"/>
+          <event type="SYSTEM.ALERT.RAISED"/>
+          <event type="SYSTEM.ALERT.RESOLVED"/>
+        </subsection>
+      </section>
+      
+      <section name="Error Handling">
+        <page>api/errors/overview.md</page>
+        <page>api/errors/http-codes.md</page>
+        <page>api/errors/error-schemas.md</page>
+        <page>api/errors/troubleshooting.md</page>
+      </section>
+      
+      <section name="SDKs & Libraries">
+        <subsection name="TypeScript">
+          <library name="@tamma/client">Official TypeScript client</library>
+          <examples>Basic usage, authentication, streaming</examples>
+        </subsection>
+        
+        <subsection name="Python">
+          <library name="tamma-python">Community Python client</library>
+          <examples>Async usage, error handling</examples>
+        </subsection>
+        
+        <subsection name="Go">
+          <library name="tamma-go">Community Go client</library>
+          <examples>Context usage, concurrency</examples>
+        </subsection>
+      </section>
+    </documentationStructure>
+    
+    <openApiSpecification>
+      <version>3.1.0</version>
+      <servers>
+        <server url="https://api.tamma.dev/v1" description="Production"/>
+        <server url="https://staging-api.tamma.dev/v1" description="Staging"/>
+        <server url="http://localhost:3000/v1" description="Development"/>
+      </servers>
+      
+      <securitySchemes>
+        <scheme type="http" scheme="bearer" bearerFormat="JWT"/>
+        <scheme type="apiKey" name="X-API-Key" in="header"/>
+      </securitySchemes>
+      
+      <components>
+        <schemas>
+          <schema name="Issue" ref="@tamma/shared/types"/>
+          <schema name="Event" ref="@tamma/shared/types"/>
+          <schema name="Workflow" ref="@tamma/shared/types"/>
+          <schema name="Provider" ref="@tamma/shared/types"/>
+          <schema name="Platform" ref="@tamma/shared/types"/>
+          <schema name="Error" ref="@tamma/shared/types"/>
+        </schemas>
+      </components>
+    </openApiSpecification>
+    
+    <codeExamples>
+      <language name="TypeScript">
+        <example name="Authentication">
+          <code>import { TammaClient } from '@tamma/client';
+
+const client = new TammaClient({
+  apiKey: process.env.TAMMA_API_KEY,
+  baseUrl: 'https://api.tamma.dev/v1'
+});</code>
+        </example>
+        
+        <example name="List Issues">
+          <code>const issues = await client.issues.list({
+  status: 'open',
+  limit: 50,
+  offset: 0
+});
+
+console.log(`Found ${issues.length} issues`);</code>
+        </example>
+        
+        <example name="Stream Events">
+          <code>const stream = await client.events.stream({
+  issueId: 'issue-123',
+  types: ['CODE.GENERATED.*']
+});
+
+for await (const event of stream) {
+  console.log('Event:', event.type, event.data);
+}</code>
+        </example>
+      </language>
+      
+      <language name="Python">
+        <example name="Authentication">
+          <code>import tamma
+
+client = tamma.Client(
+    api_key=os.environ['TAMMA_API_KEY'],
+    base_url='https://api.tamma.dev/v1'
+)</code>
+        </example>
+        
+        <example name="Create Issue">
+          <code>issue = await client.issues.create({
+    'title': 'Fix authentication bug',
+    'description': 'Users cannot login with valid credentials',
+    'priority': 'high',
+    'labels': ['bug', 'authentication']
+})
+
+print(f"Created issue {issue.id}")</code>
+        </example>
+      </language>
+      
+      <language name="cURL">
+        <example name="Get Issue">
+          <code>curl -X GET \
+  https://api.tamma.dev/v1/issues/issue-123 \
+  -H "Authorization: Bearer $TAMMA_API_KEY" \
+  -H "Content-Type: application/json"</code>
+        </example>
+        
+        <example name="Stream Events">
+          <code>curl -X GET \
+  https://api.tamma.dev/v1/events/stream \
+  -H "Authorization: Bearer $TAMMA_API_KEY" \
+  -H "Accept: text/event-stream"</code>
+        </example>
+      </language>
+    </codeExamples>
+  </implementationDetails>
+  
+  <acceptanceCriteria>
+    <criteria id="ac1" priority="high">
+      <description>Complete REST API reference documentation</description>
+      <verification>
+        <metric>100% endpoint coverage</metric>
+        <test>All HTTP methods documented</test>
+        <test>Request/response schemas</test>
+        <test>Authentication requirements</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac2" priority="high">
+      <description>WebSocket API documentation with examples</description>
+      <verification>
+        <test>Connection establishment</test>
+        <test>Message formats</test>
+        <test>Authentication flow</test>
+        <test>Error handling</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac3" priority="high">
+      <description>Comprehensive event schema documentation</description>
+      <verification>
+        <metric>100% event types documented</metric>
+        <test>Event structure examples</test>
+        <test>Tag documentation</test>
+        <test>Metadata specifications</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac4" priority="high">
+      <description>Working code examples in multiple languages</description>
+      <verification>
+        <test>TypeScript/JavaScript examples</test>
+        <test>Python examples</test>
+        <test>Go examples</test>
+        <test>cURL examples</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac5" priority="medium">
+      <description>Interactive API explorer</description>
+      <verification>
+        <test>Swagger UI integration</test>
+        <test>Try-it-out functionality</test>
+        <test>Authentication testing</test>
+        <test>Response validation</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac6" priority="medium">
+      <documentation>Searchable and navigable</documentation>
+      <verification>
+        <test>Full-text search</test>
+        <test>Cross-reference linking</test>
+        <test>Mobile-friendly layout</test>
+        <test>Print-friendly formatting</test>
+      </verification>
+    </criteria>
+  </acceptanceCriteria>
+  
+  <documentationTools>
+    <generator name="TypeDoc">
+      <purpose>TypeScript API documentation</purpose>
+      <input>JSDoc comments</input>
+      <output>HTML + JSON</output>
+    </generator>
+    
+    <generator name="Swagger UI">
+      <purpose>Interactive API explorer</purpose>
+      <input>OpenAPI specification</input>
+      <output>HTML interface</output>
+    </generator>
+    
+    <generator name="Redoc">
+      <purpose>API reference documentation</purpose>
+      <input>OpenAPI specification</input>
+      <output>Static HTML</output>
+    </generator>
+    
+    <generator name="Docusaurus">
+      <purpose>Documentation website</purpose>
+      <input>Markdown + React components</input>
+      <output>Static site</output>
+    </generator>
+  </documentationTools>
+  
+  <qualityGates>
+    <gate name="Documentation Coverage">
+      <requirement>100% public API documented</requirement>
+      <requirement>100% endpoints documented</requirement>
+      <requirement>100% event types documented</requirement>
+    </gate>
+    
+    <gate name="Example Quality">
+      <requirement>All examples tested and working</requirement>
+      <requirement>Multiple language support</require>
+      <requirement>Error handling examples</require>
+    </gate>
+    
+    <gate name="Documentation Accuracy">
+      <requirement>Documentation matches implementation</requirement>
+      <requirement>Schema validation passes</require>
+      <requirement>Examples produce expected results</require>
+    </gate>
+  </qualityGates>
+  
+  <mvpScope>
+    <inScope>
+      <item>Core REST API endpoints documentation</item>
+      <item>WebSocket streaming API documentation</item>
+      <item>Essential event schemas</item>
+      <item>TypeScript/JavaScript code examples</item>
+      <item>Basic authentication guide</item>
+      <item>Error handling documentation</item>
+    </inScope>
+    
+    <outOfScope>
+      <item>All language examples (focus on TypeScript)</item>
+      <item>Advanced authentication methods</item>
+      <item>Rate limiting details</item>
+      <item>Performance optimization guides</item>
+      <item>SDK documentation (separate story)</item>
+    </outOfScope>
+  </mvpScope>
+  
+  <successMetrics>
+    <metric name="API Coverage" target="100%" type="completeness"/>
+    <metric name="Example Success Rate" target="100%" type="quality"/>
+    <metric name="Documentation Accuracy" target="100%" type="quality"/>
+    <metric name="Developer Satisfaction" target="≥4.5/5" type="feedback"/>
+    <metric name="Support Ticket Reduction" target="≥30%" type="effectiveness"/>
+  </successMetrics>
+</storyContext>

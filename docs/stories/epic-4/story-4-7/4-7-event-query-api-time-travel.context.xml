@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.7</story-id>
+  <story-title>Event Query API for Time-Travel</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Enable time-travel debugging and flexible event analysis</primary-goal>
+    
+    <query-capabilities>
+      <capability>Query events by time range with millisecond precision</capability>
+      <capability>Filter events by event type, actor, correlation ID, and custom tags</capability>
+      <capability>Support pagination for large result sets with cursor-based navigation</capability>
+      <capability>Provide aggregation queries for event statistics and metrics</capability>
+      <capability>Include full-text search across event payloads and metadata</capability>
+    </query-capabilities>
+    
+    <time-travel-features>
+      <feature>Reconstruct aggregate state at any historical timestamp</feature>
+      <feature>Query event history for specific entities (issues, PRs, workflows)</feature>
+      <feature>Support point-in-time queries with consistency guarantees</feature>
+      <feature>Enable event-by-event navigation with forward/backward stepping</feature>
+      <feature>Provide state diff visualization between time points</feature>
+    </time-travel-features>
+    
+    <query-types>
+      <type name="Basic Event Queries">
+        <method>queryEvents(request: EventQueryRequest)</method>
+        <method>getEvent(eventId: string)</method>
+        <method>getEventsByCorrelation(correlationId: string)</method>
+      </type>
+      <type name="Time-Travel Queries">
+        <method>getStateAtTime(aggregateId: string, timestamp: string)</method>
+        <method>getEventHistory(aggregateId: string, timeRange?: TimeRange)</method>
+        <method>getStateDiff(aggregateId: string, fromTime: string, toTime: string)</method>
+      </type>
+      <type name="Aggregation Queries">
+        <method>getEventStats(request: StatsQueryRequest)</method>
+        <method>getWorkflowMetrics(workflowId: string, timeRange?: TimeRange)</method>
+        <method>getProviderUsage(timeRange?: TimeRange)</method>
+      </type>
+      <type name="Search Queries">
+        <method>searchEvents(request: SearchRequest)</method>
+        <method>searchByContent(query: string, options?: SearchOptions)</method>
+      </type>
+    </query-types>
+    
+    <performance-requirements>
+      <requirement>Query response time &lt;500ms for common queries</requirement>
+      <requirement>Support 100+ concurrent queries with proper resource management</requirement>
+      <requirement>Query result caching for frequently accessed data</requirement>
+      <requirement>Query performance monitoring and optimization</requirement>
+      <requirement>Query timeouts and resource limits</requirement>
+    </performance-requirements>
+    
+    <query-optimization>
+      <strategy>Index-based query optimization</strategy>
+      <strategy>Query pattern analysis and suggestions</strategy>
+      <strategy>Automatic caching for frequent queries</strategy>
+      <strategy>Time range optimization</strategy>
+      <strategy>Resource usage monitoring</strategy>
+    </query-optimization>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/shared</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>EventQueryService - Main query API implementation</component>
+      <component>StateReconstructor - Time-travel state reconstruction</component>
+      <component>QueryOptimizer - Query performance optimization</component>
+      <component>QueryCache - Query result caching</component>
+      <component>SearchIndex - Full-text search capabilities</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/events/src/query/event-query-service.ts</file>
+      <file>packages/events/src/query/state-reconstructor.ts</file>
+      <file>packages/events/src/query/query-optimizer.ts</file>
+      <file>packages/events/src/query/query-cache.ts</file>
+      <file>packages/events/src/types/query.types.ts</file>
+    </key-files>
+    
+    <query-interfaces>
+      <interface name="IEventQueryAPI">
+        <method>queryEvents(request: EventQueryRequest): Promise&lt;EventQueryResult&gt;</method>
+        <method>getEvent(eventId: string): Promise&lt;DomainEvent | null&gt;</method>
+        <method>getStateAtTime(aggregateId: string, timestamp: string): Promise&lt;AggregateState&gt;</method>
+        <method>getStateDiff(aggregateId: string, fromTime: string, toTime: string): Promise&lt;StateDiff&gt;</method>
+        <method>getEventStats(request: StatsQueryRequest): Promise&lt;EventStats&gt;</method>
+        <method>searchEvents(request: SearchRequest): Promise&lt;SearchResult&gt;</method>
+      </interface>
+    </query-interfaces>
+    
+    <state-reconstruction>
+      <approach>Event-by-event application in chronological order</approach>
+      <consistency>Guaranteed consistency for point-in-time queries</consistency>
+      <performance>Optimized through caching and incremental updates</performance>
+      <validation>Event ordering and integrity validation</validation>
+    </state-reconstruction>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 4.1 - Event Schema Design</upstream>
+    <upstream>Story 4.2 - Event Store Backend Selection</upstream>
+    <upstream>Story 4.3-4.6 - Event Capture (data source)</upstream>
+    <downstream>Story 4.8 - Black-Box Replay for Debugging</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Query events by time range with millisecond precision</criteria>
+    <criteria id="2">Filter events by event type, actor, correlation ID, and custom tags</criteria>
+    <criteria id="3">Support pagination for large result sets with cursor-based navigation</criteria>
+    <criteria id="4">Provide aggregation queries for event statistics and metrics</criteria>
+    <criteria id="5">Include full-text search across event payloads and metadata</criteria>
+    <criteria id="6">Reconstruct aggregate state at any historical timestamp</criteria>
+    <criteria id="7">Query event history for specific entities (issues, PRs, workflows)</criteria>
+    <criteria id="8">Support point-in-time queries with consistency guarantees</criteria>
+    <criteria id="9">Enable event-by-event navigation with forward/backward stepping</criteria>
+    <criteria id="10">Provide state diff visualization between time points</criteria>
+    <criteria id="11">Query response time &lt;500ms for common queries</criteria>
+    <criteria id="12">Support concurrent queries with proper resource management</criteria>
+    <criteria id="13">Provide query result caching for frequently accessed data</criteria>
+    <criteria id="14">Provide query performance monitoring and optimization</criteria>
+    <criteria id="15">Support query timeouts and resource limits</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Query response time &lt;500ms for common queries</metric>
+    <metric>Support for 100+ concurrent queries</metric>
+    <metric>Cache hit rate &gt;80% for frequent queries</metric>
+    <metric>State reconstruction accuracy 100%</metric>
+    <metric>Search relevance score &gt;0.8 for common queries</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Complex queries may impact system performance</description>
+      <mitigation>Query optimization, caching, resource limits</mitigation>
+    </risk>
+    <risk>
+      <description>State reconstruction may produce inconsistent results</description>
+      <mitigation>Event ordering validation, consistency checks</mitigation>
+    </risk>
+    <risk>
+      <description>Search index may become out of sync</description>
+      <mitigation>Index validation, automatic reindexing</mitigation>
+    </risk>
+    <risk>
+      <description>Query API may expose sensitive data</description>
+      <mitigation>Access controls, data filtering, audit logging</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <use-cases>
+    <use-case>Debugging - Time-travel debugging of workflow failures</use-case>
+    <use-case>Compliance - Audit trail analysis for regulatory compliance</use-case>
+    <use-case>Analytics - Event pattern analysis and metrics</use-case>
+    <use-case>Monitoring - Real-time event monitoring and alerting</use-case>
+    <use-case>Research - Historical data analysis for process improvement</use-case>
+  </use-cases>
+</story-context>

@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.7</story-id>
+  <story-title>Feedback Collection System</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>false</mvp-critical>
+  <mvp-optional>true</mvp-optional>
+  
+  <technical-context>
+    <architecture-pattern>User feedback collection with dashboard analytics</architecture-pattern>
+    <primary-goal>Collect user feedback on autonomous loop results to measure satisfaction and identify improvement areas</primary-goal>
+    
+    <feedback-collection>
+      <trigger name="PR Merge Completion">
+        <timing>Immediately after successful PR merge (Story 2.10)</timing>
+        <method>CLI prompt or webhook notification</method>
+        <context>Related issue, PR details, workflow execution</context>
+      </trigger>
+      <prompt name="Initial Rating">
+        <question>Rate this autonomous development cycle:</question>
+        <options>👍 (Thumbs Up), 👎 (Thumbs Down)</options>
+        <format>Interactive CLI buttons or webhook payload</format>
+        <timeout>30 seconds default, configurable</timeout>
+      </prompt>
+      <prompt name="Negative Feedback Follow-up">
+        <condition>Only if user selects 👎</condition>
+        <question>What went wrong?</question>
+        <type>Free text input</type>
+        <validation>Optional, max 500 characters</validation>
+        <format>CLI input or webhook response</format>
+      </prompt>
+      <prompt name="Positive Feedback Follow-up">
+        <condition>Only if user selects 👍</condition>
+        <question>What went well? (optional)</question>
+        <type>Free text input</type>
+        <validation>Optional, max 500 characters</validation>
+        <format>CLI input or webhook response</format>
+      </prompt>
+    </feedback-collection>
+    
+    <feedback-storage>
+      <schema>
+        <field name="id" type="UUID">Unique feedback identifier</field>
+        <field name="timestamp" type="ISO8601">Feedback collection time</field>
+        <field name="correlationId" type="UUID">Related workflow execution</field>
+        <field name="issueId" type="string">Related issue number</field>
+        <field name="prId" type="string">Related PR number</field>
+        <field name="rating" type="enum">positive, negative</field>
+        <field name="comment" type="text">User feedback text</field>
+        <field name="userId" type="string">User identifier (hashed)</field>
+        <field name="context" type="object">Additional context data</field>
+        <field name="source" type="enum">cli, webhook, api</field>
+      </schema>
+      <storage>Database table with proper indexing</storage>
+      <retention>2 years default, configurable</retention>
+      <privacy>PII protection, user consent, data anonymization</privacy>
+    </feedback-storage>
+    
+    <dashboard-features>
+      <page name="Feedback Dashboard">
+        <url>http://localhost:3000/dashboard/feedback</url>
+        <access>Authenticated admin access</access>
+        <purpose>View and analyze user feedback</purpose>
+      </page>
+      <metric name="Satisfaction Rate">
+        <description>Percentage of positive vs negative feedback</description>
+        <calculation>(positive_count / total_count) * 100</calculation>
+        <visualization>Time series line chart with trend</visualization>
+        <time-range>Last 30 days, Last 90 days, All time</time-range>
+      </metric>
+      <analysis name="Negative Feedback Themes">
+        <description>Common themes in negative feedback</description>
+        <method>Keyword analysis and topic modeling</method>
+        <visualization>Word cloud and theme frequency chart</visualization>
+        <features>Theme drill-down, example feedback snippets</features>
+      </analysis>
+      <feature name="Feedback Details">
+        <description>Individual feedback entries with context</description>
+        <display>Sortable table with filtering</display>
+        <columns>Date, Rating, Comment, Issue, PR, Context</columns>
+        <actions>View details, export, mark as reviewed</actions>
+      </feature>
+      <feature name="Export Capabilities">
+        <description>Data export for external analysis</description>
+        <formats>CSV, JSON, Excel</formats>
+        <filters>Date range, rating, keywords</filters>
+        <privacy>Exclude PII, anonymize user data</privacy>
+      </feature>
+    </dashboard-features>
+    
+    <privacy-protection>
+      <consent>Explicit user consent for feedback collection</consent>
+      <anonymization>Hash user identifiers, remove sensitive data</anonymization>
+      <data-minimization>Collect only necessary feedback data</data-minimization>
+      <retention>Configurable data retention policies</retention>
+      <access>Role-based access control for feedback data</access>
+      <compliance>GDPR and privacy regulation compliance</compliance>
+    </privacy-protection>
+    
+    <notification-integration>
+      <webhook name="Feedback Webhook">
+        <purpose>Receive feedback from external systems</purpose>
+        <endpoint>/api/v1/feedback/webhook</endpoint>
+        <method>POST</method>
+        <authentication>API key or signature verification</authentication>
+        <payload>Standardized feedback format</payload>
+      </webhook>
+      <cli name="CLI Feedback">
+        <purpose>Collect feedback via command line</purpose>
+        <command>tamma feedback</command>
+        <options>rate, comment, issue-id, pr-id</options>
+        <validation>Input validation and confirmation</validation>
+      </cli>
+    </notification-integration>
+    
+    <analytics-capabilities>
+      <trend-analysis>Feedback trends over time</trend-analysis>
+      <correlation-analysis>Feedback vs issue characteristics</correlation-analysis>
+      <sentiment-analysis>Automatic sentiment detection</sentiment-analysis>
+      <theme-extraction>Common topics and issues</theme-extraction>
+      <performance-metrics>Feedback collection rate, response time</performance-metrics>
+    </analytics-capabilities>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/feedback</package>
+      <package>@tamma/dashboard</package>
+      <package>@tamma/api</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>FeedbackCollector - Feedback collection interface</component>
+      <component>FeedbackStorage - Database persistence layer</component>
+      <component>FeedbackAnalyzer - Analytics and insights</component>
+      <component>FeedbackDashboard - UI for feedback visualization</component>
+      <component>PrivacyManager - Data protection and anonymization</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/feedback/src/collector/feedback-collector.ts</file>
+      <file>packages/feedback/src/storage/feedback-storage.ts</file>
+      <file>packages/feedback/src/analytics/feedback-analyzer.ts</file>
+      <file>packages/dashboard/src/components/feedback-dashboard.tsx</file>
+      <file>packages/feedback/src/privacy/privacy-manager.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>natural - Natural language processing</dependency>
+      <dependency>sentiment - Sentiment analysis</dependency>
+      <dependency>bcrypt - User ID hashing</dependency>
+      <dependency>csv-writer - CSV export functionality</dependency>
+      <dependency>xlsx - Excel export functionality</dependency>
+    </external-dependencies>
+    
+    <database-schema>
+      <table name="feedback">
+        <column name="id" type="UUID" primary="true">Unique identifier</column>
+        <column name="timestamp" type="TIMESTAMP" indexed="true">Collection time</column>
+        <column name="correlation_id" type="UUID" indexed="true">Workflow execution</column>
+        <column name="issue_id" type="VARCHAR" indexed="true">Related issue</column>
+        <column name="pr_id" type="VARCHAR" indexed="true">Related PR</column>
+        <column name="rating" type="ENUM" indexed="true">positive/negative</column>
+        <column name="comment" type="TEXT">User feedback text</column>
+        <column name="user_hash" type="VARCHAR" indexed="true">Anonymized user</column>
+        <column name="context" type="JSONB">Additional context</column>
+        <column name="source" type="ENUM">cli/webhook/api</column>
+      </table>
+    </database-schema>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 2.10 - PR Merge (feedback trigger point)</upstream>
+    <upstream>Story 5.3 - Real-Time Dashboard - System Health</upstream>
+    <downstream>Story 5.9d - Full Documentation Website</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">After PR merge, system prompts: "Rate this autonomous development cycle: 👍 👎"</criteria>
+    <criteria id="2">If user selects 👎, system asks: "What went wrong? [free text]"</criteria>
+    <criteria id="3">Feedback stored in database with: timestamp, correlation ID, rating, comment</criteria>
+    <criteria id="4">Feedback visible in dashboard: http://localhost:3000/dashboard/feedback</criteria>
+    <criteria id="5">Dashboard shows: satisfaction rate over time, common negative feedback themes (via keyword analysis)</criteria>
+    <criteria id="6">Feedback export to CSV for analysis in external tools</criteria>
+    <criteria id="7">Feedback system respects user privacy (no PII collection without consent)</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Feedback collection rate &gt;20% of PR merges</metric>
+    <metric>Dashboard load time &lt;3 seconds</metric>
+    <metric>Analytics processing time &lt;5 seconds</metric>
+    <metric>Export generation time &lt;10 seconds</metric>
+    <metric>Privacy compliance score 100%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Low feedback participation rate</description>
+      <mitigation>Multiple collection methods, user-friendly prompts, timing optimization</mitigation>
+    </risk>
+    <risk>
+      <description>Privacy concerns with feedback collection</description>
+      <mitigation>Transparent privacy policy, anonymization, user consent, data minimization</mitigation>
+    </risk>
+    <risk>
+      <description>Biased feedback from vocal minority</description>
+      <mitigation>Multiple collection channels, statistical analysis, representative sampling</mitigation>
+    </risk>
+    <risk>
+      <description>Feedback analysis accuracy issues</description>
+      <mitigation>Human review, multiple analysis methods, confidence scoring</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for feedback collection logic</requirement>
+    <requirement>Integration tests for webhook endpoints</requirement>
+    <requirement>E2E tests for complete feedback flow</requirement>
+    <requirement>Privacy tests for data protection</requirement>
+    <requirement>Analytics tests for insight generation</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Optional - User feedback valuable for post-MVP product improvement but not required for self-maintenance validation</reason>
+    <explanation>Metrics and logs provide sufficient data for MVP. Can be deferred to post-MVP.</explanation>
+    <impact>Without feedback system, team misses valuable user insights, but core functionality remains unaffected</impact>
+  </mvp-rationale>
+</story-context>

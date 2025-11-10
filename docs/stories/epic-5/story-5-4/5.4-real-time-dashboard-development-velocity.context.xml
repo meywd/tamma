@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.4</story-id>
+  <story-title>Real-Time Dashboard - Development Velocity</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>false</mvp-critical>
+  <mvp-optional>true</mvp-optional>
+  
+  <technical-context>
+    <architecture-pattern>Analytics dashboard with time-series visualization</architecture-pattern>
+    <primary-goal>Track team productivity improvements and identify bottlenecks</primary-goal>
+    
+    <velocity-metrics>
+      <metric name="Issues Completed Per Day">
+        <description>Daily count of successfully completed issues</description>
+        <time-range>Last 30 days</time-range>
+        <chart-type>Line chart with trend line</chart-type>
+        <calculation>Count of issues with completion date per day</calculation>
+      </metric>
+      <metric name="Average Time-to-Merge">
+        <description>Average time from PR creation to merge</description>
+        <time-range>Last 30 days</time-range>
+        <chart-type>Line chart with moving average</chart-type>
+        <calculation>Average of (merge_timestamp - create_timestamp) in days</calculation>
+      </metric>
+      <metric name="PR Success Rate">
+        <description>Percentage of PRs merged on first attempt vs requiring retries</description>
+        <time-range>Last 30 days</time-range>
+        <chart-type>Stacked bar chart (success vs retry)</chart-type>
+        <calculation>(first_time_merges / total_merges) * 100</calculation>
+      </metric>
+      <metric name="Throughput">
+        <description>Issues completed per week</description>
+        <time-range>Last 12 weeks</time-range>
+        <chart-type>Bar chart with weekly breakdown</chart-type>
+        <calculation>Count of issues completed per week</calculation>
+      </metric>
+      <metric name="Cycle Time">
+        <description>Time from issue assignment to PR merge</description>
+        <time-range>Last 30 days</time-range>
+        <chart-type>Histogram with distribution</chart-type>
+        <calculation>merge_timestamp - assigned_timestamp in days</calculation>
+      </metric>
+      <metric name="Quality Metrics">
+        <description>Test pass rate and code quality indicators</description>
+        <time-range>Last 30 days</time-range>
+        <chart-type>Line chart for trends</chart-type>
+        <calculation>(passed_tests / total_tests) * 100</calculation>
+      </metric>
+    </velocity-metrics>
+    
+    <dashboard-access>
+      <url>http://localhost:3000/dashboard/velocity</url>
+      <navigation>Accessible from main dashboard</navigation>
+      <responsive>Mobile-friendly design for stakeholder viewing</responsive>
+      <export>PNG and PDF export for reporting</export>
+    </dashboard-access>
+    
+    <filtering-capabilities>
+      <filter name="Date Range">
+        <type>Date picker</type>
+        <options>Last 7 days, Last 30 days, Last 90 days, Custom range</options>
+        <default>Last 30 days</default>
+      </filter>
+      <filter name="Issue Labels">
+        <type>Multi-select dropdown</type>
+        <source>Git platform labels</source>
+        <behavior>Include/exclude logic</behavior>
+      </filter>
+      <filter name="AI Provider">
+        <type>Single select dropdown</type>
+        <options>All, Anthropic Claude, OpenAI GPT, GitHub Copilot, etc.</options>
+        <default>All</default>
+      </filter>
+      <filter name="Team/Assignee">
+        <type>Multi-select dropdown</type>
+        <source>Git platform users</source>
+        <behavior>Filter by assigned team members</behavior>
+      </filter>
+    </filtering-capabilities>
+    
+    <chart-requirements>
+      <requirement>Line charts for time series data with trend lines</requirement>
+      <requirement>Bar charts for comparisons and distributions</requirement>
+      <requirement>Histograms for cycle time distribution</requirement>
+      <requirement>Stacked charts for success/failure breakdowns</requirement>
+      <requirement>Interactive tooltips with detailed information</requirement>
+      <requirement>Zoom and pan capabilities for detailed analysis</requirement>
+      <requirement>Legend with color coding and filtering</requirement>
+    </chart-requirements>
+    
+    <key-performance-indicators>
+      <kpi name="Weekly Throughput">
+        <target>10 issues per week</target>
+        <current>Calculated from last 7 days</current>
+        <trend>Up/Down/Flat compared to previous week</trend>
+      </kpi>
+      <kpi name="Average Cycle Time">
+        <target>&lt;3 days</target>
+        <current>30-day rolling average</current>
+        <trend>Improving/Worsening/Stable</trend>
+      </kpi>
+      <kpi name="PR Success Rate">
+        <target>&gt;85% first-time merge</target>
+        <current>30-day rolling average</current>
+        <trend>Improving/Worsening/Stable</trend>
+      </kpi>
+      <kpi name="Quality Score">
+        <target>&gt;90% test pass rate</target>
+        <current>30-day rolling average</current>
+        <trend>Improving/Worsening/Stable</trend>
+      </kpi>
+    </key-performance-indicators>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/dashboard</package>
+      <package>@tamma/observability</package>
+      <package>@tamma/api</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>VelocityDashboard - Main velocity dashboard component</component>
+      <component>MetricsAggregator - Velocity metrics calculation</component>
+      <component>ChartComponents - Reusable chart components</component>
+      <component>FilterManager - Dashboard filtering logic</component>
+      <component>ExportService - Chart export functionality</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/dashboard/src/components/velocity-dashboard.tsx</file>
+      <file>packages/dashboard/src/analytics/metrics-aggregator.ts</file>
+      <file>packages/dashboard/src/charts/chart-components.tsx</file>
+      <file>packages/dashboard/src/filters/filter-manager.ts</file>
+      <file>packages/dashboard/src/export/export-service.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>react - UI framework</dependency>
+      <dependency>chart.js - Charting library</dependency>
+      <dependency>react-chartjs-2 - React wrapper for Chart.js</dependency>
+      <dependency>date-fns - Date manipulation utilities</dependency>
+      <dependency>html2canvas - Chart export to image</dependency>
+      <dependency>jspdf - PDF generation</dependency>
+    </external-dependencies>
+    
+    <data-sources>
+      <source name="Metrics API">
+        <description>Historical metrics data for calculations</description>
+        <endpoint>/api/v1/metrics/velocity</endpoint>
+        <method>GET with query parameters</method>
+      </source>
+      <source name="Events API">
+        <description>Event data for detailed analysis</description>
+        <endpoint>/api/v1/events</endpoint>
+        <method>GET with filters</method>
+      </source>
+      <source name="Git Platform API">
+        <description>PR and issue metadata</description>
+        <endpoint>Git platform REST APIs</endpoint>
+        <method>Authenticated API calls</method>
+      </source>
+    </data-sources>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 5.2 - Metrics Collection Infrastructure</upstream>
+    <upstream>Story 4.7 - Event Query API for Time-Travel</upstream>
+    <downstream>Story 5.5 - Event Trail Exploration UI</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Dashboard page: http://localhost:3000/dashboard/velocity</criteria>
+    <criteria id="2">Charts display: issues completed per day (last 30 days), average time-to-merge (last 30 days), PR success rate (first-time merge vs. retry)</criteria>
+    <criteria id="3">Charts include filters: date range, issue labels, AI provider</criteria>
+    <criteria id="4">Charts use line charts for time series, bar charts for comparisons</criteria>
+    <criteria id="5">Dashboard calculates key metrics: throughput (issues/week), cycle time (issue-to-merge duration), quality (test pass rate)</criteria>
+    <criteria id="6">Dashboard exports charts as PNG or PDF for reporting</criteria>
+    <criteria id="7">Dashboard responsive for mobile viewing (stakeholder reviews on-the-go)</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Dashboard page load time &lt;3 seconds</metric>
+    <metric>Chart rendering time &lt;2 seconds</metric>
+    <metric>Filter application time &lt;1 second</metric>
+    <metric>Export generation time &lt;5 seconds</metric>
+    <metric>Mobile responsiveness score &gt;90%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Performance issues with large datasets</description>
+      <mitigation>Data sampling, server-side aggregation, pagination</mitigation>
+    </risk>
+    <risk>
+      <description>Inaccurate metrics due to data quality issues</description>
+      <mitigation>Data validation, outlier detection, manual override options</mitigation>
+    </risk>
+    <risk>
+      <description>Misinterpretation of velocity metrics</description>
+      <mitigation>Clear definitions, educational tooltips, context information</mitigation>
+    </risk>
+    <risk>
+      <description>Export functionality security risks</description>
+      <mitigation>Access controls, file validation, secure file generation</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for metrics calculations</requirement>
+    <requirement>Integration tests for chart rendering</requirement>
+    <requirement>E2E tests for dashboard functionality</requirement>
+    <requirement>Performance tests for large datasets</requirement>
+    <requirement>Mobile responsiveness testing</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Optional - CLI-based metrics queries and log analysis sufficient for MVP</reason>
+    <explanation>Velocity charts provide better visualization but not required for self-maintenance validation. Can be deferred to post-MVP.</explanation>
+    <impact>Without velocity dashboard, managers can still get metrics via CLI queries, but user experience is less convenient</impact>
+  </mvp-rationale>
+</story-context>

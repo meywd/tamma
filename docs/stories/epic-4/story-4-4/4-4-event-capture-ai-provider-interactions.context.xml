@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.4</story-id>
+  <story-title>Event Capture - AI Provider Interactions</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Capture all AI provider requests and responses for complete auditability</primary-goal>
+    
+    <key-events>
+      <event name="AIRequest">
+        <timing>Before each AI provider call</timing>
+        <payload-fields>
+          <field>provider (name, version, endpoint)</field>
+          <field>model (name, version, capabilities)</field>
+          <field>request (type, prompt truncated, estimatedTokens, context, parameters)</field>
+          <field>providerSelection (rationale, alternatives, criteria)</field>
+          <field>security (dataMasking, piiDetected, complianceChecks)</field>
+        </payload-fields>
+        <truncation>Prompt truncated if &gt;1000 chars for main event</truncation>
+      </event>
+      <event name="AIResponse">
+        <timing>After each AI provider response</timing>
+        <payload-fields>
+          <field>provider and model information</field>
+          <field>response (content truncated, actualTokens, finishReason, success)</field>
+          <field>performance (latency, firstTokenTime, throughput, queueTime)</field>
+          <field>cost (inputCost, outputCost, totalCost, pricingModel)</field>
+          <field>quality (coherenceScore, relevanceScore, completenessScore)</field>
+          <field>security (dataMasking, piiDetected, contentFilter)</field>
+        </payload-fields>
+        <truncation>Response truncated for main event</truncation>
+      </event>
+    </key-events>
+    
+    <data-security-requirements>
+      <requirement>Mask sensitive data (API keys, passwords) before persistence</requirement>
+      <requirement>Detect and redact PII (SSN, credit cards, emails)</requirement>
+      <requirement>Content classification (public, internal, confidential, restricted)</require>
+      <requirement>Compliance checks (data_masking, pii_detection)</requirement>
+      <requirement>Zero sensitive data leakage in persisted events</requirement>
+    </data-security-requirements>
+    
+    <content-storage-strategy>
+      <approach>Separate blob storage for full prompts and responses</approach>
+      <retention-policy>Configurable retention period (default: 30 days)</retention>
+      <classification>Content-based classification with appropriate retention</classification>
+      <cleanup>Automatic deletion of expired content</cleanup>
+      <access>Secure retrieval with proper authorization</access>
+    </content-storage-strategy>
+    
+    <performance-requirements>
+      <requirement>Events persisted synchronously (block on write completion)</requirement>
+      <requirement>Event capture adds &lt;200ms overhead to AI calls</requirement>
+      <requirement>Full content storage in background (non-blocking)</requirement>
+      <requirement>Efficient data masking with minimal performance impact</requirement>
+    </performance-requirements>
+    
+    <governance-requirements>
+      <requirement>Complete auditability of AI usage and costs</requirement>
+      <requirement>Provider selection rationale tracking</requirement>
+      <requirement>Cost tracking and quota management</requirement>
+      <requirement>Performance metrics for all AI interactions</requirement>
+      <requirement>Quality assessment of AI responses</requirement>
+    </governance-requirements>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/providers</package>
+      <package>@tamma/workflow</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>AIEventCapture - Main event capture service</component>
+      <component>AIDataMasker - Sensitive data masking and PII detection</component>
+      <component>AIContentStorage - Full prompt/response blob storage</component>
+      <component>AICostCalculator - Cost calculation and tracking</component>
+      <component>ContentClassifier - Content classification engine</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/events/src/capture/ai-event-capture.ts</file>
+      <file>packages/events/src/security/data-masking.ts</file>
+      <file>packages/events/src/storage/content-storage.ts</file>
+      <file>packages/events/src/schemas/ai-events.schema.ts</file>
+      <file>packages/events/src/types/ai-event.types.ts</file>
+    </key-files>
+    
+    <integration-points>
+      <point name="AI Provider Abstraction">
+        <description>Integrate with all AI provider implementations</description>
+        <timing>Before/after each API call</timing>
+        <blocking>Synchronous event persistence</blocking>
+      </point>
+      <point name="Autonomous Workflow">
+        <description>Correlate AI events with workflow execution</description>
+        <correlation-id>Links entire development cycle</correlation-id>
+      </point>
+    </integration-points>
+  </technical-context>
+  
+  <dependencies>
+    <upstream>Story 4.1 - Event Schema Design</upstream>
+    <upstream>Story 4.2 - Event Store Backend Selection</upstream>
+    <upstream>Story 1.1-1.7 - AI Provider Abstraction (integration point)</upstream>
+    <downstream>Story 4.5 - Event Capture - Code Changes &amp; Git Operations</downstream>
+    <downstream>Story 4.6 - Event Capture - Approvals &amp; Escalations</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">AIRequestEvent captured before each AI provider call including: provider name, model, prompt (truncated if &gt;1000 chars), token count estimate</criteria>
+    <criteria id="2">AIResponseEvent captured after response including: provider name, model, response (truncated), token count, latency, cost estimate</criteria>
+    <criteria id="3">Events include full prompt/response in separate blob storage for detailed analysis (with retention policy)</criteria>
+    <criteria id="4">Events mask sensitive data (API keys, passwords) before persistence</criteria>
+    <criteria id="5">Events include provider selection rationale (why this provider was chosen)</criteria>
+    <criteria id="6">Events persisted to event store synchronously (block on write completion)</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>100% of AI requests captured as events</metric>
+    <metric>100% of AI responses captured as events</metric>
+    <metric>Zero sensitive data leakage in persisted events</metric>
+    <metric>Event capture adds &lt;200ms overhead to AI calls</metric>
+    <metric>Full content storage with proper retention policies</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Sensitive data may leak through event storage</description>
+      <mitigation>Comprehensive data masking, PII detection, content classification</mitigation>
+    </risk>
+    <risk>
+      <description>Event capture may slow down AI interactions</description>
+      <mitigation>Async content storage, optimized masking, efficient serialization</mitigation>
+    </risk>
+    <risk>
+      <description>Full content storage may become expensive</description>
+      <mitigation>Retention policies, compression, tiered storage</mitigation>
+    </risk>
+    <risk>
+      <description>AI usage may not be fully auditable</description>
+      <mitigation>Complete event capture, immutable storage, correlation tracking</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <compliance-requirements>
+    <compliance>Complete auditability of AI decision-making process</compliance>
+    <compliance>Cost tracking and quota management for AI usage</compliance>
+    <compliance>Performance monitoring and quality assessment</compliance>
+    <compliance>Data protection through masking and PII detection</compliance>
+    <compliance>Provider selection transparency and rationale tracking</compliance>
+  </compliance-requirements>
+</story-context>

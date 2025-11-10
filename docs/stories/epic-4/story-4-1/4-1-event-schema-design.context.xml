@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.1</story-id>
+  <story-title>Event Schema Design</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Complete audit trail with 100% traceability for compliance and debugging</primary-goal>
+    
+    <key-concepts>
+      <concept>Event Schema Design with base fields: eventId, timestamp, eventType, actorType, actorId, payload, metadata</concept>
+      <concept>Event versioning support for schema evolution</concept>
+      <concept>Correlation IDs for linking related events in workflows</concept>
+      <concept>Causation IDs for cause-effect relationships</concept>
+      <concept>JSON Schema validation for event structure integrity</concept>
+    </key-concepts>
+    
+    <event-categories>
+      <category name="Issue Management">
+        <event>IssueSelected</event>
+        <event>IssueAnalysisCompleted</event>
+        <event>IssueContextUpdated</event>
+      </category>
+      <category name="AI Provider">
+        <event>AIRequest</event>
+        <event>AIResponse</event>
+        <event>AIProviderSelected</event>
+        <event>AICostTracked</event>
+      </category>
+      <category name="Code Changes">
+        <event>CodeFileWritten</event>
+        <event>CodeFileRead</event>
+        <event>CodeGenerationCompleted</event>
+      </category>
+      <category name="Git Operations">
+        <event>BranchCreated</event>
+        <event>CommitCreated</event>
+        <event>PRCreated</event>
+        <event>PRUpdated</event>
+        <event>PRMerged</event>
+      </category>
+      <category name="Quality Gates">
+        <event>QualityGateStarted</event>
+        <event>QualityGatePassed</event>
+        <event>QualityGateFailed</event>
+        <event>QualityGateEscalated</event>
+      </category>
+      <category name="System">
+        <event>WorkflowStarted</event>
+        <event>WorkflowStepCompleted</event>
+        <event>WorkflowCompleted</event>
+        <event>WorkflowFailed</event>
+        <event>ErrorOccurred</event>
+      </category>
+    </event-categories>
+    
+    <technical-requirements>
+      <requirement>UUID v7 for time-sortable event IDs</requirement>
+      <requirement>ISO 8601 millisecond precision timestamps</requirement>
+      <requirement>JSON Schema validation for all events</requirement>
+      <requirement>Schema versioning for evolution support</requirement>
+      <requirement>Correlation and causation ID tracking</requirement>
+      <requirement>Actor identification (system, user, AI, provider, platform)</requirement>
+    </technical-requirements>
+    
+    <compliance-requirements>
+      <compliance>SOC2 - Complete audit trail</compliance>
+      <compliance>ISO27001 - Data integrity and tracking</compliance>
+      <compliance>GDPR - Data processing records</compliance>
+    </compliance-requirements>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/shared</package>
+    </primary-packages>
+    
+    <key-files>
+      <file>packages/events/src/schemas/domain-event.schema.ts</file>
+      <file>packages/events/src/types/event.types.ts</file>
+      <file>packages/events/src/validation/event-validator.ts</file>
+      <file>packages/events/src/registry/event-registry.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>ajv - JSON schema validation</dependency>
+      <dependency>uuid - UUID generation and validation</dependency>
+      <dependency>@types/uuid - TypeScript definitions</dependency>
+    </external-dependencies>
+    
+    <validation-strategy>
+      <approach>JSON Schema validation with AJV</approach>
+      <performance-target>&lt;1ms per event validation</performance-target>
+      <error-handling>Detailed validation error messages</error-handling>
+      <compatibility>Backward compatibility through schema versioning</compatibility>
+    </validation-strategy>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>None (foundational story for Epic 4)</upstream>
+    <downstream>Story 4.2 - Event Store Backend Selection</downstream>
+    <downstream>Story 4.3 - Event Capture - Issue Selection &amp; Analysis</downstream>
+    <downstream>Story 4.4 - Event Capture - AI Provider Interactions</downstream>
+    <downstream>Story 4.5 - Event Capture - Code Changes &amp; Git Operations</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Event schema defines base fields: eventId, timestamp, eventType, actorType, actorId, payload, metadata</criteria>
+    <criteria id="2">Schema includes event types for: issue selection, AI requests/responses, code changes, Git operations, approvals, escalations, errors</criteria>
+    <criteria id="3">Schema supports event versioning (schema version field) for future evolution</criteria>
+    <criteria id="4">Schema includes correlation IDs for linking related events (e.g., all events for single PR)</criteria>
+    <criteria id="5">Schema validated with JSON Schema or Protocol Buffers</criteria>
+    <criteria id="6">Documentation includes event catalog with examples for each event type</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>All events pass schema validation with 100% compliance</metric>
+    <metric>Event schema supports all identified use cases</metric>
+    <metric>Schema versioning allows backward-compatible evolution</metric>
+    <metric>Event catalog provides complete documentation</metric>
+    <metric>Validation performance: &lt;1ms per event validation</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Event schema changes may break compatibility</description>
+      <mitigation>Implement strict versioning, backward compatibility checks</mitigation>
+    </risk>
+    <risk>
+      <description>Complex validation may impact performance</description>
+      <mitigation>Optimize validation logic, consider async validation for non-critical fields</mitigation>
+    </risk>
+    <risk>
+      <description>Missing event types for edge cases</description>
+      <mitigation>Comprehensive event discovery, extensible event registry</mitigation>
+    </risk>
+  </risks-and-mitigations>
+</story-context>

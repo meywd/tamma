@@ -1,22 +1,25 @@
-# Epic 4: Event Sourcing & Intelligence
+# Epic 4: Event Sourcing & Audit Trail
 
-This directory contains all stories and context files for Epic 4, which implements the DCB event sourcing system and intelligence engine.
+This directory contains all stories and context files for Epic 4, which implements CQRS event sourcing for complete transparency and audit compliance.
 
 ## Epic Overview
 
-**Goal**: Implement comprehensive event sourcing for audit trails, time-travel debugging, and intelligence capabilities for autonomous learning.
+**Goal**: Implement CQRS event sourcing for complete transparency and audit compliance. Capture all user actions, AI actions, and system state changes with millisecond precision.
+
+**Value Delivered**: Complete audit trail (100% traceability), compliance readiness (SOC2, ISO27001, GDPR), time-travel debugging, differential diagnosis.
 
 ## Stories Organization
 
-### Event Sourcing Stories (4-1 to 4-7)
+### Event Sourcing Stories (4.1-4.8)
 
-- **4-1**: Event Schema & Event Store Interface
-- **4-2**: Automated Scoring System & Event Store Interface
-- **4-3**: Event Streaming & Result Storage/Time-Series Management
-- **4-4**: Benchmark Orchestration/Scheduling & Snapshot Management
-- **4-5**: Query Optimization & Event Compaction
-- **4-6**: Cross-Platform Intelligence Engine & Event Replay
-- **4-7**: Event Compaction & User Benchmarking Dashboard
+- **4.1**: Event Schema Design
+- **4.2**: Event Store Backend Selection
+- **4.3**: Event Capture - Issue Selection & Analysis
+- **4.4**: Event Capture - AI Provider Interactions
+- **4.5**: Event Capture - Code Changes & Git Operations
+- **4.6**: Event Capture - Approvals & Escalations
+- **4.7**: Event Query API for Time-Travel
+- **4.8**: Black-Box Replay for Debugging
 
 ## File Types
 

@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.6</story-id>
+  <story-title>Event Capture - Approvals &amp; Escalations</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Capture all approval workflows and escalation processes for complete auditability</primary-goal>
+    
+    <key-events>
+      <event name="ApprovalRequested">
+        <timing>When human approval is needed</timing>
+        <payload-fields>
+          <field>approval (id, type, priority, category, title, description)</field>
+          <field>requester (id, name, email, role)</field>
+          <field>approvers (id, name, email, role, required, order)</field>
+          <field>context (workflowId, correlationId, issueId, prId, step)</field>
+          <field>deadline (requested, urgency, autoEscalate, escalationDelay)</field>
+          <field>artifacts (type, name, location, description)</field>
+          <field>criteria (checklist, conditions)</field>
+          <field>policies (applicable, complianceLevel, auditRequired)</field>
+        </payload-fields>
+        <truncation>Description truncated if &gt;500 chars for main event</truncation>
+      </event>
+      <event name="ApprovalCompleted">
+        <timing>When approval is granted/denied</timing>
+        <payload-fields>
+          <field>approval (id, type, decision, finalDecision)</field>
+          <field>approver (id, name, email, role, authority)</field>
+          <field>decision (rationale, conditions, concerns, suggestions)</field>
+          <field>timing (requestedAt, completedAt, duration, firstViewAt, workingTime)</field>
+          <field>review (artifactsReviewed, checklistCompleted, findings)</field>
+          <field>delegation (delegatedTo, reason, delegatedAt)</field>
+          <field>escalation (from, to, reason, escalatedAt)</field>
+        </payload-fields>
+      </event>
+      <event name="EscalationTriggered">
+        <timing>When automatic escalation occurs</timing>
+        <payload-fields>
+          <field>escalation (id, type, level, priority, automatic)</field>
+          <field>trigger (reason, sourceEventId, sourceType, context)</field>
+          <field>from (id, name, role, email)</field>
+          <field>to (id, name, role, email, authority)</field>
+          <field>context (workflowId, correlationId, approvalId, deadlines)</field>
+          <field>urgency (level, justification, responseRequired, responseDeadline)</field>
+          <field>history (timestamp, level, from, to, reason, outcome)</field>
+        </payload-fields>
+      </event>
+      <event name="EscalationCompleted">
+        <timing>When escalation is resolved</timing>
+        <payload-fields>
+          <field>escalation (id, type, level, outcome)</field>
+          <field>resolver (id, name, email, role, authority)</field>
+          <field>resolution (decision, rationale, finalAction, conditions)</field>
+          <field>timing (triggeredAt, completedAt, duration, firstResponseAt, workingTime)</field>
+          <field>impact (workflowImpact, delayImpact, costImpact, qualityImpact)</field>
+          <field>followUp (required, actions, assignedTo, deadline)</field>
+          <field>lessons (rootCause, prevention, processImprovement)</field>
+        </payload-fields>
+      </event>
+    </key-events>
+    
+    <content-storage-strategy>
+      <approach>Separate blob storage for full approval contexts and decisions</approach>
+      <retention-policy>Variable based on approval type and compliance requirements</retention-policy>
+      <classification>Content-based classification with appropriate access controls</classification>
+      <audit-trail>Complete audit trail for all human intervention points</audit-trail>
+    </content-storage-strategy>
+    
+    <approval-types>
+      <type>code_review - Review of generated code changes</type>
+      <type>security_scan - Security vulnerability assessment</type>
+      <type>compliance_check - Regulatory compliance verification</type>
+      <type>deployment - Production deployment approval</type>
+      <type>configuration_change - System configuration modifications</type>
+    </approval-types>
+    
+    <escalation-triggers>
+      <trigger>timeout - Approval deadline exceeded</trigger>
+      <trigger>denial - Approval denied with escalation</trigger>
+      <trigger>conflict - Multiple approvers in conflict</trigger>
+      <trigger>emergency - Emergency escalation required</trigger>
+      <trigger>capacity - Approver capacity exceeded</trigger>
+    </escalation-triggers>
+    
+    <performance-requirements>
+      <requirement>Events persisted synchronously before workflow proceeds</requirement>
+      <requirement>Event capture adds &lt;150ms overhead to approval workflows</requirement>
+      <requirement>Full content storage in background (non-blocking)</requirement>
+      <requirement>Immediate notification delivery to approvers/escalation targets</requirement>
+    </performance-requirements>
+    
+    <compliance-requirements>
+      <requirement>Complete auditability of human decision-making process</requirement>
+      <requirement>Immutable storage of approval decisions and rationales</requirement>
+      <requirement>Correlation tracking through approval chains</require>
+      <requirement>Retention policies based on compliance requirements</requirement>
+      <requirement>Access controls and privacy protection</requirement>
+    </compliance-requirements>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/workflow</package>
+      <package>@tamma/gates</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>ApprovalEventCapture - Main event capture service</component>
+      <component>ApprovalContentStorage - Full approval context storage</component>
+      <component>NotificationService - Approver/escalation notifications</component>
+      <component>EscalationDetector - Automatic escalation trigger detection</component>
+      <component>ApprovalWorkflow - Integration with approval systems</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/events/src/capture/approval-event-capture.ts</file>
+      <file>packages/events/src/storage/approval-content-storage.ts</file>
+      <file>packages/events/src/schemas/approval-events.schema.ts</file>
+      <file>packages/events/src/types/approval-event.types.ts</file>
+      <file>packages/gates/src/integration/approval-integration.ts</file>
+    </key-files>
+    
+    <integration-points>
+      <point name="Quality Gate Systems">
+        <description>Integrate with quality gates that require approvals</description>
+        <timing>Before gate completion</timing>
+        <blocking>Synchronous event persistence</blocking>
+      </point>
+      <point name="Approval Workflow Systems">
+        <description>Integrate with existing approval workflow tools</description>
+        <timing>On approval request/decision</timing>
+        <correlation-id>Links to workflow execution</correlation-id>
+      </point>
+      <point name="Notification Systems">
+        <description>Send notifications to approvers and escalation targets</description>
+        <timing>Immediately after event capture</timing>
+      </point>
+    </integration-points>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 4.1 - Event Schema Design</upstream>
+    <upstream>Story 4.2 - Event Store Backend Selection</upstream>
+    <upstream>Story 3.1-3.8 - Quality Gates (integration point)</upstream>
+    <downstream>Story 4.7 - Event Query API for Time-Travel</downstream>
+    <downstream>Story 4.8 - Black-Box Replay for Debugging</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">ApprovalRequestedEvent captured when human approval is needed including: approval type, requester, approver, context, deadline</criteria>
+    <criteria id="2">ApprovalCompletedEvent captured when approval is granted/denied including: decision, rationale, approver, timestamp</criteria>
+    <criteria id="3">EscalationTriggeredEvent captured when automatic escalation occurs including: reason, escalation level, target, context</criteria>
+    <criteria id="4">EscalationCompletedEvent captured when escalation is resolved including: resolution, final decision, resolver</criteria>
+    <criteria id="5">Events include full approval/escalation context in separate storage for detailed analysis</criteria>
+    <criteria id="6">Events persisted to event store synchronously before workflow proceeds</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>100% of approval requests captured as events</metric>
+    <metric>100% of approval decisions captured as events</metric>
+    <metric>100% of escalations captured as events</metric>
+    <metric>Event capture adds &lt;150ms overhead to approval workflows</metric>
+    <metric>Complete audit trail for all human intervention points</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Personal information in approval events may violate privacy</description>
+      <mitigation>Data classification, access controls, retention policies</mitigation>
+    </risk>
+    <risk>
+      <description>Event capture may slow down approval workflows</description>
+      <mitigation>Async content storage, optimized serialization</mitigation>
+    </risk>
+    <risk>
+      <description>Approval decisions may not be properly audited</description>
+      <mitigation>Complete event capture, immutable storage, correlation tracking</mitigation>
+    </risk>
+    <risk>
+      <description>Complex approval workflows may be difficult to integrate</description>
+      <mitigation>Clear integration points, comprehensive testing, gradual rollout</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <compliance-requirements>
+    <compliance>Complete auditability of human decision-making process</compliance>
+    <compliance>Immutable storage of approval decisions and rationales</compliance>
+    <compliance>Correlation tracking through approval chains</compliance>
+    <compliance>Retention policies based on compliance requirements</compliance>
+    <compliance>Access controls and privacy protection</compliance>
+  </compliance-requirements>
+</story-context>

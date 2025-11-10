@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.3</story-id>
+  <story-title>Real-Time Dashboard - System Health</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>false</mvp-critical>
+  <mvp-optional>true</mvp-optional>
+  
+  <technical-context>
+    <architecture-pattern>Real-time web dashboard with WebSocket/SSE updates</architecture-pattern>
+    <primary-goal>Monitor autonomous loops and detect issues immediately</primary-goal>
+    
+    <dashboard-features>
+      <feature name="System Overview">
+        <description>High-level system status and health indicators</description>
+        <components>
+          <component>Active loops count with status indicators</component>
+          <component>Pending approvals count with urgency levels</component>
+          <component>Recent escalations list with timestamps</component>
+          <component>System status indicator (Healthy/Degraded/Critical)</component>
+        </components>
+      </feature>
+      <feature name="Current Operations">
+        <description>Real-time view of ongoing autonomous operations</description>
+        <components>
+          <component>Current issue being processed with details</component>
+          <component>Current step in autonomous loop with progress</component>
+          <component>Estimated time remaining for current operation</component>
+          <component>Resource utilization (CPU, memory, disk)</component>
+        </components>
+      </feature>
+      <feature name="Real-time Updates">
+        <description>Automatic dashboard updates without page refresh</description>
+        <components>
+          <component>WebSocket connection for live updates</component>
+          <component>Server-Sent Events as fallback option</component>
+          <component>10-second refresh interval</component>
+          <component>Connection status indicator</component>
+        </components>
+      </feature>
+    </dashboard-features>
+    
+    <dashboard-access>
+      <url>http://localhost:3000/dashboard</url>
+      <port-configurable>true</port-configurable>
+      <authentication>Optional (configurable)</authentication>
+      <browser-support>Chrome, Firefox, Safari, Edge (modern versions)</browser-support>
+    </dashboard-access>
+    
+    <performance-requirements>
+      <requirement>Initial page load &lt;2 seconds</requirement>
+      <requirement>Auto-refresh every 10 seconds via WebSocket or SSE</requirement>
+      <requirement>Dashboard responsive on mobile devices</requirement>
+      <requirement>Real-time updates &lt;500ms latency</requirement>
+      <requirement>Concurrent user support &gt;10</requirement>
+    </performance-requirements>
+    
+    <ui-components>
+      <component name="Status Indicators">
+        <type>Visual indicators with colors and icons</type>
+        <states>🟢 Healthy, 🟡 Degraded, 🔴 Critical</states>
+        <animations>Smooth transitions and status changes</animations>
+      </component>
+      <component name="Data Tables">
+        <type>Sortable, filterable data tables</type>
+        <features>Sorting, filtering, pagination, search</features>
+        <responsive>Mobile-friendly table design</responsive>
+      </component>
+      <component name="Charts">
+        <type>Real-time updating charts</type>
+        <libraries>Chart.js or D3.js</libraries>
+        <types>Line charts, bar charts, gauges</types>
+      </component>
+      <component name="Alerts">
+        <type>Toast notifications and modal dialogs</type>
+        <severity-levels>Info, Warning, Error, Critical</severity-levels>
+        <auto-dismiss>Configurable timeout</auto-dismiss>
+      </component>
+    </ui-components>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/dashboard</package>
+      <package>@tamma/observability</package>
+      <package>@tamma/api</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>DashboardServer - Main dashboard web server</component>
+      <component>WebSocketHandler - Real-time update management</component>
+      <component>SystemHealthCollector - System health data aggregation</component>
+      <component>DashboardUI - React-based user interface</component>
+      <component>MetricsClient - Metrics data fetching</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/dashboard/src/server/dashboard-server.ts</file>
+      <file>packages/dashboard/src/websocket/websocket-handler.ts</file>
+      <file>packages/dashboard/src/health/system-health-collector.ts</file>
+      <file>packages/dashboard/src/components/dashboard-ui.tsx</file>
+      <file>packages/dashboard/src/client/metrics-client.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>react - UI framework</dependency>
+      <dependency>react-dom - DOM rendering</dependency>
+      <dependency>ws - WebSocket server</dependency>
+      <dependency>chart.js - Charting library</dependency>
+      <dependency>express - Web server framework</dependency>
+      <dependency>socket.io - WebSocket library with fallbacks</dependency>
+    </external-dependencies>
+    
+    <integration-points>
+      <point name="Metrics Endpoint">
+        <description>Fetch metrics data from /metrics endpoint</description>
+        <source>Story 5.2 - Metrics Collection Infrastructure</source>
+        <method>HTTP polling and WebSocket updates</method>
+      </point>
+      <point name="System APIs">
+        <description>Get current system state and operations</description>
+        <source>Orchestrator and worker components</source>
+        <method>REST API calls</method>
+      </point>
+      <point name="Event Stream">
+        <description>Real-time event updates for dashboard</description>
+        <source>Story 4.7 - Event Query API</source>
+        <method>Server-Sent Events or WebSocket</method>
+      </point>
+    </integration-points>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 5.2 - Metrics Collection Infrastructure</upstream>
+    <upstream>Story 4.7 - Event Query API for Time-Travel</upstream>
+    <downstream>Story 5.4 - Real-Time Dashboard - Development Velocity</downstream>
+    <downstream>Story 5.5 - Event Trail Exploration UI</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Web dashboard accessible at http://localhost:3000/dashboard (or configured port)</criteria>
+    <criteria id="2">Dashboard displays: active loops count, pending approvals count, recent escalations list</criteria>
+    <criteria id="3">Dashboard displays: current issue being processed, step in autonomous loop, estimated time remaining</criteria>
+    <criteria id="4">Dashboard auto-refreshes every 10 seconds via WebSocket or SSE</criteria>
+    <criteria id="5">Dashboard loads in &lt;2 seconds on initial page load</criteria>
+    <criteria id="6">Dashboard includes system status indicator: 🟢 Healthy, 🟡 Degraded, 🔴 Critical</criteria>
+    <criteria id="7">Dashboard works in modern browsers (Chrome, Firefox, Safari, Edge)</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Dashboard page load time &lt;2 seconds</metric>
+    <metric>Real-time update latency &lt;500ms</metric>
+    <metric>WebSocket connection success rate &gt;95%</metric>
+    <metric>Dashboard responsive on mobile devices</metric>
+    <metric>System health data accuracy &gt;99%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>WebSocket connection issues causing dashboard to freeze</description>
+      <mitigation>Automatic reconnection, SSE fallback, connection status indicator</mitigation>
+    </risk>
+    <risk>
+      <description>High memory usage from real-time data updates</description>
+      <mitigation>Data pagination, cleanup of old data, efficient rendering</mitigation>
+    </risk>
+    <risk>
+      <description>Dashboard performance degradation with high data volume</description>
+      <mitigation>Data sampling, lazy loading, virtual scrolling</mitigation>
+    </risk>
+    <risk>
+      <description>Security vulnerabilities in web dashboard</description>
+      <mitigation>Input validation, authentication, HTTPS, CSP headers</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for dashboard components</requirement>
+    <requirement>Integration tests for WebSocket connections</requirement>
+    <requirement>E2E tests for dashboard functionality</requirement>
+    <requirement>Performance tests for dashboard loading</requirement>
+    <requirement>Browser compatibility testing</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Optional - CLI-based monitoring and log tailing sufficient for MVP</reason>
+    <explanation>UI dashboard provides better UX but not required for self-maintenance validation. Can be deferred to post-MVP.</explanation>
+    <impact>Without dashboard, operators can still monitor system via CLI and logs, but user experience is degraded</impact>
+  </mvp-rationale>
+</story-context>
