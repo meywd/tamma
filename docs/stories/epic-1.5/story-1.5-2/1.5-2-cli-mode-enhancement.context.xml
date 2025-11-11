@@ -1,0 +1,509 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>1.5-2</story-id>
+  <title>CLI Mode Enhancement</title>
+  <epic>1.5</epic>
+  <category>deployment</category>
+  <last-updated>2025-11-08T12:00:00Z</last-updated>
+  
+  <technical-context>
+    <overview>
+      CLI Mode Enhancement provides an interactive, user-friendly command-line interface for Tamma with branded visuals, progress tracking, color-coded output, enhanced error handling, and configuration wizard. This enhancement transforms the basic CLI into an intuitive developer experience while maintaining full workflow functionality.
+    </overview>
+    
+    <key-components>
+      <component>
+        <name>CLI Commands</name>
+        <description>Core CLI command implementations for run, init, config, status</description>
+        <interfaces>
+          <interface>ICLICommand</interface>
+          <interface>ICommandHandler</interface>
+          <interface>ICommandOptions</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>Interactive Prompts</name>
+        <description>Interactive user prompts and input collection</description>
+        <interfaces>
+          <interface>IPromptHandler</interface>
+          <interface>IIssueSelector</interface>
+          <interface>IPlanApprover</interface>
+          <interface>IConfigWizard</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>UI Components</name>
+        <description>Visual UI components for CLI interface</description>
+        <interfaces>
+          <interface>IBanner</interface>
+          <interface>ISpinner</interface>
+          <interface>IColorFormatter</interface>
+          <interface>IOutputFormatter</interface>
+        </interfaces>
+      </component>
+      
+      <component>
+        <name>CLI Utilities</name>
+        <description>Utility functions for CLI operations</description>
+        <interfaces>
+          <interface>ICLIErrorHandler</interface>
+          <interface>ICLILogger</interface>
+          <interface>IConfigManager</interface>
+        </interfaces>
+      </component>
+    </key-components>
+    
+    <data-models>
+      <model>
+        <name>CLICommand</name>
+        <properties>
+          <property name="name" type="string" />
+          <property name="description" type="string" />
+          <property name="options" type="CommandOption[]" />
+          <property name="handler" type="CommandHandler" />
+          <property name="examples" type="string[]" />
+          <property name="category" type="CommandCategory" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>CommandOption</name>
+        <properties>
+          <property name="name" type="string" />
+          <property name="alias" type="string" />
+          <property name="description" type="string" />
+          <property name="type" type="OptionType" />
+          <property name="required" type="boolean" />
+          <property name="default" type="any" />
+          <property name="choices" type="string[]" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>InteractivePrompt</name>
+        <properties>
+          <property name="type" type="PromptType" />
+          <property name="message" type="string" />
+          <property name="choices" type="PromptChoice[]" />
+          <property name="default" type="any" />
+          <property name="validation" type="ValidationRule" />
+          <property name="transformer" type="Transformer" />
+        </properties>
+      </model>
+      
+      <model>
+        <name>CLIConfiguration</name>
+        <properties>
+          <property name="mode" type="string" />
+          <property name="logLevel" type="string" />
+          <property name="aiProvider" type="AIProviderConfig" />
+          <property name="gitPlatform" type="GitPlatformConfig" />
+          <property name="workflow" type="WorkflowConfig" />
+          <property name="ui" type="UIConfig" />
+        </properties>
+      </model>
+    </data-models>
+    
+    <key-classes>
+      <class>
+        <name>CLIApplication</name>
+        <responsibilities>
+          <responsibility>Initialize and manage CLI application</responsibility>
+          <responsibility>Register and handle CLI commands</responsibility>
+          <responsibility>Manage global CLI configuration</responsibility>
+          <responsibility>Handle CLI lifecycle events</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="initialize" returns="Promise&lt;void&gt;">
+            <param name="options" type="CLIOptions" />
+          </method>
+          <method name="registerCommand" returns="void">
+            <param name="command" type="CLICommand" />
+          </method>
+          <method name="parseArguments" returns="ParsedArguments">
+            <param name="args" type="string[]" />
+          </method>
+          <method name="executeCommand" returns="Promise&lt;CommandResult&gt;">
+            <param name="commandName" type="string" />
+            <param name="options" type="CommandOptions" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>RunCommand</name>
+        <responsibilities>
+          <responsibility>Execute main autonomous development workflow</responsibility>
+          <responsibility>Handle issue selection and plan approval</responsibility>
+          <responsibility>Provide progress tracking for workflow steps</responsibility>
+          <responsibility>Manage interactive vs non-interactive modes</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="execute" returns="Promise&lt;void&gt;">
+            <param name="options" type="RunCommandOptions" />
+          </method>
+          <method name="selectIssue" returns="Promise&lt;Issue&gt;">
+            <param name="options" type="IssueSelectionOptions" />
+          </method>
+          <method name="executeWorkflow" returns="Promise&lt;WorkflowResult&gt;">
+            <param name="issue" type="Issue" />
+            <param name="plan" type="DevelopmentPlan" />
+          </method>
+          <method name="trackProgress" returns="void">
+            <param name="step" type="WorkflowStep" />
+            <param name="progress" type="ProgressInfo" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>InitCommand</name>
+        <responsibilities>
+          <responsibility>Initialize Tamma configuration</responsibility>
+          <responsibility>Run interactive configuration wizard</responsibility>
+          <responsibility>Create configuration files and directories</responsibility>
+          <responsibility>Validate and save configuration</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="execute" returns="Promise&lt;void&gt;">
+            <param name="options" type="InitCommandOptions" />
+          </method>
+          <method name="runWizard" returns="Promise&lt;CLIConfiguration&gt;">
+            <param name="options" type="WizardOptions" />
+          </method>
+          <method name="createConfigFile" returns="Promise&lt;void&gt;">
+            <param name="config" type="CLIConfiguration" />
+            <param name="path" type="string" />
+          </method>
+          <method name="validateConfiguration" returns="ValidationResult">
+            <param name="config" type="CLIConfiguration" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>ConfigCommand</name>
+        <responsibilities>
+          <responsibility>Manage CLI configuration</responsibility>
+          <responsibility>Show current configuration</responsibility>
+          <responsibility>Validate configuration settings</responsibility>
+          <responsibility>Update configuration values</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="execute" returns="Promise&lt;void&gt;">
+            <param name="options" type="ConfigCommandOptions" />
+          </method>
+          <method name="showConfiguration" returns="void">
+            <param name="config" type="CLIConfiguration" />
+          </method>
+          <method name="validateConfiguration" returns="ValidationResult">
+            <param name="configPath" type="string" />
+          </method>
+          <method name="updateConfiguration" returns="Promise&lt;void&gt;">
+            <param name="updates" type="ConfigurationUpdates" />
+          </method>
+        </methods>
+      </class>
+      
+      <class>
+        <name>CLIErrorHandler</name>
+        <responsibilities>
+          <responsibility>Handle CLI errors with actionable suggestions</responsibility>
+          <responsibility>Provide context-specific error messages</responsibility>
+          <responsibility>Offer resolution steps for common issues</responsibility>
+          <responsibility>Manage error logging and reporting</responsibility>
+        </responsibilities>
+        <methods>
+          <method name="handleError" returns="void">
+            <param name="error" type="Error" />
+            <param name="context" type="ErrorContext" />
+          </method>
+          <method name="getSuggestion" returns="string[]">
+            <param name="errorType" type="ErrorType" />
+          </method>
+          <method name="logError" returns="void">
+            <param name="error" type="Error" />
+            <param name="debug" type="boolean" />
+          </method>
+          <method name="formatErrorMessage" returns="string">
+            <param name="error" type="Error" />
+            <param name="suggestions" type="string[]" />
+          </method>
+        </methods>
+      </class>
+    </key-classes>
+    
+    <integration-points>
+      <integration>
+        <component>CLI Commands</component>
+        <target>Core Engine</target>
+        <type>Service Integration</type>
+        <description>CLI commands use core engine for workflow execution</description>
+      </integration>
+      
+      <integration>
+        <component>Interactive Prompts</component>
+        <target>Inquirer.js</target>
+        <type>Library Integration</type>
+        <description>Uses @inquirer/prompts for interactive user input</description>
+      </integration>
+      
+      <integration>
+        <component>UI Components</component>
+        <target>CLI Libraries</target>
+        <type>Library Integration</type>
+        <description>Integrates with ora, chalk, figlet for UI</description>
+      </integration>
+      
+      <integration>
+        <component>CLI Utilities</component>
+        <target>Configuration System</target>
+        <type>Config Integration</type>
+        <description>Integrates with @tamma/config for configuration management</description>
+      </integration>
+    </integration-points>
+    
+    <api-endpoints>
+      <endpoint>
+        <path>/cli/commands/run</path>
+        <method>CLI</method>
+        <description>Execute autonomous development workflow</description>
+        <parameters>
+          <param name="--issue" type="number" />
+          <param name="--config" type="string" />
+          <param name="--debug" type="boolean" />
+          <param name="--no-interactive" type="boolean" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/cli/commands/init</path>
+        <method>CLI</method>
+        <description>Initialize Tamma configuration</description>
+        <parameters>
+          <param name="--force" type="boolean" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/cli/commands/config</path>
+        <method>CLI</method>
+        <description>Manage configuration</description>
+        <parameters>
+          <param name="--show" type="boolean" />
+          <param name="--validate" type="boolean" />
+        </parameters>
+      </endpoint>
+      
+      <endpoint>
+        <path>/cli/commands/status</path>
+        <method>CLI</method>
+        <description>Show current status</description>
+        <parameters>
+          <param name="--verbose" type="boolean" />
+        </parameters>
+      </endpoint>
+    </api-endpoints>
+    
+    <testing-strategy>
+      <unit-tests>
+        <focus>CLI command parsing and execution</focus>
+        <focus>Interactive prompt handling</focus>
+        <focus>Error handling and suggestions</focus>
+        <focus>Configuration management</focus>
+        <coverage>90% minimum</coverage>
+      </unit-tests>
+      
+      <integration-tests>
+        <focus>End-to-end CLI workflows</focus>
+        <focus>Configuration wizard completion</focus>
+        <focus>Core engine integration</focus>
+        <focus>File system operations</focus>
+      </integration-tests>
+      
+      <ui-tests>
+        <focus>User interface interactions</focus>
+        <focus>Progress indicator behavior</focus>
+        <focus>Color output formatting</focus>
+        <focus>Error message clarity</focus>
+      </ui-tests>
+      
+      <performance-tests>
+        <focus>CLI startup time</focus>
+        <focus>Command response time</focus>
+        <focus>Memory usage during execution</focus>
+        <focus>Large configuration handling</focus>
+      </performance-tests>
+    </testing-strategy>
+    
+    <security-considerations>
+      <consideration>
+        <title>Input Validation</title>
+        <description>All user inputs must be validated and sanitized</description>
+        <mitigation>Input validation, sanitization, type checking</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Credential Protection</title>
+        <description>API keys and tokens must be protected in CLI output</description>
+        <mitigation>Secure logging, credential masking, encrypted storage</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>File Permissions</title>
+        <description>Configuration files must have secure permissions</description>
+        <mitigation>File permission setting, secure defaults, access control</mitigation>
+      </consideration>
+      
+      <consideration>
+        <title>Command Injection</title>
+        <description>Prevent command injection in user inputs</description>
+        <mitigation>Input sanitization, command escaping, validation</mitigation>
+      </consideration>
+    </security-considerations>
+    
+    <monitoring-requirements>
+      <metric>
+        <name>CLI Startup Time</name>
+        <description>Time to initialize and display CLI</description>
+        <target>&lt; 2 seconds</target>
+        <alerting>Startup time &gt; 5 seconds triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Command Response Time</name>
+        <description>Time to respond to user commands</description>
+        <target>&lt; 100ms for prompts, &lt; 2s for operations</target>
+        <alerting>Response time &gt; 5 seconds triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>Error Rate</name>
+        <description>Percentage of failed CLI operations</description>
+        <target>&lt; 5%</target>
+        <alerting>Error rate &gt; 10% triggers alerts</alerting>
+      </metric>
+      
+      <metric>
+        <name>User Satisfaction</name>
+        <description>User satisfaction with CLI experience</description>
+        <target>&gt; 4.5/5</target>
+        <alerting>Satisfaction &lt; 4.0 triggers review</alerting>
+      </metric>
+    </monitoring-requirements>
+    
+    <success-metrics>
+      <metric>
+        <name>User Experience</name>
+        <description>Overall CLI user experience quality</description>
+        <measurement>User satisfaction, error recovery, ease of use</measurement>
+        <target>&gt; 4.5/5 satisfaction, 90% error recovery</target>
+      </metric>
+      
+      <metric>
+        <name>Performance</name>
+        <description>CLI performance characteristics</description>
+        <measurement>Startup time, response time, memory usage</measurement>
+        <target>&lt; 2s startup, &lt; 100ms response, &lt; 100MB memory</target>
+      </metric>
+      
+      <metric>
+        <name>Adoption</name>
+        <description>CLI adoption and usage rates</description>
+        <measurement>Init completion, regular usage, feature adoption</measurement>
+        <target>&gt; 80% init completion, 60% regular usage</target>
+      </metric>
+      
+      <metric>
+        <name>Support</name>
+        <description>Support requirements and issues</description>
+        <measurement>Support tickets, documentation usage, self-service</measurement>
+        <target>&lt; 5% support tickets, 80% self-service</target>
+      </metric>
+    </success-metrics>
+    
+    <acceptance-criteria>
+      <criteria>
+        <description>CLI startup displays branded banner with version number</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Interactive issue selection with fuzzy search and preview</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Progress indicators for long-running operations</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Color-coded output (errors red, success green, warnings yellow)</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Enhanced error messages with actionable suggestions</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>--debug flag enables verbose logging to file</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Configuration wizard creates config file interactively</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Unit tests validate CLI command parsing and output formatting</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Integration tests validate end-to-end CLI workflows</description>
+        <priority>Must Have</priority>
+      </criteria>
+      
+      <criteria>
+        <description>Accessibility support (NO_COLOR, screen readers, keyboard navigation)</description>
+        <priority>Should Have</priority>
+      </criteria>
+    </acceptance-criteria>
+    
+    <risk-mitigation>
+      <risk>
+        <title>CLI Performance Issues</title>
+        <description>Slow CLI startup or response times</description>
+        <mitigation>Lazy loading, efficient initialization, performance monitoring</mitigation>
+        <contingency>Performance optimization, caching, reduced features</contingency>
+      </risk>
+      
+      <risk>
+        <title>User Experience Problems</title>
+        <description>Poor CLI usability or confusing interface</description>
+        <mitigation>User testing, feedback collection, iterative improvement</mitigation>
+        <contingency>UX redesign, documentation improvements, user support</contingency>
+      </risk>
+      
+      <risk>
+        <title>Configuration Issues</title>
+        <description>Configuration wizard failures or invalid configs</description>
+        <mitigation>Validation, error handling, default configurations</mitigation>
+        <contingency>Manual configuration, troubleshooting guides, support</contingency>
+      </risk>
+      
+      <risk>
+        <title>Integration Failures</title>
+        <description>Failures integrating with core engine or libraries</description>
+        <mitigation>Interface testing, version compatibility, error handling</mitigation>
+        <contingency>Fallback implementations, compatibility layers, updates</contingency>
+      </risk>
+    </risk-mitigation>
+  </technical-context>
+</story-context>

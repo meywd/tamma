@@ -1,0 +1,587 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-2-configuration-management" version="1.0.0">
+  <metadata>
+    <title>Configuration Management System</title>
+    <epic>1.5</epic>
+    <story-type>infrastructure</story-type>
+    <priority>high</priority>
+    <created>2025-01-07T12:00:00.000Z</created>
+    <updated>2025-01-07T12:00:00.000Z</updated>
+    <author>Bob</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <dependencies>
+    <upstream>
+      <dependency story="1.5-1">Core Engine Separation</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="1.5-3">Environment-Specific Deployments</dependency>
+      <dependency story="1.5-4">Secret Management Integration</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Configuration Management</component>
+    <layer>Infrastructure</layer>
+    <pattern>Configuration as Code</pattern>
+    <principles>
+      <principle>Environment-specific configuration</principle>
+      <principle>Secret isolation</principle>
+      <principle>Validation and schema enforcement</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <configuration-schema>
+      <structure>
+        <section name="app">
+          <fields>
+            <field name="name" type="string" required="true">Tamma</field>
+            <field name="version" type="string" required="true">1.0.0</field>
+            <field name="environment" type="enum" required="true" values="development,testing,production">development</field>
+            <field name="log_level" type="enum" values="debug,info,warn,error">info</field>
+          </fields>
+        </section>
+        
+        <section name="database">
+          <fields>
+            <field name="host" type="string" required="true">localhost</field>
+            <field name="port" type="number" required="true">5432</field>
+            <field name="name" type="string" required="true">tamma</field>
+            <field name="ssl_mode" type="enum" values="disable,require,verify-full">require</field>
+            <field name="pool_size" type="number">20</field>
+            <field name="timeout" type="number">30000</field>
+          </fields>
+        </section>
+
+        <section name="ai_providers">
+          <type>array</type>
+          <item-schema>
+            <field name="name" type="string" required="true"/>
+            <field name="type" type="enum" required="true" values="anthropic,openai,github-copilot,gemini,opencode,z-ai,zen-mcp,openrouter,local"/>
+            <field name="enabled" type="boolean">true</field>
+            <field name="priority" type="number">1</field>
+            <field name="config" type="object"/>
+          </item-schema>
+        </section>
+
+        <section name="git_platforms">
+          <type>array</type>
+          <item-schema>
+            <field name="name" type="string" required="true"/>
+            <field name="type" type="enum" required="true" values="github,gitlab,gitea,forgejo,bitbucket,azure-devops,git"/>
+            <field name="enabled" type="boolean">true</field>
+            <field name="config" type="object"/>
+          </item-schema>
+        </section>
+
+        <section name="orchestrator">
+          <fields>
+            <field name="max_concurrent_tasks" type="number">5</field>
+            <field name="task_timeout" type="number">3600000</field>
+            <field name="retry_attempts" type="number">3</field>
+            <field name="circuit_breaker_threshold" type="number">5</field>
+          </fields>
+        </section>
+
+        <section name="security">
+          <fields>
+            <field name="encryption_key_rotation_days" type="number">90</field>
+            <field name="session_timeout" type="number">3600000</field>
+            <field name="rate_limiting_enabled" type="boolean">true</field>
+            <field name="audit_log_retention_days" type="number">365</field>
+          </fields>
+        </section>
+      </structure>
+
+      <validation>
+        <rule name="required_fields" type="schema">All required fields must be present</rule>
+        <rule name="environment_specific" type="custom">Production configs must have SSL enabled</rule>
+        <rule name="provider_validation" type="custom">At least one AI provider must be enabled</rule>
+        <rule name="platform_validation" type="custom">At least one Git platform must be enabled</rule>
+      </validation>
+    </configuration-schema>
+
+    <environment-overrides>
+      <development>
+        <overrides>
+          <override path="app.log_level">debug</override>
+          <override path="database.ssl_mode">disable</override>
+          <override path="orchestrator.max_concurrent_tasks">2</override>
+        </overrides>
+      </development>
+
+      <testing>
+        <overrides>
+          <override path="app.log_level">warn</override>
+          <override path="database.pool_size">5</override>
+          <override path="security.encryption_key_rotation_days">7</override>
+        </overrides>
+      </testing>
+
+      <production>
+        <overrides>
+          <override path="app.log_level">info</override>
+          <override path="database.ssl_mode">verify-full</override>
+          <override path="database.pool_size">50</override>
+          <override path="orchestrator.max_concurrent_tasks">10</override>
+          <override path="security.rate_limiting_enabled">true</override>
+        </overrides>
+      </production>
+    </environment-overrides>
+  </technical-specifications>
+
+  <data-models>
+    <configuration-model>
+      <interface name="IConfiguration">
+        <properties>
+          <property name="app" type="AppConfig"/>
+          <property name="database" type="DatabaseConfig"/>
+          <property name="ai_providers" type="AIProviderConfig[]"/>
+          <property name="git_platforms" type="GitPlatformConfig[]"/>
+          <property name="orchestrator" type="OrchestratorConfig"/>
+          <property name="security" type="SecurityConfig"/>
+        </properties>
+      </interface>
+
+      <interface name="IAppConfig">
+        <properties>
+          <property name="name" type="string"/>
+          <property name="version" type="string"/>
+          <property name="environment" type="Environment"/>
+          <property name="log_level" type="LogLevel"/>
+        </properties>
+      </interface>
+
+      <interface name="IDatabaseConfig">
+        <properties>
+          <property name="host" type="string"/>
+          <property name="port" type="number"/>
+          <property name="name" type="string"/>
+          <property name="ssl_mode" type="SSLMode"/>
+          <property name="pool_size" type="number"/>
+          <property name="timeout" type="number"/>
+        </properties>
+      </interface>
+    </configuration-model>
+
+    <types>
+      <type name="Environment" enum="['development', 'testing', 'production']"/>
+      <type name="LogLevel" enum="['debug', 'info', 'warn', 'error']"/>
+      <type name="SSLMode" enum="['disable', 'require', 'verify-full']"/>
+    </types>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IConfigurationManager">
+      <description>Central configuration management interface</description>
+      <methods>
+        <method name="load" returns="Promise&lt;IConfiguration&gt;">
+          <param name="environment" type="Environment"/>
+          <param name="overrides" type="Partial&lt;IConfiguration&gt;" optional="true"/>
+        </method>
+        <method name="validate" returns="Promise&lt;ValidationResult&gt;">
+          <param name="config" type="IConfiguration"/>
+        </method>
+        <method name="get" returns="T">
+          <param name="path" type="string"/>
+          <param name="defaultValue" type="T" optional="true"/>
+        </method>
+        <method name="set" returns="Promise&lt;void&gt;">
+          <param name="path" type="string"/>
+          <param name="value" type="unknown"/>
+        </method>
+        <method name="watch" returns="Disposable">
+          <param name="path" type="string"/>
+          <param name="callback" type="(value: unknown) =&gt; void"/>
+        </method>
+        <method name="reload" returns="Promise&lt;IConfiguration&gt;"/>
+      </methods>
+    </interface>
+
+    <interface name="IConfigurationLoader">
+      <description>Loads configuration from various sources</description>
+      <methods>
+        <method name="loadFromFile" returns="Promise&lt;IConfiguration&gt;">
+          <param name="filePath" type="string"/>
+        </method>
+        <method name="loadFromEnvironment" returns="Promise&lt;Partial&lt;IConfiguration&gt;&gt;"/>
+        <method name="loadFromSecrets" returns="Promise&lt;Partial&lt;IConfiguration&gt;&gt;"/>
+      </methods>
+    </interface>
+
+    <interface name="IConfigurationValidator">
+      <description>Validates configuration against schema</description>
+      <methods>
+        <method name="validate" returns="Promise&lt;ValidationResult&gt;">
+          <param name="config" type="IConfiguration"/>
+          <param name="schema" type="ConfigurationSchema"/>
+        </method>
+        <method name="validateEnvironment" returns="Promise&lt;ValidationResult&gt;">
+          <param name="config" type="IConfiguration"/>
+          <param name="environment" type="Environment"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="ConfigurationManager">
+      <description>Default implementation of configuration management</description>
+      <properties>
+        <property name="config" type="IConfiguration"/>
+        <property name="environment" type="Environment"/>
+        <property name="loader" type="IConfigurationLoader"/>
+        <property name="validator" type="IConfigurationValidator"/>
+        <property name="watchers" type="Map&lt;string, Function[]&gt;"/>
+      </properties>
+      <methods>
+        <method name="constructor">
+          <param name="loader" type="IConfigurationLoader"/>
+          <param name="validator" type="IConfigurationValidator"/>
+        </method>
+        <method name="load" returns="Promise&lt;IConfiguration&gt;"/>
+        <method name="validate" returns="Promise&lt;ValidationResult&gt;"/>
+        <method name="get" returns="T"/>
+        <method name="set" returns="Promise&lt;void&gt;"/>
+        <method name="watch" returns="Disposable"/>
+        <method name="reload" returns="Promise&lt;IConfiguration&gt;"/>
+        <method name="_mergeConfigurations" returns="IConfiguration"/>
+        <method name="_applyEnvironmentOverrides" returns="IConfiguration"/>
+      </methods>
+    </class>
+
+    <class name="FileConfigurationLoader">
+      <description>Loads configuration from files</description>
+      <implements>IConfigurationLoader</implements>
+      <methods>
+        <method name="loadFromFile" returns="Promise&lt;IConfiguration&gt;"/>
+        <method name="loadFromEnvironment" returns="Promise&lt;Partial&lt;IConfiguration&gt;&gt;"/>
+        <method name="loadFromSecrets" returns="Promise&lt;Partial&lt;IConfiguration&gt;&gt;"/>
+        <method name="_parseFile" returns="Promise&lt;unknown&gt;"/>
+        <method name="_expandEnvironmentVariables" returns="string"/>
+      </methods>
+    </class>
+
+    <class name="SchemaConfigurationValidator">
+      <description>Validates configuration using JSON Schema</description>
+      <implements>IConfigurationValidator</implements>
+      <properties>
+        <property name="ajv" type="Ajv"/>
+        <property name="schema" type="ConfigurationSchema"/>
+      </properties>
+      <methods>
+        <method name="validate" returns="Promise&lt;ValidationResult&gt;"/>
+        <method name="validateEnvironment" returns="Promise&lt;ValidationResult&gt;"/>
+        <method name="_compileSchema" returns="ValidateFunction"/>
+        <method name="_runCustomValidations" returns="Promise&lt;ValidationResult&gt;"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="secret-management">
+      <component>Secret Management</component>
+      <interface>ISecretManager</interface>
+      <description>Integrates with secret management for sensitive config values</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>direct method calls</protocol>
+        <encryption>AES-256</encryption>
+      </data-flow>
+    </integration>
+
+    <integration name="environment-detection">
+      <component>Environment Detection</component>
+      <interface>IEnvironmentDetector</interface>
+      <description>Automatically detects current environment</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>direct method calls</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="configuration-watching">
+      <component>File System Watcher</component>
+      <interface>IFileWatcher</interface>
+      <description>Watches for configuration file changes</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>event-driven</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <data-sources>
+    <source name="configuration-files">
+      <type>file</type>
+      <format>YAML/JSON</format>
+      <locations>
+        <location>config/default.yaml</location>
+        <location>config/development.yaml</location>
+        <location>config/testing.yaml</location>
+        <location>config/production.yaml</location>
+      </locations>
+      <access-pattern>read-mostly, write-on-reload</access-pattern>
+    </source>
+
+    <source name="environment-variables">
+      <type>environment</type>
+      <format>key-value pairs</format>
+      <prefix>TAMMA_</prefix>
+      <access-pattern>read-only</access-pattern>
+    </source>
+
+    <source name="secret-store">
+      <type>secret-management</type>
+      <format>encrypted</format>
+      <access-pattern>read-only</access-pattern>
+    </source>
+  </data-sources>
+
+  <api-endpoints>
+    <endpoint name="get-configuration" method="GET" path="/api/v1/config">
+      <description>Get current configuration</description>
+      <parameters>
+        <parameter name="path" type="string" optional="true">Configuration path (dot notation)</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Configuration data</response>
+        <response code="400">Invalid path</response>
+        <response code="401">Unauthorized</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="update-configuration" method="PATCH" path="/api/v1/config">
+      <description>Update configuration values</description>
+      <parameters>
+        <parameter name="path" type="string">Configuration path</parameter>
+        <parameter name="value" type="unknown">New value</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Configuration updated</response>
+        <response code="400">Invalid path or value</response>
+        <response code="401">Unauthorized</response>
+        <response code="422">Validation failed</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="validate-configuration" method="POST" path="/api/v1/config/validate">
+      <description>Validate configuration</description>
+      <parameters>
+        <parameter name="config" type="IConfiguration">Configuration to validate</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Validation result</response>
+        <response code="400">Invalid configuration</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="reload-configuration" method="POST" path="/api/v1/config/reload">
+      <description>Reload configuration from files</description>
+      <responses>
+        <response code="200">Configuration reloaded</response>
+        <response code="500">Reload failed</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>90%</coverage>
+      <focus>
+        <area>Configuration loading and merging</area>
+        <area>Schema validation</area>
+        <area>Environment override application</area>
+        <area>Path-based access methods</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>80%</coverage>
+      <focus>
+        <area>File-based configuration loading</area>
+        <area>Environment variable integration</area>
+        <area>Secret management integration</area>
+        <area>Configuration watching</area>
+      </focus>
+    </integration-tests>
+
+    <end-to-end-tests>
+      <coverage>70%</coverage>
+      <focus>
+        <area>Complete configuration lifecycle</area>
+        <area>Environment-specific deployments</area>
+        <area>Configuration hot-reloading</area>
+      </focus>
+    </end-to-end-tests>
+
+    <test-data>
+      <config-files>
+        <file>test/fixtures/config/default.yaml</file>
+        <file>test/fixtures/config/development.yaml</file>
+        <file>test/fixtures/config/production.yaml</file>
+      </config-files>
+      <mock-secrets>
+        <secret>database_password</secret>
+        <secret>api_keys</secret>
+      </mock-secrets>
+    </test-data>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="configuration-exposure">
+        <description>Sensitive configuration values exposed in logs or API responses</description>
+        <mitigation>Redact sensitive values, implement access controls</mitigation>
+      </threat>
+      <threat name="configuration-tampering">
+        <description>Unauthorized modification of configuration</description>
+        <mitigation>Implement authentication, authorization, and audit logging</mitigation>
+      </threat>
+      <threat name="secret-leakage">
+        <description>Secrets stored in plain text configuration files</description>
+        <mitigation>Use secret management, encrypt sensitive values</mitigation>
+    </threat>
+    </threats>
+
+    <controls>
+      <control name="access-control">
+        <description>Role-based access to configuration endpoints</description>
+        <implementation>JWT-based authentication with RBAC</implementation>
+      </control>
+      <control name="audit-logging">
+        <description>Log all configuration changes</description>
+        <implementation>Event emission for configuration updates</implementation>
+      </control>
+      <control name="encryption">
+        <description>Encrypt sensitive configuration values</description>
+        <implementation>AES-256 encryption for secrets</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="configuration_load_time" type="histogram">Time to load configuration</metric>
+      <metric name="configuration_validation_errors" type="counter">Number of validation failures</metric>
+      <metric name="configuration_reload_count" type="counter">Number of configuration reloads</metric>
+      <metric name="secret_access_count" type="counter">Number of secret accesses</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="configuration_validation_failed">
+        <condition>configuration_validation_errors > 0</condition>
+        <severity>critical</severity>
+        <action>Investigate configuration schema violations</action>
+      </alert>
+      <alert name="configuration_load_failed">
+        <condition>configuration_load_time > 5000ms</condition>
+        <severity>warning</severity>
+        <action>Investigate configuration loading performance</action>
+      </alert>
+    </alerts>
+
+    <dashboards>
+      <dashboard name="configuration-overview">
+        <widgets>
+          <widget type="metric">Current configuration version</widget>
+          <widget type="chart">Configuration load times</widget>
+          <widget type="table">Recent configuration changes</widget>
+        </widgets>
+      </dashboard>
+    </dashboards>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>packages/config/src/schemas/configuration.schema.ts</file-location>
+    <validation-library>ajv</validation-library>
+    <custom-validators>
+      <validator name="environment-specific">Validates environment-specific rules</validator>
+      <validator name="provider-availability">Validates provider configurations</validator>
+      <validator name="security-requirements">Validates security settings</validator>
+    </custom-validators>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <user-docs>
+      <doc name="configuration-guide">User guide for configuration management</doc>
+      <doc name="environment-setup">Environment-specific setup instructions</doc>
+      <doc name="secret-management">Secret management integration guide</doc>
+    </user-docs>
+
+    <developer-docs>
+      <doc name="configuration-api">API documentation for configuration endpoints</doc>
+      <doc name="schema-reference">Configuration schema reference</doc>
+      <doc name="extending-configuration">Guide to extending configuration system</doc>
+    </developer-docs>
+
+    <operations-docs>
+      <doc name="deployment-configuration">Configuration for different deployment scenarios</doc>
+      <doc name="troubleshooting-configuration">Common configuration issues and solutions</doc>
+    </operations-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>System loads configuration from default and environment-specific files</description>
+      <verification>Integration test with multiple config files</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Configuration validation prevents invalid values and environments</description>
+      <verification>Unit tests for schema validation</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>Environment overrides are applied correctly based on detected environment</description>
+      <verification>Integration test for each environment</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Secret values are loaded from secret management system</description>
+      <verification>Integration test with mock secret manager</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Configuration changes are hot-reloaded without service restart</description>
+      <verification>End-to-end test with file watching</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>API endpoints provide secure access to configuration</description>
+      <verification>Security test for authentication and authorization</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>Configuration changes are audited and logged</description>
+      <verification>Audit log verification test</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="high">
+      <description>Configuration complexity leads to deployment failures</description>
+      <mitigation>Comprehensive validation, clear documentation, example configs</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Secret management integration adds complexity</description>
+      <mitigation>Modular design, fallback to environment variables</mitigation>
+    </risk>
+
+    <risk id="risk3" level="medium">
+      <description>Hot-reloading causes runtime inconsistencies</description>
+      <mitigation>Atomic updates, validation before applying changes</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="configuration_load_time" target="&lt; 100ms">Time to load and validate configuration</metric>
+    <metric name="validation_success_rate" target="&gt; 99%">Percentage of successful configuration validations</metric>
+    <metric name="hot_reload_success_rate" target="&gt; 95%">Percentage of successful hot-reload operations</metric>
+    <metric name="secret_access_latency" target="&lt; 50ms">Time to access secrets from configuration</metric>
+  </success-metrics>
+</story-context>

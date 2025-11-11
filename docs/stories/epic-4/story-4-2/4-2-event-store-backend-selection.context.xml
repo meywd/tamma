@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="4-2-event-store-backend-selection">
+  <metadata>
+    <title>Story 4.2: Event Store Backend Selection</title>
+    <epic>Epic 4 - Event Sourcing & Audit Trail</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>DevOps engineer</role>
+    <goal>I want a persistent, append-only event store for storing all system events</goal>
+    <benefit>so that events are never lost and can be replayed for debugging or audit</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">
+      <description>Event store supports append-only writes (no updates or deletes)</description>
+    </criterion>
+    <criterion id="2">
+      <description>Event store provides ordered reads by timestamp with efficient querying</description>
+    </criterion>
+    <criterion id="3">
+      <description>Event store supports filtering by event type, actor, correlation ID</description>
+    </criterion>
+    <criterion id="4">
+      <description>Event store handles high write throughput (100+ events/second)</description>
+    </criterion>
+    <criterion id="5">
+      <description>Implementation supports multiple backends: local file (dev), PostgreSQL (prod), EventStore (optional)</description>
+    </criterion>
+    <criterion id="6">
+      <description>Backend selection configurable via configuration file</description>
+    </criterion>
+    <criterion id="7">
+      <description>Event store includes retention policy configuration (default: infinite retention)</description>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <package-location>packages/events/src/store/</package-location>
+    <integration-points>
+      <point>Event schema (Story 4.1)</point>
+      <point>Event capture implementations (Stories 4.3-4.6)</point>
+      <point>Query API (Story 4.7)</point>
+      <point>Replay system (Story 4.8)</point>
+    </integration-points>
+    <key-components>
+      <component>IEventStore interface definition</component>
+      <component>Local file backend implementation</component>
+      <component>PostgreSQL backend implementation</component>
+      <component>EventStore backend implementation</component>
+      <component>Backend factory and configuration</component>
+      <component>Retention policy system</component>
+    </key-components>
+  </technical-context>
+
+  <implementation-notes>
+    <considerations>
+      <item>Append-only semantics critical for audit trail integrity</item>
+      <item>Performance optimization needed for high-throughput scenarios</item>
+      <item>Configuration must support runtime backend switching</item>
+      <item>Retention policies must balance storage costs with audit requirements</item>
+      <item>Connection pooling essential for PostgreSQL performance</item>
+    </considerations>
+    <dependencies>
+      <dependency>Event schema definitions</dependency>
+      <dependency>Database drivers (PostgreSQL, optional EventStore)</dependency>
+      <dependency>Configuration management system</dependency>
+    </dependencies>
+  </implementation-notes>
+
+  <testing-strategy>
+    <unit-tests>
+      <test>Append-only write semantics</test>
+      <test>Query performance and accuracy</test>
+      <test>Backend switching functionality</test>
+      <test>Retention policy enforcement</test>
+    </unit-tests>
+    <integration-tests>
+      <test>Multi-backend compatibility</test>
+      <test>High-throughput write performance</test>
+      <test>Configuration-driven backend selection</test>
+    </integration-tests>
+  </testing-strategy>
+
+  <success-metrics>
+    <metric>Write throughput: 100+ events/second</metric>
+    <metric>Query performance: &lt;100ms for typical queries</metric>
+    <metric>Storage efficiency: &lt;20% overhead over raw events</metric>
+    <metric>Backend switching: &lt;1 second transition time</metric>
+  </success-metrics>
+
+  <rollback-plan>
+    <condition>Event store cannot handle required throughput</condition>
+    <action>Implement write batching, optimize indexing, consider sharding</action>
+    <condition>Data corruption or loss detected</condition>
+    <action>Implement write-ahead log, add data validation, enable backups</action>
+  </rollback-plan>
+</story-context>

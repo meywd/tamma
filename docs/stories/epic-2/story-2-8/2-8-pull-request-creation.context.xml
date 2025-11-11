@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-8-pull-request-creation">
+  <metadata>
+    <title>Story 2.8: Pull Request Creation</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.7 (code refactoring pass must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to create a pull request with comprehensive description and test results</action>
+    <benefit>so that I can review and merge changes through standard Git workflow</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System creates pull request from feature branch to base branch</criterion>
+    <criterion id="2">PR includes comprehensive description with implementation details</criterion>
+    <criterion id="3">PR includes test results, coverage metrics, and quality reports</criterion>
+    <criterion id="4">PR includes automated checklist for reviewers (DCO, tests, docs)</criterion>
+    <criterion id="5">System assigns appropriate reviewers and labels based on content</criterion>
+    <criterion id="6">PR creation and metadata logged to event trail</criterion>
+    <criterion id="7">Integration test validates PR creation workflow</criterion>
+    <criterion id="8">Error handling for permission issues, conflicts, and API failures</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="PullRequestManager">
+        <interface>IPullRequestManager</interface>
+        <methods>
+          <method name="createPullRequest" returns="PullRequest">
+            <parameter name="plan" type="DevelopmentPlan"/>
+            <parameter name="branchInfo" type="BranchInfo"/>
+            <parameter name="testResults" type="TestExecutionResult"/>
+          </method>
+          <method name="generateDescription" returns="string">
+            <parameter name="plan" type="DevelopmentPlan"/>
+            <parameter name="testResults" type="TestExecutionResult"/>
+            <parameter name="qualityMetrics" type="QualityMetrics"/>
+          </method>
+          <method name="assignReviewers" returns="void">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="changedFiles" type="string[]"/>
+          </method>
+          <method name="addLabels" returns="void">
+            <parameter name="pr" type="PullRequest"/>
+            <parameter name="labels" type="string[]"/>
+          </method>
+          <method name="addChecklist" returns="void">
+            <parameter name="pr" type="PullRequest"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="PullRequest">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="number" type="number"/>
+          <field name="title" type="string"/>
+          <field name="description" type="string"/>
+          <field name="sourceBranch" type="string"/>
+          <field name="targetBranch" type="string"/>
+          <field name="state" type="string"/>
+          <field name="url" type="string"/>
+          <field name="author" type="string"/>
+          <field name="createdAt" type="Date"/>
+          <field name="updatedAt" type="Date"/>
+          <field name="reviewers" type="string[]"/>
+          <field name="labels" type="string[]"/>
+          <field name="assignees" type="string[]"/>
+          <field name="mergeable" type="boolean"/>
+          <field name="draft" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="PRDescription">
+        <fields>
+          <field name="summary" type="string"/>
+          <field name="implementation" type="string"/>
+          <field name="testing" type="string"/>
+          <field name="documentation" type="string"/>
+          <field name="breakingChanges" type="string"/>
+          <field name="testResults" type="TestResultsSection"/>
+          <field name="qualityMetrics" type="QualityMetricsSection"/>
+          <field name="checklist" type="ChecklistSection"/>
+        </fields>
+      </interface>
+
+      <interface name="TestResultsSection">
+        <fields>
+          <field name="totalTests" type="number"/>
+          <field name="passedTests" type="number"/>
+          <field name="failedTests" type="number"/>
+          <field name="coverage" type="number"/>
+          <field name="testSuites" type="TestSuiteResult[]"/>
+        </fields>
+      </interface>
+
+      <interface name="QualityMetricsSection">
+        <fields>
+          <field name="complexity" type="number"/>
+          <field name="maintainability" type="number"/>
+          <field name="duplication" type="number"/>
+          <field name="security" type="SecurityScore"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="PR Content Generation">
+        <description>Generate comprehensive PR description and metadata</description>
+        <components>
+          <component>AI-powered description generation</component>
+          <component>Test results formatting</component>
+          <component>Quality metrics reporting</component>
+          <component>Checklist generation</component>
+        </components>
+      </phase>
+
+      <phase name="PR Creation">
+        <description>Create pull request on Git platform with metadata</description>
+        <components>
+          <component>Git platform integration</component>
+          <component>Reviewer assignment logic</component>
+          <component>Label assignment logic</component>
+          <component>Error handling and retry</component>
+        </components>
+      </phase>
+
+      <phase name="PR Enhancement">
+        <description>Add additional context and automation to PR</description>
+        <components>
+          <component>Automated checklist</component>
+          <component>Comment generation</component>
+          <component>Status checks integration</component>
+          <component>Notification system</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Git Platform">
+        <description>Create and manage pull requests</description>
+        <operations>
+          <operation>createPullRequest()</operation>
+          <operation>addReviewers()</operation>
+          <operation>addLabels()</operation>
+          <operation>updateDescription()</operation>
+          <operation>addComments()</operation>
+        </operations>
+      </integration>
+
+      <integration name="AI Provider">
+        <description>Generate PR descriptions and summaries</description>
+        <events>
+          <event>PR.DESCRIPTION.GENERATED</event>
+          <event>PR.SUMMARY.GENERATED</event>
+        </events>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for PR operations</description>
+        <events>
+          <event>PR.CREATED.SUCCESS</event>
+          <event>PR.CREATED.FAILED</event>
+          <event>PR.REVIEWERS.ASSIGNED</event>
+          <event>PR.LABELS.ADDED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="PullRequestManager">
+          <test>generate comprehensive PR description</test>
+          <test>assign appropriate reviewers based on content</test>
+          <test>add relevant labels automatically</test>
+          <test>format test results and quality metrics</test>
+          <test>create PR with all metadata</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>create real PR on GitHub</test>
+        <test>create real PR on GitLab</test>
+        <test>handle platform-specific features</test>
+        <test>PR creation with reviewers and labels</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="pr_creation">
+        <setting name="auto_assign_reviewers" default="true"/>
+        <setting name="auto_add_labels" default="true"/>
+        <setting name="include_test_results" default="true"/>
+        <setting name="include_quality_metrics" default="true"/>
+        <setting name="add_checklist" default="true"/>
+        <setting name="draft_mode" default="false"/>
+      </section>
+
+      <section name="description_template">
+        <setting name="include_implementation_details" default="true"/>
+        <setting name="include_testing_summary" default="true"/>
+        <setting name="include_documentation_changes" default="true"/>
+        <setting name="include_breaking_changes" default="true"/>
+        <setting name="include_performance_impact" default="true"/>
+      </section>
+
+      <section name="reviewer_assignment">
+        <setting name="max_reviewers" default="3"/>
+        <setting name="exclude_bot_accounts" default="true"/>
+        <setting name="consider_expertise" default="true"/>
+        <setting name="rotate_reviewers" default="true"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="pr_description_generation" metric="time" value="&lt; 15 seconds"/>
+      <target name="pr_creation" metric="time" value="&lt; 10 seconds"/>
+      <target name="reviewer_assignment" metric="time" value="&lt; 5 seconds"/>
+    </performance-targets>
+
+    <pr-templates>
+      <template name="standard">
+        <section name="summary">Brief overview of changes</section>
+        <section name="implementation">Detailed implementation approach</section>
+        <section name="testing">Test coverage and results</section>
+        <section name="documentation">Documentation changes</section>
+        <section name="checklist">Review checklist</section>
+      </template>
+    </pr-templates>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Comprehensive PR descriptions for effective reviews</consideration>
+      <consideration priority="2">Automatic reviewer assignment based on expertise</consideration>
+      <consideration priority="3">Include test results and quality metrics</consideration>
+      <consideration priority="4">Standardized review checklists</consideration>
+      <consideration priority="5">Handle platform differences (GitHub vs GitLab)</consideration>
+      <consideration priority="6">Error handling for permission and API issues</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

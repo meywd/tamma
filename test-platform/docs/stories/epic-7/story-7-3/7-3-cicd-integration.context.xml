@@ -1,0 +1,714 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>7-3-cicd-integration</story-id>
+    <story-title>CI/CD Integration</story-title>
+    <project>test-platform</project>
+    <epic>7</epic>
+    <status>ready-for-dev</status>
+    <generated-date>2025-01-09T12:00:00Z</generated-date>
+    <generator>story-context-workflow</generator>
+  </metadata>
+
+  <story-summary>
+    <narrative>
+      As a DevOps engineer,
+      I want to integrate benchmarking into my CI/CD pipelines,
+      so that I can automatically monitor AI model performance in my development workflow.
+    </narrative>
+    <acceptance-criteria count="8">
+      <criteria id="1">GitHub Actions Integration: Complete GitHub Actions marketplace app with seamless repository integration, automated benchmark triggering on pull requests, and comprehensive result reporting with status checks</criteria>
+      <criteria id="2">GitLab CI/CD Pipeline Integration: Native GitLab CI/CD integration with pipeline templates, automated job scheduling, and merge request performance reporting with trend analysis</criteria>
+      <criteria id="3">Jenkins Plugin Development: Full Jenkins plugin implementation with pipeline step integration, build trigger configuration, and real-time result visualization within Jenkins dashboard</criteria>
+      <criteria id="4">Azure DevOps Pipeline Integration: Azure DevOps extension with pipeline task integration, pull request automation, and comprehensive performance reporting with Azure Boards integration</criteria>
+      <criteria id="5">Benchmark Result Reporting in Pull Requests: Automated PR comments with detailed benchmark results, performance regression detection, and actionable insights for code review</criteria>
+      <criteria id="6">Performance Regression Detection: Intelligent regression detection algorithms with configurable thresholds, historical baseline comparison, and automated alerting for performance degradation</criteria>
+      <criteria id="7">Integration with Existing Test Workflows: Seamless integration with unit tests, integration tests, and existing CI/CD pipelines without disrupting current workflows</criteria>
+      <criteria id="8">Comprehensive Documentation and Examples: Detailed setup guides, configuration examples, and best practices documentation for each CI/CD platform</criteria>
+    </acceptance-criteria>
+  </story-summary>
+
+  <technical-architecture>
+    <ci-cd-integration-framework>
+      <pattern>Multi-platform CI/CD integration with unified API abstraction and platform-specific adapters</pattern>
+      <components>
+        <component>CI/CD Integration Service with platform adapters</component>
+        <component>Benchmark Trigger Engine with event-driven execution</component>
+        <component>Result Reporting Service with multi-format output</component>
+        <component>Regression Detection Engine with historical analysis</component>
+        <component>Configuration Management with platform-specific templates</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#CI-CD-Integration-Architecture</source-ref>
+    </ci-cd-integration-framework>
+
+    <platform-adapter-pattern>
+      <pattern>Adapter pattern for CI/CD platform integration with common interface and platform-specific implementations</pattern>
+      <adapters>
+        <adapter>GitHub Actions Adapter with marketplace app integration</adapter>
+        <adapter>GitLab CI/CD Adapter with pipeline templates</adapter>
+        <adapter>Jenkins Plugin Adapter with step integration</adapter>
+        <adapter>Azure DevOps Adapter with task integration</adapter>
+      </adapters>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Platform-Adapter-Pattern</source-ref>
+    </platform-adapter-pattern>
+
+    <event-driven-benchmarking>
+      <pattern>Event-driven benchmark execution triggered by CI/CD lifecycle events</pattern>
+      <triggers>
+        <trigger>Pull request opened/updated</trigger>
+        <trigger>Push to main/develop branches</trigger>
+        <trigger>Scheduled pipeline runs</trigger>
+        <trigger>Manual benchmark triggers</trigger>
+        <trigger>Performance threshold breaches</trigger>
+      </triggers>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Event-Driven-Benchmarking</source-ref>
+    </event-driven-benchmarking>
+
+    <regression-detection-system>
+      <pattern>Statistical regression detection with configurable thresholds and historical baselines</pattern>
+      <algorithms>
+        <algorithm>Statistical process control with control charts</algorithm>
+        <algorithm>Performance trend analysis with moving averages</algorithm>
+        <algorithm>Anomaly detection with machine learning models</algorithm>
+        <algorithm>Comparative analysis with baseline datasets</algorithm>
+      </algorithms>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Regression-Detection-System</source-ref>
+    </regression-detection-system>
+  </technical-architecture>
+
+  <core-interfaces>
+    <cicd-integration-service>
+      <interface-definition>
+        <name>CICDIntegrationService</name>
+        <fields>
+          <field name="id" type="string">Unique integration identifier</field>
+          <field name="platform" type="CICDPlatform">CI/CD platform type</field>
+          <field name="repository" type="RepositoryConfig">Repository configuration</field>
+          <field name="benchmarkConfig" type="BenchmarkConfiguration">Benchmark execution configuration</field>
+          <field name="reporting" type="ReportingConfig">Result reporting configuration</field>
+          <field name="authentication" type="AuthConfig">Authentication configuration</field>
+          <field name="triggers" type="TriggerConfig[]">Benchmark trigger configuration</field>
+          <field name="regressionDetection" type="RegressionConfig">Regression detection settings</field>
+          <field name="isActive" type="boolean">Integration active status</field>
+          <field name="createdAt" type="Date">Creation timestamp</field>
+          <field name="updatedAt" type="Date">Last update timestamp</field>
+          <field name="createdBy" type="string">Creator identifier</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#CICDIntegrationService</source-ref>
+    </cicd-integration-service>
+
+    <benchmark-configuration>
+      <interface-definition>
+        <name>BenchmarkConfiguration</name>
+        <fields>
+          <field name="providers" type="string[]">AI providers to benchmark</field>
+          <field name="models" type="string[]">Specific models to test</field>
+          <field name="scenarios" type="string[]">Benchmark scenarios to execute</field>
+          <field name="languages" type="string[]">Programming languages to test</field>
+          <field name="tasks" type="string[]">Specific tasks to execute</field>
+          <field name="schedule" type="string" optional="true">Cron schedule for automated runs</field>
+          <field name="regressionThreshold" type="number" optional="true">Performance regression threshold percentage</field>
+          <field name="baselineComparison" type="boolean">Enable historical baseline comparison</field>
+          <field name="parallelExecution" type="boolean">Enable parallel benchmark execution</field>
+          <field name="timeout" type="number">Benchmark execution timeout in minutes</field>
+          <field name="retryPolicy" type="RetryPolicy">Retry configuration for failed benchmarks</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#BenchmarkConfiguration</source-ref>
+    </benchmark-configuration>
+
+    <reporting-configuration>
+      <interface-definition>
+        <name>ReportingConfig</name>
+        <fields>
+          <field name="pullRequestComments" type="boolean">Enable PR comment reporting</field>
+          <field name="statusChecks" type="boolean">Enable status check reporting</field>
+          <field name="regressionAlerts" type="boolean">Enable regression alerting</field>
+          <field name="trendAnalysis" type="boolean">Enable trend analysis reporting</field>
+          <field name="summaryReports" type="boolean">Enable summary report generation</field>
+          <field name="detailedReports" type="boolean">Enable detailed report generation</field>
+          <field name="artifactUpload" type="boolean">Enable artifact upload to CI/CD platform</field>
+          <field name="notificationChannels" type="NotificationChannel[]">Notification channel configuration</field>
+          <field name="reportFormat" type="ReportFormat">Output format for reports</field>
+          <field name="customTemplates" type="ReportTemplate[]">Custom report templates</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#ReportingConfig</source-ref>
+    </reporting-configuration>
+
+    <platform-adapter>
+      <interface-definition>
+        <name>PlatformAdapter</name>
+        <methods>
+          <method name="initialize" params="config: PlatformConfig">Initialize platform adapter</method>
+          <method name="authenticate" params="credentials: AuthCredentials">Authenticate with platform</method>
+          <method name="setupWebhooks" params="webhookConfig: WebhookConfig">Setup platform webhooks</method>
+          <method name="triggerBenchmark" params="trigger: BenchmarkTrigger">Trigger benchmark execution</method>
+          <method name="reportResults" params="results: BenchmarkResults">Report benchmark results</method>
+          <method name="createStatusCheck" params="status: StatusCheck">Create status check</method>
+          <method name="createPRComment" params="comment: PRComment">Create pull request comment</method>
+          <method name="uploadArtifacts" params="artifacts: Artifact[]">Upload result artifacts</method>
+        </methods>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#PlatformAdapter</source-ref>
+    </platform-adapter>
+
+    <regression-detector>
+      <interface-definition>
+        <name>RegressionDetector</name>
+        <methods>
+          <method name="analyzePerformance" params="current: BenchmarkResults, historical: BenchmarkResults[]">Analyze performance for regressions</method>
+          <method name="detectRegressions" params="analysis: PerformanceAnalysis">Detect performance regressions</method>
+          <method name="generateAlerts" params="regressions: Regression[]">Generate regression alerts</method>
+          <method name="updateBaseline" params="results: BenchmarkResults">Update performance baseline</method>
+          <method name="configureThresholds" params="thresholds: RegressionThresholds">Configure regression thresholds</method>
+        </methods>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#RegressionDetector</source-ref>
+    </regression-detector>
+  </core-interfaces>
+
+  <platform-integrations>
+    <github-actions-integration>
+      <marketplace-app>
+        <name>AI Benchmarking by AIBaaS</name>
+        <description>Automated AI model performance benchmarking for GitHub repositories</description>
+        <features>
+          <feature>Pull request benchmark triggering</feature>
+          <feature>Status check integration</feature>
+          <feature>Automated PR comments with results</feature>
+          <feature>Workflow templates and examples</feature>
+          <feature>Repository-level configuration</feature>
+        </features>
+      </marketplace-app>
+      <workflow-templates>
+        <template name="benchmark-on-pr">Trigger benchmark on pull request</template>
+        <template name="benchmark-scheduled">Scheduled benchmark execution</template>
+        <template name="benchmark-manual">Manual benchmark trigger</template>
+        <template name="benchmark-comprehensive">Comprehensive multi-provider benchmark</template>
+      </workflow-templates>
+      <api-integration>
+        <endpoints>
+          <endpoint>POST /api/v1/github/webhooks - Handle GitHub webhooks</endpoint>
+          <endpoint>GET /api/v1/github/installations - List installations</endpoint>
+          <endpoint>POST /api/v1/github/installations/{id}/benchmarks - Trigger benchmark</endpoint>
+          <endpoint>GET /api/v1/github/repositories/{owner}/{repo}/config - Get repository config</endpoint>
+        </endpoints>
+      </api-integration>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-1-GitHub-Actions-Integration</source-ref>
+    </github-actions-integration>
+
+    <gitlab-cicd-integration>
+      <pipeline-templates>
+        <template name="benchmark-mr">Benchmark on merge request</template>
+        <template name="benchmark-scheduled">Scheduled benchmark pipeline</template>
+        <template name="benchmark-manual">Manual benchmark trigger</template>
+        <template name="benchmark-multi-stage">Multi-stage benchmark pipeline</template>
+      </pipeline-templates>
+      <api-integration>
+        <endpoints>
+          <endpoint>POST /api/v1/gitlab/webhooks - Handle GitLab webhooks</endpoint>
+          <endpoint>GET /api/v1/gitlab/projects/{id}/config - Get project config</endpoint>
+          <endpoint>POST /api/v1/gitlab/projects/{id}/benchmarks - Trigger benchmark</endpoint>
+          <endpoint>POST /api/v1/gitlab/projects/{id}/merge-requests/{mr}/notes - Create MR comment</endpoint>
+        </endpoints>
+      </api-integration>
+      <integration-features>
+        <feature>Merge request performance reporting</feature>
+        <feature>Pipeline job integration</feature>
+        <feature>GitLab CI/CD variable support</feature>
+        <feature>Project-level configuration</feature>
+      </integration-features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-2-GitLab-CI-CD-Integration</source-ref>
+    </gitlab-cicd-integration>
+
+    <jenkins-plugin>
+      <plugin-architecture>
+        <name>aibaas-benchmark</name>
+        <description>Jenkins plugin for AI model performance benchmarking</feature>
+        <dependencies>
+          <dependency>workflow-step-api</dependency>
+          <dependency>credentials-binding</dependency>
+          <dependency>workflow-cps</dependency>
+        </dependencies>
+      </plugin-architecture>
+      <pipeline-steps>
+        <step name="benchmarkTrigger">Trigger benchmark execution</step>
+        <step name="benchmarkResults">Retrieve benchmark results</step>
+        <step name="benchmarkReport">Generate benchmark report</step>
+        <step name="benchmarkValidate">Validate benchmark configuration</step>
+      </pipeline-steps>
+      <dashboard-integration>
+        <feature>Benchmark result visualization</feature>
+        <feature>Performance trend charts</feature>
+        <feature>Build-level benchmark status</feature>
+        <feature>Historical performance data</feature>
+      </dashboard-integration>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-3-Jenkins-Plugin-Development</source-ref>
+    </jenkins-plugin>
+
+    <azure-devops-integration>
+      <marketplace-extension>
+        <name>AI Benchmarking by AIBaaS</name>
+        <description>AI model performance benchmarking for Azure DevOps pipelines</description>
+        <publisher>AIBaaS</publisher>
+      </marketplace-extension>
+      <pipeline-tasks>
+        <task name="AIBaaSBenchmarkTrigger" version="1.0.0">Trigger benchmark execution</task>
+        <task name="AIBaaSBenchmarkResults" version="1.0.0">Retrieve benchmark results</task>
+        <task name="AIBaaSBenchmarkReport" version="1.0.0">Generate benchmark report</task>
+      </pipeline-tasks>
+      <boards-integration>
+        <feature>Work item linking for benchmark failures</feature>
+        <feature>Performance trend work items</feature>
+        <feature>Automated bug creation for regressions</feature>
+        <feature>Release association with benchmark results</feature>
+      </boards-integration>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-4-Azure-DevOps-Pipeline-Integration</source-ref>
+    </azure-devops-integration>
+  </platform-integrations>
+
+  <benchmark-reporting-system>
+    <pull-request-reporting>
+      <comment-generation>
+        <template>executive-summary - High-level performance overview</template>
+        <template>detailed-results - Complete benchmark results</template>
+        <template>regression-alert - Performance regression notifications</template>
+        <template>trend-analysis - Performance trend information</template>
+        <template>recommendations - Actionable insights and recommendations</template>
+      </comment-generation>
+      <status-checks>
+        <check name="benchmark-success">Benchmark execution success/failure</check>
+        <check name="performance-regression">Performance regression detection</check>
+        <check name="threshold-breach">Performance threshold violations</check>
+        <check name="trend-analysis">Performance trend status</check>
+      </status-checks>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-5-Benchmark-Result-Reporting-System</source-ref>
+    </pull-request-reporting>
+
+    <regression-detection>
+      <algorithms>
+        <algorithm name="statistical-control">Statistical process control with control limits</algorithm>
+        <algorithm name="trend-analysis">Moving average and trend line analysis</algorithm>
+        <algorithm name="anomaly-detection">Machine learning-based anomaly detection</algorithm>
+        <algorithm name="comparative-analysis">Baseline comparison with statistical significance</algorithm>
+      </algorithms>
+      <thresholds>
+        <threshold name="performance-degradation" type="percentage" default="10">Performance degradation threshold</threshold>
+        <threshold name="response-time-increase" type="percentage" default="15">Response time increase threshold</threshold>
+        <threshold name="error-rate-increase" type="percentage" default="5">Error rate increase threshold</threshold>
+        <threshold name="cost-increase" type="percentage" default="20">Cost increase threshold</threshold>
+      </thresholds>
+      <alerting>
+        <channel>pull-request-comments - Direct PR notifications</channel>
+        <channel>status-checks - CI/CD status check failures</channel>
+        <channel>email-notifications - Email alert notifications</channel>
+        <channel>slack-integration - Slack channel notifications</channel>
+      </alerting>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-6-Performance-Regression-Detection</source-ref>
+    </regression-detection>
+
+    <result-visualization>
+      <charts>
+        <chart name="performance-trend">Performance trend over time</chart>
+        <chart name="provider-comparison">Provider performance comparison</chart>
+        <chart name="cost-analysis">Cost analysis and optimization</chart>
+        <chart name="regression-detection">Regression detection visualization</chart>
+      </charts>
+      <reports>
+        <report name="executive-summary">High-level performance summary</report>
+        <report name="detailed-analysis">Comprehensive performance analysis</report>
+        <report name="regression-report">Regression detection report</report>
+        <report name="recommendations">Optimization recommendations</report>
+      </reports>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-5-Benchmark-Result-Reporting-System</source-ref>
+    </result-visualization>
+  </benchmark-reporting-system>
+
+  <test-workflow-integration>
+    <integration-hooks>
+      <hook name="pre-test">Execute benchmark before unit tests</hook>
+      <hook name="post-test">Execute benchmark after unit tests</hook>
+      <hook name="parallel">Execute benchmark in parallel with tests</hook>
+      <hook name="conditional">Execute benchmark based on test conditions</hook>
+    </integration-hooks>
+    <workflow-compatibility>
+      <platform>github-actions - Native GitHub Actions integration</platform>
+      <platform>gitlab-ci - GitLab CI/CD pipeline compatibility</platform>
+      <platform>jenkins - Jenkins pipeline integration</platform>
+      <platform>azure-devops - Azure DevOps pipeline support</platform>
+    </workflow-compatibility>
+    <non-disruptive-integration>
+      <feature>Async execution to avoid blocking pipelines</feature>
+      <feature>Configurable timeout and cancellation</feature>
+      <feature>Graceful failure handling</feature>
+      <feature>Resource usage optimization</feature>
+    </non-disruptive-integration>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-7-Test-Workflow-Integration</source-ref>
+  </test-workflow-integration>
+
+  <documentation-examples>
+    <setup-guides>
+      <guide platform="github-actions">Complete GitHub Actions setup guide</guide>
+      <guide platform="gitlab-ci">GitLab CI/CD integration guide</guide>
+      <guide platform="jenkins">Jenkins plugin installation and configuration</guide>
+      <guide platform="azure-devops">Azure DevOps extension setup guide</guide>
+    </setup-guides>
+    <configuration-examples>
+      <example name="basic-benchmark">Basic benchmark configuration</example>
+      <example name="advanced-benchmark">Advanced multi-provider benchmark</example>
+      <example name="regression-detection">Regression detection configuration</example>
+      <example name="custom-reporting">Custom reporting templates</example>
+    </configuration-examples>
+    <best-practices>
+      <practice>Benchmark configuration optimization</practice>
+      <practice>Performance regression prevention</practice>
+      <practice>Cost management and optimization</practice>
+      <practice>Security and credential management</practice>
+    </best-practices>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-8-Documentation-and-Examples</source-ref>
+  </documentation-examples>
+
+  <project-structure>
+    <directory-structure>
+      <directory name="src/cicd">
+        <purpose>CI/CD integration services</purpose>
+        <files>
+          <file>cicd-integration.service.ts</file>
+          <file>platform-adapter.factory.ts</file>
+          <file>benchmark-trigger.service.ts</file>
+          <file>result-reporting.service.ts</file>
+          <file>regression-detector.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/adapters">
+        <purpose>Platform-specific adapters</purpose>
+        <files>
+          <file>github-actions.adapter.ts</file>
+          <file>gitlab-ci.adapter.ts</file>
+          <file>jenkins.adapter.ts</file>
+          <file>azure-devops.adapter.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/github">
+        <purpose>GitHub Actions integration</purpose>
+        <files>
+          <file>github-app.service.ts</file>
+          <file>github-webhook.handler.ts</file>
+          <file>github-workflow.templates.ts</file>
+          <file>github-status.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/gitlab">
+        <purpose>GitLab CI/CD integration</purpose>
+        <files>
+          <file>gitlab-api.service.ts</file>
+          <file>gitlab-webhook.handler.ts</file>
+          <file>gitlab-pipeline.templates.ts</file>
+          <file>gitlab-mr.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/jenkins">
+        <purpose>Jenkins plugin implementation</purpose>
+        <files>
+          <file>jenkins-plugin.main.ts</file>
+          <file>jenkins-step.implementation.ts</file>
+          <file>jenkins-dashboard.integration.ts</file>
+          <file>jenkins-build.trigger.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/azure-devops">
+        <purpose>Azure DevOps integration</purpose>
+        <files>
+          <file>azure-devops.extension.ts</file>
+          <file>azure-pipeline.tasks.ts</file>
+          <file>azure-boards.integration.ts</file>
+          <file>azure-pr.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/reporting">
+        <purpose>Benchmark result reporting</purpose>
+        <files>
+          <file>pr-comment.generator.ts</file>
+          <file>status-check.service.ts</file>
+          <file>regression.alerting.ts</file>
+          <file>trend-analysis.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/cicd/regression">
+        <purpose>Regression detection system</purpose>
+        <files>
+          <file>statistical.analyzer.ts</file>
+          <file>trend.analyzer.ts</file>
+          <file>anomaly.detector.ts</file>
+          <file>baseline.manager.ts</file>
+        </files>
+      </directory>
+      <directory name="templates/cicd">
+        <purpose>CI/CD configuration templates</purpose>
+        <files>
+          <file>github-actions.yml</file>
+          <file>gitlab-ci.yml</file>
+          <file>jenkinsfile</file>
+          <file>azure-pipelines.yml</file>
+        </files>
+      </directory>
+      <directory name="docs/cicd">
+        <purpose>CI/CD integration documentation</purpose>
+        <files>
+          <file>github-actions.setup.md</file>
+          <file>gitlab-ci.setup.md</file>
+          <file>jenkins.setup.md</file>
+          <file>azure-devops.setup.md</file>
+        </files>
+      </directory>
+      <directory name="tests/cicd">
+        <purpose>CI/CD integration tests</purpose>
+        <files>
+          <file>cicd-integration.test.ts</file>
+          <file>platform-adapter.test.ts</file>
+          <file>regression-detection.test.ts</file>
+          <file>result-reporting.test.ts</file>
+        </files>
+      </directory>
+    </directory-structure>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Project-Structure-Notes</source-ref>
+  </project-structure>
+
+  <integration-points>
+    <rest-api-integration>
+      <description>Reuse REST API for benchmark execution and result retrieval</description>
+      <components>
+        <component>Benchmark execution endpoints from Story 7.1</component>
+        <component>Authentication and authorization patterns</component>
+        <component>Rate limiting and quota management</component>
+        <component>Error handling and response formats</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.context.xml</source-ref>
+    </rest-api-integration>
+
+    <webhook-system-integration>
+      <description>Integrate with webhook system for real-time event processing</description>
+      <components>
+        <component>Event publishing for benchmark triggers</component>
+        <component>Webhook delivery for result notifications</component>
+        <component>Event filtering and routing</component>
+        <component>Signature verification and security</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.context.xml</source-ref>
+    </webhook-system-integration>
+
+    <benchmark-orchestration-integration>
+      <description>Integrate with benchmark orchestration for test execution</description>
+      <components>
+        <component>Benchmark execution engine from Story 4.4</component>
+        <component>Task scheduling and management</component>
+        <component>Result collection and processing</component>
+        <component>Performance metrics aggregation</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/4-4-benchmark-orchestration-scheduling.context.xml</source-ref>
+    </benchmark-orchestration-integration>
+
+    <existing-benchmarking-infrastructure>
+      <description>Leverage existing benchmarking CLI and infrastructure</description>
+      <components>
+        <component>Existing run-benchmark.ts CLI tool</component>
+        <component>Provider implementations and configurations</component>
+        <component>Scoring and evaluation systems</component>
+        <component>Result reporting and visualization</component>
+      </components>
+      <source-ref>/home/meywd/tamma/.dev/spikes/run-benchmark.ts</source-ref>
+    </existing-benchmarking-infrastructure>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage-target>90% line coverage</coverage-target>
+      <focus-areas>
+        <area>Platform adapter implementations</area>
+        <area>Regression detection algorithms</area>
+        <area>Result reporting and formatting</area>
+        <area>Configuration management</area>
+        <area>Error handling and edge cases</area>
+      </focus-areas>
+    </unit-tests>
+
+    <integration-tests>
+      <scope>End-to-end CI/CD integration workflows</scope>
+      <scenarios>
+        <scenario>GitHub Actions pull request benchmarking</scenario>
+        <scenario>GitLab CI/CD merge request integration</scenario>
+        <scenario>Jenkins pipeline step execution</scenario>
+        <scenario>Azure DevOps pipeline task integration</scenario>
+        <scenario>Regression detection and alerting</scenario>
+      </scenarios>
+    </integration-tests>
+
+    <platform-tests>
+      <focus>Platform-specific integration testing</focus>
+      <tests>
+        <test>GitHub Actions marketplace app functionality</test>
+        <test>GitLab CI/CD pipeline template execution</test>
+        <test>Jenkins plugin installation and operation</test>
+        <test>Azure DevOps extension deployment</test>
+        <test>Cross-platform compatibility</test>
+      </tests>
+    </platform-tests>
+
+    <performance-tests>
+      <metrics>
+        <metric>Benchmark execution overhead</metric>
+        <metric>CI/CD pipeline impact</metric>
+        <metric>Regression detection accuracy</metric>
+        <metric>Result reporting latency</metric>
+        <metric>Resource utilization</metric>
+      </metrics>
+      <load-scenarios>
+        <scenario>Concurrent benchmark executions</scenario>
+        <scenario>Large repository integration</scenario>
+        <scenario>High-frequency trigger scenarios</scenario>
+        <scenario>Resource-constrained environments</scenario>
+      </load-scenarios>
+    </performance-tests>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Task-9-Testing-and-Quality-Assurance</source-ref>
+  </testing-strategy>
+
+  <implementation-dependencies>
+    <story-dependencies>
+      <dependency story="7-1-restful-api-implementation" status="drafted">
+        <rationale>Provides REST API endpoints for benchmark execution and result retrieval</rationale>
+        <components>
+          <component>Benchmark CRUD operations</component>
+          <component>Authentication and authorization</component>
+          <component>Rate limiting and quotas</component>
+          <component>Error handling patterns</component>
+        </components>
+      </dependency>
+      <dependency story="7-2-webhook-system" status="drafted">
+        <rationale>Provides webhook infrastructure for real-time event processing</rationale>
+        <components>
+          <component>Event publishing and delivery</component>
+          <component>Signature verification</component>
+          <component>Retry mechanisms</component>
+          <component>Event filtering and routing</component>
+        </components>
+      </dependency>
+      <dependency story="4-4-benchmark-orchestration-scheduling" status="planned">
+        <rationale>Provides benchmark execution engine and scheduling</rationale>
+        <components>
+          <component>Task execution engine</component>
+          <component>Scheduling and orchestration</component>
+          <component>Result collection and processing</component>
+          <component>Performance metrics</component>
+        </components>
+      </dependency>
+    </story-dependencies>
+
+    <technical-dependencies>
+      <dependency name="CI/CD Platform SDKs" required="true">
+        <description>Platform-specific SDKs for integration</description>
+        <platforms>
+          <platform>GitHub Octokit SDK</platform>
+          <platform>GitLab Node.js API</platform>
+          <platform>Jenkins Plugin SDK</platform>
+          <platform>Azure DevOps Node.js SDK</platform>
+        </platforms>
+      </dependency>
+      <dependency name="Webhook Processing" required="true">
+        <description>Webhook event processing and validation</description>
+      </dependency>
+      <dependency name="Statistical Analysis" required="true">
+        <description>Statistical analysis for regression detection</description>
+      </dependency>
+      <dependency name="Template Engine" required="true">
+        <description>Template engine for report generation</description>
+      </dependency>
+      <dependency name="Authentication Service" required="true">
+        <description>Authentication for CI/CD platform integration</description>
+      </dependency>
+    </technical-dependencies>
+  </implementation-dependencies>
+
+  <success-metrics>
+    <integration-metrics>
+      <metric name="Platform Coverage" target="4/4 platforms">Number of supported CI/CD platforms</metric>
+      <metric name="Adoption Rate" target="50+ repositories">Active repositories using CI/CD integration</metric>
+      <metric name="Pipeline Impact" target="&lt;5% overhead">CI/CD pipeline execution overhead</metric>
+      <metric name="Reliability" target="99.5% uptime">Integration service availability</metric>
+    </integration-metrics>
+
+    <performance-metrics>
+      <metric name="Benchmark Execution" target="&lt;10min overhead">Additional time for benchmark execution</metric>
+      <metric name="Result Reporting" target="&lt;30s latency">Time from benchmark completion to PR comment</metric>
+      <metric name="Regression Detection" target="&gt;95% accuracy">Regression detection accuracy</metric>
+      <metric name="False Positive Rate" target="&lt;5%">False positive regression rate</metric>
+    </performance-metrics>
+
+    <developer-experience-metrics>
+      <metric name="Setup Time" target="&lt;15min">Time to integrate with new repository</metric>
+      <metric name="Documentation Quality" target="&gt;4.5/5">Developer satisfaction with documentation</metric>
+      <metric name="Support Requests" target="&lt;10/month">Support requests per month</metric>
+      <metric name="Feature Completeness" target="100%">Feature completeness across platforms</metric>
+    </developer-experience-metrics>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Success-Metrics</source-ref>
+  </success-metrics>
+
+  <risk-mitigation>
+    <technical-risks>
+      <risk name="Platform API Changes">
+        <mitigation>Version compatibility layer and automated testing</mitigation>
+        <mitigation>Platform-specific adapter pattern for isolation</mitigation>
+        <mitigation>Regular monitoring of API deprecation notices</mitigation>
+      </risk>
+      <risk name="Authentication Complexity">
+        <mitigation>OAuth best practices and secure token management</mitigation>
+        <mitigation>Platform-specific authentication flows</mitigation>
+        <mitigation>Secure credential storage and rotation</mitigation>
+      </risk>
+      <risk name="Performance Impact">
+        <mitigation>Async execution and non-blocking integration</mitimization>
+        <mitigation>Configurable timeout and cancellation</mitigation>
+        <mitigation>Resource usage optimization and monitoring</mitigation>
+      </risk>
+      <risk name="Regression Detection Accuracy">
+        <mitigation>Multiple algorithm approaches and validation</mitigation>
+        <mitigation>Configurable thresholds and tuning</mitigation>
+        <mitigation>Historical data analysis and baseline management</mitigation>
+      </risk>
+    </technical-risks>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md#Risks-and-Mitigations</source-ref>
+  </risk-mitigation>
+
+  <references>
+    <reference type="technical-spec" path="/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md">
+      <section>Story 7.3: CI/CD Integration</section>
+      <section>CI/CD Integration Architecture</section>
+      <section>Platform Adapter Pattern</section>
+      <section>Regression Detection System</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.md">
+      <section>REST API Implementation</section>
+      <section>Authentication and Authorization</section>
+      <section>Rate Limiting and Quotas</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.md">
+      <section>Webhook System Implementation</section>
+      <section>Event Processing and Delivery</section>
+      <section>Security and Authentication</section>
+    </reference>
+    <reference type="existing-code" path="/home/meywd/tamma/.github/workflows/ai-provider-benchmark.yml">
+      <section>Existing GitHub Actions workflow</section>
+      <section>Benchmark execution patterns</section>
+      <section>Result reporting and artifact handling</section>
+    </reference>
+    <reference type="existing-code" path="/home/meywd/tamma/.dev/spikes/run-benchmark.ts">
+      <section>Existing benchmark CLI implementation</section>
+      <section>Provider integration patterns</section>
+      <section>Result collection and reporting</section>
+    </reference>
+    <reference type="project-config" path="/home/meywd/tamma/test-platform/config.yaml">
+      <section>Project configuration and paths</section>
+    </reference>
+  </references>
+</story-context>

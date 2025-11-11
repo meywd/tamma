@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-info>
+    <story-key>1-99-test-story-pattern</story-key>
+    <epic-num>1</epic-num>
+    <story-num>99</story-num>
+    <title>Test Story Pattern Validation</title>
+    <status>drafted</status>
+  </story-info>
+  
+  <file-patterns>
+    <main-file>1-99-test-story-pattern.md</main-file>
+    <context-file>1-99-test-story-pattern.context.xml</context-file>
+    <task-files>
+      <file>1-99-test-story-pattern-task-1.md</file>
+      <file>1-99-test-story-pattern-task-2.md</file>
+      <file>1-99-test-story-pattern-task-3.md</file>
+      <file>1-99-test-story-pattern-task-4.md</file>
+    </task-files>
+  </file-patterns>
+  
+  <workflow-integration>
+    <create-story>Supports epic-X/story-Y-Z/ structure</create-story>
+    <dev-story>Reads from story folder and task files</dev-story>
+    <story-context>Generates context.xml in story folder</story-context>
+    <story-ready>Updates status in sprint tracking</story-ready>
+    <story-done>Marks story as complete</story-done>
+  </workflow-integration>
+</story-context>

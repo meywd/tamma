@@ -1,0 +1,513 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-7" title="System Configuration Management" epic="1.5" created="2025-11-08T12:00:00.000Z">
+  <overview>
+    <summary>Implement unified configuration schema with environment-specific overrides, JSON Schema validation, configuration hot-reload support, and secrets management integration. System configuration management provides consistent configuration across all deployment modes (CLI, service, web, worker) with flexible loading from files, environment variables, and command-line arguments.</summary>
+    <business-objective>Enable flexible, secure, and validated configuration management across all Tamma deployment modes with support for multiple environments and runtime updates.</business-objective>
+    <technical-approach>Build a comprehensive configuration system with multi-source loading, schema validation, hot-reload capabilities, and secure secrets management.</technical-approach>
+  </overview>
+
+  <technical-components>
+    <component name="Configuration Loader" package="@tamma/config/src" primary="true">
+      <description>Core configuration loading and management system</description>
+      <key-classes>
+        <class name="ConfigLoader" responsibilities="Load configs from multiple sources, merge, validate"/>
+        <class name="LoadOptions" responsibilities="Configuration loading options"/>
+        <class name="LoadResult" responsibilities="Loading results with sources and errors"/>
+        <class name="ConfigSource" responsibilities="Configuration source metadata"/>
+      </key-classes>
+      <loading-order>
+        <order step="1">Default configuration</order>
+        <order step="2">Configuration file</order>
+        <order step="3">Environment-specific overrides</order>
+        <order step="4">Environment variables</order>
+        <order step="5">Secrets management</order>
+        <order step="6">Command-line arguments</order>
+      </loading-order>
+      <supported-formats>
+        <format>JSON</format>
+        <format>YAML</format>
+        <format>TOML</format>
+      </supported-formats>
+    </component>
+
+    <component name="Configuration Validator" package="@tamma/config/src">
+      <description>JSON Schema validation with business rules and security checks</description>
+      <key-classes>
+        <class name="ConfigValidator" responsibilities="Schema validation, business rules, security checks"/>
+        <class name="ValidationResult" responsibilities="Validation results with errors and warnings"/>
+      </key-classes>
+      <validation-types>
+        <type name="Schema validation" purpose="Zod schema validation"/>
+        <type name="Business rules" purpose="Cross-field validation, required dependencies"/>
+        <type name="Security validation" purpose="Secret strength, insecure settings"/>
+        <type name="Performance validation" purpose="Performance impact warnings"/>
+      </validation-types>
+    </component>
+
+    <component name="Configuration Types" package="@tamma/config/src">
+      <description>TypeScript type definitions and Zod schemas</description>
+      <schemas>
+        <schema name="BaseConfigSchema" purpose="Core configuration"/>
+        <schema name="AIProviderConfigSchema" purpose="AI provider settings"/>
+        <schema name="GitPlatformConfigSchema" purpose="Git platform settings"/>
+        <schema name="ServiceConfigSchema" purpose="Service mode settings"/>
+        <schema name="WebServerConfigSchema" purpose="Web server settings"/>
+        <schema name="WebhookConfigSchema" purpose="Webhook settings"/>
+        <schema name="DatabaseConfigSchema" purpose="Database settings"/>
+        <schema name="QueueConfigSchema" purpose="Queue settings"/>
+      </schemas>
+    </component>
+
+    <component name="Environment Loader" package="@tamma/config/src">
+      <description>Environment variable loading and mapping</description>
+      <key-classes>
+        <class name="EnvironmentLoader" responsibilities="Load env vars, map to config structure"/>
+      </key-classes>
+      <mappings>
+        <mapping env="TAMMA_MODE" config="mode"/>
+        <mapping env="TAMMA_LOG_LEVEL" config="logLevel"/>
+        <mapping env="NODE_ENV" config="environment"/>
+        <mapping env="DATABASE_URL" config="database.url"/>
+        <mapping env="JWT_SECRET" config="web.jwtSecret"/>
+        <mapping env="REDIS_URL" config="queue.redis.url"/>
+      </mappings>
+    </component>
+
+    <component name="Configuration Merger" package="@tamma/config/src">
+      <description>Deep merge configuration from multiple sources</description>
+      <key-classes>
+        <class name="ConfigMerger" responsibilities="Deep merge objects, handle arrays, special cases"/>
+      </key-classes>
+      <merge-strategy>
+        <strategy type="objects" description="Deep merge with later sources overriding earlier"/>
+        <strategy type="arrays" description="Replace entire arrays (configurable)"/>
+        <strategy type="special" description="Handle special cases like provider lists"/>
+      </merge-strategy>
+    </component>
+
+    <component name="Secrets Manager" package="@tamma/config/src">
+      <description>Integration with external secret management systems</description>
+      <key-classes>
+        <class name="SecretsManager" responsibilities="Load secrets from various providers"/>
+      </key-classes>
+      <providers>
+        <provider name="environment" purpose="Environment variables"/>
+        <provider name="aws-secrets-manager" purpose="AWS Secrets Manager"/>
+        <provider name="vault" purpose="HashiCorp Vault"/>
+      </providers>
+    </component>
+
+    <component name="Configuration Watcher" package="@tamma/config/src">
+      <description>File watching for hot-reload functionality</description>
+      <key-classes>
+        <class name="ConfigWatcher" responsibilities="Watch config files, trigger reloads"/>
+      </key-classes>
+      <features>
+        <feature>File system watching with chokidar</feature>
+        <feature>Debounced reload events</feature>
+        <feature>Error handling for invalid configs</feature>
+        <feature>Event emission for config changes</feature>
+      </features>
+    </component>
+
+    <component name="CLI Loader" package="@tamma/config/src">
+      <description>Command-line argument parsing</description>
+      <key-classes>
+        <class name="CLILoader" responsibilities="Parse CLI args, map to config"/>
+      </key-classes>
+      <arguments>
+        <arg name="--mode" purpose="Override deployment mode"/>
+        <arg name="--config" purpose="Specify config file path"/>
+        <arg name="--log-level" purpose="Override log level"/>
+        <arg name="--environment" purpose="Override environment"/>
+      </arguments>
+    </component>
+  </technical-components>
+
+  <data-models>
+    <model name="TammaConfig">
+      <fields>
+        <field name="mode" type="enum" values="['cli', 'service', 'web', 'worker']" description="Deployment mode"/>
+        <field name="logLevel" type="enum" values="['error', 'warn', 'info', 'debug', 'trace']" description="Logging level"/>
+        <field name="environment" type="enum" values="['development', 'staging', 'production']" default="development" description="Environment"/>
+        <field name="dataDir" type="string" default="./data" description="Data directory"/>
+        <field name="cacheDir" type="string" default="./cache" description="Cache directory"/>
+        <field name="logDir" type="string" default="./logs" description="Log directory"/>
+        <field name="workspaceDir" type="string" default="./workspace" description="Workspace directory"/>
+        <field name="features" type="FeaturesConfig" description="Feature flags"/>
+        <field name="aiProvider" type="AIProviderConfig" description="AI provider configuration"/>
+        <field name="gitPlatform" type="GitPlatformConfig" description="Git platform configuration"/>
+        <field name="service" type="ServiceConfig" optional="true" description="Service mode configuration"/>
+        <field name="web" type="WebServerConfig" optional="true" description="Web server configuration"/>
+        <field name="webhooks" type="WebhookConfig" optional="true" description="Webhook configuration"/>
+        <field name="database" type="DatabaseConfig" optional="true" description="Database configuration"/>
+        <field name="queue" type="QueueConfig" description="Queue configuration"/>
+      </fields>
+    </model>
+
+    <model name="FeaturesConfig">
+      <fields>
+        <field name="enableMetrics" type="boolean" default="true" description="Enable metrics collection"/>
+        <field name="enableTracing" type="boolean" default="false" description="Enable distributed tracing"/>
+        <field name="enableProfiling" type="boolean" default="false" description="Enable performance profiling"/>
+        <field name="enableDebugMode" type="boolean" default="false" description="Enable debug mode"/>
+      </fields>
+    </model>
+
+    <model name="AIProviderConfig">
+      <fields>
+        <field name="default" type="string" required="true" description="Default provider name"/>
+        <field name="providers" type="AIProvider[]" required="true" description="Provider configurations"/>
+        <field name="perWorkflowProviders" type="Record&lt;string, string&gt;" optional="true" description="Workflow-specific providers"/>
+        <field name="fallbackChain" type="string[]" optional="true" description="Provider fallback order"/>
+      </fields>
+    </model>
+
+    <model name="AIProvider">
+      <fields>
+        <field name="name" type="string" required="true" description="Provider name"/>
+        <field name="enabled" type="boolean" required="true" description="Provider enabled"/>
+        <field name="apiKey" type="string" optional="true" description="API key"/>
+        <field name="baseUrl" type="string" optional="true" description="Base URL"/>
+        <field name="model" type="string" optional="true" description="Default model"/>
+        <field name="options" type="Record&lt;string, any&gt;" optional="true" description="Provider options"/>
+        <field name="timeout" type="number" default="60000" description="Request timeout"/>
+        <field name="maxRetries" type="number" default="3" description="Max retry attempts"/>
+        <field name="rateLimit" type="RateLimitConfig" optional="true" description="Rate limiting"/>
+      </fields>
+    </model>
+
+    <model name="GitPlatformConfig">
+      <fields>
+        <field name="default" type="string" required="true" description="Default platform name"/>
+        <field name="platforms" type="GitPlatform[]" required="true" description="Platform configurations"/>
+        <field name="defaultBranch" type="string" default="main" description="Default branch name"/>
+        <field name="sshKeyPath" type="string" optional="true" description="SSH key path"/>
+        <field name="gitConfig" type="Record&lt;string, string&gt;" optional="true" description="Git configuration"/>
+      </fields>
+    </model>
+
+    <model name="ServiceConfig">
+      <fields>
+        <field name="pollInterval" type="number" default="5000" description="Task polling interval"/>
+        <field name="maxConcurrentTasks" type="number" default="3" description="Max concurrent tasks"/>
+        <field name="maxRetries" type="number" default="3" description="Max retry attempts"/>
+        <field name="retryDelay" type="number" default="5000" description="Initial retry delay"/>
+        <field name="maxRetryDelay" type="number" default="300000" description="Max retry delay"/>
+        <field name="autoApprove" type="AutoApproveConfig" description="Auto-approval settings"/>
+        <field name="escalation" type="EscalationConfig" description="Escalation settings"/>
+      </fields>
+    </model>
+
+    <model name="WebServerConfig">
+      <fields>
+        <field name="host" type="string" default="0.0.0.0" description="Server host"/>
+        <field name="port" type="number" default="3000" description="Server port"/>
+        <field name="trustProxy" type="boolean" default="false" description="Trust proxy headers"/>
+        <field name="bodyLimit" type="number" default="1048576" description="Request body limit"/>
+        <field name="jwtSecret" type="string" required="true" description="JWT secret"/>
+        <field name="jwtExpiresIn" type="string" default="1h" description="JWT expiration"/>
+        <field name="cors" type="CORSConfig" description="CORS configuration"/>
+        <field name="rateLimit" type="RateLimitConfig" description="Rate limiting"/>
+        <field name="docs" type="DocsConfig" description="API documentation"/>
+      </fields>
+    </model>
+
+    <model name="QueueConfig">
+      <fields>
+        <field name="type" type="enum" values="['memory', 'redis', 'sqs']" default="memory" description="Queue type"/>
+        <field name="redis" type="RedisQueueConfig" optional="true" description="Redis configuration"/>
+        <field name="sqs" type="SQSQueueConfig" optional="true" description="SQS configuration"/>
+        <field name="memory" type="MemoryQueueConfig" description="Memory queue configuration"/>
+      </fields>
+    </model>
+  </data-models>
+
+  <integration-points>
+    <integration name="All Tamma Packages" type="internal" critical="true">
+      <description>Configuration system used by all packages for consistent settings</description>
+      <interface>ConfigLoader</interface>
+      <usage>
+        <package name="@tamma/cli" purpose="CLI mode configuration"/>
+        <package name="@tamma/server" purpose="Service and web mode configuration"/>
+        <package name="@tamma/orchestrator" purpose="Workflow configuration"/>
+        <package name="@tamma/providers" purpose="AI provider configuration"/>
+        <package name="@tamma/platforms" purpose="Git platform configuration"/>
+      </usage>
+    </integration>
+
+    <integration name="File System" type="external" critical="true">
+      <description>Load configuration files from various locations</description>
+      <locations>
+        <location path="./tamma.config.yaml" priority="high"/>
+        <location path="./.tamma/config.yaml" priority="medium"/>
+        <location path="~/.tamma/config.yaml" priority="low"/>
+      </locations>
+      <formats>
+        <format>YAML (.yaml, .yml)</format>
+        <format>JSON (.json)</format>
+        <format>TOML (.toml)</format>
+      </formats>
+    </integration>
+
+    <integration name="Environment Variables" type="external" critical="true">
+      <description>Load configuration from environment variables</description>
+      <prefix>TAMMA_</prefix>
+      <mappings>
+        <mapping env="TAMMA_MODE" config="mode"/>
+        <mapping env="TAMMA_LOG_LEVEL" config="logLevel"/>
+        <mapping env="DATABASE_URL" config="database.url"/>
+        <mapping env="JWT_SECRET" config="web.jwtSecret"/>
+      </mappings>
+    </integration>
+
+    <integration name="Secret Management Systems" type="external" critical="false">
+      <description>Integration with external secret management</description>
+      <providers>
+        <provider name="AWS Secrets Manager" purpose="Production secret storage"/>
+        <provider name="HashiCorp Vault" purpose="Enterprise secret storage"/>
+        <provider name="Environment Variables" purpose="Development secret storage"/>
+      </providers>
+    </integration>
+
+    <integration name="Command Line Interface" type="external" critical="true">
+      <description>Override configuration via command-line arguments</description>
+      <arguments>
+        <arg name="--mode" purpose="Deployment mode override"/>
+        <arg name="--config" purpose="Configuration file path"/>
+        <arg name="--log-level" purpose="Log level override"/>
+        <arg name="--environment" purpose="Environment override"/>
+      </arguments>
+    </integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-testing>
+      <framework>Vitest</framework>
+      <coverage-target>95%</coverage-target>
+      <focus-areas>
+        <area>Configuration loading from multiple sources</area>
+        <area>Configuration merging and precedence</area>
+        <area>Schema validation with Zod</area>
+        <area>Business rule validation</area>
+        <area>Security validation</area>
+        <area>Environment variable mapping</area>
+        <area>File format parsing (JSON, YAML, TOML)</area>
+      </focus-areas>
+      <test-scenarios>
+        <scenario>Default configuration loading</scenario>
+        <scenario>File configuration loading</scenario>
+        <scenario>Environment-specific overrides</scenario>
+        <scenario>Environment variable overrides</scenario>
+        <scenario>Configuration merging order</scenario>
+        <scenario>Invalid configuration rejection</scenario>
+        <scenario>Missing optional fields handling</scenario>
+        <scenario>Secret loading and redaction</scenario>
+      </test-scenarios>
+    </unit-testing>
+
+    <integration-testing>
+      <framework>Vitest + File System</framework>
+      <coverage-target>85%</coverage-target>
+      <test-scenarios>
+        <scenario>End-to-end configuration loading</scenario>
+        <scenario>Hot-reload functionality</scenario>
+        <scenario>Configuration file watching</scenario>
+        <scenario>Multiple format support</scenario>
+        <scenario>Secrets manager integration</scenario>
+        <scenario>CLI argument parsing</scenario>
+        <scenario>Environment variable loading</scenario>
+        <scenario>Configuration validation in all modes</scenario>
+      </test-scenarios>
+      <test-setup>
+        <setup>Temporary configuration files</setup>
+        <setup>Mock environment variables</setup>
+        <setup>Mock CLI arguments</setup>
+        <setup>Mock secrets providers</setup>
+        <setup>File system watchers</setup>
+      </test-setup>
+    </integration-testing>
+
+    <performance-testing>
+      <framework>Custom performance tests</framework>
+      <scenarios>
+        <scenario name="Configuration Loading Performance" description="Load time &lt; 500ms"/>
+        <scenario name="Large Configuration Handling" description="Handle large configs efficiently"/>
+        <scenario name="Hot Reload Performance" description="Reload time &lt; 100ms"/>
+        <scenario name="Memory Usage" description="Memory footprint &lt; 50MB"/>
+      </scenarios>
+      <metrics>
+        <metric name="Load Time" target="&lt; 500ms"/>
+        <metric name="Reload Time" target="&lt; 100ms"/>
+        <metric name="Memory Usage" target="&lt; 50MB"/>
+        <metric name="File Watch Latency" target="&lt; 50ms"/>
+      </metrics>
+    </performance-testing>
+
+    <security-testing>
+      <framework>Custom security tests</framework>
+      <test-areas>
+        <area>Secret exposure prevention</area>
+        <area>Insecure configuration detection</area>
+        <area>Input validation bypass attempts</area>
+        <area>File permission validation</area>
+        <area>Environment variable injection</area>
+        <area>Configuration tampering detection</area>
+      </test-areas>
+      <security-tests>
+        <test>Secret redaction in logs</test>
+        <test>Weak secret detection</test>
+        <test>Insecure setting warnings</test>
+        <test>File permission checks</test>
+        <test>Configuration validation bypass</test>
+      </security-tests>
+    </security-testing>
+  </testing-strategy>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="Configuration Load Time" type="histogram" description="Time to load configuration"/>
+      <metric name="Configuration Validation Errors" type="counter" description="Validation failures"/>
+      <metric name="Configuration Reload Events" type="counter" description="Hot-reload triggers"/>
+      <metric name="Secret Access Attempts" type="counter" description="Secret retrieval operations"/>
+      <metric name="Configuration Sources Loaded" type="gauge" description="Number of sources used"/>
+      <metric name="File Watch Events" type="counter" description="File system watch events"/>
+    </metrics>
+
+    <logging>
+      <level>INFO</level>
+      <format>JSON structured</format>
+      <correlation-ids>true</correlation-ids>
+      <sensitive-data-redaction>true</sensitive-data-redaction>
+      <key-fields>
+        <field>loadTime</field>
+        <field>sources</field>
+        <field>warnings</field>
+        <field>errors</field>
+        <field>configPath</field>
+        <field>environment</field>
+        <field>mode</field>
+      </key-fields>
+    </logging>
+
+    <alerts>
+      <alert name="Configuration Load Failure" condition="load_errors &gt; 0" severity="critical"/>
+      <alert name="Slow Configuration Loading" condition="load_time &gt; 1s" severity="warning"/>
+      <alert name="Configuration Validation Errors" condition="validation_errors &gt; 0" severity="warning"/>
+      <alert name="Secret Access Failure" condition="secret_failures &gt; 0" severity="critical"/>
+      <alert name="Hot Reload Failure" condition="reload_failures &gt; 0" severity="warning"/>
+    </alerts>
+
+    <health-checks>
+      <check name="Configuration Loading" type="readiness" description="Can load configuration successfully"/>
+      <check name="Schema Validation" type="readiness" description="Schema validation working"/>
+      <check name="Secret Access" type="liveness" description="Can access secrets provider"/>
+      <check name="File Watching" type="readiness" description="File watcher operational"/>
+    </health-checks>
+  </monitoring-requirements>
+
+  <security-considerations>
+    <secret-management>
+      <storage>Environment variables, AWS Secrets Manager, Vault</storage>
+      <redaction>Automatic redaction in logs and errors</redaction>
+      <encryption>AES-256 for stored secrets</encryption>
+      <rotation>Support for secret rotation</rotation>
+      <audit>Complete audit trail of secret access</audit>
+    </secret-management>
+
+    <input-validation>
+      <validation>Zod schema validation for all inputs</validation>
+      <sanitization>Input sanitization for file paths</sanitization>
+      <type-checking>Strict type checking with TypeScript</type-checking>
+      <bounds-checking>Numeric bounds validation</bounds-checking>
+      <pattern-validation>Regex pattern validation for strings</pattern-validation>
+    </input-validation>
+
+    <file-security>
+      <permissions>Config files: 600 (owner read/write only)</permissions>
+      <paths>Validate file paths to prevent directory traversal</paths>
+      <formats>Support only secure file formats</formats>
+      <watching>Secure file watching with permission checks</watching>
+      <backup>Automatic backup of configuration changes</backup>
+    </file-security>
+
+    <runtime-security>
+      <hot-reload>Validate configuration before applying changes</hot-reload>
+      <environment>Isolate configuration loading environment</environment>
+      <dependencies>Minimal external dependencies for security</dependencies>
+      <network>Secure network access for remote secrets</network>
+      <monitoring>Detect configuration tampering attempts</monitoring>
+    </runtime-security>
+  </security-considerations>
+
+  <acceptance-criteria>
+    <functional>
+      <criterion id="AC-1">Configuration loaded from file, environment variables, and CLI args in correct precedence order</criterion>
+      <criterion id="AC-2">Supported formats: JSON, YAML, TOML with proper parsing</criterion>
+      <criterion id="AC-3">Environment-specific overrides (config.production.yaml, config.development.yaml) work correctly</criterion>
+      <criterion id="AC-4">JSON Schema validation with helpful error messages for invalid configurations</criterion>
+      <criterion id="AC-5">Configuration hot-reload support with service mode restarts on config change</criterion>
+      <criterion id="AC-6">Secrets management integration with environment variables and AWS Secrets Manager</criterion>
+      <criterion id="AC-7">Configuration API for runtime updates and queries</criterion>
+      <criterion id="AC-8">Unit tests validate config loading, merging, and validation scenarios</criterion>
+      <criterion id="AC-9">Integration tests validate config loading in all deployment modes</criterion>
+    </functional>
+
+    <non-functional>
+      <criterion id="AC-10">Configuration loading completes within 500ms</criterion>
+      <criterion id="AC-11">Memory usage remains under 50MB for typical configurations</criterion>
+      <criterion id="AC-12">Hot-reload operations complete within 100ms</criterion>
+      <criterion id="AC-13">All secrets are properly redacted from logs and error messages</criterion>
+      <criterion id="AC-14">Configuration files have secure permissions (600)</criterion>
+      <criterion id="AC-15">System validates all configuration inputs and prevents injection attacks</criterion>
+      <criterion id="AC-16">Configuration system works across all supported platforms (Linux, macOS, Windows)</criterion>
+    </non-functional>
+
+    <integration>
+      <criterion id="AC-17">All Tamma packages can load configuration consistently</criterion>
+      <criterion id="AC-18">Environment variable mapping works for all supported variables</criterion>
+      <criterion id="AC-19">Secrets manager integration works with AWS Secrets Manager</criterion>
+      <criterion id="AC-20">Command-line argument parsing overrides file and environment settings</criterion>
+      <criterion id="AC-21">File watching detects changes and triggers appropriate reloads</criterion>
+    </integration>
+
+    <security>
+      <criterion id="AC-22">Secrets are never exposed in logs, errors, or API responses</criterion>
+      <criterion id="AC-23">Weak secrets are detected and warnings are issued</criterion>
+      <criterion id="AC-24">Insecure configurations are flagged with security warnings</criterion>
+      <criterion id="AC-25">File path validation prevents directory traversal attacks</criterion>
+      <criterion id="AC-26">Configuration tampering is detected and logged</criterion>
+    </security>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="R-1" probability="medium" impact="high" description="Configuration loading failures prevent system startup">
+      <mitigation>Graceful fallback to defaults, comprehensive error handling, clear error messages</mitigation>
+    </risk>
+
+    <risk id="R-2" probability="low" impact="critical" description="Secret exposure in logs or configuration files">
+      <mitigation>Automatic secret redaction, secure file permissions, secret validation, audit logging</mitigation>
+    </risk>
+
+    <risk id="R-3" probability="medium" impact="medium" description="Hot-reload configuration corruption">
+      <mitigation>Validation before applying, atomic updates, rollback capability, backup configurations</mitigation>
+    </risk>
+
+    <risk id="R-4" probability="low" impact="high" description="Configuration injection attacks">
+      <mitigation>Input validation, schema validation, file path validation, type checking</mitigation>
+    </risk>
+
+    <risk id="R-5" probability="medium" impact="medium" description="Performance issues with large configurations">
+      <mitigation>Lazy loading, efficient parsing, memory optimization, performance monitoring</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Loading Performance" target="&lt; 500ms" measurement="Configuration loading time"/>
+    <metric name="Reliability" target="&gt;99.9%" measurement="Successful configuration loads"/>
+    <metric name="Validation Accuracy" target="100%" measurement="Required field validation"/>
+    <metric name="Security" target="Zero exposures" measurement="Secret exposure incidents"/>
+    <metric name="Hot Reload Success" target="&gt;99%" measurement="Successful hot-reload operations"/>
+    <metric name="Test Coverage" target="95% unit, 85% integration" measurement="Code coverage"/>
+  </success-metrics>
+</story-context>

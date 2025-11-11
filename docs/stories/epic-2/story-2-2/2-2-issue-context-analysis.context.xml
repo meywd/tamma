@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>2-2-issue-context-analysis</story-id>
+    <title>Issue Context Analysis</title>
+    <status>ready-for-dev</status>
+    <last-updated>2025-11-07T12:00:00Z</last-updated>
+    <version>1.0</version>
+  </metadata>
+
+  <technical-context>
+    <architecture-alignment>
+      <component>packages/intelligence</component>
+      <component>packages/platforms</component>
+      <component>packages/events</component>
+      <pattern>Interface-Based Design</pattern>
+      <pattern>Event Sourcing (DCB)</pattern>
+      <pattern>Context Building</pattern>
+    </architecture-alignment>
+    
+    <dependencies>
+      <dependency story="2-1">Issue Selection with Filtering</dependency>
+      <dependency story="1-5">GitHub Platform Implementation</dependency>
+      <dependency story="1-6">GitLab Platform Implementation</dependency>
+    </dependencies>
+    
+    <data-models>
+      <model name="IssueContext" path="packages/intelligence/src/types/issue-context.ts" />
+      <model name="ContextSummary" path="packages/intelligence/src/types/context-summary.ts" />
+      <model name="RelatedIssue" path="packages/intelligence/src/types/related-issue.ts" />
+      <model name="CommitContext" path="packages/intelligence/src/types/commit-context.ts" />
+    </data-models>
+  </technical-context>
+
+  <implementation-details>
+    <core-interfaces>
+      <interface name="IIssueContextAnalyzer" kind="TypeScript interface" signature="interface IIssueContextAnalyzer { analyzeIssue(issue: Issue): Promise&lt;IssueContext&gt;; extractRelatedIssues(issueBody: string): RelatedIssue[]; loadCommitHistory(repository: string, limit: number): Promise&lt;CommitContext[]&gt;; buildContextSummary(context: IssueContext): ContextSummary; }" path="packages/intelligence/src/interfaces/issue-context-analyzer.ts" />
+      <interface name="IContextExtractor" kind="TypeScript interface" signature="interface IContextExtractor { extractTextContent(issue: Issue): string; extractFileReferences(text: string): string[]; extractIssueReferences(text: string): string[]; extractLabels(issue: Issue): string[]; }" path="packages/intelligence/src/interfaces/context-extractor.ts" />
+    </core-interfaces>
+    
+    <key-classes>
+      <class name="IssueContextAnalyzer" kind="TypeScript class" implements="IIssueContextAnalyzer" path="packages/intelligence/src/issue-context-analyzer.ts" />
+      <class name="TextExtractor" kind="TypeScript class" implements="IContextExtractor" path="packages/intelligence/src/text-extractor.ts" />
+      <class name="RelatedIssueFinder" kind="TypeScript class" path="packages/intelligence/src/related-issue-finder.ts" />
+      <class name="CommitHistoryLoader" kind="TypeScript class" path="packages/intelligence/src/commit-history-loader.ts" />
+      <class name="ContextSummarizer" kind="TypeScript class" path="packages/intelligence/src/context-summarizer.ts" />
+    </key-classes>
+    
+    <algorithms>
+      <algorithm name="Reference Pattern Matching" type="extraction" description="Uses regex to find issue references (#123) in text" />
+      <algorithm name="File Path Extraction" type="extraction" description="Identifies file paths and code references in issue text" />
+      <algorithm name="Context Ranking" type="analysis" description="Ranks context elements by relevance to the issue" />
+      <algorithm name="Summary Generation" type="nlp" description="Generates concise summaries of issue context" />
+      <algorithm name="Semantic Similarity" type="analysis" description="Finds semantically related issues using text similarity" />
+    </algorithms>
+  </implementation-details>
+
+  <integration-points>
+    <external-integrations>
+      <integration name="Git Platform APIs" type="API" description="Fetches issue details, comments, and commit history" protocol="REST/HTTPS" />
+    </external-integrations>
+    
+    <internal-integrations>
+      <integration name="Platform Abstraction" component="packages/platforms" description="Uses IGitPlatform for issue and commit data" />
+      <integration name="Event Sourcing" component="packages/events" description="Emits context analysis events" />
+      <integration name="AI Provider Interface" component="packages/providers" description="Provides context to AI providers" />
+    </internal-integrations>
+  </integration-points>
+
+  <data-sources>
+    <primary-storage>
+      <store type="PostgreSQL" schema="intelligence" description="Stores issue context analysis results and cache" />
+    </primary-storage>
+    
+    <cache>
+      <store type="Redis" description="Caches issue context and related data" />
+      <store type="In-memory" description="Runtime cache for active analysis sessions" />
+    </cache>
+  </data-sources>
+
+  <api-endpoints>
+    <rest-api base-path="/api/v1/context">
+      <endpoint method="POST" path="/analyze" description="Analyze issue context" />
+      <endpoint method="GET" path="/issue/:id" description="Get cached context for issue" />
+      <endpoint method="GET" path="/issue/:id/related" description="Get related issues" />
+      <endpoint method="GET" path="/issue/:id/commits" description="Get commit history for issue" />
+      <endpoint method="POST" path="/refresh" description="Refresh cached context" />
+    </rest-api>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <suite name="IssueContextAnalyzer" coverage="95%" path="packages/intelligence/src/__tests__/issue-context-analyzer.test.ts" />
+      <suite name="TextExtractor" coverage="90%" path="packages/intelligence/src/__tests__/text-extractor.test.ts" />
+      <suite name="RelatedIssueFinder" coverage="90%" path="packages/intelligence/src/__tests__/related-issue-finder.test.ts" />
+      <suite name="CommitHistoryLoader" coverage="85%" path="packages/intelligence/src/__tests__/commit-history-loader.test.ts" />
+      <suite name="ContextSummarizer" coverage="85%" path="packages/intelligence/src/__tests__/context-summarizer.test.ts" />
+    </unit-tests>
+    
+    <integration-tests>
+      <suite name="Context Analysis API" path="packages/intelligence/src/__tests__/integration/context-analysis-api.test.ts" />
+      <suite name="Git Platform Integration" path="packages/intelligence/src/__tests__/integration/git-platform-integration.test.ts" />
+      <suite name="Context Extraction Workflow" path="packages/intelligence/src/__tests__/integration/context-extraction-workflow.test.ts" />
+    </integration-tests>
+    
+    <performance-tests>
+      <test name="Context Analysis Performance" target="&lt;2s" path="packages/intelligence/src/__tests__/performance/context-analysis.test.ts" />
+      <test name="Text Extraction Speed" target="1000 words/sec" path="packages/intelligence/src/__tests__/performance/text-extraction.test.ts" />
+      <test name="Summary Generation Performance" target="&lt;500ms" path="packages/intelligence/src/__tests__/performance/summary-generation.test.ts" />
+    </performance-tests>
+  </testing-strategy>
+
+  <security-considerations>
+    <data-protection>
+      <consideration type="Access Control" description="Issue analysis requires repository read permissions" />
+      <consideration type="Data Validation" description="Validate all extracted content before processing" />
+      <consideration type="Rate Limiting" description="Respect Git platform API rate limits" />
+    </data-protection>
+    
+    <privacy>
+      <consideration type="Content Filtering" description="Filter sensitive information from context summaries" />
+      <consideration type="Data Minimization" description="Only collect necessary issue-related data" />
+    </privacy>
+  </security-considerations>
+
+  <monitoring-and-observability>
+    <metrics>
+      <metric name="issues_analyzed_total" type="counter" description="Total issues analyzed" />
+      <metric name="context_extractions_total" type="counter" description="Total context extractions performed" />
+      <metric name="related_issues_found_total" type="counter" description="Total related issues found" />
+      <metric name="commits_loaded_total" type="counter" description="Total commits loaded for context" />
+      <metric name="analysis_duration_seconds" type="histogram" description="Duration of context analysis" />
+      <metric name="context_summary_length" type="histogram" description="Length of generated context summaries" />
+    </metrics>
+    
+    <logging>
+      <event name="context.analysis.started" level="info" description="Issue context analysis started" />
+      <event name="context.analysis.completed" level="info" description="Issue context analysis completed" />
+      <event name="related.issues.found" level="debug" description="Related issues found" />
+      <event name="commits.loaded" level="debug" description="Commit history loaded" />
+      <event name="context.generated" level="info" description="Context summary generated" />
+      <event name="context.cached" level="debug" description="Context cached for future use" />
+    </logging>
+  </monitoring-and-observability>
+
+  <configuration-schema>
+    <analysis-config>
+      <field name="maxCommits" type="number" required="false" default="10" description="Maximum commits to load for context" />
+      <field name="maxRelatedIssues" type="number" required="false" default="5" description="Maximum related issues to include" />
+      <field name="summaryLength" type="object" required="false" description="Target summary length configuration" />
+      <field name="cache" type="object" required="false" description="Context caching configuration" />
+      <field name="extraction" type="object" required="false" description="Content extraction configuration" />
+    </analysis-config>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <api-docs>
+      <doc name="Context Analysis API" path="docs/api/context-analysis.md" />
+      <doc name="Context Extraction Guide" path="docs/guides/context-extraction.md" />
+    </api-docs>
+    
+    <user-guides>
+      <guide name="Issue Context Analysis" path="docs/tutorials/issue-context-analysis.md" />
+      <guide name="Custom Context Extractors" path="docs/guides/custom-extractors.md" />
+    </user-guides>
+  </documentation-requirements>
+
+  <acceptance-criteria-mapping>
+    <ac id="1" component="TextExtractor" test="text-extractor.test.ts" />
+    <ac id="2" component="RelatedIssueFinder" test="related-issue-finder.test.ts" />
+    <ac id="3" component="CommitHistoryLoader" test="commit-history-loader.test.ts" />
+    <ac id="4" component="TextExtractor" test="file-reference-extraction.test.ts" />
+    <ac id="5" component="ContextSummarizer" test="context-summarizer.test.ts" />
+    <ac id="6" component="Event Sourcing" test="context-events.test.ts" />
+    <ac id="7" component="IssueContextAnalyzer" test="issue-context-analyzer.test.ts" />
+  </acceptance-criteria-mapping>
+
+  <risk-mitigation>
+    <risk id="R1" description="Large issue bodies may cause memory issues" mitigation="Content size limits and streaming processing" />
+    <risk id="R2" description="Related issue detection may create circular dependencies" mitigation="Dependency cycle detection and depth limits" />
+    <risk id="R3" description="Context extraction may miss important information" mitigation="Multiple extraction strategies and validation" />
+    <risk id="R4" description="API rate limiting may block analysis" mitigation="Rate limit monitoring and backoff strategies" />
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Analysis Accuracy" target="90%" description="Accuracy of context extraction and analysis" />
+    <metric name="Related Issue Detection" target="80%" description="Percentage of actually related issues found" />
+    <metric name="Analysis Performance" target="&lt;2s" description="Average time to analyze issue context" />
+    <metric name="Summary Quality" target="85%" description="Quality of generated context summaries" />
+    <metric name="Cache Hit Rate" target="70%" description="Percentage of context requests served from cache" />
+  </success-metrics>
+</story-context>

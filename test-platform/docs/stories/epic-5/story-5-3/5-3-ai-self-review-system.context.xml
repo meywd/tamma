@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext>
+  <storyId>5-3</storyId>
+  <title>AI Self-Review System</title>
+  <epic>5</epic>
+  <category>Multi-Judge Evaluation</category>
+  <priority>High</priority>
+  <estimatedEffort>3 weeks</estimatedEffort>
+  <weight>7.5%</weight>
+  
+  <description>
+    Implement an AI-powered self-review system that enables AI models to evaluate their own responses against established criteria, providing insights into their confidence levels, uncertainty quantification, and potential biases. This system contributes 7.5% to the overall evaluation score and focuses on metacognitive capabilities and self-awareness.
+  </description>
+  
+  <technicalContext>
+    <systemArchitecture>
+      <component name="SelfReviewEngine" type="Core Service">
+        <description>Orchestrates the AI self-review process and manages evaluation workflows</description>
+        <technologies>TypeScript, Node.js, Fastify</technologies>
+        <dependencies>AIProviderRegistry, EvaluationMetrics, ConfidenceCalculator</dependencies>
+      </component>
+      
+      <component name="MetacognitiveAnalyzer" type="Analysis Service">
+        <description>Analyzes AI responses for metacognitive indicators and self-awareness</description>
+        <technologies>Python, Transformers, spaCy</technologies>
+        <dependencies>NLPLibrary, ConfidenceModels, BiasDetection</dependencies>
+      </component>
+      
+      <component name="UncertaintyQuantifier" type="Scoring Service">
+        <description>Quantifies and scores uncertainty levels in AI responses</description>
+        <technologies>TypeScript, StatisticalAnalysis</technologies>
+        <dependencies>ProbabilityModels, ConfidenceIntervals</dependencies>
+      </component>
+      
+      <component name="SelfReviewStorage" type="Data Service">
+        <description>Stores self-review data, confidence scores, and metacognitive insights</description>
+        <technologies>PostgreSQL, JSONB</technologies>
+        <dependencies>Database, EventStore</dependencies>
+      </component>
+    </systemArchitecture>
+    
+    <dataModels>
+      <model name="SelfReviewRequest">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="submissionId" type="UUID" required="true" foreignKey="submissions.id"/>
+          <field name="modelId" type="UUID" required="true" foreignKey="models.id"/>
+          <field name="originalResponse" type="JSON" required="true"/>
+          <field name="reviewCriteria" type="JSON" required="true"/>
+          <field name="selfReviewPrompt" type="TEXT" required="true"/>
+          <field name="requestedAt" type="TIMESTAMP" required="true"/>
+          <field name="status" type="ENUM" values="pending,processing,completed,failed" required="true"/>
+        </fields>
+      </model>
+      
+      <model name="SelfReviewResponse">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="reviewRequestId" type="UUID" required="true" foreignKey="self_review_requests.id"/>
+          <field name="selfAssessment" type="JSON" required="true"/>
+          <field name="confidenceScore" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="uncertaintyLevel" type="ENUM" values="low,medium,high" required="true"/>
+          <field name="identifiedBiases" type="JSON"/>
+          <field name="knowledgeGaps" type="JSON"/>
+          <field name="reasoningQuality" type="JSON" required="true"/>
+          <field name="metacognitiveInsights" type="JSON"/>
+          <field name="reviewTimestamp" type="TIMESTAMP" required="true"/>
+          <field name="processingTime" type="INTEGER" required="true"/>
+        </fields>
+      </model>
+      
+      <model name="ConfidenceBreakdown">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="reviewResponseId" type="UUID" required="true" foreignKey="self_review_responses.id"/>
+          <field name="aspect" type="VARCHAR" required="true"/>
+          <field name="confidence" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="reasoning" type="TEXT"/>
+          <field name="evidence" type="JSON"/>
+        </fields>
+      </model>
+      
+      <model name="UncertaintyAnalysis">
+        <fields>
+          <field name="id" type="UUID" required="true"/>
+          <field name="reviewResponseId" type="UUID" required="true" foreignKey="self_review_responses.id"/>
+          <field name="uncertaintyType" type="ENUM" values="epistemic,aleatoric,ontological" required="true"/>
+          <field name="source" type="VARCHAR" required="true"/>
+          <field name="magnitude" type="FLOAT" min="0" max="1" required="true"/>
+          <field name="justification" type="TEXT"/>
+          <field name="mitigationStrategy" type="TEXT"/>
+        </fields>
+      </model>
+    </dataModels>
+    
+    <apiEndpoints>
+      <endpoint method="POST" path="/api/v1/self-review/request">
+        <description>Initiate AI self-review for a submission</description>
+        <requestBody>
+          <field name="submissionId" type="UUID" required="true"/>
+          <field name="reviewCriteria" type="JSON" required="true"/>
+          <field name="customPrompt" type="TEXT"/>
+        </requestBody>
+        <responses>
+          <response code="201">Self-review request created</response>
+          <response code="400">Invalid request data</response>
+          <response code="404">Submission not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/self-review/{requestId}">
+        <description>Retrieve self-review request status and results</description>
+        <responses>
+          <response code="200">Self-review details</response>
+          <response code="404">Review request not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/self-review/submission/{submissionId}">
+        <description>Get all self-reviews for a specific submission</description>
+        <responses>
+          <response code="200">List of self-reviews</response>
+          <response code="404">Submission not found</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="POST" path="/api/v1/self-review/analyze">
+        <description>Perform metacognitive analysis on AI response</description>
+        <requestBody>
+          <field name="response" type="JSON" required="true"/>
+          <field name="analysisType" type="ENUM" values="confidence,uncertainty,bias,reasoning" required="true"/>
+        </requestBody>
+        <responses>
+          <response code="200">Analysis results</response>
+          <response code="400">Invalid analysis request</response>
+        </responses>
+      </endpoint>
+      
+      <endpoint method="GET" path="/api/v1/self-review/model/{modelId}/insights">
+        <description>Get metacognitive insights for a specific AI model</description>
+        <queryParameters>
+          <param name="timeRange" type="STRING" default="30d"/>
+          <param name="analysisType" type="STRING"/>
+        </queryParameters>
+        <responses>
+          <response code="200">Model metacognitive insights</response>
+          <response code="404">Model not found</response>
+        </responses>
+      </endpoint>
+    </apiEndpoints>
+    
+    <algorithms>
+      <algorithm name="ConfidenceScoring">
+        <description>Calculate confidence scores based on response certainty and evidence quality</description>
+        <inputs>AI response, evidence sources, knowledge domain</inputs>
+        <outputs>Confidence score (0-1), confidence breakdown</outputs>
+        <method>Statistical analysis + evidence weighting</method>
+      </algorithm>
+      
+      <algorithm name="UncertaintyQuantification">
+        <description>Quantify different types of uncertainty in AI responses</description>
+        <inputs>Response text, confidence indicators, knowledge gaps</inputs>
+        <outputs>Uncertainty levels, uncertainty types, sources</outputs>
+        <method>Bayesian uncertainty modeling</method>
+      </algorithm>
+      
+      <algorithm name="BiasDetection">
+        <description>Identify potential biases in AI self-assessment</description>
+        <inputs>Self-review text, confidence patterns, historical data</inputs>
+        <outputs>Bias indicators, bias types, confidence</outputs>
+        <method>Pattern recognition + statistical analysis</method>
+      </algorithm>
+      
+      <algorithm name="MetacognitiveAnalysis">
+        <description>Analyze metacognitive capabilities and self-awareness</description>
+        <inputs>Self-assessment quality, reasoning transparency, error detection</inputs>
+        <outputs>Metacognitive score, insights, recommendations</outputs>
+        <method>NLP analysis + psychological models</method>
+      </algorithm>
+    </algorithms>
+  </technicalContext>
+  
+  <implementationDetails>
+    <coreFeatures>
+      <feature name="Automated Self-Review">
+        <description>AI models automatically review their own responses using standardized criteria</description>
+        <acceptanceCriteria>
+          <criterion>System generates appropriate self-review prompts for different response types</criterion>
+          <criterion>AI models can complete self-reviews within 30 seconds</criterion>
+          <criterion>Self-reviews are structured and parseable</criterion>
+          <criterion>System handles failed self-reviews gracefully</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Confidence Scoring">
+        <description>Quantify AI confidence levels across different aspects of their responses</description>
+        <acceptanceCriteria>
+          <criterion>Confidence scores range from 0 to 1 with 0.1 precision</criterion>
+          <criterion>Confidence breakdown covers factual accuracy, reasoning, completeness</criterion>
+          <criterion>Confidence scores correlate with actual performance</criterion>
+          <criterion>System detects overconfidence and underconfidence patterns</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Uncertainty Quantification">
+        <description>Identify and categorize different types of uncertainty in AI responses</description>
+        <acceptanceCriteria>
+          <criterion>System distinguishes epistemic, aleatoric, and ontological uncertainty</criterion>
+          <criterion>Uncertainty sources are identified and explained</criterion>
+          <criterion>Uncertainty magnitude is quantified on 0-1 scale</criterion>
+          <criterion>Mitigation strategies are suggested for high uncertainty</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Bias Detection">
+        <description>Identify potential biases in AI self-assessment and confidence patterns</description>
+        <acceptanceCriteria>
+          <criterion>System detects overconfidence bias, underconfidence bias</criterion>
+          <criterion>Confirmation bias patterns are identified</criterion>
+          <criterion>Dunning-Kruger effects are detected</criterion>
+          <criterion>Bias scores are calculated and tracked over time</criterion>
+        </acceptanceCriteria>
+      </feature>
+      
+      <feature name="Metacognitive Insights">
+        <description>Generate insights about AI metacognitive capabilities and self-awareness</description>
+        <acceptanceCriteria>
+          <criterion>System assesses ability to recognize knowledge limitations</criterion>
+          <criterion>Error detection and self-correction capabilities are evaluated</criterion>
+          <criterion>Reasoning transparency is scored</criterion>
+          <criterion>Metacognitive development trends are tracked</criterion>
+        </acceptanceCriteria>
+      </feature>
+    </coreFeatures>
+    
+    <technicalRequirements>
+      <requirement name="Response Time">
+        <description>Self-review completion within 30 seconds</description>
+        <metric>p95 latency &lt; 30s</metric>
+      </requirement>
+      
+      <requirement name="Accuracy">
+        <description>Confidence scores correlate with actual performance</description>
+        <metric>Correlation coefficient &gt; 0.7</metric>
+      </requirement>
+      
+      <requirement name="Reliability">
+        <description>Consistent self-review quality across sessions</description>
+        <metric>Cronbach's alpha &gt; 0.8</metric>
+      </requirement>
+      
+      <requirement name="Scalability">
+        <description>Handle 100 concurrent self-review requests</description>
+        <metric>Throughput &gt; 100 reviews/minute</metric>
+      </requirement>
+    </technicalRequirements>
+    
+    <securityConsiderations>
+      <consideration name="Prompt Injection">
+        <description>Prevent manipulation of self-review prompts</description>
+        <mitigation>Input sanitization, prompt template validation</mitigation>
+      </consideration>
+      
+      <consideration name="Confidence Gaming">
+        <description>Prevent AI models from gaming confidence scores</description>
+        <mitigation>Statistical validation, pattern detection</mitigation>
+      </consideration>
+      
+      <consideration name="Data Privacy">
+        <description>Protect sensitive AI response data</description>
+        <mitigation>Encryption at rest, access controls</mitigation>
+      </consideration>
+    </securityConsiderations>
+  </implementationDetails>
+  
+  <testingStrategy>
+    <unitTests>
+      <test name="Confidence Scoring Algorithm">
+        <description>Test confidence score calculation accuracy</description>
+        <coverage>95%</coverage>
+      </test>
+      
+      <test name="Uncertainty Quantification">
+        <description>Test uncertainty type classification</description>
+        <coverage>90%</coverage>
+      </test>
+      
+      <test name="Bias Detection">
+        <description>Test bias identification accuracy</description>
+        <coverage>85%</coverage>
+      </test>
+    </unitTests>
+    
+    <integrationTests>
+      <test name="End-to-End Self-Review">
+        <description>Test complete self-review workflow</description>
+        <scenarios>5 scenarios</scenarios>
+      </test>
+      
+      <test name="AI Provider Integration">
+        <description>Test integration with different AI providers</description>
+        <providers>Anthropic, OpenAI, local models</providers>
+      </test>
+    </integrationTests>
+    
+    <performanceTests>
+      <test name="Concurrent Self-Reviews">
+        <description>Test system under concurrent load</description>
+        <load>100 concurrent requests</load>
+        <duration>10 minutes</duration>
+      </test>
+    </performanceTests>
+  </testingStrategy>
+  
+  <acceptanceCriteria>
+    <criteria>
+      <criterion id="AC1">AI models can complete self-reviews using standardized criteria</criterion>
+      <criterion id="AC2">Confidence scores are accurately calculated and validated</criterion>
+      <criterion id="AC3">Uncertainty is properly quantified and categorized</criterion>
+      <criterion id="AC4">Bias detection identifies common cognitive biases</criterion>
+      <criterion id="AC5">Metacognitive insights provide meaningful self-awareness metrics</criterion>
+      <criterion id="AC6">System integrates with overall multi-judge evaluation framework</criterion>
+      <criterion id="AC7">Self-review data contributes 7.5% to final evaluation score</criterion>
+      <criterion id="AC8">All security and privacy requirements are met</criterion>
+    </criteria>
+  </acceptanceCriteria>
+  
+  <dependencies>
+    <dependency storyId="5-1">Staff Review Interface - for evaluation framework integration</dependency>
+    <dependency storyId="5-2">Community Voting System - for scoring consistency</dependency>
+    <dependency storyId="2-3">Automated Scoring System - for baseline comparison</dependency>
+    <dependency storyId="1-2">AI Provider Interface - for AI model integration</dependency>
+  </dependencies>
+  
+  <risks>
+    <risk level="High">
+      <description>AI models may provide unreliable self-assessments</description>
+      <mitigation>Statistical validation, cross-model verification</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>Computational cost of self-review processing</description>
+      <mitigation>Efficient algorithms, caching strategies</mitigation>
+    </risk>
+    
+    <risk level="Medium">
+      <description>Integration complexity with diverse AI providers</description>
+      <mitigation>Standardized interfaces, comprehensive testing</mitigation>
+    </risk>
+  </risks>
+  
+  <successMetrics>
+    <metric name="Self-Review Completion Rate" target="95%"/>
+    <metric name="Confidence Score Accuracy" target="&gt; 0.7 correlation"/>
+    <metric name="Bias Detection Precision" target="&gt; 80%"/>
+    <metric name="Processing Time" target="&lt; 30s p95"/>
+    <metric name="System Uptime" target="99.5%"/>
+  </successMetrics>
+</storyContext>

@@ -1,0 +1,505 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-4" title="Web Server API Implementation" epic="1.5" created="2025-11-08T12:00:00.000Z">
+  <overview>
+    <summary>Implement a comprehensive REST API server using Fastify that provides HTTP endpoints for all Tamma operations, including issue management, workflow orchestration, event streaming, and administrative functions. The API serves as the primary interface for external integrations and the web dashboard.</summary>
+    <business-objective>Enable external systems and web interfaces to interact with Tamma through a well-defined, secure, and performant REST API that supports all core platform operations.</business-objective>
+    <technical-approach>Build a production-ready Fastify server with comprehensive route handlers, middleware, authentication, rate limiting, and real-time event streaming capabilities.</technical-approach>
+  </overview>
+
+  <technical-components>
+    <component name="API Server" package="@tamma/api" primary="true">
+      <description>Fastify-based HTTP server providing REST endpoints and SSE streaming</description>
+      <key-classes>
+        <class name="ApiServer" responsibilities="Server lifecycle, route registration, middleware setup"/>
+        <class name="RoutesModule" responsibilities="Route definitions, validation schemas, handlers"/>
+        <class name="SseManager" responsibilities="Server-sent events streaming, client management"/>
+        <class name="AuthMiddleware" responsibilities="JWT authentication, API key validation"/>
+        <class name="RateLimitMiddleware" responsibilities="Rate limiting, quota enforcement"/>
+      </key-classes>
+      <dependencies>
+        <dependency package="fastify" version="^5.x" purpose="Web framework"/>
+        <dependency package="@fastify/cors" version="^9.x" purpose="CORS support"/>
+        <dependency package="@fastify/helmet" version="^11.x" purpose="Security headers"/>
+        <dependency package="@fastify/rate-limit" version="^9.x" purpose="Rate limiting"/>
+        <dependency package="@fastify/websocket" version="^10.x" purpose="WebSocket support"/>
+        <dependency package="@tamma/orchestrator" purpose="Core orchestration"/>
+        <dependency package="@tamma/events" purpose="Event streaming"/>
+        <dependency package="@tamma/shared/contracts" purpose="Type definitions"/>
+      </dependencies>
+    </component>
+
+    <component name="Route Handlers" package="@tamma/api/src/routes">
+      <description>Organized route handlers for different API domains</description>
+      <modules>
+        <module name="issues.ts" responsibilities="Issue CRUD operations, status management"/>
+        <module name="workflows.ts" responsibilities="Workflow execution, step management"/>
+        <module name="events.ts" responsibilities="Event querying, SSE streaming"/>
+        <module name="plugins.ts" responsibilities="Plugin management, installation"/>
+        <module name="admin.ts" responsibilities="System administration, health checks"/>
+        <module name="auth.ts" responsibilities="Authentication, token management"/>
+      </modules>
+    </component>
+
+    <component name="Middleware Stack" package="@tamma/api/src/middleware">
+      <description>Custom middleware for authentication, validation, and security</description>
+      <middleware>
+        <mw name="auth.ts" responsibilities="JWT validation, API key checking"/>
+        <mw name="validation.ts" responsibilities="Request/response validation"/>
+        <mw name="logging.ts" responsibilities="Request logging, correlation IDs"/>
+        <mw name="error-handling.ts" responsibilities="Error formatting, status codes"/>
+        <mw name="security.ts" responsibilities="Input sanitization, SQL injection prevention"/>
+      </middleware>
+    </component>
+
+    <component name="Schemas" package="@tamma/api/src/schemas">
+      <description>JSON schemas for request/response validation</description>
+      <schemas>
+        <schema name="issue.ts" responsibilities="Issue model validation"/>
+        <schema name="workflow.ts" responsibilities="Workflow model validation"/>
+        <schema name="event.ts" responsibilities="Event model validation"/>
+        <schema name="plugin.ts" responsibilities="Plugin model validation"/>
+        <schema name="common.ts" responsibilities="Common validation patterns"/>
+      </schemas>
+    </component>
+  </technical-components>
+
+  <data-models>
+    <model name="ApiServerConfig">
+      <fields>
+        <field name="host" type="string" default="'0.0.0.0'" description="Server bind address"/>
+        <field name="port" type="number" default="3000" description="Server port"/>
+        <field name="cors" type="CorsConfig" description="CORS configuration"/>
+        <field name="rateLimit" type="RateLimitConfig" description="Rate limiting settings"/>
+        <field name="auth" type="AuthConfig" description="Authentication settings"/>
+        <field name="logging" type="LoggingConfig" description="Logging configuration"/>
+        <field name="webhook" type="WebhookConfig" description="Webhook settings"/>
+      </fields>
+    </model>
+
+    <model name="ApiContext">
+      <fields>
+        <field name="requestId" type="string" description="Correlation ID for request tracing"/>
+        <field name="user" type="UserContext" description="Authenticated user context"/>
+        <field name="permissions" type="string[]" description="User permissions"/>
+        <field name="startTime" type="Date" description="Request start time"/>
+        <field name="metadata" type="Record&lt;string, unknown&gt;" description="Additional context"/>
+      </fields>
+    </model>
+
+    <model name="SseConnection">
+      <fields>
+        <field name="id" type="string" description="Unique connection identifier"/>
+        <field name="client" type="FastifyRequest" description="Fastify request object"/>
+        <field name="filters" type="EventFilter[]" description="Event filters for this connection"/>
+        <field name="createdAt" type="Date" description="Connection creation time"/>
+        <field name="lastActivity" type="Date" description="Last activity timestamp"/>
+      </fields>
+    </model>
+  </data-models>
+
+  <api-endpoints>
+    <endpoint method="GET" path="/api/v1/health">
+      <description>Health check endpoint</description>
+      <responses>
+        <response code="200" description="Service healthy"/>
+        <response code="503" description="Service unhealthy"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/issues">
+      <description>List issues with pagination and filtering</description>
+      <parameters>
+        <param name="page" type="number" default="1" description="Page number"/>
+        <param name="limit" type="number" default="20" description="Items per page"/>
+        <param name="status" type="string" description="Filter by status"/>
+        <param name="assignee" type="string" description="Filter by assignee"/>
+      </parameters>
+      <responses>
+        <response code="200" description="Issues list with pagination"/>
+        <response code="400" description="Invalid parameters"/>
+        <response code="401" description="Unauthorized"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="POST" path="/api/v1/issues">
+      <description>Create new issue</description>
+      <body schema="CreateIssueRequest"/>
+      <responses>
+        <response code="201" description="Issue created"/>
+        <response code="400" description="Invalid request"/>
+        <response code="401" description="Unauthorized"/>
+        <response code="409" description="Duplicate issue"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/issues/:issueId">
+      <description>Get issue details</description>
+      <parameters>
+        <param name="issueId" type="string" required="true" description="Issue UUID"/>
+      </parameters>
+      <responses>
+        <response code="200" description="Issue details"/>
+        <response code="404" description="Issue not found"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="POST" path="/api/v1/workflows">
+      <description>Start new workflow</description>
+      <body schema="StartWorkflowRequest"/>
+      <responses>
+        <response code="202" description="Workflow started"/>
+        <response code="400" description="Invalid request"/>
+        <response code="401" description="Unauthorized"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/workflows/:workflowId">
+      <description>Get workflow status</description>
+      <parameters>
+        <param name="workflowId" type="string" required="true" description="Workflow UUID"/>
+      </parameters>
+      <responses>
+        <response code="200" description="Workflow status"/>
+        <response code="404" description="Workflow not found"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/events">
+      <description>Query events with filtering</description>
+      <parameters>
+        <param name="type" type="string" description="Event type filter"/>
+        <param name="issueId" type="string" description="Issue ID filter"/>
+        <param name="from" type="string" description="Start timestamp"/>
+        <param name="to" type="string" description="End timestamp"/>
+        <param name="limit" type="number" default="100" description="Result limit"/>
+      </parameters>
+      <responses>
+        <response code="200" description="Events list"/>
+        <response code="400" description="Invalid parameters"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/events/stream">
+      <description>Server-sent events stream</description>
+      <headers>
+        <header name="Accept" value="text/event-stream" required="true"/>
+        <header name="Cache-Control" value="no-cache"/>
+      </headers>
+      <responses>
+        <response code="200" description="Event stream established"/>
+        <response code="400" description="Invalid request"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/plugins">
+      <description>List installed plugins</description>
+      <responses>
+        <response code="200" description="Plugins list"/>
+        <response code="401" description="Unauthorized"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="POST" path="/api/v1/plugins/:pluginName/install">
+      <description>Install plugin</description>
+      <parameters>
+        <param name="pluginName" type="string" required="true" description="Plugin name"/>
+      </parameters>
+      <body schema="InstallPluginRequest"/>
+      <responses>
+        <response code="200" description="Plugin installed"/>
+        <response code="400" description="Invalid plugin"/>
+        <response code="409" description="Plugin already installed"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="DELETE" path="/api/v1/plugins/:pluginName">
+      <description>Uninstall plugin</description>
+      <parameters>
+        <param name="pluginName" type="string" required="true" description="Plugin name"/>
+      </parameters>
+      <responses>
+        <response code="200" description="Plugin uninstalled"/>
+        <response code="404" description="Plugin not found"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="GET" path="/api/v1/admin/stats">
+      <description>System statistics</description>
+      <responses>
+        <response code="200" description="System stats"/>
+        <response code="401" description="Unauthorized"/>
+        <response code="403" description="Insufficient permissions"/>
+      </responses>
+    </endpoint>
+
+    <endpoint method="POST" path="/api/v1/admin/maintenance">
+      <description>Trigger maintenance tasks</description>
+      <body schema="MaintenanceRequest"/>
+      <responses>
+        <response code="200" description="Maintenance triggered"/>
+        <response code="401" description="Unauthorized"/>
+        <response code="403" description="Insufficient permissions"/>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <integration-points>
+    <integration name="Orchestrator Service" type="internal" critical="true">
+      <description>API server delegates workflow operations to orchestrator</description>
+      <interface>IOrchestratorService</interface>
+      <operations>
+        <op name="startWorkflow" async="true"/>
+        <op name="getWorkflowStatus" async="true"/>
+        <op name="cancelWorkflow" async="true"/>
+        <op name="listWorkflows" async="true"/>
+      </operations>
+    </integration>
+
+    <integration name="Event Store" type="internal" critical="true">
+      <description>API server queries event store for historical data</description>
+      <interface>IEventStore</interface>
+      <operations>
+        <op name="queryEvents" async="true"/>
+        <op name="getEventStream" async="true"/>
+        <op name="subscribeToEvents" async="true"/>
+      </operations>
+    </integration>
+
+    <integration name="Plugin Manager" type="internal" critical="true">
+      <description>API server manages plugins through plugin manager</description>
+      <interface>IPluginManager</interface>
+      <operations>
+        <op name="installPlugin" async="true"/>
+        <op name="uninstallPlugin" async="true"/>
+        <op name="listPlugins" async="true"/>
+        <op name="getPluginInfo" async="true"/>
+      </operations>
+    </integration>
+
+    <integration name="Web Dashboard" type="external" critical="true">
+      <description>Web dashboard consumes API endpoints</description>
+      <protocol>HTTP/HTTPS + SSE</protocol>
+      <authentication>JWT tokens</authentication>
+      <data-flow>Dashboard → API Server → Core Services</data-flow>
+    </integration>
+
+    <integration name="External Integrations" type="external" critical="false">
+      <description>Third-party systems integrate via REST API</description>
+      <protocol>HTTP/HTTPS</protocol>
+      <authentication>API keys, OAuth 2.0</authentication>
+      <rate-limiting>Configurable per client</rate-limiting>
+    </integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-testing>
+      <framework>Vitest</framework>
+      <coverage-target>90%</coverage-target>
+      <focus-areas>
+        <area>Route handlers - request parsing, response formatting</area>
+        <area>Middleware - authentication, validation, error handling</area>
+        <area>Schemas - request/response validation</area>
+        <area>Utilities - helper functions, data transformation</area>
+      </focus-areas>
+      <mocks>
+        <mock name="orchestratorService" description="Mock orchestrator operations"/>
+        <mock name="eventStore" description="Mock event store queries"/>
+        <mock name="pluginManager" description="Mock plugin management"/>
+        <mock name="authService" description="Mock authentication"/>
+      </mocks>
+    </unit-testing>
+
+    <integration-testing>
+      <framework>Vitest + Supertest</framework>
+      <coverage-target>80%</coverage-target>
+      <test-scenarios>
+        <scenario>End-to-end request flow through all middleware</scenario>
+        <scenario>Authentication and authorization flows</scenario>
+        <scenario>Rate limiting enforcement</scenario>
+        <scenario>SSE streaming functionality</scenario>
+        <scenario>Error handling and response formatting</scenario>
+      </test-scenarios>
+      <test-databases>
+        <db name="PostgreSQL" description="Full integration with real database"/>
+        <db name="SQLite" description="Lightweight integration tests"/>
+      </test-databases>
+    </integration-testing>
+
+    <performance-testing>
+      <framework>Artillery.io</framework>
+      <scenarios>
+        <scenario name="API Load Test" description="100 concurrent requests, p95 &lt; 500ms"/>
+        <scenario name="SSE Load Test" description="1000 concurrent SSE connections"/>
+        <scenario name="Memory Usage Test" description="Monitor memory under sustained load"/>
+      </scenarios>
+      <metrics>
+        <metric name="Response Time" target="p95 &lt; 500ms"/>
+        <metric name="Throughput" target="1000+ requests/second"/>
+        <metric name="Error Rate" target="&lt; 0.1%"/>
+        <metric name="Memory Usage" target="&lt; 512MB steady state"/>
+      </metrics>
+    </performance-testing>
+
+    <security-testing>
+      <framework>Custom security tests</framework>
+      <test-areas>
+        <area>Input validation and sanitization</area>
+        <area>Authentication bypass attempts</area>
+        <area>Authorization escalation</area>
+        <area>Rate limiting bypass</area>
+        <area>SQL injection prevention</area>
+        <area>XSS prevention</area>
+      </test-areas>
+    </security-testing>
+  </testing-strategy>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="Request Count" type="counter" description="Total API requests"/>
+      <metric name="Request Duration" type="histogram" description="Request processing time"/>
+      <metric name="Error Rate" type="counter" description="API errors by type"/>
+      <metric name="Active Connections" type="gauge" description="Current SSE connections"/>
+      <metric name="Rate Limit Hits" type="counter" description="Rate limit violations"/>
+      <metric name="Auth Failures" type="counter" description="Authentication failures"/>
+    </metrics>
+
+    <logging>
+      <level>INFO</level>
+      <format>JSON structured</format>
+      <correlation-ids>true</correlation-ids>
+      <sensitive-data-redaction>true</sensitive-data-redaction>
+      <key-fields>
+        <field>requestId</field>
+        <field>method</field>
+        <field>url</field>
+        <field>statusCode</field>
+        <field>duration</field>
+        <field>userId</field>
+        <field>userAgent</field>
+      </key-fields>
+    </logging>
+
+    <health-checks>
+      <check name="Database Connection" type="liveness" interval="30s"/>
+      <check name="Orchestrator Connection" type="liveness" interval="30s"/>
+      <check name="Memory Usage" type="readiness" threshold="80%"/>
+      <check name="Disk Space" type="readiness" threshold="90%"/>
+    </health-checks>
+
+    <alerts>
+      <alert name="High Error Rate" condition="error_rate &gt; 5%" severity="critical"/>
+      <alert name="High Response Time" condition="p95_latency &gt; 2s" severity="warning"/>
+      <alert name="Auth Failure Spike" condition="auth_failures &gt; 100/min" severity="warning"/>
+      <alert name="Memory Leak" condition="memory_usage &gt; 90%" severity="critical"/>
+    </alerts>
+  </monitoring-requirements>
+
+  <security-considerations>
+    <authentication>
+      <method>JWT Bearer Tokens</method>
+      <method>API Keys</method>
+      <method>OAuth 2.0</method>
+      <token-expiration>24 hours (JWT), 1 year (API keys)</token-expiration>
+      <refresh-tokens>true</refresh-tokens>
+    </authentication>
+
+    <authorization>
+      <model>Role-based access control (RBAC)</model>
+      <roles>
+        <role name="admin" permissions="all"/>
+        <role name="developer" permissions="read, write, workflow"/>
+        <role name="viewer" permissions="read only"/>
+      </roles>
+    </authorization>
+
+    <input-validation>
+      <framework>Fastify schema validation</framework>
+      <sanitization>HTML sanitization, SQL injection prevention</sanitization>
+      <size-limits>Request body: 10MB, Query string: 2KB</size-limits>
+    </input-validation>
+
+    <rate-limiting>
+      <default-limit>100 requests/minute</default-limit>
+      <authenticated-limit>1000 requests/minute</authenticated-limit>
+      <admin-limit>5000 requests/minute</admin-limit>
+      <window-size>60 seconds</window-size>
+    </rate-limiting>
+
+    <security-headers>
+      <header name="Content-Security-Policy" value="default-src 'self'"/>
+      <header name="X-Frame-Options" value="DENY"/>
+      <header name="X-Content-Type-Options" value="nosniff"/>
+      <header name="Referrer-Policy" value="strict-origin-when-cross-origin"/>
+      <header name="Permissions-Policy" value="geolocation=()"/>
+    </security-headers>
+
+    <data-protection>
+      <encryption-in-transit>TLS 1.3</encryption-in-transit>
+      <encryption-at-rest>AES-256 for sensitive data</encryption-at-rest>
+      <pii-redaction>Automatic in logs and responses</pii-redaction>
+      <audit-logging>Full audit trail for all operations</audit-logging>
+    </data-protection>
+  </security-considerations>
+
+  <acceptance-criteria>
+    <functional>
+      <criterion id="AC-1">All specified REST API endpoints are implemented and functional</criterion>
+      <criterion id="AC-2">Request and response validation using JSON schemas works correctly</criterion>
+      <criterion id="AC-3">Authentication and authorization mechanisms enforce proper access control</criterion>
+      <criterion id="AC-4">Rate limiting prevents abuse while allowing legitimate usage</criterion>
+      <criterion id="AC-5">Server-sent events provide real-time event streaming to clients</criterion>
+      <criterion id="AC-6">Error handling returns appropriate HTTP status codes and error messages</criterion>
+      <criterion id="AC-7">CORS configuration allows cross-origin requests from authorized domains</criterion>
+      <criterion id="AC-8">Health check endpoints return accurate service status information</criterion>
+    </functional>
+
+    <non-functional>
+      <criterion id="AC-9">API response times meet performance targets (p95 &lt; 500ms)</criterion>
+      <criterion id="AC-10">Server handles 1000+ concurrent SSE connections without degradation</criterion>
+      <criterion id="AC-11">Memory usage remains stable under sustained load (&lt; 512MB)</criterion>
+      <criterion id="AC-12">All security measures (authentication, validation, headers) are properly implemented</criterion>
+      <criterion id="AC-13">Logging provides sufficient detail for troubleshooting and auditing</criterion>
+      <criterion id="AC-14">Graceful shutdown handles in-flight requests properly</criterion>
+      <criterion id="AC-15">Configuration is externalized and environment-specific</criterion>
+    </non-functional>
+
+    <integration>
+      <criterion id="AC-16">API server successfully integrates with orchestrator service</criterion>
+      <criterion id="AC-17">Event store integration provides accurate historical data</criterion>
+      <criterion id="AC-18">Plugin manager integration enables dynamic plugin management</criterion>
+      <criterion id="AC-19">Web dashboard can authenticate and consume API endpoints</criterion>
+      <criterion id="AC-20">External integrations can authenticate via API keys or OAuth</criterion>
+    </integration>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="R-1" probability="medium" impact="high" description="Performance bottlenecks under high load">
+      <mitigation>Implement connection pooling, caching, and horizontal scaling</mitigation>
+    </risk>
+
+    <risk id="R-2" probability="low" impact="critical" description="Security vulnerabilities in API endpoints">
+      <mitigation>Comprehensive security testing, input validation, and regular security audits</mitigation>
+    </risk>
+
+    <risk id="R-3" probability="medium" impact="medium" description="SSE connection memory leaks">
+      <mitigation>Implement connection cleanup, heartbeat monitoring, and resource limits</mitigation>
+    </risk>
+
+    <risk id="R-4" probability="low" impact="high" description="Authentication bypass vulnerabilities">
+      <mitigation>Use proven authentication libraries, implement proper token validation</mitigation>
+    </risk>
+
+    <risk id="R-5" probability="medium" impact="medium" description="Rate limiting bypass attacks">
+      <mitigation>Implement distributed rate limiting, IP-based tracking, and anomaly detection</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="API Performance" target="p95 response time &lt; 500ms" measurement="Artillery.io load tests"/>
+    <metric name="Reliability" target="99.9% uptime" measurement="Prometheus monitoring"/>
+    <metric name="Security" target="Zero critical vulnerabilities" measurement="Security scans"/>
+    <metric name="Scalability" target="1000+ concurrent SSE connections" measurement="Load testing"/>
+    <metric name="Code Quality" target="90% test coverage" measurement="Vitest coverage reports"/>
+    <metric name="Documentation" target="100% API documentation coverage" measurement="OpenAPI spec validation"/>
+  </success-metrics>
+</story-context>

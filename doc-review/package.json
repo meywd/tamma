@@ -1,0 +1,55 @@
+{
+  "name": "@tamma/doc-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "start": "wrangler pages dev",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler pages deploy ./build/client",
+    "preview": "wrangler pages dev ./build/client",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "wrangler d1 migrations apply tamma-docs",
+    "db:migrate:local": "wrangler d1 migrations apply tamma-docs --local",
+    "db:studio": "drizzle-kit studio",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+  },
+  "dependencies": {
+    "@react-router/cloudflare": "^7.9.5",
+    "@react-router/dev": "^7.9.5",
+    "@react-router/node": "^7.9.5",
+    "dayjs": "^1.11.13",
+    "diff": "^7.0.0",
+    "drizzle-orm": "^0.44.7",
+    "isbot": "^5",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "react-router": "^7.9.5",
+    "rehype-highlight": "^7.0.0",
+    "remark-frontmatter": "^5.0.0",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251107.0",
+    "@types/diff": "^6.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "drizzle-kit": "^0.31.6",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.2",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7",
+    "wrangler": "^4.46.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.5</story-id>
+  <story-title>Event Trail Exploration UI</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>false</mvp-critical>
+  <mvp-optional>true</mvp-optional>
+  
+  <technical-context>
+    <architecture-pattern>Interactive event browser with search and filtering</architecture-pattern>
+    <primary-goal>Investigate past development cycles without writing queries</primary-goal>
+    
+    <event-list-features>
+      <feature name="Event Display">
+        <description>Tabular view of events with key information</description>
+        <columns>
+          <column>Timestamp (ISO 8601 format)</column>
+          <column>Event Type (categorized)</column>
+          <column>Actor (system/user/AI/provider)</column>
+          <column>Summary (first 100 characters of payload)</column>
+          <column>Correlation ID (clickable for filtering)</column>
+          <column>Duration (for applicable events)</column>
+        </columns>
+        <sorting>By timestamp (newest first), with option to reverse</sorting>
+      </feature>
+      <feature name="Event Expansion">
+        <description>Detailed view of individual events</description>
+        <trigger>Click on event row</trigger>
+        <content>
+          <item>Full event payload (JSON formatted, syntax highlighted)</item>
+          <item>Event metadata with all fields</item>
+          <item>Related events (same correlation ID)</item>
+          <item>Event schema validation status</item>
+          <item>Raw event data (copyable)</item>
+        </content>
+      </feature>
+      <feature name="Pagination">
+        <description>Efficient handling of large event datasets</description>
+        <method>Infinite scroll with lazy loading</method>
+        <page-size>100 events per page</page-size>
+        <performance>Smooth scrolling without UI freezing</performance>
+      </feature>
+    </event-list-features>
+    
+    <filtering-capabilities>
+      <filter name="Date Range">
+        <type>Date range picker</type>
+        <behavior>Filter events by timestamp range</behavior>
+        <presets>Last hour, Last 24 hours, Last 7 days, Last 30 days</presets>
+      </filter>
+      <filter name="Event Type">
+        <type>Multi-select dropdown with search</type>
+        <options>All event types from Story 4.1 schema</options>
+        <behavior>Include/exclude specific event types</behavior>
+        <categories>Grouped by category (Issue, AI, Code, Git, Approval)</categories>
+      </filter>
+      <filter name="Correlation ID">
+        <type>Text input with autocomplete</type>
+        <behavior>Filter events for specific workflow execution</behavior>
+        <source>Recent correlation IDs, search functionality</source>
+      </filter>
+      <filter name="Issue Number">
+        <type>Text input with validation</type>
+        <behavior>Filter events related to specific issue</behavior>
+        <format>GitHub/GitLab issue number format</format>
+      </filter>
+      <filter name="Actor">
+        <type>Multi-select dropdown</type>
+        <options>system, user, ai, provider, platform</options>
+        <behavior>Filter by who performed the action</behavior>
+      </filter>
+    </filtering-capabilities>
+    
+    <search-functionality>
+      <search-type>Full-text search across event payloads</search-type>
+      <scope>Event payload, metadata, and summary fields</scope>
+      <features>
+        <feature>Real-time search results as you type</feature>
+        <feature>Search result highlighting</feature>
+        <feature>Search history and recent searches</feature>
+        <feature>Advanced search with boolean operators</feature>
+        <feature>Search within specific event types</feature>
+      </features>
+      <performance>Search response time &lt;2 seconds</performance>
+    </search-functionality>
+    
+    <correlation-tracking>
+      <action name="Follow Correlation ID">
+        <description>Load all events related to a workflow execution</description>
+        <trigger>Click correlation ID in event list</trigger>
+        <behavior>Apply correlation ID filter and load related events</behavior>
+        <benefit>Complete workflow reconstruction for debugging</benefit>
+      </action>
+      <feature name="Workflow Timeline">
+        <description>Visual timeline of workflow execution</description>
+        <trigger>When viewing events with same correlation ID</trigger>
+        <visualization>Timeline view with event sequence and durations</visualization>
+        <interactivity>Click events for details, zoom timeline</interactivity>
+      </feature>
+    </correlation-tracking>
+    
+    <dashboard-access>
+      <url>http://localhost:3000/dashboard/events</url>
+      <navigation>Accessible from main dashboard</navigation>
+      <responsive>Mobile-friendly with touch interactions</responsive>
+      <performance>Initial load &lt;3 seconds, search &lt;2 seconds</performance>
+    </dashboard-access>
+    
+    <ui-components>
+      <component name="Event Table">
+        <type>Virtual scrolling table for performance</type>
+        <features>Sorting, filtering, inline actions</features>
+        <responsive>Adaptive column layout for mobile</responsive>
+      </component>
+      <component name="JSON Viewer">
+        <type>Syntax-highlighted JSON display</type>
+        <features>Expand/collapse sections, copy to clipboard, search within JSON</features>
+        <performance>Handles large JSON objects efficiently</performance>
+      </component>
+      <component name="Filter Panel">
+        <type>Collapsible sidebar with filter controls</type>
+        <features>Save/load filter presets, clear all filters</features>
+        <responsive>Overlay on mobile devices</responsive>
+      </component>
+      <component name="Search Bar">
+        <type>Advanced search with autocomplete</type>
+        <features>Search suggestions, recent searches, boolean operators</features>
+        <performance>Debounced search input</performance>
+      </component>
+    </ui-components>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/dashboard</package>
+      <package>@tamma/api</package>
+      <package>@tamma/events</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>EventExplorer - Main event exploration interface</component>
+      <component>EventTable - Virtual scrolling event table</component>
+      <component>EventFilter - Advanced filtering logic</component>
+      <component>EventSearch - Full-text search functionality</component>
+      <component>EventDetails - Event detail viewer</component>
+      <component>CorrelationTracker - Workflow correlation tracking</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/dashboard/src/components/event-explorer.tsx</file>
+      <file>packages/dashboard/src/components/event-table.tsx</file>
+      <file>packages/dashboard/src/filters/event-filter.ts</file>
+      <file>packages/dashboard/src/search/event-search.ts</file>
+      <file>packages/dashboard/src/components/event-details.tsx</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>react - UI framework</dependency>
+      <dependency>react-window - Virtual scrolling for performance</dependency>
+      <dependency>react-virtualized-auto-sizer - Dynamic sizing</dependency>
+      <dependency>monaco-editor - JSON viewer with syntax highlighting</dependency>
+      <dependency>fuse.js - Fuzzy search functionality</dependency>
+      <dependency>date-fns - Date formatting and manipulation</dependency>
+    </external-dependencies>
+    
+    <api-integration>
+      <endpoint name="Events Query">
+        <url>/api/v1/events</url>
+        <method>GET with query parameters</method>
+        <parameters>dateRange, eventTypes, correlationId, issueNumber, actor, search</parameters>
+        <response>Paginated event list with metadata</response>
+      </endpoint>
+      <endpoint name="Event Details">
+        <url>/api/v1/events/:eventId</url>
+        <method>GET</method>
+        <parameters>eventId (path parameter)</parameters>
+        <response>Complete event object with full payload</response>
+      </endpoint>
+      <endpoint name="Correlation Events">
+        <url>/api/v1/events/correlation/:correlationId</url>
+        <method>GET</method>
+        <parameters>correlationId (path parameter)</parameters>
+        <response>All events for specific workflow execution</response>
+      </endpoint>
+    </api-integration>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 4.7 - Event Query API for Time-Travel</upstream>
+    <upstream>Story 5.3 - Real-Time Dashboard - System Health</upstream>
+    <downstream>Story 5.6 - Alert System for Critical Issues</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Dashboard page: http://localhost:3000/dashboard/events</criteria>
+    <criteria id="2">Event list displays: timestamp, event type, actor, summary (first 100 chars of payload)</criteria>
+    <criteria id="3">Event list supports filtering: date range, event type, correlation ID, issue number</criteria>
+    <criteria id="4">Event list supports full-text search across event payloads</criteria>
+    <criteria id="5">Clicking event row expands full event details (JSON formatted)</criteria>
+    <criteria id="6">Event list supports "Follow correlation ID" action to load all related events</criteria>
+    <criteria id="7">Event list pagination (100 events per page) with infinite scroll</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Initial page load time &lt;3 seconds</metric>
+    <metric>Search response time &lt;2 seconds</metric>
+    <metric>Filter application time &lt;1 second</metric>
+    <metric>Infinite scroll performance (no UI freezing)</metric>
+    <metric>Event detail expansion time &lt;500ms</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Performance issues with large event datasets</description>
+      <mitigation>Virtual scrolling, server-side filtering, pagination</mitigation>
+    </risk>
+    <risk>
+      <description>Search performance degradation with event volume</description>
+      <mitigation>Indexed search, debounced queries, result caching</mitigation>
+    </risk>
+    <risk>
+      <description>Memory usage from large JSON objects</description>
+      <mitigation>Lazy loading, JSON streaming, memory cleanup</mitigation>
+    </risk>
+    <risk>
+      <description>Complex filtering logic causing bugs</description>
+      <mitigation>Comprehensive testing, filter validation, clear UI feedback</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for filtering and search logic</requirement>
+    <requirement>Integration tests for API endpoints</requirement>
+    <requirement>E2E tests for complete user workflows</requirement>
+    <requirement>Performance tests for large datasets</requirement>
+    <requirement>Mobile responsiveness testing</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Optional - Event query API (Story 4.7) provides programmatic access sufficient for MVP</reason>
+    <explanation>UI provides better UX but not required for self-maintenance validation. Can be deferred to post-MVP.</explanation>
+    <impact>Without event UI, developers can still explore events via API queries, but debugging experience is less convenient</impact>
+  </mvp-rationale>
+</story-context>

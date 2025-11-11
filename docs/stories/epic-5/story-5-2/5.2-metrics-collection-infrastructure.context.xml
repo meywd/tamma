@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.2</story-id>
+  <story-title>Metrics Collection Infrastructure</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>true</mvp-critical>
+  
+  <technical-context>
+    <architecture-pattern>Prometheus-style metrics collection</architecture-pattern>
+    <primary-goal>Track development velocity, quality trends, and system health</primary-goal>
+    
+    <metrics-categories>
+      <category name="Counters">
+        <description>Counting occurrences of events</description>
+        <metrics>
+          <metric>issues_processed_total - Total issues processed</metric>
+          <metric>prs_created_total - Total PRs created</metric>
+          <metric>prs_merged_total - Total PRs merged</metric>
+          <metric>escalations_total - Total escalations triggered</metric>
+          <metric>ai_requests_total - Total AI provider requests</metric>
+          <metric>errors_total - Total errors encountered</metric>
+        </metrics>
+      </category>
+      <category name="Gauges">
+        <description>Current values that can go up or down</description>
+        <metrics>
+          <metric>active_autonomous_loops - Currently active loops</metric>
+          <metric>pending_approvals - Pending approval count</metric>
+          <metric>queue_depth - Current queue depth</metric>
+          <metric>memory_usage_bytes - Current memory usage</metric>
+          <metric>cpu_usage_percent - Current CPU usage</metric>
+          <metric>disk_usage_percent - Current disk usage</metric>
+        </metrics>
+      </category>
+      <category name="Histograms">
+        <description>Distribution of values over time</description>
+        <metrics>
+          <metric>issue_completion_duration_seconds - Time to complete issues</metric>
+          <metric>ai_request_duration_seconds - AI request response time</metric>
+          <metric>test_execution_duration_seconds - Test execution time</metric>
+          <metric>pr_merge_duration_seconds - Time from PR creation to merge</metric>
+          <metric>workflow_step_duration_seconds - Individual step duration</metric>
+        </metrics>
+      </category>
+    </metrics-categories>
+    
+    <metrics-labels>
+      <label name="provider">AI provider name (anthropic, openai, github-copilot)</label>
+      <label name="platform">Git platform (github, gitlab, bitbucket)</label>
+      <label name="issue_type">Type of issue (bug, feature, enhancement)</label>
+      <label name="outcome">Result (success, failure, timeout)</label>
+      <label name="severity">Error severity (low, medium, high, critical)</label>
+      <label name="workflow_step">Current workflow step</label>
+      <label name="environment">Environment (dev, staging, production)</label>
+    </metrics-labels>
+    
+    <exposure-endpoint>
+      <path>/metrics</path>
+      <format>Prometheus text format</format>
+      <method>GET</method>
+      <authentication>Optional (configurable)</authentication>
+      <scrape-interval>15 seconds</scrape-interval>
+    </exposure-endpoint>
+    
+    <metrics-backend>
+      <primary>Prometheus scraping</primary>
+      <alternatives>
+        <alt>StatsD push</alt>
+        <alt>OpenTelemetry collector</alt>
+        <alt>CloudWatch metrics</alt>
+        <alt>Datadog metrics</alt>
+      </alternatives>
+    </metrics-backend>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/observability</package>
+      <package>@tamma/shared</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>MetricsCollector - Main metrics interface</component>
+      <component>PrometheusExporter - Prometheus format export</component>
+      <component>MetricsRegistry - Metrics storage and management</component>
+      <component>LabelManager - Metrics label handling</component>
+      <component>MetricsMiddleware - HTTP middleware for /metrics endpoint</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/observability/src/metrics/metrics-collector.ts</file>
+      <file>packages/observability/src/metrics/prometheus-exporter.ts</file>
+      <file>packages/observability/src/metrics/metrics-registry.ts</file>
+      <file>packages/observability/src/metrics/label-manager.ts</file>
+      <file>packages/observability/src/metrics/metrics-middleware.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>prom-client - Prometheus client library</dependency>
+      <dependency>prometheus-gc-stats - Garbage collection metrics</dependency>
+      <dependency>systeminformation - System metrics collection</dependency>
+    </external-dependencies>
+    
+    <integration-points>
+      <point name="All System Components">
+        <description>Metrics collection integrated throughout codebase</description>
+        <scope>Every package and component</scope>
+        <method>Metrics injection and automatic collection</method>
+      </point>
+      <point name="HTTP Server">
+        <description>/metrics endpoint for Prometheus scraping</description>
+        <scope>API server and orchestrator</scope>
+        <method>Express/Fastify middleware</method>
+      </point>
+      <point name="System Monitoring">
+        <description>System resource metrics collection</description>
+        <scope>System-level monitoring</scope>
+        <method>OS metrics collection</method>
+      </point>
+    </integration-points>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>None (parallel to Story 5.1)</upstream>
+    <downstream>Story 5.3 - Real-Time Dashboard - System Health</downstream>
+    <downstream>Story 5.4 - Real-Time Dashboard - Development Velocity</downstream>
+    <downstream>Story 5.6 - Alert System for Critical Issues</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Metrics library integrated (Prometheus client, StatsD, or similar)</criteria>
+    <criteria id="2">Counter metrics: issues_processed_total, prs_created_total, prs_merged_total, escalations_total</criteria>
+    <criteria id="3">Gauge metrics: active_autonomous_loops, pending_approvals, queue_depth</criteria>
+    <criteria id="4">Histogram metrics: issue_completion_duration_seconds, ai_request_duration_seconds, test_execution_duration_seconds</criteria>
+    <criteria id="5">Metrics exposed via HTTP endpoint: GET /metrics (Prometheus format)</criteria>
+    <criteria id="6">Metrics include labels: provider name, Git platform, issue type, outcome (success/failure)</criteria>
+    <criteria id="7">Metrics scraped by Prometheus (or pushed to metrics backend) every 15 seconds</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>All required metrics collected and exposed</metric>
+    <metric>Metrics endpoint responds in &lt;100ms</metric>
+    <metric>Metrics collection overhead &lt;1% of system performance</metric>
+    <metric>Prometheus scraping successful every 15 seconds</metric>
+    <metric>Metrics labels properly applied for filtering</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Metrics collection impacting performance</description>
+      <mitigation>Efficient metrics libraries, sampling, async collection</mitigation>
+    </risk>
+    <risk>
+      <description>High cardinality metrics causing memory issues</description>
+      <mitigation>Label cardinality limits, metric pruning</mitigation>
+    </risk>
+    <risk>
+      <description>Metrics endpoint exposing sensitive information</description>
+      <mitigation>Access controls, authentication, metric filtering</mitigation>
+    </risk>
+    <risk>
+      <description>Metrics loss during system restart</description>
+      <mitigation>Persistent metrics storage, proper shutdown handling</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for all metric types</requirement>
+    <requirement>Integration tests for metrics endpoint</requirement>
+    <requirement>Performance tests for metrics collection overhead</requirement>
+    <requirement>Load tests for metrics endpoint</requirement>
+    <requirement>End-to-end tests for Prometheus scraping</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Essential for monitoring autonomous loop health and detecting anomalies</reason>
+    <explanation>Metrics enable tracking of completion rates, escalation rates, and quality metrics critical for self-maintenance validation</explanation>
+    <impact>Without metrics, detecting system health issues and performance degradation becomes impossible</impact>
+  </mvp-rationale>
+</story-context>

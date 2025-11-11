@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="3-5-clarifying-questions-workflow-implementation">
+  <metadata>
+    <title>Story 3.5: Clarifying Questions Workflow Implementation</title>
+    <epic>Epic 3 - Quality Gates & Intelligence Layer</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want clarifying questions workflow to resolve ambiguous requirements</action>
+    <benefit>so that I can ensure clear understanding and prevent implementation mistakes</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System identifies ambiguous requirements and unclear specifications</criterion>
+    <criterion id="2">System generates relevant clarifying questions based on context</criterion>
+    <criterion id="3">Questions are prioritized by importance and impact on implementation</criterion>
+    <criterion id="4">System sends questions to appropriate stakeholders via multiple channels</criterion>
+    <criterion id="5">System tracks question responses and incorporates answers into development plan</criterion>
+    <criterion id="6">Question generation and responses logged to event trail</criterion>
+    <criterion id="7">Integration test validates clarifying questions workflow</criterion>
+    <criterion id="8">System handles unanswered questions and follow-up procedures</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="ClarifyingQuestionsWorkflow">
+        <interface>IClarifyingQuestionsWorkflow</interface>
+        <methods>
+          <method name="identifyAmbiguity" returns="Ambiguity[]">
+            <parameter name="context" type="IssueContext"/>
+            <parameter name="developmentPlan" type="DevelopmentPlan"/>
+          </method>
+          <method name="generateQuestions" returns="ClarifyingQuestion[]">
+            <parameter name="ambiguities" type="Ambiguity[]"/>
+            <parameter name="context" type="IssueContext"/>
+          </method>
+          <method name="prioritizeQuestions" returns="PrioritizedQuestion[]">
+            <parameter name="questions" type="ClarifyingQuestion[]"/>
+          </method>
+          <method name="sendQuestions" returns="QuestionDeliveryResult[]">
+            <parameter name="questions" type="PrioritizedQuestion[]"/>
+          </method>
+          <method name="processResponses" returns="ResponseProcessingResult">
+            <parameter name="responses" type="QuestionResponse[]"/>
+          </method>
+          <method name="updateDevelopmentPlan" returns="PlanUpdateResult">
+            <parameter name="plan" type="DevelopmentPlan"/>
+            <parameter name="responses" type="QuestionResponse[]"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="Ambiguity">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="type" type="string"/>
+          <field name="description" type="string"/>
+          <field name="source" type="string"/>
+          <field name="context" type="string"/>
+          <field name="severity" type="string"/>
+          <field name="impact" type="string"/>
+          <field name="suggestedQuestions" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="ClarifyingQuestion">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="ambiguityId" type="string"/>
+          <field name="question" type="string"/>
+          <field name="type" type="string"/>
+          <field name="purpose" type="string"/>
+          <field name="context" type="string"/>
+          <field name="options" type="QuestionOption[]"/>
+          <field name="required" type="boolean"/>
+          <field name="priority" type="number"/>
+        </fields>
+      </interface>
+
+      <interface name="PrioritizedQuestion">
+        <fields>
+          <field name="question" type="ClarifyingQuestion"/>
+          <field name="priority" type="number"/>
+          <field name="reasoning" type="string"/>
+          <field name="impact" type="string"/>
+          <field name="deadline" type="Date"/>
+          <field name="stakeholders" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="QuestionResponse">
+        <fields>
+          <field name="questionId" type="string"/>
+          <field name="responder" type="string"/>
+          <field name="response" type="string"/>
+          <field name="confidence" type="number"/>
+          <field name="clarifications" type="string[]"/>
+          <field name="respondedAt" type="Date"/>
+          <field name="attachments" type="Attachment[]"/>
+        </fields>
+      </interface>
+
+      <interface name="QuestionDeliveryResult">
+        <fields>
+          <field name="questionId" type="string"/>
+          <field name="channel" type="string"/>
+          <field name="recipient" type="string"/>
+          <field name="sentAt" type="Date"/>
+          <field name="status" type="string"/>
+          <field name="deliveryId" type="string"/>
+          <field name="followUpRequired" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="ResponseProcessingResult">
+        <fields>
+          <field name="processedResponses" type="number"/>
+          <field name="incorporatedAnswers" type="IncorporatedAnswer[]"/>
+          <field name="conflicts" type="ResponseConflict[]"/>
+          <field name="additionalQuestions" type="ClarifyingQuestion[]"/>
+          <field name="planUpdates" type="PlanUpdate[]"/>
+        </fields>
+      </interface>
+
+      <interface name="IncorporatedAnswer">
+        <fields>
+          <field name="questionId" type="string"/>
+          <field name="answer" type="string"/>
+          <field name="impact" type="string"/>
+          <field name="planChanges" type="PlanChange[]"/>
+          <field name="confidence" type="number"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Ambiguity Detection">
+        <description>Identify ambiguous requirements and unclear specifications</description>
+        <components>
+          <component>Natural language processing</component>
+          <component>Requirement analysis</component>
+          <component>Context evaluation</component>
+          <component>Impact assessment</component>
+        </components>
+      </phase>
+
+      <phase name="Question Generation">
+        <description>Generate relevant clarifying questions</description>
+        <components>
+          <component>Question templating</component>
+          <component>Context-aware generation</component>
+          <component>Question categorization</component>
+          <component>Option creation</component>
+        </components>
+      </phase>
+
+      <phase name="Question Delivery">
+        <description>Send questions to appropriate stakeholders</description>
+        <components>
+          <component>Stakeholder identification</component>
+          <component>Channel selection</component>
+          <component>Message formatting</component>
+          <component>Delivery tracking</component>
+        </components>
+      </phase>
+
+      <phase name="Response Processing">
+        <description>Process responses and update development plan</description>
+        <components>
+          <component>Response parsing</component>
+          <component>Conflict detection</component>
+          <component>Plan integration</component>
+          <component>Follow-up generation</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Communication Channels">
+        <description>Send questions through multiple channels</description>
+        <channels>
+          <channel>Email</channel>
+          <channel>Slack</channel>
+          <channel>Microsoft Teams</channel>
+          <channel>GitHub Issues</channel>
+          <channel>GitLab Issues</channel>
+        </channels>
+      </integration>
+
+      <integration name="AI Provider">
+        <description>Use AI for ambiguity detection and question generation</description>
+        <capabilities>
+          <capability>Natural language understanding</capability>
+          <capability>Question generation</capability>
+          <capability>Response analysis</capability>
+          <capability>Context awareness</capability>
+        </capabilities>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for question workflow</description>
+        <events>
+          <event>AMBIGUITY.DETECTED</event>
+          <event>QUESTION.GENERATED</event>
+          <event>QUESTION.SENT</event>
+          <event>RESPONSE.RECEIVED</event>
+          <event>PLAN.UPDATED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="ClarifyingQuestionsWorkflow">
+          <test>identify ambiguities accurately</test>
+          <test>generate relevant questions</test>
+          <test>prioritize questions effectively</test>
+          <test>send questions to stakeholders</test>
+          <test>process responses correctly</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>end-to-end question workflow</test>
+        <test>multi-channel delivery</test>
+        <test>response processing</test>
+        <test>plan updates</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="ambiguity_detection">
+        <setting name="confidence_threshold" default="0.7"/>
+        <setting name="min_ambiguity_score" default="0.5"/>
+        <setting name="max_questions_per_ambiguity" default="3"/>
+        <setting name="require_context" default="true"/>
+      </section>
+
+      <section name="question_generation">
+        <setting name="max_questions_total" default="10"/>
+        <setting name="include_options" default="true"/>
+        <setting name="require_priority" default="true"/>
+        <setting name="auto_categorize" default="true"/>
+      </section>
+
+      <section name="delivery_settings">
+        <setting name="default_channels" default="['email', 'slack']"/>
+        <setting name="follow_up_days" default="3"/>
+        <setting name="max_follow_ups" default="3"/>
+        <setting name="escalate_unanswered" default="true"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="ambiguity_detection" metric="time" value="&lt; 30 seconds"/>
+      <target name="question_generation" metric="time" value="&lt; 45 seconds"/>
+      <target name="question_delivery" metric="time" value="&lt; 15 seconds"/>
+      <target name="response_processing" metric="time" value="&lt; 20 seconds"/>
+    </performance-targets>
+
+    <ambiguity-types>
+      <type name="requirement_ambiguity">
+        <description>Unclear or incomplete requirements</description>
+        <example>What should happen when the user clicks the button?</example>
+      </type>
+      <type name="technical_ambiguity">
+        <description>Unclear technical specifications</description>
+        <example>Which database should be used for storage?</example>
+      </type>
+      <type name="scope_ambiguity">
+        <description>Unclear project boundaries or scope</description>
+        <example>Should this feature handle edge cases X and Y?</example>
+      </type>
+      <type name="acceptance_ambiguity">
+        <description>Unclear acceptance criteria</description>
+        <example>What defines "fast enough" performance?</example>
+      </type>
+    </ambiguity-types>
+
+    <question-types>
+      <type name="clarification">Request for more detail or explanation</type>
+      <type name="confirmation">Request to verify understanding</type>
+      <type name="decision">Request to choose between options</type>
+      <type name="constraint">Request about limitations or requirements</type>
+      <type name="preference">Request about desired approach or style</type>
+    </question-types>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Accurate ambiguity detection using NLP</consideration>
+      <consideration priority="2">Context-aware question generation</consideration>
+      <consideration priority="3">Multi-channel stakeholder communication</consideration>
+      <consideration priority="4">Effective response processing and integration</consideration>
+      <consideration priority="5">Proper question prioritization and tracking</consideration>
+      <consideration priority="6">Follow-up procedures for unanswered questions</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

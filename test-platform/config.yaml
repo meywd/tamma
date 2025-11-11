@@ -1,0 +1,6 @@
+# BMad Configuration for Test Platform Project
+project_root: /home/meywd/tamma/test-platform
+output_folder: /home/meywd/tamma/test-platform/docs
+dev_story_location: /home/meywd/tamma/test-platform/docs/stories
+user_name: meywd
+communication_language: english

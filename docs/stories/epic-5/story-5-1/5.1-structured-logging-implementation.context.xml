@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.1</story-id>
+  <story-title>Structured Logging Implementation</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>true</mvp-critical>
+  
+  <technical-context>
+    <architecture-pattern>Structured Logging with JSON format</architecture-pattern>
+    <primary-goal>Efficient search, filtering, and analysis of production logs</primary-goal>
+    
+    <logging-requirements>
+      <requirement>All log statements use structured logging library (Winston, Bunyan, structlog)</requirement>
+      <requirement>Log format: {"timestamp": ISO8601, "level": "info/warn/error", "message": "...", "context": {...}}</requirement>
+      <requirement>Context includes: correlation ID, issue number, PR number, actor ID</requirement>
+      <requirement>Log levels properly assigned: DEBUG (verbose details), INFO (key milestones), WARN (recoverable issues), ERROR (failures)</requirement>
+      <requirement>Logs written to: stdout (for container environments), file (for local development), log aggregation service (optional: Datadog, ELK)</requirement>
+      <requirement>Log volume under control: &lt;10 log statements per event for typical flow</requirement>
+      <requirement>Sensitive data (API keys, tokens) redacted from all logs</requirement>
+    </logging-requirements>
+    
+    <log-format>
+      <structure>JSON format with consistent schema</structure>
+      <fields>
+        <field name="timestamp" type="ISO8601" required="true">Event timestamp with millisecond precision</field>
+        <field name="level" type="enum" required="true">DEBUG, INFO, WARN, ERROR</field>
+        <field name="message" type="string" required="true">Human-readable log message</field>
+        <field name="context" type="object" required="true">Structured context data</field>
+      </fields>
+      <context-fields>
+        <field name="correlationId" type="string">Links entire workflow execution</field>
+        <field name="workflowId" type="string">Workflow instance identifier</field>
+        <field name="issueId" type="string">Related issue ID</field>
+        <field name="prId" type="string">Related PR ID</field>
+        <field name="actorId" type="string">Entity performing action</field>
+        <field name="actorType" type="string">system, user, ai, provider</field>
+        <field name="step" type="string">Current workflow step</field>
+        <field name="duration" type="number">Operation duration in milliseconds</field>
+        <field name="error" type="object">Error details (for ERROR level)</field>
+      </context-fields>
+    </log-format>
+    
+    <output-targets>
+      <target name="stdout" environment="container">JSON logs to stdout for container log drivers</target>
+      <target name="file" environment="development">Rotating log files for local development</target>
+      <target name="aggregation" environment="production">Optional integration with log aggregation services</target>
+    </output-targets>
+    
+    <security-requirements>
+      <requirement>API keys and tokens automatically redacted</requirement>
+      <requirement>PII detection and masking</requirement>
+      <requirement>Sensitive configuration values filtered</requirement>
+      <requirement>Log sanitization before output</requirement>
+    </security-requirements>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/observability</package>
+      <package>@tamma/shared</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>StructuredLogger - Main logging interface</component>
+      <component>LogFormatter - JSON formatting and redaction</component>
+      <component>LogTransport - Output destination management</component>
+      <component>ContextManager - Log context propagation</component>
+      <component>SecurityFilter - Sensitive data redaction</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/observability/src/logging/structured-logger.ts</file>
+      <file>packages/observability/src/logging/log-formatter.ts</file>
+      <file>packages/observability/src/logging/log-transport.ts</file>
+      <file>packages/observability/src/logging/context-manager.ts</file>
+      <file>packages/observability/src/logging/security-filter.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>winston - Structured logging library</dependency>
+      <dependency>winston-daily-rotate-file - Log file rotation</dependency>
+      <dependency>winston-transports - Additional transport options</dependency>
+    </external-dependencies>
+    
+    <integration-points>
+      <point name="All System Components">
+        <description>Structured logging integrated throughout codebase</description>
+        <scope>Every package and component</scope>
+        <method>Logger injection and context propagation</method>
+      </point>
+      <point name="Container Environments">
+        <description>stdout logging for container log drivers</description>
+        <scope>Docker, Kubernetes</scope>
+        <method>JSON output to stdout</method>
+      </point>
+      <point name="Development Environment">
+        <description>File-based logging for local development</description>
+        <scope>Local development</scope>
+        <method>Rotating log files</method>
+      </point>
+    </integration-points>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>None (foundational for Epic 5)</upstream>
+    <downstream>Story 5.2 - Metrics Collection Infrastructure</downstream>
+    <downstream>Story 5.6 - Alert System for Critical Issues</downstream>
+    <downstream>Story 5.8 - Integration Testing Suite</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">All log statements use structured logging library (Winston, Bunyan, structlog)</criteria>
+    <criteria id="2">Log format: {"timestamp": ISO8601, "level": "info/warn/error", "message": "...", "context": {...}}</criteria>
+    <criteria id="3">Context includes: correlation ID, issue number, PR number, actor ID</criteria>
+    <criteria id="4">Log levels properly assigned: DEBUG (verbose details), INFO (key milestones), WARN (recoverable issues), ERROR (failures)</criteria>
+    <criteria id="5">Logs written to: stdout (for container environments), file (for local development), log aggregation service (optional: Datadog, ELK)</criteria>
+    <criteria id="6">Log volume under control: &lt;10 log statements per event for typical flow</criteria>
+    <criteria id="7">Sensitive data (API keys, tokens) redacted from all logs</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>100% of log statements use structured format</metric>
+    <metric>Zero sensitive data leakage in logs</metric>
+    <metric>Log volume &lt;10 statements per typical event flow</metric>
+    <metric>Log search performance &lt;1 second for common queries</metric>
+    <metric>Log rotation and storage management working correctly</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Performance impact from structured logging</description>
+      <mitigation>Async logging, efficient serialization, log level filtering</mitigation>
+    </risk>
+    <risk>
+      <description>Sensitive data leakage through logs</description>
+      <mitigation>Comprehensive redaction patterns, PII detection, security testing</mitigation>
+    </risk>
+    <risk>
+      <description>Log volume overwhelming storage</description>
+      <mitigation>Log rotation, compression, retention policies</mitigation>
+    </risk>
+    <risk>
+      <description>Context propagation complexity</description>
+      <mitigation>Async context storage, automatic context injection</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for log formatting and redaction</requirement>
+    <requirement>Integration tests for different output targets</requirement>
+    <requirement>Performance tests for logging overhead</requirement>
+    <requirement>Security tests for sensitive data redaction</requirement>
+    <requirement>End-to-end tests for log flow through system</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Essential for debugging stuck workflows and validating self-maintenance capability</reason>
+    <explanation>Tamma must log all workflow steps to enable diagnosis when autonomous loop encounters issues in its own codebase</explanation>
+    <impact>Without structured logging, debugging autonomous failures becomes impossible</impact>
+  </mvp-rationale>
+</story-context>

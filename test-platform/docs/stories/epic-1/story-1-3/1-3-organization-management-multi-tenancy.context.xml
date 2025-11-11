@@ -1,0 +1,116 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>3</storyId>
+    <title>Organization Management & Multi-Tenancy</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-11-08T14:30:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/1-3-organization-management-multi-tenancy.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>organization admin</asA>
+    <iWant>create and manage an organization with team members</iWant>
+    <soThat>our team can collaborate on benchmarks with proper data isolation and resource management</soThat>
+    <tasks>Task 1: Organization Management (AC: #1, #5)
+  - Subtask 1.1: Create organization CRUD endpoints
+  - Subtask 1.2: Implement organization settings management
+  - Subtask 1.3: Add organization validation and uniqueness checks
+  - Subtask 1.4: Create organization branding customization
+Task 2: Multi-Tenancy Data Isolation (AC: #4)
+  - Subtask 2.1: Implement Row-Level Security (RLS) policies
+  - Subtask 2.2: Create tenant context middleware
+  - Subtask 2.3: Add organization-scoped query filtering
+  - Subtask 2.4: Implement Redis namespacing by organization
+Task 3: Role-Based Access Control (AC: #2)
+  - Subtask 3.1: Define organization roles and permissions
+  - Subtask 3.2: Create role assignment and management endpoints
+  - Subtask 3.3: Implement permission checking middleware
+  - Subtask 3.4: Add role hierarchy and inheritance
+Task 4: Team Member Management (AC: #3, #6)
+  - Subtask 4.1: Create user invitation system with email
+  - Subtask 4.2: Implement invitation acceptance workflow
+  - Subtask 4.3: Add multi-organization user support
+  - Subtask 4.4: Create organization switching functionality
+Task 5: Resource Management (AC: #7, #8)
+  - Subtask 5.1: Implement resource quota system
+  - Subtask 5.2: Create quota checking and enforcement
+  - Subtask 5.3: Add audit logging for all organization actions
+  - Subtask 5.4: Create resource usage monitoring and reporting</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Organization creation with name, description, and settings
+2. Role-based access control (Admin, Developer, Viewer)
+3. Team member invitation system with email invitations
+4. Organization-scoped data isolation in all queries
+5. Organization settings management (quotas, branding)
+6. User can belong to multiple organizations with role switching
+7. Audit logging for organization management actions
+8. Resource quota enforcement and monitoring</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="test-platform/docs/ARCHITECTURE.md" title="System Architecture" section="User & Auth Tables" snippet="CREATE TABLE users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), email VARCHAR(255) UNIQUE NOT NULL, tier VARCHAR(20) DEFAULT 'free' CHECK (tier IN ('free', 'pro', 'enterprise')), api_key_hash VARCHAR(255))" />
+      <doc path="test-platform/docs/PRD.md" title="Product Requirements" section="SaaS B2B Multi-Tenancy" snippet="Organization-based isolation: Each customer has private workspaces and data. Role-based access control: Admin, Developer, Viewer roles with appropriate permissions." />
+      <doc path="test-platform/docs/epics.md" title="Epic Breakdown" section="Epic 1 Stories" snippet="As an organization admin, I want to create and manage an organization with team members, so that our team can collaborate on benchmarks with proper data isolation" />
+      <doc path="doc-review/db/schema.sql" title="Database Patterns" section="User Management" snippet="CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY NOT NULL, email TEXT UNIQUE NOT NULL, role TEXT DEFAULT 'viewer' NOT NULL)" />
+    </docs>
+    <code>
+      <interface path="packages/shared/src/contracts/index.ts" name="ILogger" description="Logging interface pattern for consistent structured logging across services" />
+      <pattern name="UUID v7 for primary keys" description="All entities use UUID v7 for time-sortable, globally unique identifiers" />
+      <pattern name="Fastify plugin architecture" description="Modular route handling with schema validation and middleware" />
+      <pattern name="PostgreSQL JSONB metadata" description="Flexible metadata storage using JSONB with proper indexing" />
+    </code>
+    <dependencies>
+      <framework name="PostgreSQL 17" purpose="Primary database with Row-Level Security support" />
+      <framework name="TimescaleDB" purpose="Time-series extensions for hypertables and retention policies" />
+      <framework name="Redis" purpose="Caching, rate limiting, and pub/sub for real-time features" />
+      <framework name="Fastify" purpose="High-performance API framework with schema validation" />
+      <framework name="Vitest" purpose="Unit and integration testing framework" />
+      <framework name="TypeScript 5.7+" purpose="Type safety and development experience" />
+      <library name="bcrypt" purpose="Password and API key hashing" />
+      <library name="uuid" purpose="UUID v7 generation for primary keys" />
+      <library name="Pino" purpose="Structured JSON logging" />
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="PostgreSQL Row-Level Security" description="All tenant data must be isolated using RLS policies, not application-level filtering" />
+    <constraint name="Redis Namespacing" description="All Redis keys must be namespaced by organization ID to prevent cross-tenant data leakage" />
+    <constraint name="Audit Trail" description="All organization management actions must be logged with user context and timestamps" />
+    <constraint name="Rate Limiting" description="API rate limits must be enforced per organization, not per user" />
+    <constraint name="Data Retention" description="Organization data retention policies must respect tenant-specific settings" />
+  </constraints>
+  <interfaces>
+    <interface name="IOrganizationService" methods="create, update, delete, getById, getByUser" description="Core organization CRUD operations with tenant isolation" />
+    <interface name="IUserOrganizationService" methods="addMember, removeMember, updateRole, getMembers" description="Organization membership and role management" />
+    <interface name="ITenantContext" methods="getCurrentOrg, setCurrentOrg, validateAccess" description="Tenant context middleware for request isolation" />
+    <interface name="IInvitationService" methods="invite, accept, decline, listPending" description="Email-based invitation system for team onboarding" />
+    <interface name="IQuotaService" methods="checkQuota, updateUsage, getUsage" description="Resource quota enforcement and monitoring" />
+    <interface name="IAuditLogger" methods="logAction, getAuditTrail, exportLogs" description="Comprehensive audit logging for compliance" />
+  </interfaces>
+  <tests>
+    <standards>
+      <standard name="Unit Test Coverage" requirement="80% line coverage, 75% branch coverage for all organization services" />
+      <standard name="Integration Tests" requirement="Test multi-tenancy isolation with real PostgreSQL RLS policies" />
+      <standard name="Security Tests" requirement="Test RBAC permissions and cross-tenant data access prevention" />
+      <standard name="Performance Tests" requirement="Organization switching under 100ms, quota checks under 50ms" />
+    </standards>
+    <locations>
+      <location path="packages/orchestrator/src/organizations/" type="unit" description="Organization service unit tests" />
+      <location path="packages/orchestrator/src/auth/" type="integration" description="Authentication and authorization integration tests" />
+      <location path="packages/api/src/routes/organizations.test.ts" type="integration" description="API endpoint integration tests" />
+      <location path="test/integration/multi-tenancy.test.ts" type="integration" description="Cross-tenant isolation tests" />
+    </locations>
+    <ideas>
+      <test name="RLS Policy Bypass Attempts" description="Try to access other organizations' data through direct SQL injection" />
+      <test name="Redis Namespace Collision" description="Verify Redis keys are properly namespaced to prevent data leakage" />
+      <test name="Role Hierarchy Validation" description="Test that users cannot elevate privileges beyond their assigned role" />
+      <test name="Quota Enforcement Under Load" description="Verify quotas are enforced correctly during high concurrent usage" />
+      <test name="Audit Trail Completeness" description="Ensure all organization actions are properly logged with full context" />
+      <test name="Multi-Organization Context Switching" description="Test users switching between organizations without data leakage" />
+      <test name="Invitation Security" description="Test invitation token security and expiration handling" />
+    </ideas>
+  </tests>
+</story-context>

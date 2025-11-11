@@ -1,0 +1,750 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-3-environment-specific-deployments" version="1.0.0">
+  <metadata>
+    <title>Environment-Specific Deployments</title>
+    <epic>1.5</epic>
+    <story-type>infrastructure</story-type>
+    <priority>high</priority>
+    <created>2025-01-07T12:00:00.000Z</created>
+    <updated>2025-01-07T12:00:00.000Z</updated>
+    <author>Bob</author>
+    <reviewer>Tamma Reviewer</reviewer>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <dependencies>
+    <upstream>
+      <dependency story="1.5-1">Core Engine Separation</dependency>
+      <dependency story="1.5-2">Configuration Management</dependency>
+    </upstream>
+    <downstream>
+      <dependency story="1.5-4">Secret Management Integration</dependency>
+      <dependency story="1.5-5">Docker Packaging</dependency>
+    </downstream>
+  </dependencies>
+
+  <architecture-alignment>
+    <component>Environment Management</component>
+    <layer>Infrastructure</layer>
+    <pattern>Environment as Code</pattern>
+    <principles>
+      <principle>Environment parity</principle>
+      <principle>Immutable infrastructure</principle>
+      <principle>Zero-downtime deployments</principle>
+    </principles>
+  </architecture-alignment>
+
+  <technical-specifications>
+    <environment-definitions>
+      <environment name="development">
+        <description>Local development environment</description>
+        <characteristics>
+          <characteristic>Hot reloading enabled</characteristic>
+          <characteristic>Debug logging enabled</characteristic>
+          <characteristic>Mock services for external dependencies</characteristic>
+          <characteristic>Local database instance</characteristic>
+        </characteristics>
+        <configuration>
+          <app>
+            <log_level>debug</log_level>
+            <hot_reload>true</hot_reload>
+            <debug_mode>true</debug_mode>
+          </app>
+          <database>
+            <host>localhost</host>
+            <ssl_mode>disable</ssl_mode>
+            <pool_size>5</pool_size>
+          </database>
+          <orchestrator>
+            <max_concurrent_tasks>2</max_concurrent_tasks>
+            <task_timeout>300000</task_timeout>
+          </orchestrator>
+        </configuration>
+      </environment>
+
+      <environment name="testing">
+        <description>Automated testing environment</description>
+        <characteristics>
+          <characteristic>Isolated test databases</characteristic>
+          <characteristic>Mock external APIs</characteristic>
+          <characteristic>Performance monitoring enabled</characteristic>
+          <characteristic>Test data fixtures</characteristic>
+        </characteristics>
+        <configuration>
+          <app>
+            <log_level>warn</log_level>
+            <hot_reload>false</hot_reload>
+            <debug_mode>false</debug_mode>
+          </app>
+          <database>
+            <host>test-db</host>
+            <ssl_mode>require</ssl_mode>
+            <pool_size>10</pool_size>
+          </database>
+          <orchestrator>
+            <max_concurrent_tasks>3</max_concurrent_tasks>
+            <task_timeout>600000</task_timeout>
+          </orchestrator>
+          <testing>
+            <mock_external_apis>true</mock_external_apis>
+            <test_data_fixtures>true</test_data_fixtures>
+          </testing>
+        </configuration>
+      </environment>
+
+      <environment name="staging">
+        <description>Pre-production staging environment</description>
+        <characteristics>
+          <characteristic>Production-like configuration</characteristic>
+          <characteristic>Real external APIs (sandbox mode)</characteristic>
+          <characteristic>Full monitoring and alerting</characteristic>
+          <characteristic>Blue-green deployment support</characteristic>
+        </characteristics>
+        <configuration>
+          <app>
+            <log_level>info</log_level>
+            <hot_reload>false</hot_reload>
+            <debug_mode>false</debug_mode>
+          </app>
+          <database>
+            <host>staging-db.internal</host>
+            <ssl_mode>verify-full</ssl_mode>
+            <pool_size>20</pool_size>
+          </database>
+          <orchestrator>
+            <max_concurrent_tasks>5</max_concurrent_tasks>
+            <task_timeout>1800000</task_timeout>
+          </orchestrator>
+          <security>
+            <rate_limiting_enabled>true</rate_limiting_enabled>
+            <audit_log_retention_days>90</audit_log_retention_days>
+          </security>
+        </configuration>
+      </environment>
+
+      <environment name="production">
+        <description>Production environment</description>
+        <characteristics>
+          <characteristic>High availability configuration</characteristic>
+          <characteristic>Real external APIs</characteristic>
+          <characteristic>Full observability stack</characteristic>
+          <characteristic>Auto-scaling enabled</characteristic>
+        </characteristics>
+        <configuration>
+          <app>
+            <log_level>info</log_level>
+            <hot_reload>false</hot_reload>
+            <debug_mode>false</debug_mode>
+          </app>
+          <database>
+            <host>prod-db.internal</host>
+            <ssl_mode>verify-full</ssl_mode>
+            <pool_size>50</pool_size>
+            <read_replicas>true</read_replicas>
+          </database>
+          <orchestrator>
+            <max_concurrent_tasks>10</max_concurrent_tasks>
+            <task_timeout>3600000</task_timeout>
+          </orchestrator>
+          <security>
+            <rate_limiting_enabled>true</rate_limiting_enabled>
+            <audit_log_retention_days>365</audit_log_retention_days>
+            <encryption_key_rotation_days>90</encryption_key_rotation_days>
+          </security>
+        </configuration>
+      </environment>
+    </environment-definitions>
+
+    <deployment-strategies>
+      <strategy name="development">
+        <type>local</type>
+        <orchestration>docker-compose</orchestration>
+        <database>postgresql:15-alpine</database>
+        <services>
+          <service name="app">tamma:latest</service>
+          <service name="db">postgres:15-alpine</service>
+          <service name="redis">redis:7-alpine</service>
+        </services>
+        <networking>
+          <mode>bridge</mode>
+          <ports>
+            <port service="app" host="3000" container="3000"/>
+            <port service="db" host="5432" container="5432"/>
+          </ports>
+        </networking>
+      </strategy>
+
+      <strategy name="testing">
+        <type>containerized</type>
+        <orchestration>kubernetes</orchestration>
+        <namespace>tamma-testing</namespace>
+        <replicas>1</replicas>
+        <resources>
+          <requests>
+            <cpu>100m</cpu>
+            <memory>256Mi</memory>
+          </requests>
+          <limits>
+            <cpu>500m</cpu>
+            <memory>512Mi</memory>
+          </limits>
+        </resources>
+      </strategy>
+
+      <strategy name="staging">
+        <type>containerized</type>
+        <orchestration>kubernetes</orchestration>
+        <namespace>tamma-staging</namespace>
+        <deployment-type>blue-green</deployment-type>
+        <replicas>2</replicas>
+        <resources>
+          <requests>
+            <cpu>500m</cpu>
+            <memory>1Gi</memory>
+          </requests>
+          <limits>
+            <cpu>2000m</cpu>
+            <memory>2Gi</memory>
+          </limits>
+        </resources>
+      </strategy>
+
+      <strategy name="production">
+        <type>containerized</type>
+        <orchestration>kubernetes</orchestration>
+        <namespace>tamma-production</namespace>
+        <deployment-type>rolling-update</deployment-type>
+        <replicas>3</replicas>
+        <auto-scaling>
+          <min_replicas>3</min_replicas>
+          <max_replicas>10</max_replicas>
+          <target_cpu_utilization>70</target_cpu_utilization>
+        </auto-scaling>
+        <resources>
+          <requests>
+            <cpu>1000m</cpu>
+            <memory>2Gi</memory>
+          </requests>
+          <limits>
+            <cpu>4000m</cpu>
+            <memory>4Gi</memory>
+          </limits>
+        </resources>
+      </strategy>
+    </deployment-strategies>
+
+    <environment-detection>
+      <methods>
+        <method name="environment-variable" priority="1">
+          <variable>NODE_ENV</variable>
+          <values>development,testing,staging,production</values>
+        </method>
+        <method name="hostname-pattern" priority="2">
+          <patterns>
+            <pattern regex=".*-dev.*" environment="development"/>
+            <pattern regex=".*-test.*" environment="testing"/>
+            <pattern regex=".*-staging.*" environment="staging"/>
+            <pattern regex=".*-prod.*" environment="production"/>
+          </patterns>
+        </method>
+        <method name="kubernetes-namespace" priority="3">
+          <namespaces>
+            <namespace name="tamma-development" environment="development"/>
+            <namespace name="tamma-testing" environment="testing"/>
+            <namespace name="tamma-staging" environment="staging"/>
+            <namespace name="tamma-production" environment="production"/>
+          </namespaces>
+        </method>
+        <method name="default" priority="4">
+          <environment>development</environment>
+        </method>
+      </methods>
+    </environment-detection>
+  </technical-specifications>
+
+  <data-models>
+    <environment-model>
+      <interface name="IEnvironment">
+        <properties>
+          <property name="name" type="string"/>
+          <property name="type" type="EnvironmentType"/>
+          <property name="configuration" type="IConfiguration"/>
+          <property name="deployment" type="IDeploymentConfig"/>
+          <property name="resources" type="IResourceConfig"/>
+        </properties>
+      </interface>
+
+      <interface name="IDeploymentConfig">
+        <properties>
+          <property name="strategy" type="DeploymentStrategy"/>
+          <property name="orchestration" type="OrchestrationPlatform"/>
+          <property name="namespace" type="string"/>
+          <property name="replicas" type="number"/>
+          <property name="auto_scaling" type="IAutoScalingConfig" optional="true"/>
+        </properties>
+      </interface>
+
+      <interface name="IResourceConfig">
+        <properties>
+          <property name="requests" type="IResourceRequests"/>
+          <property name="limits" type="IResourceLimits"/>
+        </properties>
+      </interface>
+
+      <interface name="IAutoScalingConfig">
+        <properties>
+          <property name="min_replicas" type="number"/>
+          <property name="max_replicas" type="number"/>
+          <property name="target_cpu_utilization" type="number"/>
+          <property name="target_memory_utilization" type="number" optional="true"/>
+        </properties>
+      </interface>
+    </environment-model>
+
+    <types>
+      <type name="EnvironmentType" enum="['development', 'testing', 'staging', 'production']"/>
+      <type name="DeploymentStrategy" enum="['local', 'containerized', 'serverless']"/>
+      <type name="OrchestrationPlatform" enum="['docker-compose', 'kubernetes', 'ecs', 'gke']"/>
+    </types>
+  </data-models>
+
+  <core-interfaces>
+    <interface name="IEnvironmentManager">
+      <description>Manages environment-specific deployments</description>
+      <methods>
+        <method name="detectEnvironment" returns="Promise&lt;EnvironmentType&gt;"/>
+        <method name="getEnvironment" returns="Promise&lt;IEnvironment&gt;">
+          <param name="environment" type="EnvironmentType" optional="true"/>
+        </method>
+        <method name="deploy" returns="Promise&lt;IDeploymentResult&gt;">
+          <param name="environment" type="EnvironmentType"/>
+          <param name="options" type="IDeploymentOptions" optional="true"/>
+        </method>
+        <method name="rollback" returns="Promise&lt;IRollbackResult&gt;">
+          <param name="deployment_id" type="string"/>
+        </method>
+        <method name="getDeploymentStatus" returns="Promise&lt;IDeploymentStatus&gt;">
+          <param name="deployment_id" type="string"/>
+        </method>
+        <method name="validateEnvironment" returns="Promise&lt;IValidationResult&gt;">
+          <param name="environment" type="EnvironmentType"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IDeploymentStrategy">
+      <description>Abstract deployment strategy</description>
+      <methods>
+        <method name="deploy" returns="Promise&lt;IDeploymentResult&gt;">
+          <param name="environment" type="IEnvironment"/>
+          <param name="options" type="IDeploymentOptions"/>
+        </method>
+        <method name="rollback" returns="Promise&lt;IRollbackResult&gt;">
+          <param name="deployment" type="IDeploymentResult"/>
+        </method>
+        <method name="getStatus" returns="Promise&lt;IDeploymentStatus&gt;">
+          <param name="deployment_id" type="string"/>
+        </method>
+        <method name="validate" returns="Promise&lt;IValidationResult&gt;">
+          <param name="environment" type="IEnvironment"/>
+        </method>
+      </methods>
+    </interface>
+
+    <interface name="IEnvironmentDetector">
+      <description>Detects current environment</description>
+      <methods>
+        <method name="detect" returns="Promise&lt;EnvironmentType&gt;"/>
+        <method name="addDetectionMethod" returns="void">
+          <param name="method" type="IDetectionMethod"/>
+        </method>
+      </methods>
+    </interface>
+  </core-interfaces>
+
+  <key-classes>
+    <class name="EnvironmentManager">
+      <description>Default implementation of environment management</description>
+      <properties>
+        <property name="detector" type="IEnvironmentDetector"/>
+        <property name="strategies" type="Map&lt;DeploymentStrategy, IDeploymentStrategy&gt;"/>
+        <property name="config_manager" type="IConfigurationManager"/>
+      </properties>
+      <methods>
+        <method name="detectEnvironment" returns="Promise&lt;EnvironmentType&gt;"/>
+        <method name="getEnvironment" returns="Promise&lt;IEnvironment&gt;"/>
+        <method name="deploy" returns="Promise&lt;IDeploymentResult&gt;"/>
+        <method name="rollback" returns="Promise&lt;IRollbackResult&gt;"/>
+        <method name="getDeploymentStatus" returns="Promise&lt;IDeploymentStatus&gt;"/>
+        <method name="validateEnvironment" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="_getDeploymentStrategy" returns="IDeploymentStrategy"/>
+      </methods>
+    </class>
+
+    <class name="KubernetesDeploymentStrategy">
+      <description>Kubernetes deployment strategy</description>
+      <implements>IDeploymentStrategy</implements>
+      <properties>
+        <property name="client" type="KubernetesApi"/>
+        <property name="helm_client" type="HelmClient" optional="true"/>
+      </properties>
+      <methods>
+        <method name="deploy" returns="Promise&lt;IDeploymentResult&gt;"/>
+        <method name="rollback" returns="Promise&lt;IRollbackResult&gt;"/>
+        <method name="getStatus" returns="Promise&lt;IDeploymentStatus&gt;"/>
+        <method name="validate" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="_createDeployment" returns="Promise&lt;V1Deployment&gt;"/>
+        <method name="_createService" returns="Promise&lt;V1Service&gt;"/>
+        <method name="_createConfigMap" returns="Promise&lt;V1ConfigMap&gt;"/>
+        <method name="_createSecret" returns="Promise&lt;V1Secret&gt;"/>
+      </methods>
+    </class>
+
+    <class name="DockerComposeDeploymentStrategy">
+      <description>Docker Compose deployment strategy</description>
+      <implements>IDeploymentStrategy</implements>
+      <properties>
+        <property name="compose_client" type="DockerComposeClient"/>
+      </properties>
+      <methods>
+        <method name="deploy" returns="Promise&lt;IDeploymentResult&gt;"/>
+        <method name="rollback" returns="Promise&lt;IRollbackResult&gt;"/>
+        <method name="getStatus" returns="Promise&lt;IDeploymentStatus&gt;"/>
+        <method name="validate" returns="Promise&lt;IValidationResult&gt;"/>
+        <method name="_generateComposeFile" returns="string"/>
+        <method name="_validateComposeFile" returns="Promise&lt;IValidationResult&gt;"/>
+      </methods>
+    </class>
+
+    <class name="ChainedEnvironmentDetector">
+      <description>Chains multiple environment detection methods</description>
+      <implements>IEnvironmentDetector</implements>
+      <properties>
+        <property name="methods" type="IDetectionMethod[]"/>
+      </properties>
+      <methods>
+        <method name="detect" returns="Promise&lt;EnvironmentType&gt;"/>
+        <method name="addDetectionMethod" returns="void"/>
+        <method name="_tryDetectionMethod" returns="Promise&lt;EnvironmentType | null&gt;"/>
+      </methods>
+    </class>
+  </key-classes>
+
+  <integration-points>
+    <integration name="kubernetes-api">
+      <component>Kubernetes Cluster</component>
+      <interface>KubernetesApi</interface>
+      <description>Deploys and manages Kubernetes resources</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>Kubernetes REST API</protocol>
+        <authentication>Service Account Token</authentication>
+      </data-flow>
+    </integration>
+
+    <integration name="docker-compose">
+      <component>Docker Engine</component>
+      <interface>Docker Compose CLI</interface>
+      <description>Manages local Docker Compose deployments</description>
+      <data-flow>
+        <direction>unidirectional</direction>
+        <protocol>Docker CLI</protocol>
+      </data-flow>
+    </integration>
+
+    <integration name="helm-charts">
+      <component>Helm</component>
+      <interface>Helm Client</interface>
+      <description>Uses Helm charts for complex deployments</description>
+      <data-flow>
+        <direction>bidirectional</direction>
+        <protocol>Helm CLI/REST API</protocol>
+      </data-flow>
+    </integration>
+  </integration-points>
+
+  <data-sources>
+    <source name="environment-configs">
+      <type>file</type>
+      <format>YAML</format>
+      <locations>
+        <location>deployments/environments/development.yaml</location>
+        <location>deployments/environments/testing.yaml</location>
+        <location>deployments/environments/staging.yaml</location>
+        <location>deployments/environments/production.yaml</location>
+      </locations>
+      <access-pattern>read-on-deploy</access-pattern>
+    </source>
+
+    <source name="kubernetes-manifests">
+      <type>file</type>
+      <format>YAML</format>
+      <locations>
+        <location>deployments/kubernetes/namespace.yaml</location>
+        <location>deployments/kubernetes/deployment.yaml</location>
+        <location>deployments/kubernetes/service.yaml</location>
+        <location>deployments/kubernetes/configmap.yaml</location>
+      </locations>
+      <access-pattern>read-on-deploy</access-pattern>
+    </source>
+
+    <source name="docker-compose-files">
+      <type>file</type>
+      <format>YAML</format>
+      <locations>
+        <location>deployments/docker-compose/docker-compose.yml</location>
+        <location>deployments/docker-compose/docker-compose.override.yml</location>
+      </locations>
+      <access-pattern>read-on-deploy</access-pattern>
+    </source>
+  </data-sources>
+
+  <api-endpoints>
+    <endpoint name="deploy-environment" method="POST" path="/api/v1/deployments">
+      <description>Deploy to specific environment</description>
+      <parameters>
+        <parameter name="environment" type="EnvironmentType">Target environment</parameter>
+        <parameter name="options" type="IDeploymentOptions" optional="true">Deployment options</parameter>
+      </parameters>
+      <responses>
+        <response code="201">Deployment started</response>
+        <response code="400">Invalid environment or options</response>
+        <response code="401">Unauthorized</response>
+        <response code="409">Deployment already in progress</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="get-deployment-status" method="GET" path="/api/v1/deployments/{deployment_id}">
+      <description>Get deployment status</description>
+      <parameters>
+        <parameter name="deployment_id" type="string">Deployment identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Deployment status</response>
+        <response code="404">Deployment not found</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="rollback-deployment" method="POST" path="/api/v1/deployments/{deployment_id}/rollback">
+      <description>Rollback deployment</description>
+      <parameters>
+        <parameter name="deployment_id" type="string">Deployment identifier</parameter>
+      </parameters>
+      <responses>
+        <response code="200">Rollback initiated</response>
+        <response code="404">Deployment not found</response>
+        <response code="409">Rollback not possible</response>
+      </responses>
+    </endpoint>
+
+    <endpoint name="list-environments" method="GET" path="/api/v1/environments">
+      <description>List available environments</description>
+      <responses>
+        <response code="200">List of environments</response>
+      </responses>
+    </endpoint>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage>85%</coverage>
+      <focus>
+        <area>Environment detection logic</area>
+        <area>Configuration loading per environment</area>
+        <area>Deployment strategy selection</area>
+        <area>Validation logic</area>
+      </focus>
+    </unit-tests>
+
+    <integration-tests>
+      <coverage>75%</coverage>
+      <focus>
+        <area>Docker Compose deployment</area>
+        <area>Kubernetes API integration</area>
+        <area>Environment-specific configuration</area>
+        <area>Rollback functionality</area>
+      </focus>
+    </integration-tests>
+
+    <end-to-end-tests>
+      <coverage>60%</coverage>
+      <focus>
+        <area>Complete deployment lifecycle</area>
+        <area>Environment promotion workflow</area>
+        <area>Disaster recovery scenarios</area>
+      </focus>
+    </end-to-end-tests>
+
+    <test-environments>
+      <environment name="test-cluster">
+        <type>kubernetes</type>
+        <purpose>Integration testing</purpose>
+        <isolation>namespace-level</isolation>
+      </environment>
+      <environment name="local-docker">
+        <type>docker-compose</type>
+        <purpose>Development testing</purpose>
+        <isolation>container-level</isolation>
+      </environment>
+    </test-environments>
+  </testing-strategy>
+
+  <security-considerations>
+    <threats>
+      <threat name="environment-configuration-exposure">
+        <description>Sensitive environment configurations exposed</description>
+        <mitigation>Encrypt secrets, use RBAC, audit access</mitigation>
+      </threat>
+      <threat name="unauthorized-deployment">
+        <description>Unauthorized deployments to production</description>
+        <mitigation>Require approvals, MFA, audit trails</mitigation>
+      </threat>
+      <threat name="cross-environment-contamination">
+        <description>Production data accessed from non-production</description>
+        <mitigation>Network isolation, separate credentials, environment validation</mitigation>
+      </threat>
+    </threats>
+
+    <controls>
+      <control name="rbac">
+        <description>Role-based access control for deployments</description>
+        <implementation>Kubernetes RBAC, JWT tokens</implementation>
+      </control>
+      <control name="approval-workflows">
+        <description>Required approvals for production deployments</description>
+        <implementation>GitHub Actions approval steps, manual gates</implementation>
+      </control>
+      <control name="network-isolation">
+        <description>Network isolation between environments</description>
+        <implementation>Kubernetes NetworkPolicies, VPC separation</implementation>
+      </control>
+    </controls>
+  </security-considerations>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="deployment_duration" type="histogram">Time to complete deployment</metric>
+      <metric name="deployment_success_rate" type="counter">Successful vs failed deployments</metric>
+      <metric name="rollback_count" type="counter">Number of rollbacks performed</metric>
+      <metric name="environment_health_score" type="gauge">Health score per environment</metric>
+    </metrics>
+
+    <alerts>
+      <alert name="deployment_failed">
+        <condition>deployment_success_rate &lt; 95%</condition>
+        <severity>critical</severity>
+        <action>Investigate deployment failure</action>
+      </alert>
+      <alert name="rollback_initiated">
+        <condition>rollback_count &gt; 0</condition>
+        <severity>warning</severity>
+        <action>Review rollback reason and impact</action>
+      </alert>
+      <alert name="environment_unhealthy">
+        <condition>environment_health_score &lt; 0.8</condition>
+        <severity>warning</severity>
+        <action>Investigate environment health issues</action>
+      </alert>
+    </alerts>
+
+    <dashboards>
+      <dashboard name="deployment-overview">
+        <widgets>
+          <widget type="chart">Deployment success rate over time</widget>
+          <widget type="table">Recent deployments and status</widget>
+          <widget type="gauge">Current environment health</widget>
+        </widgets>
+      </dashboard>
+    </dashboards>
+  </monitoring-requirements>
+
+  <configuration-schema>
+    <file-location>deployments/environments/{environment}.yaml</file-location>
+    <schema-validation>ajv with environment-specific schemas</schema-validation>
+    <templates>
+      <template name="development">deployments/templates/development.yaml.template</template>
+      <template name="production">deployments/templates/production.yaml.template</template>
+    </templates>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <user-docs>
+      <doc name="environment-setup">Setting up different environments</doc>
+      <doc name="deployment-guide">Step-by-step deployment instructions</doc>
+      <doc name="troubleshooting-deployments">Common deployment issues</doc>
+    </user-docs>
+
+    <developer-docs>
+      <doc name="environment-configuration">Environment configuration reference</doc>
+      <doc name="deployment-strategies">Custom deployment strategies</doc>
+      <doc name="kubernetes-manifests">Kubernetes resource documentation</doc>
+    </developer-docs>
+
+    <operations-docs>
+      <doc name="production-runbook">Production deployment procedures</doc>
+      <doc name="disaster-recovery">Disaster recovery procedures</doc>
+      <doc name="monitoring-deployments">Deployment monitoring setup</doc>
+    </operations-docs>
+  </documentation-requirements>
+
+  <acceptance-criteria>
+    <criteria id="ac1" priority="must">
+      <description>System automatically detects current environment using multiple methods</description>
+      <verification>Unit test for detection chain with fallbacks</verification>
+    </criteria>
+
+    <criteria id="ac2" priority="must">
+      <description>Each environment has specific configuration overrides applied correctly</description>
+      <verification>Integration test for each environment type</verification>
+    </criteria>
+
+    <criteria id="ac3" priority="must">
+      <description>Development environment supports hot reloading and debug mode</description>
+      <verification>Manual testing of hot reload functionality</verification>
+    </criteria>
+
+    <criteria id="ac4" priority="must">
+      <description>Production environment has hardened security settings and monitoring</description>
+      <verification>Security audit and monitoring verification</verification>
+    </criteria>
+
+    <criteria id="ac5" priority="should">
+      <description>Deployments can be performed to any environment via API</description>
+      <verification>API integration test for deployment endpoints</verification>
+    </criteria>
+
+    <criteria id="ac6" priority="should">
+      <description>Rollback functionality works correctly for all environments</description>
+      <verification>Rollback integration test</verification>
+    </criteria>
+
+    <criteria id="ac7" priority="could">
+      <description>Environment promotion workflow supports automated testing gates</description>
+      <verification>End-to-end promotion workflow test</verification>
+    </criteria>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="risk1" level="high">
+      <description>Environment configuration drift causes deployment failures</description>
+      <mitigation>Configuration validation, automated testing, drift detection</mitigation>
+    </risk>
+
+    <risk id="risk2" level="medium">
+      <description>Production deployment complexity leads to downtime</description>
+      <mitigation>Blue-green deployments, automated rollbacks, health checks</mitigation>
+    </risk>
+
+    <risk id="risk3" level="medium">
+      <description>Cross-environment data contamination</description>
+      <mitigation>Strict isolation, separate credentials, environment validation</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="deployment_success_rate" target="&gt; 99%">Percentage of successful deployments</metric>
+    <metric name="deployment_time" target="&lt; 5min">Time to complete deployment</metric>
+    <metric name="rollback_time" target="&lt; 2min">Time to complete rollback</metric>
+    <metric name="environment_detection_accuracy" target="100%">Accuracy of automatic environment detection</metric>
+  </success-metrics>
+</story-context>

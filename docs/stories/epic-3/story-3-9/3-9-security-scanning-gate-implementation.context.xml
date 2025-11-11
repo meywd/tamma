@@ -1,0 +1,402 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="3-9-security-scanning-gate-implementation">
+  <metadata>
+    <title>Story 3.9: Security Scanning Gate Implementation</title>
+    <epic>Epic 3 - Quality Gates & Intelligence Layer</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want security scanning gate to detect vulnerabilities and compliance issues</action>
+    <benefit>so that I can ensure security standards and prevent security breaches</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">Security scanning gate runs multiple security tools across different vulnerability types</criterion>
+    <criterion id="2">Gate detects code vulnerabilities, dependency issues, and configuration problems</criterion>
+    <criterion id="3">Security findings are categorized by severity and CVSS scores</criterion>
+    <criterion id="4">Gate generates security reports with remediation recommendations</criterion>
+    <criterion id="5">Security scans are integrated into CI/CD pipeline with proper gating</criterion>
+    <criterion id="6">Security scan execution and results logged to event trail</criterion>
+    <criterion id="7">Integration test validates security scanning workflow</criterion>
+    <criterion id="8">System handles false positives and security scan failures</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="SecurityScanningGate">
+        <interface>ISecurityScanningGate</interface>
+        <methods>
+          <method name="executeSecurityScan" returns="SecurityScanResult">
+            <parameter name="request" type="SecurityScanRequest"/>
+          </method>
+          <method name="detectVulnerabilityTypes" returns="VulnerabilityType[]">
+            <parameter name="projectPath" type="string"/>
+            <parameter name="languages" type="Language[]"/>
+          </method>
+          <method name="selectSecurityTools" returns="SecurityTool[]">
+            <parameter name="vulnerabilityTypes" type="VulnerabilityType[]"/>
+            <parameter name="context" type="SecurityContext"/>
+          </method>
+          <method name="runSecurityTool" returns="SecurityToolResult">
+            <parameter name="tool" type="SecurityTool"/>
+            <parameter name="target" type="ScanTarget"/>
+          </method>
+          <method name="aggregateSecurityResults" returns="AggregatedSecurityResult">
+            <parameter name="toolResults" type="SecurityToolResult[]"/>
+          </method>
+          <method name="generateRemediationPlan" returns="RemediationPlan">
+            <parameter name="results" type="AggregatedSecurityResult"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="SecurityScanRequest">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="projectPath" type="string"/>
+          <field name="branch" type="string"/>
+          <field name="commit" type="string"/>
+          <field name="scanTypes" type="ScanType[]"/>
+          <field name="languages" type="Language[]"/>
+          <field name="tools" type="string[]"/>
+          <field name="options" type="SecurityScanOptions"/>
+          <field name="timeout" type="number"/>
+        </fields>
+      </interface>
+
+      <interface name="SecurityScanResult">
+        <fields>
+          <field name="success" type="boolean"/>
+          <field name="requestId" type="string"/>
+          <field name="scannedAt" type="Date"/>
+          <field name="duration" type="number"/>
+          <field name="toolResults" type="SecurityToolResult[]"/>
+          <field name="aggregatedResult" type="AggregatedSecurityResult"/>
+          <field name="remediationPlan" type="RemediationPlan"/>
+          <field name="securityScore" type="number"/>
+          <field name="complianceStatus" type="ComplianceStatus"/>
+        </fields>
+      </interface>
+
+      <interface name="SecurityTool">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="type" type="ScanType"/>
+          <field name="category" type="SecurityCategory"/>
+          <field name="languages" type="string[]"/>
+          <field name="command" type="string"/>
+          <field name="args" type="string[]"/>
+          <field name="configFiles" type="string[]"/>
+          <field name="outputFormat" type="string"/>
+          <field name="severity" type="string[]"/>
+          <field name="database" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="SecurityToolResult">
+        <fields>
+          <field name="toolName" type="string"/>
+          <field name="scanType" type="ScanType"/>
+          <field name="success" type="boolean"/>
+          <field name="exitCode" type="number"/>
+          <field name="output" type="string"/>
+          <field name="errorOutput" type="string"/>
+          <field name="duration" type="number"/>
+          <field name="vulnerabilities" type="Vulnerability[]"/>
+          <field name="metadata" type="ToolMetadata"/>
+        </fields>
+      </interface>
+
+      <interface name="Vulnerability">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="tool" type="string"/>
+          <field name="type" type="VulnerabilityType"/>
+          <field name="severity" type="string"/>
+          <field name="cvssScore" type="number"/>
+          <field name="title" type="string"/>
+          <field name="description" type="string"/>
+          <field name="file" type="string"/>
+          <field name="line" type="number"/>
+          <field name="column" type="number"/>
+          <field name="cwe" type="string"/>
+          <field name="owasp" type="string"/>
+          <field name="references" type="string[]"/>
+          <field name="remediation" type="Remediation"/>
+        </fields>
+      </interface>
+
+      <interface name="AggregatedSecurityResult">
+        <fields>
+          <field name="totalVulnerabilities" type="number"/>
+          <field name="vulnerabilitiesBySeverity" type="Record&lt;string, number&gt;"/>
+          <field name="vulnerabilitiesByType" type="Record&lt;string, number&gt;"/>
+          <field name="vulnerabilitiesByFile" type="Record&lt;string, number&gt;"/>
+          <field name="securityMetrics" type="SecurityMetrics"/>
+          <field name="complianceMetrics" type="ComplianceMetrics"/>
+          <field name="riskAssessment" type="RiskAssessment"/>
+        </fields>
+      </interface>
+
+      <interface name="RemediationPlan">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="priority" type="string"/>
+          <field name="remediations" type="Remediation[]"/>
+          <field name="estimatedEffort" type="string"/>
+          <field name="riskReduction" type="number"/>
+          <field name="timeline" type="Timeline"/>
+          <field name="dependencies" type="string[]"/>
+        </fields>
+      </interface>
+
+      <interface name="Remediation">
+        <fields>
+          <field name="vulnerabilityId" type="string"/>
+          <field name="type" type="RemediationType"/>
+          <field name="description" type="string"/>
+          <field name="steps" type="string[]"/>
+          <field name="codeExample" type="string"/>
+          <field name="effort" type="string"/>
+          <field name="priority" type="string"/>
+          <field name="automated" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="SecurityMetrics">
+        <fields>
+          <field name="securityScore" type="number"/>
+          <field name="criticalVulnerabilities" type="number"/>
+          <field name="highVulnerabilities" type="number"/>
+          <field name="mediumVulnerabilities" type="number"/>
+          <field name="lowVulnerabilities" type="number"/>
+          <field name="riskScore" type="number"/>
+          <field name="complianceScore" type="number"/>
+        </fields>
+      </interface>
+
+      <interface name="ComplianceStatus">
+        <fields>
+          <field name="framework" type="string"/>
+          <field name="status" type="string"/>
+          <field name="requirements" type="ComplianceRequirement[]"/>
+          <field name="violations" type="ComplianceViolation[]"/>
+          <field name="score" type="number"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Vulnerability Detection">
+        <description>Detect types of security vulnerabilities to scan for</description>
+        <components>
+          <component>Code analysis</component>
+          <component>Dependency analysis</component>
+          <component>Configuration analysis</component>
+          <component>Infrastructure analysis</component>
+        </components>
+      </phase>
+
+      <phase name="Tool Selection">
+        <description>Select appropriate security scanning tools</description>
+        <components>
+          <component>Tool mapping</component>
+          <component>Database updates</component>
+          <component>Configuration loading</component>
+          <component>Compatibility checking</component>
+        </components>
+      </phase>
+
+      <phase name="Security Scanning">
+        <description>Execute security scanning tools</description>
+        <components>
+          <component>Parallel scanning</component>
+          <component>Resource monitoring</component>
+          <component>Timeout management</component>
+          <component>Error handling</component>
+        </components>
+      </phase>
+
+      <phase name="Result Analysis">
+        <description>Analyze and aggregate security results</description>
+        <components>
+          <component>Vulnerability correlation</component>
+          <component>False positive filtering</component>
+          <field name="Severity normalization</field>
+          <component>Risk assessment</component>
+        </components>
+      </phase>
+
+      <phase name="Remediation Planning">
+        <description>Generate remediation plans and recommendations</description>
+        <components>
+          <component>Remediation generation</component>
+          <component>Effort estimation</component>
+          <component>Priority calculation</component>
+          <component>Automated fix suggestions</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Security Scanners">
+        <description>Integrate with various security scanning tools</description>
+        <tools>
+          <tool>Snyk (Dependency scanning)</tool>
+          <tool>Semgrep (Static analysis)</tool>
+          <tool>CodeQL (Semantic analysis)</tool>
+          <tool>OWASP ZAP (Dynamic analysis)</tool>
+          <tool>Trivy (Container scanning)</tool>
+          <tool>Bandit (Python security)</tool>
+          <tool>npm audit (JavaScript dependencies)</tool>
+        </tools>
+      </integration>
+
+      <integration name="Vulnerability Databases">
+        <description>Integrate with vulnerability databases</description>
+        <databases>
+          <database>NVD (National Vulnerability Database)</database>
+          <database>CVE (Common Vulnerabilities and Exposures)</database>
+          <database>CWE (Common Weakness Enumeration)</database>
+          <database>GitHub Advisory Database</database>
+        </databases>
+      </integration>
+
+      <integration name="Compliance Frameworks">
+        <description>Check compliance against security frameworks</description>
+        <frameworks>
+          <framework>OWASP Top 10</framework>
+          <framework>SANS Top 25</framework>
+          <framework>NIST Cybersecurity Framework</framework>
+          <framework>ISO 27001</framework>
+          <framework>SOC 2</framework>
+        </frameworks>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for security scanning</description>
+        <events>
+          <event>SECURITY_SCAN.STARTED</event>
+          <event>SECURITY_SCAN.COMPLETED</event>
+          <event>VULNERABILITY.DETECTED</event>
+          <event>REMEDIATION.PLAN.GENERATED</event>
+          <event>COMPLIANCE.CHECK.COMPLETED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="SecurityScanningGate">
+          <test>detect vulnerability types accurately</test>
+          <test>select appropriate security tools</test>
+          <test>execute security scans</test>
+          <test>aggregate security results</test>
+          <test>generate remediation plans</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>scan real codebases for vulnerabilities</test>
+        <test>multiple security tool integration</test>
+        <test>compliance framework checking</test>
+        <test>remediation plan generation</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="scan_settings">
+        <setting name="default_tools" default="['snyk', 'semgrep', 'codeql']"/>
+        <setting name="parallel_execution" default="true"/>
+        <setting name="max_workers" default="4"/>
+        <setting name="timeout" default="3600"/>
+        <setting name="fail_on_critical" default="true"/>
+      </section>
+
+      <section name="severity_thresholds">
+        <setting name="block_on_critical" default="true"/>
+        <setting name="block_on_high" default="false"/>
+        <setting name="max_critical_vulnerabilities" default="0"/>
+        <setting name="max_high_vulnerabilities" default="5"/>
+        <setting name="min_cvss_score" default="4.0"/>
+      </section>
+
+      <section name="compliance_settings">
+        <setting name="owasp_top_10" default="true"/>
+        <setting name="sans_top_25" default="true"/>
+        <setting name="nist_framework" default="false"/>
+        <setting name="min_compliance_score" default="80"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="vulnerability_detection" metric="time" value="&lt; 15 seconds"/>
+      <target name="tool_selection" metric="time" value="&lt; 10 seconds"/>
+      <target name="security_scanning" metric="time" value="&lt; 30 minutes"/>
+      <target name="result_analysis" metric="time" value="&lt; 2 minutes"/>
+    </performance-targets>
+
+    <vulnerability-types>
+      <type name="injection">
+        <description>SQL, NoSQL, OS, and LDAP injection</description>
+        <tools>semgrep, codeql, bandit</tools>
+      </type>
+      <type name="dependency">
+        <description>Vulnerable dependencies and packages</description>
+        <tools>snyk, npm audit, pip-audit</tools>
+      </type>
+      <type name="authentication">
+        <description>Authentication and authorization issues</description>
+        <tools>semgrep, codeql, bandit</tools>
+      </type>
+      <type name="sensitive_data">
+        <description>Exposure of sensitive data</description>
+        <tools>semgrep, git-secrets, trufflehog</tools>
+      </type>
+      <type name="cryptographic">
+        <description>Weak cryptography and implementation</description>
+        <tools>semgrep, codeql, bandit</tools>
+      </type>
+    </vulnerability-types>
+
+    <scan-types>
+      <type name="static_analysis">
+        <description>Static Application Security Testing (SAST)</description>
+        <tools>semgrep, codeql, bandit</tools>
+      </type>
+      <type name="dependency_scanning">
+        <description>Software Composition Analysis (SCA)</description>
+        <tools>snyk, npm audit, pip-audit</tools>
+      </type>
+      <type name="container_scanning">
+        <description>Container image security scanning</description>
+        <tools>trivy, clair, anchore</tools>
+      </type>
+      <type name="infrastructure_scanning">
+        <description>Infrastructure as Code security</description>
+        <tools>checkov, tfsec, terrascan</tools>
+      </type>
+    </scan-types>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Comprehensive vulnerability detection across multiple types</consideration>
+      <consideration priority="2">Integration with multiple security scanning tools</consideration>
+      <consideration priority="3">Proper severity assessment and CVSS scoring</consideration>
+      <consideration priority="4">Actionable remediation planning</consideration>
+      <consideration priority="5">Compliance framework checking</consideration>
+      <consideration priority="6">False positive filtering and risk assessment</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

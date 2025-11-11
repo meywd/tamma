@@ -1,0 +1,454 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="1.5-9" title="Binary Releases & Installers" epic="1.5" created="2025-11-08T12:00:00.000Z">
+  <overview>
+    <summary>Create platform-specific binaries, installers, and distribution mechanisms for Windows, macOS, and Linux. This enables easy installation for users who prefer binary distributions over npm packages, with automated building, packaging, and release workflows.</summary>
+    <business-objective>Provide easy installation methods for all major platforms with automated binary building, installer creation, and distribution through multiple channels.</business-objective>
+    <technical-approach>Implement cross-platform binary compilation using pkg, create platform-specific installers (NSIS, DMG, DEB/RPM), and build automated release workflows with GitHub Actions.</technical-approach>
+  </overview>
+
+  <technical-components>
+    <component name="Binary Building System" package="scripts" primary="true">
+      <description>Cross-platform binary compilation and packaging</description>
+      <key-scripts>
+        <script name="build-binaries.ts" purpose="Cross-platform binary creation"/>
+        <script name="create-archives.ts" purpose="Archive creation for distribution"/>
+      </key-scripts>
+      <platforms>
+        <platform name="linux-x64" binary="tamma" archive="tar.gz"/>
+        <platform name="linux-arm64" binary="tamma" archive="tar.gz"/>
+        <platform name="darwin-x64" binary="tamma" archive="tar.gz"/>
+        <platform name="darwin-arm64" binary="tamma" archive="tar.gz"/>
+        <platform name="win32-x64" binary="tamma.exe" archive="zip"/>
+      </platforms>
+      <tools>
+        <tool name="pkg" purpose="Node.js binary compilation"/>
+        <tool name="archiver" purpose="ZIP archive creation"/>
+        <tool name="tar" purpose="tar.gz archive creation"/>
+      </tools>
+    </component>
+
+    <component name="Windows Installer" package="installers/windows" primary="true">
+      <description>NSIS-based Windows installer with PATH configuration</description>
+      <key-files>
+        <file name="installer.nsi" purpose="NSIS installer script"/>
+        <file name="build-installer.ps1" purpose="PowerShell build script"/>
+      </key-files>
+      <features>
+        <feature>GUI installation wizard</feature>
+        <feature>PATH environment variable configuration</feature>
+        <feature>Desktop and Start Menu shortcuts</feature>
+        <feature>Automatic uninstaller</feature>
+        <feature>Registry integration</feature>
+      </features>
+      <tools>
+        <tool name="NSIS" purpose="Windows installer creation"/>
+        <tool name="PowerShell" purpose="Build automation"/>
+      </tools>
+    </component>
+
+    <component name="macOS Installer" package="installers/macos" primary="true">
+      <description>DMG creation with app bundle for macOS</description>
+      <key-files>
+        <file name="create-dmg.sh" purpose="DMG creation script"/>
+        <file name="Info.plist" purpose="App bundle configuration"/>
+      </key-files>
+      <features>
+        <feature>DMG disk image with drag-and-drop</feature>
+        <feature>macOS app bundle</feature>
+        <feature>Code signing support</feature>
+        <feature>Notarization support</feature>
+      </features>
+      <tools>
+        <tool name="hdiutil" purpose="DMG creation"/>
+        <tool name="codesign" purpose="Code signing"/>
+        <tool name="xcrun" purpose="Notarization"/>
+      </tools>
+    </component>
+
+    <component name="Linux Packages" package="installers/linux" primary="true">
+      <description>DEB and RPM package creation for Linux distributions</description>
+      <key-files>
+        <file name="create-packages.sh" purpose="Package creation script"/>
+        <file name="tamma.spec" purpose="RPM spec file"/>
+        <file name="control" purpose="DEB control file"/>
+      </key-files>
+      <packages>
+        <package name="DEB" platforms="Debian, Ubuntu" tool="dpkg-deb"/>
+        <package name="RPM" platforms="RHEL, Fedora, CentOS" tool="rpmbuild"/>
+      </packages>
+      <features>
+        <feature>Dependency management</feature>
+        <feature>System integration</feature>
+        <feature>Package manager integration</feature>
+        <feature>Automatic updates</feature>
+      </features>
+    </component>
+
+    <component name="Installation Scripts" package="root" primary="true">
+      <description>Universal installation scripts for all platforms</description>
+      <key-scripts>
+        <script name="install.sh" purpose="Unix/Linux installation"/>
+        <script name="install.ps1" purpose="Windows PowerShell installation"/>
+      </key-scripts>
+      <features>
+        <feature>Platform detection</feature>
+        <feature>Automatic download</feature>
+        <feature>PATH configuration</feature>
+        <feature>Installation verification</feature>
+        <feature>Shell integration</feature>
+      </features>
+    </component>
+
+    <component name="Release Automation" package=".github/workflows" primary="true">
+      <description>Automated binary building and release workflows</description>
+      <key-workflows>
+        <workflow name="release-binaries.yml" purpose="Binary building and release"/>
+        <workflow name="create-installers.yml" purpose="Installer creation"/>
+      </key-workflows>
+      <build-matrix>
+        <matrix os="ubuntu-latest" platform="linux" arch="x64"/>
+        <matrix os="ubuntu-latest" platform="linux" arch="arm64"/>
+        <matrix os="macos-latest" platform="darwin" arch="x64"/>
+        <matrix os="macos-latest" platform="darwin" arch="arm64"/>
+        <matrix os="windows-latest" platform="win32" arch="x64"/>
+      </build-matrix>
+    </component>
+
+    <component name="Package Manager Integration" package="package-managers" primary="false">
+      <description>Integration with Homebrew, Chocolatey, and other package managers</description>
+      <integrations>
+        <integration name="Homebrew" file="Formula/tamma.rb" purpose="macOS package manager"/>
+        <integration name="Chocolatey" file="chocolatey/tamma.nuspec" purpose="Windows package manager"/>
+        <integration name="Snap" file="snap/snapcraft.yaml" purpose="Universal Linux package"/>
+      </integrations>
+    </component>
+  </technical-components>
+
+  <data-models>
+    <model name="PlatformConfig">
+      <fields>
+        <field name="platform" type="string" description="Platform identifier"/>
+        <field name="arch" type="string" description="Architecture identifier"/>
+        <field name="binaryName" type="string" description="Binary file name"/>
+        <field name="ext" type="string" description="File extension"/>
+        <field name="archiveFormat" type="enum" values="['tar.gz', 'zip']" description="Archive format"/>
+      </fields>
+    </model>
+
+    <model name="BuildConfig">
+      <fields>
+        <field name="version" type="string" description="Build version"/>
+        <field name="release" type="string" description="Release identifier"/>
+        <field name="targets" type="PlatformConfig[]" description="Build targets"/>
+        <field name="compression" type="enum" values="['GZip', 'Brotli', 'None']" default="GZip" description="Compression method"/>
+      </fields>
+    </model>
+
+    <model name="InstallerConfig">
+      <fields>
+        <field name="appName" type="string" description="Application name"/>
+        <field name="version" type="string" description="Application version"/>
+        <field name="publisher" type="string" description="Publisher name"/>
+        <field name="url" type="string" description="Application URL"/>
+        <field name="installDir" type="string" description="Default installation directory"/>
+        <field name="licenseFile" type="string" description="License file path"/>
+      </fields>
+    </model>
+
+    <model name="PackageMetadata">
+      <fields>
+        <field name="name" type="string" description="Package name"/>
+        <field name="version" type="string" description="Package version"/>
+        <field name="description" type="string" description="Package description"/>
+        <field name="maintainer" type="string" description="Package maintainer"/>
+        <field name="license" type="string" description="License type"/>
+        <field name="dependencies" type="string[]" description="Package dependencies"/>
+        <field name="architecture" type="string" description="Package architecture"/>
+      </fields>
+    </model>
+
+    <model name="ReleaseAsset">
+      <fields>
+        <field name="name" type="string" description="Asset file name"/>
+        <field name="platform" type="string" description="Target platform"/>
+        <field name="architecture" type="string" description="Target architecture"/>
+        <field name="contentType" type="string" description="MIME content type"/>
+        <field name="size" type="number" description="File size in bytes"/>
+        <field name="checksum" type="string" description="SHA256 checksum"/>
+      </fields>
+    </model>
+  </data-models>
+
+  <integration-points>
+    <integration name="GitHub Releases" type="external" critical="true">
+      <description>Primary distribution channel for binaries and installers</description>
+      <protocol>GitHub REST API</protocol>
+      <authentication>GitHub token</authentication>
+      <operations>
+        <op name="create-release" purpose="Create GitHub release"/>
+        <op name="upload-assets" purpose="Upload release assets"/>
+        <op name="download-assets" purpose="Download release assets"/>
+      </operations>
+    </integration>
+
+    <integration name="Build Systems" type="internal" critical="true">
+      <description>Integration with package build systems</description>
+      <systems>
+        <system name="pkg" purpose="Node.js binary compilation"/>
+        <system name="TypeScript" purpose="Source compilation"/>
+        <system name="pnpm" purpose="Package management"/>
+      </systems>
+    </integration>
+
+    <integration name="Package Managers" type="external" critical="false">
+      <description>Integration with system package managers</description>
+      <managers>
+        <manager name="Homebrew" purpose="macOS package distribution"/>
+        <manager name="Chocolatey" purpose="Windows package distribution"/>
+        <manager name="Snap Store" purpose="Universal Linux packages"/>
+        <manager name="APT" purpose="Debian/Ubuntu packages"/>
+        <manager name="YUM/DNF" purpose="RHEL/Fedora packages"/>
+      </managers>
+    </integration>
+
+    <integration name="CI/CD Pipeline" type="external" critical="true">
+      <description>GitHub Actions automation for building and releasing</description>
+      <platform>GitHub Actions</platform>
+      <triggers>
+        <trigger name="tag push" purpose="Release creation"/>
+        <trigger name="main branch" purpose="Development builds"/>
+      </triggers>
+      <environments>
+        <env name="ubuntu-latest" purpose="Linux builds"/>
+        <env name="macos-latest" purpose="macOS builds"/>
+        <env name="windows-latest" purpose="Windows builds"/>
+      </environments>
+    </integration>
+
+    <integration name="Code Signing" type="external" critical="false">
+      <description>Code signing for security and trust</description>
+      <platforms>
+        <platform name="Apple" purpose="macOS code signing and notarization"/>
+        <platform name="Microsoft" purpose="Windows code signing"/>
+      </platforms>
+      <certificates>
+        <cert name="Apple Developer ID" purpose="macOS signing"/>
+        <cert name="Code Signing Certificate" purpose="Windows signing"/>
+      </certificates>
+    </integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-testing>
+      <framework>Vitest</framework>
+      <coverage-target>85%</coverage-target>
+      <focus-areas>
+        <area>Platform detection logic</area>
+        <area>Archive creation and extraction</area>
+        <area>Installation script validation</area>
+        <area>Package metadata generation</area>
+        <area>Checksum calculation</area>
+      </focus-areas>
+      <test-scenarios>
+        <scenario>Platform detection for all supported platforms</scenario>
+        <scenario>Archive creation with correct compression</scenario>
+        <scenario>Package metadata validation</scenario>
+        <scenario>Installation script error handling</scenario>
+        <scenario>Checksum verification</scenario>
+      </test-scenarios>
+    </unit-testing>
+
+    <integration-testing>
+      <framework>GitHub Actions + Virtual Machines</framework>
+      <coverage-target>80%</coverage-target>
+      <test-scenarios>
+        <scenario>End-to-end binary building on all platforms</scenario>
+        <scenario>Installer creation and testing</scenario>
+        <scenario>Package installation and verification</scenario>
+        <scenario>Release automation workflow</scenario>
+        <scenario>Package manager integration</scenario>
+        <scenario>Code signing verification</scenario>
+      </test-scenarios>
+      <test-environments>
+        <env name="Ubuntu 20.04/22.04" purpose="Linux testing"/>
+        <env name="macOS 12/13" purpose="macOS testing"/>
+        <env name="Windows 10/11" purpose="Windows testing"/>
+      </test-environments>
+    </integration-testing>
+
+    <manual-testing>
+      <test-scenarios>
+        <scenario>Fresh system installation</scenario>
+        <scenario>Installation method comparison</scenario>
+        <scenario>Upgrade testing</scenario>
+        <scenario>Uninstallation testing</scenario>
+        <scenario>Package manager installation</scenario>
+        <scenario>Binary functionality verification</scenario>
+      </test-scenarios>
+      <test-platforms>
+        <platform name="Windows 10/11" architectures="x64"/>
+        <platform name="macOS 12/13" architectures="x64, arm64"/>
+        <platform name="Ubuntu 20.04/22.04" architectures="x64, arm64"/>
+        <platform name="Fedora 38/39" architectures="x64, arm64"/>
+      </test-platforms>
+    </manual-testing>
+
+    <performance-testing>
+      <framework>Custom performance tests</framework>
+      <scenarios>
+        <scenario name="Binary Size" description="Compressed binary size &lt; 100MB"/>
+        <scenario name="Installation Speed" description="Installation time &lt; 2 minutes"/>
+        <scenario name="Startup Performance" description="Binary startup time &lt; 3 seconds"/>
+      </scenarios>
+      <metrics>
+        <metric name="Binary Size" target="&lt; 100MB compressed"/>
+        <metric name="Installation Time" target="&lt; 2 minutes"/>
+        <metric name="Startup Time" target="&lt; 3 seconds"/>
+        <metric name="Memory Usage" target="&lt; 50MB at startup"/>
+      </metrics>
+    </performance-testing>
+  </testing-strategy>
+
+  <monitoring-requirements>
+    <metrics>
+      <metric name="Build Success Rate" type="counter" description="Successful binary builds"/>
+      <metric name="Build Duration" type="histogram" description="Time to build binaries"/>
+      <metric name="Release Success Rate" type="counter" description="Successful releases"/>
+      <metric name="Download Count" type="counter" description="Binary downloads per platform"/>
+      <metric name="Installation Success Rate" type="counter" description="Successful installations"/>
+      <metric name="Package Manager Installs" type="counter" description="Package manager installations"/>
+    </metrics>
+
+    <logging>
+      <level>INFO</level>
+      <format>JSON structured</format>
+      <correlation-ids>true</correlation-ids>
+      <key-fields>
+        <field>platform</field>
+        <field>architecture</field>
+        <field>version</field>
+        <field>buildTime</field>
+        <field>binarySize</field>
+        <field>checksum</field>
+      </key-fields>
+    </logging>
+
+    <alerts>
+      <alert name="Build Failure" condition="build_failures &gt; 0" severity="critical"/>
+      <alert name="Slow Build" condition="build_time &gt; 30m" severity="warning"/>
+      <alert name="Large Binary" condition="binary_size &gt; 150MB" severity="warning"/>
+      <alert name="Release Failure" condition="release_failures &gt; 0" severity="critical"/>
+      <alert name="Installation Issues" condition="installation_failures &gt; 5%" severity="warning"/>
+    </alerts>
+
+    <health-checks>
+      <check name="Build System" type="readiness" description="Binary building functional"/>
+      <check name="Release Pipeline" type="readiness" description="Release automation working"/>
+      <check name="Package Managers" type="liveness" description="Package manager integration"/>
+      <check name="Download URLs" type="liveness" description="Download URLs accessible"/>
+    </health-checks>
+  </monitoring-requirements>
+
+  <security-considerations>
+    <code-signing>
+      <platforms>
+        <platform name="Windows" tool="signtool" certificate="Code Signing Certificate"/>
+        <platform name="macOS" tool="codesign" certificate="Apple Developer ID"/>
+      </platforms>
+      <verification>Signature verification on download</verification>
+      <timestamp>Timestamp authority integration</timestamp>
+    </code-signing>
+
+    <binary-security>
+      <scanning>Virus scanning before release</scanning>
+      <dependencies>Dependency vulnerability scanning</dependencies>
+      <obfuscation>Binary obfuscation for IP protection</obfuscation>
+      <integrity>SHA256 checksums for all releases</integrity>
+    </binary-security>
+
+    <installer-security>
+      <validation>Installer integrity verification</validation>
+      <elevation>Proper privilege escalation</elevation>
+      <rollback>Secure uninstallation process</rollback>
+      <permissions>Minimal required permissions</permissions>
+    </installer-security>
+
+    <distribution-security>
+      <https>HTTPS-only downloads</https>
+      <verification>Checksum verification</verification>
+      <signatures>Digital signatures on all artifacts</signatures>
+      <audit>Complete audit trail of releases</audit>
+    </distribution-security>
+  </security-considerations>
+
+  <acceptance-criteria>
+    <functional>
+      <criterion id="AC-1">Binaries available for Windows, macOS, Linux (x64/arm64)</criterion>
+      <criterion id="AC-2">Installers created for all platforms (NSIS, DMG, DEB/RPM)</criterion>
+      <criterion id="AC-3">Universal installation scripts work for all platforms</criterion>
+      <criterion id="AC-4">Package manager integration complete (Homebrew, Chocolatey)</criterion>
+      <criterion id="AC-5">Automated release pipeline functional</criterion>
+      <criterion id="AC-6">Code signing implemented for all platforms</criterion>
+      <criterion id="AC-7">Checksums and security verification provided</criterion>
+      <criterion id="AC-8">Installation verification and testing complete</criterion>
+    </functional>
+
+    <non-functional>
+      <criterion id="AC-9">Installation process completes in less than 2 minutes</criterion>
+      <criterion id="AC-10">Compressed binary size is less than 100MB</criterion>
+      <criterion id="AC-11">Installation success rate is greater than 99%</criterion>
+      <criterion id="AC-12">Cross-platform compatibility verified on all supported systems</criterion>
+      <criterion id="AC-13">Binary startup time is less than 3 seconds</criterion>
+      <criterion id="AC-14">Memory usage at startup is less than 50MB</criterion>
+      <criterion id="AC-15">All releases are code signed and verified</criterion>
+    </non-functional>
+
+    <integration>
+      <criterion id="AC-16">GitHub Actions automation builds all platforms correctly</criterion>
+      <criterion id="AC-17">Release artifacts uploaded to GitHub Releases</criterion>
+      <criterion id="AC-18">Package manager submissions accepted and published</criterion>
+      <criterion id="AC-19">Installation scripts download and install correctly</criterion>
+      <criterion id="AC-20">Code signing integration works with certificate authorities</criterion>
+      <criterion id="AC-21">Checksum verification prevents tampered downloads</criterion>
+    </integration>
+
+    <security>
+      <criterion id="AC-22">All binaries are code signed for respective platforms</criterion>
+      <criterion id="AC-23">SHA256 checksums provided for all releases</criterion>
+      <criterion id="AC-24">Downloads use HTTPS with valid certificates</criterion>
+      <criterion id="AC-25">Installers request minimal necessary permissions</criterion>
+      <criterion id="AC-26">Security scanning passes for all binaries</criterion>
+    </security>
+  </acceptance-criteria>
+
+  <risk-mitigation>
+    <risk id="R-1" probability="medium" impact="high" description="Cross-platform compilation failures">
+      <mitigation>Containerized builds, comprehensive testing, fallback procedures</mitigation>
+    </risk>
+
+    <risk id="R-2" probability="low" impact="critical" description="Security vulnerabilities in binaries">
+      <mitigation>Code signing, security scanning, dependency management, quick patching</mitigation>
+    </risk>
+
+    <risk id="R-3" probability="medium" impact="medium" description="Package manager rejection">
+      <mitigation>Guideline compliance, thorough testing, community engagement</mitigation>
+    </risk>
+
+    <risk id="R-4" probability="low" impact="high" description="Certificate expiration or revocation">
+      <mitigation>Certificate monitoring, automated renewal, backup certificates</mitigation>
+    </risk>
+
+    <risk id="R-5" probability="medium" impact="medium" description="Installation failures on user systems">
+      <mitigation>Comprehensive testing, error handling, user support, troubleshooting guides</mitigation>
+    </risk>
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Installation Speed" target="&lt; 2 minutes" measurement="Time from download to functional installation"/>
+    <metric name="Binary Size" target="&lt; 100MB" measurement="Compressed binary size"/>
+    <metric name="Success Rate" target="&gt;99%" measurement="Installation success rate"/>
+    <metric name="Platform Coverage" target="100%" measurement="Supported platform coverage"/>
+    <metric name="Package Manager Adoption" target="&gt;50%" measurement="Package manager vs direct download usage"/>
+    <metric name="Security Compliance" target="100%" measurement="Code signing and security verification"/>
+  </success-metrics>
+</story-context>

@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-9-pr-status-monitoring">
+  <metadata>
+    <title>Story 2.9: PR Status Monitoring</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.8 (pull request creation must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to monitor pull request status and handle feedback</action>
+    <benefit>so that I can track review progress and respond to changes automatically</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System monitors PR status changes (reviews, comments, checks)</criterion>
+    <criterion id="2">System detects review feedback and categorizes by type (approval, changes, questions)</criterion>
+    <criterion id="3">System automatically addresses review comments when possible</criterion>
+    <criterion id="4">System notifies developers of required manual intervention</criterion>
+    <criterion id="5">System tracks check results (build, test, security) and responds to failures</criterion>
+    <criterion id="6">PR status changes and actions logged to event trail</criterion>
+    <criterion id="7">Integration test validates PR monitoring workflow</criterion>
+    <criterion id="8">System handles merge conflicts and status updates appropriately</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="PRMonitor">
+        <interface>IPRMonitor</interface>
+        <methods>
+          <method name="startMonitoring" returns="void">
+            <parameter name="pr" type="PullRequest"/>
+          </method>
+          <method name="checkStatus" returns="PRStatus">
+            <parameter name="pr" type="PullRequest"/>
+          </method>
+          <method name="processReviewFeedback" returns="ReviewProcessingResult">
+            <parameter name="reviews" type="Review[]"/>
+          </method>
+          <method name="handleCheckResults" returns="CheckHandlingResult">
+            <parameter name="checks" type="StatusCheck[]"/>
+          </method>
+          <method name="respondToComments" returns="CommentResponseResult">
+            <parameter name="comments" type="Comment[]"/>
+          </method>
+          <method name="handleMergeConflicts" returns="ConflictResolutionResult">
+            <parameter name="pr" type="PullRequest"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="PRStatus">
+        <fields>
+          <field name="prNumber" type="number"/>
+          <field name="state" type="string"/>
+          <field name="mergeable" type="boolean"/>
+          <field name="reviewCount" type="number"/>
+          <field name="approvalCount" type="number"/>
+          <field name="changeRequestCount" type="number"/>
+          <field name="commentCount" type="number"/>
+          <field name="checkStatus" type="CheckStatus"/>
+          <field name="lastUpdated" type="Date"/>
+          <field name="mergeConflicts" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="Review">
+        <fields>
+          <field name="id" type="string"/>
+          <field name="author" type="string"/>
+          <field name="state" type="string"/>
+          <field name="body" type="string"/>
+          <field name="comments" type="ReviewComment[]"/>
+          <field name="submittedAt" type="Date"/>
+          <field name="canAutoRespond" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="StatusCheck">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="status" type="string"/>
+          <field name="conclusion" type="string"/>
+          <field name="detailsUrl" type="string"/>
+          <field name="startedAt" type="Date"/>
+          <field name="completedAt" type="Date"/>
+          <field name="canAutoFix" type="boolean"/>
+        </fields>
+      </interface>
+
+      <interface name="ReviewProcessingResult">
+        <fields>
+          <field name="processedReviews" type="number"/>
+          <field name="autoResponses" type="AutoResponse[]"/>
+          <field name="manualActionsRequired" type="ManualAction[]"/>
+          <field name="changesMade" type="Change[]"/>
+        </fields>
+      </interface>
+
+      <interface name="AutoResponse">
+        <fields>
+          <field name="type" type="string"/>
+          <field name="target" type="string"/>
+          <field name="action" type="string"/>
+          <field name="content" type="string"/>
+          <field name="appliedAt" type="Date"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Status Monitoring">
+        <description>Continuously monitor PR status and changes</description>
+        <components>
+          <component>Webhook event processing</component>
+          <component>Polling fallback mechanism</component>
+          <component>Status change detection</component>
+          <component>Event filtering and prioritization</component>
+        </components>
+      </phase>
+
+      <phase name="Review Processing">
+        <description>Analyze and respond to review feedback</description>
+        <components>
+          <component>Review categorization</component>
+          <component>Auto-response generation</component>
+          <component>Comment analysis</component>
+          <component>Change implementation</component>
+        </components>
+      </phase>
+
+      <phase name="Check Management">
+        <description>Handle CI/CD check results and failures</description>
+        <components>
+          <component>Check status monitoring</component>
+          <component>Failure analysis</component>
+          <component>Auto-fix attempts</component>
+          <component>Notification system</component>
+        </components>
+      </phase>
+
+      <phase name="Conflict Resolution">
+        <description>Handle merge conflicts and status updates</description>
+        <components>
+          <component>Conflict detection</component>
+          <component>Automatic resolution attempts</component>
+          <component>Manual intervention requests</component>
+          <component>Status updates</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Git Platform">
+        <description>Monitor PR status and events</description>
+        <events>
+          <event>pull_request.review_requested</event>
+          <event>pull_request.review_submitted</event>
+          <event>pull_request.synchronize</event>
+          <event>status.check_run</event>
+        </events>
+      </integration>
+
+      <integration name="AI Provider">
+        <description>Analyze feedback and generate responses</description>
+        <events>
+          <event>REVIEW.ANALYZED</event>
+          <event>RESPONSE.GENERATED</event>
+        </events>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for PR monitoring</description>
+        <events>
+          <event>PR.STATUS.CHANGED</event>
+          <event>REVIEW.PROCESSED</event>
+          <event>CHECK.HANDLED</event>
+          <event>CONFLICT.RESOLVED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="PRMonitor">
+          <test>detect PR status changes</test>
+          <test>categorize review feedback</test>
+          <test>generate auto-responses</test>
+          <test>handle check failures</test>
+          <test>resolve merge conflicts</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>monitor real PR on GitHub</test>
+        <test>process review feedback automatically</test>
+        <test>handle CI/CD check failures</test>
+        <test>resolve merge conflicts</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="monitoring">
+        <setting name="poll_interval" default="30"/>
+        <setting name="webhook_enabled" default="true"/>
+        <setting name="auto_respond" default="true"/>
+        <setting name="auto_fix_checks" default="true"/>
+        <setting name="notification_threshold" default="1"/>
+      </section>
+
+      <section name="review_processing">
+        <setting name="auto_approve_trivial" default="false"/>
+        <setting name="auto_implement_changes" default="true"/>
+        <setting name="response_confidence_threshold" default="0.8"/>
+        <setting name="max_auto_changes_per_review" default="5"/>
+      </section>
+
+      <section name="check_handling">
+        <setting name="auto_retry_failures" default="true"/>
+        <setting name="max_retry_attempts" default="3"/>
+        <setting name="retry_backoff_seconds" default="60"/>
+        <setting name="critical_checks" default="['build', 'test', 'security']"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="status_check" metric="time" value="&lt; 5 seconds"/>
+      <target name="review_processing" metric="time" value="&lt; 30 seconds"/>
+      <target name="auto_response_generation" metric="time" value="&lt; 15 seconds"/>
+      <target name="conflict_detection" metric="time" value="&lt; 10 seconds"/>
+    </performance-targets>
+
+    <auto-response-types>
+      <type name="code_fix">Implement requested code changes</type>
+      <type name="clarification">Provide additional explanation</type>
+      <type name="test_addition">Add requested tests</type>
+      <type name="documentation_update">Update documentation</type>
+      <type name="comment_response">Respond to questions</type>
+      <type name="format_fix">Fix formatting issues</type>
+    </auto-response-types>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Real-time monitoring with webhook and polling fallback</consideration>
+      <consideration priority="2">Intelligent review feedback categorization</consideration>
+      <consideration priority="3">Safe auto-response with confidence thresholds</consideration>
+      <consideration priority="4">Comprehensive check failure handling</consideration>
+      <consideration priority="5">Merge conflict detection and resolution</consideration>
+      <consideration priority="6">Clear notification system for manual intervention</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

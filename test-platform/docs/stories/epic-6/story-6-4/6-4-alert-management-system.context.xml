@@ -1,0 +1,521 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>6</epicId>
+    <storyId>4</storyId>
+    <title>Alert Management System</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-09T18:45:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/6-4-alert-management-system.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>an organization admin</asA>
+    <iWant>to configure alerts for performance changes and benchmark completion</iWant>
+    <soThat>I stay informed about important events without constantly checking the platform</soThat>
+    <tasks>- Task 1: Alert Rule Creation Interface (AC: 1)
+  - Subtask 1.1: Create alert rule builder with condition builder UI
+  - Subtask 1.2: Add support for metric thresholds and trend conditions
+  - Subtask 1.3: Implement time-based and event-based triggers
+  - Subtask 1.4: Create rule validation and testing functionality
+  - Subtask 1.5: Add alert rule templates for common scenarios
+- Task 2: Multi-Channel Notification System (AC: 2)
+  - Subtask 2.1: Implement email notification service with HTML templates
+  - Subtask 2.2: Create Slack integration with webhook support
+  - Subtask 2.3: Build webhook notification system with retry logic
+  - Subtask 2.4: Add SMS notification support for critical alerts
+  - Subtask 2.5: Create in-app notification system for real-time alerts
+- Task 3: Alert Severity and Escalation System (AC: 3)
+  - Subtask 3.1: Define severity levels (Info, Warning, Error, Critical)
+  - Subtask 3.2: Create escalation rule engine with time-based triggers
+  - Subtask 3.3: Implement role-based escalation paths
+  - Subtask 3.4: Add automatic escalation for unacknowledged alerts
+  - Subtask 3.5: Create escalation history and audit trail
+- Task 4: Alert History and Acknowledgment System (AC: 4)
+  - Subtask 4.1: Create alert history dashboard with filtering and search
+  - Subtask 4.2: Implement alert acknowledgment and resolution tracking
+  - Subtask 4.3: Add alert commenting and collaboration features
+  - Subtask 4.4: Create alert lifecycle management (active, acknowledged, resolved)
+  - Subtask 4.5: Build alert analytics and reporting tools
+- Task 5: Digest Mode for Batch Notifications (AC: 5)
+  - Subtask 5.1: Create digest scheduling and configuration
+  - Subtask 5.2: Implement alert grouping and summarization
+  - Subtask 5.3: Add customizable digest formats and templates
+  - Subtask 5.4: Create smart digest timing based on alert patterns
+  - Subtask 5.5: Build digest preview and testing functionality
+- Task 6: Alert Testing and Validation Tools (AC: 6)
+  - Subtask 6.1: Create alert rule testing with simulated data
+  - Subtask 6.2: Implement notification channel testing
+  - Subtask 6.3: Add alert preview functionality before activation
+  - Subtask 6.4: Create test scenario templates
+  - Subtask 6.5: Build alert delivery verification system
+- Task 7: Rate Limiting and Alert Fatigue Prevention (AC: 7)
+  - Subtask 7.1: Create intelligent rate limiting algorithms
+  - Subtask 7.2: Implement alert deduplication and correlation
+  - Subtask 7.3: Add quiet hours and maintenance windows
+  - Subtask 7.4: Create alert frequency controls per user/channel
+  - Subtask 7.5: Build alert fatigue analytics and recommendations
+- Task 8: Organization Notification Preferences Integration (AC: 8)
+  - Subtask 8.1: Connect to user notification preferences from Story 6.2
+  - Subtask 8.2: Implement organization-level alert policies
+  - Subtask 8.3: Add role-based notification routing
+  - Subtask 8.4: Create team-based alert grouping and assignment
+  - Subtask 8.5: Build notification preference inheritance and overrides</tasks>
+  </story>
+
+  <acceptanceCriteria>1. Alert rule creation with customizable conditions
+2. Multiple notification channels (email, Slack, webhook)
+3. Alert severity levels and escalation rules
+4. Alert history and acknowledgment tracking
+5. Digest mode for batch notifications
+6. Alert testing and validation
+7. Rate limiting to prevent alert fatigue
+8. Integration with organization notification preferences</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown - Story 6.4</title>
+        <section>Story 6.4: Alert Management System</section>
+        <snippet>As an organization admin, I want to configure alerts for performance changes and benchmark completion, So that I stay informed about important events without constantly checking the platform.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Integration Architecture</section>
+        <snippet>Notification Service: Centralized notification service with multi-channel support and queue management, Real-time Updates: WebSocket integration for live alert notifications and status updates.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Alert Rule Engine: Rule-based alerting system with condition evaluation and trigger management, Multi-Channel Notifications: Email, Slack, webhook, SMS, and in-app notification support, Escalation System: Time-based and role-based escalation with configurable paths, Rate Limiting: Intelligent rate limiting to prevent alert fatigue and notification spam.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-6.md</path>
+        <title>Epic 6 Technical Specification</title>
+        <section>Frontend Architecture</section>
+        <snippet>React-based SPA: Modern single-page application with component-based architecture, State Management: Centralized state management with Redux Toolkit for complex UI state, Real-time Updates: WebSocket integration for live dashboard updates and notifications, Responsive Design: Mobile-first responsive design with progressive enhancement.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/ARCHITECTURE.md</path>
+        <title>System Architecture Document</title>
+        <section>Web UI (Next.js 15 + React 19)</section>
+        <snippet>Features: Public leaderboard with real-time updates, Historical performance charts (Recharts + D3.js), Provider comparison tools, User authentication (Auth0/Clerk), API key management, Custom scenario builder (Pro tier), Alert configuration. Tech Stack: Next.js 15 (App Router), React 19 + Tailwind CSS 4, Charts: Recharts + D3.js, State: Zustand, Realtime: React Query + SSE.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>User Interface & Dashboard</section>
+        <snippet>Alert Management: Configuration for performance degradation and improvement notifications, Notification Systems: Slack, email, and webhook notifications, Configurable alert rules with multiple notification channels, Escalation system with severity levels, Alert history and acknowledgment tracking, Rate limiting to prevent alert fatigue.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/stories/6-2-organization-dashboard.md</path>
+        <title>Story 6.2: Organization Dashboard</title>
+        <section>Dashboard Architecture</section>
+        <snippet>Widget-based Layout: Configurable dashboard with drag-and-drop widget arrangement, Data Visualization: Interactive charts using D3.js and Chart.js for complex visualizations, Real-time Metrics: Live data streaming with efficient update mechanisms, Performance Optimization: Virtual scrolling, lazy loading, and efficient rendering.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/stories/6-3-trend-analysis-visualization.md</path>
+        <title>Story 6.3: Trend Analysis & Visualization</title>
+        <section>Dashboard Framework</section>
+        <snippet>Dashboard Framework: Reuse dashboard layout and widget system from Story 6.3, Real-time Updates: Leverage WebSocket service for live alert notifications, Data Visualization: Apply chart components for alert analytics and trends, Component Architecture: Follow established React component patterns and state management.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <codefile>
+        <path>packages/dashboard/package.json</path>
+        <kind>package</kind>
+        <symbol>dashboard</symbol>
+        <lines>1-25</lines>
+        <reason>Dashboard package contains React components for alert management interfaces with React 18.3.1 and Vite build system</reason>
+      </codefile>
+      <codefile>
+        <path>packages/api/package.json</path>
+        <kind>package</kind>
+        <symbol>api</symbol>
+        <lines>1-20</lines>
+        <reason>API package handles alert rule management and notification endpoints with Fastify framework</reason>
+      </codefile>
+      <codefile>
+        <path>packages/shared/package.json</path>
+        <kind>package</kind>
+        <symbol>shared</symbol>
+        <lines>1-20</lines>
+        <reason>Shared package contains alert types and notification utilities used across components</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/src/index.tsx</path>
+        <kind>typescript</kind>
+        <symbol>dashboard-entry</symbol>
+        <lines>1-10</lines>
+        <reason>Main dashboard entry point for React application with alert management components</reason>
+      </codefile>
+      <codefile>
+        <path>packages/dashboard/vite.config.ts</path>
+        <kind>typescript</kind>
+        <symbol>vite-config</symbol>
+        <lines>1-30</lines>
+        <reason>Vite configuration for dashboard build system with React plugin and optimization for alert components</reason>
+      </codefile>
+    </code>
+    <dependencies>
+      <ecosystem>React</ecosystem>
+      <packages>
+        <package name="react" version="^18.3.1" />
+        <package name="react-dom" version="^18.3.1" />
+        <package name="@reduxjs/toolkit" version="^2.0.1" />
+        <package name="react-redux" version="^9.0.4" />
+        <package name="nodemailer" version="^6.9.7" />
+        <package name="@slack/web-api" version="^6.11.2" />
+        <package name="twilio" version="^4.19.0" />
+        <package name="bull" version="^4.12.2" />
+        <package name="node-cron" version="^3.0.3" />
+        <package name="handlebars" version="^4.7.8" />
+        <package name="joi" version="^17.11.0" />
+        <package name="date-fns" version="^2.30.0" />
+        <package name="lodash" version="^4.17.21" />
+        <package name="uuid" version="^9.0.1" />
+        <package name="react-hook-form" version="^7.48.2" />
+        <package name="react-select" version="^5.8.0" />
+        <package name="react-datepicker" version="^4.21.0" />
+        <package name "@tanstack/react-query" version="^4.32.6" />
+        <package name="zustand" version="^4.4.1" />
+      </packages>
+      <database>
+        <db name="PostgreSQL" version="17" />
+        <db name="Redis" version="7.x" />
+      </database>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Alert Rule Engine: Rule-based alerting system with condition evaluation and trigger management using flexible condition builders</constraint>
+    <constraint>Multi-Channel Notifications: Email (Nodemailer), Slack (Web API), webhook (with retry logic), SMS (Twilio), and in-app notification support</constraint>
+    <constraint>Escalation System: Time-based and role-based escalation with configurable paths and automatic escalation for unacknowledged alerts</constraint>
+    <constraint>Rate Limiting: Intelligent rate limiting to prevent alert fatigue and notification spam with deduplication and correlation</constraint>
+    <constraint>Real-time Updates: WebSocket integration for live alert notifications and status updates with efficient message handling</constraint>
+    <constraint>Security: Secure webhook handling with signature verification and notification channel authentication</constraint>
+    <constraint>Performance: Efficient alert processing with background jobs (Bull queue) and caching (Redis) for high-volume scenarios</constraint>
+    <constraint>Audit Trail: Complete alert lifecycle tracking with acknowledgment and resolution history for compliance and debugging</constraint>
+    <constraint>Digest Mode: Batch notification processing with customizable scheduling, grouping, and template-based summarization</constraint>
+    <constraint>Testing Framework: Comprehensive alert testing with simulated data, notification channel validation, and delivery verification</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>AlertService</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AlertService {
+  createAlertRule(rule: CreateAlertRuleRequest): Promise&lt;AlertRule&gt;;
+  updateAlertRule(id: string, rule: UpdateAlertRuleRequest): Promise&lt;AlertRule&gt;;
+  deleteAlertRule(id: string): Promise&lt;void&gt;;
+  getAlertRules(filters: AlertRuleFilters): Promise&lt;AlertRule[]&gt;;
+  getAlertHistory(filters: AlertHistoryFilters): Promise&lt;AlertHistory[]&gt;;
+  acknowledgeAlert(alertId: string, userId: string, comment?: string): Promise&lt;void&gt;;
+  resolveAlert(alertId: string, userId: string, resolution: AlertResolution): Promise&lt;void&gt;;
+  testAlertRule(rule: AlertRule, testData?: any): Promise&lt;AlertTestResult&gt;;
+  getAlertAnalytics(filters: AlertAnalyticsFilters): Promise&lt;AlertAnalytics&gt;;
+  exportAlertData(filters: AlertExportFilters): Promise&lt;ExportResult&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>NotificationService</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface NotificationService {
+  sendNotification(notification: NotificationRequest): Promise&lt;NotificationResult&gt;;
+  sendBatchNotifications(notifications: NotificationRequest[]): Promise&lt;BatchNotificationResult&gt;;
+  getNotificationStatus(notificationId: string): Promise&lt;NotificationStatus&gt;;
+  retryFailedNotification(notificationId: string): Promise&lt;NotificationResult&gt;;
+  configureChannel(channel: NotificationChannel, config: ChannelConfig): Promise&lt;void&gt;;
+  testChannel(channel: NotificationChannel, testMessage: string): Promise&lt;ChannelTestResult&gt;;
+  getChannelStatus(channel: NotificationChannel): Promise&lt;ChannelStatus&gt;;
+  createDigest(digestConfig: DigestConfig): Promise&lt;Digest&gt;;
+  sendDigest(digestId: string): Promise&lt;DigestResult&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>AlertRule</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AlertRule {
+  id: string;
+  name: string;
+  description: string;
+  organizationId: string;
+  createdBy: string;
+  conditions: AlertCondition[];
+  triggers: AlertTrigger[];
+  severity: AlertSeverity;
+  channels: NotificationChannel[];
+  escalation: EscalationConfig;
+  rateLimit: RateLimitConfig;
+  digest: DigestConfig;
+  enabled: boolean;
+  tags: string[];
+  metadata: Record&lt;string, any&gt;;
+  createdAt: Date;
+  updatedAt: Date;
+  lastTriggered?: Date;
+  triggerCount: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>AlertCondition</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AlertCondition {
+  id: string;
+  metric: string;
+  operator: ConditionOperator;
+  value: number | string | boolean;
+  timeWindow?: TimeWindow;
+  aggregation?: AggregationType;
+  logicalOperator?: LogicalOperator;
+  group?: string;
+  weight?: number;
+  description?: string;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>AlertTrigger</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AlertTrigger {
+  type: TriggerType;
+  schedule?: ScheduleConfig;
+  event?: EventConfig;
+  threshold?: ThresholdConfig;
+  cooldown?: CooldownConfig;
+  maxFrequency?: MaxFrequencyConfig;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>EscalationConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface EscalationConfig {
+  enabled: boolean;
+  levels: EscalationLevel[];
+  autoEscalate: boolean;
+  maxEscalations: number;
+  quietHours: QuietHoursConfig;
+  maintenanceWindows: MaintenanceWindow[];
+  escalationPaths: EscalationPath[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>Notification</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface Notification {
+  id: string;
+  alertId: string;
+  alertRuleId: string;
+  type: NotificationType;
+  channel: NotificationChannel;
+  recipient: string;
+  subject: string;
+  content: string;
+  template?: string;
+  variables?: Record&lt;string, any&gt;;
+  status: NotificationStatus;
+  priority: NotificationPriority;
+  sentAt?: Date;
+  deliveredAt?: Date;
+  readAt?: Date;
+  error?: string;
+  retryCount: number;
+  maxRetries: number;
+  metadata: Record&lt;string, any&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>AlertHistory</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AlertHistory {
+  id: string;
+  alertRuleId: string;
+  alertRuleName: string;
+  severity: AlertSeverity;
+  status: AlertStatus;
+  triggeredAt: Date;
+  acknowledgedAt?: Date;
+  acknowledgedBy?: string;
+  acknowledgedComment?: string;
+  resolvedAt?: Date;
+  resolvedBy?: string;
+  resolution?: AlertResolution;
+  escalatedAt?: Date;
+  escalatedTo?: string;
+  notifications: Notification[];
+  context: AlertContext;
+  metadata: Record&lt;string, any&gt;;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>DigestConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface DigestConfig {
+  enabled: boolean;
+  schedule: DigestSchedule;
+  grouping: DigestGrouping;
+  template: DigestTemplate;
+  filters: DigestFilters;
+  delivery: DigestDelivery;
+  maxAlerts?: number;
+  includeResolved?: boolean;
+  sortBy?: DigestSortBy;
+  sortOrder?: SortOrder;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+    <interface>
+      <name>RateLimitConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface RateLimitConfig {
+  enabled: boolean;
+  maxAlerts: number;
+  timeWindow: number; // seconds
+  perUser?: boolean;
+  perChannel?: boolean;
+  perRule?: boolean;
+  deduplication: DeduplicationConfig;
+  correlation: CorrelationConfig;
+  quietHours: QuietHoursConfig;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-6.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for React components with Jest and React Testing Library, Integration tests for notification services and alert rule evaluation, E2E tests for alert creation, triggering, and notification workflows, Performance tests for alert processing with high volume scenarios (1000+ alerts/minute), Security tests for webhook security and notification channel authentication, Accessibility tests for WCAG 2.1 AA compliance, Notification tests for all channels and delivery reliability, Load tests for concurrent alert processing and queue management. Target: 80% line coverage, 75% branch coverage, 85% function coverage.</standards>
+    <locations>
+      <location>packages/dashboard/src/components/alerts/**/*.test.tsx</location>
+      <location>packages/dashboard/src/components/notifications/**/*.test.tsx</location>
+      <location>packages/dashboard/src/services/alertService.test.ts</location>
+      <location>packages/dashboard/src/services/notificationService.test.ts</location>
+      <location>packages/dashboard/src/services/escalationService.test.ts</location>
+      <location>packages/dashboard/src/store/slices/alertsSlice.test.ts</location>
+      <location>packages/dashboard/src/store/slices/notificationsSlice.test.ts</location>
+      <location>packages/api/src/controllers/alerts.test.ts</location>
+      <location>packages/api/src/services/notificationQueue.test.ts</location>
+      <location>packages/api/src/services/alertEngine.test.ts</location>
+      <location>packages/shared/src/types/alerts.test.ts</location>
+      <location>**/*.e2e.test.ts</location>
+      <location>**/*.integration.test.ts</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Test alert rule creation interface with condition builder UI, metric thresholds, and trend conditions</test>
+      <test idea="AC2">Test multi-channel notification system (email, Slack, webhook, SMS) with delivery verification</test>
+      <test idea="AC3">Test alert severity levels and escalation rule engine with time-based and role-based paths</test>
+      <test idea="AC4">Test alert history dashboard and acknowledgment tracking with commenting and collaboration</test>
+      <test idea="AC5">Test digest mode for batch notifications with scheduling, grouping, and template customization</test>
+      <test idea="AC6">Test alert testing and validation tools with simulated data and notification channel testing</test>
+      <test idea="AC7">Test rate limiting and alert fatigue prevention with deduplication and correlation algorithms</test>
+      <test idea="AC8">Test integration with organization notification preferences and role-based routing</test>
+      <test idea="Performance">Test alert processing performance with 1000+ concurrent alerts and queue management</test>
+      <test idea="Security">Test webhook security with signature verification and notification channel authentication</test>
+      <test idea="Accessibility">Test WCAG 2.1 AA compliance for alert management interfaces with keyboard navigation</test>
+      <test idea="Integration">Test end-to-end workflow from alert rule creation to notification delivery and acknowledgment</test>
+      <test idea="Reliability">Test notification delivery reliability with retry logic and failure handling</test>
+      <test idea="Escalation">Test automatic escalation for unacknowledged alerts with configurable paths and timeouts</test>
+    </ideas>
+  </tests>
+
+  <implementation>
+    <structure>
+      <directory path="packages/dashboard/src/components/alerts/">
+        <component name="AlertRuleBuilder" type="React Component" />
+        <component name="AlertRuleList" type="React Component" />
+        <component name="AlertHistory" type="React Component" />
+        <component name="AlertDetails" type="React Component" />
+        <component name="AlertAcknowledgment" type="React Component" />
+        <component name="AlertAnalytics" type="React Component" />
+        <component name="ConditionBuilder" type="React Component" />
+        <component name="EscalationConfig" type="React Component" />
+        <component name="NotificationChannelConfig" type="React Component" />
+        <component name="DigestConfig" type="React Component" />
+        <component name="RateLimitConfig" type="React Component" />
+        <component name="AlertTesting" type="React Component" />
+      </directory>
+      <directory path="packages/dashboard/src/components/notifications/">
+        <component name="NotificationCenter" type="React Component" />
+        <component name="NotificationItem" type="React Component" />
+        <component name="NotificationSettings" type="React Component" />
+        <component name="DigestViewer" type="React Component" />
+        <component name="ChannelStatus" type="React Component" />
+      </directory>
+      <directory path="packages/dashboard/src/services/">
+        <service name="alertService" type="API Service" />
+        <service name="notificationService" type="API Service" />
+        <service name="escalationService" type="Business Logic Service" />
+        <service name="digestService" type="Business Logic Service" />
+        <service name="realtimeAlertService" type="WebSocket Service" />
+      </directory>
+      <directory path="packages/api/src/controllers/">
+        <controller name="alertsController" type="REST Controller" />
+        <controller name="notificationsController" type="REST Controller" />
+        <controller name="escalationController" type="REST Controller" />
+      </directory>
+      <directory path="packages/api/src/services/">
+        <service name="alertEngine" type="Core Service" />
+        <service name="notificationQueue" type="Queue Service" />
+        <service name="emailService" type="Notification Service" />
+        <service name="slackService" type="Notification Service" />
+        <service name="smsService" type="Notification Service" />
+        <service name="webhookService" type="Notification Service" />
+        <service name="digestProcessor" type="Background Service" />
+      </directory>
+      <directory path="packages/dashboard/src/store/slices/">
+        <slice name="alertsSlice" type="Redux Slice" />
+        <slice name="notificationsSlice" type="Redux Slice" />
+        <slice name="alertRulesSlice" type="Redux Slice" />
+      </directory>
+      <directory path="packages/dashboard/src/hooks/">
+        <hook name="useAlerts" type="Custom Hook" />
+        <hook name="useNotifications" type="Custom Hook" />
+        <hook name="useAlertRules" type="Custom Hook" />
+        <hook name="useRealtimeAlerts" type="Custom Hook" />
+      </directory>
+      <directory path="packages/shared/src/types/">
+        <type name="alerts" type="Type Definitions" />
+        <type name="notifications" type="Type Definitions" />
+        <type name="escalation" type="Type Definitions" />
+      </directory>
+      <directory path="packages/shared/src/utils/">
+        <utility name="alertHelpers" type="Utility Functions" />
+        <utility name="notificationHelpers" type="Utility Functions" />
+        <utility name="conditionValidators" type="Validation Functions" />
+      </directory>
+    </structure>
+    <patterns>
+      <pattern name="Component Composition" description="Compose complex alert interfaces from reusable components with consistent props interface" />
+      <pattern name="State Management" description="Use Redux Toolkit for global alert state and local state for component-specific data" />
+      <pattern name="Data Fetching" description="Implement React Query for server state with caching and background updates" />
+      <pattern name="Real-time Updates" description="Use WebSocket connections for live alert notifications and status updates" />
+      <pattern name="Queue Processing" description="Use Bull queue for background notification processing with retry logic" />
+      <pattern name="Template Engine" description="Use Handlebars for dynamic email and digest template rendering" />
+      <pattern name="Rate Limiting" description="Implement token bucket algorithm for intelligent rate limiting" />
+      <pattern name="Escalation Engine" description="Use state machine pattern for alert escalation with configurable paths" />
+      <pattern name="Deduplication" description="Implement content-based deduplication with configurable similarity thresholds" />
+      <pattern name="Security" description="Use HMAC signatures for webhook verification and secure credential storage" />
+    </patterns>
+    <integration>
+      <system name="Dashboard Framework" description="Reuse dashboard layout and widget system from Story 6.2 and 6.3" />
+      <system name="API Gateway" description="Integrate with existing API endpoints for alert management" />
+      <system name="WebSocket Service" description="Connect to real-time data streaming infrastructure for live alerts" />
+      <system name="Authentication" description="Use existing auth system for user-specific alert access and permissions" />
+      <system name="Theme System" description="Apply consistent theming across all alert management components" />
+      <system name="Organization Dashboard" description="Integrate with organization notification preferences from Story 6.2" />
+      <system name="Trend Analysis" description="Use chart components from Story 6.3 for alert analytics and visualization" />
+      <system name="Background Jobs" description="Integrate with existing background job processing infrastructure" />
+      <system name="Caching Layer" description="Use Redis for alert rule caching and notification rate limiting" />
+      <system name="Database" description="Store alert rules, history, and configurations in PostgreSQL" />
+    </integration>
+  </implementation>
+</story-context>

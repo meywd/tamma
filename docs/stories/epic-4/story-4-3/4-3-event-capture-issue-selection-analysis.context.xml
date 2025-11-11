@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>4.3</story-id>
+  <story-title>Event Capture - Issue Selection &amp; Analysis</story-title>
+  <epic>4</epic>
+  <epic-title>Event Sourcing &amp; Audit Trail</epic-title>
+  
+  <technical-context>
+    <architecture-pattern>DCB (Dynamic Consistency Boundary) Event Sourcing</architecture-pattern>
+    <primary-goal>Capture all issue selection and analysis actions for complete auditability</primary-goal>
+    
+    <integration-points>
+      <point name="Story 2.1 - Issue Selection">
+        <description>Capture IssueSelectedEvent when issue is selected for development</description>
+        <event-type>IssueSelected</event-type>
+        <timing>Before workflow proceeds to next step</timing>
+      </point>
+      <point name="Story 2.2 - Issue Analysis">
+        <description>Capture IssueAnalysisCompletedEvent after issue analysis is finished</description>
+        <event-type>IssueAnalysisCompleted</event-type>
+        <timing>Before workflow proceeds to next step</timing>
+      </point>
+    </integration-points>
+    
+    <key-events>
+      <event name="IssueSelected">
+        <payload-fields>
+          <field>issueId, title, description, labels, assignee, priority</field>
+          <field>repository (name, owner, platform)</field>
+          <field>selectionCriteria (labels, assignee, priority, customFilters)</field>
+          <field>selectionRationale, estimatedComplexity, estimatedDuration</field>
+        </payload-fields>
+        <actor-types>system, ci-runner</actor-types>
+      </event>
+      <event name="IssueAnalysisCompleted">
+        <payload-fields>
+          <field>issueId</field>
+          <field>contextSummary (length, tokenCount, sections)</field>
+          <field>referencedIssues (id, title, relevance, relationship)</field>
+          <field>complexityAssessment (score, factors, confidence)</field>
+          <field>feasibilityAnalysis (achievable, blockers, prerequisites)</field>
+          <field>riskAssessment (level, factors, mitigation)</field>
+          <field>analysisDuration, analysisModel, analysisVersion</field>
+        </payload-fields>
+        <actor-types>system, ci-runner</actor-types>
+      </event>
+    </key-events>
+    
+    <data-integrity-requirements>
+      <requirement>Events persisted BEFORE workflow proceeds to next step</requirement>
+      <requirement>Event write failures trigger retry (3 attempts) then halt autonomous loop</requirement>
+      <requirement>Correlation ID links entire development cycle</requirement>
+      <requirement>Event ordering preserved through timestamp ordering</requirement>
+      <requirement>Zero data loss in event persistence</requirement>
+    </data-integrity-requirements>
+    
+    <error-handling-strategy>
+      <approach>Retry policy with exponential backoff</approach>
+      <max-attempts>3</max-attempts>
+      <base-delay>1000ms</base-delay>
+      <max-delay>10000ms</max-delay>
+      <failure-action>Halt autonomous loop for data integrity</failure-action>
+      <retryable-errors>ConnectionError, TimeoutError, RateLimitError</retryable-errors>
+    </error-handling-strategy>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/events</package>
+      <package>@tamma/workflow</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>IssueEventCapture - Main event capture service</component>
+      <component>EventPersistenceError - Custom error for failed writes</component>
+      <component>RetryPolicy - Configurable retry logic</component>
+      <component>AutonomousWorkflow - Integration with workflow engine</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/events/src/capture/issue-event-capture.ts</file>
+      <file>packages/events/src/schemas/issue-events.schema.ts</file>
+      <file>packages/events/src/types/issue-event.types.ts</file>
+      <file>packages/workflow/src/integration/event-capture-integration.ts</file>
+    </key-files>
+    
+    <performance-requirements>
+      <requirement>Event capture adds &lt;100ms overhead to workflow</requirement>
+      <requirement>100% of issue selections captured as events</requirement>
+      <requirement>100% of issue analyses captured as events</requirement>
+      <requirement>Failed event writes successfully halt workflow</requirement>
+    </performance-requirements>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 4.1 - Event Schema Design</upstream>
+    <upstream>Story 4.2 - Event Store Backend Selection</upstream>
+    <upstream>Story 2.1 - Issue Selection (integration point)</upstream>
+    <upstream>Story 2.2 - Issue Analysis (integration point)</upstream>
+    <downstream>Story 4.4 - Event Capture - AI Provider Interactions</downstream>
+    <downstream>Story 4.5 - Event Capture - Code Changes &amp; Git Operations</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">IssueSelectedEvent captured when issue is selected (Story 2.1) including issue ID, title, labels, selection criteria</criteria>
+    <criteria id="2">IssueAnalysisCompletedEvent captured after analysis (Story 2.2) including context summary length, referenced issues</criteria>
+    <criteria id="3">Events include actor (system in orchestrator mode, CI runner in worker mode)</criteria>
+    <criteria id="4">Events include correlation ID linking entire development cycle</criteria>
+    <criteria id="5">Events persisted to event store before proceeding to next step</criteria>
+    <criteria id="6">Event write failures trigger retry (3 attempts) then halt autonomous loop for data integrity</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>100% of issue selections captured as events</metric>
+    <metric>100% of issue analyses captured as events</metric>
+    <metric>Zero data loss in event persistence</metric>
+    <metric>Event capture adds &lt;100ms overhead to workflow</metric>
+    <metric>Failed event writes successfully halt workflow</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Event capture may slow down workflow</description>
+      <mitigation>Async event persistence, optimized serialization</mitigation>
+    </risk>
+    <risk>
+      <description>Event write failures may go unnoticed</description>
+      <mitigation>Retry policy, workflow halt on failure, comprehensive error handling</mitigation>
+    </risk>
+    <risk>
+      <description>Workflow integration may be complex</description>
+      <mitigation>Clear integration points, comprehensive testing, gradual rollout</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <compliance-requirements>
+    <compliance>Complete audit trail for issue selection decisions</compliance>
+    <compliance>Transparency in autonomous decision-making process</compliance>
+    <correlation-id>Links entire development cycle for reconstruction</correlation-id>
+    <data-integrity>Events persisted before workflow progression</data-integrity>
+  </compliance-requirements>
+</story-context>

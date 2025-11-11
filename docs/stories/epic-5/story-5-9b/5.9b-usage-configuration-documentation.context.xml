@@ -1,0 +1,372 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.9b</story-id>
+  <story-title>Usage &amp; Configuration Documentation</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>true</mvp-critical>
+  <sub-story>true</sub-story>
+  <parent-story>5.9</parent-story>
+  
+  <technical-context>
+    <architecture-pattern>Comprehensive usage and configuration reference documentation</architecture-pattern>
+    <primary-goal>Enable Tamma operators to configure AI providers, Git platforms, and operate Tamma effectively</primary-goal>
+    
+    <cli-command-reference>
+      <command name="tamma init">
+        <description>Interactive configuration wizard</description>
+        <usage>tamma init [options]</usage>
+        <options>
+          <option name="--config" short="-c">Specify config file path</option>
+          <option name="--force" short="-f">Overwrite existing configuration</option>
+          <option name="--interactive" short="-i">Force interactive mode</option>
+        </options>
+        <examples>
+          <example>tamma init</example>
+          <example>tamma init --config ./custom-config.yaml</example>
+          <example>tamma init --force</example>
+        </examples>
+      </command>
+      <command name="tamma start">
+        <description>Start Tamma in specified mode</description>
+        <usage>tamma start [mode] [options]</usage>
+        <modes>
+          <mode>orchestrator - Autonomous coordinator mode</mode>
+          <mode>worker - CI/CD invoked single-task mode</mode>
+          <mode>standalone - Complete workflow in single process</mode>
+        </modes>
+        <options>
+          <option name="--config" short="-c">Configuration file path</option>
+          <option name="--daemon" short="-d">Run as background service</option>
+          <option name="--log-level">Logging level (debug, info, warn, error)</option>
+        </options>
+        <examples>
+          <example>tamma start orchestrator</example>
+          <example>tamma start worker --config ./prod-config.yaml</example>
+          <example>tamma start standalone --daemon</example>
+        </examples>
+      </command>
+      <command name="tamma status">
+        <description>Show current system status</description>
+        <usage>tamma status [options]</usage>
+        <options>
+          <option name="--json">Output in JSON format</option>
+          <option name="--watch">Continuously update status</option>
+        </options>
+        <examples>
+          <example>tamma status</example>
+          <example>tamma status --json</example>
+          <example>tamma status --watch</example>
+        </examples>
+      </command>
+      <command name="tamma logs">
+        <description>Show system logs</description>
+        <usage>tamma logs [options]</usage>
+        <options>
+          <option name="--follow" short="-f">Follow log output</option>
+          <option name="--since">Show logs since timestamp</option>
+          <option name="--level">Filter by log level</option>
+          <option name="--correlation">Filter by correlation ID</option>
+        </options>
+        <examples>
+          <example>tamma logs --follow</example>
+          <example>tamma logs --level error</example>
+          <example>tamma logs --since "2025-11-09T10:00:00Z"</example>
+        </examples>
+      </command>
+      <command name="tamma config">
+        <description>Configuration management</description>
+        <usage>tamma config [subcommand] [options]</usage>
+        <subcommands>
+          <subcommand>get - Get configuration value</subcommand>
+          <subcommand>set - Set configuration value</subcommand>
+          <subcommand>list - List all configuration</subcommand>
+          <subcommand>validate - Validate configuration file</subcommand>
+        </subcommands>
+        <examples>
+          <example>tamma config get ai.provider</example>
+          <example>tamma config set git.platform github</example>
+          <example>tamma config list</example>
+          <example>tamma config validate</example>
+        </examples>
+      </command>
+    </cli-command-reference>
+    
+    <configuration-file-reference>
+      <file name="tamma.config.yaml">
+        <location>~/.tamma/config.yaml (default)</location>
+        <format>YAML with hierarchical structure</format>
+        <validation>JSON schema validation on startup</validation>
+        <security>File permissions 600 (owner read/write only)</security>
+      </file>
+      <section name="AI Providers">
+        <description>Configuration for AI provider settings</description>
+        <structure>
+          <field name="provider" type="string">Default AI provider (anthropic, openai, github-copilot)</field>
+          <field name="providers" type="object">Provider-specific configurations</field>
+          <provider name="anthropic">
+            <field name="api_key" type="string" env="ANTHROPIC_API_KEY">API key</field>
+            <field name="model" type="string" default="claude-3-5-sonnet">Default model</field>
+            <field name="max_tokens" type="number" default="4096">Maximum tokens</field>
+            <field name="temperature" type="number" default="0.7">Temperature setting</field>
+          </provider>
+          <provider name="openai">
+            <field name="api_key" type="string" env="OPENAI_API_KEY">API key</field>
+            <field name="model" type="string" default="gpt-4">Default model</field>
+            <field name="organization" type="string" optional="true">Organization ID</field>
+          </provider>
+        </structure>
+      </section>
+      <section name="Git Platforms">
+        <description>Configuration for Git platform settings</description>
+        <structure>
+          <field name="platform" type="string">Default platform (github, gitlab, bitbucket)</field>
+          <field name="platforms" type="object">Platform-specific configurations</field>
+          <platform name="github">
+            <field name="token" type="string" env="GITHUB_TOKEN">Access token</field>
+            <field name="api_url" type="string" default="https://api.github.com">API endpoint</field>
+            <field name="webhook_secret" type="string" env="GITHUB_WEBHOOK_SECRET">Webhook secret</field>
+          </platform>
+          <platform name="gitlab">
+            <field name="token" type="string" env="GITLAB_TOKEN">Access token</field>
+            <field name="url" type="string" default="https://gitlab.com">GitLab URL</field>
+            <field name="webhook_secret" type="string" env="GITLAB_WEBHOOK_SECRET">Webhook secret</field>
+          </platform>
+        </structure>
+      </section>
+      <section name="Orchestrator">
+        <description>Orchestrator mode configuration</description>
+        <structure>
+          <field name="max_concurrent_workflows" type="number" default="5">Maximum concurrent workflows</field>
+          <field name="polling_interval" type="number" default="60">Issue polling interval (seconds)</field>
+          <field name="workflow_timeout" type="number" default="3600">Workflow timeout (seconds)</field>
+          <field name="auto_merge" type="boolean" default="false">Automatic PR merging</field>
+        </structure>
+      </section>
+      <section name="Worker">
+        <description>Worker mode configuration</description>
+        <structure>
+          <field name="task_timeout" type="number" default="1800">Task timeout (seconds)</field>
+          <field name="max_retries" type="number" default="3">Maximum retry attempts</field>
+          <field name="exit_on_error" type="boolean" default="true">Exit on error</field>
+        </structure>
+      </section>
+      <section name="Logging">
+        <description>Logging configuration</description>
+        <structure>
+          <field name="level" type="string" default="info">Log level</field>
+          <field name="format" type="string" default="json">Log format</field>
+          <field name="outputs" type="array" default="["stdout"]">Log outputs</field>
+          <field name="file" type="object" optional="true">File logging configuration</field>
+          <field name="rotation" type="object" optional="true">Log rotation settings</field>
+        </structure>
+      </section>
+    </configuration-file-reference>
+    
+    <ai-provider-setup-guides>
+      <provider name="Anthropic Claude">
+        <prerequisites>Anthropic account, API key, Node.js 22+</prerequisites>
+        <steps>
+          <step>Sign up at console.anthropic.com</step>
+          <step>Generate API key with appropriate permissions</step>
+          <step>Configure environment variable: export ANTHROPIC_API_KEY=your_key</step>
+          <step>Test configuration: tamma config set ai.provider anthropic</step>
+          <step>Verify with: tamma config get ai.provider</step>
+        </steps>
+        <configuration-options>Model selection, temperature, max tokens, rate limits</configuration-options>
+      </provider>
+      <provider name="OpenAI GPT">
+        <prerequisites>OpenAI account, API key, organization ID</prerequisites>
+        <steps>
+          <step>Sign up at platform.openai.com</step>
+          <step>Create API key with organization access</step>
+          <step>Configure environment variables</step>
+          <step>Test configuration and verify model access</step>
+        </steps>
+        <configuration-options>Model selection, organization, usage limits</configuration-options>
+      </provider>
+      <provider name="GitHub Copilot">
+        <prerequisites>GitHub account, Copilot subscription</prerequisites>
+        <steps>
+          <step>Enable GitHub Copilot in account settings</step>
+          <step>Generate personal access token with Copilot scopes</step>
+          <step>Configure Tamma with GitHub token</step>
+          <step>Test Copilot integration</step>
+        </steps>
+        <configuration-options>Copilot model, context window, rate limits</configuration-options>
+      </provider>
+      <provider name="Local LLM">
+        <prerequisites>Local LLM server, hardware requirements</prerequisites>
+        <steps>
+          <step>Set up local LLM server (Ollama, LM Studio)</step>
+          <step>Configure server endpoint and model</step>
+          <step>Test local LLM connectivity</step>
+          <step>Configure Tamma to use local endpoint</step>
+        </steps>
+        <configuration-options>Endpoint URL, model name, hardware requirements</configuration-options>
+      </provider>
+    </ai-provider-setup-guides>
+    
+    <git-platform-setup-guides>
+      <platform name="GitHub">
+        <prerequisites>GitHub account, repository access, personal access token</prerequisites>
+        <steps>
+          <step>Create personal access token with repo and webhook scopes</step>
+          <step>Configure repository webhook for Tamma</step>
+          <step>Set up GitHub App for production use</step>
+          <step>Test webhook connectivity</step>
+          <step>Configure Tamma with GitHub token</step>
+        </steps>
+        <webhook-configuration>Push events, PR events, issue comments</webhook-configuration>
+      </platform>
+      <platform name="GitLab">
+        <prerequisites>GitLab account, project access, personal access token</prerequisites>
+        <steps>
+          <step>Create personal access token with appropriate scopes</step>
+          <step>Configure GitLab project webhook</step>
+          <step>Set up GitLab integration</step>
+          <step>Test webhook delivery</step>
+          <step>Configure Tamma with GitLab token</step>
+        </steps>
+        <webhook-configuration>Push events, merge requests, issue events</webhook-configuration>
+      </platform>
+      <platform name="Bitbucket">
+        <prerequisites>Bitbucket account, workspace access, app password</prerequisites>
+        <steps>
+          <step>Create app password with required permissions</step>
+          <step>Configure Bitbucket webhook</step>
+          <step>Test webhook integration</step>
+          <step>Configure Tamma with Bitbucket credentials</step>
+        </steps>
+        <webhook-configuration>Repository pushes, pull requests, comments</webhook-configuration>
+      </platform>
+    </git-platform-setup-guides>
+    
+    <operational-modes>
+      <mode name="Orchestrator Mode">
+        <description>Autonomous coordinator for continuous development</description>
+        <use-cases>Development servers, production automation</use-cases>
+        <configuration>Issue polling, workflow management, auto-merge settings</configuration>
+        <monitoring>Dashboard access, log monitoring, metrics</monitoring>
+      </mode>
+      <mode name="Worker Mode">
+        <description>CI/CD invoked single-task execution</description>
+        <use-cases>GitHub Actions, GitLab CI, Jenkins pipelines</use-cases>
+        <configuration>Task execution, timeout handling, exit codes</configuration>
+        <monitoring>CI logs, test results, artifact generation</monitoring>
+      </mode>
+      <mode name="Standalone Mode">
+        <description>Complete workflow in single process</description>
+        <use-cases>Local development, testing, debugging</use-cases>
+        <configuration>Single workflow execution, interactive prompts</configuration>
+        <monitoring>Terminal output, local logs, progress indicators</monitoring>
+      </mode>
+    </operational-modes>
+    
+    <environment-variables>
+      <variable name="ANTHROPIC_API_KEY">Anthropic API key</variable>
+      <variable name="OPENAI_API_KEY">OpenAI API key</variable>
+      <variable name="GITHUB_TOKEN">GitHub access token</variable>
+      <variable name="GITLAB_TOKEN">GitLab access token</variable>
+      <variable name="TAMMA_CONFIG_PATH">Custom configuration file path</variable>
+      <variable name="TAMMA_LOG_LEVEL">Override log level</variable>
+      <variable name="TAMMA_MODE">Override operational mode</variable>
+    </environment-variables>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/cli</package>
+      <package>@tamma/config</package>
+      <package>@tamma/docs</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>CLICommands - Command implementation</component>
+      <component>ConfigManager - Configuration management</component>
+      <component>DocumentationGenerator - Documentation building</component>
+      <component>SetupWizard - Interactive configuration</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/cli/src/commands/</file>
+      <file>packages/config/src/manager/config-manager.ts</file>
+      <file>packages/cli/src/wizard/setup-wizard.ts</file>
+      <file>docs/usage/README.md</file>
+      <file>docs/configuration/README.md</file>
+    </key-files>
+    
+    <documentation-files>
+      <file>docs/usage/cli-reference.md</file>
+      <file>docs/configuration/config-reference.md</file>
+      <file>docs/setup/ai-providers.md</file>
+      <file>docs/setup/git-platforms.md</file>
+      <file>docs/setup/operational-modes.md</file>
+      <file>docs/setup/environment-variables.md</file>
+    </documentation-files>
+    
+    <external-dependencies>
+      <dependency>commander - CLI framework</dependency>
+      <dependency>inquirer - Interactive prompts</dependency>
+      <dependency>yaml - YAML parsing</dependency>
+      <dependency>chalk - Terminal colors</dependency>
+      <dependency>cli-table3 - Table formatting</dependency>
+    </external-dependencies>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Stories 1.3, 1.7, 1.5-2, 1.5-6 (config and CLI must exist)</upstream>
+    <downstream>Story 5.9c - API Reference Documentation</downstream>
+    <downstream>Story 5.10 - Alpha Release Preparation</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">CLI command reference documented (all tamma commands with examples)</criteria>
+    <criteria id="2">Configuration file reference documented (all options with examples)</criteria>
+    <criteria id="3">AI provider setup guides (Anthropic, OpenAI, GitHub Copilot, local LLMs)</criteria>
+    <criteria id="4">Git platform setup guides (GitHub, GitLab, webhooks)</criteria>
+    <criteria id="5">Orchestrator mode vs worker mode explained with use cases</criteria>
+    <criteria id="6">Webhook configuration documented</criteria>
+    <criteria id="7">Environment variables documented</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Documentation completeness score &gt;95%</metric>
+    <metric>Example accuracy rate &gt;90%</metric>
+    <metric>User understanding score &gt;4.0/5 (feedback)</metric>
+    <metric>Configuration success rate &gt;85%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Documentation complexity overwhelming users</description>
+      <mitigation>Progressive disclosure, quick start guides, tutorials</mitigation>
+    </risk>
+    <risk>
+      <description>Configuration errors preventing operation</description>
+      <mitigation>Validation, clear error messages, configuration wizard</mitigation>
+    </risk>
+    <risk>
+      <description>Outdated documentation causing confusion</description>
+      <mitigation>Automated documentation testing, version-specific docs</mitigation>
+    </risk>
+    <risk>
+      <description>Security issues in configuration examples</description>
+      <mitigation>Security review, placeholder values, best practices</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>CLI command testing</requirement>
+    <requirement>Configuration validation testing</requirement>
+    <requirement>Setup guide testing</requirement>
+    <requirement>Documentation accuracy testing</requirement>
+    <requirement>Security testing of examples</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Essential for alpha release - users need configuration reference and usage examples</reason>
+    <explanation>Clear documentation is critical for users to effectively configure and operate Tamma</explanation>
+    <impact>Without proper usage and configuration documentation, users cannot successfully deploy or use Tamma</impact>
+  </mvp-rationale>
+</story-context>

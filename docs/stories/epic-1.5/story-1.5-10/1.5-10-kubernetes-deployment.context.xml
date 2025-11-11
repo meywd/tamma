@@ -1,0 +1,518 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext id="1.5-10" epic="1.5" title="Kubernetes Deployment" created="2025-01-08" updated="2025-01-08">
+  <summary>
+    Create production-ready Kubernetes manifests and Helm charts for deploying Tamma in cloud-native environments. This story provides enterprise-grade deployment capabilities with auto-scaling, high availability, service mesh integration, and comprehensive monitoring for production Kubernetes clusters.
+  </summary>
+
+  <technicalComponents>
+    <component name="Kubernetes Manifests" type="infrastructure">
+      <description>Production-ready Kubernetes manifests for all Tamma components</description>
+      <files>
+        <file path="k8s/base/" type="kubernetes" description="Kustomize base manifests" />
+        <file path="k8s/overlays/development/" type="kubernetes" description="Development environment overlay" />
+        <file path="k8s/overlays/staging/" type="kubernetes" description="Staging environment overlay" />
+        <file path="k8s/overlays/production/" type="kubernetes" description="Production environment overlay" />
+        <file path="k8s/components/" type="kubernetes" description="Individual component manifests" />
+      </files>
+      <dependencies>
+        <dependency name="Kubernetes" version="1.28+" />
+        <dependency name="Kustomize" version="5.0+" />
+      </dependencies>
+    </component>
+
+    <component name="Helm Charts" type="packaging">
+      <description>Helm charts for flexible Tamma deployment and configuration</description>
+      <files>
+        <file path="helm/tamma/Chart.yaml" type="yaml" />
+        <file path="helm/tamma/values.yaml" type="yaml" />
+        <file path="helm/tamma/values-dev.yaml" type="yaml" />
+        <file path="helm/tamma/values-prod.yaml" type="yaml" />
+        <file path="helm/tamma/templates/" type="helm-templates" />
+      </files>
+      <dependencies>
+        <dependency name="Helm" version="3.13+" />
+        <dependency name="Helmfile" version="0.150+" />
+      </dependencies>
+    </component>
+
+    <component name="Service Mesh Integration" type="networking">
+      <description>Istio/Linkerd integration for advanced traffic management</description>
+      <files>
+        <file path="k8s/service-mesh/istio/" type="kubernetes" />
+        <file path="k8s/service-mesh/linkerd/" type="kubernetes" />
+        <file path="k8s/service-mesh/traffic-policies.yaml" type="yaml" />
+        <file path="k8s/service-mesh/security-policies.yaml" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="Istio" version="1.19+" />
+        <dependency name="Linkerd" version="2.55+" />
+      </dependencies>
+    </component>
+
+    <component name="Auto-Scaling Configuration" type="scaling">
+      <description>HPA, VPA, and Cluster Autoscaler configurations</description>
+      <files>
+        <file path="k8s/autoscaling/hpa.yaml" type="yaml" />
+        <file path="k8s/autoscaling/vpa.yaml" type="yaml" />
+        <file path="k8s/autoscaling/cluster-autoscaler.yaml" type="yaml" />
+        <file path="k8s/autoscaling/custom-metrics.yaml" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="Kubernetes Metrics Server" version="0.6+" />
+        <dependency name="KEDA" version="2.11+" />
+      </dependencies>
+    </component>
+
+    <component name="Monitoring & Observability" type="monitoring">
+      <description>Prometheus, Grafana, and OpenTelemetry integration</description>
+      <files>
+        <file path="k8s/monitoring/prometheus/" type="kubernetes" />
+        <file path="k8s/monitoring/grafana/" type="kubernetes" />
+        <file path="k8s/monitoring/opentelemetry/" type="kubernetes" />
+        <file path="k8s/monitoring/dashboards/" type="json" />
+        <file path="k8s/monitoring/alerts/" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="Prometheus" version="2.47+" />
+        <dependency name="Grafana" version="10.2+" />
+        <dependency name="OpenTelemetry" version="1.21+" />
+      </dependencies>
+    </component>
+
+    <component name="Security & Compliance" type="security">
+      <description>Pod Security Standards, Network Policies, and RBAC</description>
+      <files>
+        <file path="k8s/security/pod-security-policies.yaml" type="yaml" />
+        <file path="k8s/security/network-policies.yaml" type="yaml" />
+        <file path="k8s/security/rbac.yaml" type="yaml" />
+        <file path="k8s/security/secrets-management.yaml" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="OPA Gatekeeper" version="3.13+" />
+        <dependency name="Kyverno" version="1.11+" />
+      </dependencies>
+    </component>
+
+    <component name="Backup & Disaster Recovery" type="disaster-recovery">
+      <description>Velero integration for backup and disaster recovery</description>
+      <files>
+        <file path="k8s/backup/velero/" type="kubernetes" />
+        <file path="k8s/backup/backup-schedules.yaml" type="yaml" />
+        <file path="k8s/backup/restore-policies.yaml" type="yaml" />
+        <file path="k8s/backup/disaster-recovery.yaml" type="yaml" />
+      </files>
+      <dependencies>
+        <dependency name="Velero" version="1.12+" />
+        <dependency name="Restic" version="0.15+" />
+      </dependencies>
+    </component>
+  </technicalComponents>
+
+  <dataModels>
+    <model name="KubernetesDeploymentConfig">
+      <fields>
+        <field name="namespace" type="string" required="true" description="Target namespace" />
+        <field name="environment" type="string" required="true" description="Deployment environment" />
+        <field name="replicas" type="number" description="Number of replicas" />
+        <field name="image" type="ImageConfig" description="Container image configuration" />
+        <field name="resources" type="ResourceConfig" description="CPU and memory resources" />
+        <field name="autoscaling" type="AutoscalingConfig" description="Auto-scaling configuration" />
+        <field name="storage" type="StorageConfig" description="Persistent storage configuration" />
+        <field name="networking" type="NetworkingConfig" description="Network configuration" />
+        <field name="security" type="SecurityConfig" description="Security configuration" />
+        <field name="monitoring" type="MonitoringConfig" description="Monitoring configuration" />
+      </fields>
+    </model>
+
+    <model name="HelmValues">
+      <fields>
+        <field name="global" type="GlobalConfig" description="Global configuration" />
+        <field name="orchestrator" type="ComponentConfig" description="Orchestrator configuration" />
+        <field name="workers" type="ComponentConfig" description="Workers configuration" />
+        <field name="api" type="ComponentConfig" description="API configuration" />
+        <field name="dashboard" type="ComponentConfig" description="Dashboard configuration" />
+        <field name="database" type="DatabaseConfig" description="Database configuration" />
+        <field name="ingress" type="IngressConfig" description="Ingress configuration" />
+        <field name="serviceMesh" type="ServiceMeshConfig" description="Service mesh configuration" />
+        <field name="monitoring" type="MonitoringConfig" description="Monitoring configuration" />
+      </fields>
+    </model>
+
+    <model name="ResourceConfig">
+      <fields>
+        <field name="requests" type="ResourceLimits" description="Resource requests" />
+        <field name="limits" type="ResourceLimits" description="Resource limits" />
+        <field name="qualityOfService" type="string" description="QoS class (Burstable, Guaranteed)" />
+        <field name="nodeSelector" type="Record&lt;string, string&gt;" description="Node selector labels" />
+        <field name="tolerations" type="Toleration[]" description="Node tolerations" />
+        <field name="affinity" type="AffinityConfig" description="Pod affinity rules" />
+      </fields>
+    </model>
+
+    <model name="AutoscalingConfig">
+      <fields>
+        <field name="enabled" type="boolean" description="Enable auto-scaling" />
+        <field name="minReplicas" type="number" description="Minimum number of replicas" />
+        <field name="maxReplicas" type="number" description="Maximum number of replicas" />
+        <field name="targetCPUUtilization" type="number" description="Target CPU utilization percentage" />
+        <field name="targetMemoryUtilization" type="number" description="Target memory utilization percentage" />
+        <field name="customMetrics" type="CustomMetric[]" description="Custom scaling metrics" />
+        <field name="behavior" type="ScalingBehavior" description="Scaling behavior configuration" />
+      </fields>
+    </model>
+
+    <model name="SecurityConfig">
+      <fields>
+        <field name="podSecurityContext" type="PodSecurityContext" description="Pod security context" />
+        <field name="containerSecurityContext" type="ContainerSecurityContext" description="Container security context" />
+        <field name="serviceAccount" type="ServiceAccountConfig" description="Service account configuration" />
+        <field name="rbac" type="RBACConfig" description="RBAC configuration" />
+        <field name="networkPolicy" type="NetworkPolicyConfig" description="Network policy configuration" />
+        <field name="podSecurityAdmission" type="PodSecurityAdmission" description="Pod security admission" />
+      </fields>
+    </model>
+
+    <model name="MonitoringConfig">
+      <fields>
+        <field name="prometheus" type="PrometheusConfig" description="Prometheus configuration" />
+        <field name="grafana" type="GrafanaConfig" description="Grafana configuration" />
+        <field name="opentelemetry" type="OpenTelemetryConfig" description="OpenTelemetry configuration" />
+        <field name="alerts" type="AlertConfig[]" description="Alert configurations" />
+        <field name="dashboards" type="DashboardConfig[]" description="Dashboard configurations" />
+        <field name="tracing" type="TracingConfig" description="Distributed tracing configuration" />
+      </fields>
+    </model>
+
+    <model name="DeploymentResult">
+      <fields>
+        <field name="success" type="boolean" description="Deployment success status" />
+        <field name="namespace" type="string" description="Target namespace" />
+        <field name="releaseName" type="string" description="Helm release name" />
+        <field name="version" type="string" description="Deployed version" />
+        <field name="replicas" type="number" description="Number of deployed replicas" />
+        <field name="endpoints" type="Endpoint[]" description="Service endpoints" />
+        <field name="deploymentTime" type="string" description="Deployment timestamp" />
+        <field name="healthStatus" type="HealthStatus" description="Component health status" />
+        <field name="warnings" type="string[]" description="Deployment warnings" />
+        <field name="errors" type="string[]" description="Deployment errors" />
+      </fields>
+    </model>
+  </dataModels>
+
+  <integrationPoints>
+    <integration name="Kubernetes API" type="infrastructure">
+      <description>Direct integration with Kubernetes API for resource management</description>
+      <interface>
+        <method name="applyManifests" type="rest" />
+        <method name="getResources" type="rest" />
+        <method name="updateResources" type="rest" />
+        <method name="deleteResources" type="rest" />
+        <method name="watchResources" type="websocket" />
+      </interface>
+      <dataFlow>
+        <source name="Helm/Kustomize" />
+        <destination name="Kubernetes cluster" />
+        <protocol name="Kubernetes API" />
+        <format name="YAML/JSON" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Helm Package Manager" type="deployment">
+      <description>Helm chart management and release lifecycle</description>
+      <interface>
+        <method name="install" type="cli" />
+        <method name="upgrade" type="cli" />
+        <method name="rollback" type="cli" />
+        <method name="uninstall" type="cli" />
+        <method name="list" type="cli" />
+      </interface>
+      <dataFlow>
+        <source name="Chart repository" />
+        <destination name="Kubernetes cluster" />
+        <protocol name="Helm API" />
+        <format name="Helm charts" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Service Mesh" type="networking">
+      <description>Istio/Linkerd integration for traffic management</description>
+      <interface>
+        <method name="configureTraffic" type="rest" />
+        <method name="applyPolicies" type="rest" />
+        <method name="monitorTraffic" type="rest" />
+        <method name="secureCommunication" type="rest" />
+      </interface>
+      <dataFlow>
+        <source name="Service mesh control plane" />
+        <destination name="Service mesh data plane" />
+        <protocol name="Envoy xDS" />
+        <format name="Traffic policies" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Monitoring Stack" type="observability">
+      <description>Prometheus, Grafana, and OpenTelemetry integration</description>
+      <interface>
+        <method name="scrapeMetrics" type="http" />
+        <method name="queryMetrics" type="http" />
+        <method name="visualizeData" type="http" />
+        <method name="sendTraces" type="http" />
+      </interface>
+      <dataFlow>
+        <source name="Application pods" />
+        <destination name="Monitoring backend" />
+        <protocol name="HTTP/gRPC" />
+        <format name="Metrics/Traces" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Container Registry" type="deployment">
+      <description>Integration with container registries for image management</description>
+      <interface>
+        <method name="pullImages" type="rest" />
+        <method name="scanImages" type="rest" />
+        <method name="cacheImages" type="rest" />
+        <method name="signImages" type="rest" />
+      </interface>
+      <dataFlow>
+        <source name="Container registry" />
+        <destination name="Kubernetes nodes" />
+        <protocol name="Docker Registry API" />
+        <format name="Container images" />
+      </dataFlow>
+    </integration>
+  </integrationPoints>
+
+  <testingStrategy>
+    <unitTesting>
+      <framework name="Vitest" version="3.x" />
+      <coverage target="85" description="Kubernetes utilities and configuration" />
+      <focus>
+        <area name="Helm chart templating" />
+        <area name="Kustomize overlay generation" />
+        <area name="Resource configuration validation" />
+        <area name="Security policy generation" />
+        <area name="Monitoring configuration" />
+      </focus>
+    </unitTesting>
+
+    <integrationTesting>
+      <framework name="KIND" version="0.20+" />
+      <framework name="Helm testing" />
+      <coverage target="80" description="End-to-end Kubernetes deployment" />
+      <focus>
+        <area name="Multi-environment deployments" />
+        <area name="Service mesh integration" />
+        <area name="Auto-scaling behavior" />
+        <area name="Monitoring and alerting" />
+        <area name="Security policy enforcement" />
+      </focus>
+    </integrationTesting>
+
+    <securityTesting>
+      <framework name="OPA Conftest" />
+      <framework name="Polaris" />
+      <framework name="kube-score" />
+      <coverage target="100" description="All manifests must pass security checks" />
+      <focus>
+        <area name="Pod security standards compliance" />
+        <area name="RBAC configuration validation" />
+        <area name="Network policy effectiveness" />
+        <area name="Secret management security" />
+        <area name="Image security scanning" />
+      </focus>
+    </securityTesting>
+
+    <performanceTesting>
+      <framework name="K6" />
+      <framework name="Kubernetes benchmarks" />
+      <coverage target="100" description="Performance and scalability validation" />
+      <focus>
+        <area name="Deployment time optimization" />
+        <area name="Auto-scaling responsiveness" />
+        <area name="Resource utilization efficiency" />
+        <area name="Network performance" />
+        <area name="Storage performance" />
+      </focus>
+    </performanceTesting>
+  </testingStrategy>
+
+  <securityConsiderations>
+    <clusterSecurity>
+      <requirement name="Pod Security Standards" description="Enforce Kubernetes Pod Security Standards" />
+      <requirement name="Network Policies" description="Implement comprehensive network policies" />
+      <requirement name="RBAC least privilege" description="Follow least privilege principle for RBAC" />
+      <requirement name="Secrets management" description="Use external secret management systems" />
+    </clusterSecurity>
+
+    <applicationSecurity>
+      <requirement name="Container security" description="Secure container configurations and images" />
+      <requirement name="Service mesh security" description="Implement mTLS and service identity" />
+      <requirement name="Admission controllers" description="Use OPA Gatekeeper or Kyverno for policy enforcement" />
+      <requirement name="Runtime security" description="Implement runtime security monitoring" />
+    </applicationSecurity>
+
+    <complianceSecurity>
+      <requirement name="CIS Kubernetes Benchmark" description="Comply with CIS Kubernetes Benchmark" />
+      <requirement name="NIST controls" description="Implement relevant NIST security controls" />
+      <requirement name="SOC2 compliance" description="Meet SOC2 Type II requirements" />
+      <requirement name="GDPR compliance" description="Ensure data protection compliance" />
+    </complianceSecurity>
+  </securityConsiderations>
+
+  <acceptanceCriteria>
+    <functional>
+      <criteria id="AC-1" description="Production-ready Kubernetes manifests for all components" priority="high" />
+      <criteria id="AC-2" description="Helm charts with flexible configuration options" priority="high" />
+      <criteria id="AC-3" description="Multi-environment support (dev, staging, prod)" priority="high" />
+      <criteria id="AC-4" description="Auto-scaling with HPA and custom metrics" priority="high" />
+      <criteria id="AC-5" description="Service mesh integration (Istio/Linkerd)" priority="medium" />
+      <criteria id="AC-6" description="Comprehensive monitoring and alerting" priority="medium" />
+      <criteria id="AC-7" description="Security policies and compliance enforcement" priority="medium" />
+      <criteria id="AC-8" description="Backup and disaster recovery capabilities" priority="medium" />
+    </functional>
+
+    <nonFunctional>
+      <criteria id="NFC-1" description="Deployment time &lt; 10 minutes" priority="high" />
+      <criteria id="NFC-2" description="High availability with 99.9% uptime" priority="high" />
+      <criteria id="NFC-3" description="Auto-scaling response time &lt; 2 minutes" priority="high" />
+      <criteria id="NFC-4" description="Resource utilization efficiency &gt; 80%" priority="medium" />
+      <criteria id="NFC-5" description="Security compliance 100%" priority="medium" />
+      <criteria id="NFC-6" description="Monitoring coverage 100%" priority="medium" />
+    </nonFunctional>
+
+    <compliance>
+      <criteria id="CC-1" description="CIS Kubernetes Benchmark compliance" priority="high" />
+      <criteria id="CC-2" description="Pod Security Standards enforcement" priority="high" />
+      <criteria id="CC-3" description="SOC2 Type II security controls" priority="medium" />
+      <criteria id="CC-4" description="GDPR data protection compliance" priority="medium" />
+    </compliance>
+  </acceptanceCriteria>
+
+  <riskMitigation>
+    <risk id="R-1" description="Cluster misconfiguration leading to security vulnerabilities" probability="medium" impact="high">
+      <mitigation name="Policy as code" description="Use OPA Gatekeeper or Kyverno for policy enforcement" />
+      <mitigation name="Security scanning" description="Regular security scanning of manifests and configurations" />
+      <mitigation name="Compliance checking" description="Automated compliance checking against CIS benchmarks" />
+    </risk>
+
+    <risk id="R-2" description="Resource exhaustion and performance degradation" probability="medium" impact="high">
+      <mitigation name="Resource quotas" description="Implement resource quotas and limits" />
+      <mitigation name="Auto-scaling" description="Configure horizontal and vertical auto-scaling" />
+      <mitigation name="Performance monitoring" description="Comprehensive performance monitoring and alerting" />
+    </risk>
+
+    <risk id="R-3" description="Deployment failures and service downtime" probability="medium" impact="high">
+      <mitigation name="Rollback strategies" description="Automated rollback and recovery procedures" />
+      <mitigation name="Health checks" description="Comprehensive health checks and readiness probes" />
+      <mitigation name="Blue-green deployments" description="Implement blue-green or canary deployment strategies" />
+    </risk>
+
+    <risk id="R-4" description="Data loss and backup failures" probability="low" impact="critical">
+      <mitigation name="Automated backups" description="Automated backup scheduling with Velero" />
+      <mitigation name="Disaster recovery" description="Comprehensive disaster recovery procedures" />
+      <mitigation name="Backup verification" description="Regular backup restoration testing" />
+    </risk>
+  </riskMitigation>
+
+  <successMetrics>
+    <technical>
+      <metric name="Deployment success rate" target="&gt; 95%" description="Successful Kubernetes deployments" />
+      <metric name="Cluster uptime" target="99.9%" description="Kubernetes cluster availability" />
+      <metric name="Auto-scaling efficiency" target="&gt; 90%" description="Effective auto-scaling responses" />
+      <metric name="Security compliance" target="100%" description="Security policy compliance" />
+      <metric name="Resource utilization" target="&gt; 80%" description="Resource utilization efficiency" />
+    </technical>
+
+    <operational>
+      <metric name="Mean time to deploy" target="&lt; 10min" description="Average deployment time" />
+      <metric name="Mean time to recover" target="&lt; 5min" description="Average recovery time" />
+      <metric name="Alert response time" target="&lt; 2min" description="Alert response time" />
+      <metric name="Backup success rate" target="&gt; 99%" description="Successful backup operations" />
+    </operational>
+
+    <business>
+      <metric name="Service availability" target="99.9%" description="Overall service availability" />
+      <metric name="Cost efficiency" target="&gt; 85%" description="Infrastructure cost efficiency" />
+      <metric name="Security incident reduction" target="&gt; 90%" description="Reduction in security incidents" />
+    </business>
+  </successMetrics>
+
+  <dependencies>
+    <internal>
+      <dependency name="Docker packaging" description="Container images for all components" />
+      <dependency name="Configuration management" description="Unified configuration system" />
+      <dependency name="Health monitoring" description="Health check endpoints" />
+      <dependency name="Logging system" description="Structured logging for Kubernetes" />
+    </internal>
+
+    <external>
+      <dependency name="Kubernetes cluster" description="Target deployment platform" />
+      <dependency name="Container registry" description="Container image storage" />
+      <dependency name="Monitoring stack" description="Prometheus, Grafana, OpenTelemetry" />
+      <dependency name="Service mesh" description="Istio or Linkerd for advanced networking" />
+    </external>
+  </dependencies>
+
+  <timeline>
+    <phase name="Infrastructure Setup" duration="3 days">
+      <task name="Set up Kubernetes development cluster" />
+      <task name="Configure Helm and Kustomize" />
+      <task name="Set up monitoring and logging stack" />
+    </phase>
+
+    <phase name="Base Manifests" duration="4 days">
+      <task name="Create base Kubernetes manifests" />
+      <task name="Implement Kustomize overlays" />
+      <task name="Configure resource limits and requests" />
+    </phase>
+
+    <phase name="Helm Charts" duration="3 days">
+      <task name="Create Helm chart structure" />
+      <task name="Implement value templates" />
+      <task name="Add environment-specific configurations" />
+    </phase>
+
+    <phase name="Service Mesh Integration" duration="3 days">
+      <task name="Configure Istio/Linkerd integration" />
+      <task name="Implement traffic management policies" />
+      <task name="Set up service mesh security" />
+    </phase>
+
+    <phase name="Auto-Scaling" duration="2 days">
+      <task name="Configure HPA and VPA" />
+      <task name="Implement custom metrics scaling" />
+      <task name="Set up cluster autoscaler" />
+    </phase>
+
+    <phase name="Security & Compliance" duration="3 days">
+      <task name="Implement Pod Security Standards" />
+      <task name="Configure network policies" />
+      <task name="Set up RBAC and admission controllers" />
+    </phase>
+
+    <phase name="Monitoring & Observability" duration="3 days">
+      <task name="Configure Prometheus scraping" />
+      <task name="Set up Grafana dashboards" />
+      <task name="Implement OpenTelemetry tracing" />
+    </phase>
+
+    <phase name="Backup & DR" duration="2 days">
+      <task name="Configure Velero backups" />
+      <task name="Implement disaster recovery procedures" />
+      <task name="Test backup and restore" />
+    </phase>
+
+    <phase name="Testing & Validation" duration="4 days">
+      <task name="Test multi-environment deployments" />
+      <task name="Validate security compliance" />
+      <task name="Performance and scalability testing" />
+    </phase>
+
+    <phase name="Documentation & Release" duration="2 days">
+      <task name="Create deployment documentation" />
+      <task name="Write troubleshooting guides" />
+      <task name="Release production-ready charts" />
+    </phase>
+  </timeline>
+</storyContext>

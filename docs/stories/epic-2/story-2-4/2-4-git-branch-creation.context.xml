@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-4-git-branch-creation">
+  <metadata>
+    <title>Story 2.4: Git Branch Creation</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.3 (development plan approval must complete first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want the system to create a Git branch for the approved development plan</action>
+    <benefit>so that implementation work can be isolated from the main codebase</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System creates a new Git branch based on approved development plan</criterion>
+    <criterion id="2">Branch name follows configurable naming convention (e.g., feature/123-issue-title)</criterion>
+    <criterion id="3">System handles branch name conflicts by appending suffix</criterion>
+    <criterion id="4">System switches to the new branch for subsequent operations</criterion>
+    <criterion id="5">System validates branch creation was successful</criterion>
+    <criterion id="6">Branch creation and switching logged to event trail</criterion>
+    <criterion id="7">Integration test validates branch creation workflow</criterion>
+    <criterion id="8">Error handling for insufficient permissions, conflicts, and network issues</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="BranchManager">
+        <interface>IBranchManager</interface>
+        <methods>
+          <method name="createBranch" returns="BranchInfo">
+            <parameter name="plan" type="DevelopmentPlan"/>
+          </method>
+          <method name="switchBranch">
+            <parameter name="branchName" type="string"/>
+          </method>
+          <method name="validateBranchCreation" returns="boolean">
+            <parameter name="branchName" type="string"/>
+          </method>
+          <method name="handleBranchConflict" returns="string">
+            <parameter name="baseName" type="string"/>
+          </method>
+          <method name="deleteBranch">
+            <parameter name="branchName" type="string"/>
+          </method>
+          <method name="getCurrentBranch" returns="string"/>
+        </methods>
+      </component>
+
+      <component name="BranchCreationService">
+        <description>High-level service with retry logic and error handling</description>
+        <methods>
+          <method name="createBranchWithRetry" returns="BranchInfo">
+            <parameter name="plan" type="DevelopmentPlan"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="BranchInfo">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="baseBranch" type="string"/>
+          <field name="issueNumber" type="number"/>
+          <field name="issueTitle" type="string"/>
+          <field name="createdAt" type="Date"/>
+          <field name="createdBy" type="string"/>
+          <field name="url" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="BranchCreationConfig">
+        <fields>
+          <field name="namingPattern" type="string"/>
+          <field name="baseBranch" type="string"/>
+          <field name="maxNameLength" type="number"/>
+          <field name="sanitizeNames" type="boolean"/>
+          <field name="conflictResolution" type="string"/>
+          <field name="autoSwitch" type="boolean"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Branch Creation Engine">
+        <description>AI-powered branch creation with intelligent naming and conflict resolution</description>
+        <components>
+          <component>BranchManager class</component>
+          <component>Branch name generation from patterns</component>
+          <component>Conflict resolution strategies (suffix, timestamp, abort)</component>
+          <component>Branch name sanitization and validation</component>
+        </components>
+      </phase>
+
+      <phase name="Error Handling and Retry">
+        <description>Robust error handling with exponential backoff and intelligent retry</description>
+        <components>
+          <component>BranchCreationError class</component>
+          <component>BranchOperationError class</component>
+          <component>Retry logic with backoff</component>
+          <component>Permission and conflict detection</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="Git Platform">
+        <description>Abstract Git operations across multiple platforms</description>
+        <operations>
+          <operation>createBranch()</operation>
+          <operation>branchExists()</operation>
+          <operation>switchBranch()</operation>
+          <operation>getCurrentBranch()</operation>
+          <operation>deleteBranch()</operation>
+        </operations>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Complete audit trail for branch operations</description>
+        <events>
+          <event>BRANCH.CREATED.SUCCESS</event>
+          <event>BRANCH.CREATED.FAILED</event>
+          <event>BRANCH.SWITCHED.SUCCESS</event>
+          <event>BRANCH.SWITCHED.FAILED</event>
+          <event>BRANCH.DELETED.SUCCESS</event>
+          <event>BRANCH.DELETED.FAILED</event>
+        </events>
+      </integration>
+
+      <integration name="Configuration Management">
+        <description>Flexible branch naming and conflict resolution</description>
+        <settings>
+          <setting>Branch naming patterns</setting>
+          <setting>Conflict resolution strategies</setting>
+          <setting>Base branch selection</setting>
+          <setting>Permission handling</setting>
+        </settings>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="BranchManager">
+          <test>generate branch name from pattern</test>
+          <test>truncate long branch names</test>
+          <test>sanitize special characters</test>
+          <test>add numeric suffix for conflicts</test>
+          <test>add timestamp for conflicts</test>
+          <test>abort on conflicts when configured</test>
+          <test>create branch successfully</test>
+          <test>handle permission errors</test>
+        </test-suite>
+
+        <test-suite name="BranchCreationService">
+          <test>retry on transient failures</test>
+          <test>don't retry on permission errors</test>
+          <test>exponential backoff timing</test>
+          <test>max retry limit enforcement</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>create real branch on GitHub</test>
+        <test>create real branch on GitLab</test>
+        <test>handle platform-specific errors</test>
+        <test>branch switching workflow</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="branch_creation">
+        <setting name="naming_pattern" default="feature/{issue-number}-{issue-title}"/>
+        <setting name="base_branch" default="main"/>
+        <setting name="max_name_length" default="100"/>
+        <setting name="sanitize_names" default="true"/>
+        <setting name="conflict_resolution" default="suffix"/>
+        <setting name="auto_switch" default="true"/>
+      </section>
+
+      <section name="platform_specific">
+        <setting name="github.default_base" default="main"/>
+        <setting name="github.protected_branches" default="['main', 'develop', 'release/*']"/>
+        <setting name="gitlab.default_base" default="main"/>
+        <setting name="gitlab.protected_branches" default="['main', 'develop']"/>
+      </section>
+
+      <section name="advanced">
+        <setting name="validate_base_branch" default="true"/>
+        <setting name="check_permissions" default="true"/>
+        <setting name="cleanup_on_failure" default="false"/>
+      </section>
+    </configuration>
+
+    <monitoring>
+      <metrics>
+        <metric name="branch_creation_success_rate"/>
+        <metric name="branch_conflict_resolution_frequency"/>
+        <metric name="average_branch_creation_time"/>
+        <metric name="branch_naming_pattern_effectiveness"/>
+        <metric name="permission_error_rates"/>
+      </metrics>
+
+      <logging>
+        <level name="info">Branch creation started, conflict resolved, branch switched</level>
+        <level name="warn">Branch creation attempt failed, retrying</level>
+        <level name="error">Branch creation failed, permission denied</level>
+      </logging>
+    </monitoring>
+
+    <performance-targets>
+      <target name="branch_creation" metric="time" value="&lt; 5 seconds"/>
+      <target name="branch_switching" metric="time" value="&lt; 2 seconds"/>
+      <target name="conflict_resolution" metric="time" value="&lt; 10 seconds"/>
+      <target name="validation" metric="time" value="&lt; 1 second"/>
+    </performance-targets>
+
+    <security-considerations>
+      <consideration>Validate branch names to prevent injection attacks</consideration>
+      <consideration>Check permissions before attempting operations</consideration>
+      <consideration>Use appropriate authentication tokens</consideration>
+      <consideration>Handle sensitive branch names appropriately</consideration>
+      <consideration>Implement rate limiting for branch operations</consideration>
+    </security-considerations>
+
+    <best-practices>
+      <practice>Use descriptive branch names</practice>
+      <practice>Keep branch names under reasonable length limits</practice>
+      <practice>Avoid special characters that cause issues</practice>
+      <practice>Follow team conventions for branch organization</practice>
+      <practice>Consider branch protection rules for important branches</practice>
+    </best-practices>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Branch naming consistency is crucial for organization and automation</consideration>
+      <consideration priority="2">Multiple conflict resolution strategies ensure success</consideration>
+      <consideration priority="3">Proper error handling for protected branches and permissions</consideration>
+      <consideration priority="4">Complete audit trail for compliance and debugging</consideration>
+      <consideration priority="5">Handle platform differences between Git providers</consideration>
+      <consideration priority="6">Consider automatic branch cleanup after PR merge</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

@@ -1,0 +1,210 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>4</storyId>
+    <title>Basic API Infrastructure &amp; Documentation</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-08T12:00:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/1-4-basic-api-infrastructure-documentation.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>a well-structured REST API with OpenAPI documentation</iWant>
+    <soThat>I can understand and integrate with the platform endpoints effectively</soThat>
+    <tasks>
+- Task 1: Fastify Server Setup (AC: #1)
+  - Subtask 1.1: Initialize Fastify server with TypeScript
+  - Subtask 1.2: Configure core middleware (helmet, cors, compression)
+  - Subtask 1.3: Set up server lifecycle management (graceful shutdown)
+  - Subtask 1.4: Configure environment-based server settings
+- Task 2: OpenAPI Documentation (AC: #2, #7)
+  - Subtask 2.1: Integrate fastify-swagger plugin
+  - Subtask 2.2: Configure OpenAPI 3.0 specification
+  - Subtask 2.3: Set up Swagger UI at /docs endpoint
+  - Subtask 2.4: Auto-generate API documentation from routes
+- Task 3: API Versioning (AC: #3)
+  - Subtask 3.1: Implement v1 route prefixing
+  - Subtask 3.2: Create version management middleware
+  - Subtask 3.3: Add version deprecation warnings
+  - Subtask 3.4: Configure version-specific documentation
+- Task 4: Request Validation (AC: #4)
+  - Subtask 4.1: Set up JSON schema validation
+  - Subtask 4.2: Create validation schemas for all endpoints
+  - Subtask 4.3: Implement custom validation error responses
+  - Subtask 4.4: Add validation middleware to all routes
+- Task 5: Error Handling (AC: #5)
+  - Subtask 5.1: Create standardized error response format
+  - Subtask 5.2: Implement global error handler
+  - Subtask 5.3: Add error classification and logging
+  - Subtask 5.4: Create error response schemas
+- Task 6: API Key Management (AC: #6)
+  - Subtask 6.1: Create API key generation endpoints
+  - Subtask 6.2: Implement API key authentication middleware
+  - Subtask 6.3: Add API key management (create, list, revoke)
+  - Subtask 6.4: Set up API key permissions and scopes
+- Task 7: Logging and Monitoring (AC: #8)
+  - Subtask 7.1: Implement request/response logging middleware
+  - Subtask 7.2: Add correlation ID tracking
+  - Subtask 7.3: Configure structured JSON logging
+  - Subtask 7.4: Set up performance metrics collection
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. Fastify-based API server with proper middleware setup
+2. OpenAPI 3.0 specification with comprehensive endpoint documentation
+3. API versioning (v1) with proper version routing
+4. Request validation using JSON schemas
+5. Error handling with consistent error response format
+6. API key generation and management for programmatic access
+7. Swagger UI for interactive API documentation
+8. Request/response logging for debugging and monitoring
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <item>
+        <path>docs/ARCHITECTURE.md</path>
+        <title>AI Benchmarking as a Service (AIBaaS) - Architecture Document</title>
+        <section>API Design</section>
+        <snippet>REST API (Fastify 5.x) - Primary API for programmatic access with endpoints for providers, models, leaderboard, benchmarks, alerts, and trends. Features include authentication via JWT + API keys, rate limiting, OpenAPI 3.1 documentation, and comprehensive error handling.</snippet>
+      </item>
+      <item>
+        <path>docs/tech-spec-epic-1.md</path>
+        <title>Epic Technical Specification: Foundation &amp; Infrastructure</title>
+        <section>Basic API Infrastructure &amp; Documentation (Story 1.4)</section>
+        <snippet>Fastify Plugin Architecture: Core plugins include fastifyHelmet for security headers, fastifyRateLimit with Redis backend, fastifySwagger for OpenAPI 3.0 specs, and fastifySwaggerUi for documentation at /docs. Custom plugins handle authentication, tenant context, and audit logging.</snippet>
+      </item>
+      <item>
+        <path>docs/PRD.md</path>
+        <title>Test Platform (AIBaaS) - Product Requirements Document</title>
+        <section>API &amp; Integration</section>
+        <snippet>RESTful API: Complete API for all platform functionality with OpenAPI documentation. Features include authentication via API keys and OAuth 2.0, rate limiting and quota management, request validation with detailed error responses, pagination and filtering for list endpoints, and comprehensive OpenAPI documentation.</snippet>
+      </item>
+      <item>
+        <path>docs/epics.md</path>
+        <title>Test Platform (AIBaaS) - Epic Breakdown</title>
+        <section>Story 1.4: Basic API Infrastructure &amp; Documentation</section>
+        <snippet>Fastify-based API server with proper middleware setup, OpenAPI 3.0 specification with comprehensive endpoint documentation, API versioning (v1) with proper version routing, request validation using JSON schemas, error handling with consistent error response format, API key generation and management for programmatic access, Swagger UI for interactive API documentation, and request/response logging for debugging and monitoring.</snippet>
+      </item>
+    </docs>
+    <code>
+    </code>
+    <dependencies>
+      <item>
+        <ecosystem>Node.js</ecosystem>
+        <packages>
+          <package name="fastify" version="^5.0.0" />
+          <package name="@fastify/swagger" version="^8.0.0" />
+          <package name="@fastify/swagger-ui" version="^2.0.0" />
+          <package name="@fastify/helmet" version="^11.0.0" />
+          <package name="@fastify/cors" version="^9.0.0" />
+          <package name="@fastify/compress" version="^7.0.0" />
+          <package name="@fastify/rate-limit" version="^9.0.0" />
+          <package name="jsonwebtoken" version="^9.0.0" />
+          <package name="bcrypt" version="^5.1.0" />
+          <package name="uuid" version="^9.0.0" />
+          <package name="pino" version="^8.0.0" />
+          <package name="redis" version="^4.0.0" />
+        </packages>
+      </item>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <item>Must use Fastify 5.x as the API framework for high performance</item>
+    <item>All API endpoints must follow RESTful conventions with proper HTTP methods</item>
+    <item>API versioning must use URL-based versioning (e.g., /api/v1/)</item>
+    <item>All requests/responses must be validated using JSON schemas</item>
+    <item>Error responses must follow standardized format with error codes and messages</item>
+    <item>API keys must be hashed using bcrypt before storage in database</item>
+    <item>All API calls must be logged with correlation IDs for debugging</item>
+    <item>Rate limiting must be implemented using Redis as backend store</item>
+    <item>OpenAPI documentation must be automatically generated from route definitions</item>
+    <item>Swagger UI must be available at /docs endpoint for interactive testing</item>
+  </constraints>
+
+  <interfaces>
+    <item>
+      <name>APIResponse</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface APIResponse&lt;T&gt; {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+  meta?: {
+    pagination?: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+    requestId: string;
+    timestamp: string;
+  };
+}</signature>
+      <path>src/types/api.ts</path>
+    </item>
+    <item>
+      <name>ValidationError</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface ValidationError {
+  field: string;
+  message: string;
+  code: string;
+}</signature>
+      <path>src/types/validation.ts</path>
+    </item>
+    <item>
+      <name>AuthenticatedRequest</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface AuthenticatedRequest extends FastifyRequest {
+  user: {
+    id: string;
+    tier: 'free' | 'pro' | 'enterprise';
+    rateLimitPerHour: number;
+  };
+}</signature>
+      <path>src/types/auth.ts</path>
+    </item>
+    <item>
+      <name>GET /api/v1/providers</name>
+      <kind>REST Endpoint</kind>
+      <signature>GET /api/v1/providers - List all AI providers with current stats</signature>
+      <path>src/routes/providers.ts</path>
+    </item>
+    <item>
+      <name>GET /api/v1/leaderboard</name>
+      <kind>REST Endpoint</kind>
+      <signature>GET /api/v1/leaderboard?scenario={string}&amp;period={string} - Get current leaderboard for scenario</signature>
+      <path>src/routes/leaderboard.ts</path>
+    </item>
+    <item>
+      <name>POST /api/v1/benchmarks/run</name>
+      <kind>REST Endpoint</kind>
+      <signature>POST /api/v1/benchmarks/run - Trigger new benchmark run (authenticated, Pro tier+)</signature>
+      <path>src/routes/benchmarks.ts</path>
+    </item>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for all middleware components, integration tests for API endpoints, documentation tests for OpenAPI specification validity, performance tests for API response times, and security tests for authentication and validation. Use Vitest 3.x for testing framework with 80% line coverage, 75% branch coverage, and 85% function coverage targets.</standards>
+    <locations>tests/unit/middleware/, tests/integration/api/, tests/e2e/docs/, tests/performance/api/, tests/security/auth/</locations>
+    <ideas>
+      <item testId="AC1" description="Test Fastify server initialization with all core middleware plugins registered successfully"/>
+      <item testId="AC2" description="Test OpenAPI 3.0 specification generation matches route definitions and validates successfully"/>
+      <item testId="AC3" description="Test API versioning middleware correctly routes v1 requests and rejects invalid versions"/>
+      <item testId="AC4" description="Test JSON schema validation rejects invalid requests with proper error messages"/>
+      <item testId="AC5" description="Test global error handler formats all errors consistently with proper status codes"/>
+      <item testId="AC6" description="Test API key generation, storage (hashed), and authentication flow end-to-end"/>
+      <item testId="AC7" description="Test Swagger UI loads correctly at /docs and allows interactive API testing"/>
+      <item testId="AC8" description="Test request/response logging includes correlation IDs and structured JSON format"/>
+    </ideas>
+  </tests>
+</story-context>

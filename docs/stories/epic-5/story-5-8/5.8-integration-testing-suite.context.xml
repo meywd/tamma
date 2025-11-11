@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext id="5.8" epic="5" title="Integration Testing Suite">
+  <summary>
+    Create comprehensive integration testing suite covering end-to-end workflows, API endpoints, provider integrations, and platform integrations. Ensure system reliability through automated testing of real-world scenarios.
+  </summary>
+  
+  <technicalContext>
+    <architecture>
+      <component name="Test Framework" type="testing">
+        <framework>Vitest 3.x</framework>
+        <libraries>
+          <library name="supertest" purpose="HTTP API testing"/>
+          <library name="msw" purpose="API mocking"/>
+          <library name="testcontainers" purpose="database testing"/>
+          <library name="playwright" purpose="UI testing"/>
+        </libraries>
+      </component>
+      
+      <component name="Test Infrastructure" type="testing">
+        <testDatabase>PostgreSQL testcontainers</testDatabase>
+        <mockServices>Provider and platform mocks</mockServices>
+        <testData>Factory-generated test data</testData>
+        <ciIntegration>GitHub Actions workflows</ciIntegration>
+      </component>
+      
+      <component name="Test Categories" type="testing">
+        <category name="API Integration">
+          <coverage>REST endpoints, SSE streams</coverage>
+          <scenarios>Happy path, error cases, edge cases</scenarios>
+        </category>
+        <category name="Provider Integration">
+          <coverage>AI providers, streaming responses</coverage>
+          <scenarios>Real API calls, fallback scenarios</scenarios>
+        </category>
+        <category name="Platform Integration">
+          <coverage>Git platforms, webhook handling</coverage>
+          <scenarios>PR operations, issue management</scenarios>
+        </category>
+        <category name="Workflow Integration">
+          <coverage>End-to-end workflows</coverage>
+          <scenarios>Complete issue resolution cycles</scenarios>
+        </category>
+      </component>
+    </architecture>
+    
+    <dependencies>
+      <upstream>
+        <dependency story="5.1">Structured Logging Implementation</dependency>
+        <dependency story="5.2">Metrics Collection Infrastructure</dependency>
+        <dependency story="5.3">Real-time Dashboard System Health</dependency>
+      </upstream>
+      <downstream>
+        <dependency story="5.10">Alpha Release Preparation</dependency>
+      </downstream>
+    </dependencies>
+  </technicalContext>
+  
+  <implementationDetails>
+    <testFramework>
+      <setup>
+        <configFile>vitest.integration.config.ts</configFile>
+        <testEnvironment>node</testEnvironment>
+        <globalSetup>test/setup.integration.ts</globalSetup>
+        <globalTeardown>test/teardown.integration.ts</globalTeardown>
+      </setup>
+      
+      <testHelpers>
+        <helper name="TestDatabase" purpose="Database setup/teardown"/>
+        <helper name="MockProvider" purpose="AI provider mocking"/>
+        <helper name="MockPlatform" purpose="Git platform mocking"/>
+        <helper name="TestDataFactory" purpose="Test data generation"/>
+        <helper name="TestUtils" purpose="Common test utilities"/>
+      </testHelpers>
+    </testFramework>
+    
+    <testSuites>
+      <suite name="API Integration Tests">
+        <file>test/integration/api/auth.test.ts</file>
+        <file>test/integration/api/issues.test.ts</file>
+        <file>test/integration/api/events.test.ts</file>
+        <file>test/integration/api/providers.test.ts</file>
+        <file>test/integration/api/platforms.test.ts</file>
+        <file>test/integration/api/workflows.test.ts</file>
+      </suite>
+      
+      <suite name="Provider Integration Tests">
+        <file>test/integration/providers/anthropic.test.ts</file>
+        <file>test/integration/providers/openai.test.ts</file>
+        <file>test/integration/providers/github-copilot.test.ts</file>
+        <file>test/integration/providers/streaming.test.ts</file>
+        <file>test/integration/providers/error-handling.test.ts</file>
+      </suite>
+      
+      <suite name="Platform Integration Tests">
+        <file>test/integration/platforms/github.test.ts</file>
+        <file>test/integration/platforms/gitlab.test.ts</file>
+        <file>test/integration/platforms/webhooks.test.ts</file>
+        <file>test/integration/platforms/pr-operations.test.ts</file>
+      </suite>
+      
+      <suite name="Workflow Integration Tests">
+        <file>test/integration/workflows/complete-cycle.test.ts</file>
+        <file>test/integration/workflows/error-recovery.test.ts</file>
+        <file>test/integration/workflows/concurrent-tasks.test.ts</file>
+        <file>test/integration/workflows/quality-gates.test.ts</file>
+      </suite>
+      
+      <suite name="Dashboard Integration Tests">
+        <file>test/integration/dashboard/api.test.ts</file>
+        <file>test/integration/dashboard/websockets.test.ts</file>
+        <file>test/integration/dashboard/auth.test.ts</file>
+      </suite>
+    </testSuites>
+    
+    <testData>
+      <factories>
+        <factory name="IssueFactory" purpose="Generate test issues"/>
+        <factory name="UserFactory" purpose="Generate test users"/>
+        <factory name="RepositoryFactory" purpose="Generate test repositories"/>
+        <factory name="WorkflowFactory" purpose="Generate test workflows"/>
+        <factory name="EventFactory" purpose="Generate test events"/>
+      </factories>
+      
+      <fixtures>
+        <fixture name="testDatabase" purpose="Clean database per test"/>
+        <fixture name="mockProviders" purpose="Mock AI providers"/>
+        <fixture name="mockPlatforms" purpose="Mock Git platforms"/>
+        <fixture name="testServer" purpose="Test HTTP server"/>
+      </fixtures>
+    </testData>
+  </implementationDetails>
+  
+  <acceptanceCriteria>
+    <criteria id="ac1" priority="high">
+      <description>API integration tests cover all REST endpoints</description>
+      <verification>
+        <metric>100% endpoint coverage</metric>
+        <test>Happy path scenarios</test>
+        <test>Error handling scenarios</test>
+        <test>Authentication/authorization</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac2" priority="high">
+      <description>Provider integration tests work with real APIs</description>
+      <verification>
+        <test>Real API calls to test providers</test>
+        <test>Streaming response handling</test>
+        <test>Error handling and retries</test>
+        <test>Fallback scenarios</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac3" priority="high">
+      <description>Platform integration tests cover Git operations</description>
+      <verification>
+        <test>PR creation and management</test>
+        <test>Issue handling</test>
+        <test>Webhook processing</test>
+        <test>Branch operations</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac4" priority="high">
+      <description>End-to-end workflow tests validate complete cycles</description>
+      <verification>
+        <test>Complete issue resolution</test>
+        <test>Error recovery workflows</test>
+        <test>Concurrent task handling</test>
+        <test>Quality gate enforcement</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac5" priority="medium">
+      <description>Test infrastructure supports reliable execution</description>
+      <verification>
+        <test>Database isolation between tests</test>
+        <test>Mock service reliability</test>
+        <test>Test data consistency</test>
+        <test>CI/CD integration</test>
+      </verification>
+    </criteria>
+    
+    <criteria id="ac6" priority="medium">
+      <description>Performance tests validate system limits</description>
+      <verification>
+        <test>Load testing scenarios</test>
+        <test>Stress testing boundaries</test>
+        <test>Resource usage monitoring</test>
+        <test>Bottleneck identification</test>
+      </verification>
+    </criteria>
+  </acceptanceCriteria>
+  
+  <testingStrategy>
+    <testTypes>
+      <type name="Integration">
+        <scope>Component interactions</scope>
+        <environment>Test database + real APIs</environment>
+        <execution>CI + local development</execution>
+      </type>
+      
+      <type name="End-to-End">
+        <scope>Complete user workflows</scope>
+        <environment>Full system stack</environment>
+        <execution>CI + staging</execution>
+      </type>
+      
+      <type name="Performance">
+        <scope>System performance</scope>
+        <environment>Load testing infrastructure</environment>
+        <execution>Scheduled CI runs</execution>
+      </type>
+    </testTypes>
+    
+    <testEnvironments>
+      <environment name="Unit">
+        <database>Memory</database>
+        <apis>Mocked</apis>
+        <execution>Fast feedback</execution>
+      </environment>
+      
+      <environment name="Integration">
+        <database>Testcontainers PostgreSQL</database>
+        <apis>Real test credentials</apis>
+        <execution>CI pipeline</execution>
+      </environment>
+      
+      <environment name="E2E">
+        <database>Staging PostgreSQL</database>
+        <apis>Staging environments</apis>
+        <execution>Release pipeline</execution>
+      </environment>
+    </testEnvironments>
+    
+    <coverageTargets>
+      <target name="API Endpoints">100%</target>
+      <target name="Provider Integrations">90%</target>
+      <target name="Platform Integrations">85%</target>
+      <target name="Workflow Paths">80%</target>
+      <target name="Error Scenarios">95%</target>
+    </coverageTargets>
+  </testingStrategy>
+  
+  <qualityGates>
+    <gate name="Test Coverage">
+      <requirement>≥80% line coverage</requirement>
+      <requirement>≥75% branch coverage</requirement>
+      <requirement>≥85% function coverage</requirement>
+    </gate>
+    
+    <gate name="Test Reliability">
+      <requirement>≤1% flaky test rate</requirement>
+      <requirement>≤30s average test duration</require>
+      <requirement>100% test isolation</requirement>
+    </gate>
+    
+    <gate name="Integration Success">
+      <requirement>100% API integration tests pass</requirement>
+      <requirement>95% provider integration tests pass</require>
+      <requirement>90% platform integration tests pass</requirement>
+    </gate>
+  </qualityGates>
+  
+  <mvpScope>
+    <inScope>
+      <item>Core API endpoint integration tests</item>
+      <item>Primary provider integration tests (Anthropic, OpenAI)</item>
+      <item>GitHub platform integration tests</item>
+      <item>Basic workflow end-to-end tests</item>
+      <item>Test infrastructure setup</item>
+      <item>CI/CD integration</item>
+    </inScope>
+    
+    <outOfScope>
+      <item>All provider integration tests (focus on primary ones)</item>
+      <item>All platform integration tests (focus on GitHub)</item>
+      <item>Advanced performance testing</item>
+      <item>Chaos engineering</item>
+      <item>Visual regression testing</item>
+    </outOfScope>
+  </mvpScope>
+  
+  <successMetrics>
+    <metric name="Test Coverage" target="≥80%" type="quality"/>
+    <metric name="Test Reliability" target="≥99%" type="quality"/>
+    <metric name="Integration Test Pass Rate" target="≥95%" type="quality"/>
+    <metric name="Test Execution Time" target="≤10min" type="performance"/>
+    <metric name="Defect Detection Rate" target="≥90%" type="effectiveness"/>
+  </successMetrics>
+</storyContext>

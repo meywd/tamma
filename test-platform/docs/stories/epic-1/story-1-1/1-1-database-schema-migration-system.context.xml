@@ -1,0 +1,177 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>1</storyId>
+    <title>Database Schema Migration System</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-08T12:00:00.000Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/1-1-database-schema-migration-system.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a developer</asA>
+    <iWant>a properly structured PostgreSQL database with migration system</iWant>
+    <soThat>we have reliable data storage for benchmark results and multi-tenant operations</soThat>
+    <tasks>- Task 1: Database Setup and Configuration (AC: #1)
+  - Subtask 1.1: Install and configure PostgreSQL 17
+  - Subtask 1.2: Enable JSONB extension and verify functionality
+  - Subtask 1.3: Configure connection pooling with PgBouncer
+- Task 2: Migration Framework Implementation (AC: #2)
+  - Subtask 2.1: Set up Knex.js migration framework
+  - Subtask 2.2: Create migration runner with version tracking
+  - Subtask 2.3: Implement rollback functionality
+- Task 3: Core Schema Creation (AC: #3, #4)
+  - Subtask 3.1: Create organizations table with UUID primary key
+  - Subtask 3.2: Create users table with authentication fields
+  - Subtask 3.3: Create user_organizations join table
+  - Subtask 3.4: Create events table for DCB event sourcing
+  - Subtask 3.5: Create api_keys table for authentication
+- Task 4: Database Optimization (AC: #5, #6)
+  - Subtask 4.1: Create performance indexes for all query patterns
+  - Subtask 4.2: Implement connection retry logic with exponential backoff
+  - Subtask 4.3: Configure connection pool settings
+- Task 5: Documentation and Validation (AC: #7, #8)
+  - Subtask 5.1: Document schema with ERD and field descriptions
+  - Subtask 5.2: Test migration rollback scenarios
+  - Subtask 5.3: Validate data integrity after migrations</tasks>
+  </story>
+
+  <acceptanceCriteria>1. PostgreSQL 17 database with JSONB support installed and configured
+2. Migration system using modern Node.js migration library (Knex.js or similar)
+3. Core tables created: organizations, users, user_organizations, events, api_keys
+4. Event sourcing table (events) with DCB pattern implementation
+5. Database indexes optimized for query performance
+6. Connection pooling and retry logic implemented
+7. Database schema documented with relationships and constraints
+8. Migration rollback capability with version tracking</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/epics.md</path>
+        <title>Epic Breakdown - Story 1.1</title>
+        <section>Story 1.1: Database Schema & Migration System</section>
+        <snippet>As a developer, I want a properly structured PostgreSQL database with TimescaleDB extension and migration system, So that we have reliable data storage for benchmark results and time-series data.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/ARCHITECTURE.md</path>
+        <title>System Architecture - Data Model</title>
+        <section>Database Schema (PostgreSQL 17 + TimescaleDB)</section>
+        <snippet>Core Tables with UUID primary keys using gen_random_uuid(), JSONB support for flexible schema evolution, and comprehensive indexing strategy for query performance.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-1.md</path>
+        <title>Epic 1 Technical Specification</title>
+        <section>Database Schema & Migration System (Story 1.1)</section>
+        <snippet>PostgreSQL 17 with JSONB for flexible schema evolution, custom migration framework with versioning and rollback support, DCB pattern implementation for complete audit trails.</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements - Functional Requirements</title>
+        <section>Core Benchmarking Engine</section>
+        <snippet>Result Storage: Time-series optimized storage of benchmark results with full audit trail, Multi-tenancy: Organization-based isolation with private workspaces and data.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <codefile>
+        <path>package.json</path>
+        <kind>package</kind>
+        <symbol>migrate:latest, migrate:rollback</symbol>
+        <lines>25-26</lines>
+        <reason>Existing migration scripts in root package.json show database operations are orchestrated through @tamma/orchestrator package</reason>
+      </codefile>
+      <codefile>
+        <path>packages/orchestrator/package.json</path>
+        <kind>package</kind>
+        <symbol>orchestrator</symbol>
+        <lines>1-20</lines>
+        <reason>Orchestrator package likely contains database migration logic and connection management</reason>
+      </codefile>
+    </code>
+    <dependencies>
+      <ecosystem>Node.js</ecosystem>
+      <packages>
+        <package name="typescript" version="~5.7.2" />
+        <package name="vitest" version="^3.0.6" />
+        <package name="esbuild" version="^0.24.2" />
+      </packages>
+      <database>
+        <db name="PostgreSQL" version="17" />
+        <db name="Redis" version="7.x" />
+      </database>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>DCB Event Sourcing: Events table must support time-series queries and audit trails with complete event history</constraint>
+    <constraint>Multi-tenancy: Row-level security policies needed for tenant isolation across all tables</constraint>
+    <constraint>JSONB Usage: Flexible schema evolution for metadata and settings fields with proper indexing</constraint>
+    <constraint>UUID Primary Keys: All tables use gen_random_uuid() for primary keys with proper UUID v7 implementation</constraint>
+    <constraint>Connection Pooling: PgBouncer integration for high-concurrency access with proper pool sizing</constraint>
+    <constraint>Migration Framework: Must support version tracking, rollback capabilities, and dependency management</constraint>
+    <constraint>Performance: Database indexes optimized for all query patterns with 95th percentile &lt;100ms query times</constraint>
+    <constraint>Security: All sensitive data encrypted at rest, audit logging for all data access</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>Migration</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface Migration {
+  version: string;
+  description: string;
+  up: (db: Database) => Promise<void>;
+  down: (db: Database) => Promise<void>;
+  dependencies?: string[];
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface>
+      <name>MigrationRunner</name>
+      <kind>TypeScript Class</kind>
+      <signature>class MigrationRunner {
+  async runMigrations(targetVersion?: string): Promise<void>;
+  async rollback(targetVersion: string): Promise<void>;
+  async getCurrentVersion(): Promise<string>;
+  async getPendingMigrations(): Promise<Migration[]>;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface>
+      <name>DatabaseConfig</name>
+      <kind>TypeScript Interface</kind>
+      <signature>interface DatabaseConfig {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  ssl: boolean;
+  poolSize: number;
+  connectionTimeout: number;
+}</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for migration runner with in-memory PostgreSQL, Integration tests with real PostgreSQL test database, Migration rollback validation tests, Performance tests for query optimization, Data integrity validation tests. Target: 90% line coverage, 85% branch coverage using Vitest 3.x with TypeScript support.</standards>
+    <locations>
+      <location>**/*.unit.test.ts</location>
+      <location>**/*.integration.test.ts</location>
+      <location>packages/orchestrator/src/database/**/*.test.ts</location>
+      <location>database/migrations/**/*.test.ts</location>
+    </locations>
+    <ideas>
+      <test idea="AC1">Test PostgreSQL 17 installation and JSONB extension verification</test>
+      <test idea="AC2">Test Knex.js migration framework setup and version tracking</test>
+      <test idea="AC3">Test core tables creation with proper UUID primary keys and constraints</test>
+      <test idea="AC4">Test DCB event sourcing pattern implementation in events table</test>
+      <test idea="AC5">Test database index creation and query performance optimization</test>
+      <test idea="AC6">Test connection pooling configuration and retry logic with exponential backoff</test>
+      <test idea="AC7">Test schema documentation generation and ERD creation</test>
+      <test idea="AC8">Test migration rollback scenarios and data integrity validation</test>
+    </ideas>
+  </tests>
+</story-context>

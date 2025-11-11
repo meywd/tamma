@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="3-10-agent-performance-monitoring">
+  <metadata>
+    <title>Story 3.10: Agent Performance Monitoring</title>
+    <epic>Epic 3 - Quality Gates & Intelligence Layer</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+  </metadata>
+
+  <user-story>
+    <role>system operator</role>
+    <goal>I want to monitor AI agent performance metrics and response quality</goal>
+    <benefit>so that I can identify issues, optimize performance, and ensure consistent autonomous development quality</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">
+      <description>System tracks comprehensive performance metrics for each AI provider and task type combination</description>
+    </criterion>
+    <criterion id="2">
+      <description>Metrics include: response time, success rate, token usage, cost per task, revision count, quality score</description>
+    </criterion>
+    <criterion id="3">
+      <description>Real-time dashboard displays current performance with historical trends and alerts for anomalies</description>
+    </criterion>
+    <criterion id="4">
+      <description>Performance baselines established per provider/task type with automatic deviation detection</description>
+    </criterion>
+    <criterion id="5">
+      <description>Quality scoring system evaluates AI responses based on code quality, test coverage, and user feedback</description>
+    </criterion>
+    <criterion id="6">
+      <description>Automated alerts trigger when performance degrades beyond thresholds (response time, success rate, cost)</description>
+    </criterion>
+    <criterion id="7">
+      <description>Performance reports generated daily/weekly with insights and optimization recommendations</description>
+    </criterion>
+    <criterion id="8">
+      <description>Historical performance data used to inform provider selection and prompt optimization</description>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <package-location>packages/observability/src/performance-monitoring.ts</package-location>
+    <integration-points>
+      <point>AI provider abstraction (Story 1.1)</point>
+      <point>Provider selection (Story 2.12)</point>
+      <point>Prompt optimization (Story 2.13)</point>
+      <point>Metrics collection (Story 5.2)</point>
+    </integration-points>
+    <key-components>
+      <component>Performance metrics collection</component>
+      <component>Real-time dashboard</component>
+      <component>Quality scoring algorithm</component>
+      <component>Alert system</component>
+      <component>Historical analysis</component>
+    </key-components>
+  </technical-context>
+
+  <implementation-notes>
+    <considerations>
+      <item>Performance monitoring must not significantly impact system performance</item>
+      <item>Metrics collection should be configurable and extensible</item>
+      <item>Dashboard should provide actionable insights, not just raw data</item>
+      <item>Quality scoring requires multiple factors and historical context</item>
+    </considerations>
+    <dependencies>
+      <dependency>AI provider interface implementation</dependency>
+      <dependency>Event sourcing for audit trail</dependency>
+      <dependency>Metrics collection infrastructure</dependency>
+    </dependencies>
+  </implementation-notes>
+
+  <testing-strategy>
+    <unit-tests>
+      <test>Performance metrics collection accuracy</test>
+      <test>Quality scoring algorithm validation</test>
+      <test>Alert threshold detection</test>
+      <test>Dashboard data visualization</test>
+    </unit-tests>
+    <integration-tests>
+      <test>End-to-end performance tracking</test>
+      <test>Multi-provider metrics aggregation</test>
+      <test>Alert notification delivery</test>
+    </integration-tests>
+    <performance-tests>
+      <test>Monitoring system overhead measurement</test>
+      <test>Large-scale metrics processing</test>
+    </performance-tests>
+  </testing-strategy>
+
+  <success-metrics>
+    <metric>Performance monitoring accuracy: 99.5%+</metric>
+    <metric>Alert response time: &lt; 1 minute</metric>
+    <metric>Dashboard refresh rate: Real-time (&lt; 5 seconds)</metric>
+    <metric>System overhead: &lt; 2% performance impact</metric>
+  </success-metrics>
+
+  <rollback-plan>
+    <condition>Performance monitoring degrades system performance</condition>
+    <action>Disable detailed metrics collection, maintain essential monitoring only</action>
+    <condition>Quality scoring algorithm produces inaccurate results</condition>
+    <action>Revert to basic metrics, implement improved scoring algorithm</action>
+  </rollback-plan>
+</story-context>

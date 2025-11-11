@@ -1,0 +1,1077 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>7-4-data-export-reporting</story-id>
+    <story-title>Data Export & Reporting</story-title>
+    <project>test-platform</project>
+    <epic>7</epic>
+    <status>ready-for-dev</status>
+    <generated-date>2025-01-09T12:00:00Z</generated-date>
+    <generator>story-context-workflow</generator>
+  </metadata>
+
+  <story-summary>
+    <narrative>
+      As a business analyst,
+      I want comprehensive data export and reporting capabilities,
+      so that I can create custom reports and perform advanced analysis.
+    </narrative>
+    <acceptance-criteria count="8">
+      <criteria id="1">Export in multiple formats (JSON, CSV, PDF, Excel)</criteria>
+      <criteria id="2">Custom report generation with templates</criteria>
+      <criteria id="3">Scheduled report generation and delivery</criteria>
+      <criteria id="4">Advanced filtering and data selection</criteria>
+      <criteria id="5">Historical data export with date ranges</criteria>
+      <criteria id="6">Report sharing and collaboration</criteria>
+      <criteria id="7">API access for raw data extraction</criteria>
+      <criteria id="8">Data visualization export capabilities</criteria>
+    </acceptance-criteria>
+  </story-summary>
+
+  <technical-architecture>
+    <export-reporting-framework>
+      <pattern>Multi-format export engine with template-based reporting and scheduled delivery</pattern>
+      <components>
+        <component>Export Engine with multi-format support and data transformation</component>
+        <component>Report Generation Service with template engine and customization</component>
+        <component>Scheduling Service with cron-based triggers and delivery management</component>
+        <component>Data Filtering Service with advanced query capabilities</component>
+        <component>Collaboration Service with sharing and permission management</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Data-Export--Reporting-Architecture</source-ref>
+    </export-reporting-framework>
+
+    <template-engine-architecture>
+      <pattern>Template-based report generation with dynamic content and styling</pattern>
+      <features>
+        <feature>Handlebars/Mustache template engine for report layouts</feature>
+        <feature>Dynamic parameter binding and conditional rendering</feature>
+        <feature>Custom styling with CSS and branding support</feature>
+        <feature>Chart and visualization embedding</feature>
+        <feature>Multi-language template support</feature>
+      </features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Template-Engine</source-ref>
+    </template-engine-architecture>
+
+    <data-processing-pipeline>
+      <pattern>ETL pipeline for data extraction, transformation, and loading</pattern>
+      <stages>
+        <stage>Extraction: Query data from multiple sources with filtering</stage>
+        <stage>Transformation: Apply business rules and data formatting</stage>
+        <stage>Loading: Generate output in target format with compression</stage>
+      </stages>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Data-Processing-Pipeline</source-ref>
+    </data-processing-pipeline>
+
+    <scheduling-delivery-system>
+      <pattern>Cron-based scheduling with multi-channel delivery</pattern>
+      <features>
+        <feature>Flexible cron expression scheduling</feature>
+        <feature>Timezone-aware execution</feature>
+        <feature>Email delivery with HTML templates</feature>
+        <feature>Webhook notifications for external systems</feature>
+        <feature>File storage integration (S3, Google Cloud)</feature>
+      </features>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Scheduling--Delivery</source-ref>
+    </scheduling-delivery-system>
+  </technical-architecture>
+
+  <core-interfaces>
+    <data-export-service>
+      <interface-definition>
+        <name>DataExportService</name>
+        <methods>
+          <method name="exportData" params="request: ExportRequest">Export data in specified format</method>
+          <method name="generateReport" params="template: ReportTemplate, data: ReportData">Generate custom report</method>
+          <method name="scheduleReport" params="schedule: ReportSchedule">Schedule recurring report</method>
+          <method name="createTemplate" params="template: ReportTemplate">Create report template</method>
+          <method name="updateTemplate" params="id: string, template: ReportTemplate">Update report template</method>
+          <method name="deleteTemplate" params="id: string">Delete report template</method>
+          <method name="getExportStatus" params="exportId: string">Get export status</method>
+          <method name="cancelExport" params="exportId: string">Cancel export job</method>
+        </methods>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#DataExportService</source-ref>
+    </data-export-service>
+
+    <export-request>
+      <interface-definition>
+        <name>ExportRequest</name>
+        <fields>
+          <field name="format" type="ExportFormat">Target export format (JSON, CSV, PDF, Excel)</field>
+          <field name="dataSource" type="string">Data source identifier</field>
+          <field name="filters" type="DataFilter[]">Data filtering criteria</field>
+          <field name="fields" type="string[]" optional="true">Specific fields to export</field>
+          <field name="options" type="ExportOptions" optional="true">Export configuration options</field>
+          <field name="userId" type="string">Requesting user identifier</field>
+          <field name="tenantId" type="string">Tenant identifier</field>
+          <field name="priority" type="ExportPriority">Export job priority</field>
+          <field name="notification" type="NotificationConfig" optional="true">Completion notification settings</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#ExportRequest</source-ref>
+    </export-request>
+
+    <report-template>
+      <interface-definition>
+        <name>ReportTemplate</name>
+        <fields>
+          <field name="id" type="string">Unique template identifier</field>
+          <field name="name" type="string">Template name</field>
+          <field name="description" type="string">Template description</field>
+          <field name="layout" type="ReportLayout">Report layout configuration</field>
+          <field name="styling" type="ReportStyling">Visual styling configuration</field>
+          <field name="parameters" type="ReportParameter[]">Template parameters</field>
+          <field name="permissions" type="Permission[]">Access permissions</field>
+          <field name="category" type="string">Template category</field>
+          <field name="tags" type="string[]">Template tags</field>
+          <field name="isPublic" type="boolean">Public visibility flag</field>
+          <field name="createdBy" type="string">Creator identifier</field>
+          <field name="createdAt" type="Date">Creation timestamp</field>
+          <field name="updatedAt" type="Date">Last update timestamp</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#ReportTemplate</source-ref>
+    </report-template>
+
+    <data-filter>
+      <interface-definition>
+        <name>DataFilter</name>
+        <fields>
+          <field name="field" type="string">Field path to filter on</field>
+          <field name="operator" type="FilterOperator">Filter operation</field>
+          <field name="value" type="any">Filter value</field>
+          <field name="logic" type="FilterLogic" optional="true">Logical operator (AND/OR)</field>
+          <field name="nested" type="DataFilter[]" optional="true">Nested filter conditions</field>
+        </fields>
+        <operators>
+          <operator>equals</operator>
+          <operator>not_equals</operator>
+          <operator>in</operator>
+          <operator>not_in</operator>
+          <operator>greater_than</operator>
+          <operator>less_than</operator>
+          <operator>contains</operator>
+          <operator>starts_with</operator>
+          <operator>ends_with</operator>
+          <operator>between</operator>
+          <operator>is_null</operator>
+          <operator>is_not_null</operator>
+        </operators>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#DataFilter</source-ref>
+    </data-filter>
+
+    <report-schedule>
+      <interface-definition>
+        <name>ReportSchedule</name>
+        <fields>
+          <field name="id" type="string">Unique schedule identifier</field>
+          <field name="templateId" type="string">Report template identifier</field>
+          <field name="name" type="string">Schedule name</field>
+          <field name="cronExpression" type="string">Cron schedule expression</field>
+          <field name="timezone" type="string">Execution timezone</field>
+          <field name="parameters" type="Record&lt;string, any&gt;">Report parameters</field>
+          <field name="delivery" type="DeliveryConfig">Delivery configuration</field>
+          <field name="isActive" type="boolean">Schedule active status</field>
+          <field name="nextRun" type="Date">Next execution time</field>
+          <field name="lastRun" type="Date" optional="true">Last execution time</field>
+          <field name="createdBy" type="string">Creator identifier</field>
+          <field name="createdAt" type="Date">Creation timestamp</field>
+        </fields>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#ReportSchedule</source-ref>
+    </report-schedule>
+
+    <export-result>
+      <interface-definition>
+        <name>ExportResult</name>
+        <fields>
+          <field name="id" type="string">Export job identifier</field>
+          <field name="status" type="ExportStatus">Current export status</field>
+          <field name="format" type="ExportFormat">Export format</field>
+          <field name="size" type="number">Export file size in bytes</field>
+          <field name="records" type="number">Number of records exported</field>
+          <field name="url" type="string" optional="true">Download URL</field>
+          <field name="expiresAt" type="Date" optional="true">Download expiration</field>
+          <field name="error" type="string" optional="true">Error message if failed</field>
+          <field name="progress" type="number" optional="true">Progress percentage (0-100)</field>
+          <field name="startedAt" type="Date">Start timestamp</field>
+          <field name="completedAt" type="Date" optional="true">Completion timestamp</field>
+        </fields>
+        <status-values>
+          <status>pending</status>
+          <status>processing</status>
+          <status>completed</status>
+          <status>failed</status>
+          <status>cancelled</status>
+        </status-values>
+      </interface-definition>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#ExportResult</source-ref>
+    </export-result>
+  </core-interfaces>
+
+  <export-formats>
+    <json-export>
+      <description>Structured data export with customizable schema</description>
+      <features>
+        <feature>Nested object support with proper serialization</feature>
+        <feature>Custom field selection and renaming</feature>
+        <feature>Pretty printing or compact format options</feature>
+        <feature>Metadata inclusion (timestamps, record counts)</feature>
+        <feature>Streaming support for large datasets</feature>
+      </features>
+      <configuration>
+        <parameter name="prettyPrint" type="boolean" default="false">Pretty print JSON output</parameter>
+        <parameter name="includeMetadata" type="boolean" default="true">Include export metadata</parameter>
+        <parameter name="dateFormat" type="string" default="ISO8601">Date format for timestamps</parameter>
+        <parameter name="nullHandling" type="string" default="include">How to handle null values</parameter>
+      </configuration>
+    </json-export>
+
+    <csv-export>
+      <description>Tabular data export with configurable delimiters</description>
+      <features>
+        <feature>Configurable delimiters (comma, semicolon, tab)</feature>
+        <feature>Custom encoding options (UTF-8, ISO-8859-1)</feature>
+        <feature>Header row customization</feature>
+        <feature>Quote handling and escaping</feature>
+        <feature>Large dataset streaming</feature>
+      </features>
+      <configuration>
+        <parameter name="delimiter" type="string" default=",">Field delimiter character</parameter>
+        <parameter name="encoding" type="string" default="UTF-8">Character encoding</parameter>
+        <parameter name="includeHeaders" type="boolean" default="true">Include header row</parameter>
+        <parameter name="quoteCharacter" type="string" default="&quot;">Quote character for fields</parameter>
+        <parameter name="escapeCharacter" type="string" default="\">Escape character</parameter>
+      </configuration>
+    </csv-export>
+
+    <pdf-export>
+      <description>Professional report generation with charts and formatting</description>
+      <features>
+        <feature>Custom page layouts and templates</feature>
+        <feature>Chart and graph embedding</feature>
+        <feature>Table formatting with styling</feature>
+        <feature>Header/footer customization</feature>
+        <feature>Watermark and branding support</feature>
+      </features>
+      <configuration>
+        <parameter name="pageSize" type="string" default="A4">Page size (A4, Letter, Legal)</parameter>
+        <parameter name="orientation" type="string" default="portrait">Page orientation</parameter>
+        <parameter name="margin" type="number" default="20">Page margin in mm</parameter>
+        <parameter name="includeCharts" type="boolean" default="true">Include charts and graphs</parameter>
+        <parameter name="compressImages" type="boolean" default="true">Compress embedded images</parameter>
+      </configuration>
+    </pdf-export>
+
+    <excel-export>
+      <description>Spreadsheet export with multiple worksheets and formulas</description>
+      <features>
+        <feature>Multiple worksheet support</feature>
+        <feature>Cell formatting and styling</feature>
+        <feature>Formula calculation support</feature>
+        <feature>Chart generation within Excel</feature>
+        <feature>Pivot table creation</feature>
+      </features>
+      <configuration>
+        <parameter name="includeFormulas" type="boolean" default="false">Include calculated formulas</parameter>
+        <parameter name="autoFilter" type="boolean" default="true">Enable auto-filter for tables</parameter>
+        <parameter name="freezeHeader" type="boolean" default="true">Freeze header row</parameter>
+        <parameter name="maxRows" type="number" default="1000000">Maximum rows per worksheet</parameter>
+        <parameter name="includeCharts" type="boolean" default="true">Include chart sheets</parameter>
+      </configuration>
+    </excel-export>
+  </export-formats>
+
+  <report-generation-system>
+    <template-engine>
+      <name>Handlebars Template Engine</name>
+      <capabilities>
+        <capability>Variable substitution and binding</capability>
+        <capability>Conditional rendering with if/else logic</capability>
+        <capability>Loop iteration for data collections</capability>
+        <capability>Partial templates for reusable components</capability>
+        <capability>Custom helper functions for formatting</capability>
+      </capabilities>
+      <template-syntax>
+        <syntax>{{variable}}</syntax>
+        <syntax>{{#if condition}}...{{/if}}</syntax>
+        <syntax>{{#each array}}...{{/each}}</syntax>
+        <syntax>{{&gt; partial}}</syntax>
+        <syntax>{{formatDate date "YYYY-MM-DD"}}</syntax>
+      </template-syntax>
+      <source-ref>/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md#Template-Engine</source-ref>
+    </template-engine>
+
+    <report-builder>
+      <features>
+        <feature>Drag-and-drop report builder interface</feature>
+        <feature>Visual component library (charts, tables, text)</feature>
+        <feature>Real-time preview and editing</feature>
+        <feature>Responsive design for different screen sizes</feature>
+        <feature>Version control and change tracking</feature>
+      </features>
+      <components>
+        <component>Chart components (line, bar, pie, scatter)</component>
+        <component>Table components with sorting and filtering</component>
+        <component>Text components with rich formatting</component>
+        <component>Image components with upload and sizing</component>
+        <component>Container components for layout</component>
+      </components>
+    </report-builder>
+
+    <parameter-system>
+      <parameter-types>
+        <type>text - Single-line text input</type>
+        <type>textarea - Multi-line text input</type>
+        <type>number - Numeric input with validation</type>
+        <type>date - Date picker with calendar</type>
+        <type>select - Dropdown selection from options</type>
+        <type>multiselect - Multiple selection from options</type>
+        <type>boolean - Checkbox or toggle switch</type>
+        <type>file - File upload for report assets</type>
+      </parameter-types>
+      <validation>
+        <validation>Required field validation</validation>
+        <validation>Data type validation</validation>
+        <validation>Range validation for numbers</validation>
+        <validation>Pattern validation with regex</validation>
+        <validation>Custom validation functions</validation>
+      </validation>
+    </parameter-system>
+  </report-generation-system>
+
+  <scheduling-delivery>
+    <cron-scheduling>
+      <features>
+        <feature>Flexible cron expression support</feature>
+        <feature>Timezone-aware scheduling</feature>
+        <feature>Next execution calculation</feature>
+        <feature>Schedule conflict detection</feature>
+        <feature>Manual trigger override</feature>
+      </features>
+      <examples>
+        <example>0 9 * * 1-5 - Every weekday at 9 AM</example>
+        <example>0 0 1 * * - First day of every month</example>
+        <example>0 */6 * * * - Every 6 hours</example>
+        <example>0 0 * * 0 - Every Sunday at midnight</example>
+      </examples>
+    </cron-scheduling>
+
+    <delivery-channels>
+      <email-delivery>
+        <features>
+          <feature>HTML email templates with branding</feature>
+          <feature>File attachment support</feature>
+          <feature>Multiple recipient support</feature>
+          <feature>Delivery status tracking</feature>
+          <feature>Bounce handling and retry</feature>
+        </features>
+        <providers>
+          <provider>SendGrid - Primary email service</provider>
+          <provider>AWS SES - Alternative email service</provider>
+          <provider>SMTP - Custom SMTP server</provider>
+        </providers>
+      </email-delivery>
+
+      <webhook-delivery>
+        <features>
+          <feature>HTTP POST delivery with retry logic</feature>
+          <feature>Custom header support</feature>
+          <feature>Authentication (Bearer token, Basic auth)</feature>
+          <feature>Timeout and retry configuration</feature>
+          <feature>Delivery status webhooks</feature>
+        </features>
+        <security>
+          <security>HMAC signature verification</security>
+          <security>IP whitelist support</security>
+          <security>Rate limiting per endpoint</security>
+        </security>
+      </webhook-delivery>
+
+      <cloud-storage>
+        <features>
+          <feature>Direct upload to cloud storage</feature>
+          <feature>Access control and permissions</feature>
+          <feature>Automatic cleanup policies</feature>
+          <feature>CDN integration for fast access</feature>
+          <feature>Versioning and backup</feature>
+        </features>
+        <providers>
+          <provider>AWS S3 - Primary storage</provider>
+          <provider>Google Cloud Storage - Alternative</provider>
+          <provider>Azure Blob Storage - Enterprise option</provider>
+        </providers>
+      </cloud-storage>
+    </delivery-channels>
+  </scheduling-delivery>
+
+  <data-filtering-system>
+    <filter-builder>
+      <features>
+        <feature>Visual filter builder interface</feature>
+        <feature>Complex AND/OR logic with nesting</feature>
+        <feature>Auto-complete for field names</feature>
+        <feature>Filter validation and preview</feature>
+        <feature>Saved filter management</feature>
+      </features>
+      <filter-types>
+        <type>Text filters (contains, starts with, equals)</type>
+        <type>Numeric filters (greater than, between, equals)</type>
+        <type>Date filters (relative, absolute, range)</type>
+        <type>List filters (in, not in, contains)</type>
+        <type>Boolean filters (is true, is false)</type>
+      </filter-types>
+    </filter-builder>
+
+    <date-range-filtering>
+      <features>
+        <feature>Predefined date ranges (last 7 days, last month)</feature>
+        <feature>Custom date range selection</feature>
+        <feature>Relative date expressions (today-30d)</feature>
+        <feature>Timezone-aware date filtering</feature>
+        <feature>Business day calculations</feature>
+      </features>
+      <examples>
+        <example>last_7_days - Last 7 days including today</example>
+        <example>current_month - From start of current month</example>
+        <example>last_quarter - Previous calendar quarter</example>
+        <example>year_to_date - From January 1st of current year</example>
+      </examples>
+    </date-range-filtering>
+
+    <saved-filters>
+      <features>
+        <feature>Save complex filters for reuse</feature>
+        <feature>Share filters with other users</feature>
+        <feature>Filter categories and organization</feature>
+        <feature>Filter usage analytics</feature>
+        <feature>Filter versioning and history</feature>
+      </features>
+      <permissions>
+        <permission>Private - Only visible to creator</permission>
+        <permission>Team - Visible to team members</permission>
+        <permission>Public - Visible to all users</permission>
+      </permissions>
+    </saved-filters>
+  </data-filtering-system>
+
+  <collaboration-sharing>
+    <report-sharing>
+      <features>
+        <feature>Share reports via secure links</feature>
+        <feature>Permission-based access control</feature>
+        <feature>Expiration dates for shared links</feature>
+        <feature>Password protection for sensitive reports</feature>
+        <feature>Download restrictions and watermarking</feature>
+      </features>
+      <access-levels>
+        <level>View - Read-only access to report</level>
+        <level>Comment - Can add comments and annotations</level>
+        <level>Edit - Can modify report content</level>
+        <level>Admin - Full control including sharing</level>
+      </access-levels>
+    </report-sharing>
+
+    <collaborative-editing>
+      <features>
+        <feature>Real-time collaborative editing</feature>
+        <feature>Change tracking and version history</feature>
+        <feature>Comment and annotation system</feature>
+        <feature>Conflict resolution for simultaneous edits</feature>
+        <feature>Notification system for changes</feature>
+      </features>
+      <change-tracking>
+        <tracking>Who made changes and when</tracking>
+        <tracking>Before/after comparison</tracking>
+        <tracking>Change approval workflow</tracking>
+        <tracking>Automatic change summaries</tracking>
+      </change-tracking>
+    </collaborative-editing>
+
+    <report-library>
+      <features>
+        <feature>Centralized report repository</feature>
+        <feature>Category and tag organization</feature>
+        <feature>Advanced search and filtering</feature>
+        <feature>Favorite and bookmark system</feature>
+        <feature>Usage analytics and popularity metrics</feature>
+      </features>
+      <organization>
+        <organization>By category (Financial, Technical, Executive)</organization>
+        <organization>By department (Sales, Marketing, Engineering)</organization>
+        <organization>By frequency (Daily, Weekly, Monthly, Ad-hoc)</organization>
+        <organization>By audience (Internal, External, Public)</organization>
+      </organization>
+    </report-library>
+  </collaboration-sharing>
+
+  <api-data-extraction>
+    <rest-endpoints>
+      <endpoint method="GET" path="/api/v1/export/data">
+        <description>Export data in specified format</description>
+        <parameters>
+          <param name="format" type="string" required="true">Export format (json, csv, pdf, excel)</param>
+          <param name="source" type="string" required="true">Data source identifier</param>
+          <param name="filters" type="string" optional="true">JSON-encoded filter criteria</param>
+          <param name="fields" type="string" optional="true">Comma-separated field list</param>
+        </parameters>
+        <responses>
+          <response code="202">Export job accepted</response>
+          <response code="400">Invalid request parameters</response>
+          <response code="401">Authentication required</response>
+        </responses>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/export/status/{exportId}">
+        <description>Get export job status</description>
+        <parameters>
+          <param name="exportId" type="string" required="true">Export job identifier</param>
+        </parameters>
+        <responses>
+          <response code="200">Export status returned</response>
+          <response code="404">Export job not found</response>
+        </responses>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/export/download/{exportId}">
+        <description>Download exported file</description>
+        <parameters>
+          <param name="exportId" type="string" required="true">Export job identifier</param>
+        </parameters>
+        <responses>
+          <response code="200">File download stream</response>
+          <response code="404">Export not found or expired</response>
+        </responses>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/reports/generate">
+        <description>Generate custom report</description>
+        <parameters>
+          <param name="templateId" type="string" required="true">Report template identifier</param>
+          <param name="parameters" type="object" required="true">Report parameters</param>
+          <param name="format" type="string" optional="true">Output format</param>
+        </parameters>
+        <responses>
+          <response code="202">Report generation started</response>
+          <response code="400">Invalid template or parameters</response>
+        </responses>
+      </endpoint>
+
+      <endpoint method="POST" path="/api/v1/reports/schedule">
+        <description>Schedule recurring report</description>
+        <parameters>
+          <param name="templateId" type="string" required="true">Report template identifier</param>
+          <param name="schedule" type="object" required="true">Schedule configuration</param>
+          <param name="delivery" type="object" required="true">Delivery configuration</param>
+        </parameters>
+        <responses>
+          <response code="201">Schedule created</response>
+          <response code="400">Invalid schedule configuration</response>
+        </responses>
+      </endpoint>
+    </rest-endpoints>
+
+    <graphql-schema>
+      <query name="exportData" type="ExportResult">
+        <description>Export data with filtering</description>
+        <arguments>
+          <arg name="format" type="ExportFormat!" required="true">Export format</arg>
+          <arg name="source" type="String!" required="true">Data source</arg>
+          <arg name="filters" type="DataFilter" optional="true">Filter criteria</arg>
+          <arg name="fields" type="[String]" optional="true">Field selection</arg>
+        </arguments>
+      </query>
+
+      <query name="reportTemplates" type="[ReportTemplate!]">
+        <description>List available report templates</description>
+        <arguments>
+          <arg name="category" type="String" optional="true">Filter by category</arg>
+          <arg name="tags" type="[String]" optional="true">Filter by tags</arg>
+        </arguments>
+      </query>
+
+      <mutation name="generateReport" type="ReportJob">
+        <description>Generate report from template</description>
+        <arguments>
+          <arg name="templateId" type="ID!" required="true">Template ID</arg>
+          <arg name="parameters" type="JSON!" required="true">Report parameters</arg>
+          <arg name="format" type="ExportFormat" optional="true">Output format</arg>
+        </arguments>
+      </mutation>
+
+      <subscription name="exportProgress" type="ExportResult">
+        <description>Subscribe to export progress updates</description>
+        <arguments>
+          <arg name="exportId" type="ID!" required="true">Export job ID</arg>
+        </arguments>
+      </subscription>
+    </graphql-schema>
+
+    <streaming-endpoints>
+      <endpoint method="GET" path="/api/v1/export/stream/{exportId}">
+        <description>Server-sent events for export progress</description>
+        <features>
+          <feature>Real-time progress updates</feature>
+          <feature>Completion notifications</feature>
+          <feature>Error event streaming</feature>
+          <feature>Automatic reconnection</feature>
+        </features>
+      </endpoint>
+
+      <endpoint method="GET" path="/api/v1/data/stream">
+        <description>Stream data directly for real-time export</description>
+        <features>
+          <feature>Chunked data streaming</feature>
+          <feature>Compression support</feature>
+          <feature>Format-specific streaming</feature>
+          <feature>Backpressure handling</feature>
+        </features>
+      </endpoint>
+    </streaming-endpoints>
+  </api-data-extraction>
+
+  <visualization-export>
+    <chart-export>
+      <formats>
+        <format name="PNG">Raster image with transparency support</format>
+        <format name="SVG">Vector graphics for scalability</format>
+        <format name="PDF">High-quality vector format</format>
+        <format name="JPEG">Compressed image format</format>
+      </formats>
+      <features>
+        <feature>Custom resolution and DPI settings</feature>
+        <feature>Background color and transparency</feature>
+        <feature>Size and aspect ratio configuration</feature>
+        <feature>Batch export for multiple charts</feature>
+        <feature>Animation export (GIF, MP4)</feature>
+      </features>
+    </chart-export>
+
+    <dashboard-export>
+      <features>
+        <feature>Complete dashboard export with layout</feature>
+        <feature>Interactive HTML export</feature>
+        <feature>Static image export</feature>
+        <feature>PDF with multiple pages</feature>
+        <feature>Embedded data for offline viewing</feature>
+      </features>
+      <options>
+        <option name="includeData" type="boolean">Include raw data tables</option>
+        <option name="includeFilters" type="boolean">Include current filter state</option>
+        <option name="interactive" type="boolean">Generate interactive HTML</option>
+        <option name="theme" type="string">Color theme for export</option>
+      </options>
+    </dashboard-export>
+
+    <custom-visualization>
+      <template-system>
+        <feature>D3.js template integration</feature>
+        <feature>Custom JavaScript visualization</feature>
+        <feature>React component embedding</feature>
+        <feature>WebGL for high-performance graphics</feature>
+        <feature>Canvas-based custom drawing</feature>
+      </template-system>
+      <styling>
+        <feature>CSS custom properties</feature>
+        <feature>Brand color integration</feature>
+        <feature>Typography customization</feature>
+        <feature>Animation and transition controls</feature>
+      </styling>
+    </custom-visualization>
+  </visualization-export>
+
+  <project-structure>
+    <directory-structure>
+      <directory name="src/export">
+        <purpose>Data export and reporting services</purpose>
+        <files>
+          <file>export.service.ts</file>
+          <file>report-generator.service.ts</file>
+          <file>template-engine.service.ts</file>
+          <file>scheduler.service.ts</file>
+          <file>delivery.service.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/formats">
+        <purpose>Export format implementations</purpose>
+        <files>
+          <file>json.exporter.ts</file>
+          <file>csv.exporter.ts</file>
+          <file>pdf.exporter.ts</file>
+          <file>excel.exporter.ts</file>
+          <file>base.exporter.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/templates">
+        <purpose>Report template management</purpose>
+        <files>
+          <file>template.manager.ts</file>
+          <file>template.validator.ts</file>
+          <file>handlebars.engine.ts</file>
+          <file>template.builder.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/filters">
+        <purpose>Data filtering system</purpose>
+        <files>
+          <file>filter.builder.ts</file>
+          <file>filter.executor.ts</file>
+          <file>date-range.filter.ts</file>
+          <file>complex-filter.parser.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/scheduling">
+        <purpose>Report scheduling system</purpose>
+        <files>
+          <file>cron.scheduler.ts</file>
+          <file>job.manager.ts</file>
+          <file>trigger.handler.ts</file>
+          <file>timezone.handler.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/delivery">
+        <purpose>Report delivery system</purpose>
+        <files>
+          <file>email.delivery.ts</file>
+          <file>webhook.delivery.ts</file>
+          <file>cloud-storage.delivery.ts</file>
+          <file>delivery.tracker.ts</file>
+        </files>
+      </directory>
+      <directory name="src/export/collaboration">
+        <purpose>Report sharing and collaboration</purpose>
+        <files>
+          <file>sharing.service.ts</file>
+          <file>collaboration.service.ts</file>
+          <file>permission.manager.ts</file>
+          <file>comment.system.ts</file>
+        </files>
+      </directory>
+      <directory name="src/api/v1/export">
+        <purpose>Export API endpoints</purpose>
+        <files>
+          <file>export.routes.ts</file>
+          <file>report.routes.ts</file>
+          <file>template.routes.ts</file>
+          <file>schedule.routes.ts</file>
+          <file>stream.routes.ts</file>
+        </files>
+      </directory>
+      <directory name="src/visualization">
+        <purpose>Data visualization export</purpose>
+        <files>
+          <file>chart.exporter.ts</file>
+          <file>dashboard.exporter.ts</file>
+          <file>custom-viz.exporter.ts</file>
+          <file>image.processor.ts</file>
+        </files>
+      </directory>
+      <directory name="templates/reports">
+        <purpose>Report template files</purpose>
+        <files>
+          <file>executive-summary.hbs</file>
+          <file>performance-report.hbs</file>
+          <file>cost-analysis.hbs</file>
+          <file>trend-analysis.hbs</file>
+        </files>
+      </directory>
+      <directory name="tests/export">
+        <purpose>Export system tests</purpose>
+        <files>
+          <file>export.service.test.ts</file>
+          <file>report-generator.test.ts</file>
+          <file>template-engine.test.ts</file>
+          <file>scheduler.test.ts</file>
+          <file>delivery.test.ts</file>
+        </files>
+      </directory>
+    </directory-structure>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-4-data-export-reporting.md#Project-Structure-Notes</source-ref>
+  </project-structure>
+
+  <integration-points>
+    <rest-api-integration>
+      <description>Reuse REST API patterns and authentication from Story 7.1</description>
+      <components>
+        <component>Authentication and authorization middleware</component>
+        <component>Rate limiting and quota management</component>
+        <component>Error handling and response formatting</component>
+        <component>API documentation with OpenAPI</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.context.xml</source-ref>
+    </rest-api-integration>
+
+    <webhook-system-integration>
+      <description>Integrate with webhook system for report delivery notifications</description>
+      <components>
+        <component>Webhook delivery for report completion</component>
+        <component>Event publishing for export status updates</component>
+        <component>Signature verification for secure delivery</component>
+        <component>Retry mechanisms for failed deliveries</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.context.xml</source-ref>
+    </webhook-system-integration>
+
+    <cicd-integration>
+      <description>Integrate with CI/CD system for automated reporting</description>
+      <components>
+        <component>Report generation in pipeline workflows</component>
+        <component>Artifact upload and storage</component>
+        <component>Pull request comment integration</component>
+        <component>Status check reporting</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.context.xml</source-ref>
+    </cicd-integration>
+
+    <data-store-integration>
+      <description>Integration with time-series data store for historical exports</description>
+      <components>
+        <component>TimescaleDB for time-series data</component>
+        <component>PostgreSQL for metadata and configurations</component>
+        <component>Redis for caching and session management</component>
+        <component>S3 for file storage and delivery</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/ARCHITECTURE.md#Data-Layer</source-ref>
+    </data-store-integration>
+
+    <visualization-integration>
+      <description>Integration with existing visualization components</description>
+      <components>
+        <component>Recharts for chart generation</component>
+        <component>D3.js for custom visualizations</component>
+        <component>React components for interactive reports</component>
+        <component>Canvas API for high-performance graphics</component>
+      </components>
+      <source-ref>/home/meywd/tamma/test-platform/docs/ARCHITECTURE.md#UI-UX-Enhancements</source-ref>
+    </visualization-integration>
+  </integration-points>
+
+  <testing-strategy>
+    <unit-tests>
+      <coverage-target>90% line coverage</coverage-target>
+      <focus-areas>
+        <area>Export format implementations</area>
+        <area>Template engine functionality</area>
+        <area>Data filtering and transformation</area>
+        <area>Scheduling and delivery systems</area>
+        <area>API endpoint implementations</area>
+      </focus-areas>
+    </unit-tests>
+
+    <integration-tests>
+      <scope>End-to-end export and reporting workflows</scope>
+      <scenarios>
+        <scenario>Complete export workflow from request to download</scenario>
+        <scenario>Report generation with custom templates</scenario>
+        <scenario>Scheduled report execution and delivery</scenario>
+        <scenario>Large dataset export performance</scenario>
+        <scenario>Multi-format export consistency</scenario>
+      </scenarios>
+    </integration-tests>
+
+    <performance-tests>
+      <metrics>
+        <metric>Export throughput (records/second)</metric>
+        <metric>Memory usage during large exports</metric>
+        <metric>File generation time by format</metric>
+        <metric>Concurrent export handling</metric>
+        <metric>Database query performance</metric>
+      </metrics>
+      <load-scenarios>
+        <scenario>Export 1M records to CSV</scenario>
+        <scenario>Generate 100-page PDF report</scenario>
+        <scenario>Process 1000 concurrent export requests</scenario>
+        <scenario>Schedule 100 recurring reports</scenario>
+      </load-scenarios>
+    </performance-tests>
+
+    <security-tests>
+      <focus>Data access control and export security</focus>
+      <tests>
+        <test>Unauthorized data export attempts</test>
+        <test>Data leakage through filter manipulation</test>
+        <test>File access control and expiration</test>
+        <test>Report sharing permission validation</test>
+        <test>API rate limiting enforcement</test>
+      </tests>
+    </security-tests>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-4-data-export-reporting.md#Task-9-Testing-and-Quality-Assurance</source-ref>
+  </testing-strategy>
+
+  <implementation-dependencies>
+    <story-dependencies>
+      <dependency story="7-1-restful-api-implementation" status="drafted">
+        <rationale>Provides REST API foundation and authentication patterns</rationale>
+        <components>
+          <component>API authentication and authorization</component>
+          <component>Rate limiting and quota management</component>
+          <component>Error handling and response formatting</component>
+          <component>OpenAPI documentation generation</component>
+        </components>
+      </dependency>
+      <dependency story="7-2-webhook-system" status="drafted">
+        <rationale>Provides webhook infrastructure for report delivery</rationale>
+        <components>
+          <component>Webhook delivery with retry logic</component>
+          <component>Event publishing and subscription</component>
+          <component>Signature verification and security</component>
+          <component>Delivery status tracking</component>
+        </components>
+      </dependency>
+      <dependency story="7-3-cicd-integration" status="ready-for-dev">
+        <rationale>Provides CI/CD integration for automated reporting</rationale>
+        <components>
+          <component>Pipeline integration patterns</component>
+          <component>Artifact upload and storage</component>
+          <component>Status check and reporting integration</component>
+          <component>Platform adapter patterns</component>
+        </components>
+      </dependency>
+      <dependency story="4-3-result-storage-time-series-management" status="planned">
+        <rationale>Provides time-series data storage for historical exports</rationale>
+        <components>
+          <component>TimescaleDB integration</component>
+          <component>Time-series data querying</component>
+          <component>Data aggregation and summarization</component>
+          <component>Historical data management</component>
+        </components>
+      </dependency>
+    </story-dependencies>
+
+    <technical-dependencies>
+      <dependency name="Export Libraries" required="true">
+        <description>Libraries for multi-format export generation</description>
+        <libraries>
+          <library>exceljs - Excel file generation</library>
+          <library>pdfkit - PDF document creation</library>
+          <library>csv-writer - CSV file generation</library>
+          <library>canvas - Image processing and generation</library>
+        </libraries>
+      </dependency>
+      <dependency name="Template Engine" required="true">
+        <description>Handlebars template engine for report generation</description>
+        <libraries>
+          <library>handlebars - Template rendering engine</library>
+          <library>handlebars-helpers - Custom helper functions</library>
+        </libraries>
+      </dependency>
+      <dependency name="Scheduling" required="true">
+        <description>Cron-based job scheduling system</description>
+        <libraries>
+          <library>node-cron - Cron job scheduling</library>
+          <library>bull - Job queue management</library>
+        </libraries>
+      </dependency>
+      <dependency name="Email Service" required="true">
+        <description>Email delivery service for report distribution</description>
+        <libraries>
+          <library>@sendgrid/mail - SendGrid email service</library>
+          <library>nodemailer - SMTP email support</library>
+        </libraries>
+      </dependency>
+      <dependency name="Cloud Storage" required="true">
+        <description>Cloud storage integration for file management</description>
+        <libraries>
+          <library>@aws-sdk/client-s3 - AWS S3 integration</library>
+          <library>@google-cloud/storage - Google Cloud Storage</library>
+        </libraries>
+      </dependency>
+    </technical-dependencies>
+  </implementation-dependencies>
+
+  <success-metrics>
+    <export-metrics>
+      <metric name="Export Success Rate" target="&gt; 99%">Percentage of successful exports</metric>
+      <metric name="Export Latency" target="&lt; 30s (p95)">Time from request to completion</metric>
+      <metric name="Format Support" target="100%">All required export formats working</metric>
+      <metric name="Data Accuracy" target="100%">Exported data matches source exactly</metric>
+    </export-metrics>
+
+    <reporting-metrics>
+      <metric name="Report Generation Success" target="&gt; 98%">Successful report generation rate</metric>
+      <metric name="Template Rendering Performance" target="&lt; 5s">Template rendering time</metric>
+      <metric name="Scheduled Report Delivery" target="&gt; 99%">On-time delivery rate</metric>
+      <metric name="User Satisfaction" target="&gt; 4.5/5">User satisfaction rating</metric>
+    </reporting-metrics>
+
+    <performance-metrics>
+      <metric name="Large Dataset Export" target="&lt; 5min">Export 1M records</metric>
+      <metric name="Concurrent Exports" target="100+">Simultaneous export capacity</metric>
+      <metric name="Memory Efficiency" target="&lt; 1GB">Peak memory usage for large exports</metric>
+      <metric name="Storage Optimization" target="&gt; 50% compression">File compression ratio</metric>
+    </performance-metrics>
+
+    <adoption-metrics>
+      <metric name="Daily Exports" target="1000+">Daily export volume</metric>
+      <metric name="Active Templates" target="500+">Number of active report templates</metric>
+      <metric name="Scheduled Reports" target="200+">Number of active scheduled reports</metric>
+      <metric name="API Usage" target="10K+ calls/day">Export API usage</metric>
+    </adoption-metrics>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-4-data-export-reporting.md#Success-Metrics</source-ref>
+  </success-metrics>
+
+  <risk-mitigation>
+    <technical-risks>
+      <risk name="Large Dataset Performance">
+        <mitigation>Streaming export with chunked processing</mitigation>
+        <mitigation>Background job processing with progress tracking</mitigation>
+        <mitigation>Memory-efficient data transformation</mitigation>
+        <mitigation>Configurable timeout and cancellation</mitigation>
+      </risk>
+      <risk name="File Storage Costs">
+        <mitigation>Automatic cleanup policies for expired files</mitigation>
+        <mitigation>Compression and optimization for file sizes</mitigation>
+        <mitigation>Cloud storage lifecycle management</mitigation>
+        <mitigation>Usage monitoring and alerts</mitigation>
+      </risk>
+      <risk name="Template Security">
+        <mitigation>Sandboxed template execution environment</mitigation>
+        <mitigation>Template validation and sanitization</mitigation>
+        <mitigation>Resource limits for template rendering</mitigation>
+        <mitigation>Audit logging for template usage</mitigation>
+      </risk>
+      <risk name="Data Leakage">
+        <mitigation>Strict permission validation for data access</mitigation>
+        <mitigation>Filter injection prevention</mitigation>
+        <mitigation>Audit logging for all export activities</mitigation>
+        <mitigation>Data encryption for stored exports</mitigation>
+      </risk>
+    </technical-risks>
+    <source-ref>/home/meywd/tamma/test-platform/docs/stories/7-4-data-export-reporting.md#Risks-and-Mitigations</source-ref>
+  </risk-mitigation>
+
+  <references>
+    <reference type="technical-spec" path="/home/meywd/tamma/test-platform/docs/tech-spec-epic-7.md">
+      <section>Data Export & Reporting Architecture</section>
+      <section>Template Engine</section>
+      <section>Data Processing Pipeline</section>
+      <section>Scheduling & Delivery</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-1-restful-api-implementation.md">
+      <section>REST API Implementation</section>
+      <section>Authentication and Authorization</section>
+      <section>Rate Limiting and Quotas</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-2-webhook-system.md">
+      <section>Webhook System Implementation</section>
+      <section>Event Processing and Delivery</section>
+      <section>Security and Authentication</section>
+    </reference>
+    <reference type="story" path="/home/meywd/tamma/test-platform/docs/stories/7-3-cicd-integration.md">
+      <section>CI/CD Integration</section>
+      <section>Platform Adapter Patterns</section>
+      <section>Report Generation Integration</section>
+    </reference>
+    <reference type="architecture" path="/home/meywd/tamma/test-platform/docs/ARCHITECTURE.md">
+      <section>Data Model</section>
+      <section>API Design</section>
+      <section>Security & Privacy</section>
+      <section>Scalability Strategy</section>
+    </reference>
+    <reference type="project-config" path="/home/meywd/tamma/test-platform/config.yaml">
+      <section>Project configuration and paths</section>
+    </reference>
+  </references>
+</story-context>

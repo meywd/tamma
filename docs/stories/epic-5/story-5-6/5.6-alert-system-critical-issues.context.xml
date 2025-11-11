@@ -1,0 +1,260 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>5.6</story-id>
+  <story-title>Alert System for Critical Issues</story-title>
+  <epic>5</epic>
+  <epic-title>Observability &amp; Production Readiness</epic-title>
+  <mvp-critical>true</mvp-critical>
+  <mvp-partial>true</mvp-partial>
+  
+  <technical-context>
+    <architecture-pattern>Multi-channel alerting system with configurable rules</architecture-pattern>
+    <primary-goal>Automatic alerts when system encounters critical issues or anomalies</primary-goal>
+    
+    <alert-triggers>
+      <trigger name="Escalation After Retries">
+        <condition>System escalates after 3 retry attempts</condition>
+        <severity>critical</severity>
+        <description>Autonomous loop failed to resolve issue after maximum retries</description>
+        <suggested-action>Investigate issue complexity, review AI provider responses, consider manual intervention</suggested-action>
+      </trigger>
+      <trigger name="System Error">
+        <condition>Uncaught exception or system crash</condition>
+        <severity>critical</severity>
+        <description>System encountered unexpected error and cannot continue</description>
+        <suggested-action>Check logs for error details, restart system if needed, investigate root cause</suggested-action>
+      </trigger>
+      <trigger name="API Rate Limit Hit">
+        <condition>AI provider or Git platform rate limit exceeded</condition>
+        <severity>warning</severity>
+        <description>System hit rate limits and cannot make API calls</description>
+        <suggested-action>Wait for rate limit reset, consider switching providers, implement backoff</suggested-action>
+      </trigger>
+      <trigger name="Event Store Write Failure">
+        <condition>Unable to write events to storage</condition>
+        <severity>critical</severity>
+        <description>Event store is unavailable or corrupted</description>
+        <suggested-action>Check storage system, verify permissions, investigate event store health</suggested-action>
+      </trigger>
+      <trigger name="High Error Rate">
+        <condition>Error rate exceeds threshold (e.g., 10% of operations)</condition>
+        <severity>warning</severity>
+        <description>System experiencing unusually high error rate</description>
+        <suggested-action>Investigate recent changes, check system resources, review error patterns</suggested-action>
+      </trigger>
+      <trigger name="Stuck Workflow">
+        <condition>Workflow step running longer than expected threshold</condition>
+        <severity>warning</severity>
+        <description>Workflow appears to be stuck or hanging</description>
+        <suggested-action>Check workflow progress, investigate hanging operation, consider timeout</suggested-action>
+      </trigger>
+    </alert-triggers>
+    
+    <alert-channels>
+      <channel name="CLI Output">
+        <type>Console output</type>
+        <environment>Development, CLI execution</environment>
+        <format>Colored text with alert details</format>
+        <behavior>Immediate display when Tamma is running in terminal</behavior>
+      </channel>
+      <channel name="Webhook">
+        <type>HTTP POST to configured URL</type>
+        <environment>Production, CI/CD integration</environment>
+        <format>JSON payload with alert details</format>
+        <behavior>Async HTTP POST with retry logic</behavior>
+        <authentication>Optional API key or bearer token</authentication>
+      </channel>
+      <channel name="Email">
+        <type>SMTP email notification</type>
+        <environment>Production, on-call notifications</environment>
+        <format>HTML email with alert details and actions</format>
+        <behavior>SMTP delivery with template rendering</behavior>
+        <configuration>SMTP server, credentials, recipient lists</configuration>
+      </channel>
+      <channel name="Slack">
+        <type>Slack webhook integration</type>
+        <environment>Team communication</environment>
+        <format>Slack message with buttons and attachments</format>
+        <behavior>Slack API call with interactive elements</behavior>
+        <configuration>Webhook URL, channel mapping</configuration>
+      </channel>
+    </alert-channels>
+    
+    <alert-payload>
+      <structure>
+        <field name="severity" type="enum">critical, warning, info</field>
+        <field name="title" type="string">Brief alert title</field>
+        <field name="description" type="string">Detailed alert description</field>
+        <field name="correlationId" type="string">Related workflow execution</field>
+        <field name="timestamp" type="ISO8601">Alert generation time</field>
+        <field name="trigger" type="object">Trigger condition details</field>
+        <field name="suggestedAction" type="string">Recommended response</field>
+        <field name="context" type="object">Additional context data</field>
+        <field name="alertId" type="string">Unique alert identifier</field>
+      </structure>
+      <example>
+        <payload>
+          <![CDATA[
+          {
+            "severity": "critical",
+            "title": "Escalation After Retries",
+            "description": "Autonomous loop failed to resolve issue #123 after 3 retry attempts",
+            "correlationId": "uuid-v7-here",
+            "timestamp": "2025-11-09T15:30:00.000Z",
+            "trigger": {
+              "type": "escalation_after_retries",
+              "issueId": "123",
+              "retryCount": 3,
+              "lastError": "AI provider timeout"
+            },
+            "suggestedAction": "Investigate issue complexity, review AI provider responses, consider manual intervention",
+            "context": {
+              "workflowId": "workflow-uuid",
+              "step": "code_generation",
+              "provider": "anthropic-claude"
+            },
+            "alertId": "alert-uuid-v7"
+          }
+          ]]>
+        </payload>
+      </example>
+    </alert-payload>
+    
+    <rate-limiting>
+      <max-alerts-per-minute>5</max-alerts-per-minute>
+      <max-alerts-per-hour>50</max-alerts-per-hour>
+      <burst-capacity>10</burst-capacity>
+      <behavior>Queue alerts when limit exceeded, send when capacity available</behavior>
+      <priority>Critical alerts bypass rate limiting</priority>
+    </rate-limiting>
+    
+    <alert-history>
+      <storage>Database table for alert persistence</storage>
+      <retention>90 days default, configurable</retention>
+      <fields>alertId, severity, title, description, timestamp, resolved, resolution</fields>
+      <indexing>By timestamp, severity, correlationId</indexing>
+      <access>Dashboard view, API query, export capabilities</access>
+    </alert-history>
+    
+    <custom-rules>
+      <rule-engine>Configurable alert rule definitions</rule-engine>
+      <conditions>Metrics thresholds, event patterns, time-based conditions</conditions>
+      <actions>Custom alert channels, custom payloads, escalation chains</actions>
+      <validation>Rule syntax validation, test mode for new rules</validation>
+      <examples>
+        <example>Alert when PR merge rate drops below 80% for 1 hour</example>
+        <example>Alert when memory usage exceeds 90% for 5 minutes</example>
+        <example>Alert when no issues processed for 2 hours during business hours</example>
+      </examples>
+    </custom-rules>
+  </technical-context>
+  
+  <implementation-context>
+    <primary-packages>
+      <package>@tamma/observability</package>
+      <package>@tamma/alerts</package>
+      <package>@tamma/shared</package>
+    </primary-packages>
+    
+    <key-components>
+      <component>AlertManager - Main alert system coordinator</component>
+      <component>AlertTrigger - Alert condition detection</component>
+      <component>AlertChannel - Channel-specific delivery logic</component>
+      <component>RateLimiter - Alert rate limiting</component>
+      <component>AlertHistory - Alert persistence and querying</component>
+      <component>RuleEngine - Custom alert rule processing</component>
+    </key-components>
+    
+    <key-files>
+      <file>packages/alerts/src/alert-manager.ts</file>
+      <file>packages/alerts/src/triggers/alert-trigger.ts</file>
+      <file>packages/alerts/src/channels/alert-channels.ts</file>
+      <file>packages/alerts/src/rate-limiter.ts</file>
+      <file>packages/alerts/src/history/alert-history.ts</file>
+      <file>packages/alerts/src/rules/rule-engine.ts</file>
+    </key-files>
+    
+    <external-dependencies>
+      <dependency>nodemailer - Email sending</dependency>
+      <dependency>axios - HTTP webhook delivery</dependency>
+      <dependency>@slack/web-api - Slack integration</dependency>
+      <dependency>bull - Alert queue processing</dependency>
+      <dependency>ioredis - Rate limiting storage</dependency>
+    </external-dependencies>
+    
+    <integration-points>
+      <point name="Metrics System">
+        <description>Alert triggers based on metric thresholds</description>
+        <source>Story 5.2 - Metrics Collection Infrastructure</source>
+        <method>Metric subscription and threshold monitoring</method>
+      </point>
+      <point name="Event System">
+        <description>Alert triggers based on event patterns</description>
+        <source>Story 4.7 - Event Query API</source>
+        <method>Event stream monitoring and pattern matching</method>
+      </point>
+      <point name="Workflow System">
+        <description>Alert triggers from workflow state</description>
+        <source>Orchestrator and worker components</source>
+        <method>Workflow status monitoring and timeout detection</method>
+      </point>
+    </integration-points>
+  </implementation-context>
+  
+  <dependencies>
+    <upstream>Story 5.2 - Metrics Collection Infrastructure</upstream>
+    <upstream>Story 4.7 - Event Query API for Time-Travel</upstream>
+    <downstream>Story 5.8 - Integration Testing Suite</downstream>
+  </dependencies>
+  
+  <acceptance-criteria>
+    <criteria id="1">Alert triggers: escalation after 3 retries, system error (uncaught exception), API rate limit hit, event store write failure</criteria>
+    <criteria id="2">Alert channels: CLI output (if running), webhook (POST to configured URL), email (if configured)</criteria>
+    <criteria id="3">Alert payload includes: severity (critical/warning/info), title, description, correlation ID, timestamp, suggested action</criteria>
+    <criteria id="4">Alert rate limiting: no more than 5 alerts per minute (prevent spam)</criteria>
+    <criteria id="5">Alert history stored in database for review</criteria>
+    <criteria id="6">Alert delivery tested with mock webhook endpoint</criteria>
+    <criteria id="7">Alert system supports configuration of custom alert rules</criteria>
+  </acceptance-criteria>
+  
+  <success-metrics>
+    <metric>Alert delivery success rate &gt;95%</metric>
+    <metric>Alert latency &lt;30 seconds from trigger to delivery</metric>
+    <metric>False positive rate &lt;5%</metric>
+    <metric>Rate limiting effectiveness (no spam)</metric>
+    <metric>Custom rule configuration success rate &gt;90%</metric>
+  </success-metrics>
+  
+  <risks-and-mitigations>
+    <risk>
+      <description>Alert fatigue from too many notifications</description>
+      <mitigation>Rate limiting, severity-based prioritization, intelligent grouping</mitigation>
+    </risk>
+    <risk>
+      <description>Alert delivery failures causing missed critical issues</description>
+      <mitigation>Multiple channels, delivery confirmation, retry logic, fallback mechanisms</mitigation>
+    </risk>
+    <risk>
+      <description>False alerts reducing trust in system</description>
+      <mitigation>Threshold tuning, confirmation logic, alert validation, learning from feedback</mitigation>
+    </risk>
+    <risk>
+      <description>Alert system performance impact</description>
+      <mitigation>Async processing, efficient rule evaluation, resource monitoring</mitigation>
+    </risk>
+  </risks-and-mitigations>
+  
+  <testing-requirements>
+    <requirement>Unit tests for all alert triggers</requirement>
+    <requirement>Integration tests for all alert channels</requirement>
+    <requirement>End-to-end tests for alert delivery</requirement>
+    <requirement>Performance tests for rate limiting</requirement>
+    <requirement>Security tests for webhook delivery</requirement>
+  </testing-requirements>
+  
+  <mvp-rationale>
+    <reason>Partial - Basic alerts via CLI output, email, or Slack webhooks required for MVP</reason>
+    <explanation>Full dashboard integration optional. Essential for self-maintenance to detect and respond to escalations, errors, or stuck workflows.</explanation>
+    <impact>Without alert system, critical issues may go unnoticed, preventing timely intervention and system recovery</impact>
+  </mvp-rationale>
+</story-context>

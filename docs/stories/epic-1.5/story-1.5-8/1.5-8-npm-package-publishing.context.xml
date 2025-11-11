@@ -1,0 +1,458 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<storyContext id="1.5-8" epic="1.5" title="NPM Package Publishing" created="2025-01-08" updated="2025-01-08">
+  <summary>
+    Establish automated NPM package publishing workflow for all Tamma packages with semantic versioning, dependency management, and distribution optimization. This story enables Tamma components to be distributed via NPM registry with proper versioning, documentation, and security scanning.
+  </summary>
+
+  <technicalComponents>
+    <component name="Package Publishing Pipeline" type="ci-cd">
+      <description>Automated publishing pipeline for all packages with semantic versioning</description>
+      <files>
+        <file path=".github/workflows/npm-publish.yml" type="yaml" />
+        <file path="tools/publish/publish-packages.ts" type="typescript" />
+        <file path="tools/publish/semantic-release.ts" type="typescript" />
+        <file path="tools/publish/version-manager.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="semantic-release" version="22.0+" />
+        <dependency name="@semantic-release/github" version="9.0+" />
+        <dependency name="@semantic-release/npm" version="10.0+" />
+      </dependencies>
+    </component>
+
+    <component name="Package Configuration Management" type="build-system">
+      <description>Centralized package.json management with dependency optimization</description>
+      <files>
+        <file path="tools/publish/package-manager.ts" type="typescript" />
+        <file path="tools/publish/dependency-optimizer.ts" type="typescript" />
+        <file path="tools/publish/package-templates/" type="templates" />
+        <file path="scripts/sync-package-versions.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="pnpm" version="9.0+" />
+        <dependency name="semver" version="7.5+" />
+        <dependency name="pacote" version="17.0+" />
+      </dependencies>
+    </component>
+
+    <component name="Distribution Optimization" type="performance">
+      <description>Package size optimization and tree-shaking support</description>
+      <files>
+        <file path="tools/publish/bundle-analyzer.ts" type="typescript" />
+        <file path="tools/publish/size-optimizer.ts" type="typescript" />
+        <file path="tools/publish/tree-shaking-config.json" type="json" />
+        <file path="tools/publish/export-optimizer.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="@rollup/plugin-node-resolve" version="15.0+" />
+        <dependency name="@rollup/plugin-commonjs" version="25.0+" />
+        <dependency name="rollup-plugin-terser" version="7.0+" />
+      </dependencies>
+    </component>
+
+    <component name="Package Security & Compliance" type="security">
+      <description>Security scanning, license compliance, and vulnerability checking</description>
+      <files>
+        <file path="tools/publish/security-scanner.ts" type="typescript" />
+        <file path="tools/publish/license-checker.ts" type="typescript" />
+        <file path="tools/publish/vulnerability-auditor.ts" type="typescript" />
+        <file path="tools/publish/compliance-reporter.ts" type="typescript" />
+      </files>
+      <dependencies>
+        <dependency name="audit-ci" version="6.0+" />
+        <dependency name="license-checker" version="25.0+" />
+        <dependency name="snyk" version="latest" />
+      </dependencies>
+    </component>
+
+    <component name="Documentation Generation" type="documentation">
+      <description>API documentation generation and changelog management</description>
+      <files>
+        <file path="tools/publish/doc-generator.ts" type="typescript" />
+        <file path="tools/publish/changelog-generator.ts" type="typescript" />
+        <file path="tools/publish/readme-generator.ts" type="typescript" />
+        <file path="tools/publish/api-extractor.json" type="json" />
+      </files>
+      <dependencies>
+        <dependency name="typedoc" version="0.25+" />
+        <dependency name="@microsoft/api-extractor" version="7.38+" />
+        <dependency name="conventional-changelog" version="4.0+" />
+      </dependencies>
+    </component>
+  </technicalComponents>
+
+  <dataModels>
+    <model name="PublishConfig">
+      <fields>
+        <field name="packageName" type="string" required="true" description="NPM package name" />
+        <field name="version" type="string" required="true" description="Semantic version" />
+        <field name="registry" type="string" description="NPM registry URL" />
+        <field name="tag" type="string" description="Distribution tag (latest, beta, etc.)" />
+        <field name="access" type="string" description="Package access (public, private)" />
+        <field name="dryRun" type="boolean" description="Dry run mode for testing" />
+        <field name="otp" type="string" description="One-time password for 2FA" />
+        <field name="provenance" type="boolean" description="Enable package provenance" />
+      </fields>
+    </model>
+
+    <model name="PackageMetadata">
+      <fields>
+        <field name="name" type="string" required="true" description="Package name" />
+        <field name="version" type="string" required="true" description="Package version" />
+        <field name="description" type="string" description="Package description" />
+        <field name="keywords" type="string[]" description="Search keywords" />
+        <field name="author" type="AuthorInfo" description="Package author" />
+        <field name="license" type="string" description="Package license" />
+        <field name="repository" type="RepositoryInfo" description="Source repository" />
+        <field name="dependencies" type="Record&lt;string, string&gt;" description="Production dependencies" />
+        <field name="devDependencies" type="Record&lt;string, string&gt;" description="Development dependencies" />
+        <field name="peerDependencies" type="Record&lt;string, string&gt;" description="Peer dependencies" />
+        <field name="engines" type="EngineInfo" description="Runtime requirements" />
+        <field name="main" type="string" description="Main entry point" />
+        <field name="module" type="string" description="ESM entry point" />
+        <field name="types" type="string" description="TypeScript definitions" />
+        <field name="exports" type="Record&lt;string, string&gt;" description="Package exports" />
+        <field name="files" type="string[]" description="Files to include" />
+        <field name="publishConfig" type="PublishConfig" description="Publish configuration" />
+      </fields>
+    </model>
+
+    <model name="PublishResult">
+      <fields>
+        <field name="success" type="boolean" description="Publish success status" />
+        <field name="packageId" type="string" description="Published package identifier" />
+        <field name="version" type="string" description="Published version" />
+        <field name="registry" type="string" description="Target registry" />
+        <field name="tag" type="string" description="Distribution tag" />
+        <field name="tarballSize" type="number" description="Package tarball size in bytes" />
+        <field name="unpackSize" type="number" description="Unpacked package size" />
+        <field name="publishTime" type="string" description="Publish timestamp" />
+        <field name="shasum" type="string" description="Package SHA1 checksum" />
+        <field name="securityScan" type="SecurityScanResult" description="Security scan results" />
+        <field name="warnings" type="string[]" description="Publish warnings" />
+        <field name="errors" type="string[]" description="Publish errors" />
+      </fields>
+    </model>
+
+    <model name="SecurityScanResult">
+      <fields>
+        <field name="vulnerabilities" type="Vulnerability[]" description="Found vulnerabilities" />
+        <field name="criticalCount" type="number" description="Critical vulnerability count" />
+        <field name="highCount" type="number" description="High vulnerability count" />
+        <field name="mediumCount" type="number" description="Medium vulnerability count" />
+        <field name="lowCount" type="number" description="Low vulnerability count" />
+        <field name="licenseIssues" type="LicenseIssue[]" description="License compliance issues" />
+        <field name="complianceStatus" type="string" description="Overall compliance status" />
+        <field name="recommendations" type="string[]" description="Security recommendations" />
+      </fields>
+    </model>
+
+    <model name="VersionInfo">
+      <fields>
+        <field name="current" type="string" description="Current version" />
+        <field name="next" type="string" description="Next version to publish" />
+        <field name="type" type="string" description="Version bump type (patch, minor, major)" />
+        <field name="reason" type="string" description="Reason for version bump" />
+        <field name="commits" type="CommitInfo[]" description="Commits since last release" />
+        <field name="breakingChanges" type="string[]" description="Breaking changes" />
+        <field name="features" type="string[]" description="New features" />
+        <field name="fixes" type="string[]" description="Bug fixes" />
+      </fields>
+    </model>
+  </dataModels>
+
+  <integrationPoints>
+    <integration name="NPM Registry" type="distribution">
+      <description>Package publishing to NPM registry with authentication and provenance</description>
+      <interface>
+        <method name="authenticate" type="rest" />
+        <method name="publish" type="rest" />
+        <method name="unpublish" type="rest" />
+        <method name="deprecate" type="rest" />
+        <method name="viewPackage" type="rest" />
+      </interface>
+      <dataFlow>
+        <source name="Build artifacts" />
+        <destination name="NPM registry" />
+        <protocol name="NPM API" />
+        <format name="Package tarball" />
+      </dataFlow>
+    </integration>
+
+    <integration name="GitHub Releases" type="ci-cd">
+      <description>Automatic GitHub release creation with changelog and assets</description>
+      <interface>
+        <method name="createRelease" type="rest" />
+        <method name="uploadAsset" type="rest" />
+        <method name="updateRelease" type="rest" />
+        <method name="generateChangelog" type="cli" />
+      </interface>
+      <dataFlow>
+        <source name="Git commits" />
+        <destination name="GitHub releases" />
+        <protocol name="GitHub API" />
+        <format name="Release notes" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Semantic Release" type="automation">
+      <description>Automated semantic versioning and release management</description>
+      <interface>
+        <method name="analyzeCommits" type="plugin" />
+        <method name="generateNotes" type="plugin" />
+        <method name="verifyRelease" type="plugin" />
+        <method name="publish" type="plugin" />
+      </interface>
+      <dataFlow>
+        <source name="Git history" />
+        <destination name="Release artifacts" />
+        <protocol name="Plugin system" />
+        <format name="Conventional commits" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Security Scanning" type="security">
+      <description>Integration with Snyk and NPM audit for vulnerability scanning</description>
+      <interface>
+        <method name="scanPackage" type="cli" />
+        <method name="generateReport" type="cli" />
+        <method name="checkLicenses" type="cli" />
+        <method name="monitorDependencies" type="rest" />
+      </interface>
+      <dataFlow>
+        <source name="Package dependencies" />
+        <destination name="Security database" />
+        <protocol name="REST/CLI" />
+        <format name="Vulnerability reports" />
+      </dataFlow>
+    </integration>
+
+    <integration name="Documentation Generation" type="documentation">
+      <description>TypeDoc and API Extractor integration for documentation</description>
+      <interface>
+        <method name="generateDocs" type="cli" />
+        <method name="extractAPI" type="cli" />
+        <method name="validateTypes" type="cli" />
+        <method name="publishDocs" type="cli" />
+      </interface>
+      <dataFlow>
+        <source name="TypeScript source" />
+        <destination name="Documentation site" />
+        <protocol name="File system" />
+        <format name="HTML/Markdown" />
+      </dataFlow>
+    </integration>
+  </integrationPoints>
+
+  <testingStrategy>
+    <unitTesting>
+      <framework name="Vitest" version="3.x" />
+      <coverage target="90" description="Package publishing utilities and configuration" />
+      <focus>
+        <area name="Version management logic" />
+        <area name="Package configuration generation" />
+        <area name="Dependency optimization algorithms" />
+        <area name="Security scanning integration" />
+        <area name="Publishing workflow orchestration" />
+      </focus>
+    </unitTesting>
+
+    <integrationTesting>
+      <framework name="Custom test framework" />
+      <coverage target="85" description="End-to-end publishing workflow" />
+      <focus>
+        <area name="Package publishing to test registry" />
+        <area name="Version bumping and tagging" />
+        <area name="Security scanning pipeline" />
+        <area name="Documentation generation" />
+        <area name="GitHub release creation" />
+      </focus>
+    </integrationTesting>
+
+    <securityTesting>
+      <framework name="Snyk" version="latest" />
+      <framework name="NPM audit" version="latest" />
+      <coverage target="100" description="All packages must pass security scans" />
+      <focus>
+        <area name="Dependency vulnerability scanning" />
+        <area name="License compliance checking" />
+        <area name="Malware detection" />
+        <area name="Supply chain security" />
+        <area name="Package integrity verification" />
+      </focus>
+    </securityTesting>
+
+    <performanceTesting>
+      <framework name="Custom benchmarks" />
+      <framework name="Bundle analyzer" />
+      <coverage target="100" description="All packages must meet size criteria" />
+      <focus>
+        <area name="Package size optimization" />
+        <area name="Tree-shaking effectiveness" />
+        <area name="Installation time" />
+        <area name="Dependency resolution speed" />
+        <area name="Publishing time" />
+      </focus>
+    </performanceTesting>
+  </testingStrategy>
+
+  <securityConsiderations>
+    <packageSecurity>
+      <requirement name="Vulnerability scanning" description="All packages must be scanned before publishing" />
+      <requirement name="Dependency auditing" description="Regular audits of all dependencies" />
+      <requirement name="License compliance" description="All dependencies must have compatible licenses" />
+      <requirement name="Supply chain security" description="Package provenance and integrity verification" />
+    </packageSecurity>
+
+    <publishingSecurity>
+      <requirement name="2FA enforcement" description="NPM publishing requires two-factor authentication" />
+      <requirement name="Access control" description="Limited publishing permissions with audit trail" />
+      <requirement name="Package provenance" description="Enable npm provenance for all packages" />
+      <requirement name="Secure credentials" description="API tokens stored securely with rotation" />
+    </publishingSecurity>
+
+    <contentSecurity>
+      <requirement name="Code scanning" description="Source code scanned for secrets and vulnerabilities" />
+      <requirement name="Malware detection" description="Packages scanned for malicious code" />
+      <requirement name="Integrity verification" description="Package integrity verified during installation" />
+      <requirement name="Tamper detection" description="Detect any unauthorized modifications" />
+    </contentSecurity>
+  </securityConsiderations>
+
+  <acceptanceCriteria>
+    <functional>
+      <criteria id="AC-1" description="Automated publishing pipeline for all packages" priority="high" />
+      <criteria id="AC-2" description="Semantic versioning with conventional commits" priority="high" />
+      <criteria id="AC-3" description="Security scanning and vulnerability checking" priority="high" />
+      <criteria id="AC-4" description="Package size optimization and tree-shaking" priority="medium" />
+      <criteria id="AC-5" description="API documentation generation and publishing" priority="medium" />
+      <criteria id="AC-6" description="Changelog generation and GitHub releases" priority="medium" />
+      <criteria id="AC-7" description="License compliance checking" priority="medium" />
+    </functional>
+
+    <nonFunctional>
+      <criteria id="NFC-1" description="Publish time &lt; 5 minutes per package" priority="high" />
+      <criteria id="NFC-2" description="Package size &lt; 10MB for runtime packages" priority="high" />
+      <criteria id="NFC-3" description="Zero critical/high vulnerabilities" priority="high" />
+      <criteria id="NFC-4" description="Installation time &lt; 30 seconds" priority="medium" />
+      <criteria id="NFC-5" description="Documentation coverage &gt; 80%" priority="medium" />
+      <criteria id="NFC-6" description="100% license compliance" priority="medium" />
+    </nonFunctional>
+
+    <compliance>
+      <criteria id="CC-1" description="NPM package security guidelines" priority="high" />
+      <criteria id="CC-2" description="Open source license compliance" priority="high" />
+      <criteria id="CC-3" description="Supply chain security standards" priority="medium" />
+      <criteria id="CC-4" description="API documentation standards" priority="medium" />
+    </compliance>
+  </acceptanceCriteria>
+
+  <riskMitigation>
+    <risk id="R-1" description="Package size bloat affecting installation and performance" probability="medium" impact="medium">
+      <mitigation name="Bundle analysis" description="Regular bundle size analysis and optimization" />
+      <mitigation name="Tree-shaking" description="Implement proper tree-shaking and dead code elimination" />
+      <mitigation name="Dependency pruning" description="Remove unused dependencies and optimize imports" />
+    </risk>
+
+    <risk id="R-2" description="Security vulnerabilities in dependencies" probability="high" impact="high">
+      <mitigation name="Automated scanning" description="Pre-publish vulnerability scanning with Snyk" />
+      <mitigation name="Dependency monitoring" description="Continuous monitoring of dependency security" />
+      <mitigation name="Rapid patching" description="Automated patching of vulnerable dependencies" />
+    </risk>
+
+    <risk id="R-3" description="Publishing failures and version conflicts" probability="medium" impact="high">
+      <mitigation name="Semantic versioning" description="Strict semantic versioning with automated bumping" />
+      <mitigation name="Dry run testing" description="Test publishing to staging registry first" />
+      <mitigation name="Rollback procedures" description="Automated rollback and recovery procedures" />
+    </risk>
+
+    <risk id="R-4" description="License compliance issues" probability="low" impact="high">
+      <mitigation name="License scanning" description="Automated license compatibility checking" />
+      <mitigation name="Legal review" description="Legal review of all dependencies" />
+      <mitigation name="License documentation" description="Clear license documentation and attribution" />
+    </risk>
+  </riskMitigation>
+
+  <successMetrics>
+    <technical>
+      <metric name="Publish success rate" target="&gt; 95%" description="Successful package publications" />
+      <metric name="Security scan pass rate" target="100%" description="Packages passing security scans" />
+      <metric name="Average package size" target="&lt; 5MB" description="Mean package size" />
+      <metric name="Publish time" target="&lt; 5min" description="Average publish time" />
+      <metric name="Documentation coverage" target="&gt; 80%" description="API documentation coverage" />
+    </technical>
+
+    <operational>
+      <metric name="Release frequency" target="Weekly" description="Package release frequency" />
+      <metric name="Installation success rate" target="&gt; 99%" description="Successful installations" />
+      <metric name="Vulnerability remediation time" target="&lt; 24h" description="Time to fix security issues" />
+      <metric name="Dependency update time" target="&lt; 48h" description="Time to update dependencies" />
+    </operational>
+
+    <business>
+      <metric name="NPM downloads" target="&gt; 1000/month" description="Monthly package downloads" />
+      <metric name="Developer adoption" target="&gt; 50 teams" description="Teams using packages" />
+      <metric name="Community contributions" target="&gt; 10/month" description="Community contributions" />
+    </business>
+  </successMetrics>
+
+  <dependencies>
+    <internal>
+      <dependency name="Package build system" description="Completed TypeScript compilation and bundling" />
+      <dependency name="Testing infrastructure" description="Comprehensive test coverage for all packages" />
+      <dependency name="Documentation system" description="API documentation generation capability" />
+      <dependency name="Version control" description="Git repository with conventional commits" />
+    </internal>
+
+    <external>
+      <dependency name="NPM registry" description="Package distribution platform" />
+      <dependency name="GitHub" description="Source control and release management" />
+      <dependency name="Security tools" description="Snyk, audit-ci, license-checker" />
+      <dependency name="Semantic release" description="Automated versioning and publishing" />
+    </external>
+  </dependencies>
+
+  <timeline>
+    <phase name="Infrastructure Setup" duration="2 days">
+      <task name="Configure NPM registry access and authentication" />
+      <task name="Set up semantic release configuration" />
+      <task name="Configure security scanning tools" />
+    </phase>
+
+    <phase name="Package Configuration" duration="3 days">
+      <task name="Standardize package.json files across all packages" />
+      <task name="Implement dependency optimization" />
+      <task name="Configure export maps and tree-shaking" />
+    </phase>
+
+    <phase name="Publishing Pipeline" duration="3 days">
+      <task name="Create automated publishing workflow" />
+      <task name="Implement semantic versioning" />
+      <task name="Add GitHub release integration" />
+    </phase>
+
+    <phase name="Security Integration" duration="2 days">
+      <task name="Integrate vulnerability scanning" />
+      <task name="Add license compliance checking" />
+      <task name="Implement package provenance" />
+    </phase>
+
+    <phase name="Documentation Generation" duration="2 days">
+      <task name="Set up TypeDoc configuration" />
+      <task name="Implement API extraction" />
+      <task name="Generate README files" />
+    </phase>
+
+    <phase name="Testing & Validation" duration="3 days">
+      <task name="Test publishing to staging registry" />
+      <task name="Validate security scanning results" />
+      <task name="Performance testing and optimization" />
+    </phase>
+
+    <phase name="Production Release" duration="1 day">
+      <task name="Publish first production packages" />
+      <task name="Create usage documentation" />
+      <task name="Set up monitoring and alerts" />
+    </phase>
+  </timeline>
+</storyContext>

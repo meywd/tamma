@@ -1,0 +1,177 @@
+<story-context id="test-platform/story-context" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>2</storyId>
+    <title>Authentication &amp; Authorization System</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-09T01:28:53.414Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>/home/meywd/tamma/test-platform/docs/stories/1-2-authentication-authorization-system.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a user</asA>
+    <iWant>create an account and log in securely with email/password</iWant>
+    <soThat>I can access the platform and manage my benchmark data with proper permissions</soThat>
+    <tasks>Task 1: User Registration System (AC: #1, #6, #7)
+- Subtask 1.1: Create user registration endpoint with email validation
+- Subtask 1.2: Implement email verification with secure tokens
+- Subtask 1.3: Add rate limiting to registration endpoint
+- Subtask 1.4: Implement input validation and sanitization
+Task 2: Authentication Framework (AC: #2, #3, #5)
+- Subtask 2.1: Implement secure password hashing with bcrypt (12+ rounds)
+- Subtask 2.2: Create JWT token generation with RS256 signing
+- Subtask 2.3: Implement refresh token rotation system
+- Subtask 2.4: Create login endpoint with authentication logic
+- Subtask 2.5: Implement secure logout with token invalidation
+Task 3: Password Management (AC: #4)
+- Subtask 3.1: Create password reset request endpoint
+- Subtask 3.2: Generate secure reset tokens with expiration
+- Subtask 3.3: Implement password reset confirmation endpoint
+- Subtask 3.4: Add email notifications for password resets
+Task 4: Authorization System (AC: #8)
+- Subtask 4.1: Define role-based permission model (Owner, Admin, Member, Viewer)
+- Subtask 4.2: Implement permission checking middleware
+- Subtask 4.3: Create role assignment and management endpoints
+- Subtask 4.4: Implement organization-scoped permissions
+Task 5: API Key Management (AC: #9)
+- Subtask 5.1: Create API key generation with secure hashing
+- Subtask 5.2: Implement API key authentication middleware
+- Subtask 5.3: Add API key management endpoints (create, list, revoke)
+- Subtask 5.4: Implement API key usage tracking and rate limiting</tasks>
+  </story>
+
+  <acceptanceCriteria>1. User registration with email verification
+2. Secure password hashing using bcrypt or Argon2
+3. JWT-based authentication with refresh tokens
+4. Password reset functionality with secure token generation
+5. Session management with proper logout
+6. Rate limiting on auth endpoints (5 attempts per minute)
+7. Input validation and sanitization on all auth endpoints
+8. Role-based access control (RBAC) with fine-grained permissions
+9. API key generation and management for programmatic access</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>test-platform/docs/PRD.md</path>
+        <title>Product Requirements Document</title>
+        <section>Functional Requirements - Security &amp; Authentication</section>
+        <snippet>Security: API Key Management: Secure storage and rotation of AI provider API keys, Data Encryption: All sensitive data encrypted at rest and in transit, Access Control: Role-based permissions with audit logging, Data Privacy: No storage of proprietary code from customer benchmarks, Compliance: GDPR compliance for European customers</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/ARCHITECTURE.md</path>
+        <title>System Architecture Document</title>
+        <section>Security Architecture &amp; User Management</section>
+        <snippet>Authentication: JWT tokens with refresh token rotation, Authorization: Role-based access control (RBAC) with fine-grained permissions, Multi-tenancy: Row-level security (RLS) for tenant data isolation, Secrets Management: Integration with cloud provider secret stores</snippet>
+      </doc>
+      <doc>
+        <path>test-platform/docs/tech-spec-epic-1.md</path>
+        <title>Epic 1 Technical Specification</title>
+        <section>Authentication &amp; Authorization System Design</section>
+        <snippet>JWT Token Structure with sub, email, org, role, permissions, iat, exp, jti fields, RBAC Permission Model with ORG_READ, ORG_WRITE, ORG_ADMIN, BENCHMARK_READ, BENCHMARK_WRITE, BENCHMARK_EXECUTE, BENCHMARK_DELETE, USER_INVITE, USER_MANAGE, SYSTEM_ADMIN permissions, Role hierarchy: OWNER, ADMIN, MEMBER, VIEWER with specific permission sets</snippet>
+      </doc>
+    </docs>
+    <code>
+      <code>
+        <path>packages/shared/src/types/index.ts</path>
+        <kind>types</kind>
+        <symbol>TammaConfig</symbol>
+        <lines>6-9</lines>
+        <reason>Base configuration interface that may need authentication context</reason>
+      </code>
+      <code>
+        <path>packages/api/package.json</path>
+        <kind>dependencies</kind>
+        <symbol>fastify, @fastify/cors, @fastify/helmet</symbol>
+        <lines>20-27</lines>
+        <reason>Current API framework dependencies for implementing auth middleware</reason>
+      </code>
+    </code>
+    <dependencies>
+      <ecosystem name="node">
+        <packages>
+          <package name="fastify" version="^5.2.0" />
+          <package name="@fastify/cors" version="^10.0.1" />
+          <package name="@fastify/helmet" version="^12.0.1" />
+          <package name="typescript" version="~5.7.2" />
+          <package name="vitest" version="^3.0.6" />
+        </packages>
+      </ecosystem>
+      <ecosystem name="auth">
+        <packages>
+          <package name="jsonwebtoken" version="latest" />
+          <package name="bcrypt" version="latest" />
+          <package name="@fastify/jwt" version="latest" />
+          <package name="@fastify/rate-limit" version="latest" />
+        </packages>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint name="Password Security">bcrypt with minimum 12 salt rounds, Argon2 as alternative</constraint>
+    <constraint name="JWT Token Structure">Include user ID, organization ID, role, permissions, and token ID for revocation</constraint>
+    <constraint name="Session Management">Secure, HTTP-only cookies with proper CORS configuration</constraint>
+    <constraint name="Rate Limiting">Redis-based rate limiting with configurable policies per endpoint (5 attempts per minute for auth endpoints)</constraint>
+    <constraint name="API Key Security">HMAC-SHA256 hashing for stored keys, secure key generation</constraint>
+    <constraint name="Input Validation">Comprehensive validation and sanitization on all auth endpoints</constraint>
+    <constraint name="Multi-tenancy">Row-level security (RLS) for tenant data isolation</constraint>
+    <constraint name="Audit Trail">Complete audit logging for all authentication and authorization events</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="User Registration API" kind="REST endpoint">
+      <signature>POST /auth/register - Create new user account with email verification</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface name="Authentication API" kind="REST endpoint">
+      <signature>POST /auth/login - User login with email/password, POST /auth/refresh - Refresh access token</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface name="Password Reset API" kind="REST endpoint">
+      <signature>POST /auth/password/reset-request - Request password reset, POST /auth/password/reset-confirm - Confirm password reset</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface name="JWT Payload" kind="data structure">
+      <signature>interface JWTPayload { sub: string; email: string; org: string; role: string; permissions: string[]; iat: number; exp: number; jti: string; }</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface name="RBAC Permissions" kind="enum">
+      <signature>enum Permission { ORG_READ, ORG_WRITE, ORG_ADMIN, BENCHMARK_READ, BENCHMARK_WRITE, BENCHMARK_EXECUTE, BENCHMARK_DELETE, USER_INVITE, USER_MANAGE, SYSTEM_ADMIN }</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+    <interface name="API Key Management" kind="REST endpoint">
+      <signature>GET /api-keys - List API keys, POST /api-keys - Create API key, DELETE /api-keys/:id - Revoke API key</signature>
+      <path>test-platform/docs/tech-spec-epic-1.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>Unit tests for all authentication flows with mocked dependencies, Integration tests for complete auth workflows, Security tests for common vulnerabilities (SQL injection, XSS, CSRF), Performance tests for rate limiting and token validation, Email service integration tests with test email accounts</standards>
+    <locations>test-platform/src/auth/**/*.test.ts, test-platform/src/middleware/**/*.test.ts, test-platform/src/controllers/**/*.test.ts</locations>
+    <ideas>
+      <test idea="User registration flow" ac="1">
+        Test email validation, password requirements, account creation, and email verification token generation
+      </test>
+      <test idea="Login authentication" ac="2,3">
+        Test password hashing verification, JWT token generation, and refresh token rotation
+      </test>
+      <test idea="Password reset workflow" ac="4">
+        Test reset token generation, email delivery, token validation, and password update
+      </test>
+      <test idea="Rate limiting enforcement" ac="6">
+        Test 5 attempts per minute limit on auth endpoints with proper error responses
+      </test>
+      <test idea="Input validation" ac="7">
+        Test SQL injection, XSS prevention, and input sanitization on all endpoints
+      </test>
+      <test idea="RBAC authorization" ac="8">
+        Test role-based permissions for different user roles and organization scopes
+      </test>
+      <test idea="API key management" ac="9">
+        Test API key generation, authentication, usage tracking, and revocation
+      </test>
+    </ideas>
+  </tests>
+</story-context>

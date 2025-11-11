@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context id="2-6-implementation-code-generation">
+  <metadata>
+    <title>Story 2.6: Implementation Code Generation</title>
+    <epic>Epic 2 - Autonomous Development Loop - Core</epic>
+    <status>Ready for Development</status>
+    <priority>High</priority>
+    <prerequisites>Story 2.5 (failing tests must be written first)</prerequisites>
+  </metadata>
+
+  <user-story>
+    <role>developer</role>
+    <action>want system to generate implementation code that passes previously written tests</action>
+    <benefit>so that I can complete TDD green phase with working functionality</benefit>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="1">System generates implementation code based on development plan and test requirements</criterion>
+    <criterion id="2">Generated code follows project conventions, patterns, and style guidelines</criterion>
+    <criterion id="3">Code is structured to pass all failing tests from red phase</criterion>
+    <criterion id="4">System validates code syntax and structure before writing files</criterion>
+    <criterion id="5">Implementation includes proper error handling, logging, and documentation</criterion>
+    <criterion id="6">Code execution confirms all tests pass (green phase)</criterion>
+    <criterion id="7">Code generation and test execution logged to event trail</criterion>
+    <criterion id="8">Integration test validates TDD green phase workflow</criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <core-components>
+      <component name="CodeGenerator">
+        <interface>ICodeGenerator</interface>
+        <methods>
+          <method name="generateImplementation" returns="GeneratedCode[]">
+            <parameter name="plan" type="DevelopmentPlan"/>
+            <parameter name="testSuites" type="TestSuite[]"/>
+          </method>
+          <method name="validateCode" returns="ValidationResult">
+            <parameter name="code" type="GeneratedCode[]"/>
+          </method>
+          <method name="writeCodeFiles">
+            <parameter name="code" type="GeneratedCode[]"/>
+          </method>
+          <method name="runTests" returns="TestExecutionResult">
+            <parameter name="testFiles" type="string[]"/>
+          </method>
+          <method name="confirmTestsPass" returns="boolean">
+            <parameter name="results" type="TestExecutionResult"/>
+          </method>
+        </methods>
+      </component>
+    </core-components>
+
+    <key-interfaces>
+      <interface name="GeneratedCode">
+        <fields>
+          <field name="filePath" type="string"/>
+          <field name="content" type="string"/>
+          <field name="language" type="string"/>
+          <field name="framework" type="string"/>
+          <field name="dependencies" type="string[]"/>
+          <field name="exports" type="string[]"/>
+          <field name="imports" type="string[]"/>
+          <field name="functions" type="FunctionDefinition[]"/>
+          <field name="classes" type="ClassDefinition[]"/>
+          <field name="interfaces" type="InterfaceDefinition[]"/>
+        </fields>
+      </interface>
+
+      <interface name="FunctionDefinition">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="parameters" type="Parameter[]"/>
+          <field name="returnType" type="string"/>
+          <field name="visibility" type="string"/>
+          <field name="async" type="boolean"/>
+          <field name="documentation" type="string"/>
+        </fields>
+      </interface>
+
+      <interface name="ClassDefinition">
+        <fields>
+          <field name="name" type="string"/>
+          <field name="extends" type="string"/>
+          <field name="implements" type="string[]"/>
+          <field name="properties" type="PropertyDefinition[]"/>
+          <field name="methods" type="MethodDefinition[]"/>
+          <field name="constructor" type="ConstructorDefinition"/>
+        </fields>
+      </interface>
+    </key-interfaces>
+
+    <implementation-strategy>
+      <phase name="Code Analysis">
+        <description>Analyze test requirements and development plan to understand implementation needs</description>
+        <components>
+          <component>Test requirement extraction</component>
+          <component>API interface definition</component>
+          <component>Dependency analysis</component>
+          <component>Code pattern identification</component>
+        </components>
+      </phase>
+
+      <phase name="Code Generation">
+        <description>Generate implementation code that satisfies test requirements</description>
+        <components>
+          <component>AI-powered code generation</component>
+          <component>Template-based code generation</component>
+          <component>Code structure and organization</component>
+          <component>Error handling and logging integration</component>
+        </components>
+      </phase>
+
+      <phase name="Validation and Testing">
+        <description>Validate generated code and confirm tests pass</description>
+        <components>
+          <component>Syntax and lint validation</component>
+          <component>Test execution and verification</component>
+          <component>Coverage measurement</component>
+          <component>Code quality assessment</component>
+        </components>
+      </phase>
+    </implementation-strategy>
+
+    <integration-points>
+      <integration name="AI Provider">
+        <description>Generate implementation code from requirements</description>
+        <events>
+          <event>CODE.GENERATION.SUCCESS</event>
+          <event>CODE.GENERATION.FAILED</event>
+        </events>
+      </integration>
+
+      <integration name="Testing Framework">
+        <description>Execute tests to verify implementation</description>
+        <frameworks>
+          <framework>Vitest</framework>
+          <framework>Jest</framework>
+          <framework>Mocha</framework>
+        </frameworks>
+      </integration>
+
+      <integration name="Code Quality Tools">
+        <description>Validate code quality and style</description>
+        <tools>
+          <tool>ESLint</tool>
+          <tool>Prettier</tool>
+          <tool>TypeScript Compiler</tool>
+        </tools>
+      </integration>
+
+      <integration name="Event Store">
+        <description>Audit trail for code generation and testing</description>
+        <events>
+          <event>CODE.CREATED.SUCCESS</event>
+          <event>TEST.PASSED.ALL</event>
+          <event>CODE.VALIDATION.FAILED</event>
+        </events>
+      </integration>
+    </integration-points>
+
+    <testing-strategy>
+      <unit-tests>
+        <test-suite name="CodeGenerator">
+          <test>generate implementation from test requirements</test>
+          <test>validate generated code syntax and structure</test>
+          <test>confirm all tests pass after implementation</test>
+          <test>handle edge cases and error conditions</test>
+          <test>generate proper error handling and logging</test>
+        </test-suite>
+      </unit-tests>
+
+      <integration-tests>
+        <test>end-to-end TDD green phase workflow</test>
+        <test>code generation with real test suites</test>
+        <test>integration with multiple testing frameworks</test>
+      </integration-tests>
+    </testing-strategy>
+
+    <configuration>
+      <section name="code_generation">
+        <setting name="language" default="typescript"/>
+        <setting name="framework" default="node"/>
+        <setting name="style_guide" default="prettier"/>
+        <setting name="error_handling" default="comprehensive"/>
+        <setting name="documentation" default="jsdoc"/>
+      </section>
+
+      <section name="validation">
+        <setting name="syntax_check" default="true"/>
+        <setting name="lint_check" default="true"/>
+        <setting name="type_check" default="true"/>
+        <setting name="test_execution" default="true"/>
+        <setting name="coverage_threshold" default="80"/>
+      </section>
+    </configuration>
+
+    <performance-targets>
+      <target name="code_generation" metric="time" value="&lt; 60 seconds"/>
+      <target name="code_validation" metric="time" value="&lt; 15 seconds"/>
+      <target name="test_execution" metric="time" value="&lt; 30 seconds"/>
+    </performance-targets>
+
+    <code-quality-standards>
+      <standard>TypeScript strict mode compliance</standard>
+      <standard>Comprehensive error handling</standard>
+      <standard>Structured logging with context</standard>
+      <standard>JSDoc documentation for all public APIs</standard>
+      <standard>Consistent code formatting and style</standard>
+      <standard>Proper dependency management</standard>
+    </code-quality-standards>
+  </technical-context>
+
+  <implementation-notes>
+    <key-considerations>
+      <consideration priority="1">Generated code must pass all previously written tests</consideration>
+      <consideration priority="2">Follow project coding conventions and patterns</consideration>
+      <consideration priority="3">Include comprehensive error handling and logging</consideration>
+      <consideration priority="4">Validate code quality before writing files</consideration>
+      <consideration priority="5">Ensure proper documentation and type safety</consideration>
+      <consideration priority="6">Handle edge cases and boundary conditions</consideration>
+    </key-considerations>
+  </implementation-notes>
+
+  <references>
+    <reference type="process" url="../../BEFORE_YOU_CODE.md">🔴 MANDATORY PROCESS: Before You Code</reference>
+    <reference type="knowledge-base" url="../../.dev/README.md">Knowledge Base: Search spikes, bugs, findings, decisions</reference>
+  </references>
+</story-context>

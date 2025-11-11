@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tamma-doc-review",
+  "compatibility_date": "2025-01-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "pages_build_output_dir": "./build/client",
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tamma-docs",
+      "database_id": "TODO" // Will be created with: wrangler d1 create tamma-docs
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "TODO" // Will be created with: wrangler kv namespace create CACHE
+    }
+  ],
+  // Optional: For file attachments
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "tamma-attachments"
+    }
+  ],
+  "vars": {
+    // These can be overridden with wrangler secret put
+    "REPO_PATH": "../docs",
+    "NODE_ENV": "production"
+  }
+}

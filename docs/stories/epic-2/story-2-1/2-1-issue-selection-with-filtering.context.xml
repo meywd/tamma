@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>2-1-issue-selection-with-filtering</story-id>
+    <title>Issue Selection with Filtering</title>
+    <status>ready-for-dev</status>
+    <last-updated>2025-11-07T12:00:00Z</last-updated>
+    <version>1.0</version>
+  </metadata>
+
+  <technical-context>
+    <architecture-alignment>
+      <component>packages/orchestrator</component>
+      <component>packages/platforms</component>
+      <component>packages/events</component>
+      <pattern>Interface-Based Design</pattern>
+      <pattern>Event Sourcing (DCB)</pattern>
+      <pattern>Polling Pattern</pattern>
+    </architecture-alignment>
+    
+    <dependencies>
+      <dependency story="1-5">GitHub Platform Implementation</dependency>
+      <dependency story="1-6">GitLab Platform Implementation</dependency>
+      <dependency story="1-4">Git Platform Interface Definition</dependency>
+    </dependencies>
+    
+    <data-models>
+      <model name="IssueFilter" path="packages/orchestrator/src/types/issue-filter.ts" />
+      <model name="IssueSelection" path="packages/orchestrator/src/types/issue-selection.ts" />
+      <model name="SelectionStrategy" path="packages/orchestrator/src/types/selection-strategy.ts" />
+    </data-models>
+  </technical-context>
+
+  <implementation-details>
+    <core-interfaces>
+      <interface name="IIssueSelector" kind="TypeScript interface" signature="interface IIssueSelector { selectNextIssue(filters: IssueFilter[], strategy: SelectionStrategy): Promise&lt;IssueSelection | null&gt;; validateFilters(filters: IssueFilter[]): ValidationResult; }" path="packages/orchestrator/src/interfaces/issue-selector.ts" />
+      <interface name="IIssueFilter" kind="TypeScript interface" signature="interface IIssueFilter { filter(issues: Issue[]): Issue[]; validate(filter: IssueFilter): boolean; }" path="packages/orchestrator/src/interfaces/issue-filter.ts" />
+    </core-interfaces>
+    
+    <key-classes>
+      <class name="IssueSelector" kind="TypeScript class" implements="IIssueSelector" path="packages/orchestrator/src/issue-selector.ts" />
+      <class name="LabelFilter" kind="TypeScript class" implements="IIssueFilter" path="packages/orchestrator/src/filters/label-filter.ts" />
+      <class name="AgeFilter" kind="TypeScript class" implements="IIssueFilter" path="packages/orchestrator/src/filters/age-filter.ts" />
+      <class name="AssignmentFilter" kind="TypeScript class" implements="IIssueFilter" path="packages/orchestrator/src/filters/assignment-filter.ts" />
+      <class name="PollingService" kind="TypeScript class" path="packages/orchestrator/src/polling-service.ts" />
+    </key-classes>
+    
+    <algorithms>
+      <algorithm name="Priority Scoring" type="selection" description="Scores issues based on age, labels, and other factors for prioritization" />
+      <algorithm name="Exponential Backoff Polling" type="polling" description="Implements intelligent polling with backoff when no issues available" />
+      <algorithm name="Filter Chain" type="filtering" description="Applies multiple filters in sequence with short-circuit evaluation" />
+    </algorithms>
+  </implementation-details>
+
+  <integration-points>
+    <external-integrations>
+      <integration name="Git Platform APIs" type="API" description="Queries GitHub/GitLab APIs for issue data" protocol="REST/HTTPS" />
+    </external-integrations>
+    
+    <internal-integrations>
+      <integration name="Platform Abstraction" component="packages/platforms" description="Uses IGitPlatform interface for issue operations" />
+      <integration name="Event Sourcing" component="packages/events" description="Emits events for issue selection and assignment" />
+      <integration name="Configuration" component="packages/config" description="Loads filtering and selection configuration" />
+    </internal-integrations>
+  </integration-points>
+
+  <data-sources>
+    <primary-storage>
+      <store type="PostgreSQL" schema="orchestrator" description="Stores issue selection history and assignment records" />
+    </primary-storage>
+    
+    <cache>
+      <store type="Redis" description="Caches recently processed issues to avoid duplicates" />
+      <store type="In-memory" description="Runtime cache for current selection state" />
+    </cache>
+  </data-sources>
+
+  <api-endpoints>
+    <rest-api base-path="/api/v1/issues">
+      <endpoint method="GET" path="/next" description="Get next issue for processing" />
+      <endpoint method="POST" path="/assign" description="Manually assign specific issue" />
+      <endpoint method="GET" path="/filters" description="Get current issue filters" />
+      <endpoint method="PUT" path="/filters" description="Update issue filters" />
+      <endpoint method="GET" path="/selection/history" description="Get issue selection history" />
+    </rest-api>
+  </api-endpoints>
+
+  <testing-strategy>
+    <unit-tests>
+      <suite name="IssueSelector" coverage="95%" path="packages/orchestrator/src/__tests__/issue-selector.test.ts" />
+      <suite name="LabelFilter" coverage="90%" path="packages/orchestrator/src/__tests__/filters/label-filter.test.ts" />
+      <suite name="AgeFilter" coverage="90%" path="packages/orchestrator/src/__tests__/filters/age-filter.test.ts" />
+      <suite name="AssignmentFilter" coverage="90%" path="packages/orchestrator/src/__tests__/filters/assignment-filter.test.ts" />
+      <suite name="PollingService" coverage="85%" path="packages/orchestrator/src/__tests__/polling-service.test.ts" />
+    </unit-tests>
+    
+    <integration-tests>
+      <suite name="Issue Selection API" path="packages/orchestrator/src/__tests__/integration/issue-selection-api.test.ts" />
+      <suite name="Git Platform Integration" path="packages/orchestrator/src/__tests__/integration/git-platform-integration.test.ts" />
+      <suite name="Filter Chain Integration" path="packages/orchestrator/src/__tests__/integration/filter-chain.test.ts" />
+    </integration-tests>
+    
+    <performance-tests>
+      <test name="Issue Selection Performance" target="&lt;500ms" path="packages/orchestrator/src/__tests__/performance/issue-selection.test.ts" />
+      <test name="Polling Efficiency" target="&lt;100ms" path="packages/orchestrator/src/__tests__/performance/polling-efficiency.test.ts" />
+      <test name="Filter Performance" target="1000 issues/sec" path="packages/orchestrator/src/__tests__/performance/filter-performance.test.ts" />
+    </performance-tests>
+  </testing-strategy>
+
+  <security-considerations>
+    <data-protection>
+      <consideration type="Access Control" description="Issue assignment requires proper authentication and authorization" />
+      <consideration type="Rate Limiting" description="Respect Git platform API rate limits" />
+      <consideration type="Data Validation" description="Validate all issue data before processing" />
+    </data-protection>
+    
+    <privacy>
+      <consideration type="Data Minimization" description="Only collect necessary issue data for selection" />
+      <consideration type="Consent" description="Issue assignment requires repository access permissions" />
+    </privacy>
+  </security-considerations>
+
+  <monitoring-and-observability>
+    <metrics>
+      <metric name="issues_selected_total" type="counter" description="Total issues selected for processing" />
+      <metric name="issues_filtered_total" type="counter" description="Total issues filtered out" />
+      <metric name="selection_duration_seconds" type="histogram" description="Time taken to select next issue" />
+      <metric name="polling_attempts_total" type="counter" description="Total polling attempts" />
+      <metric name="assignment_success_total" type="counter" description="Total successful issue assignments" />
+      <metric name="assignment_failures_total" type="counter" description="Total failed issue assignments" />
+    </metrics>
+    
+    <logging>
+      <event name="issue.selected" level="info" description="Issue selected for processing" />
+      <event name="issue.filtered" level="debug" description="Issue filtered out" />
+      <event name="issue.assigned" level="info" description="Issue assigned to bot" />
+      <event name="polling.started" level="debug" description="Issue polling started" />
+      <event name="polling.idle" level="info" description="No issues available, entering idle state" />
+      <event name="filter.applied" level="debug" description="Filter applied to issue list" />
+    </logging>
+  </monitoring-and-observability>
+
+  <configuration-schema>
+    <selection-config>
+      <field name="repository" type="string" required="true" description="Repository to monitor for issues" />
+      <field name="filters" type="array" required="false" description="Issue filters to apply" />
+      <field name="strategy" type="object" required="false" description="Selection strategy configuration" />
+      <field name="polling" type="object" required="false" description="Polling configuration" />
+      <field name="assignment" type="object" required="false" description="Assignment configuration" />
+    </selection-config>
+  </configuration-schema>
+
+  <documentation-requirements>
+    <api-docs>
+      <doc name="Issue Selection API" path="docs/api/issue-selection.md" />
+      <doc name="Filter Configuration Guide" path="docs/guides/issue-filtering.md" />
+    </api-docs>
+    
+    <user-guides>
+      <guide name="Issue Selection Setup" path="docs/tutorials/issue-selection-setup.md" />
+      <guide name="Custom Filters" path="docs/guides/custom-filters.md" />
+    </user-guides>
+  </documentation-requirements>
+
+  <acceptance-criteria-mapping>
+    <ac id="1" component="IssueSelector" test="issue-selector.test.ts" />
+    <ac id="2" component="LabelFilter" test="label-filter.test.ts" />
+    <ac id="3" component="AgeFilter" test="age-filter.test.ts" />
+    <ac id="4" component="IssueSelector" test="issue-assignment.test.ts" />
+    <ac id="5" component="Event Sourcing" test="issue-events.test.ts" />
+    <ac id="6" component="PollingService" test="polling-service.test.ts" />
+    <ac id="7" component="Git Platform Integration" test="git-platform-integration.test.ts" />
+  </acceptance-criteria-mapping>
+
+  <risk-mitigation>
+    <risk id="R1" description="API rate limiting may block issue selection" mitigation="Exponential backoff and rate limit monitoring" />
+    <risk id="R2" description="Infinite loop on same issue" mitigation="Assignment tracking and duplicate detection" />
+    <risk id="R3" description="Filter configuration errors" mitigation="Configuration validation and default fallbacks" />
+    <risk id="R4" description="Platform API unavailability" mitigation="Circuit breaker pattern and graceful degradation" />
+  </risk-mitigation>
+
+  <success-metrics>
+    <metric name="Selection Accuracy" target="95%" description="Percentage of correctly selected issues" />
+    <metric name="Filter Performance" target="&lt;100ms" description="Time to apply filters to issue list" />
+    <metric name="Assignment Success Rate" target="99%" description="Percentage of successful issue assignments" />
+    <metric name="Polling Efficiency" target="&lt;5min idle" description="Average time in idle state" />
+  </success-metrics>
+</story-context>
