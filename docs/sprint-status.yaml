@@ -104,11 +104,31 @@ development_status:
    epic-3-retrospective: optional
 
   epic-4: contexted
-  4-1-task-execution-engine: ready-for-dev
-  # Epic 4 stories not yet drafted - currently in epic file only
+
+  4-1-event-schema-design: ready-for-dev
+  4-2-event-store-backend-selection: ready-for-dev
+  4-3-event-capture-issue-selection-analysis: ready-for-dev
+  4-4-event-capture-ai-provider-interactions: ready-for-dev
+  4-5-event-capture-code-changes-git-operations: ready-for-dev
+  4-6-event-capture-approvals-escalations: ready-for-dev
+  4-7-event-query-api-for-time-travel: ready-for-dev
+  4-8-black-box-replay-for-debugging: ready-for-dev
   epic-4-retrospective: optional
 
-  epic-5: contexted
-  5-1-structured-logging-implementation: drafted
-  # Epic 5 stories not yet drafted - currently in epic file only
-  epic-5-retrospective: optional
+   epic-5: contexted
+   5-1-structured-logging-implementation: ready-for-dev
+   5-2-metrics-collection-infrastructure: ready-for-dev
+   5-3-real-time-dashboard-system-health: ready-for-dev
+   5-4-real-time-dashboard-development-velocity: ready-for-dev
+   5-5-event-trail-exploration-ui: ready-for-dev
+   5-6-alert-system-for-critical-issues: ready-for-dev
+   5-7-feedback-collection-system: ready-for-dev
+   5-8-integration-testing-suite: drafted
+   5-9a-installation-setup-documentation: drafted
+   5-9b-usage-configuration-documentation: drafted
+   5-9c-api-reference-documentation: backlog
+   5-9d-full-documentation-website: backlog
+   5-9e-video-walkthrough: backlog
+   5-10-alpha-release-preparation: drafted
+   epic-5-retrospective: optional
+

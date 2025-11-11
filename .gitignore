@@ -172,3 +172,4 @@ Thumbs.db
 
 # pnpm
 .pnpm-store/
+.playwright-mcp/

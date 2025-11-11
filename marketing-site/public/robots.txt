@@ -1,0 +1,15 @@
+# Task 6 (#85) - SEO Optimization
+# robots.txt for Tamma Marketing Site
+
+# Allow all crawlers
+User-agent: *
+Allow: /
+
+# Disallow admin/private paths (none currently)
+# Disallow: /admin/
+
+# Sitemap location
+Sitemap: https://tamma.dev/sitemap.xml
+
+# Crawl-delay (optional, for rate limiting)
+# Crawl-delay: 1
