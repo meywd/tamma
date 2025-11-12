@@ -1,0 +1,51 @@
+# Database Setup - Git Ignore File
+
+# Environment and credentials
+.env.database
+.env.backup
+*.env
+
+# PgBouncer user lists (contain passwords)
+userlist.txt
+pgbouncer_userlist.txt
+
+# Backup files
+*.backup
+*.backup.*
+*.bak
+
+# Log files
+*.log
+pgbouncer.log
+postgresql.log
+
+# PID files
+*.pid
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Database dumps
+*.sql.gz
+*.dump
+*.pgdump
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test outputs
+test-results/
+test-output/
+
+# Local configuration overrides
+*.local
+*.override
