@@ -381,7 +381,7 @@ _These use cases are thoroughly planned and specified. Implementation will begin
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with inspiration from the best open-source projects
 - Thanks to all AI providers making autonomous development possible
