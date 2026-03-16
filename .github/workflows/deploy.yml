@@ -3,6 +3,7 @@
 #
 # Pulls pre-built Docker images from GHCR and deploys to VPS.
 # Runs after Docker images are built, or via manual dispatch.
+# Works for both main branch pushes (sha-<commit>) and PRs (pr-<number>).
 #
 # Required secrets:
 #   VPS_HOST              — Server hostname or IP
@@ -73,22 +74,46 @@ jobs:
             exit 1
           fi
 
+      - name: Determine image tag and ref
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # Get the event type and PR number from the triggering workflow
+            EVENT="${{ github.event.workflow_run.event }}"
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
+
+            if [ "$EVENT" = "pull_request" ]; then
+              # Find the PR number for this branch
+              PR_NUMBER=$(gh pr list --head "$HEAD_BRANCH" --json number --jq '.[0].number' --repo "${{ github.repository }}")
+              if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+                echo "tag=pr-${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+                echo "ref=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
+                echo "Deploying PR #${PR_NUMBER} from branch ${HEAD_BRANCH} (tag: pr-${PR_NUMBER})"
+              else
+                echo "::error::Could not find PR number for branch ${HEAD_BRANCH}"
+                exit 1
+              fi
+            else
+              # Push to main — use SHA tag
+              echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+              echo "ref=${SHA}" >> "$GITHUB_OUTPUT"
+              echo "Deploying main at sha-$(echo "$SHA" | cut -c1-7)"
+            fi
+          else
+            # Manual dispatch — use current SHA
+            SHA="${{ github.sha }}"
+            echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
+            echo "Deploying manual dispatch at sha-$(echo "$SHA" | cut -c1-7)"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Determine image tag
-        id: tag
-        run: |
-          # Always use immutable SHA tag for deployments
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            SHA="${{ github.event.workflow_run.head_sha }}"
-          else
-            SHA="${{ github.sha }}"
-          fi
-          echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-          echo "Deploying image tag: sha-$(echo "$SHA" | cut -c1-7)"
+          ref: ${{ steps.tag.outputs.ref }}
 
       - name: Configure SSH
         run: |
