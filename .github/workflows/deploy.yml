@@ -140,7 +140,7 @@ jobs:
       - name: Create docker-compose override for GHCR images
         run: |
           IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          OWNER="${{ github.repository_owner }}"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
           cat > /tmp/docker-compose.images.yml << YAML
           services:
