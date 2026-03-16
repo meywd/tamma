@@ -57,6 +57,22 @@ jobs:
     environment: ${{ github.event.inputs.environment || 'production' }}
 
     steps:
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.VPS_HOST }}" ] && missing+=("VPS_HOST")
+          [ -z "${{ secrets.VPS_USER }}" ] && missing+=("VPS_USER")
+          [ -z "${{ secrets.VPS_SSH_KEY }}" ] && missing+=("VPS_SSH_KEY")
+          [ -z "${{ secrets.VPS_DEPLOY_PATH }}" ] && missing+=("VPS_DEPLOY_PATH")
+          [ -z "${{ secrets.TAMMA_APP_PRIVATE_KEY }}" ] && missing+=("TAMMA_APP_PRIVATE_KEY")
+          [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
+          [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
+          [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -101,14 +117,14 @@ jobs:
               "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
 
           # Build .env from individual secrets (no opaque TAMMA_DOTENV blob)
-          cat <<'ENVEOF' | ssh -i ~/.ssh/deploy_key \
+          printf '%s\n' \
+            "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
+            "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
+            "GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}" \
+          | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
-          POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}
-          GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}
-          GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}
-          ENVEOF
 
       - name: Sync docker + database files
         run: |
