@@ -326,6 +326,23 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "curl -sf http://localhost:3100/api/health && echo ' API OK' || echo 'API health check failed'"
 
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              echo '=== Container Status ===' && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml ps -a 2>/dev/null && \
+              echo '' && \
+              for svc in elsa-server tamma-api tamma-api-dotnet tamma-engine postgres rabbitmq; do
+                echo \"=== Logs: \$svc (last 50 lines) ===\" && \
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
+                echo ''
+              done
+            "
+
       - name: Cleanup SSH
         if: always()
         run: rm -f ~/.ssh/deploy_key

@@ -4,8 +4,7 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Adds resource limits, replicas for stateless services, and restricts
-# exposed ports to only the externally-facing services.
+# Adds resource limits. Single-instance for port-bound services.
 # =============================================================================
 
 services:
@@ -15,7 +14,6 @@ services:
         limits:
           cpus: "2.0"
           memory: 2G
-    # No exposed ports in production
 
   rabbitmq:
     deploy:
@@ -26,7 +24,6 @@ services:
 
   elsa-server:
     deploy:
-      replicas: 2
       resources:
         limits:
           cpus: "1.0"
@@ -34,7 +31,6 @@ services:
 
   tamma-api-dotnet:
     deploy:
-      replicas: 2
       resources:
         limits:
           cpus: "0.5"
