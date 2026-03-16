@@ -1,10 +1,10 @@
 # =============================================================================
-# Build & Publish Docker Images
+# Build & Publish Docker Images + Deploy
 #
-# Builds all Tamma Docker images and pushes them to GitHub Container Registry.
+# Builds all Tamma Docker images, pushes to GHCR, then deploys to VPS.
 # - main: tagged as :main and :sha-<commit>
 # - tags: tagged as :v1.2.3 and :latest
-# - PRs: tagged as :pr-<number> (pre-release)
+# - PRs: tagged as :pr-<number>
 # =============================================================================
 
 name: Build & Publish Docker Images
@@ -154,3 +154,172 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Deploy to VPS (runs after all images are built)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to VPS
+    needs: [build-ts, build-dashboard, build-dotnet]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.VPS_HOST }}" ] && missing+=("VPS_HOST")
+          [ -z "${{ secrets.VPS_USER }}" ] && missing+=("VPS_USER")
+          [ -z "${{ secrets.VPS_SSH_KEY }}" ] && missing+=("VPS_SSH_KEY")
+          [ -z "${{ secrets.VPS_DEPLOY_PATH }}" ] && missing+=("VPS_DEPLOY_PATH")
+          [ -z "${{ secrets.TAMMA_APP_PRIVATE_KEY }}" ] && missing+=("TAMMA_APP_PRIVATE_KEY")
+          [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
+          [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
+          [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAG="pr-${{ github.event.pull_request.number }}"
+          else
+            TAG="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${TAG}"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT || 22 }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Setup VPS (idempotent)
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'if ! command -v docker &>/dev/null; then
+               echo "Installing Docker..."
+               curl -fsSL https://get.docker.com | sh
+             fi
+             mkdir -p ${{ secrets.VPS_DEPLOY_PATH }}/{secrets,database/migrations}'
+
+      - name: Write secrets to VPS
+        run: |
+          echo '${{ secrets.TAMMA_APP_PRIVATE_KEY }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
+
+          printf '%s\n' \
+            "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
+            "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
+            "GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}" \
+          | ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
+
+      - name: Sync docker + database files
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            docker/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            database/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/database/
+
+      - name: Create docker-compose override for GHCR images
+        run: |
+          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
+          OWNER="${{ steps.tag.outputs.owner }}"
+
+          cat > /tmp/docker-compose.images.yml << YAML
+          services:
+            tamma-api:
+              image: ghcr.io/${OWNER}/tamma-api:${IMAGE_TAG}
+              build: !reset null
+            tamma-engine:
+              image: ghcr.io/${OWNER}/tamma-engine:${IMAGE_TAG}
+              build: !reset null
+            tamma-dashboard:
+              image: ghcr.io/${OWNER}/tamma-dashboard:${IMAGE_TAG}
+              build: !reset null
+            elsa-server:
+              image: ghcr.io/${OWNER}/tamma-elsa:${IMAGE_TAG}
+              build: !reset null
+            tamma-api-dotnet:
+              image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
+              build: !reset null
+          YAML
+
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            /tmp/docker-compose.images.yml \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
+
+      - name: Deploy
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< '${{ secrets.GITHUB_TOKEN }}' && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                pull && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                up -d --remove-orphans && \
+              echo 'Waiting for health checks...' && \
+              sleep 15 && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                ps
+            "
+
+      - name: Run database migrations
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }} && \
+              for f in database/migrations/*.sql; do
+                echo \"Running migration: \$f\" && \
+                docker compose -f docker/docker-compose.yml exec -T postgres \
+                  psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
+              done
+            "
+
+      - name: Health check
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "curl -sf http://localhost:3100/api/health && echo ' API OK' || echo 'API health check failed'"
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -1,31 +1,15 @@
 # =============================================================================
-# Deploy to VPS
+# Deploy to VPS (manual trigger only)
 #
-# Pulls pre-built Docker images from GHCR and deploys to VPS.
-# Runs after Docker images are built, or via manual dispatch.
-# Works for both main branch pushes (sha-<commit>) and PRs (pr-<number>).
+# For automated deploys, see docker-publish.yml which deploys after building.
+# This workflow is for re-deploying without rebuilding images.
 #
-# Required secrets:
-#   VPS_HOST              — Server hostname or IP
-#   VPS_USER              — SSH username (e.g., root)
-#   VPS_SSH_KEY           — Private SSH key for authentication
-#   VPS_DEPLOY_PATH       — Path on VPS (e.g., /opt/tamma)
-#   TAMMA_APP_PRIVATE_KEY — GitHub App private key (PEM)
-#   TAMMA_APP_ID          — GitHub App ID
-#   TAMMA_WEBHOOK_SECRET  — GitHub webhook secret
-#   TAMMA_POSTGRES_PASSWORD — PostgreSQL password
-#
-# Optional secrets:
-#   VPS_SSH_PORT          — SSH port (default: 22)
+# Required secrets: see docker-publish.yml
 # =============================================================================
 
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: ["Build & Publish Docker Images"]
-    types: [completed]
-
   workflow_dispatch:
     inputs:
       environment:
@@ -36,6 +20,10 @@ on:
         options:
           - production
           - staging
+      image_tag:
+        description: 'Image tag to deploy (e.g. pr-172, sha-abc1234, main)'
+        required: true
+        default: 'main'
 
 permissions:
   contents: read
@@ -49,12 +37,6 @@ jobs:
     name: Deploy to VPS
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    # Only run if images were built successfully (or manual trigger)
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-
     environment: ${{ github.event.inputs.environment || 'production' }}
 
     steps:
@@ -74,46 +56,8 @@ jobs:
             exit 1
           fi
 
-      - name: Determine image tag and ref
-        id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            # Get the event type and PR number from the triggering workflow
-            EVENT="${{ github.event.workflow_run.event }}"
-            SHA="${{ github.event.workflow_run.head_sha }}"
-            HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
-
-            if [ "$EVENT" = "pull_request" ]; then
-              # Find the PR number for this branch
-              PR_NUMBER=$(gh pr list --head "$HEAD_BRANCH" --json number --jq '.[0].number' --repo "${{ github.repository }}")
-              if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
-                echo "tag=pr-${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-                echo "ref=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
-                echo "Deploying PR #${PR_NUMBER} from branch ${HEAD_BRANCH} (tag: pr-${PR_NUMBER})"
-              else
-                echo "::error::Could not find PR number for branch ${HEAD_BRANCH}"
-                exit 1
-              fi
-            else
-              # Push to main — use SHA tag
-              echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-              echo "ref=${SHA}" >> "$GITHUB_OUTPUT"
-              echo "Deploying main at sha-$(echo "$SHA" | cut -c1-7)"
-            fi
-          else
-            # Manual dispatch — use current SHA
-            SHA="${{ github.sha }}"
-            echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ github.ref }}" >> "$GITHUB_OUTPUT"
-            echo "Deploying manual dispatch at sha-$(echo "$SHA" | cut -c1-7)"
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.tag.outputs.ref }}
 
       - name: Configure SSH
         run: |
@@ -141,7 +85,6 @@ jobs:
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
               "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
 
-          # Build .env from individual secrets (no opaque TAMMA_DOTENV blob)
           printf '%s\n' \
             "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
             "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
@@ -164,7 +107,7 @@ jobs:
 
       - name: Create docker-compose override for GHCR images
         run: |
-          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
           cat > /tmp/docker-compose.images.yml << YAML
