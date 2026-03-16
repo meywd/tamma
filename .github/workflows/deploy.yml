@@ -10,7 +10,9 @@
 #   VPS_SSH_KEY           — Private SSH key for authentication
 #   VPS_DEPLOY_PATH       — Path on VPS (e.g., /opt/tamma)
 #   TAMMA_APP_PRIVATE_KEY — GitHub App private key (PEM)
-#   TAMMA_DOTENV          — Full .env file contents for docker-compose
+#   TAMMA_APP_ID          — GitHub App ID
+#   TAMMA_WEBHOOK_SECRET  — GitHub webhook secret
+#   TAMMA_POSTGRES_PASSWORD — PostgreSQL password
 #
 # Optional secrets:
 #   VPS_SSH_PORT          — SSH port (default: 22)
@@ -97,11 +99,16 @@ jobs:
               -p ${{ secrets.VPS_SSH_PORT || 22 }} \
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
               "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
-          echo '${{ secrets.TAMMA_DOTENV }}' | \
-            ssh -i ~/.ssh/deploy_key \
-              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
+
+          # Build .env from individual secrets (no opaque TAMMA_DOTENV blob)
+          cat <<'ENVEOF' | ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
+          POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}
+          GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}
+          GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}
+          ENVEOF
 
       - name: Sync docker + database files
         run: |

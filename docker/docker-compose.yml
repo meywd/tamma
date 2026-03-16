@@ -110,8 +110,10 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
-      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-key.pem
+      GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
+    volumes:
+      - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,10 +137,11 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
-      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-key.pem
+      GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       TAMMA_API_URL: http://tamma-api:3100
     volumes:
       - tamma-engine-workdir:/home/tamma/workdir
+      - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       tamma-api:
         condition: service_healthy
