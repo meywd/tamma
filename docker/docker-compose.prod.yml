@@ -4,7 +4,8 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Adds resource limits. Single-instance for port-bound services.
+# Adds resource limits. Traffic enters via nginx-proxy on port 80.
+# Cloudflare handles public TLS termination.
 # =============================================================================
 
 services:
@@ -42,8 +43,7 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
-    ports:
-      - "3100:3100"
+    # No exposed ports — reachable via nginx-proxy only
 
   tamma-engine:
     deploy:
@@ -58,5 +58,13 @@ services:
         limits:
           cpus: "0.25"
           memory: 256M
+    # No exposed ports — reachable via nginx-proxy only
+
+  nginx-proxy:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
     ports:
-      - "3001:3001"
+      - "80:80"

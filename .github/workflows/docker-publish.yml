@@ -423,7 +423,7 @@ jobs:
               exit 1
             "
 
-      - name: "Start layer 4: tamma-engine + tamma-dashboard"
+      - name: "Start layer 4: tamma-engine + tamma-dashboard + nginx-proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -434,7 +434,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d tamma-engine tamma-dashboard
+                up -d tamma-engine tamma-dashboard nginx-proxy
             "
 
       - name: "Verify: all services running"
@@ -452,12 +452,12 @@ jobs:
                 ps
             "
 
-      - name: "Health check: tamma-api"
+      - name: "Health check: API via proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sf http://localhost:3100/api/health && echo ' API OK' || (echo '::error::API health check failed' && exit 1)"
+            "curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK' || (echo '::error::API health check via proxy failed' && exit 1)"
 
       - name: Dump container logs on failure
         if: failure()
@@ -469,7 +469,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard; do
+              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

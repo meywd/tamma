@@ -215,24 +215,24 @@ jobs:
               echo 'FAILED: APIs not healthy' && \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && exit 1
             "
 
-      - name: "Start: engine + dashboard"
+      - name: "Start: engine + dashboard + nginx-proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
-                up -d tamma-engine tamma-dashboard && \
+                up -d tamma-engine tamma-dashboard nginx-proxy && \
               sleep 5 && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
             "
 
-      - name: "Health check: tamma-api"
+      - name: "Health check: API via proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sf http://localhost:3100/api/health && echo ' API OK' || (echo '::error::API health check failed' && exit 1)"
+            "curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK' || (echo '::error::API health check via proxy failed' && exit 1)"
 
       - name: Dump container logs on failure
         if: failure()
