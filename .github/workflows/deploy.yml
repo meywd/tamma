@@ -3,8 +3,6 @@
 #
 # For automated deploys, see docker-publish.yml which deploys after building.
 # This workflow is for re-deploying without rebuilding images.
-#
-# Required secrets: see docker-publish.yml
 # =============================================================================
 
 name: Deploy
@@ -134,7 +132,7 @@ jobs:
             /tmp/docker-compose.images.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
 
-      - name: Deploy
+      - name: Pull images and stop old containers
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -142,30 +140,29 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< '${{ secrets.GITHUB_TOKEN }}' && \
               docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
+                -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
                 pull && \
               docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                down --remove-orphans 2>/dev/null || true && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                up -d && \
-              echo 'Waiting for health checks...' && \
-              sleep 15 && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                ps
+                -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
+                down --remove-orphans 2>/dev/null || true
+            "
+
+      - name: "Start and verify: postgres + rabbitmq"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d postgres rabbitmq && \
+              for i in \$(seq 1 30); do
+                PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
+                RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ\" && \
+                [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && echo 'Infrastructure healthy' && exit 0
+                sleep 2
+              done && \
+              echo 'FAILED: infrastructure not healthy' && \$COMPOSE logs --tail=30 postgres rabbitmq && exit 1
             "
 
       - name: Run database migrations
@@ -176,17 +173,79 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }} && \
               for f in database/migrations/*.sql; do
                 echo \"Running migration: \$f\" && \
-                docker compose -f docker/docker-compose.yml exec -T postgres \
-                  psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
+                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml -f docker/docker-compose.images.yml --env-file .env \
+                  exec -T postgres psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
               done
             "
 
-      - name: Health check
+      - name: "Start and verify: elsa-server"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d elsa-server && \
+              for i in \$(seq 1 30); do
+                STATE=\$(\$COMPOSE ps elsa-server --format '{{.State}}' 2>/dev/null) && \
+                HEALTH=\$(\$COMPOSE ps elsa-server --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: state=\$STATE health=\$HEALTH\" && \
+                [ \"\$STATE\" = 'exited' ] || [ \"\$STATE\" = 'dead' ] && echo 'FAILED: elsa-server crashed' && \$COMPOSE logs --tail=50 elsa-server && exit 1
+                [ \"\$HEALTH\" = 'healthy' ] && echo 'elsa-server healthy' && exit 0
+                sleep 3
+              done && \
+              echo 'FAILED: elsa-server not healthy' && \$COMPOSE logs --tail=50 elsa-server && exit 1
+            "
+
+      - name: "Start and verify: APIs"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d tamma-api-dotnet tamma-api && \
+              for i in \$(seq 1 20); do
+                API=\$(\$COMPOSE ps tamma-api --format '{{.Health}}' 2>/dev/null) && \
+                DOTNET=\$(\$COMPOSE ps tamma-api-dotnet --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/20: tamma-api=\$API tamma-api-dotnet=\$DOTNET\" && \
+                [ \"\$API\" = 'healthy' ] && [ \"\$DOTNET\" = 'healthy' ] && echo 'APIs healthy' && exit 0
+                sleep 3
+              done && \
+              echo 'FAILED: APIs not healthy' && \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && exit 1
+            "
+
+      - name: "Start: engine + dashboard"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
+                up -d tamma-engine tamma-dashboard && \
+              sleep 5 && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
+            "
+
+      - name: "Health check: tamma-api"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sf http://localhost:3100/api/health && echo ' API OK' || echo 'API health check failed'"
+            "curl -sf http://localhost:3100/api/health && echo ' API OK' || (echo '::error::API health check failed' && exit 1)"
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard; do
+                echo \"=== \$svc (last 50) ===\" && \
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)'
+              done
+            "
 
       - name: Cleanup SSH
         if: always()
