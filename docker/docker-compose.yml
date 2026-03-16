@@ -85,6 +85,7 @@ services:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
+      Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
     depends_on:
       elsa-server:
         condition: service_healthy

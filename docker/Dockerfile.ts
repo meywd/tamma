@@ -50,10 +50,10 @@ USER tamma
 EXPOSE 3100
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3100/health || exit 1
+  CMD wget -qO- http://localhost:3100/api/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "packages/cli/dist/index.js", "server", "--port", "3100", "--host", "0.0.0.0"]
+CMD ["node", "packages/api/dist/serve.js"]
 
 # ---- Stage 3b: Engine ----
 FROM node:22-alpine AS tamma-engine
