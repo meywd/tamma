@@ -42,7 +42,6 @@ services:
 
   tamma-api:
     deploy:
-      replicas: 2
       resources:
         limits:
           cpus: "0.5"
@@ -59,7 +58,6 @@ services:
 
   tamma-dashboard:
     deploy:
-      replicas: 2
       resources:
         limits:
           cpus: "0.25"
