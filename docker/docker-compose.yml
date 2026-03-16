@@ -56,7 +56,7 @@ services:
       context: ../apps/tamma-elsa/src
       dockerfile: Tamma.ElsaServer/Dockerfile
     environment:
-      ConnectionStrings__PostgreSql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       RabbitMq__HostName: rabbitmq
       RabbitMq__UserName: ${RABBITMQ_USER:-tamma}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-tamma}
@@ -82,7 +82,7 @@ services:
       context: ../apps/tamma-elsa/src
       dockerfile: Tamma.Api/Dockerfile
     environment:
-      ConnectionStrings__PostgreSql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
     depends_on:
