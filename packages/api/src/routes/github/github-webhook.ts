@@ -19,6 +19,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import type { IGitHubInstallationStore } from '../../persistence/installation-store.js';
 import type { ITaskQueue } from '../../services/task-queue.js';
 import type { InstallationRouter } from '../../services/installation-router.js';
@@ -61,6 +62,9 @@ export async function registerGitHubWebhookRoute(
   app: FastifyInstance,
   options: GitHubWebhookOptions,
 ): Promise<void> {
+  // Register rate-limit plugin so route-level config takes effect
+  await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
+
   // Fastify needs raw body for signature verification.
   // We register a content-type parser to capture raw body.
   app.addContentTypeParser(
