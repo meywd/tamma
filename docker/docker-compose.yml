@@ -109,8 +109,9 @@ services:
       target: tamma-api
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-key.pem
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,11 +133,10 @@ services:
       dockerfile: docker/Dockerfile.ts
       target: tamma-engine
     environment:
-      GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN is required}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
-      GITHUB_OWNER: ${GITHUB_OWNER:?GITHUB_OWNER is required}
-      GITHUB_REPO: ${GITHUB_REPO:?GITHUB_REPO is required}
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app-key.pem
+      TAMMA_API_URL: http://tamma-api:3100
     volumes:
       - tamma-engine-workdir:/home/tamma/workdir
     depends_on:
