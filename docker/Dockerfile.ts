@@ -38,7 +38,7 @@ RUN pnpm prune --prod
 
 # ---- Stage 3a: API Server ----
 FROM node:22-alpine AS tamma-api
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini curl
 RUN addgroup -g 1001 tamma && adduser -u 1001 -G tamma -s /bin/sh -D tamma
 WORKDIR /app
 
@@ -49,7 +49,6 @@ COPY --from=build /app/package.json ./
 USER tamma
 EXPOSE 3100
 
-RUN apk add --no-cache curl
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -sf http://localhost:3100/api/health || exit 1
 
