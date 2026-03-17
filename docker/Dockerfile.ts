@@ -49,7 +49,7 @@ COPY --from=build /app/package.json ./
 USER tamma
 EXPOSE 3100
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3100/api/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
