@@ -82,6 +82,9 @@ export {
   InMemoryTaskQueue,
 };
 
+export { startApiServer } from './serve.js';
+export type { ApiServerOptions } from './serve.js';
+
 export type {
   KBServices,
   EngineRouteOptions,

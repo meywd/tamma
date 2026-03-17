@@ -1,22 +1,17 @@
 /**
- * Standalone API server entrypoint for Docker/SaaS deployment.
+ * Standalone API server for Docker/SaaS deployment.
  *
- * Reads configuration from environment variables (not CLI config files).
- * Starts the Fastify server with GitHub App webhook, SaaS routes, and
- * all management endpoints.
+ * Exports startApiServer() for use by both:
+ * - Docker entrypoint (this file's main() at bottom)
+ * - CLI `tamma api` command
  *
- * Usage:
- *   node packages/api/dist/serve.js
- *
- * Required env vars:
- *   DATABASE_URL             — PostgreSQL connection string
- *   GITHUB_APP_ID            — GitHub App ID
- *   GITHUB_APP_PRIVATE_KEY_PATH — Path to PEM file
- *   GITHUB_WEBHOOK_SECRET    — Webhook signing secret
+ * Reads configuration from environment variables and optional overrides.
  */
 
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { Octokit } from '@octokit/rest';
+import { createAppAuth } from '@octokit/auth-app';
 import {
   createApp,
   InMemoryWorkflowStore,
@@ -26,15 +21,31 @@ import {
   InMemoryTaskQueue,
 } from './index.js';
 
-async function main(): Promise<void> {
-  const port = parseInt(process.env['PORT'] ?? '3100', 10);
-  const host = process.env['HOST'] ?? '0.0.0.0';
+export interface ApiServerOptions {
+  port?: number;
+  host?: string;
+  /** Override for GITHUB_APP_PRIVATE_KEY_PATH env var. */
+  privateKeyPath?: string;
+  /** Override for LOG_LEVEL env var. */
+  logLevel?: string;
+}
+
+/**
+ * Start the Tamma API server in SaaS mode.
+ * All deps (pg, Octokit) live in @tamma/api — callers don't need them.
+ */
+export async function startApiServer(options: ApiServerOptions = {}): Promise<void> {
+  const port = options.port ?? parseInt(process.env['PORT'] ?? '3100', 10);
+  const host = options.host ?? process.env['HOST'] ?? '0.0.0.0';
 
   // Database (optional — falls back to in-memory stores)
   const databaseUrl = process.env['DATABASE_URL'];
   let pool: pg.Pool | undefined;
   if (databaseUrl) {
     pool = new pg.Pool({ connectionString: databaseUrl });
+    console.log('Using PostgreSQL persistence');
+  } else {
+    console.log('No DATABASE_URL — using in-memory stores');
   }
 
   // Stores
@@ -45,26 +56,29 @@ async function main(): Promise<void> {
   const taskQueue = new InMemoryTaskQueue();
   const installationRouter = new InstallationRouter(installationStore);
 
-  // GitHub App config (optional — webhook/callback won't register without these)
+  // GitHub App config
   const appIdStr = process.env['GITHUB_APP_ID'];
-  const privateKeyPath = process.env['GITHUB_APP_PRIVATE_KEY_PATH'];
   const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
+  const keyPath = options.privateKeyPath ?? process.env['GITHUB_APP_PRIVATE_KEY_PATH'];
 
   let privateKey: string | undefined;
-  if (privateKeyPath) {
+  if (keyPath) {
     try {
-      privateKey = readFileSync(privateKeyPath, 'utf-8');
+      privateKey = readFileSync(keyPath, 'utf-8');
     } catch (err) {
-      console.warn(`Warning: Could not read private key from ${privateKeyPath}:`, (err as Error).message);
+      console.warn(`Warning: Could not read private key from ${keyPath}:`, (err as Error).message);
     }
+  } else if (process.env['GITHUB_APP_PRIVATE_KEY']) {
+    privateKey = process.env['GITHUB_APP_PRIVATE_KEY'];
   }
 
   const appId = appIdStr ? parseInt(appIdStr, 10) : undefined;
 
   // Build app options
+  const logLevel = options.logLevel ?? process.env['LOG_LEVEL'] ?? 'info';
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
-    logger: { level: process.env['LOG_LEVEL'] ?? 'info' },
+    logger: { level: logLevel },
   };
 
   // Register GitHub App routes if configured
@@ -84,10 +98,6 @@ async function main(): Promise<void> {
       successRedirectUrl: process.env['GITHUB_CALLBACK_SUCCESS_URL'] ?? '/api/health',
     };
 
-    // SaaS routes need Octokit factory
-    const { Octokit } = await import('@octokit/rest');
-    const { createAppAuth } = await import('@octokit/auth-app');
-
     appOptions.saas = {
       installationStore,
       workflowStore,
@@ -101,9 +111,9 @@ async function main(): Promise<void> {
 
     console.log(`GitHub App configured (appId=${appId})`);
   } else {
-    console.warn('GitHub App not configured — webhook/SaaS routes disabled');
+    console.warn('GitHub App not fully configured — webhook/SaaS routes disabled');
     if (!appId) console.warn('  Missing: GITHUB_APP_ID');
-    if (!privateKey) console.warn('  Missing: GITHUB_APP_PRIVATE_KEY_PATH');
+    if (!privateKey) console.warn('  Missing: GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH');
     if (!webhookSecret) console.warn('  Missing: GITHUB_WEBHOOK_SECRET');
   }
 
@@ -123,7 +133,11 @@ async function main(): Promise<void> {
   console.log(`Tamma API listening on ${host}:${port}`);
 }
 
-main().catch((err) => {
-  console.error('Failed to start API server:', err);
-  process.exit(1);
-});
+// Docker entrypoint — only runs when executed directly
+const isDirectRun = process.argv[1]?.endsWith('serve.js') || process.argv[1]?.endsWith('serve.ts');
+if (isDirectRun) {
+  startApiServer().catch((err) => {
+    console.error('Failed to start API server:', err);
+    process.exit(1);
+  });
+}
