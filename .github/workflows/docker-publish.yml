@@ -295,7 +295,8 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                down --remove-orphans 2>/dev/null || true
+                down --remove-orphans 2>/dev/null || true && \
+              docker container prune -f 2>/dev/null || true
             "
 
       - name: "Start layer 1: postgres + rabbitmq"
@@ -309,7 +310,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d postgres rabbitmq
+                up -d --force-recreate postgres rabbitmq
             "
 
       - name: "Verify layer 1: postgres + rabbitmq healthy"
@@ -358,7 +359,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d elsa-server
+                up -d --force-recreate elsa-server
             "
 
       - name: "Verify layer 2: elsa-server healthy"
@@ -402,7 +403,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d tamma-api-dotnet tamma-api
+                up -d --force-recreate tamma-api-dotnet tamma-api
             "
 
       - name: "Verify layer 3: tamma-api healthy"
@@ -412,13 +413,7 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-              echo '--- Debug: testing health endpoint directly ---' && \
-              sleep 5 && \
               API_C=\$(\$COMPOSE ps -q tamma-api | head -1) && \
-              docker exec \$API_C curl -sv http://localhost:3100/api/health 2>&1 || echo 'curl exec failed' && \
-              echo '--- Debug: container inspect ---' && \
-              docker inspect --format '{{json .State.Health}}' \$API_C 2>/dev/null | head -5 && \
-              echo '---' && \
               DOTNET_C=\$(\$COMPOSE ps -q tamma-api-dotnet | head -1) && \
               for i in \$(seq 1 30); do
                 API=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$API_C 2>/dev/null || echo 'unknown') && \
@@ -445,7 +440,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d tamma-engine tamma-dashboard nginx-proxy
+                up -d --force-recreate tamma-engine tamma-dashboard nginx-proxy
             "
 
       - name: "Verify: all services running"
