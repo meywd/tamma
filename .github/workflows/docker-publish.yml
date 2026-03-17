@@ -412,7 +412,13 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              echo '--- Debug: testing health endpoint directly ---' && \
+              sleep 5 && \
               API_C=\$(\$COMPOSE ps -q tamma-api | head -1) && \
+              docker exec \$API_C curl -sv http://localhost:3100/api/health 2>&1 || echo 'curl exec failed' && \
+              echo '--- Debug: container inspect ---' && \
+              docker inspect --format '{{json .State.Health}}' \$API_C 2>/dev/null | head -5 && \
+              echo '---' && \
               DOTNET_C=\$(\$COMPOSE ps -q tamma-api-dotnet | head -1) && \
               for i in \$(seq 1 30); do
                 API=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$API_C 2>/dev/null || echo 'unknown') && \
