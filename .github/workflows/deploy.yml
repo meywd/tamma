@@ -87,6 +87,11 @@ jobs:
             "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
             "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
             "GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}" \
+            "GITHUB_OAUTH_CLIENT_ID=${{ secrets.TAMMA_OAUTH_CLIENT_ID }}" \
+            "GITHUB_OAUTH_CLIENT_SECRET=${{ secrets.TAMMA_OAUTH_CLIENT_SECRET }}" \
+            "JWT_SECRET=${{ secrets.TAMMA_JWT_SECRET }}" \
+            "API_BASE_URL=https://api.tamma.dev" \
+            "DASHBOARD_URL=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \

@@ -41,6 +41,8 @@ import { PgUserStore } from './persistence/pg-user-store.js';
 import { generateApiKey, hashApiKey, getApiKeyPrefix } from './auth/api-key.js';
 import { registerApiKeyAuthPlugin } from './auth/api-key-auth.js';
 import type { InstallationContext, ApiKeyAuthConfig } from './auth/api-key-auth.js';
+import { registerGitHubOAuthRoutes } from './routes/auth/github-oauth.js';
+import type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
 import type { ProvisionResult } from './services/github-secrets-provisioner.js';
 import { InstallationRouter } from './services/installation-router.js';
@@ -80,10 +82,12 @@ export {
   GitHubSecretsProvisioner,
   InstallationRouter,
   InMemoryTaskQueue,
+  registerGitHubOAuthRoutes,
 };
 
 export { startApiServer } from './serve.js';
 export type { ApiServerOptions } from './serve.js';
+export type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
 
 export type {
   KBServices,
@@ -138,6 +142,8 @@ export interface CreateAppOptions {
   githubWebhook?: GitHubWebhookOptions;
   /** SaaS API route options (optional; enables /api/v1/* routes). */
   saas?: SaaSRouteOptions;
+  /** GitHub OAuth login options (optional; enables /api/auth/github). */
+  githubOAuth?: GitHubOAuthOptions;
   /** Enable Fastify logger (boolean or pino options object). */
   logger?: boolean | object;
 }
@@ -207,6 +213,11 @@ export async function createApp(options?: CreateAppOptions) {
       },
       { prefix: '' },
     );
+  }
+
+  // GitHub OAuth login routes
+  if (options?.githubOAuth !== undefined) {
+    await registerGitHubOAuthRoutes(app, options.githubOAuth);
   }
 
   // SaaS API routes (protected by API key auth)

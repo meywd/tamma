@@ -17,6 +17,8 @@ import {
   InMemoryWorkflowStore,
   InMemoryInstallationStore,
   PgInstallationStore,
+  InMemoryUserStore,
+  PgUserStore,
   InstallationRouter,
   InMemoryTaskQueue,
 } from './index.js';
@@ -52,6 +54,9 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   const installationStore = pool
     ? new PgInstallationStore(pool)
     : new InMemoryInstallationStore();
+  const userStore = pool
+    ? new PgUserStore(pool)
+    : new InMemoryUserStore();
   const workflowStore = new InMemoryWorkflowStore();
   const taskQueue = new InMemoryTaskQueue();
   const installationRouter = new InstallationRouter(installationStore);
@@ -110,6 +115,30 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     };
 
     console.log(`GitHub App configured (appId=${appId})`);
+
+    // GitHub OAuth login (requires GITHUB_OAUTH_CLIENT_ID + SECRET)
+    const oauthClientId = process.env['GITHUB_OAUTH_CLIENT_ID'];
+    const oauthClientSecret = process.env['GITHUB_OAUTH_CLIENT_SECRET'];
+    const jwtSecret = process.env['JWT_SECRET'] ?? 'tamma-dev-jwt-secret';
+    const apiBaseUrl = process.env['API_BASE_URL'] ?? `http://localhost:${port}`;
+    const dashUrl = process.env['DASHBOARD_URL'] ?? 'http://localhost:3001';
+
+    if (oauthClientId && oauthClientSecret) {
+      appOptions.githubOAuth = {
+        clientId: oauthClientId,
+        clientSecret: oauthClientSecret,
+        jwtSecret,
+        userStore,
+        installationStore,
+        dashboardUrl: dashUrl,
+        apiBaseUrl,
+      };
+      console.log('GitHub OAuth login enabled');
+    } else {
+      console.warn('GitHub OAuth not configured — login disabled');
+      if (!oauthClientId) console.warn('  Missing: GITHUB_OAUTH_CLIENT_ID');
+      if (!oauthClientSecret) console.warn('  Missing: GITHUB_OAUTH_CLIENT_SECRET');
+    }
   } else {
     console.warn('GitHub App not fully configured — webhook/SaaS routes disabled');
     if (!appId) console.warn('  Missing: GITHUB_APP_ID');

@@ -113,6 +113,11 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:-tamma-dev-jwt-secret}
+      API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
+      DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
     volumes:
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
