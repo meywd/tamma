@@ -49,8 +49,8 @@ COPY --from=build /app/package.json ./
 USER tamma
 EXPOSE 3100
 
-HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost:3100/api/health || exit 1
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://localhost:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "packages/api/dist/serve.js"]

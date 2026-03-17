@@ -414,10 +414,10 @@ jobs:
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               API_C=\$(\$COMPOSE ps -q tamma-api | head -1) && \
               DOTNET_C=\$(\$COMPOSE ps -q tamma-api-dotnet | head -1) && \
-              for i in \$(seq 1 20); do
+              for i in \$(seq 1 30); do
                 API=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$API_C 2>/dev/null || echo 'unknown') && \
                 DOTNET=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$DOTNET_C 2>/dev/null || echo 'unknown') && \
-                echo \"Check \$i/20: tamma-api=\$API tamma-api-dotnet=\$DOTNET\" && \
+                echo \"Check \$i/30: tamma-api=\$API tamma-api-dotnet=\$DOTNET\" && \
                 if [ \"\$API\" = 'healthy' ] && [ \"\$DOTNET\" = 'healthy' ]; then
                   echo 'Layer 3 healthy' && exit 0
                 fi && \
