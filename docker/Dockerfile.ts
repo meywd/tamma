@@ -50,7 +50,7 @@ USER tamma
 EXPOSE 3100
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl -sf http://localhost:3100/api/health || exit 1
+  CMD curl -4sf http://127.0.0.1:3100/api/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "packages/api/dist/serve.js"]

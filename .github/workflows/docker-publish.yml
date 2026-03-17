@@ -413,13 +413,11 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-              API_C=\$(\$COMPOSE ps -q tamma-api | head -1) && \
-              DOTNET_C=\$(\$COMPOSE ps -q tamma-api-dotnet | head -1) && \
               for i in \$(seq 1 30); do
-                API=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$API_C 2>/dev/null || echo 'unknown') && \
-                DOTNET=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}' \$DOTNET_C 2>/dev/null || echo 'unknown') && \
-                echo \"Check \$i/30: tamma-api=\$API tamma-api-dotnet=\$DOTNET\" && \
-                if [ \"\$API\" = 'healthy' ] && [ \"\$DOTNET\" = 'healthy' ]; then
+                API_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api | head -1) curl -4sf http://127.0.0.1:3100/api/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                DOTNET_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api-dotnet | head -1) curl -4sf http://127.0.0.1:3000/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                echo \"Check \$i/30: tamma-api=\$API_OK tamma-api-dotnet=\$DOTNET_OK\" && \
+                if [ \"\$API_OK\" = 'ok' ] && [ \"\$DOTNET_OK\" = 'ok' ]; then
                   echo 'Layer 3 healthy' && exit 0
                 fi && \
                 sleep 3
