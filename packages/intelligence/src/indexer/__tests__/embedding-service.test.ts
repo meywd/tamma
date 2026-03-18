@@ -279,13 +279,14 @@ describe('MockEmbeddingProvider', () => {
     });
 
     it('should allow custom delay', async () => {
-      provider.configure({ embedDelay: 10 });
+      provider.configure({ embedDelay: 50 });
 
       const start = Date.now();
       await provider.embed('test');
       const duration = Date.now() - start;
 
-      expect(duration).toBeGreaterThanOrEqual(10);
+      // Use 40ms threshold (not 50) to account for timer imprecision
+      expect(duration).toBeGreaterThanOrEqual(40);
     });
 
     it('should allow failure simulation', async () => {
