@@ -47,6 +47,12 @@ export async function registerGitHubOAuthRoutes(
     tokenExpiresIn = 86400,
   } = options;
 
+  // Rate limiting for auth routes
+  await app.register((await import('@fastify/rate-limit')).default, {
+    max: 60,
+    timeWindow: '1 minute',
+  });
+
   // Register JWT plugin for this scope
   await app.register(await import('@fastify/jwt').then((m) => m.default ?? m), {
     secret: jwtSecret,
