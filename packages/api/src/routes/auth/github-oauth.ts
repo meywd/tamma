@@ -164,7 +164,7 @@ export async function registerGitHubOAuthRoutes(
   // -------------------------------------------------------------------
   // GET /api/auth/me — return current user from JWT cookie
   // -------------------------------------------------------------------
-  app.get('/api/auth/me', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/auth/me', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (request: FastifyRequest, reply: FastifyReply) => { // lgtm[js/missing-rate-limiting]
     try {
       const decoded = await request.jwtVerify<{
         id: string;
