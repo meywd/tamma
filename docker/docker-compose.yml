@@ -49,6 +49,24 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Infrastructure: ChromaDB (vector database)
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:0.6.3
+    volumes:
+      - tamma-chroma-data:/chroma/chroma
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+      IS_PERSISTENT: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # ELSA .NET Workflow Engine
   # ---------------------------------------------------------------------------
   elsa-server:
@@ -110,6 +128,7 @@ services:
       target: tamma-api
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
+      CHROMADB_URL: http://chromadb:8000
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
@@ -190,6 +209,7 @@ services:
 volumes:
   tamma-pg-data:
   tamma-rmq-data:
+  tamma-chroma-data:
   tamma-engine-workdir:
 
 # =============================================================================

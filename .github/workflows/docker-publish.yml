@@ -322,7 +322,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d --force-recreate postgres rabbitmq
+                up -d --force-recreate postgres rabbitmq chromadb
             "
 
       - name: "Verify layer 1: postgres + rabbitmq healthy"
@@ -335,13 +335,14 @@ jobs:
               for i in \$(seq 1 30); do
                 PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
                 RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
-                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ\" && \
-                if [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ]; then
+                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ chromadb=\$CHROMA\" && \
+                if [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ]; then
                   echo 'Layer 1 healthy' && exit 0
                 fi && \
                 sleep 2
               done && \
-              echo '::error::Layer 1 (postgres/rabbitmq) failed to become healthy' && \
+              echo '::error::Layer 1 (postgres/rabbitmq/chromadb) failed to become healthy' && \
               \$COMPOSE logs --tail=30 postgres rabbitmq && \
               exit 1
             "

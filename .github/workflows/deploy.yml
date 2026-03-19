@@ -171,15 +171,16 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-              \$COMPOSE up -d postgres rabbitmq && \
+              \$COMPOSE up -d postgres rabbitmq chromadb && \
               for i in \$(seq 1 30); do
                 PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
                 RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
-                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ\" && \
-                [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && echo 'Infrastructure healthy' && exit 0
+                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ chromadb=\$CHROMA\" && \
+                [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ] && echo 'Infrastructure healthy' && exit 0
                 sleep 2
               done && \
-              echo 'FAILED: infrastructure not healthy' && \$COMPOSE logs --tail=30 postgres rabbitmq && exit 1
+              echo 'FAILED: infrastructure not healthy' && \$COMPOSE logs --tail=30 postgres rabbitmq chromadb && exit 1
             "
 
       - name: Run database migrations

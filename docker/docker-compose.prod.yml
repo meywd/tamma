@@ -23,6 +23,13 @@ services:
           cpus: "1.0"
           memory: 1G
 
+  chromadb:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
   elsa-server:
     deploy:
       resources:
