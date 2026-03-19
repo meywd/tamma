@@ -4,8 +4,8 @@
  * Manages MCP (Model Context Protocol) server lifecycle,
  * tool discovery, invocation, and log viewing.
  *
- * Delegates to the real MCPClient from @tamma/mcp-client
- * when available; otherwise returns empty state.
+ * Delegates to a real IMCPClientService implementation when available;
+ * otherwise returns empty state.
  */
 
 import type {
@@ -15,19 +15,15 @@ import type {
   MCPToolInvokeResult,
   MCPServerLog,
 } from '@tamma/shared';
-import type { MCPClient } from '@tamma/mcp-client';
-import type {
-  ServerInfo as MCPClientServerInfo,
-  MCPTool as MCPClientTool,
-} from '@tamma/mcp-client';
+import type { IMCPClientService } from './types.js';
 
 const MAX_LOGS_PER_SERVER = 1000;
 
 export class MCPManagementService {
-  private readonly client: MCPClient | null;
+  private readonly client: IMCPClientService | null;
   private logs: Map<string, MCPServerLog[]> = new Map();
 
-  constructor(client?: MCPClient) {
+  constructor(client?: IMCPClientService) {
     this.client = client ?? null;
   }
 
@@ -41,8 +37,8 @@ export class MCPManagementService {
     this.logs.set(name, logList);
   }
 
-  /** Convert MCPClient ServerInfo to the API MCPServerInfo shape */
-  private toMCPServerInfo(info: MCPClientServerInfo): MCPServerInfo {
+  /** Convert IMCPClientService server info to the API MCPServerInfo shape */
+  private toMCPServerInfo(info: { name: string; status: string; transport: string; url?: string }): MCPServerInfo {
     const result: MCPServerInfo = {
       name: info.name,
       status: info.status === 'connecting' || info.status === 'reconnecting'
@@ -50,21 +46,15 @@ export class MCPManagementService {
         : info.status === 'error'
           ? 'error'
           : info.status as 'connected' | 'disconnected',
-      transport: info.transport === 'websocket' ? 'sse' : info.transport,
-      toolCount: info.toolCount,
-      resourceCount: info.resourceCount,
+      transport: (info.transport === 'websocket' ? 'sse' : info.transport) as 'stdio' | 'sse',
+      toolCount: 0,
+      resourceCount: 0,
       config: {
         name: info.name,
-        transport: info.transport === 'websocket' ? 'sse' : info.transport,
+        transport: (info.transport === 'websocket' ? 'sse' : info.transport) as 'stdio' | 'sse',
         enabled: true,
       },
     };
-    if (info.lastConnected) {
-      result.lastConnected = info.lastConnected.toISOString();
-    }
-    if (info.lastError) {
-      result.error = info.lastError.message;
-    }
     return result;
   }
 
@@ -82,7 +72,8 @@ export class MCPManagementService {
       throw new Error(`MCP server not found: ${name}`);
     }
 
-    const info = this.client.getServerInfo(name);
+    const servers = this.client.listServers();
+    const info = servers.find((s) => s.name === name);
     if (!info) {
       throw new Error(`MCP server not found: ${name}`);
     }
@@ -128,12 +119,12 @@ export class MCPManagementService {
       return [];
     }
 
-    const clientTools: MCPClientTool[] = this.client.listTools(serverName);
+    const clientTools = await this.client.listTools(serverName ?? '');
     return clientTools.map((t) => ({
       name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema as Record<string, unknown>,
-      serverName: t.serverName,
+      description: t.description ?? '',
+      inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+      serverName: serverName ?? '',
     }));
   }
 
@@ -156,22 +147,11 @@ export class MCPManagementService {
         request.arguments,
       );
 
-      const durationMs = result.metadata?.latencyMs ?? (Date.now() - startTime);
-
-      // Flatten text content to a simple value
-      let content: unknown = null;
-      if (result.content.length > 0) {
-        const first = result.content[0];
-        if (first && first.type === 'text') {
-          content = { message: first.text };
-        } else {
-          content = result.content;
-        }
-      }
+      const durationMs = Date.now() - startTime;
 
       const invokeResult: MCPToolInvokeResult = {
         success: result.success,
-        content,
+        content: result.content,
         durationMs,
       };
       if (result.error) {
@@ -189,10 +169,11 @@ export class MCPManagementService {
   }
 
   async getServerLogs(name: string, limit = 100): Promise<MCPServerLog[]> {
-    if (this.client) {
-      const info = this.client.getServerInfo(name);
-      if (!info) {
-        throw new Error(`MCP server not found: ${name}`);
+    // Try to get logs from client if supported
+    if (this.client?.getServerLogs) {
+      const clientLogs = this.client.getServerLogs(name, limit);
+      if (clientLogs.length > 0) {
+        return clientLogs;
       }
     }
 

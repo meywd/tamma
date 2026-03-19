@@ -4,8 +4,8 @@
  * Provides usage analytics, quality metrics, and cost analysis
  * for the knowledge base system.
  *
- * Delegates to the real CostTracker from @tamma/cost-monitor
- * when available; otherwise returns zero state.
+ * Delegates to a real ICostTracker implementation when available;
+ * otherwise returns zero state.
  */
 
 import type {
@@ -14,12 +14,12 @@ import type {
   CostAnalytics,
   AnalyticsPeriodFilter,
 } from '@tamma/shared';
-import type { CostTracker } from '@tamma/cost-monitor';
+import type { ICostTracker } from './types.js';
 
 export class AnalyticsService {
-  private readonly costTracker: CostTracker | null;
+  private readonly costTracker: ICostTracker | null;
 
-  constructor(costTracker?: CostTracker) {
+  constructor(costTracker?: ICostTracker) {
     this.costTracker = costTracker ?? null;
   }
 
@@ -34,30 +34,13 @@ export class AnalyticsService {
       };
     }
 
-    const startDate = new Date(period.start);
-    const endDate = new Date(period.end);
-
-    // Query usage records from cost tracker
-    const records = await this.costTracker.getUsage({
-      startDate,
-      endDate,
-    });
-
-    const totalQueries = records.length;
-    let totalTokensRetrieved = 0;
-    let totalLatencyMs = 0;
-
-    // Aggregate metrics from usage records
-    for (const record of records) {
-      totalTokensRetrieved += (record.inputTokens ?? 0) + (record.outputTokens ?? 0);
-      totalLatencyMs += record.latencyMs ?? 0;
-    }
+    const usage = this.costTracker.getUsage({ start: period.start, end: period.end });
 
     return {
       period: { start: period.start, end: period.end },
-      totalQueries,
-      totalTokensRetrieved,
-      avgLatencyMs: totalQueries > 0 ? totalLatencyMs / totalQueries : 0,
+      totalQueries: usage.totalRequests,
+      totalTokensRetrieved: usage.totalTokens,
+      avgLatencyMs: 0,
       sourceBreakdown: {},
     };
   }
@@ -86,26 +69,18 @@ export class AnalyticsService {
       };
     }
 
-    const startDate = new Date(period.start);
-    const endDate = new Date(period.end);
+    const totalCostUsd = this.costTracker.getTotalCost({ start: period.start, end: period.end });
 
-    const totalCostUsd = await this.costTracker.getTotalCost({
-      startDate,
-      endDate,
-    });
-
-    // Get per-model breakdown using aggregation
-    const byModel = await this.costTracker.getAggregate(
-      { startDate, endDate },
-      ['model'],
-    );
-
-    const breakdown = byModel.map((agg) => ({
-      category: agg.dimensionValue || 'Unknown',
-      costUsd: agg.totalCostUsd,
-      units: agg.totalCalls,
-      unitCostUsd: agg.totalCalls > 0 ? agg.totalCostUsd / agg.totalCalls : 0,
-    }));
+    // Get per-model breakdown using aggregation if available
+    const aggregate = this.costTracker.getAggregate?.({ start: period.start, end: period.end });
+    const breakdown = aggregate
+      ? Object.entries(aggregate.byModel).map(([model, costUsd]) => ({
+          category: model,
+          costUsd,
+          units: 0,
+          unitCostUsd: 0,
+        }))
+      : [];
 
     return {
       period: { start: period.start, end: period.end },

@@ -7,12 +7,14 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import type { CodebaseIndexer } from '@tamma/intelligence/indexer';
-import type { IVectorStore } from '@tamma/intelligence/vector-store';
-import type { RAGPipeline } from '@tamma/intelligence/rag';
-import type { ContextAggregator } from '@tamma/intelligence/context';
-import type { MCPClient } from '@tamma/mcp-client';
-import type { CostTracker } from '@tamma/cost-monitor';
+import type {
+  ICodebaseIndexer,
+  IVectorStoreService,
+  IRAGPipeline,
+  IContextAggregator,
+  IMCPClientService,
+  ICostTracker,
+} from '../../services/knowledge-base/types.js';
 import { IndexManagementService } from '../../services/knowledge-base/IndexManagementService.js';
 import { VectorDBManagementService } from '../../services/knowledge-base/VectorDBManagementService.js';
 import { RAGManagementService } from '../../services/knowledge-base/RAGManagementService.js';
@@ -38,12 +40,12 @@ export interface KBServices {
 
 /** Optional real dependencies that can be injected into service creation */
 export interface KBDependencies {
-  indexer?: CodebaseIndexer;
-  vectorStore?: IVectorStore;
-  ragPipeline?: RAGPipeline;
-  contextAggregator?: ContextAggregator;
-  mcpClient?: MCPClient;
-  costTracker?: CostTracker;
+  indexer?: ICodebaseIndexer;
+  vectorStore?: IVectorStoreService;
+  ragPipeline?: IRAGPipeline;
+  contextAggregator?: IContextAggregator;
+  mcpClient?: IMCPClientService;
+  costTracker?: ICostTracker;
   /** Project path used by the indexer for indexing operations */
   projectPath?: string;
 }

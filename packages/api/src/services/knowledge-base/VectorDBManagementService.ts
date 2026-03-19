@@ -3,8 +3,8 @@
  *
  * Manages vector database collections, search testing, and metrics.
  *
- * Delegates to the real IVectorStore from @tamma/intelligence
- * when available; otherwise returns empty state.
+ * Delegates to a real IVectorStoreService implementation when available;
+ * otherwise returns empty state.
  */
 
 import type {
@@ -14,13 +14,13 @@ import type {
   VectorSearchResult,
   StorageUsage,
 } from '@tamma/shared';
-import type { IVectorStore } from '@tamma/intelligence/vector-store';
+import type { IVectorStoreService } from './types.js';
 
 export class VectorDBManagementService {
-  private readonly store: IVectorStore | null;
+  private readonly store: IVectorStoreService | null;
   private queryCounters: Map<string, number> = new Map();
 
-  constructor(store?: IVectorStore) {
+  constructor(store?: IVectorStoreService) {
     this.store = store ?? null;
   }
 
@@ -34,15 +34,26 @@ export class VectorDBManagementService {
 
     for (const name of names) {
       try {
-        const stats = await this.store.getCollectionStats(name);
-        collections.push({
-          name: stats.name,
-          vectorCount: stats.documentCount,
-          dimensions: stats.dimensions,
-          storageBytes: stats.indexSize ?? 0,
-          createdAt: stats.createdAt ? stats.createdAt.toISOString() : new Date().toISOString(),
-          lastModified: stats.updatedAt ? stats.updatedAt.toISOString() : new Date().toISOString(),
-        });
+        if (this.store.getCollectionStats) {
+          const stats = await this.store.getCollectionStats(name);
+          collections.push({
+            name,
+            vectorCount: stats.vectorCount,
+            dimensions: stats.dimensions,
+            storageBytes: stats.storageBytes,
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+          });
+        } else {
+          collections.push({
+            name,
+            vectorCount: 0,
+            dimensions: 0,
+            storageBytes: 0,
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+          });
+        }
       } catch {
         // If stats fail for a collection, include it with zeroed stats
         collections.push({
@@ -60,12 +71,7 @@ export class VectorDBManagementService {
   }
 
   async getCollectionStats(name: string): Promise<CollectionStatsInfo> {
-    if (!this.store) {
-      throw new Error(`Collection not found: ${name}`);
-    }
-
-    const exists = await this.store.collectionExists(name);
-    if (!exists) {
+    if (!this.store || !this.store.getCollectionStats) {
       throw new Error(`Collection not found: ${name}`);
     }
 
@@ -73,10 +79,10 @@ export class VectorDBManagementService {
     const totalQueries = this.queryCounters.get(name) ?? 0;
 
     return {
-      name: stats.name,
-      vectorCount: stats.documentCount,
+      name,
+      vectorCount: stats.vectorCount,
       dimensions: stats.dimensions,
-      storageBytes: stats.indexSize ?? 0,
+      storageBytes: stats.storageBytes,
       queryMetrics: {
         totalQueries,
         avgLatencyMs: 0,
@@ -92,22 +98,12 @@ export class VectorDBManagementService {
       throw new Error('No vector store configured');
     }
 
-    const exists = await this.store.collectionExists(name);
-    if (exists) {
-      throw new Error(`Collection already exists: ${name}`);
-    }
-
     await this.store.createCollection(name, { dimensions });
     this.queryCounters.set(name, 0);
   }
 
   async deleteCollection(name: string): Promise<void> {
     if (!this.store) {
-      throw new Error(`Collection not found: ${name}`);
-    }
-
-    const exists = await this.store.collectionExists(name);
-    if (!exists) {
       throw new Error(`Collection not found: ${name}`);
     }
 
@@ -120,47 +116,56 @@ export class VectorDBManagementService {
       throw new Error(`Collection not found: ${request.collection}`);
     }
 
-    const exists = await this.store.collectionExists(request.collection);
-    if (!exists) {
-      throw new Error(`Collection not found: ${request.collection}`);
-    }
-
     // Track query count
     const current = this.queryCounters.get(request.collection) ?? 0;
     this.queryCounters.set(request.collection, current + 1);
 
-    // The IVectorStore.search() requires an embedding vector, but VectorSearchRequest
-    // from the API provides a text query. We do a hybrid search if available, or
-    // fall back to returning empty results if we cannot generate an embedding.
-    // For now, use hybridSearch which accepts a text query.
     try {
-      const hybridQuery: import('@tamma/intelligence/vector-store').HybridSearchQuery = {
-        embedding: [], // Empty embedding; hybrid search can use text alone
-        text: request.query,
-        topK: request.topK,
-        includeContent: true,
-        includeMetadata: true,
-      };
-      if (request.scoreThreshold !== undefined) {
-        hybridQuery.scoreThreshold = request.scoreThreshold;
+      // Prefer hybridSearch if available (accepts text query), fall back to search
+      if (this.store.hybridSearch) {
+        const results = await this.store.hybridSearch(request.collection, {
+          text: request.query,
+          limit: request.topK,
+        });
+
+        return results.map((r) => ({
+          id: r.id,
+          score: r.score,
+          content: r.content,
+          metadata: r.metadata ?? {},
+        }));
       }
 
-      const results = await this.store.hybridSearch(request.collection, hybridQuery);
+      const results = await this.store.search(request.collection, {
+        text: request.query,
+        limit: request.topK,
+      });
 
       return results.map((r) => ({
         id: r.id,
         score: r.score,
-        content: r.content ?? '',
-        metadata: (r.metadata as Record<string, unknown>) ?? {},
+        content: r.content,
+        metadata: r.metadata ?? {},
       }));
     } catch {
-      // If hybrid search is not supported or fails, return empty results
+      // If search fails, return empty results
       return [];
     }
   }
 
   async getStorageUsage(): Promise<StorageUsage> {
     if (!this.store) {
+      return { totalBytes: 0, byCollection: {} };
+    }
+
+    // Use dedicated getStorageUsage if available
+    if (this.store.getStorageUsage) {
+      const usage = await this.store.getStorageUsage();
+      return { totalBytes: usage.totalBytes, byCollection: {} };
+    }
+
+    // Fall back to aggregating from collection stats
+    if (!this.store.getCollectionStats) {
       return { totalBytes: 0, byCollection: {} };
     }
 
@@ -171,9 +176,8 @@ export class VectorDBManagementService {
     for (const name of names) {
       try {
         const stats = await this.store.getCollectionStats(name);
-        const bytes = stats.indexSize ?? 0;
-        byCollection[name] = bytes;
-        totalBytes += bytes;
+        byCollection[name] = stats.storageBytes;
+        totalBytes += stats.storageBytes;
       } catch {
         byCollection[name] = 0;
       }

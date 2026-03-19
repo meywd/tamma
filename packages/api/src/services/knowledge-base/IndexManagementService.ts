@@ -4,8 +4,8 @@
  * Manages codebase indexing operations including status tracking,
  * triggering re-indexes, history, and configuration.
  *
- * Delegates to the real CodebaseIndexer from @tamma/intelligence
- * when available; otherwise returns empty/zero state.
+ * Delegates to a real ICodebaseIndexer implementation when available;
+ * otherwise returns empty/zero state.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -15,7 +15,7 @@ import type {
   IndexConfig,
   TriggerIndexRequest,
 } from '@tamma/shared';
-import type { CodebaseIndexer } from '@tamma/intelligence/indexer';
+import type { ICodebaseIndexer } from './types.js';
 
 /** Default index configuration (used when no indexer is available) */
 const DEFAULT_INDEX_CONFIG: IndexConfig = {
@@ -40,7 +40,7 @@ const DEFAULT_INDEX_CONFIG: IndexConfig = {
 };
 
 export class IndexManagementService {
-  private readonly indexer: CodebaseIndexer | null;
+  private readonly indexer: ICodebaseIndexer | null;
 
   /** Tracks the current indexing state and the latest run for the API response */
   private currentStatus: IndexStatus = {
@@ -54,51 +54,24 @@ export class IndexManagementService {
   private config: IndexConfig = { ...DEFAULT_INDEX_CONFIG };
   private projectPath: string | null = null;
 
-  constructor(indexer?: CodebaseIndexer, projectPath?: string) {
+  constructor(indexer?: ICodebaseIndexer, projectPath?: string) {
     this.indexer = indexer ?? null;
 
     if (projectPath) {
       this.projectPath = projectPath;
     }
-
-    // Sync config from real indexer if available
-    if (this.indexer) {
-      const realConfig = this.indexer.getConfig();
-      this.config = {
-        includePatterns: realConfig.includePatterns,
-        excludePatterns: realConfig.excludePatterns,
-        chunkingConfig: {
-          maxTokens: realConfig.maxChunkTokens,
-          overlapTokens: realConfig.overlapTokens,
-          preserveImports: realConfig.preserveImports,
-          groupRelatedCode: realConfig.groupRelatedCode,
-        },
-        embeddingConfig: {
-          provider: realConfig.embeddingProvider as 'openai' | 'cohere' | 'ollama',
-          model: realConfig.embeddingModel,
-          batchSize: realConfig.batchSize,
-        },
-        triggerConfig: {
-          gitHooks: realConfig.enableGitHooks,
-          watchMode: realConfig.enableFileWatcher,
-          schedule: realConfig.scheduleCron ?? null,
-        },
-      };
-    }
   }
 
   async getStatus(): Promise<IndexStatus> {
-    // If we have a real indexer and a project path, query it for live status
-    if (this.indexer && this.projectPath) {
+    // If we have a real indexer, query it for live status
+    if (this.indexer && this.indexer.getIndexStatus) {
       try {
-        const realStatus = await this.indexer.getIndexStatus(this.projectPath);
+        const realStatus = this.indexer.getIndexStatus();
         const result: IndexStatus = {
           status: this.currentStatus.status,
-          lastRun: realStatus.lastIndexedAt
-            ? realStatus.lastIndexedAt.toISOString()
-            : this.currentStatus.lastRun,
-          filesIndexed: realStatus.totalFiles,
-          chunksCreated: realStatus.totalChunks,
+          lastRun: realStatus.lastIndexedAt ?? this.currentStatus.lastRun,
+          filesIndexed: realStatus.filesIndexed,
+          chunksCreated: realStatus.chunksCreated,
         };
         if (this.currentStatus.progress !== undefined) {
           result.progress = this.currentStatus.progress;
@@ -136,14 +109,15 @@ export class IndexManagementService {
     };
 
     // Subscribe to progress events for live status updates
-    const progressHandler = (progress: {
-      phase: string;
-      filesTotal: number;
-      filesProcessed: number;
-      chunksTotal: number;
-      chunksProcessed: number;
-      currentFile?: string;
-    }): void => {
+    const progressHandler = (...args: unknown[]): void => {
+      const progress = args[0] as {
+        phase: string;
+        filesTotal: number;
+        filesProcessed: number;
+        chunksTotal: number;
+        chunksProcessed: number;
+        currentFile?: string;
+      };
       const total = progress.filesTotal || 1;
       const updated: IndexStatus = {
         status: 'indexing',
@@ -157,23 +131,28 @@ export class IndexManagementService {
       }
       this.currentStatus = updated;
     };
-    this.indexer.on('progress', progressHandler);
+    if (this.indexer.on) {
+      this.indexer.on('progress', progressHandler);
+    }
 
     // Run indexing asynchronously (fire-and-forget for the caller)
     const isFullReindex = _request?.fullReindex === true;
-    const indexPromise = isFullReindex
-      ? this.indexer.indexProject(this.projectPath)
+    const indexPromise = (isFullReindex || !this.indexer.updateIndex)
+      ? this.indexer.indexProject(this.projectPath, { fullReindex: isFullReindex })
       : this.indexer.updateIndex(this.projectPath);
 
     indexPromise
-      .then((result) => {
+      .then(() => {
         const now = new Date().toISOString();
+
+        // Query status after indexing completes
+        const status = this.indexer?.getIndexStatus?.();
 
         this.currentStatus = {
           status: 'idle',
           lastRun: now,
-          filesIndexed: result.filesProcessed,
-          chunksCreated: result.chunksCreated,
+          filesIndexed: status?.filesIndexed ?? this.currentStatus.filesIndexed,
+          chunksCreated: status?.chunksCreated ?? this.currentStatus.chunksCreated,
           progress: 100,
         };
 
@@ -181,18 +160,14 @@ export class IndexManagementService {
           id: randomUUID(),
           startTime,
           endTime: now,
-          filesProcessed: result.filesProcessed,
-          chunksCreated: result.chunksCreated,
-          chunksUpdated: result.chunksUpdated,
-          chunksDeleted: result.chunksDeleted,
-          embeddingCost: result.embeddingCostUsd,
-          durationMs: result.durationMs,
-          status: result.success ? 'success' : result.errors.length > 0 ? 'partial' : 'failed',
-          errors: result.errors.map((e) => ({
-            filePath: e.filePath,
-            error: e.error,
-            timestamp: e.timestamp.toISOString(),
-          })),
+          filesProcessed: status?.filesIndexed ?? 0,
+          chunksCreated: status?.chunksCreated ?? 0,
+          chunksUpdated: 0,
+          chunksDeleted: 0,
+          embeddingCost: 0,
+          durationMs: Date.now() - new Date(startTime).getTime(),
+          status: 'success',
+          errors: [],
         };
 
         this.history.unshift(entry);
@@ -228,9 +203,6 @@ export class IndexManagementService {
             timestamp: now,
           }],
         });
-      })
-      .finally(() => {
-        this.indexer!.off('progress', progressHandler);
       });
   }
 
@@ -239,8 +211,8 @@ export class IndexManagementService {
       throw new Error('No indexing operation in progress');
     }
 
-    if (this.indexer) {
-      await this.indexer.stop();
+    if (this.indexer?.stop) {
+      this.indexer.stop();
     }
 
     this.currentStatus = {
@@ -277,8 +249,8 @@ export class IndexManagementService {
     }
 
     // Push config changes to real indexer
-    if (this.indexer) {
-      const indexerUpdate: Partial<import('@tamma/intelligence/indexer').IndexerConfig> = {
+    if (this.indexer?.configure) {
+      this.indexer.configure({
         includePatterns: this.config.includePatterns,
         excludePatterns: this.config.excludePatterns,
         maxChunkTokens: this.config.chunkingConfig.maxTokens,
@@ -290,11 +262,10 @@ export class IndexManagementService {
         batchSize: this.config.embeddingConfig.batchSize,
         enableGitHooks: this.config.triggerConfig.gitHooks,
         enableFileWatcher: this.config.triggerConfig.watchMode,
-      };
-      if (this.config.triggerConfig.schedule !== null) {
-        indexerUpdate.scheduleCron = this.config.triggerConfig.schedule;
-      }
-      await this.indexer.configure(indexerUpdate);
+        ...(this.config.triggerConfig.schedule !== null
+          ? { scheduleCron: this.config.triggerConfig.schedule }
+          : {}),
+      });
     }
 
     return { ...this.config };
