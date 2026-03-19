@@ -83,6 +83,18 @@ jobs:
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
               "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
 
+          echo '${{ secrets.TAMMA_ORIGIN_CERT }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem"
+
+          echo '${{ secrets.TAMMA_ORIGIN_KEY }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem"
+
           printf '%s\n' \
             "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
             "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
@@ -237,7 +249,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK' || (echo '::error::API health check via proxy failed' && exit 1)"
+            "curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health && echo ' API OK' || curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK (http)' || (echo '::error::API health check via proxy failed' && exit 1)"
 
       - name: "Verify: port 80 accessible and firewall"
         run: |

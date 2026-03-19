@@ -68,3 +68,4 @@ services:
           memory: 128M
     ports:
       - "80:80"
+      - "443:443"
