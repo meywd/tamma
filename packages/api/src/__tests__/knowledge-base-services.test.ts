@@ -128,12 +128,8 @@ describe('RAGManagementService', () => {
     expect(metrics.sourceBreakdown).toBeDefined();
   });
 
-  it('returns empty test result without a pipeline', async () => {
-    const result = await service.testQuery({ query: 'test query', topK: 5 });
-    expect(result.queryId).toBe('');
-    expect(result.chunks).toEqual([]);
-    expect(result.assembledContext).toBe('');
-    expect(result.tokenCount).toBe(0);
+  it('throws when testing query without a pipeline', async () => {
+    await expect(service.testQuery({ query: 'test query', topK: 5 })).rejects.toThrow('not configured');
   });
 });
 
@@ -161,19 +157,16 @@ describe('MCPManagementService', () => {
     await expect(service.stopServer('test')).rejects.toThrow('not found');
   });
 
-  it('returns empty tool list without a client', async () => {
-    const tools = await service.listTools();
-    expect(tools).toEqual([]);
+  it('throws when listing tools without a client', async () => {
+    await expect(service.listTools()).rejects.toThrow('not configured');
   });
 
-  it('returns failure when invoking tool without a client', async () => {
-    const result = await service.invokeTool({
+  it('throws when invoking tool without a client', async () => {
+    await expect(service.invokeTool({
       serverName: 'filesystem',
       toolName: 'read_file',
       arguments: { path: '/test.txt' },
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('not found');
+    })).rejects.toThrow('not configured');
   });
 
   it('returns empty logs for unknown server', async () => {
@@ -189,19 +182,13 @@ describe('ContextTestingService', () => {
     service = new ContextTestingService();
   });
 
-  it('returns empty result without an aggregator', async () => {
-    const result = await service.testContext({
+  it('throws when testing context without an aggregator', async () => {
+    await expect(service.testContext({
       query: 'How does auth work?',
       taskType: 'implementation',
       maxTokens: 4000,
       sources: ['vector_db', 'rag'],
-    });
-
-    expect(result.requestId).toBe('');
-    expect(result.context.chunks).toEqual([]);
-    expect(result.context.tokenCount).toBe(0);
-    expect(result.sources).toEqual([]);
-    expect(result.metrics.totalLatencyMs).toBe(0);
+    })).rejects.toThrow('not configured');
   });
 
   it('maintains test history (empty results still stored)', async () => {

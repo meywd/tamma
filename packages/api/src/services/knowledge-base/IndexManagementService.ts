@@ -66,7 +66,7 @@ export class IndexManagementService {
     // If we have a real indexer, query it for live status
     if (this.indexer && this.indexer.getIndexStatus) {
       try {
-        const realStatus = this.indexer.getIndexStatus();
+        const realStatus = await this.indexer.getIndexStatus();
         const result: IndexStatus = {
           status: this.currentStatus.status,
           lastRun: realStatus.lastIndexedAt ?? this.currentStatus.lastRun,
@@ -80,8 +80,14 @@ export class IndexManagementService {
           result.currentFile = this.currentStatus.currentFile;
         }
         return result;
-      } catch {
-        // Fall through to cached status
+      } catch (err) {
+        // Log error and surface it in status response instead of silently swallowing
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error('[IndexManagementService] getIndexStatus() failed:', err);
+        return {
+          ...this.currentStatus,
+          error: errorMessage,
+        };
       }
     }
 
@@ -135,6 +141,17 @@ export class IndexManagementService {
       this.indexer.on('progress', progressHandler);
     }
 
+    // Capture indexer reference for use in closures below
+    const indexer = this.indexer;
+
+    /** Remove the progress listener — called in both success and error paths. */
+    const removeProgressListener = (): void => {
+      // ICodebaseIndexer does not expose removeListener; if the real implementation
+      // does, cast through unknown to call it defensively.
+      const maybeEmitter = indexer as unknown as { removeListener?(event: string, handler: (...args: unknown[]) => void): void };
+      maybeEmitter.removeListener?.('progress', progressHandler);
+    };
+
     // Run indexing asynchronously (fire-and-forget for the caller)
     const isFullReindex = _request?.fullReindex === true;
     const indexPromise = (isFullReindex || !this.indexer.updateIndex)
@@ -142,11 +159,13 @@ export class IndexManagementService {
       : this.indexer.updateIndex(this.projectPath);
 
     indexPromise
-      .then(() => {
+      .then(async () => {
+        removeProgressListener();
+
         const now = new Date().toISOString();
 
         // Query status after indexing completes
-        const status = this.indexer?.getIndexStatus?.();
+        const status = await indexer.getIndexStatus?.();
 
         this.currentStatus = {
           status: 'idle',
@@ -176,6 +195,8 @@ export class IndexManagementService {
         }
       })
       .catch((error) => {
+        removeProgressListener();
+
         const now = new Date().toISOString();
 
         this.currentStatus = {
@@ -212,7 +233,7 @@ export class IndexManagementService {
     }
 
     if (this.indexer?.stop) {
-      this.indexer.stop();
+      await this.indexer.stop();
     }
 
     this.currentStatus = {

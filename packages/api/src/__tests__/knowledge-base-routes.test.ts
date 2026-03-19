@@ -178,18 +178,14 @@ describe('Knowledge Base API Routes', () => {
       expect(metrics.totalQueries).toBe(0);
     });
 
-    it('POST /api/knowledge-base/rag/test returns empty result without pipeline', async () => {
+    it('POST /api/knowledge-base/rag/test returns 500 without pipeline', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/knowledge-base/rag/test',
         payload: { query: 'How does authentication work?', topK: 5 },
       });
 
-      expect(response.statusCode).toBe(200);
-      const result = response.json();
-      expect(result.queryId).toBe('');
-      expect(result.chunks).toEqual([]);
-      expect(typeof result.tokenCount).toBe('number');
+      expect(response.statusCode).toBeGreaterThanOrEqual(400);
     });
   });
 
@@ -221,7 +217,7 @@ describe('Knowledge Base API Routes', () => {
   // === Context Testing ===
 
   describe('Context Testing', () => {
-    it('POST /api/knowledge-base/context/test returns empty result without aggregator', async () => {
+    it('POST /api/knowledge-base/context/test returns error without aggregator', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/knowledge-base/context/test',
@@ -233,13 +229,7 @@ describe('Knowledge Base API Routes', () => {
         },
       });
 
-      expect(response.statusCode).toBe(200);
-      const result = response.json();
-      expect(result.requestId).toBe('');
-      expect(result.context).toBeDefined();
-      expect(result.context.chunks).toEqual([]);
-      expect(result.metrics).toBeDefined();
-      expect(typeof result.metrics.totalLatencyMs).toBe('number');
+      expect(response.statusCode).toBeGreaterThanOrEqual(400);
     });
 
     it('POST /api/knowledge-base/context/feedback submits feedback', async () => {

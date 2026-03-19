@@ -116,7 +116,7 @@ export class MCPManagementService {
 
   async listTools(serverName?: string): Promise<MCPTool[]> {
     if (!this.client) {
-      return [];
+      throw new Error('MCP client is not configured');
     }
 
     const clientTools = await this.client.listTools(serverName ?? '');
@@ -130,12 +130,7 @@ export class MCPManagementService {
 
   async invokeTool(request: MCPToolInvokeRequest): Promise<MCPToolInvokeResult> {
     if (!this.client) {
-      return {
-        success: false,
-        content: null,
-        error: `MCP server not found: ${request.serverName}`,
-        durationMs: 0,
-      };
+      throw new Error('MCP client is not configured');
     }
 
     const startTime = Date.now();

@@ -27,34 +27,10 @@ export class ContextTestingService {
 
   async testContext(request: ContextTestRequest): Promise<ContextTestResult> {
     if (!this.aggregator) {
-      // Return empty result when no aggregator is configured
-      const emptyResult: ContextTestResult = {
-        requestId: '',
-        context: {
-          text: '',
-          chunks: [],
-          tokenCount: 0,
-          format: request.options?.includeMetadata ? 'xml' : 'markdown',
-        },
-        sources: [],
-        metrics: {
-          totalLatencyMs: 0,
-          totalTokens: 0,
-          budgetUtilization: 0,
-          deduplicationRate: 0,
-          cacheHitRate: 0,
-        },
-      };
-      return emptyResult;
+      throw new Error('Context aggregator is not configured');
     }
 
     const options: Record<string, unknown> = {};
-    if (request.taskType) {
-      options.taskType = request.taskType;
-    }
-    if (request.maxTokens !== undefined) {
-      options.maxTokens = request.maxTokens;
-    }
     if (request.sources) {
       options.sources = request.sources;
     }
@@ -65,10 +41,20 @@ export class ContextTestingService {
       options.options = request.options;
     }
 
-    const response = await this.aggregator.getContext(request.query, options);
+    const aggregatorRequest: { query: string; taskType?: string; maxTokens?: number } = {
+      query: request.query,
+    };
+    if (request.taskType) {
+      aggregatorRequest.taskType = request.taskType;
+    }
+    if (request.maxTokens !== undefined) {
+      aggregatorRequest.maxTokens = request.maxTokens;
+    }
+
+    const response = await this.aggregator.getContext(aggregatorRequest, options);
 
     // Map the response to the UI ContextTestResult shape
-    const chunks: UIContextChunk[] = response.chunks.map((chunk) => ({
+    const chunks: UIContextChunk[] = response.context.chunks.map((chunk) => ({
       id: '',
       content: chunk.content,
       source: chunk.source as UIContextSource,
@@ -77,11 +63,11 @@ export class ContextTestingService {
     }));
 
     const result: ContextTestResult = {
-      requestId: '',
+      requestId: response.requestId,
       context: {
-        text: response.chunks.map((c) => c.content).join('\n\n'),
+        text: response.context.text,
         chunks,
-        tokenCount: response.totalTokens,
+        tokenCount: response.context.tokenCount,
         format: request.options?.includeMetadata ? 'xml' : 'markdown',
       },
       sources: response.sources.map((s) => ({
@@ -92,8 +78,8 @@ export class ContextTestingService {
         cacheHit: false,
       })),
       metrics: {
-        totalLatencyMs: response.durationMs,
-        totalTokens: response.totalTokens,
+        totalLatencyMs: response.metrics.totalLatencyMs,
+        totalTokens: response.metrics.totalTokens,
         budgetUtilization: 0,
         deduplicationRate: 0,
         cacheHitRate: 0,

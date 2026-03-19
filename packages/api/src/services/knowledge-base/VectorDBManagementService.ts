@@ -120,23 +120,9 @@ export class VectorDBManagementService {
     const current = this.queryCounters.get(request.collection) ?? 0;
     this.queryCounters.set(request.collection, current + 1);
 
-    try {
-      // Prefer hybridSearch if available (accepts text query), fall back to search
-      if (this.store.hybridSearch) {
-        const results = await this.store.hybridSearch(request.collection, {
-          text: request.query,
-          limit: request.topK,
-        });
-
-        return results.map((r) => ({
-          id: r.id,
-          score: r.score,
-          content: r.content,
-          metadata: r.metadata ?? {},
-        }));
-      }
-
-      const results = await this.store.search(request.collection, {
+    // Prefer hybridSearch if available (accepts text query), fall back to search
+    if (this.store.hybridSearch) {
+      const results = await this.store.hybridSearch(request.collection, {
         text: request.query,
         limit: request.topK,
       });
@@ -147,10 +133,19 @@ export class VectorDBManagementService {
         content: r.content,
         metadata: r.metadata ?? {},
       }));
-    } catch {
-      // If search fails, return empty results
-      return [];
     }
+
+    const results = await this.store.search(request.collection, {
+      text: request.query,
+      limit: request.topK,
+    });
+
+    return results.map((r) => ({
+      id: r.id,
+      score: r.score,
+      content: r.content,
+      metadata: r.metadata ?? {},
+    }));
   }
 
   async getStorageUsage(): Promise<StorageUsage> {

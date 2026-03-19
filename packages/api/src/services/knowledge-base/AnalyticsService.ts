@@ -34,12 +34,13 @@ export class AnalyticsService {
       };
     }
 
-    const usage = this.costTracker.getUsage({ start: period.start, end: period.end });
+    const usageRows = await this.costTracker.getUsage({ start: period.start, end: period.end });
+    const totalTokens = usageRows.reduce((sum, row) => sum + row.tokens, 0);
 
     return {
       period: { start: period.start, end: period.end },
-      totalQueries: usage.totalRequests,
-      totalTokensRetrieved: usage.totalTokens,
+      totalQueries: usageRows.length,
+      totalTokensRetrieved: totalTokens,
       avgLatencyMs: 0,
       sourceBreakdown: {},
     };
@@ -69,10 +70,10 @@ export class AnalyticsService {
       };
     }
 
-    const totalCostUsd = this.costTracker.getTotalCost({ start: period.start, end: period.end });
+    const totalCostUsd = await this.costTracker.getTotalCost({ start: period.start, end: period.end });
 
     // Get per-model breakdown using aggregation if available
-    const aggregate = this.costTracker.getAggregate?.({ start: period.start, end: period.end });
+    const aggregate = await this.costTracker.getAggregate?.({ start: period.start, end: period.end });
     const breakdown = aggregate
       ? Object.entries(aggregate.byModel).map(([model, costUsd]) => ({
           category: model,

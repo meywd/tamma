@@ -14,8 +14,8 @@
 export interface ICodebaseIndexer {
   indexProject(projectPath: string, options?: { fullReindex?: boolean }): Promise<void>;
   updateIndex?(projectPath: string): Promise<void>;
-  stop?(): void;
-  getIndexStatus?(): { status: string; filesIndexed: number; chunksCreated: number; lastIndexedAt?: string };
+  stop?(): Promise<void>;
+  getIndexStatus?(): Promise<{ status: string; filesIndexed: number; chunksCreated: number; lastIndexedAt?: string }>;
   configure?(config: Record<string, unknown>): void;
   on?(event: string, handler: (...args: unknown[]) => void): void;
 }
@@ -39,7 +39,7 @@ export interface IVectorStoreService {
 // ---------------------------------------------------------------------------
 
 export interface IRAGPipeline {
-  retrieve(query: string, options?: Record<string, unknown>): Promise<{ chunks: Array<{ content: string; source: string; score: number; metadata?: Record<string, unknown> }>; cached: boolean; durationMs: number }>;
+  retrieve(query: { text: string; maxResults?: number; sources?: string[] }, options?: Record<string, unknown>): Promise<{ queryId: string; retrievedChunks: Array<{ content: string; source: string; score: number; metadata?: Record<string, unknown> }>; cacheHit: boolean; latencyMs: number }>;
   getCacheStats?(): { hits: number; misses: number; size: number };
   getFeedbackOverview?(): { totalFeedback: number; averageRelevance: number };
   configure?(config: Record<string, unknown>): void;
@@ -63,11 +63,15 @@ export interface IMCPClientService {
 // ---------------------------------------------------------------------------
 
 export interface IContextAggregator {
-  getContext(query: string, options?: Record<string, unknown>): Promise<{
-    chunks: Array<{ content: string; source: string; score: number; metadata?: Record<string, unknown> }>;
-    totalTokens: number;
-    durationMs: number;
+  getContext(request: { query: string; taskType?: string; maxTokens?: number }, options?: Record<string, unknown>): Promise<{
+    requestId: string;
+    context: {
+      text: string;
+      chunks: Array<{ content: string; source: string; score: number; metadata?: Record<string, unknown> }>;
+      tokenCount: number;
+    };
     sources: Array<{ name: string; chunks: number; durationMs: number }>;
+    metrics: { totalLatencyMs: number; totalTokens: number };
   }>;
 }
 
@@ -76,7 +80,7 @@ export interface IContextAggregator {
 // ---------------------------------------------------------------------------
 
 export interface ICostTracker {
-  getUsage(period?: { start: string; end: string }): { totalTokens: number; totalRequests: number; byProvider: Record<string, number>; byModel: Record<string, number> };
-  getTotalCost(period?: { start: string; end: string }): number;
-  getAggregate?(period?: { start: string; end: string }): { byProvider: Record<string, number>; byModel: Record<string, number> };
+  getUsage(period?: { start: string; end: string }): Promise<Array<{ provider: string; model: string; tokens: number; cost: number }>>;
+  getTotalCost(period?: { start: string; end: string }): Promise<number>;
+  getAggregate?(period?: { start: string; end: string }): Promise<{ byProvider: Record<string, number>; byModel: Record<string, number> }>;
 }

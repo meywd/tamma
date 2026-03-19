@@ -113,23 +113,13 @@ export class RAGManagementService {
 
   async testQuery(request: RAGTestRequest): Promise<RAGTestResult> {
     if (!this.pipeline) {
-      return {
-        queryId: '',
-        chunks: [],
-        assembledContext: '',
-        tokenCount: 0,
-        latencyMs: 0,
-        sources: [],
-      };
+      throw new Error('RAG pipeline is not configured');
     }
 
     const startTime = Date.now();
     this.queryCount++;
 
     const options: Record<string, unknown> = {};
-    if (request.sources) {
-      options.sources = request.sources;
-    }
     if (request.maxTokens !== undefined) {
       options.maxTokens = request.maxTokens;
     }
@@ -137,21 +127,31 @@ export class RAGManagementService {
       options.topK = request.topK;
     }
 
-    const result = await this.pipeline.retrieve(request.query, options);
+    const retrieveQuery: { text: string; maxResults?: number; sources?: string[] } = {
+      text: request.query,
+    };
+    if (request.topK !== undefined) {
+      retrieveQuery.maxResults = request.topK;
+    }
+    if (request.sources) {
+      retrieveQuery.sources = request.sources;
+    }
 
-    const latencyMs = result.durationMs ?? (Date.now() - startTime);
+    const result = await this.pipeline.retrieve(retrieveQuery, options);
+
+    const latencyMs = result.latencyMs ?? (Date.now() - startTime);
     this.totalLatencyMs += latencyMs;
 
     return {
-      queryId: '',
-      chunks: result.chunks.map((chunk) => ({
+      queryId: result.queryId,
+      chunks: result.retrievedChunks.map((chunk) => ({
         id: '',
         content: chunk.content,
         source: chunk.source,
         score: chunk.score,
         metadata: chunk.metadata ?? {},
       })),
-      assembledContext: result.chunks.map((c) => c.content).join('\n\n'),
+      assembledContext: result.retrievedChunks.map((c) => c.content).join('\n\n'),
       tokenCount: 0,
       latencyMs,
       sources: [],
