@@ -2,9 +2,17 @@
  * Knowledge Base Routes Registration
  *
  * Registers all knowledge base management API routes with Fastify.
+ * Accepts optional real dependencies for wiring to live implementations;
+ * services degrade gracefully when dependencies are not provided.
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { CodebaseIndexer } from '@tamma/intelligence/indexer';
+import type { IVectorStore } from '@tamma/intelligence/vector-store';
+import type { RAGPipeline } from '@tamma/intelligence/rag';
+import type { ContextAggregator } from '@tamma/intelligence/context';
+import type { MCPClient } from '@tamma/mcp-client';
+import type { CostTracker } from '@tamma/cost-monitor';
 import { IndexManagementService } from '../../services/knowledge-base/IndexManagementService.js';
 import { VectorDBManagementService } from '../../services/knowledge-base/VectorDBManagementService.js';
 import { RAGManagementService } from '../../services/knowledge-base/RAGManagementService.js';
@@ -28,18 +36,30 @@ export interface KBServices {
   analyticsService: AnalyticsService;
 }
 
+/** Optional real dependencies that can be injected into service creation */
+export interface KBDependencies {
+  indexer?: CodebaseIndexer;
+  vectorStore?: IVectorStore;
+  ragPipeline?: RAGPipeline;
+  contextAggregator?: ContextAggregator;
+  mcpClient?: MCPClient;
+  costTracker?: CostTracker;
+  /** Project path used by the indexer for indexing operations */
+  projectPath?: string;
+}
+
 /**
- * Create default service instances.
- * In production these would be injected with real backend connections.
+ * Create service instances, optionally wired to real implementations.
+ * When a dependency is not provided the service returns empty/zero state.
  */
-export function createKBServices(): KBServices {
+export function createKBServices(deps: KBDependencies = {}): KBServices {
   return {
-    indexService: new IndexManagementService(),
-    vectorDBService: new VectorDBManagementService(),
-    ragService: new RAGManagementService(),
-    mcpService: new MCPManagementService(),
-    contextService: new ContextTestingService(),
-    analyticsService: new AnalyticsService(),
+    indexService: new IndexManagementService(deps.indexer, deps.projectPath),
+    vectorDBService: new VectorDBManagementService(deps.vectorStore),
+    ragService: new RAGManagementService(deps.ragPipeline),
+    mcpService: new MCPManagementService(deps.mcpClient),
+    contextService: new ContextTestingService(deps.contextAggregator),
+    analyticsService: new AnalyticsService(deps.costTracker),
   };
 }
 

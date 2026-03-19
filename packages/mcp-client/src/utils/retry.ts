@@ -107,8 +107,8 @@ export async function withRetry<T>(
     const context: RetryContext = {
       attempt,
       maxAttempts: opts.maxAttempts,
-      lastError,
     };
+    if (lastError !== undefined) context.lastError = lastError;
 
     try {
       // Check if aborted before attempting
@@ -268,6 +268,6 @@ export class CircuitBreaker {
     this.state = 'closed';
     this.failureCount = 0;
     this.successCount = 0;
-    this.lastFailureTime = undefined;
+    delete this.lastFailureTime;
   }
 }

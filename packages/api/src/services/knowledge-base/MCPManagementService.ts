@@ -3,6 +3,9 @@
  *
  * Manages MCP (Model Context Protocol) server lifecycle,
  * tool discovery, invocation, and log viewing.
+ *
+ * Delegates to the real MCPClient from @tamma/mcp-client
+ * when available; otherwise returns empty state.
  */
 
 import type {
@@ -12,72 +15,20 @@ import type {
   MCPToolInvokeResult,
   MCPServerLog,
 } from '@tamma/shared';
+import type { MCPClient } from '@tamma/mcp-client';
+import type {
+  ServerInfo as MCPClientServerInfo,
+  MCPTool as MCPClientTool,
+} from '@tamma/mcp-client';
 
 const MAX_LOGS_PER_SERVER = 1000;
 
 export class MCPManagementService {
-  private servers: Map<string, MCPServerInfo> = new Map();
+  private readonly client: MCPClient | null;
   private logs: Map<string, MCPServerLog[]> = new Map();
 
-  constructor() {
-    // Seed with example servers
-    this.servers.set('filesystem', {
-      name: 'filesystem',
-      status: 'connected',
-      transport: 'stdio',
-      toolCount: 4,
-      resourceCount: 2,
-      lastConnected: new Date().toISOString(),
-      config: {
-        name: 'filesystem',
-        transport: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', '/workspace'],
-        enabled: true,
-      },
-    });
-    this.servers.set('github', {
-      name: 'github',
-      status: 'connected',
-      transport: 'stdio',
-      toolCount: 8,
-      resourceCount: 0,
-      lastConnected: new Date().toISOString(),
-      config: {
-        name: 'github',
-        transport: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-github'],
-        env: { GITHUB_TOKEN: '***' },
-        enabled: true,
-      },
-    });
-    this.servers.set('memory', {
-      name: 'memory',
-      status: 'disconnected',
-      transport: 'stdio',
-      toolCount: 0,
-      resourceCount: 0,
-      config: {
-        name: 'memory',
-        transport: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-memory'],
-        enabled: false,
-      },
-    });
-
-    // Seed logs
-    const now = Date.now();
-    this.logs.set('filesystem', [
-      { timestamp: new Date(now - 60000).toISOString(), level: 'info', message: 'Server started successfully' },
-      { timestamp: new Date(now - 30000).toISOString(), level: 'info', message: 'Connected to transport' },
-      { timestamp: new Date(now - 10000).toISOString(), level: 'debug', message: 'Tool list refreshed: 4 tools available' },
-    ]);
-    this.logs.set('github', [
-      { timestamp: new Date(now - 45000).toISOString(), level: 'info', message: 'Server started successfully' },
-      { timestamp: new Date(now - 20000).toISOString(), level: 'info', message: 'Authenticated with GitHub API' },
-    ]);
+  constructor(client?: MCPClient) {
+    this.client = client ?? null;
   }
 
   /** Append a log entry, trimming oldest entries when the cap is exceeded. */
@@ -90,59 +41,75 @@ export class MCPManagementService {
     this.logs.set(name, logList);
   }
 
+  /** Convert MCPClient ServerInfo to the API MCPServerInfo shape */
+  private toMCPServerInfo(info: MCPClientServerInfo): MCPServerInfo {
+    const result: MCPServerInfo = {
+      name: info.name,
+      status: info.status === 'connecting' || info.status === 'reconnecting'
+        ? 'starting'
+        : info.status === 'error'
+          ? 'error'
+          : info.status as 'connected' | 'disconnected',
+      transport: info.transport === 'websocket' ? 'sse' : info.transport,
+      toolCount: info.toolCount,
+      resourceCount: info.resourceCount,
+      config: {
+        name: info.name,
+        transport: info.transport === 'websocket' ? 'sse' : info.transport,
+        enabled: true,
+      },
+    };
+    if (info.lastConnected) {
+      result.lastConnected = info.lastConnected.toISOString();
+    }
+    if (info.lastError) {
+      result.error = info.lastError.message;
+    }
+    return result;
+  }
+
   async listServers(): Promise<MCPServerInfo[]> {
-    return Array.from(this.servers.values());
+    if (!this.client) {
+      return [];
+    }
+
+    const servers = this.client.listServers();
+    return servers.map((s) => this.toMCPServerInfo(s));
   }
 
   async getServerStatus(name: string): Promise<MCPServerInfo> {
-    const server = this.servers.get(name);
-    if (!server) {
+    if (!this.client) {
       throw new Error(`MCP server not found: ${name}`);
     }
-    return { ...server };
+
+    const info = this.client.getServerInfo(name);
+    if (!info) {
+      throw new Error(`MCP server not found: ${name}`);
+    }
+
+    return this.toMCPServerInfo(info);
   }
 
   async startServer(name: string): Promise<void> {
-    const server = this.servers.get(name);
-    if (!server) {
+    if (!this.client) {
       throw new Error(`MCP server not found: ${name}`);
     }
-    if (server.status === 'connected') {
-      throw new Error(`Server ${name} is already running`);
-    }
 
-    server.status = 'starting';
-    this.servers.set(name, { ...server });
+    await this.client.connectServer(name);
 
-    // Simulate startup
-    setTimeout(() => {
-      const s = this.servers.get(name);
-      if (s && s.status === 'starting') {
-        s.status = 'connected';
-        s.lastConnected = new Date().toISOString();
-        s.toolCount = name === 'memory' ? 3 : s.toolCount;
-        this.servers.set(name, { ...s });
-
-        this.appendLog(name, {
-          timestamp: new Date().toISOString(),
-          level: 'info',
-          message: 'Server started successfully',
-        });
-      }
-    }, 1000);
+    this.appendLog(name, {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: 'Server started successfully',
+    });
   }
 
   async stopServer(name: string): Promise<void> {
-    const server = this.servers.get(name);
-    if (!server) {
+    if (!this.client) {
       throw new Error(`MCP server not found: ${name}`);
     }
-    if (server.status === 'disconnected') {
-      throw new Error(`Server ${name} is already stopped`);
-    }
 
-    server.status = 'disconnected';
-    this.servers.set(name, { ...server });
+    await this.client.disconnectServer(name);
 
     this.appendLog(name, {
       timestamp: new Date().toISOString(),
@@ -157,66 +124,76 @@ export class MCPManagementService {
   }
 
   async listTools(serverName?: string): Promise<MCPTool[]> {
-    const tools: MCPTool[] = [];
-
-    const addToolsForServer = (name: string): void => {
-      if (name === 'filesystem') {
-        tools.push(
-          { name: 'read_file', description: 'Read a file from the filesystem', inputSchema: { type: 'object', properties: { path: { type: 'string' } } }, serverName: name },
-          { name: 'write_file', description: 'Write content to a file', inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } }, serverName: name },
-          { name: 'list_directory', description: 'List contents of a directory', inputSchema: { type: 'object', properties: { path: { type: 'string' } } }, serverName: name },
-          { name: 'search_files', description: 'Search for files matching a pattern', inputSchema: { type: 'object', properties: { pattern: { type: 'string' } } }, serverName: name },
-        );
-      } else if (name === 'github') {
-        tools.push(
-          { name: 'list_issues', description: 'List repository issues', inputSchema: { type: 'object', properties: { state: { type: 'string' } } }, serverName: name },
-          { name: 'create_issue', description: 'Create a new issue', inputSchema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } } }, serverName: name },
-          { name: 'get_pull_request', description: 'Get pull request details', inputSchema: { type: 'object', properties: { number: { type: 'number' } } }, serverName: name },
-        );
-      }
-    };
-
-    if (serverName) {
-      addToolsForServer(serverName);
-    } else {
-      for (const name of this.servers.keys()) {
-        addToolsForServer(name);
-      }
+    if (!this.client) {
+      return [];
     }
 
-    return tools;
+    const clientTools: MCPClientTool[] = this.client.listTools(serverName);
+    return clientTools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema as Record<string, unknown>,
+      serverName: t.serverName,
+    }));
   }
 
   async invokeTool(request: MCPToolInvokeRequest): Promise<MCPToolInvokeResult> {
-    const server = this.servers.get(request.serverName);
-    if (!server) {
-      throw new Error(`MCP server not found: ${request.serverName}`);
-    }
-    if (server.status !== 'connected') {
+    if (!this.client) {
       return {
         success: false,
         content: null,
-        error: `Server ${request.serverName} is not connected`,
+        error: `MCP server not found: ${request.serverName}`,
         durationMs: 0,
       };
     }
 
     const startTime = Date.now();
 
-    // Simulate tool invocation
-    const result: MCPToolInvokeResult = {
-      success: true,
-      content: { message: `Tool ${request.toolName} invoked successfully`, arguments: request.arguments },
-      durationMs: Date.now() - startTime + Math.floor(Math.random() * 50),
-    };
+    try {
+      const result = await this.client.invokeTool(
+        request.serverName,
+        request.toolName,
+        request.arguments,
+      );
 
-    return result;
+      const durationMs = result.metadata?.latencyMs ?? (Date.now() - startTime);
+
+      // Flatten text content to a simple value
+      let content: unknown = null;
+      if (result.content.length > 0) {
+        const first = result.content[0];
+        if (first && first.type === 'text') {
+          content = { message: first.text };
+        } else {
+          content = result.content;
+        }
+      }
+
+      const invokeResult: MCPToolInvokeResult = {
+        success: result.success,
+        content,
+        durationMs,
+      };
+      if (result.error) {
+        invokeResult.error = result.error;
+      }
+      return invokeResult;
+    } catch (error) {
+      return {
+        success: false,
+        content: null,
+        error: error instanceof Error ? error.message : String(error),
+        durationMs: Date.now() - startTime,
+      };
+    }
   }
 
   async getServerLogs(name: string, limit = 100): Promise<MCPServerLog[]> {
-    const server = this.servers.get(name);
-    if (!server) {
-      throw new Error(`MCP server not found: ${name}`);
+    if (this.client) {
+      const info = this.client.getServerInfo(name);
+      if (!info) {
+        throw new Error(`MCP server not found: ${name}`);
+      }
     }
 
     const logList = this.logs.get(name) ?? [];

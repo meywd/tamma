@@ -2,9 +2,11 @@
  * Context Testing Service
  *
  * Provides interactive context retrieval testing and feedback collection.
+ *
+ * Delegates to the real ContextAggregator from @tamma/intelligence
+ * when available; otherwise returns empty state.
  */
 
-import { randomUUID } from 'node:crypto';
 import type {
   ContextTestRequest,
   ContextTestResult,
@@ -12,68 +14,131 @@ import type {
   UIContextChunk,
   UIContextSource,
 } from '@tamma/shared';
+import type { ContextAggregator } from '@tamma/intelligence/context';
 
 export class ContextTestingService {
+  private readonly aggregator: ContextAggregator | null;
   private testHistory: ContextTestResult[] = [];
   private feedback: Map<string, ContextFeedbackRequest> = new Map();
 
+  constructor(aggregator?: ContextAggregator) {
+    this.aggregator = aggregator ?? null;
+  }
+
   async testContext(request: ContextTestRequest): Promise<ContextTestResult> {
-    const startTime = Date.now();
-    const requestId = randomUUID();
-    const sources = request.sources ?? ['vector_db', 'rag'] as UIContextSource[];
-
-    const chunks: UIContextChunk[] = [];
-    let chunkIndex = 0;
-
-    for (const source of sources) {
-      const count = source === 'vector_db' ? 3 : source === 'rag' ? 2 : 1;
-      for (let i = 0; i < count; i++) {
-        chunks.push({
-          id: randomUUID(),
-          content: `// Context from ${source}, chunk ${i + 1}\n// Matching query: "${request.query}"\nexport function handler${chunkIndex}() {\n  // Implementation related to the query\n  console.log('${source} result ${i + 1}');\n}`,
-          source: source as UIContextSource,
-          relevance: 0.95 - chunkIndex * 0.05,
-          metadata: {
-            filePath: `src/${source}/handler-${i + 1}.ts`,
-            startLine: 1,
-            endLine: 6,
-            language: 'typescript',
-          },
-        });
-        chunkIndex++;
-      }
+    if (!this.aggregator) {
+      // Return empty result when no aggregator is configured
+      const emptyResult: ContextTestResult = {
+        requestId: '',
+        context: {
+          text: '',
+          chunks: [],
+          tokenCount: 0,
+          format: request.options?.includeMetadata ? 'xml' : 'markdown',
+        },
+        sources: [],
+        metrics: {
+          totalLatencyMs: 0,
+          totalTokens: 0,
+          budgetUtilization: 0,
+          deduplicationRate: 0,
+          cacheHitRate: 0,
+        },
+      };
+      return emptyResult;
     }
 
-    const assembledText = chunks.map((c) => c.content).join('\n\n');
-    const tokenCount = Math.ceil(assembledText.length / 4);
-    const totalLatencyMs = Date.now() - startTime + Math.floor(Math.random() * 150);
+    const contextRequest: import('@tamma/intelligence/context').ContextRequest = {
+      query: request.query,
+      taskType: request.taskType,
+      maxTokens: request.maxTokens,
+    };
+    if (request.sources) {
+      contextRequest.sources = request.sources;
+    }
+    if (request.hints) {
+      const hints: import('@tamma/intelligence/context').ContextHints = {};
+      if (request.hints.relatedFiles) {
+        hints.relatedFiles = request.hints.relatedFiles;
+      }
+      if (request.hints.relatedIssues) {
+        hints.relatedIssues = request.hints.relatedIssues;
+      }
+      if (request.hints.language) {
+        hints.language = request.hints.language;
+      }
+      if (request.hints.framework) {
+        hints.framework = request.hints.framework;
+      }
+      contextRequest.hints = hints;
+    }
+    if (request.options) {
+      const opts: import('@tamma/intelligence/context').ContextOptions = {};
+      if (request.options.deduplicate !== undefined) {
+        opts.deduplicate = request.options.deduplicate;
+      }
+      if (request.options.compress !== undefined) {
+        opts.compress = request.options.compress;
+      }
+      if (request.options.summarize !== undefined) {
+        opts.summarize = request.options.summarize;
+      }
+      if (request.options.includeMetadata !== undefined) {
+        opts.includeMetadata = request.options.includeMetadata;
+      }
+      contextRequest.options = opts;
+    }
 
-    const sourceContributions = sources.map((source) => {
-      const sourceChunks = chunks.filter((c) => c.source === source);
+    const response = await this.aggregator.getContext(contextRequest);
+
+    // Map the ContextResponse to the UI ContextTestResult shape
+    const chunks: UIContextChunk[] = response.context.chunks.map((chunk) => {
+      const meta: UIContextChunk['metadata'] = {};
+      if (chunk.metadata.filePath !== undefined) {
+        meta.filePath = chunk.metadata.filePath;
+      }
+      if (chunk.metadata.startLine !== undefined) {
+        meta.startLine = chunk.metadata.startLine;
+      }
+      if (chunk.metadata.endLine !== undefined) {
+        meta.endLine = chunk.metadata.endLine;
+      }
+      if (chunk.metadata.language !== undefined) {
+        meta.language = chunk.metadata.language;
+      }
+      if (chunk.metadata.symbolName !== undefined) {
+        meta.symbolName = chunk.metadata.symbolName;
+      }
       return {
-        source: source as UIContextSource,
-        chunksProvided: sourceChunks.length,
-        tokensUsed: sourceChunks.length * Math.floor(tokenCount / chunks.length),
-        latencyMs: Math.floor(totalLatencyMs * 0.4) + Math.floor(Math.random() * 50),
-        cacheHit: Math.random() > 0.6,
+        id: chunk.id,
+        content: chunk.content,
+        source: chunk.source as UIContextSource,
+        relevance: chunk.relevance,
+        metadata: meta,
       };
     });
 
     const result: ContextTestResult = {
-      requestId,
+      requestId: response.requestId,
       context: {
-        text: assembledText,
+        text: response.context.text,
         chunks,
-        tokenCount,
-        format: request.options?.includeMetadata ? 'xml' : 'markdown',
+        tokenCount: response.context.tokenCount,
+        format: response.context.format,
       },
-      sources: sourceContributions,
+      sources: response.sources.map((s) => ({
+        source: s.source as UIContextSource,
+        chunksProvided: s.chunksProvided,
+        tokensUsed: s.tokensUsed,
+        latencyMs: s.latencyMs,
+        cacheHit: s.cacheHit,
+      })),
       metrics: {
-        totalLatencyMs,
-        totalTokens: tokenCount,
-        budgetUtilization: Math.min(tokenCount / request.maxTokens, 1),
-        deduplicationRate: 0.15,
-        cacheHitRate: sourceContributions.filter((s) => s.cacheHit).length / sourceContributions.length,
+        totalLatencyMs: response.metrics.totalLatencyMs,
+        totalTokens: response.metrics.totalTokens,
+        budgetUtilization: response.metrics.budgetUtilization,
+        deduplicationRate: response.metrics.deduplicationRate,
+        cacheHitRate: response.metrics.cacheHitRate,
       },
     };
 

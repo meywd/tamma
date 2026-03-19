@@ -278,9 +278,18 @@ importers:
       '@octokit/rest':
         specifier: ^21.0.2
         version: 21.1.1
+      '@tamma/cost-monitor':
+        specifier: workspace:*
+        version: link:../cost-monitor
       '@tamma/events':
         specifier: workspace:*
         version: link:../events
+      '@tamma/intelligence':
+        specifier: workspace:*
+        version: link:../intelligence
+      '@tamma/mcp-client':
+        specifier: workspace:*
+        version: link:../mcp-client
       '@tamma/observability':
         specifier: workspace:*
         version: link:../observability

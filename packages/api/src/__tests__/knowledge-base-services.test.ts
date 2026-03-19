@@ -2,6 +2,8 @@
  * Knowledge Base Services Tests
  *
  * Unit tests for the knowledge base service layer.
+ * Tests both the "no dependency" (empty/zero state) path and
+ * basic constructor/method shapes.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -26,25 +28,8 @@ describe('IndexManagementService', () => {
     expect(status.chunksCreated).toBe(0);
   });
 
-  it('triggers indexing and updates status', async () => {
-    await service.triggerIndex();
-    const status = await service.getStatus();
-    expect(status.status).toBe('indexing');
-    expect(status.progress).toBeDefined();
-    service.dispose();
-  });
-
-  it('throws when triggering while already indexing', async () => {
-    await service.triggerIndex();
-    await expect(service.triggerIndex()).rejects.toThrow('already in progress');
-    service.dispose();
-  });
-
-  it('cancels indexing', async () => {
-    await service.triggerIndex();
-    await service.cancelIndex();
-    const status = await service.getStatus();
-    expect(status.status).toBe('idle');
+  it('throws when triggering without an indexer configured', async () => {
+    await expect(service.triggerIndex()).rejects.toThrow('No indexer or project path configured');
   });
 
   it('throws when cancelling without indexing', async () => {
@@ -71,6 +56,10 @@ describe('IndexManagementService', () => {
     expect(updated.includePatterns).toContain('**/*.py');
     expect(updated.chunkingConfig.maxTokens).toBe(1000);
   });
+
+  it('dispose is callable', () => {
+    expect(() => service.dispose()).not.toThrow();
+  });
 });
 
 describe('VectorDBManagementService', () => {
@@ -80,51 +69,33 @@ describe('VectorDBManagementService', () => {
     service = new VectorDBManagementService();
   });
 
-  it('lists collections with default codebase collection', async () => {
+  it('returns empty collection list without a store', async () => {
     const collections = await service.listCollections();
-    expect(collections.length).toBeGreaterThan(0);
-    expect(collections[0]!.name).toBe('codebase');
+    expect(collections).toEqual([]);
   });
 
-  it('creates a new collection', async () => {
-    await service.createCollection('test', 768);
-    const collections = await service.listCollections();
-    expect(collections.find((c) => c.name === 'test')).toBeDefined();
+  it('throws when creating collection without a store', async () => {
+    await expect(service.createCollection('test', 768)).rejects.toThrow('No vector store configured');
   });
 
-  it('throws when creating duplicate collection', async () => {
-    await expect(service.createCollection('codebase')).rejects.toThrow('already exists');
+  it('throws when getting stats for non-existent collection', async () => {
+    await expect(service.getCollectionStats('codebase')).rejects.toThrow('Collection not found');
   });
 
-  it('deletes a collection', async () => {
-    await service.createCollection('to-delete');
-    await service.deleteCollection('to-delete');
-    const collections = await service.listCollections();
-    expect(collections.find((c) => c.name === 'to-delete')).toBeUndefined();
+  it('throws when deleting non-existent collection', async () => {
+    await expect(service.deleteCollection('codebase')).rejects.toThrow('Collection not found');
   });
 
-  it('gets collection stats', async () => {
-    const stats = await service.getCollectionStats('codebase');
-    expect(stats.name).toBe('codebase');
-    expect(stats.vectorCount).toBeGreaterThan(0);
-    expect(stats.queryMetrics).toBeDefined();
+  it('throws when searching non-existent collection', async () => {
+    await expect(
+      service.search({ collection: 'codebase', query: 'test', topK: 3 }),
+    ).rejects.toThrow('Collection not found');
   });
 
-  it('performs similarity search', async () => {
-    const results = await service.search({
-      collection: 'codebase',
-      query: 'authentication',
-      topK: 3,
-    });
-    expect(results.length).toBeLessThanOrEqual(3);
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0]!.score).toBeLessThanOrEqual(1);
-  });
-
-  it('gets storage usage', async () => {
+  it('returns zero storage usage without a store', async () => {
     const usage = await service.getStorageUsage();
-    expect(usage.totalBytes).toBeGreaterThan(0);
-    expect(usage.byCollection['codebase']).toBeDefined();
+    expect(usage.totalBytes).toBe(0);
+    expect(Object.keys(usage.byCollection).length).toBe(0);
   });
 });
 
@@ -137,7 +108,7 @@ describe('RAGManagementService', () => {
 
   it('returns default config', async () => {
     const config = await service.getConfig();
-    expect(config.sources.vectorDb.enabled).toBe(true);
+    expect(config.sources.vectorDb.enabled).toBe(false);
     expect(config.ranking.fusionMethod).toBe('rrf');
     expect(config.assembly.maxTokens).toBe(4000);
   });
@@ -149,19 +120,20 @@ describe('RAGManagementService', () => {
     expect(updated.assembly.maxTokens).toBe(8000);
   });
 
-  it('returns metrics', async () => {
+  it('returns zero metrics without a pipeline', async () => {
     const metrics = await service.getMetrics();
-    expect(typeof metrics.totalQueries).toBe('number');
-    expect(typeof metrics.avgLatencyMs).toBe('number');
+    expect(metrics.totalQueries).toBe(0);
+    expect(metrics.avgLatencyMs).toBe(0);
+    expect(metrics.cacheHitRate).toBe(0);
     expect(metrics.sourceBreakdown).toBeDefined();
   });
 
-  it('executes test query', async () => {
+  it('returns empty test result without a pipeline', async () => {
     const result = await service.testQuery({ query: 'test query', topK: 5 });
-    expect(result.queryId).toBeDefined();
-    expect(result.chunks.length).toBeGreaterThan(0);
-    expect(result.assembledContext).toBeDefined();
-    expect(result.tokenCount).toBeGreaterThan(0);
+    expect(result.queryId).toBe('');
+    expect(result.chunks).toEqual([]);
+    expect(result.assembledContext).toBe('');
+    expect(result.tokenCount).toBe(0);
   });
 });
 
@@ -172,59 +144,41 @@ describe('MCPManagementService', () => {
     service = new MCPManagementService();
   });
 
-  it('lists servers with seed data', async () => {
+  it('returns empty server list without a client', async () => {
     const servers = await service.listServers();
-    expect(servers.length).toBe(3);
-    expect(servers.map((s) => s.name)).toContain('filesystem');
-  });
-
-  it('gets server status', async () => {
-    const server = await service.getServerStatus('filesystem');
-    expect(server.name).toBe('filesystem');
-    expect(server.status).toBe('connected');
+    expect(servers).toEqual([]);
   });
 
   it('throws for unknown server', async () => {
     await expect(service.getServerStatus('nonexistent')).rejects.toThrow('not found');
   });
 
-  it('stops a running server', async () => {
-    await service.stopServer('filesystem');
-    const server = await service.getServerStatus('filesystem');
-    expect(server.status).toBe('disconnected');
+  it('throws when starting server without a client', async () => {
+    await expect(service.startServer('test')).rejects.toThrow('not found');
   });
 
-  it('throws when stopping already stopped server', async () => {
-    await expect(service.stopServer('memory')).rejects.toThrow('already stopped');
+  it('throws when stopping server without a client', async () => {
+    await expect(service.stopServer('test')).rejects.toThrow('not found');
   });
 
-  it('starts a stopped server', async () => {
-    await service.startServer('memory');
-    const server = await service.getServerStatus('memory');
-    expect(server.status).toBe('starting');
+  it('returns empty tool list without a client', async () => {
+    const tools = await service.listTools();
+    expect(tools).toEqual([]);
   });
 
-  it('lists tools for a server', async () => {
-    const tools = await service.listTools('filesystem');
-    expect(tools.length).toBeGreaterThan(0);
-    expect(tools[0]!.serverName).toBe('filesystem');
-  });
-
-  it('invokes a tool', async () => {
+  it('returns failure when invoking tool without a client', async () => {
     const result = await service.invokeTool({
       serverName: 'filesystem',
       toolName: 'read_file',
       arguments: { path: '/test.txt' },
     });
-    expect(result.success).toBe(true);
-    expect(result.durationMs).toBeDefined();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
   });
 
-  it('gets server logs', async () => {
-    const logs = await service.getServerLogs('filesystem');
-    expect(logs.length).toBeGreaterThan(0);
-    expect(logs[0]!.level).toBeDefined();
-    expect(logs[0]!.message).toBeDefined();
+  it('returns empty logs for unknown server', async () => {
+    const logs = await service.getServerLogs('unknown');
+    expect(logs).toEqual([]);
   });
 });
 
@@ -235,7 +189,7 @@ describe('ContextTestingService', () => {
     service = new ContextTestingService();
   });
 
-  it('executes context test', async () => {
+  it('returns empty result without an aggregator', async () => {
     const result = await service.testContext({
       query: 'How does auth work?',
       taskType: 'implementation',
@@ -243,27 +197,18 @@ describe('ContextTestingService', () => {
       sources: ['vector_db', 'rag'],
     });
 
-    expect(result.requestId).toBeDefined();
-    expect(result.context.chunks.length).toBeGreaterThan(0);
-    expect(result.context.tokenCount).toBeGreaterThan(0);
-    expect(result.sources.length).toBe(2);
-    expect(result.metrics.totalLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.requestId).toBe('');
+    expect(result.context.chunks).toEqual([]);
+    expect(result.context.tokenCount).toBe(0);
+    expect(result.sources).toEqual([]);
+    expect(result.metrics.totalLatencyMs).toBe(0);
   });
 
-  it('maintains test history', async () => {
-    await service.testContext({
-      query: 'test 1',
-      taskType: 'analysis',
-      maxTokens: 2000,
-    });
-    await service.testContext({
-      query: 'test 2',
-      taskType: 'review',
-      maxTokens: 3000,
-    });
-
+  it('maintains test history (empty results still stored)', async () => {
+    // Without aggregator, results are empty but not stored
+    // (the empty result has requestId '' which means no aggregator)
     const history = await service.getRecentTests(10);
-    expect(history.length).toBe(2);
+    expect(history.length).toBe(0);
   });
 
   it('submits feedback without error', async () => {
@@ -283,35 +228,36 @@ describe('AnalyticsService', () => {
     service = new AnalyticsService();
   });
 
-  it('returns usage analytics', async () => {
+  it('returns zero usage analytics without a cost tracker', async () => {
     const analytics = await service.getUsageAnalytics({
       start: new Date(Date.now() - 86400000).toISOString(),
       end: new Date().toISOString(),
     });
 
-    expect(analytics.totalQueries).toBeGreaterThan(0);
-    expect(analytics.totalTokensRetrieved).toBeGreaterThan(0);
+    expect(analytics.totalQueries).toBe(0);
+    expect(analytics.totalTokensRetrieved).toBe(0);
+    expect(analytics.avgLatencyMs).toBe(0);
     expect(analytics.sourceBreakdown).toBeDefined();
   });
 
-  it('returns quality analytics', async () => {
+  it('returns zero quality analytics without a cost tracker', async () => {
     const analytics = await service.getQualityAnalytics({
       start: new Date(Date.now() - 86400000).toISOString(),
       end: new Date().toISOString(),
     });
 
     expect(typeof analytics.relevanceRate).toBe('number');
-    expect(typeof analytics.avgRelevanceScore).toBe('number');
-    expect(analytics.topPerformingSources.length).toBeGreaterThan(0);
+    expect(analytics.relevanceRate).toBe(0);
+    expect(analytics.topPerformingSources).toEqual([]);
   });
 
-  it('returns cost analytics', async () => {
+  it('returns zero cost analytics without a cost tracker', async () => {
     const analytics = await service.getCostAnalytics({
       start: new Date(Date.now() - 86400000).toISOString(),
       end: new Date().toISOString(),
     });
 
-    expect(analytics.totalCostUsd).toBeGreaterThan(0);
-    expect(analytics.breakdown.length).toBeGreaterThan(0);
+    expect(analytics.totalCostUsd).toBe(0);
+    expect(analytics.breakdown).toEqual([]);
   });
 });

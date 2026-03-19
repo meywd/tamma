@@ -3,6 +3,9 @@
  *
  * Manages codebase indexing operations including status tracking,
  * triggering re-indexes, history, and configuration.
+ *
+ * Delegates to the real CodebaseIndexer from @tamma/intelligence
+ * when available; otherwise returns empty/zero state.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -12,8 +15,9 @@ import type {
   IndexConfig,
   TriggerIndexRequest,
 } from '@tamma/shared';
+import type { CodebaseIndexer } from '@tamma/intelligence/indexer';
 
-/** Default index configuration */
+/** Default index configuration (used when no indexer is available) */
 const DEFAULT_INDEX_CONFIG: IndexConfig = {
   includePatterns: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.md'],
   excludePatterns: ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**'],
@@ -36,7 +40,10 @@ const DEFAULT_INDEX_CONFIG: IndexConfig = {
 };
 
 export class IndexManagementService {
-  private status: IndexStatus = {
+  private readonly indexer: CodebaseIndexer | null;
+
+  /** Tracks the current indexing state and the latest run for the API response */
+  private currentStatus: IndexStatus = {
     status: 'idle',
     lastRun: null,
     filesIndexed: 0,
@@ -45,77 +52,202 @@ export class IndexManagementService {
 
   private history: IndexHistoryEntry[] = [];
   private config: IndexConfig = { ...DEFAULT_INDEX_CONFIG };
-  private indexingTimer: ReturnType<typeof setTimeout> | null = null;
+  private projectPath: string | null = null;
+
+  constructor(indexer?: CodebaseIndexer, projectPath?: string) {
+    this.indexer = indexer ?? null;
+
+    if (projectPath) {
+      this.projectPath = projectPath;
+    }
+
+    // Sync config from real indexer if available
+    if (this.indexer) {
+      const realConfig = this.indexer.getConfig();
+      this.config = {
+        includePatterns: realConfig.includePatterns,
+        excludePatterns: realConfig.excludePatterns,
+        chunkingConfig: {
+          maxTokens: realConfig.maxChunkTokens,
+          overlapTokens: realConfig.overlapTokens,
+          preserveImports: realConfig.preserveImports,
+          groupRelatedCode: realConfig.groupRelatedCode,
+        },
+        embeddingConfig: {
+          provider: realConfig.embeddingProvider as 'openai' | 'cohere' | 'ollama',
+          model: realConfig.embeddingModel,
+          batchSize: realConfig.batchSize,
+        },
+        triggerConfig: {
+          gitHooks: realConfig.enableGitHooks,
+          watchMode: realConfig.enableFileWatcher,
+          schedule: realConfig.scheduleCron ?? null,
+        },
+      };
+    }
+  }
 
   async getStatus(): Promise<IndexStatus> {
-    return { ...this.status };
+    // If we have a real indexer and a project path, query it for live status
+    if (this.indexer && this.projectPath) {
+      try {
+        const realStatus = await this.indexer.getIndexStatus(this.projectPath);
+        const result: IndexStatus = {
+          status: this.currentStatus.status,
+          lastRun: realStatus.lastIndexedAt
+            ? realStatus.lastIndexedAt.toISOString()
+            : this.currentStatus.lastRun,
+          filesIndexed: realStatus.totalFiles,
+          chunksCreated: realStatus.totalChunks,
+        };
+        if (this.currentStatus.progress !== undefined) {
+          result.progress = this.currentStatus.progress;
+        }
+        if (this.currentStatus.currentFile !== undefined) {
+          result.currentFile = this.currentStatus.currentFile;
+        }
+        return result;
+      } catch {
+        // Fall through to cached status
+      }
+    }
+
+    return { ...this.currentStatus };
   }
 
   async triggerIndex(_request?: TriggerIndexRequest): Promise<void> {
-    if (this.status.status === 'indexing') {
+    if (this.currentStatus.status === 'indexing') {
       throw new Error('Indexing is already in progress');
     }
 
-    this.status = {
+    if (!this.indexer || !this.projectPath) {
+      throw new Error('No indexer or project path configured');
+    }
+
+    const startTime = new Date().toISOString();
+
+    this.currentStatus = {
       status: 'indexing',
-      lastRun: this.status.lastRun,
+      lastRun: this.currentStatus.lastRun,
       filesIndexed: 0,
       chunksCreated: 0,
       progress: 0,
       currentFile: 'Scanning files...',
     };
 
-    // Simulate indexing completion asynchronously
-    const startTime = new Date().toISOString();
-    this.indexingTimer = setTimeout(() => {
-      const filesIndexed = Math.floor(Math.random() * 200) + 50;
-      const chunksCreated = filesIndexed * 5 + Math.floor(Math.random() * 100);
-      const now = new Date().toISOString();
-
-      this.status = {
-        status: 'idle',
-        lastRun: now,
-        filesIndexed,
-        chunksCreated,
-        progress: 100,
+    // Subscribe to progress events for live status updates
+    const progressHandler = (progress: {
+      phase: string;
+      filesTotal: number;
+      filesProcessed: number;
+      chunksTotal: number;
+      chunksProcessed: number;
+      currentFile?: string;
+    }): void => {
+      const total = progress.filesTotal || 1;
+      const updated: IndexStatus = {
+        status: 'indexing',
+        lastRun: this.currentStatus.lastRun,
+        filesIndexed: progress.filesProcessed,
+        chunksCreated: progress.chunksProcessed,
+        progress: Math.round((progress.filesProcessed / total) * 100),
       };
-
-      this.history.unshift({
-        id: randomUUID(),
-        startTime,
-        endTime: now,
-        filesProcessed: filesIndexed,
-        chunksCreated,
-        chunksUpdated: Math.floor(chunksCreated * 0.1),
-        chunksDeleted: Math.floor(Math.random() * 10),
-        embeddingCost: chunksCreated * 0.00002,
-        durationMs: 3000 + Math.floor(Math.random() * 2000),
-        status: 'success',
-        errors: [],
-      });
-
-      // Cap history to 100 entries max
-      if (this.history.length > 100) {
-        this.history.length = 100;
+      if (progress.currentFile !== undefined) {
+        updated.currentFile = progress.currentFile;
       }
-    }, 3000);
+      this.currentStatus = updated;
+    };
+    this.indexer.on('progress', progressHandler);
+
+    // Run indexing asynchronously (fire-and-forget for the caller)
+    const isFullReindex = _request?.fullReindex === true;
+    const indexPromise = isFullReindex
+      ? this.indexer.indexProject(this.projectPath)
+      : this.indexer.updateIndex(this.projectPath);
+
+    indexPromise
+      .then((result) => {
+        const now = new Date().toISOString();
+
+        this.currentStatus = {
+          status: 'idle',
+          lastRun: now,
+          filesIndexed: result.filesProcessed,
+          chunksCreated: result.chunksCreated,
+          progress: 100,
+        };
+
+        const entry: IndexHistoryEntry = {
+          id: randomUUID(),
+          startTime,
+          endTime: now,
+          filesProcessed: result.filesProcessed,
+          chunksCreated: result.chunksCreated,
+          chunksUpdated: result.chunksUpdated,
+          chunksDeleted: result.chunksDeleted,
+          embeddingCost: result.embeddingCostUsd,
+          durationMs: result.durationMs,
+          status: result.success ? 'success' : result.errors.length > 0 ? 'partial' : 'failed',
+          errors: result.errors.map((e) => ({
+            filePath: e.filePath,
+            error: e.error,
+            timestamp: e.timestamp.toISOString(),
+          })),
+        };
+
+        this.history.unshift(entry);
+        if (this.history.length > 100) {
+          this.history.length = 100;
+        }
+      })
+      .catch((error) => {
+        const now = new Date().toISOString();
+
+        this.currentStatus = {
+          status: 'error',
+          lastRun: this.currentStatus.lastRun,
+          filesIndexed: this.currentStatus.filesIndexed,
+          chunksCreated: this.currentStatus.chunksCreated,
+          error: error instanceof Error ? error.message : String(error),
+        };
+
+        this.history.unshift({
+          id: randomUUID(),
+          startTime,
+          endTime: now,
+          filesProcessed: 0,
+          chunksCreated: 0,
+          chunksUpdated: 0,
+          chunksDeleted: 0,
+          embeddingCost: 0,
+          durationMs: 0,
+          status: 'failed',
+          errors: [{
+            filePath: '',
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: now,
+          }],
+        });
+      })
+      .finally(() => {
+        this.indexer!.off('progress', progressHandler);
+      });
   }
 
   async cancelIndex(): Promise<void> {
-    if (this.status.status !== 'indexing') {
+    if (this.currentStatus.status !== 'indexing') {
       throw new Error('No indexing operation in progress');
     }
 
-    if (this.indexingTimer) {
-      clearTimeout(this.indexingTimer);
-      this.indexingTimer = null;
+    if (this.indexer) {
+      await this.indexer.stop();
     }
 
-    this.status = {
+    this.currentStatus = {
       status: 'idle',
-      lastRun: this.status.lastRun,
-      filesIndexed: this.status.filesIndexed,
-      chunksCreated: this.status.chunksCreated,
+      lastRun: this.currentStatus.lastRun,
+      filesIndexed: this.currentStatus.filesIndexed,
+      chunksCreated: this.currentStatus.chunksCreated,
     };
   }
 
@@ -143,13 +275,32 @@ export class IndexManagementService {
     if (config.triggerConfig) {
       this.config.triggerConfig = { ...this.config.triggerConfig, ...config.triggerConfig };
     }
+
+    // Push config changes to real indexer
+    if (this.indexer) {
+      const indexerUpdate: Partial<import('@tamma/intelligence/indexer').IndexerConfig> = {
+        includePatterns: this.config.includePatterns,
+        excludePatterns: this.config.excludePatterns,
+        maxChunkTokens: this.config.chunkingConfig.maxTokens,
+        overlapTokens: this.config.chunkingConfig.overlapTokens,
+        preserveImports: this.config.chunkingConfig.preserveImports,
+        groupRelatedCode: this.config.chunkingConfig.groupRelatedCode,
+        embeddingProvider: this.config.embeddingConfig.provider,
+        embeddingModel: this.config.embeddingConfig.model,
+        batchSize: this.config.embeddingConfig.batchSize,
+        enableGitHooks: this.config.triggerConfig.gitHooks,
+        enableFileWatcher: this.config.triggerConfig.watchMode,
+      };
+      if (this.config.triggerConfig.schedule !== null) {
+        indexerUpdate.scheduleCron = this.config.triggerConfig.schedule;
+      }
+      await this.indexer.configure(indexerUpdate);
+    }
+
     return { ...this.config };
   }
 
   dispose(): void {
-    if (this.indexingTimer) {
-      clearTimeout(this.indexingTimer);
-      this.indexingTimer = null;
-    }
+    // No timers to clean up; indexer lifecycle is managed externally
   }
 }

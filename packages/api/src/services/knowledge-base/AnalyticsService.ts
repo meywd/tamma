@@ -3,6 +3,9 @@
  *
  * Provides usage analytics, quality metrics, and cost analysis
  * for the knowledge base system.
+ *
+ * Delegates to the real CostTracker from @tamma/cost-monitor
+ * when available; otherwise returns zero state.
  */
 
 import type {
@@ -11,59 +14,105 @@ import type {
   CostAnalytics,
   AnalyticsPeriodFilter,
 } from '@tamma/shared';
+import type { CostTracker } from '@tamma/cost-monitor';
 
 export class AnalyticsService {
+  private readonly costTracker: CostTracker | null;
+
+  constructor(costTracker?: CostTracker) {
+    this.costTracker = costTracker ?? null;
+  }
+
   async getUsageAnalytics(period: AnalyticsPeriodFilter): Promise<UsageAnalytics> {
+    if (!this.costTracker) {
+      return {
+        period: { start: period.start, end: period.end },
+        totalQueries: 0,
+        totalTokensRetrieved: 0,
+        avgLatencyMs: 0,
+        sourceBreakdown: {},
+      };
+    }
+
+    const startDate = new Date(period.start);
+    const endDate = new Date(period.end);
+
+    // Query usage records from cost tracker
+    const records = await this.costTracker.getUsage({
+      startDate,
+      endDate,
+    });
+
+    const totalQueries = records.length;
+    let totalTokensRetrieved = 0;
+    let totalLatencyMs = 0;
+
+    // Aggregate metrics from usage records
+    for (const record of records) {
+      totalTokensRetrieved += (record.inputTokens ?? 0) + (record.outputTokens ?? 0);
+      totalLatencyMs += record.latencyMs ?? 0;
+    }
+
     return {
       period: { start: period.start, end: period.end },
-      totalQueries: 1247,
-      totalTokensRetrieved: 3_450_000,
-      avgLatencyMs: 124,
-      sourceBreakdown: {
-        vector_db: {
-          queries: 890,
-          tokensRetrieved: 2_415_000,
-          avgLatencyMs: 45,
-          cacheHitRate: 0.32,
-        },
-        rag: {
-          queries: 650,
-          tokensRetrieved: 780_000,
-          avgLatencyMs: 89,
-          cacheHitRate: 0.18,
-        },
-        mcp: {
-          queries: 210,
-          tokensRetrieved: 255_000,
-          avgLatencyMs: 156,
-          cacheHitRate: 0.05,
-        },
-      },
+      totalQueries,
+      totalTokensRetrieved,
+      avgLatencyMs: totalQueries > 0 ? totalLatencyMs / totalQueries : 0,
+      sourceBreakdown: {},
     };
   }
 
   async getQualityAnalytics(period: AnalyticsPeriodFilter): Promise<QualityAnalytics> {
+    // Quality analytics require feedback data which the CostTracker does not track.
+    // Return zero state; this can be enhanced when a dedicated feedback store is available.
     return {
       period: { start: period.start, end: period.end },
-      totalFeedback: 342,
-      relevanceRate: 0.78,
-      avgRelevanceScore: 0.82,
-      topPerformingSources: ['vector_db', 'rag', 'mcp'],
-      improvementTrend: 0.05,
+      totalFeedback: 0,
+      relevanceRate: 0,
+      avgRelevanceScore: 0,
+      topPerformingSources: [],
+      improvementTrend: 0,
     };
   }
 
   async getCostAnalytics(period: AnalyticsPeriodFilter): Promise<CostAnalytics> {
+    if (!this.costTracker) {
+      return {
+        period: { start: period.start, end: period.end },
+        totalCostUsd: 0,
+        embeddingCostUsd: 0,
+        indexingCostUsd: 0,
+        breakdown: [],
+      };
+    }
+
+    const startDate = new Date(period.start);
+    const endDate = new Date(period.end);
+
+    const totalCostUsd = await this.costTracker.getTotalCost({
+      startDate,
+      endDate,
+    });
+
+    // Get per-model breakdown using aggregation
+    const byModel = await this.costTracker.getAggregate(
+      { startDate, endDate },
+      ['model'],
+    );
+
+    const breakdown = byModel.map((agg) => ({
+      category: agg.dimensionValue || 'Unknown',
+      costUsd: agg.totalCostUsd,
+      units: agg.totalCalls,
+      unitCostUsd: agg.totalCalls > 0 ? agg.totalCostUsd / agg.totalCalls : 0,
+    }));
+
     return {
       period: { start: period.start, end: period.end },
-      totalCostUsd: 12.45,
-      embeddingCostUsd: 8.20,
-      indexingCostUsd: 4.25,
-      breakdown: [
-        { category: 'Embedding Generation', costUsd: 8.20, units: 410000, unitCostUsd: 0.00002 },
-        { category: 'Re-indexing', costUsd: 3.15, units: 15, unitCostUsd: 0.21 },
-        { category: 'Query Processing', costUsd: 1.10, units: 1247, unitCostUsd: 0.00088 },
-      ],
+      totalCostUsd,
+      embeddingCostUsd: 0,
+      indexingCostUsd: 0,
+      breakdown,
     };
   }
 }
