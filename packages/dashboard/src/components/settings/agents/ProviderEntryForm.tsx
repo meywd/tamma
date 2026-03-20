@@ -1,10 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import type { IProviderChainEntry } from '@tamma/shared';
 
 interface ProviderEntryFormProps {
+  /** Called when saving (both add and edit). */
+  onSave: (entry: IProviderChainEntry) => void;
+  onCancel: () => void;
+  /** If provided, the form is in edit mode with pre-filled values. */
+  initialValue?: IProviderChainEntry;
+}
+
+// Keep backward compat with old onAdd prop
+interface LegacyProviderEntryFormProps {
   onAdd: (entry: IProviderChainEntry) => void;
   onCancel: () => void;
+  initialValue?: IProviderChainEntry;
 }
 
 const KNOWN_PROVIDERS = [
@@ -18,10 +28,23 @@ const KNOWN_PROVIDERS = [
   'github-copilot',
 ];
 
-export function ProviderEntryForm({ onAdd, onCancel }: ProviderEntryFormProps): JSX.Element {
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
-  const [apiKeyRef, setApiKeyRef] = useState('');
+export function ProviderEntryForm(
+  props: ProviderEntryFormProps | LegacyProviderEntryFormProps,
+): JSX.Element {
+  const onSave = 'onSave' in props ? props.onSave : props.onAdd;
+  const { onCancel, initialValue } = props;
+  const isEdit = initialValue !== undefined;
+
+  const [provider, setProvider] = useState(initialValue?.provider ?? '');
+  const [model, setModel] = useState(initialValue?.model ?? '');
+  const [apiKeyRef, setApiKeyRef] = useState(initialValue?.apiKeyRef ?? '');
+
+  // Reset form when initialValue changes (switching between entries)
+  useEffect(() => {
+    setProvider(initialValue?.provider ?? '');
+    setModel(initialValue?.model ?? '');
+    setApiKeyRef(initialValue?.apiKeyRef ?? '');
+  }, [initialValue]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -34,11 +57,11 @@ export function ProviderEntryForm({ onAdd, onCancel }: ProviderEntryFormProps): 
     if (apiKeyRef.trim()) {
       entry.apiKeyRef = apiKeyRef.trim();
     }
-    onAdd(entry);
+    onSave(entry);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-3 bg-blue-50 rounded-md border border-blue-200 space-y-3">
+    <form onSubmit={handleSubmit} className={`p-3 rounded-md border space-y-3 ${isEdit ? 'bg-yellow-50 border-yellow-200' : 'bg-blue-50 border-blue-200'}`}>
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
         <input
@@ -79,9 +102,9 @@ export function ProviderEntryForm({ onAdd, onCancel }: ProviderEntryFormProps): 
       <div className="flex gap-2">
         <button
           type="submit"
-          className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+          className={`px-3 py-1.5 text-sm font-medium text-white rounded-md ${isEdit ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-blue-600 hover:bg-blue-700'}`}
         >
-          Add
+          {isEdit ? 'Save Changes' : 'Add'}
         </button>
         <button
           type="button"

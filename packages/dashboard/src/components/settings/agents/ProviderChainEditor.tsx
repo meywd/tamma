@@ -29,11 +29,13 @@ function SortableEntry({
   entry,
   index,
   onRemove,
+  onEdit,
 }: {
   id: string;
   entry: IProviderChainEntry;
   index: number;
   onRemove: () => void;
+  onEdit: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
@@ -62,7 +64,7 @@ function SortableEntry({
           <path d="M7 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7 14a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
         </svg>
       </button>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit} title="Click to edit">
         <span className="text-sm font-medium text-gray-900">{entry.provider}</span>
         {entry.model && <span className="text-sm text-gray-500 ml-2">{entry.model}</span>}
         {entry.apiKeyRef && (
@@ -72,6 +74,16 @@ function SortableEntry({
       <span className="text-xs text-gray-400 shrink-0">
         {index === 0 ? 'Primary' : `Fallback ${index}`}
       </span>
+      <button
+        type="button"
+        onClick={onEdit}
+        className="text-gray-400 hover:text-blue-600 text-sm shrink-0"
+        title="Edit provider"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </button>
       <button
         type="button"
         onClick={onRemove}
@@ -91,6 +103,7 @@ function buildItemIds(chain: IProviderChainEntry[]): string[] {
 
 export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProps): JSX.Element {
   const [showForm, setShowForm] = useState(false);
+  const [editIndex, setEditIndex] = useState<number | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -110,6 +123,9 @@ export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProp
   };
 
   const handleRemove = (index: number) => {
+    if (editIndex === index) {
+      setEditIndex(null);
+    }
     onChange(chain.filter((_, i) => i !== index));
   };
 
@@ -118,13 +134,35 @@ export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProp
     setShowForm(false);
   };
 
+  const handleEdit = (index: number) => {
+    setShowForm(false);
+    setEditIndex(editIndex === index ? null : index);
+  };
+
+  const handleSaveEdit = (entry: IProviderChainEntry) => {
+    if (editIndex === null) return;
+    const updated = [...chain];
+    updated[editIndex] = entry;
+    onChange(updated);
+    setEditIndex(null);
+  };
+
+  const handleCancelEdit = () => {
+    setEditIndex(null);
+  };
+
+  const handleShowAdd = () => {
+    setEditIndex(null);
+    setShowForm(!showForm);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <label className="text-sm font-medium text-gray-700">Provider Chain</label>
         <button
           type="button"
-          onClick={() => setShowForm(!showForm)}
+          onClick={handleShowAdd}
           className="text-sm text-blue-600 hover:text-blue-800 font-medium"
         >
           {showForm ? 'Cancel' : '+ Add Provider'}
@@ -141,13 +179,24 @@ export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProp
         <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
           <div className="space-y-2">
             {chain.map((entry, index) => (
-              <SortableEntry
-                key={itemIds[index]}
-                id={itemIds[index]!}
-                entry={entry}
-                index={index}
-                onRemove={() => handleRemove(index)}
-              />
+              <div key={itemIds[index]}>
+                <SortableEntry
+                  id={itemIds[index]!}
+                  entry={entry}
+                  index={index}
+                  onRemove={() => handleRemove(index)}
+                  onEdit={() => handleEdit(index)}
+                />
+                {editIndex === index && (
+                  <div className="mt-2 ml-6">
+                    <ProviderEntryForm
+                      onSave={handleSaveEdit}
+                      onCancel={handleCancelEdit}
+                      initialValue={entry}
+                    />
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </SortableContext>
@@ -155,7 +204,7 @@ export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProp
 
       {showForm && (
         <div className="mt-3">
-          <ProviderEntryForm onAdd={handleAdd} onCancel={() => setShowForm(false)} />
+          <ProviderEntryForm onSave={handleAdd} onCancel={() => setShowForm(false)} />
         </div>
       )}
     </div>
