@@ -165,8 +165,9 @@ export class QueryProcessor implements IQueryProcessor {
     if (this.embeddingService) {
       try {
         embedding = await this.embeddingService.embed(text);
-      } catch {
+      } catch (error) {
         // Embedding generation is optional, continue without it
+        console.warn('[QueryProcessor] Embedding generation failed:', error instanceof Error ? error.message : String(error));
       }
     }
 

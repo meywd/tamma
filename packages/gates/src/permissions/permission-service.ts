@@ -481,6 +481,12 @@ export class PermissionService implements IPermissionService {
 
     this.violations.push(fullViolation);
 
+    // Trim the violations array when it exceeds the maximum size to prevent unbounded growth.
+    const MAX_VIOLATIONS = 10000;
+    if (this.violations.length > MAX_VIOLATIONS) {
+      this.violations.splice(0, this.violations.length - MAX_VIOLATIONS);
+    }
+
     this.logger?.warn(`Permission violation recorded: ${id}`, {
       agentType: violation.agentType,
       projectId: violation.projectId,

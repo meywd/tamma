@@ -106,7 +106,9 @@ export class CostTracker implements ICostTracker {
         if (alert.scopeId) {
           createParams.scopeId = alert.scopeId;
         }
-        this.alertManager.createAlert(createParams).catch(console.error);
+        this.alertManager.createAlert(createParams).catch((error: unknown) => {
+          console.warn('[CostTracker] Failed to create alert:', error instanceof Error ? error.message : String(error));
+        });
       },
     });
 

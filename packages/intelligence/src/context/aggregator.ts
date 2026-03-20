@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ILogger } from '@tamma/shared';
 import type {
   IContextAggregator,
@@ -20,9 +21,8 @@ import { ChunkRanker } from './ranker.js';
 import { ContextAssemblerAgg } from './assembler.js';
 import { MemoryCache } from './cache/memory-cache.js';
 
-let idCounter = 0;
 function generateId(): string {
-  return `ctx-${Date.now()}-${++idCounter}`;
+  return `ctx-${randomUUID()}`;
 }
 
 export interface ContextAggregatorOptions {
@@ -223,7 +223,7 @@ export class ContextAggregator implements IContextAggregator {
 
     return {
       healthy: allHealthy,
-      sources: sourceStatus as any,
+      sources: sourceStatus as Record<ContextSourceType, { healthy: boolean; latencyMs?: number; error?: string }>,
       cache: { healthy: cacheHealthy, provider: this.config.caching.provider },
     };
   }

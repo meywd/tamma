@@ -88,13 +88,15 @@ export class GitDiffDetector {
     try {
       const diffOutput = this.execGit(['diff', '--name-status', ref]);
       this.parseDiffOutput(diffOutput, changes);
-    } catch {
+    } catch (error) {
       // ref might not exist (e.g., first commit), try HEAD
+      console.warn(`[GitDiffDetector] git diff against ref "${ref}" failed, retrying with HEAD:`, error instanceof Error ? error.message : String(error));
       try {
         const diffOutput = this.execGit(['diff', '--name-status', 'HEAD']);
         this.parseDiffOutput(diffOutput, changes);
-      } catch {
+      } catch (fallbackError) {
         // No commits yet or git not available
+        console.warn('[GitDiffDetector] git diff HEAD fallback also failed:', fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
       }
     }
 
@@ -106,8 +108,8 @@ export class GitDiffDetector {
         includeStaged,
         includeUnstaged,
       });
-    } catch {
-      // git status failed
+    } catch (error) {
+      console.warn('[GitDiffDetector] git status failed:', error instanceof Error ? error.message : String(error));
     }
 
     return Array.from(changes.values());
