@@ -1,32 +1,74 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { FormEvent } from 'react';
 import type { IProviderChainEntry } from '@tamma/shared';
 
 interface ProviderEntryFormProps {
-  /** Called when saving (both add and edit). */
   onSave: (entry: IProviderChainEntry) => void;
   onCancel: () => void;
-  /** If provided, the form is in edit mode with pre-filled values. */
   initialValue?: IProviderChainEntry;
 }
 
-// Keep backward compat with old onAdd prop
+// Legacy compat
 interface LegacyProviderEntryFormProps {
   onAdd: (entry: IProviderChainEntry) => void;
   onCancel: () => void;
   initialValue?: IProviderChainEntry;
 }
 
-const KNOWN_PROVIDERS = [
-  'claude-code',
-  'opencode',
-  'openrouter',
-  'zen-mcp',
-  'anthropic',
-  'openai',
-  'gemini',
-  'github-copilot',
-];
+/** Known providers and their available models */
+const PROVIDER_MODELS: Record<string, string[]> = {
+  'claude-code': [
+    'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-opus-20240229',
+  ],
+  anthropic: [
+    'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-opus-20240229',
+    'claude-3-sonnet-20240229',
+    'claude-3-haiku-20240307',
+  ],
+  openai: [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-4',
+    'gpt-3.5-turbo',
+    'o1-preview',
+    'o1-mini',
+  ],
+  gemini: [
+    'gemini-2.0-flash',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash',
+  ],
+  openrouter: [
+    'anthropic/claude-sonnet-4',
+    'anthropic/claude-opus-4',
+    'openai/gpt-4o',
+    'google/gemini-2.0-flash',
+    'meta-llama/llama-3.1-405b',
+  ],
+  opencode: [],
+  'zen-mcp': [],
+  'github-copilot': [],
+};
+
+const KNOWN_PROVIDERS = Object.keys(PROVIDER_MODELS);
+
+/** Default API key env var name per provider */
+const DEFAULT_API_KEY_REF: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  gemini: 'GOOGLE_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  'github-copilot': 'GITHUB_TOKEN',
+};
 
 export function ProviderEntryForm(
   props: ProviderEntryFormProps | LegacyProviderEntryFormProps,
@@ -39,12 +81,26 @@ export function ProviderEntryForm(
   const [model, setModel] = useState(initialValue?.model ?? '');
   const [apiKeyRef, setApiKeyRef] = useState(initialValue?.apiKeyRef ?? '');
 
-  // Reset form when initialValue changes (switching between entries)
   useEffect(() => {
     setProvider(initialValue?.provider ?? '');
     setModel(initialValue?.model ?? '');
     setApiKeyRef(initialValue?.apiKeyRef ?? '');
   }, [initialValue]);
+
+  // Models available for the selected provider
+  const availableModels = useMemo(() => {
+    const normalized = provider.trim().toLowerCase();
+    return PROVIDER_MODELS[normalized] ?? [];
+  }, [provider]);
+
+  // Auto-fill API key ref when provider changes (only if empty)
+  const handleProviderChange = (newProvider: string) => {
+    setProvider(newProvider);
+    const ref = DEFAULT_API_KEY_REF[newProvider.trim().toLowerCase()];
+    if (ref && !apiKeyRef) {
+      setApiKeyRef(ref);
+    }
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -62,35 +118,82 @@ export function ProviderEntryForm(
 
   return (
     <form onSubmit={handleSubmit} className={`p-3 rounded-md border space-y-3 ${isEdit ? 'bg-yellow-50 border-yellow-200' : 'bg-blue-50 border-blue-200'}`}>
+      {/* Provider — select dropdown */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-        <input
-          type="text"
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-          list="known-providers"
-          placeholder="e.g., claude-code"
-          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          required
-        />
-        <datalist id="known-providers">
+        <select
+          value={KNOWN_PROVIDERS.includes(provider) ? provider : '__custom__'}
+          onChange={(e) => {
+            if (e.target.value === '__custom__') return;
+            handleProviderChange(e.target.value);
+          }}
+          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+        >
+          <option value="" disabled>Select a provider...</option>
           {KNOWN_PROVIDERS.map((p) => (
-            <option key={p} value={p} />
+            <option key={p} value={p}>{p}</option>
           ))}
-        </datalist>
+          {!KNOWN_PROVIDERS.includes(provider) && provider && (
+            <option value="__custom__">{provider} (custom)</option>
+          )}
+        </select>
+        {/* Allow custom provider name if not in list */}
+        {!KNOWN_PROVIDERS.includes(provider) && (
+          <input
+            type="text"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            placeholder="Custom provider name"
+            className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        )}
       </div>
+
+      {/* Model — dropdown with available models + custom option */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Model (optional)</label>
-        <input
-          type="text"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="e.g., claude-sonnet-4-5"
-          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+        {availableModels.length > 0 ? (
+          <>
+            <select
+              value={availableModels.includes(model) ? model : model ? '__custom__' : ''}
+              onChange={(e) => {
+                if (e.target.value === '__custom__') return;
+                setModel(e.target.value);
+              }}
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">Default model</option>
+              {availableModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+              {model && !availableModels.includes(model) && (
+                <option value="__custom__">{model} (custom)</option>
+              )}
+            </select>
+            {model && !availableModels.includes(model) && (
+              <input
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="Custom model name"
+                className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
+          </>
+        ) : (
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="e.g., claude-sonnet-4-5"
+            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        )}
       </div>
+
+      {/* API Key Ref */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">API Key Ref (optional)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">API Key Env Var</label>
         <input
           type="text"
           value={apiKeyRef}
@@ -98,7 +201,13 @@ export function ProviderEntryForm(
           placeholder="e.g., ANTHROPIC_API_KEY"
           className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        {provider && DEFAULT_API_KEY_REF[provider.toLowerCase()] && !apiKeyRef && (
+          <p className="text-xs text-gray-400 mt-0.5">
+            Default: {DEFAULT_API_KEY_REF[provider.toLowerCase()]}
+          </p>
+        )}
       </div>
+
       <div className="flex gap-2">
         <button
           type="submit"
