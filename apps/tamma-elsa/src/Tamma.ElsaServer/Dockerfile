@@ -54,7 +54,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 # Set environment variables
 ENV ASPNETCORE_URLS=http://+:5000
-ENV ASPNETCORE_ENVIRONMENT=Production
+# Development mode required for UseStaticWebAssets() to serve Blazor WASM
+# files from NuGet packages. Auth is still enforced via Elsa identity.
+ENV ASPNETCORE_ENVIRONMENT=Development
 
 # Entry point
 ENTRYPOINT ["dotnet", "Tamma.ElsaServer.dll"]
