@@ -84,8 +84,12 @@ builder.Services.AddCors(options =>
 // Health checks
 builder.Services.AddHealthChecks();
 
-// Serve Blazor WASM Studio static assets
-builder.WebHost.UseStaticWebAssets();
+// Serve Blazor WASM Studio static assets (only in Development;
+// in Production, assets are bundled via dotnet publish)
+if (builder.Environment.IsDevelopment())
+{
+    builder.WebHost.UseStaticWebAssets();
+}
 
 var app = builder.Build();
 

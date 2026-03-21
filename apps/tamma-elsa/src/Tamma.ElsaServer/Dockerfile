@@ -23,7 +23,7 @@ RUN dotnet build "Tamma.ElsaServer.csproj" -c Release -o /app/build
 
 # Publish stage
 FROM build AS publish
-RUN dotnet publish "Tamma.ElsaServer.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Tamma.ElsaServer.csproj" -c Release -o /app/publish /p:UseAppHost=false /p:StaticWebAssetsEnabled=true
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
