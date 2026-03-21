@@ -93,6 +93,21 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # ELSA Studio (Blazor WASM UI)
+  # ---------------------------------------------------------------------------
+  elsa-studio:
+    image: elsaworkflows/elsa-studio-v3:latest
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # URL must be browser-accessible (Blazor WASM runs client-side)
+      ELSASERVER__URL: https://elsa.tamma.dev/elsa/api
+    depends_on:
+      elsa-server:
+        condition: service_healthy
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # Tamma .NET REST API (ELSA management)
   # ---------------------------------------------------------------------------
   tamma-api-dotnet:

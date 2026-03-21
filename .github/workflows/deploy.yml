@@ -240,7 +240,7 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
-                up -d tamma-engine tamma-dashboard nginx-proxy && \
+                up -d tamma-engine tamma-dashboard elsa-studio nginx-proxy && \
               sleep 5 && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
             "

@@ -451,7 +451,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d --force-recreate tamma-engine tamma-dashboard nginx-proxy
+                up -d --force-recreate tamma-engine tamma-dashboard elsa-studio nginx-proxy
             "
 
       - name: "Verify: all services running"
