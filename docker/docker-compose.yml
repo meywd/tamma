@@ -71,8 +71,8 @@ services:
   # ---------------------------------------------------------------------------
   elsa-server:
     build:
-      context: ../apps/tamma-elsa/src
-      dockerfile: Tamma.ElsaServer/Dockerfile
+      context: ../apps/tamma-elsa
+      dockerfile: src/Tamma.ElsaServer/Dockerfile
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       RabbitMq__HostName: rabbitmq
@@ -96,7 +96,7 @@ services:
   # ELSA Studio (Blazor WASM UI)
   # ---------------------------------------------------------------------------
   elsa-studio:
-    image: elsaworkflows/elsa-studio-v3:latest
+    image: elsaworkflows/elsa-studio-v3:3.0.0
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       # URL must be browser-accessible (Blazor WASM runs client-side)

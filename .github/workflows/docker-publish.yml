@@ -117,7 +117,7 @@ jobs:
       matrix:
         include:
           - name: tamma-elsa
-            context: apps/tamma-elsa/src
+            context: apps/tamma-elsa
             dockerfile: apps/tamma-elsa/src/Tamma.ElsaServer/Dockerfile
           - name: tamma-api-dotnet
             context: apps/tamma-elsa/src
@@ -486,7 +486,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
+              for svc in postgres rabbitmq elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

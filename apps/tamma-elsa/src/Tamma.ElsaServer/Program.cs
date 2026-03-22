@@ -84,8 +84,8 @@ builder.Services.AddCors(options =>
 // Health checks
 builder.Services.AddHealthChecks();
 
-// Serve Blazor WASM Studio static assets from NuGet packages
-builder.WebHost.UseStaticWebAssets();
+// Seed workflow definitions from JSON files at startup
+builder.Services.AddHostedService<Tamma.ElsaServer.WorkflowSeeder>();
 
 var app = builder.Build();
 
@@ -95,10 +95,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseWorkflowsApi();
 app.UseWorkflows();
-app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 app.MapHealthChecks("/health");
-app.MapFallbackToFile("index.html");
 
 app.UseSerilogRequestLogging();
 
