@@ -9,78 +9,108 @@
   "variables": [
     {
       "name": "storyId",
-      "type": "String",
-      "value": ""
+      "value": "",
+      "typeName": "String",
+      "id": "842070ab15cc40b9",
+      "isArray": false
     },
     {
       "name": "juniorId",
-      "type": "String",
-      "value": ""
+      "value": "",
+      "typeName": "String",
+      "id": "c464f402d604470c",
+      "isArray": false
     },
     {
       "name": "sessionId",
-      "type": "Guid",
-      "value": null
+      "value": null,
+      "typeName": "Guid",
+      "id": "fe73634e53714b50",
+      "isArray": false
     },
     {
       "name": "currentState",
-      "type": "String",
-      "value": "INIT_STORY_PROCESSING"
+      "value": "INIT_STORY_PROCESSING",
+      "typeName": "String",
+      "id": "9f5065920a364d70",
+      "isArray": false
     },
     {
       "name": "assessmentResult",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "f6eafdcf83114622",
+      "isArray": false
     },
     {
       "name": "progressStatus",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "29fd89cd7a994357",
+      "isArray": false
     },
     {
       "name": "qualityResult",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "2664b4d879204b31",
+      "isArray": false
     },
     {
       "name": "reviewStatus",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "bd3928c78b3a4399",
+      "isArray": false
     },
     {
       "name": "blockerInfo",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "db940a749e14429d",
+      "isArray": false
     },
     {
       "name": "guidanceResult",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "48564977f6804cb6",
+      "isArray": false
     },
     {
       "name": "codeContext",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "3f495f20655c4094",
+      "isArray": false
     },
     {
       "name": "aiAnalysis",
-      "type": "Object",
-      "value": null
+      "value": null,
+      "typeName": "Object",
+      "id": "63e1171dacb04988",
+      "isArray": false
     },
     {
       "name": "pullRequestNumber",
-      "type": "Int32",
-      "value": "0"
+      "value": "0",
+      "typeName": "Int32",
+      "id": "f3ccb3aadb3c4984",
+      "isArray": false
     },
     {
       "name": "retryCount",
-      "type": "Int32",
-      "value": "0"
+      "value": "0",
+      "typeName": "Int32",
+      "id": "e775f2c7e9214a96",
+      "isArray": false
     },
     {
       "name": "maxRetries",
-      "type": "Int32",
-      "value": "3"
+      "value": "3",
+      "typeName": "Int32",
+      "id": "eddd7827f4f74336",
+      "isArray": false
     }
   ],
   "root": {
