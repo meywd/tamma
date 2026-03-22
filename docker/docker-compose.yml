@@ -80,6 +80,7 @@ services:
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-tamma}
       Elsa__Identity__SigningKey: ${ELSA_SIGNING_KEY:-sufficiently-long-secret-signing-key-for-elsa-jwt-tokens}
       Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
+      ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
     depends_on:
       postgres:
         condition: service_healthy
