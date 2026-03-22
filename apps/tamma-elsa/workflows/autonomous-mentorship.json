@@ -70,17 +70,17 @@
     {
       "name": "pullRequestNumber",
       "type": "Int32",
-      "value": 0
+      "value": "0"
     },
     {
       "name": "retryCount",
       "type": "Int32",
-      "value": 0
+      "value": "0"
     },
     {
       "name": "maxRetries",
       "type": "Int32",
-      "value": 3
+      "value": "3"
     }
   ],
   "root": {
