@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Integration;
@@ -19,8 +20,8 @@ namespace Tamma.Activities.Integration;
 )]
 public class EmailActivity : CodeActivity<EmailOperationResult>
 {
-    private readonly ILogger<EmailActivity> _logger;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<EmailActivity>? _logger;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Recipient email address</summary>
     [Input(Description = "Recipient email address")]
@@ -46,6 +47,9 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
     [Input(Description = "CC recipients (comma-separated)")]
     public Input<string?> Cc { get; set; } = default!;
 
+    [JsonConstructor]
+    public EmailActivity() { }
+
     public EmailActivity(
         ILogger<EmailActivity> logger,
         IIntegrationService integrationService)
@@ -65,7 +69,7 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
         var template = Template.Get(context);
         var templateData = TemplateData.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Sending email to {To} with subject: {Subject}",
             to, subject);
 
@@ -76,9 +80,9 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
                 ? ApplyTemplate(template, body, templateData)
                 : body;
 
-            await _integrationService.SendEmailAsync(to, subject, finalBody);
+            await _integrationService!.SendEmailAsync(to, subject, finalBody);
 
-            _logger.LogInformation("Email sent successfully to {To}", to);
+            _logger?.LogInformation("Email sent successfully to {To}", to);
 
             context.SetResult(new EmailOperationResult
             {
@@ -89,7 +93,7 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send email to {To}", to);
+            _logger?.LogError(ex, "Failed to send email to {To}", to);
             context.SetResult(new EmailOperationResult
             {
                 Success = false,

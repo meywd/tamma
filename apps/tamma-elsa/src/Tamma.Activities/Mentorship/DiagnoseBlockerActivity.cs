@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,10 +22,10 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
 {
-    private readonly ILogger<DiagnoseBlockerActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
-    private readonly IAnalyticsService _analyticsService;
+    private readonly ILogger<DiagnoseBlockerActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
+    private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -41,6 +42,9 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
     /// <summary>Additional context about the blocker (optional)</summary>
     [Input(Description = "Additional context about the blocker")]
     public Input<string?> BlockerContext { get; set; } = default!;
+
+    [JsonConstructor]
+    public DiagnoseBlockerActivity() { }
 
     public DiagnoseBlockerActivity(
         ILogger<DiagnoseBlockerActivity> logger,
@@ -64,14 +68,14 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         var juniorId = JuniorId.Get(context);
         var blockerContext = BlockerContext.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Diagnosing blocker for junior {JuniorId} on story {StoryId}",
             juniorId, storyId);
 
         try
         {
             // Update session state
-            await _repository.UpdateStateAsync(sessionId, MentorshipState.DIAGNOSE_BLOCKER);
+            await _repository!.UpdateStateAsync(sessionId, MentorshipState.DIAGNOSE_BLOCKER);
 
             // Get story and junior information
             var story = await _repository.GetStoryByIdAsync(storyId);
@@ -80,7 +84,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
 
             if (story == null || junior == null || session == null)
             {
-                _logger.LogError("Required entities not found for blocker diagnosis");
+                _logger?.LogError("Required entities not found for blocker diagnosis");
                 context.SetResult(new BlockerDiagnosisOutput
                 {
                     BlockerType = BlockerType.UNKNOWN,
@@ -95,7 +99,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             var diagnosticData = await CollectDiagnosticData(story, junior, storyId, juniorId);
 
             // Analyze patterns from analytics
-            var patterns = await _analyticsService.DetectPatternsAsync(juniorId);
+            var patterns = await _analyticsService!.DetectPatternsAsync(juniorId);
 
             // Diagnose the blocker type
             var diagnosis = AnalyzeBlocker(diagnosticData, patterns, blockerContext);
@@ -116,7 +120,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
                 (double)diagnosis.BlockerType,
                 "blocker_type");
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Blocker diagnosed for junior {JuniorId}: Type={Type}, Severity={Severity}",
                 juniorId, diagnosis.BlockerType, diagnosis.Severity);
 
@@ -130,7 +134,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during blocker diagnosis for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during blocker diagnosis for session {SessionId}", sessionId);
 
             context.SetResult(new BlockerDiagnosisOutput
             {
@@ -160,7 +164,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         {
             try
             {
-                var commits = await _integrationService.GetGitHubCommitsAsync(
+                var commits = await _integrationService!.GetGitHubCommitsAsync(
                     story.RepositoryUrl,
                     $"feature/{storyId}",
                     DateTime.UtcNow.AddHours(-24));
@@ -189,7 +193,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to collect GitHub diagnostic data");
+                _logger?.LogWarning(ex, "Failed to collect GitHub diagnostic data");
             }
         }
 
@@ -350,7 +354,7 @@ I've noticed you might be stuck. Here's what I've identified:
 
 Don't worry - this is a normal part of learning! Reply if you need more help.";
 
-        await _integrationService.SendSlackDirectMessageAsync(slackId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
     }
 }
 

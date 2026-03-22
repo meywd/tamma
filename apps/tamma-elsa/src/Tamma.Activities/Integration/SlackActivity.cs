@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -20,9 +21,9 @@ namespace Tamma.Activities.Integration;
 )]
 public class SlackActivity : CodeActivity<SlackOperationResult>
 {
-    private readonly ILogger<SlackActivity> _logger;
-    private readonly IIntegrationService _integrationService;
-    private readonly IMentorshipSessionRepository _repository;
+    private readonly ILogger<SlackActivity>? _logger;
+    private readonly IIntegrationService? _integrationService;
+    private readonly IMentorshipSessionRepository? _repository;
 
     /// <summary>Slack action to perform</summary>
     [Input(Description = "Action: SendChannel, SendDirect, SendAssessment, SendGuidance, SendNotification")]
@@ -48,6 +49,9 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
     [Input(Description = "Message type: Info, Warning, Success, Error")]
     public Input<MessageType> MessageType { get; set; } = new(Integration.MessageType.Info);
 
+    [JsonConstructor]
+    public SlackActivity() { }
+
     public SlackActivity(
         ILogger<SlackActivity> logger,
         IIntegrationService integrationService,
@@ -70,7 +74,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
         var sessionId = SessionId.Get(context);
         var messageType = MessageType.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Executing Slack action {Action}",
             action);
 
@@ -91,7 +95,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
             // Log the event if session is provided
             if (sessionId.HasValue && result.Success)
             {
-                await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+                await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
                 {
                     SessionId = sessionId.Value,
                     EventType = Core.Entities.EventTypes.Info
@@ -102,7 +106,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Slack operation failed");
+            _logger?.LogError(ex, "Slack operation failed");
             context.SetResult(new SlackOperationResult
             {
                 Success = false,
@@ -128,7 +132,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
 
     private async Task<SlackOperationResult> SendToChannel(string channel, string message)
     {
-        await _integrationService.SendSlackMessageAsync(channel, message);
+        await _integrationService!.SendSlackMessageAsync(channel, message);
         return new SlackOperationResult
         {
             Success = true,
@@ -139,7 +143,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
 
     private async Task<SlackOperationResult> SendDirectMessage(string userId, string message)
     {
-        await _integrationService.SendSlackDirectMessageAsync(userId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(userId, message);
         return new SlackOperationResult
         {
             Success = true,
@@ -158,7 +162,7 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
 Please respond to this message with your answers.
 _This assessment will help me understand your current understanding and provide better guidance._";
 
-        await _integrationService.SendSlackDirectMessageAsync(userId, formattedMessage);
+        await _integrationService!.SendSlackDirectMessageAsync(userId, formattedMessage);
 
         return new SlackOperationResult
         {
@@ -178,7 +182,7 @@ _This assessment will help me understand your current understanding and provide 
 
 _Reply if you have questions or need more help!_";
 
-        await _integrationService.SendSlackDirectMessageAsync(userId, formattedMessage);
+        await _integrationService!.SendSlackDirectMessageAsync(userId, formattedMessage);
 
         return new SlackOperationResult
         {
@@ -193,12 +197,12 @@ _Reply if you have questions or need more help!_";
     {
         if (!string.IsNullOrEmpty(userId))
         {
-            await _integrationService.SendSlackDirectMessageAsync(userId, message);
+            await _integrationService!.SendSlackDirectMessageAsync(userId, message);
         }
 
         if (!string.IsNullOrEmpty(channel))
         {
-            await _integrationService.SendSlackMessageAsync(channel, message);
+            await _integrationService!.SendSlackMessageAsync(channel, message);
         }
 
         return new SlackOperationResult

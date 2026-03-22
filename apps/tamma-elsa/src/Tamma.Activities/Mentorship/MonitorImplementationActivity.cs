@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,9 +22,9 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
 {
-    private readonly ILogger<MonitorImplementationActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<MonitorImplementationActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -44,6 +45,9 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
     /// <summary>Check interval in minutes</summary>
     [Input(Description = "Check interval in minutes", DefaultValue = 5)]
     public Input<int> CheckInterval { get; set; } = new(5);
+
+    [JsonConstructor]
+    public MonitorImplementationActivity() { }
 
     public MonitorImplementationActivity(
         ILogger<MonitorImplementationActivity> logger,
@@ -66,20 +70,20 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         var monitoringDuration = MonitoringDuration.Get(context);
         var checkInterval = CheckInterval.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Starting implementation monitoring for junior {JuniorId} on story {StoryId}",
             juniorId, storyId);
 
         try
         {
             // Update session state
-            await _repository.UpdateStateAsync(sessionId, MentorshipState.MONITOR_PROGRESS);
+            await _repository!.UpdateStateAsync(sessionId, MentorshipState.MONITOR_PROGRESS);
 
             // Get story for context
             var story = await _repository.GetStoryByIdAsync(storyId);
             if (story == null)
             {
-                _logger.LogError("Story {StoryId} not found", storyId);
+                _logger?.LogError("Story {StoryId} not found", storyId);
                 context.SetResult(new ProgressOutput
                 {
                     Status = ProgressStatus.Error,
@@ -104,7 +108,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
                 StateTo = MentorshipState.MONITOR_PROGRESS
             });
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Progress analysis for junior {JuniorId}: Status={Status}, Reason={Reason}",
                 juniorId, analysis.Status, analysis.Reason);
 
@@ -112,7 +116,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during progress monitoring for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during progress monitoring for session {SessionId}", sessionId);
 
             context.SetResult(new ProgressOutput
             {
@@ -137,7 +141,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
             try
             {
                 // Get recent commits
-                var commits = await _integrationService.GetGitHubCommitsAsync(
+                var commits = await _integrationService!.GetGitHubCommitsAsync(
                     repositoryUrl,
                     $"feature/{storyId}",
                     DateTime.UtcNow.AddHours(-1));
@@ -167,7 +171,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to collect GitHub progress data");
+                _logger?.LogWarning(ex, "Failed to collect GitHub progress data");
             }
         }
 

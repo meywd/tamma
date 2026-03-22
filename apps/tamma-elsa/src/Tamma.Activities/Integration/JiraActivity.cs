@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Integration;
@@ -19,8 +20,8 @@ namespace Tamma.Activities.Integration;
 )]
 public class JiraActivity : CodeActivity<JiraOperationResult>
 {
-    private readonly ILogger<JiraActivity> _logger;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<JiraActivity>? _logger;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>JIRA action to perform</summary>
     [Input(Description = "Action: GetTicket, UpdateStatus, AddComment, LinkPR")]
@@ -46,6 +47,9 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
     [Input(Description = "Custom fields as key-value pairs")]
     public Input<Dictionary<string, object>?> CustomFields { get; set; } = default!;
 
+    [JsonConstructor]
+    public JiraActivity() { }
+
     public JiraActivity(
         ILogger<JiraActivity> logger,
         IIntegrationService integrationService)
@@ -66,7 +70,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         var prUrl = PullRequestUrl.Get(context);
         var customFields = CustomFields.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Executing JIRA action {Action} on ticket {TicketId}",
             action, ticketId);
 
@@ -86,7 +90,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "JIRA operation failed");
+            _logger?.LogError(ex, "JIRA operation failed");
             context.SetResult(new JiraOperationResult
             {
                 Success = false,
@@ -97,7 +101,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
 
     private async Task<JiraOperationResult> GetTicket(string ticketId)
     {
-        var ticket = await _integrationService.GetJiraTicketAsync(ticketId);
+        var ticket = await _integrationService!.GetJiraTicketAsync(ticketId);
 
         if (ticket == null)
         {
@@ -121,7 +125,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
 
     private async Task<JiraOperationResult> UpdateStatus(string ticketId, string newStatus)
     {
-        var result = await _integrationService.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
+        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
         {
             Status = newStatus
         });
@@ -139,7 +143,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
 
     private async Task<JiraOperationResult> AddComment(string ticketId, string comment)
     {
-        var result = await _integrationService.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
+        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
         {
             Comment = comment
         });
@@ -158,7 +162,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
     {
         var comment = $"**Pull Request Linked**\n\nPR: {prUrl}\n\n_Linked automatically by Tamma Mentorship System_";
 
-        var result = await _integrationService.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
+        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
         {
             Comment = comment
         });
@@ -176,7 +180,7 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
 
     private async Task<JiraOperationResult> UpdateCustomFields(string ticketId, Dictionary<string, object> fields)
     {
-        var result = await _integrationService.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
+        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
         {
             CustomFields = fields
         });

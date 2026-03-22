@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,9 +22,9 @@ namespace Tamma.Activities.AI;
 )]
 public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
 {
-    private readonly ILogger<SuggestionGeneratorActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IAnalyticsService _analyticsService;
+    private readonly ILogger<SuggestionGeneratorActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -49,6 +50,9 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
     [Input(Description = "Maximum suggestions", DefaultValue = 5)]
     public Input<int> MaxSuggestions { get; set; } = new(5);
 
+    [JsonConstructor]
+    public SuggestionGeneratorActivity() { }
+
     public SuggestionGeneratorActivity(
         ILogger<SuggestionGeneratorActivity> logger,
         IMentorshipSessionRepository repository,
@@ -71,14 +75,14 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
         var analysisResults = AnalysisResults.Get(context);
         var maxSuggestions = MaxSuggestions.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Generating {Type} suggestions for junior {JuniorId}",
             suggestionType, juniorId);
 
         try
         {
             // Get junior's profile for personalization
-            var junior = await _repository.GetJuniorByIdAsync(juniorId);
+            var junior = await _repository!.GetJuniorByIdAsync(juniorId);
 
             if (junior == null)
             {
@@ -91,7 +95,7 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
             }
 
             // Get behavior patterns for context
-            var patterns = await _analyticsService.DetectPatternsAsync(juniorId);
+            var patterns = await _analyticsService!.DetectPatternsAsync(juniorId);
 
             // Generate suggestions based on type
             var suggestions = suggestionType switch
@@ -118,20 +122,20 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
             suggestions = PrioritizeSuggestions(suggestions, patterns, junior.SkillLevel);
 
             // Log the suggestion generation
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
                 EventType = Core.Entities.EventTypes.SuggestionsGenerated
             });
 
             // Record analytics
-            await _analyticsService.RecordMetricAsync(
+            await _analyticsService!.RecordMetricAsync(
                 sessionId,
                 "suggestions_generated",
                 suggestions.Count,
                 "count");
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Generated {Count} suggestions for junior {JuniorId}",
                 suggestions.Count, juniorId);
 
@@ -146,7 +150,7 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error generating suggestions for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error generating suggestions for session {SessionId}", sessionId);
 
             context.SetResult(new SuggestionsOutput
             {

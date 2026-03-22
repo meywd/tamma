@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,10 +22,10 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 {
-    private readonly ILogger<CodeReviewActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
-    private readonly IAnalyticsService _analyticsService;
+    private readonly ILogger<CodeReviewActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
+    private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -45,6 +46,9 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
     /// <summary>Existing pull request number (for Monitor/RequestChanges)</summary>
     [Input(Description = "Existing PR number")]
     public Input<int?> PullRequestNumber { get; set; } = default!;
+
+    [JsonConstructor]
+    public CodeReviewActivity() { }
 
     public CodeReviewActivity(
         ILogger<CodeReviewActivity> logger,
@@ -69,13 +73,13 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         var action = Action.Get(context);
         var prNumber = PullRequestNumber.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Code review action {Action} for junior {JuniorId} on story {StoryId}",
             action, juniorId, storyId);
 
         try
         {
-            var story = await _repository.GetStoryByIdAsync(storyId);
+            var story = await _repository!.GetStoryByIdAsync(storyId);
             var junior = await _repository.GetJuniorByIdAsync(juniorId);
 
             if (story == null || junior == null)
@@ -122,7 +126,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during code review for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during code review for session {SessionId}", sessionId);
 
             context.SetResult(new CodeReviewOutput
             {
@@ -139,7 +143,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         Core.Entities.Story story,
         Core.Entities.JuniorDeveloper junior)
     {
-        await _repository.UpdateStateAsync(sessionId, MentorshipState.PREPARE_CODE_REVIEW);
+        await _repository!.UpdateStateAsync(sessionId, MentorshipState.PREPARE_CODE_REVIEW);
 
         if (string.IsNullOrEmpty(story.RepositoryUrl))
         {
@@ -153,12 +157,12 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         }
 
         // Get file changes for PR description
-        var fileChanges = await _integrationService.GetGitHubFileChangesAsync(
+        var fileChanges = await _integrationService!.GetGitHubFileChangesAsync(
             story.RepositoryUrl,
             $"feature/{story.Id}");
 
         // Get recent commits for context
-        var commits = await _integrationService.GetGitHubCommitsAsync(
+        var commits = await _integrationService!.GetGitHubCommitsAsync(
             story.RepositoryUrl,
             $"feature/{story.Id}",
             DateTime.UtcNow.AddDays(-7));
@@ -167,7 +171,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         var prBody = BuildPullRequestBody(story, junior, fileChanges, commits);
 
         // Create the pull request
-        var prResult = await _integrationService.CreateGitHubPullRequestAsync(
+        var prResult = await _integrationService!.CreateGitHubPullRequestAsync(
             story.RepositoryUrl,
             new CreatePullRequestRequest
             {
@@ -196,9 +200,9 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         }
 
         // Record analytics
-        await _analyticsService.RecordMetricAsync(sessionId, "pr_created", 1);
+        await _analyticsService!.RecordMetricAsync(sessionId, "pr_created", 1);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Created pull request #{PrNumber} for story {StoryId}",
             prResult.Number, story.Id);
 
@@ -227,7 +231,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         Core.Entities.JuniorDeveloper junior,
         int? prNumber)
     {
-        await _repository.UpdateStateAsync(sessionId, MentorshipState.MONITOR_REVIEW);
+        await _repository!.UpdateStateAsync(sessionId, MentorshipState.MONITOR_REVIEW);
 
         if (!prNumber.HasValue || string.IsNullOrEmpty(story.RepositoryUrl))
         {
@@ -249,12 +253,12 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
                 // Notify junior about approval
                 if (!string.IsNullOrEmpty(junior.SlackId))
                 {
-                    await _integrationService.SendSlackDirectMessageAsync(
+                    await _integrationService!.SendSlackDirectMessageAsync(
                         junior.SlackId,
                         $"Great news! Your PR #{prNumber} has been approved! Proceeding to merge.");
                 }
 
-                await _analyticsService.RecordMetricAsync(sessionId, "pr_approved", 1);
+                await _analyticsService!.RecordMetricAsync(sessionId, "pr_approved", 1);
 
                 return new CodeReviewOutput
                 {
@@ -309,7 +313,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         Core.Entities.JuniorDeveloper junior,
         int? prNumber)
     {
-        await _repository.UpdateStateAsync(sessionId, MentorshipState.GUIDE_FIXES);
+        await _repository!.UpdateStateAsync(sessionId, MentorshipState.GUIDE_FIXES);
 
         if (!prNumber.HasValue)
         {
@@ -339,10 +343,10 @@ Here's help addressing the review feedback on PR #{prNumber}:
 
 After making changes, the PR will be re-reviewed automatically.";
 
-            await _integrationService.SendSlackDirectMessageAsync(junior.SlackId, message);
+            await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
         }
 
-        await _analyticsService.RecordMetricAsync(sessionId, "review_changes_guided", commentGuidance.Count);
+        await _analyticsService!.RecordMetricAsync(sessionId, "review_changes_guided", commentGuidance.Count);
 
         return new CodeReviewOutput
         {
@@ -516,7 +520,7 @@ Your code is ready for review!
 
 A reviewer will look at your code soon. You'll be notified when there's feedback.";
 
-        await _integrationService.SendSlackDirectMessageAsync(slackId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
     }
 
     private async Task NotifyChangesRequested(string slackId, int prNumber, List<ReviewComment> comments)
@@ -529,7 +533,7 @@ Your PR #{prNumber} has received feedback. {comments.Count} change(s) requested:
 
 I'll send you guidance on how to address each item shortly.";
 
-        await _integrationService.SendSlackDirectMessageAsync(slackId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
     }
 }
 
