@@ -4,6 +4,7 @@ using Elsa.EntityFrameworkCore.Modules.Runtime;
 using Elsa.Extensions;
 using Serilog;
 using Tamma.Activities.AI;
+using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,8 +65,11 @@ builder.Services.AddElsa(elsa =>
             httpOptions.BaseUrl = new Uri(
                 builder.Configuration["Elsa:Server:BaseUrl"] ?? "http://localhost:5000"));
 
-    // Register all 14 custom Tamma activities from the Activities assembly
+    // Register all custom Tamma activities from the Activities assembly
     elsa.AddActivitiesFrom<ClaudeAnalysisActivity>();
+
+    // Register all code-first WorkflowBase subclasses from the ElsaServer assembly
+    elsa.AddWorkflowsFrom<LlmCallWorkflow>();
 });
 
 // CORS for Tamma API and Dashboard

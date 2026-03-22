@@ -72,4 +72,23 @@ public static class EventTypes
     public const string ContextGathered = "context_gathered";
     public const string MergeCompleted = "merge_completed";
     public const string SkillLevelUpdated = "skill_level_updated";
+
+    // Phase 3 event types (Story 7-1A workflow states)
+    public const string SessionStarted = "session_started";
+    public const string StoryValidated = "story_validated";
+    public const string RequirementsClarified = "requirements_clarified";
+    public const string StoryReExplained = "story_re_explained";
+    public const string PlanCreated = "plan_created";
+    public const string PlanReviewed = "plan_reviewed";
+    public const string PlanAdjusted = "plan_adjusted";
+    public const string ImplementationStarted = "implementation_started";
+    public const string PatternDetected = "pattern_detected";
+    public const string AutoFixAttempted = "auto_fix_attempted";
+    public const string ManualFixRequired = "manual_fix_required";
+    public const string ReviewReRequested = "review_re_requested";
+    public const string EscalatedToSenior = "escalated_to_senior";
+    public const string SessionCancelled = "session_cancelled";
+    public const string SessionTimedOut = "session_timed_out";
+    public const string ReportGenerated = "report_generated";
+    public const string SkillProfileUpdated = "skill_profile_updated";
 }

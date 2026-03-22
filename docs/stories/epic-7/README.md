@@ -8,6 +8,8 @@ The mentorship workflow autonomously handles the full lifecycle: assessing a jun
 
 ## Stories
 
+### Core Stories
+
 | Story | Title | Priority | Status |
 |-------|-------|----------|--------|
 | 7-1 | Mentorship State Machine Core | P1 | Planned |
@@ -20,6 +22,46 @@ The mentorship workflow autonomously handles the full lifecycle: assessing a jun
 | 7-8 | Quality Gate & Auto-Fix Pipeline | P2 | Planned |
 | 7-9 | Code Review & Merge Workflow | P2 | Planned |
 | 7-10 | TypeScript Engine Bridge & Session API | P1 | Planned |
+
+### ELSA Sub-Workflow Stories
+
+These stories elevate the TypeScript-level logic from the core stories into code-first ELSA workflows — composable, auditable, pausable/resumable, and visible in ELSA Studio.
+
+| Story | Title | Enhances | Priority | Status |
+|-------|-------|----------|----------|--------|
+| 7-1A | Main Mentorship Workflow (Code-First Flowchart) | 7-1 | P1 | Planned |
+| 7-1B | LLM Call Sub-Workflow | 9-1, 9-3, 9-5 | P1 | Planned |
+| 7-1C | Testing Sub-Workflow | 7-7, 7-8 | P1 | Planned |
+| 7-1D | Code Review Sub-Workflow | 7-9 | P2 | Planned |
+| 7-1E | Assessment Sub-Workflow | 7-2, 7-4 | P1 | Planned |
+| 7-1F | Context Gathering Sub-Workflow | 7-3 | P1 | Planned |
+| 7-1G | Blocker Diagnosis Sub-Workflow | 7-6, 7-5 | P2 | Planned |
+| 7-1H | TDD Sub-Workflow | New | P1 | Planned |
+| 7-1I | Debugging Sub-Workflow | New | P1 | Planned |
+
+#### Sub-Workflow Dependency Graph
+
+```
+7-1B (LLM Call) ← foundation, no deps
+7-1F (Context)  ← no deps (uses GitHub/DB directly)
+
+7-1C (Testing)     ← needs 7-1B
+7-1E (Assessment)  ← needs 7-1B, 7-1F
+7-1D (Code Review) ← needs 7-1B
+7-1G (Blocker)     ← needs 7-1B, 7-1F
+7-1I (Debugging)   ← needs 7-1B, 7-1C, 7-1F
+7-1H (TDD)         ← needs 7-1B, 7-1C, 7-1I
+
+7-1A (Main Workflow) ← needs all of the above
+```
+
+#### Implementation Order
+
+1. **Parallel**: 7-1B (LLM Call) + 7-1F (Context Gathering) — no dependencies
+2. **Parallel**: 7-1C (Testing) + 7-1E (Assessment) + 7-1D (Code Review) + 7-1G (Blocker) — depend on 7-1B/7-1F
+3. **Sequential**: 7-1I (Debugging) — needs Testing
+4. **Sequential**: 7-1H (TDD) — needs Testing + Debugging
+5. **Final**: 7-1A (Main Workflow) — wires everything together
 
 ## Architecture
 
@@ -139,6 +181,22 @@ The mentorship workflow is driven by a 28-state machine defined in `Tamma.Core.E
 - Implement blocker diagnosis and resolution workflow
 - Build quality gate pipeline with auto-fix capabilities
 - Implement code review creation, monitoring, fix guidance, and merge automation
+
+### Phase 5: ELSA Sub-Workflows (Stories 7-1A through 7-1I)
+Elevate all core story logic into code-first ELSA workflows, replacing the JSON-based `WorkflowSeeder` approach.
+
+- **Foundation** (7-1B, 7-1F): LLM Call with provider chain/circuit breaker, Context Gathering with parallel fetching
+- **Capabilities** (7-1C, 7-1D, 7-1E, 7-1G): Testing pipeline, Code Review lifecycle, Assessment, Blocker Diagnosis
+- **New Workflows** (7-1H, 7-1I): TDD red-green-refactor cycle, Systematic Debugging (3 modes)
+- **Main Workflow** (7-1A): 28-state Flowchart wiring all sub-workflows together
+
+Key design principles:
+- All logic in ELSA workflows (not TypeScript classes) — every retry, fallback, and decision is a visible activity
+- Config-driven: provider chains, prompts, tools, thresholds from `appsettings.json`/env vars
+- Composable: each sub-workflow standalone AND callable as child workflow
+- LLM Call (7-1B) is the universal building block — all AI interactions go through it
+- Bookmark-based waiting at external events (CI results, review decisions, junior responses)
+- Code-first C# definitions registered at startup, visible in ELSA Studio
 
 ## Existing Implementation
 
