@@ -102,6 +102,43 @@ public class IntegrationService : IIntegrationService
         return result.Data!;
     }
 
+    public async Task<List<GitHubIssue>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open")
+    {
+        var result = await _github.ListGitHubIssuesAsync(repository, labels, state);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
+    public async Task AssignGitHubIssueAsync(string repository, int issueNumber, string assignee)
+    {
+        var result = await _github.AssignGitHubIssueAsync(repository, issueNumber, assignee);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+    }
+
+    public async Task CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null)
+    {
+        var result = await _github.CloseGitHubIssueAsync(repository, issueNumber, comment);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+    }
+
+    public async Task DeleteGitHubBranchAsync(string repository, string branchName)
+    {
+        var result = await _github.DeleteGitHubBranchAsync(repository, branchName);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+    }
+
+    public async Task<List<GitHubReviewComment>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber)
+    {
+        var result = await _github.GetPullRequestReviewCommentsAsync(repository, pullRequestNumber);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
     // ============================================
     // CI/CD delegation
     // ============================================

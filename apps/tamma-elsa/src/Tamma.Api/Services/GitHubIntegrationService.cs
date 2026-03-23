@@ -214,4 +214,157 @@ public class GitHubIntegrationService : IGitHubIntegrationService
             return IntegrationResult<List<GitHubFileChange>>.Fail(ex.Message);
         }
     }
+
+    public async Task<IntegrationResult<List<GitHubIssue>>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open")
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var url = $"/repos/{repository}/issues?state={state}&per_page=20";
+            if (labels is { Length: > 0 })
+                url += $"&labels={string.Join(",", labels)}";
+
+            var response = await httpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var results = new List<GitHubIssue>();
+
+            foreach (var issue in data.EnumerateArray())
+            {
+                // Skip pull requests (GitHub returns PRs in the issues endpoint)
+                if (issue.TryGetProperty("pull_request", out _))
+                    continue;
+
+                var issueLabels = new List<string>();
+                if (issue.TryGetProperty("labels", out var labelsArr))
+                {
+                    foreach (var label in labelsArr.EnumerateArray())
+                    {
+                        var name = label.GetProperty("name").GetString();
+                        if (name != null) issueLabels.Add(name);
+                    }
+                }
+
+                results.Add(new GitHubIssue
+                {
+                    Number = issue.GetProperty("number").GetInt32(),
+                    Title = issue.GetProperty("title").GetString() ?? "",
+                    Body = issue.TryGetProperty("body", out var b) ? b.GetString() : null,
+                    State = issue.GetProperty("state").GetString() ?? "open",
+                    Labels = issueLabels,
+                    Assignee = issue.TryGetProperty("assignee", out var a) && a.ValueKind != JsonValueKind.Null
+                        ? a.GetProperty("login").GetString() : null,
+                    CreatedAt = issue.GetProperty("created_at").GetDateTime(),
+                    Url = issue.GetProperty("html_url").GetString() ?? ""
+                });
+            }
+
+            return IntegrationResult<List<GitHubIssue>>.Ok(results);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list issues for {Repo}", repository);
+            return IntegrationResult<List<GitHubIssue>>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> AssignGitHubIssueAsync(string repository, int issueNumber, string assignee)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var payload = new { assignees = new[] { assignee } };
+            var response = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/issues/{issueNumber}/assignees", payload);
+            response.EnsureSuccessStatusCode();
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to assign issue #{Number} in {Repo}", issueNumber, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            if (!string.IsNullOrEmpty(comment))
+            {
+                var commentPayload = new { body = comment };
+                await httpClient.PostAsJsonAsync(
+                    $"/repos/{repository}/issues/{issueNumber}/comments", commentPayload);
+            }
+
+            var payload = new { state = "closed" };
+            var response = await httpClient.PatchAsJsonAsync(
+                $"/repos/{repository}/issues/{issueNumber}", payload);
+            response.EnsureSuccessStatusCode();
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to close issue #{Number} in {Repo}", issueNumber, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> DeleteGitHubBranchAsync(string repository, string branchName)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var response = await httpClient.DeleteAsync(
+                $"/repos/{repository}/git/refs/heads/{branchName}");
+            response.EnsureSuccessStatusCode();
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete branch {Branch} in {Repo}", branchName, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<List<GitHubReviewComment>>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var response = await httpClient.GetAsync(
+                $"/repos/{repository}/pulls/{pullRequestNumber}/comments");
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var results = new List<GitHubReviewComment>();
+
+            foreach (var comment in data.EnumerateArray())
+            {
+                results.Add(new GitHubReviewComment
+                {
+                    Id = comment.GetProperty("id").GetInt32(),
+                    Body = comment.GetProperty("body").GetString() ?? "",
+                    Path = comment.TryGetProperty("path", out var p) ? p.GetString() : null,
+                    Line = comment.TryGetProperty("line", out var l) && l.ValueKind == JsonValueKind.Number ? l.GetInt32() : null,
+                    Author = comment.GetProperty("user").GetProperty("login").GetString() ?? "",
+                    CreatedAt = comment.GetProperty("created_at").GetDateTime()
+                });
+            }
+
+            return IntegrationResult<List<GitHubReviewComment>>.Ok(results);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get review comments for PR #{Number} in {Repo}", pullRequestNumber, repository);
+            return IntegrationResult<List<GitHubReviewComment>>.Fail(ex.Message);
+        }
+    }
 }
