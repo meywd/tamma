@@ -39,6 +39,7 @@ public class MergeApprovalWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "MergeApprovalFlowchart",
+            Name = "Merge Approval Flowchart",
             Start = waitMerge,
             Activities = { waitMerge, outputDecision, outputFeedback },
             Connections =

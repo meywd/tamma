@@ -73,6 +73,7 @@ public class CodeReviewWorkflow : WorkflowBase
         var storePRResult = new SetVariable
         {
             Id = "StorePRResult",
+            Name = "StorePRResult",
             Variable = prNumber,
             Value = Expr<object?>(ctx =>
             {
@@ -85,7 +86,6 @@ public class CodeReviewWorkflow : WorkflowBase
                 return 0;
             })
         };
-        storePRResult.Name = "StorePRResult";
 
         var prCreatedCheck = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
         { Id = "PRCreatedCheck", Name = "PRCreatedCheck" };
@@ -115,6 +115,7 @@ public class CodeReviewWorkflow : WorkflowBase
         var storeReviewComments = new SetVariable
         {
             Id = "StoreReviewComments",
+            Name = "StoreReviewComments",
             Variable = reviewCommentsJson,
             Value = Expr<object?>(ctx =>
             {
@@ -126,16 +127,15 @@ public class CodeReviewWorkflow : WorkflowBase
                 return "[]";
             })
         };
-        storeReviewComments.Name = "StoreReviewComments";
 
         // 6. Increment iteration counter
         var incrementIteration = new SetVariable
         {
             Id = "IncrementIteration",
+            Name = "IncrementIteration",
             Variable = iteration,
             Value = Expr<object?>(ctx => (object)(iteration.Get(ctx) + 1))
         };
-        incrementIteration.Name = "IncrementIteration";
 
         // 7. Deliver fix guidance
         var deliverGuidance = new DeliverGuidanceActivity

@@ -68,6 +68,7 @@ public class BranchCreationWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "BranchCreationFlowchart",
+            Name = "Branch Creation Flowchart",
             Start = createBranch,
             Activities = { createBranch, setSuccess, outputSuccess, outputBranchName },
             Connections =

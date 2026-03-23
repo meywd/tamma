@@ -324,6 +324,8 @@ public class TddWorkflow : WorkflowBase
         // ============================
         builder.Root = new Flowchart
         {
+            Id = "TddCycleFlowchart",
+            Name = "TDD Cycle Flowchart",
             Activities =
             {
                 // Init
@@ -447,9 +449,11 @@ public class TddWorkflow : WorkflowBase
     /// </summary>
     private static SetVariable Assign(Variable variable, Func<ExpressionExecutionContext, object?> valueFunc, string? id = null)
     {
+        var activityId = id ?? Guid.NewGuid().ToString("N")[..8];
         return new SetVariable
         {
-            Id = id ?? Guid.NewGuid().ToString("N")[..8],
+            Id = activityId,
+            Name = activityId,
             Variable = variable,
             Value = new Input<object?>(valueFunc)
         };

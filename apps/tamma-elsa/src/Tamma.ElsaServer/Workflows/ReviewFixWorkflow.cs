@@ -68,6 +68,7 @@ public class ReviewFixWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "ReviewFixFlowchart",
+            Name = "Review Fix Flowchart",
             Start = analyze,
             Activities = { analyze, hasActionable, generateFixes, applyFixes, outputSuccess, outputHasComments, outputFixesApplied },
             Connections =

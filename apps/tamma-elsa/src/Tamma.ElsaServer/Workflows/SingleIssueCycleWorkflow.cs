@@ -585,6 +585,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // ================================================================
         builder.Root = new Flowchart
         {
+            Id = "SingleIssueCycleFlowchart",
+            Name = "Single Issue Cycle Flowchart",
             Start = initConfig,
             Activities =
             {

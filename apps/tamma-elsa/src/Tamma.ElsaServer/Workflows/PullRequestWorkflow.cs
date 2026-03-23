@@ -43,6 +43,7 @@ public class PullRequestWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "PullRequestFlowchart",
+            Name = "Pull Request Flowchart",
             Start = createPr,
             Activities = { createPr, outputSuccess, outputPrNumber, outputPrUrl },
             Connections =

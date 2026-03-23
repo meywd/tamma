@@ -46,6 +46,7 @@ public class IssueSelectionWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "IssueSelectionFlowchart",
+            Name = "Issue Selection Flowchart",
             Start = selectIssue,
             Activities = { selectIssue, outputSuccess, outputIssueJson, outputIssueNumber, outputIssueTitle },
             Connections =

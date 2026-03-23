@@ -388,7 +388,7 @@ public class TestingWorkflow : WorkflowBase
         // ============================================
         // Build the Flowchart
         // ============================================
-        var flowchart = new Flowchart();
+        var flowchart = new Flowchart { Id = "TestingPipelineFlowchart", Name = "Testing Pipeline Flowchart" };
 
         // Add all activities to the flowchart
         var allActivities = new IActivity[]

@@ -40,6 +40,7 @@ public class MergeWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "MergeFlowchart",
+            Name = "Merge Flowchart",
             Start = mergePr,
             Activities = { mergePr, setSuccess, outputSuccess, outputMergeSha },
             Connections =
