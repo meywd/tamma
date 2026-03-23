@@ -11,6 +11,8 @@ using Elsa.Workflows.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 namespace Tamma.ElsaServer.Workflows;
 
@@ -32,17 +34,13 @@ namespace Tamma.ElsaServer.Workflows;
 ///   - success (bool): Whether the call succeeded
 ///   - workflowOutput (string): Full serialized LlmCallWorkflowOutput JSON
 ///
+/// Design: Flowchart with visible nodes for each phase in ELSA Studio.
+///
 /// Flow:
-///   1. Initialize variables from workflow input
-///   2. Resolve provider chain from config (AgentsConfig:ProviderChains:{agentRole})
-///   3. For each provider in the chain:
-///      a. Check circuit breaker → skip if Open
-///      b. Check budget → skip if exhausted
-///      c. Resolve prompt (via ResolveLlmPromptActivity, 6-level hierarchy)
-///      d. Call LLM API (with retry on transient failures)
-///      e. Record diagnostics (update circuit breaker + budget)
-///      f. If success → break, else → next provider
-///   4. Set workflow outputs via SetOutput
+///   InitInputs → SetupBudget → ResolveChain → ForEachProviderChain
+///     → FailureCheck → [success?]
+///       Yes → SetOutputs
+///       No  → BuildFailureOutput → SetOutputs
 /// </summary>
 public class LlmCallWorkflow : WorkflowBase
 {
@@ -81,245 +79,272 @@ public class LlmCallWorkflow : WorkflowBase
         var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
 
         // ============================================================
-        // Workflow body
+        // Activities
         // ============================================================
 
-        builder.Root = new Sequence
+        // 1. Initialize from input — supports both new typed inputs and legacy InputJson
+        var initInputs = new SetVariable
         {
-            Activities =
+            Id = "InitInputs",
+            Name = "Initialize Inputs",
+            Variable = agentRoleVar,
+            Value = new(context => {
+                // Try new typed inputs first
+                var role = context.GetInput<string>("agentRole");
+                if (!string.IsNullOrWhiteSpace(role))
+                {
+                    taskPromptVar.Set(context, context.GetInput<string>("taskPrompt") ?? "");
+                    contextVar.Set(context, context.GetInput<string>("context") ?? "");
+                    sessionIdVar.Set(context, context.GetInput<string>("sessionId") ?? "");
+                    return role;
+                }
+
+                // Fall back to legacy InputJson
+                var raw = context.GetInput<string>("InputJson") ?? "{}";
+                inputVar.Set(context, raw);
+                var input = ParseInput(raw);
+                taskPromptVar.Set(context, input.UserPrompt);
+                contextVar.Set(context, "");
+                sessionIdVar.Set(context, input.CorrelationId ?? "");
+
+                // Also check dict-style inputs (from BlockerDiagnosis etc.)
+                var dictRole = context.GetInput<string>("role");
+                if (!string.IsNullOrWhiteSpace(dictRole))
+                {
+                    var content = context.GetInput<string>("content") ?? "";
+                    taskPromptVar.Set(context, content);
+                    return dictRole;
+                }
+
+                return input.Role ?? "assistant";
+            })
+        };
+
+        // 2. Parse input and set up budget
+        var setupBudget = new SetVariable
+        {
+            Id = "SetupBudget",
+            Name = "Setup Budget",
+            Variable = budgetStateVar,
+            Value = new(context => {
+                var raw = inputVar.Get(context);
+                var input = ParseInput(raw);
+                return JsonSerializer.Serialize(new BudgetState { CapUsd = input.BudgetCapUsd });
+            })
+        };
+
+        // 3. Resolve provider chain from config
+        var resolveChain = new SetVariable
+        {
+            Id = "ResolveChain",
+            Name = "Resolve Provider Chain",
+            Variable = providerChainVar,
+            Value = new(context => {
+                var role = agentRoleVar.Get(context) ?? "default";
+                var raw = inputVar.Get(context);
+                var input = ParseInput(raw);
+
+                // If caller provided an explicit chain, use it
+                if (input.ProviderChain.Count > 0)
+                    return (object)input.ProviderChain;
+
+                // Otherwise resolve from config: AgentsConfig:ProviderChains:{role}
+                // Config isn't available in expression lambdas, so fall back to default
+                var chain = new List<string> { "anthropic", "openai", "openrouter" };
+                return (object)chain;
+            })
+        };
+
+        // 4. ForEach provider in chain — kept as a Sequence-bodied ForEach (composite activity)
+        var forEachProviders = new ForEach<string>
+        {
+            Id = "ForEachProviderChain",
+            Name = "For Each Provider",
+            Items = new(context => {
+                var role = agentRoleVar.Get(context) ?? "default";
+                var raw = inputVar.Get(context);
+                var input = ParseInput(raw);
+
+                if (input.ProviderChain.Count > 0)
+                    return (ICollection<string>)input.ProviderChain;
+
+                return (ICollection<string>)new List<string> { "anthropic", "openai", "openrouter" };
+            }),
+            Body = new Sequence
             {
-                // ── Step 1: Initialize from input ─────────────────────
-                // Supports both new typed inputs and legacy InputJson format
-                new SetVariable
+                Id = "ProviderIterationBody",
+                Name = "Provider Iteration",
+                Activities =
                 {
-                    Variable = agentRoleVar,
-                    Value = new(context => {
-                        // Try new typed inputs first
-                        var role = context.GetInput<string>("agentRole");
-                        if (!string.IsNullOrWhiteSpace(role))
-                        {
-                            taskPromptVar.Set(context, context.GetInput<string>("taskPrompt") ?? "");
-                            contextVar.Set(context, context.GetInput<string>("context") ?? "");
-                            sessionIdVar.Set(context, context.GetInput<string>("sessionId") ?? "");
-                            return role;
-                        }
-
-                        // Fall back to legacy InputJson
-                        var raw = context.GetInput<string>("InputJson") ?? "{}";
-                        inputVar.Set(context, raw);
-                        var input = ParseInput(raw);
-                        taskPromptVar.Set(context, input.UserPrompt);
-                        contextVar.Set(context, "");
-                        sessionIdVar.Set(context, input.CorrelationId ?? "");
-
-                        // Also check dict-style inputs (from BlockerDiagnosis etc.)
-                        var dictRole = context.GetInput<string>("role");
-                        if (!string.IsNullOrWhiteSpace(dictRole))
-                        {
-                            var content = context.GetInput<string>("content") ?? "";
-                            taskPromptVar.Set(context, content);
-                            return dictRole;
-                        }
-
-                        return input.Role ?? "assistant";
-                    })
-                },
-
-                // Parse input and set up budget
-                new SetVariable
-                {
-                    Variable = budgetStateVar,
-                    Value = new(context => {
-                        var raw = inputVar.Get(context);
-                        var input = ParseInput(raw);
-                        return JsonSerializer.Serialize(new BudgetState { CapUsd = input.BudgetCapUsd });
-                    })
-                },
-
-                // ── Step 2: Resolve provider chain from config ────────
-                new SetVariable
-                {
-                    Variable = providerChainVar,
-                    Value = new(context => {
-                        var role = agentRoleVar.Get(context) ?? "default";
-                        var raw = inputVar.Get(context);
-                        var input = ParseInput(raw);
-
-                        // If caller provided an explicit chain, use it
-                        if (input.ProviderChain.Count > 0)
-                            return (object)input.ProviderChain;
-
-                        // Otherwise resolve from config: AgentsConfig:ProviderChains:{role}
-                        // Config isn't available in expression lambdas, so fall back to default
-                        var chain = new List<string> { "anthropic", "openai", "openrouter" };
-                        return (object)chain;
-                    })
-                },
-
-                // ── Step 3: Iterate over provider chain ───────────────
-                new ForEach<string>
-                {
-                    Items = new(context => {
-                        var role = agentRoleVar.Get(context) ?? "default";
-                        var raw = inputVar.Get(context);
-                        var input = ParseInput(raw);
-
-                        if (input.ProviderChain.Count > 0)
-                            return (ICollection<string>)input.ProviderChain;
-
-                        return (ICollection<string>)new List<string> { "anthropic", "openai", "openrouter" };
-                    }),
-                    Body = new Sequence
+                    // ── Skip if already succeeded ──
+                    new If
                     {
-                        Activities =
+                        Id = "SkipIfSucceeded",
+                        Name = "Already Succeeded?",
+                        Condition = new(context => successVar.Get(context)),
+                        Then = new Sequence { Id = "SkipNoop", Name = "Skip (No-op)", Activities = { /* skip */ } },
+                        Else = new Sequence
                         {
-                            // ── Skip if already succeeded ──
-                            new If
+                            Id = "TryProvider",
+                            Name = "Try Provider",
+                            Activities =
                             {
-                                Condition = new(context => successVar.Get(context)),
-                                Then = new Sequence { Activities = { /* skip — do nothing */ } },
-                                Else = new Sequence
+                                // Set current provider from the ForEach current value
+                                new SetVariable
                                 {
-                                    Activities =
+                                    Id = "SetCurrentProvider",
+                                    Name = "Set Current Provider",
+                                    Variable = currentProviderVar,
+                                    Value = new(context => context.GetVariable<string>("CurrentValue") ?? "anthropic")
+                                },
+
+                                // Reset attempt counter
+                                new SetVariable
+                                {
+                                    Id = "ResetAttemptNumber",
+                                    Name = "Reset Attempt",
+                                    Variable = attemptNumberVar,
+                                    Value = new(1)
+                                },
+
+                                // ── 3a. Check circuit breaker ──
+                                new If
+                                {
+                                    Id = "CheckCircuitBreaker",
+                                    Name = "Circuit Breaker Open?",
+                                    Condition = new(context => {
+                                        var provider = currentProviderVar.Get(context);
+                                        var statesJson = circuitBreakerStatesVar.Get(context);
+                                        return IsCircuitBreakerOpen(provider, statesJson);
+                                    }),
+                                    // Circuit breaker is OPEN → skip this provider
+                                    Then = new Sequence
                                     {
-                                        // Set current provider from the ForEach current value
-                                        new SetVariable
+                                        Id = "RecordCBSkip",
+                                        Name = "Record CB Skip",
+                                        Activities =
                                         {
-                                            Variable = currentProviderVar,
-                                            Value = new(context => context.GetVariable<string>("CurrentValue") ?? "anthropic")
-                                        },
-
-                                        // Reset attempt counter
-                                        new SetVariable
-                                        {
-                                            Variable = attemptNumberVar,
-                                            Value = new(1)
-                                        },
-
-                                        // ── 3a. Check circuit breaker ──
-                                        new If
-                                        {
-                                            Condition = new(context => {
-                                                var provider = currentProviderVar.Get(context);
-                                                var statesJson = circuitBreakerStatesVar.Get(context);
-                                                return IsCircuitBreakerOpen(provider, statesJson);
-                                            }),
-                                            // Circuit breaker is OPEN → skip this provider
-                                            Then = new Sequence
+                                            new SetVariable
                                             {
-                                                Activities =
-                                                {
-                                                    new SetVariable
+                                                Id = "DiagCBSkip",
+                                                Name = "Diag: CB Skip",
+                                                Variable = diagnosticsListVar,
+                                                Value = new(context => {
+                                                    var list = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
+                                                    var newList = new List<ProviderAttemptDiagnostic>(list);
+                                                    newList.Add(new ProviderAttemptDiagnostic
                                                     {
-                                                        Variable = diagnosticsListVar,
-                                                        Value = new(context => {
-                                                            var list = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
-                                                            var newList = new List<ProviderAttemptDiagnostic>(list);
-                                                            newList.Add(new ProviderAttemptDiagnostic
-                                                            {
-                                                                ProviderName = currentProviderVar.Get(context) ?? "",
-                                                                AttemptNumber = 0,
-                                                                Succeeded = false,
-                                                                CircuitBreakerSkipped = true,
-                                                                StartedAtUtc = DateTime.UtcNow,
-                                                                ErrorMessage = "Circuit breaker is open"
-                                                            });
-                                                            return JsonSerializer.Serialize(newList);
-                                                        })
-                                                    }
-                                                }
-                                            },
-                                            // Circuit breaker is CLOSED or HALF_OPEN → proceed
-                                            Else = new Sequence
+                                                        ProviderName = currentProviderVar.Get(context) ?? "",
+                                                        AttemptNumber = 0,
+                                                        Succeeded = false,
+                                                        CircuitBreakerSkipped = true,
+                                                        StartedAtUtc = DateTime.UtcNow,
+                                                        ErrorMessage = "Circuit breaker is open"
+                                                    });
+                                                    return JsonSerializer.Serialize(newList);
+                                                })
+                                            }
+                                        }
+                                    },
+                                    // Circuit breaker is CLOSED or HALF_OPEN → proceed
+                                    Else = new Sequence
+                                    {
+                                        Id = "CBClosed",
+                                        Name = "CB Closed",
+                                        Activities =
+                                        {
+                                            // ── 3b. Check budget ──
+                                            new If
                                             {
-                                                Activities =
+                                                Id = "CheckBudget",
+                                                Name = "Budget Exhausted?",
+                                                Condition = new(context => {
+                                                    var budgetJson = budgetStateVar.Get(context);
+                                                    return IsBudgetExhausted(budgetJson);
+                                                }),
+                                                // Budget exhausted → skip
+                                                Then = new Sequence
                                                 {
-                                                    // ── 3b. Check budget ──
-                                                    new If
+                                                    Id = "RecordBudgetSkip",
+                                                    Name = "Record Budget Skip",
+                                                    Activities =
                                                     {
-                                                        Condition = new(context => {
-                                                            var budgetJson = budgetStateVar.Get(context);
-                                                            return IsBudgetExhausted(budgetJson);
-                                                        }),
-                                                        // Budget exhausted → skip
-                                                        Then = new Sequence
+                                                        new SetVariable
                                                         {
-                                                            Activities =
-                                                            {
-                                                                new SetVariable
+                                                            Id = "DiagBudgetSkip",
+                                                            Name = "Diag: Budget Skip",
+                                                            Variable = diagnosticsListVar,
+                                                            Value = new(context => {
+                                                                var list = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
+                                                                var newList = new List<ProviderAttemptDiagnostic>(list);
+                                                                newList.Add(new ProviderAttemptDiagnostic
                                                                 {
-                                                                    Variable = diagnosticsListVar,
-                                                                    Value = new(context => {
-                                                                        var list = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
-                                                                        var newList = new List<ProviderAttemptDiagnostic>(list);
-                                                                        newList.Add(new ProviderAttemptDiagnostic
-                                                                        {
-                                                                            ProviderName = currentProviderVar.Get(context) ?? "",
-                                                                            AttemptNumber = 0,
-                                                                            Succeeded = false,
-                                                                            BudgetExhausted = true,
-                                                                            StartedAtUtc = DateTime.UtcNow,
-                                                                            ErrorMessage = "Budget exhausted"
-                                                                        });
-                                                                        return JsonSerializer.Serialize(newList);
-                                                                    })
-                                                                }
-                                                            }
-                                                        },
-                                                        // Budget OK → resolve prompt and call
-                                                        Else = new Sequence
-                                                        {
-                                                            Activities =
-                                                            {
-                                                                // ── 3c. Resolve prompt ──
-                                                                // Uses ResolveLlmPromptActivity for the 6-level hierarchy
-                                                                new SetVariable
-                                                                {
-                                                                    Variable = resolvedSystemPromptVar,
-                                                                    Value = new(context => {
-                                                                        var raw = inputVar.Get(context);
-                                                                        var input = ParseInput(raw);
-                                                                        // If caller override, use it
-                                                                        if (!string.IsNullOrWhiteSpace(input.SystemPromptOverride))
-                                                                            return input.SystemPromptOverride;
-                                                                        // Fall back to role-based prompt from config hierarchy
-                                                                        // (ResolveLlmPromptActivity handles this via DI when used standalone)
-                                                                        var role = agentRoleVar.Get(context) ?? "assistant";
-                                                                        return GetRolePrompt(role);
-                                                                    })
-                                                                },
-
-                                                                // ── 3d. Resolve tools ──
-                                                                new SetVariable
-                                                                {
-                                                                    Variable = resolvedToolsJsonVar,
-                                                                    Value = new(context => {
-                                                                        var raw = inputVar.Get(context);
-                                                                        var input = ParseInput(raw);
-                                                                        if (input.ToolNames == null || input.ToolNames.Count == 0)
-                                                                            return "";
-                                                                        return JsonSerializer.Serialize(input.ToolNames);
-                                                                    })
-                                                                },
-
-                                                                // ── 3e. Call LLM with retry loop ──
-                                                                BuildRetryLoop(
-                                                                    inputVar,
-                                                                    taskPromptVar,
-                                                                    currentProviderVar,
-                                                                    resolvedSystemPromptVar,
-                                                                    resolvedToolsJsonVar,
-                                                                    attemptNumberVar,
-                                                                    maxRetriesVar,
-                                                                    successVar,
-                                                                    lastDiagnosticVar,
-                                                                    lastResponseVar,
-                                                                    diagnosticsListVar,
-                                                                    circuitBreakerStatesVar,
-                                                                    budgetStateVar,
-                                                                    workflowOutputVar)
-                                                            }
+                                                                    ProviderName = currentProviderVar.Get(context) ?? "",
+                                                                    AttemptNumber = 0,
+                                                                    Succeeded = false,
+                                                                    BudgetExhausted = true,
+                                                                    StartedAtUtc = DateTime.UtcNow,
+                                                                    ErrorMessage = "Budget exhausted"
+                                                                });
+                                                                return JsonSerializer.Serialize(newList);
+                                                            })
                                                         }
+                                                    }
+                                                },
+                                                // Budget OK → resolve prompt and call
+                                                Else = new Sequence
+                                                {
+                                                    Id = "BudgetOk",
+                                                    Name = "Budget OK",
+                                                    Activities =
+                                                    {
+                                                        // ── 3c. Resolve prompt ──
+                                                        new SetVariable
+                                                        {
+                                                            Id = "ResolvePrompt",
+                                                            Name = "Resolve Prompt",
+                                                            Variable = resolvedSystemPromptVar,
+                                                            Value = new(context => {
+                                                                var raw = inputVar.Get(context);
+                                                                var input = ParseInput(raw);
+                                                                if (!string.IsNullOrWhiteSpace(input.SystemPromptOverride))
+                                                                    return input.SystemPromptOverride;
+                                                                var role = agentRoleVar.Get(context) ?? "assistant";
+                                                                return GetRolePrompt(role);
+                                                            })
+                                                        },
+
+                                                        // ── 3d. Resolve tools ──
+                                                        new SetVariable
+                                                        {
+                                                            Id = "ResolveTools",
+                                                            Name = "Resolve Tools",
+                                                            Variable = resolvedToolsJsonVar,
+                                                            Value = new(context => {
+                                                                var raw = inputVar.Get(context);
+                                                                var input = ParseInput(raw);
+                                                                if (input.ToolNames == null || input.ToolNames.Count == 0)
+                                                                    return "";
+                                                                return JsonSerializer.Serialize(input.ToolNames);
+                                                            })
+                                                        },
+
+                                                        // ── 3e. Call LLM with retry loop ──
+                                                        BuildRetryLoop(
+                                                            inputVar,
+                                                            taskPromptVar,
+                                                            currentProviderVar,
+                                                            resolvedSystemPromptVar,
+                                                            resolvedToolsJsonVar,
+                                                            attemptNumberVar,
+                                                            maxRetriesVar,
+                                                            successVar,
+                                                            lastDiagnosticVar,
+                                                            lastResponseVar,
+                                                            diagnosticsListVar,
+                                                            circuitBreakerStatesVar,
+                                                            budgetStateVar,
+                                                            workflowOutputVar)
                                                     }
                                                 }
                                             }
@@ -329,42 +354,61 @@ public class LlmCallWorkflow : WorkflowBase
                             }
                         }
                     }
-                },
+                }
+            }
+        };
 
-                // ── Step 4: Build final output if no success ──────────
-                new If
+        // 5. Check if call succeeded
+        var failureCheck = new FlowDecision(context => successVar.Get(context))
+        {
+            Id = "FailureCheck",
+            Name = "Call Succeeded?"
+        };
+
+        // 5a. Build failure output (all providers failed)
+        var buildFailureOutput = new SetVariable
+        {
+            Id = "BuildFailureOutput",
+            Name = "Build Failure Output",
+            Variable = workflowOutputVar,
+            Value = new(context => {
+                var diagnostics = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
+                var output = new LlmCallWorkflowOutput
                 {
-                    Condition = new(context => !successVar.Get(context)),
-                    Then = new SetVariable
-                    {
-                        Variable = workflowOutputVar,
-                        Value = new(context => {
-                            var diagnostics = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
-                            var output = new LlmCallWorkflowOutput
-                            {
-                                Success = false,
-                                ErrorMessage = "All providers in the chain failed",
-                                TotalDurationMs = diagnostics.Sum(d => d.DurationMs),
-                                Diagnostics = diagnostics
-                            };
-                            return JsonSerializer.Serialize(output, SerializerOptions);
-                        })
-                    }
-                },
+                    Success = false,
+                    ErrorMessage = "All providers in the chain failed",
+                    TotalDurationMs = diagnostics.Sum(d => d.DurationMs),
+                    Diagnostics = diagnostics
+                };
+                return JsonSerializer.Serialize(output, SerializerOptions);
+            })
+        };
 
-                // ── Step 5: Set workflow outputs for parent consumption ──
+        // 6. Set workflow outputs for parent consumption
+        var setOutputs = new Sequence
+        {
+            Id = "SetOutputs",
+            Name = "Set Outputs",
+            Activities =
+            {
                 new SetOutput
                 {
+                    Id = "OutputSuccess",
+                    Name = "Output: success",
                     OutputName = new("success"),
                     OutputValue = new(context => (object)successVar.Get(context))
                 },
                 new SetOutput
                 {
+                    Id = "OutputWorkflowOutput",
+                    Name = "Output: workflowOutput",
                     OutputName = new("workflowOutput"),
                     OutputValue = new(context => (object)(workflowOutputVar.Get(context) ?? "{}"))
                 },
                 new SetOutput
                 {
+                    Id = "OutputLlmResponse",
+                    Name = "Output: llmResponse",
                     OutputName = new("llmResponse"),
                     OutputValue = new(context =>
                     {
@@ -375,6 +419,8 @@ public class LlmCallWorkflow : WorkflowBase
                 },
                 new SetOutput
                 {
+                    Id = "OutputProviderUsed",
+                    Name = "Output: providerUsed",
                     OutputName = new("providerUsed"),
                     OutputValue = new(context =>
                     {
@@ -385,6 +431,8 @@ public class LlmCallWorkflow : WorkflowBase
                 },
                 new SetOutput
                 {
+                    Id = "OutputCostUsd",
+                    Name = "Output: costUsd",
                     OutputName = new("costUsd"),
                     OutputValue = new(context =>
                     {
@@ -395,6 +443,8 @@ public class LlmCallWorkflow : WorkflowBase
                 },
                 new SetOutput
                 {
+                    Id = "OutputTokensUsed",
+                    Name = "Output: tokensUsed",
                     OutputName = new("tokensUsed"),
                     OutputValue = new(context =>
                     {
@@ -403,6 +453,41 @@ public class LlmCallWorkflow : WorkflowBase
                         return (object)(output?.TotalTokens ?? 0);
                     })
                 }
+            }
+        };
+
+        // ============================================================
+        // Flowchart
+        // ============================================================
+        builder.Root = new Flowchart
+        {
+            Id = "LlmCallFlowchart",
+            Start = initInputs,
+            Activities =
+            {
+                initInputs, setupBudget, resolveChain, forEachProviders,
+                failureCheck, buildFailureOutput, setOutputs
+            },
+            Connections =
+            {
+                // InitInputs → Setup Budget
+                Connect(initInputs, setupBudget),
+
+                // Setup Budget → Resolve Provider Chain
+                Connect(setupBudget, resolveChain),
+
+                // Resolve Provider Chain → For Each Provider
+                Connect(resolveChain, forEachProviders),
+
+                // For Each Provider → Call Succeeded?
+                Connect(forEachProviders, failureCheck),
+
+                // Call Succeeded? Yes → Set Outputs
+                ConnectOutcome(failureCheck, "True", setOutputs),
+
+                // Call Succeeded? No → Build Failure Output → Set Outputs
+                ConnectOutcome(failureCheck, "False", buildFailureOutput),
+                Connect(buildFailureOutput, setOutputs)
             }
         };
     }
@@ -428,6 +513,8 @@ public class LlmCallWorkflow : WorkflowBase
         Variable<string> workflowOutputVar)
     {
         var whileLoop = new While((string?)null);
+        whileLoop.Id = "RetryLoop";
+        whileLoop.Name = "Retry Loop";
         whileLoop.Condition = new Input<bool>(context =>
             !successVar.Get(context) &&
             attemptNumberVar.Get(context) <= maxRetriesVar.Get(context));
@@ -435,6 +522,8 @@ public class LlmCallWorkflow : WorkflowBase
         // Build the retry loop body
         var retryCheckIf = new If
         {
+            Id = "RetryCheck",
+            Name = "Transient Error?",
             Condition = new(context =>
             {
                 var diagJson = context.GetVariable<string>("LastDiagnostic") ?? "";
@@ -450,11 +539,15 @@ public class LlmCallWorkflow : WorkflowBase
             }),
             Then = new SetVariable
             {
+                Id = "IncrementAttempt",
+                Name = "Increment Attempt",
                 Variable = attemptNumberVar,
                 Value = new(context => attemptNumberVar.Get(context) + 1)
             },
             Else = new SetVariable
             {
+                Id = "ExhaustAttempts",
+                Name = "Exhaust Attempts",
                 Variable = attemptNumberVar,
                 Value = new(context => maxRetriesVar.Get(context) + 1)
             }
@@ -462,6 +555,8 @@ public class LlmCallWorkflow : WorkflowBase
 
         var successCheckIf = new If
         {
+            Id = "SuccessCheck",
+            Name = "LLM Succeeded?",
             Condition = new(context =>
             {
                 var diagJson = context.GetVariable<string>("LastDiagnostic") ?? "";
@@ -475,15 +570,21 @@ public class LlmCallWorkflow : WorkflowBase
             }),
             Then = new Sequence
             {
+                Id = "RecordSuccess",
+                Name = "Record Success",
                 Activities =
                 {
                     new SetVariable
                     {
+                        Id = "SetSuccessTrue",
+                        Name = "Set Success",
                         Variable = successVar,
                         Value = new(true)
                     },
                     new SetVariable
                     {
+                        Id = "BuildSuccessOutput",
+                        Name = "Build Success Output",
                         Variable = workflowOutputVar,
                         Value = new(context =>
                         {
@@ -514,16 +615,22 @@ public class LlmCallWorkflow : WorkflowBase
             },
             Else = new Sequence
             {
+                Id = "HandleRetry",
+                Name = "Handle Retry",
                 Activities = { retryCheckIf }
             }
         };
 
         var loopBody = new Sequence
         {
+            Id = "RetryLoopBody",
+            Name = "Retry Loop Body",
             Activities =
             {
                 new CallLlmInlineActivity
                 {
+                    Id = "CallLlm",
+                    Name = "Call LLM",
                     InputJsonProp = new(context => inputVar.Get(context)),
                     ProviderNameProp = new(context => currentProviderVar.Get(context)),
                     SystemPromptProp = new(context => resolvedSystemPromptVar.Get(context)),
@@ -532,6 +639,8 @@ public class LlmCallWorkflow : WorkflowBase
                 },
                 new RecordDiagnosticsInlineActivity
                 {
+                    Id = "RecordDiagnostics",
+                    Name = "Record Diagnostics",
                     ProviderNameProp = new(context => currentProviderVar.Get(context)),
                     DiagnosticsListJsonProp = new(context => diagnosticsListVar.Get(context)),
                     CircuitBreakerStatesJsonProp = new(context => circuitBreakerStatesVar.Get(context)),
@@ -544,6 +653,16 @@ public class LlmCallWorkflow : WorkflowBase
         whileLoop.Body = loopBody;
         return whileLoop;
     }
+
+    // ================================================================
+    // Flowchart helpers
+    // ================================================================
+
+    private static FlowConnection Connect(IActivity source, IActivity target)
+        => new(new FlowEndpoint(source), new FlowEndpoint(target));
+
+    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
+        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 
     // ================================================================
     // Helper methods (static, used in expression lambdas)

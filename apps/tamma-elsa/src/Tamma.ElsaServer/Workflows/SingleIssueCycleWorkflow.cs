@@ -75,6 +75,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var initConfig = new SetVariable
         {
             Id = "InitConfig",
+            Name = "Init Config",
             Variable = repository,
             Value = new Input<object?>(ctx =>
             {
@@ -109,6 +110,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractIssue = new SetVariable
         {
             Id = "ExtractIssueData",
+            Name = "Extract Issue Data",
             Variable = issueNumber,
             Value = new Input<object?>(ctx =>
             {
@@ -151,6 +153,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractContext = new SetVariable
         {
             Id = "ExtractContextData",
+            Name = "Extract Context Data",
             Variable = contextJson,
             Value = new Input<object?>(ctx =>
             {
@@ -184,6 +187,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractPlan = new SetVariable
         {
             Id = "ExtractPlanData",
+            Name = "Extract Plan Data",
             Variable = planJson,
             Value = new Input<object?>(ctx =>
             {
@@ -224,6 +228,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractBranch = new SetVariable
         {
             Id = "ExtractBranchData",
+            Name = "Extract Branch Data",
             Variable = branchName,
             Value = new Input<object?>(ctx =>
             {
@@ -275,6 +280,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var incrementTddDebug = new SetVariable
         {
             Id = "IncrTddDebug",
+            Name = "Increment TDD Debug",
             Variable = tddDebugAttempt,
             Value = new Input<object?>(ctx => (object)(tddDebugAttempt.Get(ctx) + 1))
         };
@@ -322,6 +328,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractPr = new SetVariable
         {
             Id = "ExtractPrData",
+            Name = "Extract PR Data",
             Variable = prNumber,
             Value = new Input<object?>(ctx =>
             {
@@ -375,6 +382,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var incrementCiRetry = new SetVariable
         {
             Id = "IncrCiRetry",
+            Name = "Increment CI Retry",
             Variable = ciRetryCount,
             Value = new Input<object?>(ctx => (object)(ciRetryCount.Get(ctx) + 1))
         };
@@ -495,13 +503,14 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var finishSuccess = new Sequence
         {
             Id = "FinishSuccess",
+            Name = "Finish Success",
             Activities =
             {
-                new SetVariable { Id = "SetSuccessReason", Variable = exitReason, Value = new Input<object?>(_ => (object)"success") },
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"success") },
-                new SetOutput { OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) },
-                new SetOutput { OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) },
-                new SetOutput { OutputName = new("mergeSha"), OutputValue = new(ctx =>
+                new SetVariable { Id = "SetSuccessReason", Name = "Set Success Reason", Variable = exitReason, Value = new Input<object?>(_ => (object)"success") },
+                new SetOutput { Id = "SetOutputExitReasonSuccess", Name = "Set Exit Reason Success", OutputName = new("exitReason"), OutputValue = new(_ => (object)"success") },
+                new SetOutput { Id = "SetOutputIssueNumber", Name = "Set Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) },
+                new SetOutput { Id = "SetOutputPrNumber", Name = "Set PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) },
+                new SetOutput { Id = "SetOutputMergeSha", Name = "Set Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx =>
                 {
                     var r = mergeResult.Get(ctx);
                     return (object)(r != null && r.TryGetValue("mergeSha", out var ms) ? ms?.ToString() ?? "" : "");
@@ -512,58 +521,64 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var finishNoIssues = new Sequence
         {
             Id = "FinishNoIssues",
+            Name = "Finish No Issues",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"noIssues") }
+                new SetOutput { Id = "SetOutputExitReasonNoIssues", Name = "Set Exit Reason No Issues", OutputName = new("exitReason"), OutputValue = new(_ => (object)"noIssues") }
             }
         };
 
         var finishRejected = new Sequence
         {
             Id = "FinishRejected",
+            Name = "Finish Rejected",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"rejected") }
+                new SetOutput { Id = "SetOutputExitReasonRejected", Name = "Set Exit Reason Rejected", OutputName = new("exitReason"), OutputValue = new(_ => (object)"rejected") }
             }
         };
 
         var finishError = new Sequence
         {
             Id = "FinishError",
+            Name = "Finish Error",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"error") }
+                new SetOutput { Id = "SetOutputExitReasonError", Name = "Set Exit Reason Error", OutputName = new("exitReason"), OutputValue = new(_ => (object)"error") }
             }
         };
 
         var finishTddFailed = new Sequence
         {
             Id = "FinishTddFailed",
+            Name = "Finish TDD Failed",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"tddFailed") }
+                new SetOutput { Id = "SetOutputExitReasonTddFailed", Name = "Set Exit Reason TDD Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"tddFailed") }
             }
         };
 
         var finishCiFailed = new Sequence
         {
             Id = "FinishCiFailed",
+            Name = "Finish CI Failed",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"ciFailed") }
+                new SetOutput { Id = "SetOutputExitReasonCiFailed", Name = "Set Exit Reason CI Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"ciFailed") }
             }
         };
 
         var finishMergeFailed = new Sequence
         {
             Id = "FinishMergeFailed",
+            Name = "Finish Merge Failed",
             Activities =
             {
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(_ => (object)"mergeFailed") }
+                new SetOutput { Id = "SetOutputExitReasonMergeFailed", Name = "Set Exit Reason Merge Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"mergeFailed") }
             }
         };
 
-        var finish = new Finish { Id = "Finish" };
+        var finish = new Finish { Id = "Finish", Name = "Finish" };
 
         // ================================================================
         // Flowchart

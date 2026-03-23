@@ -1,22 +1,18 @@
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 namespace Tamma.ElsaServer.Workflows;
 
-/// <summary>
-/// Review Fix sub-workflow: fetches review comments, analyzes them via AI,
-/// and applies fixes.
-///
-/// Inputs: repository, prNumber, branchName
-/// Outputs: success, hasComments, fixesApplied
-/// </summary>
 public class ReviewFixWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
@@ -32,17 +28,19 @@ public class ReviewFixWorkflow : WorkflowBase
 
         var analyze = new AnalyzeReviewActivity
         {
-            Id = "AnalyzeReview",
+            Id = "AnalyzeReview", Name = "Analyze Review",
             Repository = new Input<string>(ctx => ctx.GetInput<string>("repository") ?? ""),
             PrNumber = new Input<int>(ctx => ctx.GetInput<int>("prNumber")),
             HasActionableComments = new Output<bool>(hasActionableVar),
             AnalysisJson = new Output<string?>(analysisJsonVar)
         };
 
-        // If there are actionable comments, dispatch llm-call to generate fixes
+        var hasActionable = new FlowDecision(ctx => hasActionableVar.Get(ctx))
+        { Id = "HasActionable", Name = "Has Actionable?" };
+
         var generateFixes = new DispatchWorkflow
         {
-            Id = "DispatchFixGeneration",
+            Id = "DispatchFixGeneration", Name = "Generate Fixes",
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -56,42 +54,38 @@ public class ReviewFixWorkflow : WorkflowBase
 
         var applyFixes = new ApplyReviewFixesActivity
         {
-            Id = "ApplyFixes",
+            Id = "ApplyFixes", Name = "Apply Fixes",
             AnalysisJson = new Input<string>(ctx => analysisJsonVar.Get(ctx)),
             Repository = new Input<string>(ctx => ctx.GetInput<string>("repository") ?? ""),
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
             FixesApplied = new Output<bool>(fixesAppliedVar)
         };
 
-        builder.Root = new Sequence
+        var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) };
+        var outputHasComments = new SetOutput { Id = "OutputHasComments", Name = "Output Has Comments", OutputName = new("hasComments"), OutputValue = new(ctx => (object)hasActionableVar.Get(ctx)) };
+        var outputFixesApplied = new SetOutput { Id = "OutputFixesApplied", Name = "Output Fixes Applied", OutputName = new("fixesApplied"), OutputValue = new(ctx => (object)fixesAppliedVar.Get(ctx)) };
+
+        builder.Root = new Flowchart
         {
-            Activities =
+            Id = "ReviewFixFlowchart",
+            Start = analyze,
+            Activities = { analyze, hasActionable, generateFixes, applyFixes, outputSuccess, outputHasComments, outputFixesApplied },
+            Connections =
             {
-                analyze,
-                new If
-                {
-                    Condition = new(ctx => hasActionableVar.Get(ctx)),
-                    Then = new Sequence
-                    {
-                        Activities = { generateFixes, applyFixes }
-                    }
-                },
-                new SetOutput
-                {
-                    OutputName = new("success"),
-                    OutputValue = new(ctx => (object)true)
-                },
-                new SetOutput
-                {
-                    OutputName = new("hasComments"),
-                    OutputValue = new(ctx => (object)hasActionableVar.Get(ctx))
-                },
-                new SetOutput
-                {
-                    OutputName = new("fixesApplied"),
-                    OutputValue = new(ctx => (object)fixesAppliedVar.Get(ctx))
-                }
+                Connect(analyze, hasActionable),
+                ConnectOutcome(hasActionable, "True", generateFixes),
+                Connect(generateFixes, applyFixes),
+                Connect(applyFixes, outputSuccess),
+                ConnectOutcome(hasActionable, "False", outputSuccess),
+                Connect(outputSuccess, outputHasComments),
+                Connect(outputHasComments, outputFixesApplied)
             }
         };
     }
+
+    private static FlowConnection Connect(IActivity source, IActivity target)
+        => new(new FlowEndpoint(source), new FlowEndpoint(target));
+
+    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
+        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }

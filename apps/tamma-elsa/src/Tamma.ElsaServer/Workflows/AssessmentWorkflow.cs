@@ -74,6 +74,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 1: Read inputs into variables ─────────────────────────
         var readInputs = new SetVariable
         {
+            Id = "ReadInputs",
+            Name = "Read Inputs",
             Variable = sessionId,
             Value = new(context =>
             {
@@ -107,6 +109,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 2: Gather context via ContextGathering workflow (7-1F) ─
         var gatherContext = new DispatchWorkflow
         {
+            Id = "GatherContext",
+            Name = "Gather Context",
             WorkflowDefinitionId = new("context-gathering"),
             Input = new(context => new Dictionary<string, object>
             {
@@ -120,6 +124,8 @@ public class AssessmentWorkflow : WorkflowBase
 
         var storeContextResult = new SetVariable
         {
+            Id = "StoreContextResult",
+            Name = "Store Context Result",
             Variable = storyContext,
             Value = new(ctx => {
                 // Context is available from the dispatched workflow output
@@ -130,6 +136,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 3: Generate questions ─────────────────────────────────
         var generateQuestions = new GenerateQuestionsActivity
         {
+            Id = "GenerateQuestions",
+            Name = "Generate Questions",
             SessionId = new(context => sessionId.Get(context)),
             StoryId = new(context => storyId.Get(context)),
             SkillLevel = new(context => skillLevel.Get(context)),
@@ -141,6 +149,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Store generated questions as JSON string
         var storeQuestions = new SetVariable
         {
+            Id = "StoreQuestions",
+            Name = "Store Questions",
             Variable = questionsJson,
             Value = new(context =>
             {
@@ -152,6 +162,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 4: Deliver questions ──────────────────────────────────
         var deliverQuestions = new DeliverQuestionsActivity
         {
+            Id = "DeliverQuestions",
+            Name = "Deliver Questions",
             SessionId = new(context => sessionId.Get(context)),
             JuniorId = new(context => juniorId.Get(context)),
             QuestionsJson = new(context => questionsJson.Get(context)),
@@ -162,6 +174,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 5: Wait for response (bookmark) ──────────────────────
         var waitForResponse = new WaitForResponseActivity
         {
+            Id = "WaitForResponse",
+            Name = "Wait For Response",
             SessionId = new(context => sessionId.Get(context)),
             AttemptNumber = new(context => attemptNumber.Get(context)),
             SkillLevel = new(context => skillLevel.Get(context)),
@@ -172,6 +186,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 6a: Store response into workflow variable ─────────────
         var storeResponse = new SetVariable
         {
+            Id = "StoreResponse",
+            Name = "Store Response",
             Variable = juniorResponse,
             Value = new(context =>
             {
@@ -183,6 +199,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 6a: Analyze response ──────────────────────────────────
         var analyzeResponse = new AnalyzeResponseActivity
         {
+            Id = "AnalyzeResponse",
+            Name = "Analyze Response",
             SessionId = new(context => sessionId.Get(context)),
             SkillLevel = new(context => skillLevel.Get(context)),
             QuestionsJson = new(context => questionsJson.Get(context)),
@@ -194,6 +212,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Store analysis result as JSON + extract gaps/strengths
         var storeAnalysis = new SetVariable
         {
+            Id = "StoreAnalysis",
+            Name = "Store Analysis",
             Variable = analysisResultJson,
             Value = new(context =>
             {
@@ -210,6 +230,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 6b: Handle timeout ────────────────────────────────────
         var setTimeoutResult = new SetVariable
         {
+            Id = "SetTimeoutResult",
+            Name = "Set Timeout Result",
             Variable = analysisResultJson,
             Value = new(context =>
             {
@@ -235,6 +257,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 7: Classify result ────────────────────────────────────
         var classifyResult = new ClassifyResultActivity
         {
+            Id = "ClassifyResult",
+            Name = "Classify Result",
             AnalysisResultJson = new(context => analysisResultJson.Get(context)),
             ResponseReceived = new(context => responseReceived.Get(context)),
             Status = new(classifiedStatus),
@@ -245,6 +269,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Store classification outputs into workflow variables
         var storeClassification = new SetVariable
         {
+            Id = "StoreClassification",
+            Name = "Store Classification",
             Variable = assessmentStatus,
             Value = new(context =>
             {
@@ -257,6 +283,8 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 8: Update skill profile (response path) ──────────────
         var updateSkillProfile = new UpdateSkillProfileActivity
         {
+            Id = "UpdateSkillProfile",
+            Name = "Update Skill Profile",
             SessionId = new(context => sessionId.Get(context)),
             JuniorId = new(context => juniorId.Get(context)),
             StoryId = new(context => storyId.Get(context)),
@@ -269,6 +297,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Separate instance for timeout path
         var updateSkillProfileTimeout = new UpdateSkillProfileActivity
         {
+            Id = "UpdateSkillProfileTimeout",
+            Name = "Update Skill Profile (Timeout)",
             SessionId = new(context => sessionId.Get(context)),
             JuniorId = new(context => juniorId.Get(context)),
             StoryId = new(context => storyId.Get(context)),
@@ -282,6 +312,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Store the final result into output variables for parent workflow retrieval
         var setOutput = new SetVariable
         {
+            Id = "SetOutputResult",
+            Name = "Set Output Result",
             Variable = outputResultJson,
             Value = new(context =>
             {
@@ -305,6 +337,8 @@ public class AssessmentWorkflow : WorkflowBase
         // Set workflow output (timeout path)
         var setOutputTimeout = new SetVariable
         {
+            Id = "SetOutputTimeout",
+            Name = "Set Output Timeout",
             Variable = outputResultJson,
             Value = new(context =>
             {
@@ -328,26 +362,32 @@ public class AssessmentWorkflow : WorkflowBase
         // ── Step 10: Expose outputs via SetOutput for parent consumption ─
         var exposeOutputResponse = new Sequence
         {
+            Id = "ExposeOutputResponse",
+            Name = "Expose Output Response",
             Activities =
             {
-                new SetOutput { OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) },
-                new SetOutput { OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }
+                new SetOutput { Id = "OutputAssessmentResult", Name = "Output Assessment Result", OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) },
+                new SetOutput { Id = "OutputNextState", Name = "Output Next State", OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) },
+                new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }
             }
         };
         var exposeOutputTimeout = new Sequence
         {
+            Id = "ExposeOutputTimeout",
+            Name = "Expose Output Timeout",
             Activities =
             {
-                new SetOutput { OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) },
-                new SetOutput { OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }
+                new SetOutput { Id = "OutputAssessmentResultTimeout", Name = "Output Assessment Result (Timeout)", OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) },
+                new SetOutput { Id = "OutputNextStateTimeout", Name = "Output Next State (Timeout)", OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) },
+                new SetOutput { Id = "OutputStatusTimeout", Name = "Output Status (Timeout)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }
             }
         };
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
+            Id = "AssessmentFlowchart",
+            Name = "Assessment Flowchart",
             Activities =
             {
                 readInputs,

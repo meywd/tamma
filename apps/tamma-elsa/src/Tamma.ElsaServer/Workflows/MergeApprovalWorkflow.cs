@@ -1,21 +1,17 @@
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Tamma.Activities.ADL;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 namespace Tamma.ElsaServer.Workflows;
 
-/// <summary>
-/// Merge Approval sub-workflow: suspends and waits for a human to decide
-/// whether to merge, run additional tests, or reject the PR.
-///
-/// Inputs: issueNumber, prNumber, prUrl
-/// Outputs: decision (merge|test|reject), feedback
-/// </summary>
 public class MergeApprovalWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
@@ -29,7 +25,7 @@ public class MergeApprovalWorkflow : WorkflowBase
 
         var waitMerge = new WaitForMergeApprovalActivity
         {
-            Id = "WaitMergeApproval",
+            Id = "WaitMergeApproval", Name = "Wait Merge Approval",
             IssueNumber = new Input<int>(ctx => ctx.GetInput<int>("issueNumber")),
             PrNumber = new Input<int>(ctx => ctx.GetInput<int>("prNumber")),
             PrUrl = new Input<string?>(ctx => ctx.GetInput<string>("prUrl")),
@@ -37,22 +33,22 @@ public class MergeApprovalWorkflow : WorkflowBase
             Feedback = new Output<string?>(feedbackVar)
         };
 
-        builder.Root = new Sequence
+        var outputDecision = new SetOutput { Id = "OutputDecision", Name = "Output Decision", OutputName = new("decision"), OutputValue = new(ctx => (object)(decisionVar.Get(ctx) ?? "reject")) };
+        var outputFeedback = new SetOutput { Id = "OutputFeedback", Name = "Output Feedback", OutputName = new("feedback"), OutputValue = new(ctx => (object)(feedbackVar.Get(ctx) ?? "")) };
+
+        builder.Root = new Flowchart
         {
-            Activities =
+            Id = "MergeApprovalFlowchart",
+            Start = waitMerge,
+            Activities = { waitMerge, outputDecision, outputFeedback },
+            Connections =
             {
-                waitMerge,
-                new SetOutput
-                {
-                    OutputName = new("decision"),
-                    OutputValue = new(ctx => (object)(decisionVar.Get(ctx) ?? "reject"))
-                },
-                new SetOutput
-                {
-                    OutputName = new("feedback"),
-                    OutputValue = new(ctx => (object)(feedbackVar.Get(ctx) ?? ""))
-                }
+                Connect(waitMerge, outputDecision),
+                Connect(outputDecision, outputFeedback)
             }
         };
     }
+
+    private static FlowConnection Connect(IActivity source, IActivity target)
+        => new(new FlowEndpoint(source), new FlowEndpoint(target));
 }

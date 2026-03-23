@@ -1,20 +1,17 @@
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Tamma.Activities.ADL;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 namespace Tamma.ElsaServer.Workflows;
 
-/// <summary>
-/// Pull Request sub-workflow: creates a PR with the implementation plan and test summary.
-///
-/// Inputs: repository, branchName, baseBranch, issueNumber, issueTitle, planJson
-/// Outputs: success, prNumber, prUrl
-/// </summary>
 public class PullRequestWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
@@ -28,7 +25,7 @@ public class PullRequestWorkflow : WorkflowBase
 
         var createPr = new CreatePullRequestActivity
         {
-            Id = "CreatePR",
+            Id = "CreatePR", Name = "Create PR",
             Repository = new Input<string>(ctx => ctx.GetInput<string>("repository") ?? ""),
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
             BaseBranch = new Input<string>(ctx => ctx.GetInput<string>("baseBranch") ?? "main"),
@@ -39,27 +36,24 @@ public class PullRequestWorkflow : WorkflowBase
             PrUrl = new Output<string?>(prUrlVar)
         };
 
-        builder.Root = new Sequence
+        var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)(prNumberVar.Get(ctx) > 0)) };
+        var outputPrNumber = new SetOutput { Id = "OutputPrNumber", Name = "Output PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumberVar.Get(ctx)) };
+        var outputPrUrl = new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrlVar.Get(ctx) ?? "")) };
+
+        builder.Root = new Flowchart
         {
-            Activities =
+            Id = "PullRequestFlowchart",
+            Start = createPr,
+            Activities = { createPr, outputSuccess, outputPrNumber, outputPrUrl },
+            Connections =
             {
-                createPr,
-                new SetOutput
-                {
-                    OutputName = new("success"),
-                    OutputValue = new(ctx => (object)(prNumberVar.Get(ctx) > 0))
-                },
-                new SetOutput
-                {
-                    OutputName = new("prNumber"),
-                    OutputValue = new(ctx => (object)prNumberVar.Get(ctx))
-                },
-                new SetOutput
-                {
-                    OutputName = new("prUrl"),
-                    OutputValue = new(ctx => (object)(prUrlVar.Get(ctx) ?? ""))
-                }
+                Connect(createPr, outputSuccess),
+                Connect(outputSuccess, outputPrNumber),
+                Connect(outputPrNumber, outputPrUrl)
             }
         };
     }
+
+    private static FlowConnection Connect(IActivity source, IActivity target)
+        => new(new FlowEndpoint(source), new FlowEndpoint(target));
 }

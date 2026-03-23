@@ -79,46 +79,48 @@ public class DebuggingWorkflow : WorkflowBase
         // 1. Initialize variables from workflow inputs
         var initialize = new SetVariable<string>(debugStartTime,
             _ => DateTime.UtcNow.ToString("o"))
-        { Id = "initialize" };
+        { Id = "initialize", Name = "Initialize Start Time" };
 
         var initIteration = new SetVariable<int>(currentIteration, _ => 1)
-        { Id = "initIteration" };
+        { Id = "initIteration", Name = "Initialize Iteration" };
 
         var initMaxIterations = new SetVariable<int>(maxIterations, _ => 5)
-        { Id = "initMaxIterations" };
+        { Id = "initMaxIterations", Name = "Initialize Max Iterations" };
 
         var initFilesModified = new SetVariable<string>(allFilesModified, _ => "[]")
-        { Id = "initFilesModified" };
+        { Id = "initFilesModified", Name = "Initialize Files Modified" };
 
         var initRegressionTest = new SetVariable<bool>(regressionTestWritten, _ => false)
-        { Id = "initRegressionTest" };
+        { Id = "initRegressionTest", Name = "Initialize Regression Test Flag" };
 
         var initIterationContext = new SetVariable<string>(iterationContextJson,
             _ => "{\"currentIteration\":0,\"hypotheses\":[],\"previousAttempts\":[]}")
-        { Id = "initIterationContext" };
+        { Id = "initIterationContext", Name = "Initialize Iteration Context" };
 
         // 2. Classify debug context
         var classify = new ClassifyDebugContextActivity
         {
             Id = "classifyContext",
+            Name = "Classify Debug Context",
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx))
         };
 
         // 3. Context-specific emphasis logging (one per branch, all converge)
         var tddEmphasis = new WriteLine("Debug mode: TDD Failure -- emphasizing test output and implementation code")
-        { Id = "tddEmphasis" };
+        { Id = "tddEmphasis", Name = "TDD Emphasis" };
 
         var runtimeEmphasis = new WriteLine("Debug mode: Runtime Error -- emphasizing stack traces and recent changes")
-        { Id = "runtimeEmphasis" };
+        { Id = "runtimeEmphasis", Name = "Runtime Emphasis" };
 
         var bugEmphasis = new WriteLine("Debug mode: Bug Investigation -- emphasizing issue description and reproduction steps")
-        { Id = "bugEmphasis" };
+        { Id = "bugEmphasis", Name = "Bug Emphasis" };
 
         // 4. Parallel context gathering activities
         var collectErrors = new CollectErrorMessagesActivity
         {
             Id = "collectErrors",
+            Name = "Collect Error Messages",
             ErrorOutput = new Input<string>(ctx => errorOutput.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
@@ -128,6 +130,7 @@ public class DebuggingWorkflow : WorkflowBase
         var collectCode = new CollectRelevantCodeActivity
         {
             Id = "collectCode",
+            Name = "Collect Relevant Code",
             RelevantFiles = new Input<List<string>?>(ctx =>
             {
                 var files = relevantFiles.Get(ctx);
@@ -143,6 +146,7 @@ public class DebuggingWorkflow : WorkflowBase
         var collectGit = new CollectGitHistoryActivity
         {
             Id = "collectGit",
+            Name = "Collect Git History",
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
@@ -151,6 +155,7 @@ public class DebuggingWorkflow : WorkflowBase
         var collectTests = new CollectTestResultsActivity
         {
             Id = "collectTests",
+            Name = "Collect Test Results",
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
@@ -160,6 +165,7 @@ public class DebuggingWorkflow : WorkflowBase
         var collectRepro = new CollectReproductionStepsActivity
         {
             Id = "collectRepro",
+            Name = "Collect Reproduction Steps",
             IssueDescription = new Input<string>(ctx => issueDescription.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
         };
@@ -168,6 +174,7 @@ public class DebuggingWorkflow : WorkflowBase
         var fork = new FlowFork
         {
             Id = "contextFork",
+            Name = "Context Fork",
             Branches = new Input<ICollection<string>>(new List<string>
             {
                 "CollectErrors",
@@ -182,16 +189,18 @@ public class DebuggingWorkflow : WorkflowBase
         var join = new FlowJoin
         {
             Id = "contextJoin",
+            Name = "Context Join",
             Mode = new Input<FlowJoinMode>(FlowJoinMode.WaitAll)
         };
 
         var joinLog = new WriteLine("All debug context gathered -- proceeding to AI diagnosis")
-        { Id = "joinLog" };
+        { Id = "joinLog", Name = "Join Log" };
 
         // 7. AI Diagnosis
         var aiDiagnosis = new AIDiagnosisActivity
         {
             Id = "aiDiagnosis",
+            Name = "AI Diagnosis",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             ErrorContext = new Input<string>(ctx => errorMessages.Get(ctx) ?? ""),
@@ -207,6 +216,7 @@ public class DebuggingWorkflow : WorkflowBase
         var selectHypothesis = new SelectHypothesisActivity
         {
             Id = "selectHypothesis",
+            Name = "Select Hypothesis",
             HypothesesJson = new Input<string>(ctx => hypothesesJson.Get(ctx) ?? "[]"),
             CurrentIteration = new Input<int>(ctx => currentIteration.Get(ctx)),
             MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx))
@@ -218,16 +228,17 @@ public class DebuggingWorkflow : WorkflowBase
             var json = selectedHypothesisJson.Get(ctx);
             return !string.IsNullOrEmpty(json) && json != "null";
         })
-        { Id = "hasHypothesis" };
+        { Id = "hasHypothesis", Name = "Has Hypothesis?" };
 
         // 10. BugInvestigation guard: write regression test if needed
         var isBugMode = new FlowDecision(ctx =>
             debugContextMode.Get(ctx) == "BugInvestigation" && !regressionTestWritten.Get(ctx))
-        { Id = "isBugMode" };
+        { Id = "isBugMode", Name = "Is Bug Mode?" };
 
         var writeRegressionTest = new WriteRegressionTestActivity
         {
             Id = "writeRegressionTest",
+            Name = "Write Regression Test",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx) ?? ""),
             BugDescription = new Input<string>(ctx => issueDescription.Get(ctx) ?? ""),
@@ -238,12 +249,13 @@ public class DebuggingWorkflow : WorkflowBase
         };
 
         var markRegressionTestWritten = new SetVariable<bool>(regressionTestWritten, _ => true)
-        { Id = "markRegressionTestWritten" };
+        { Id = "markRegressionTestWritten", Name = "Mark Regression Test Written" };
 
         // 11. Apply fix via LLM call sub-workflow
         var applyFix = new DispatchWorkflow
         {
             Id = "applyFix",
+            Name = "Apply Fix",
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -258,6 +270,7 @@ public class DebuggingWorkflow : WorkflowBase
         var runTests = new DispatchWorkflow
         {
             Id = "runTests",
+            Name = "Run Tests",
             WorkflowDefinitionId = new("testing-pipeline"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -278,12 +291,13 @@ public class DebuggingWorkflow : WorkflowBase
                 return passed;
             return false;
         })
-        { Id = "testsPass" };
+        { Id = "testsPass", Name = "Tests Pass?" };
 
         // 14. Record resolution (tests passed)
         var recordResolution = new RecordResolutionActivity
         {
             Id = "recordResolution",
+            Name = "Record Resolution",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? ""),
@@ -312,12 +326,14 @@ public class DebuggingWorkflow : WorkflowBase
 
         var setResolvedOutputs = new Sequence
         {
+            Id = "setResolvedOutputs",
+            Name = "Set Resolved Outputs",
             Activities =
             {
-                new WriteLine("Debug resolved -- fix verified by tests") { Id = "setResolved" },
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)true) },
-                new SetOutput { OutputName = new("resolution"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
+                new WriteLine("Debug resolved -- fix verified by tests") { Id = "setResolved", Name = "Log Resolved" },
+                new SetOutput { Id = "outputResolvedSuccess", Name = "Output Resolved Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) },
+                new SetOutput { Id = "outputResolution", Name = "Output Resolution", OutputName = new("resolution"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
+                new SetOutput { Id = "outputResolvedIterations", Name = "Output Resolved Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
             }
         };
 
@@ -325,6 +341,7 @@ public class DebuggingWorkflow : WorkflowBase
         var refineHypothesis = new RefineHypothesisActivity
         {
             Id = "refineHypothesis",
+            Name = "Refine Hypothesis",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             TriedHypothesisJson = new Input<string>(ctx => selectedHypothesisJson.Get(ctx) ?? "{}"),
             TestResults = new Input<string>(ctx => testResults.Get(ctx) ?? ""),
@@ -335,12 +352,13 @@ public class DebuggingWorkflow : WorkflowBase
         // 16. Increment iteration
         var incrementIteration = new SetVariable<int>(currentIteration,
             ctx => currentIteration.Get(ctx) + 1)
-        { Id = "incrementIteration" };
+        { Id = "incrementIteration", Name = "Increment Iteration" };
 
         // 17. Compile debug report (escalation)
         var compileReport = new CompileDebugReportActivity
         {
             Id = "compileReport",
+            Name = "Compile Debug Report",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? ""),
@@ -353,21 +371,25 @@ public class DebuggingWorkflow : WorkflowBase
 
         var setEscalatedOutputs = new Sequence
         {
+            Id = "setEscalatedOutputs",
+            Name = "Set Escalated Outputs",
             Activities =
             {
-                new WriteLine("Debug ESCALATED -- max iterations reached, report compiled") { Id = "setEscalated" },
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)false) },
-                new SetOutput { OutputName = new("debugReport"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
+                new WriteLine("Debug ESCALATED -- max iterations reached, report compiled") { Id = "setEscalated", Name = "Log Escalated" },
+                new SetOutput { Id = "outputEscalatedSuccess", Name = "Output Escalated Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
+                new SetOutput { Id = "outputDebugReport", Name = "Output Debug Report", OutputName = new("debugReport"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
+                new SetOutput { Id = "outputEscalatedIterations", Name = "Output Escalated Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
             }
         };
 
         // 18. Final finish
-        var finish = new Finish { Id = "finish" };
+        var finish = new Finish { Id = "finish", Name = "Finish" };
 
         // ---- Build Flowchart ----
         builder.Root = new Flowchart
         {
+            Id = "DebuggingFlowchart",
+            Name = "Debugging Flowchart",
             Activities =
             {
                 initialize, initIteration, initMaxIterations,

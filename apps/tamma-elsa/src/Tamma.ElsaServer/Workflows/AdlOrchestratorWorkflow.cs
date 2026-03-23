@@ -173,8 +173,8 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Name = "Output (Limits)",
             Activities =
             {
-                new SetOutput { OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }
+                new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total Completed (Limits)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
+                new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Exit Reason (Limits)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }
             }
         };
 
@@ -185,12 +185,12 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Name = "Output (No Issues)",
             Activities =
             {
-                new SetOutput { OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
-                new SetOutput { OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }
+                new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total Completed (No Issues)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
+                new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Exit Reason (No Issues)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }
             }
         };
 
-        var finish = new Finish { Id = "Finish" };
+        var finish = new Finish { Id = "Finish", Name = "Finish" };
 
         // ================================================================
         // Flowchart

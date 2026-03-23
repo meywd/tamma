@@ -87,6 +87,8 @@ public class TddWorkflow : WorkflowBase
         // WriteTests: output bound to testGenResult variable
         var writeTests = new WriteTestsActivity
         {
+            Id = "WriteTests",
+            Name = "Write Tests",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx)),
             TaskDescription = new Input<string>(ctx => taskDescription.Get(ctx)),
@@ -115,6 +117,8 @@ public class TddWorkflow : WorkflowBase
         // RED phase guard
         var checkTestsFail = new CheckTestsFailActivity
         {
+            Id = "CheckTestsFail",
+            Name = "Check Tests Fail",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             TestRunResult = new Input<TestRunResult>(ctx =>
             {
@@ -135,13 +139,16 @@ public class TddWorkflow : WorkflowBase
         var incrementRewrite = Assign(rewriteAttempt, ctx => (object)(rewriteAttempt.Get(ctx) + 1), "IncrRewrite");
 
         // If tests pass AND max rewrites exhausted -> proceed anyway
-        var maxRewritesCheck = new FlowDecision(ctx => rewriteAttempt.Get(ctx) >= 2);
+        var maxRewritesCheck = new FlowDecision(ctx => rewriteAttempt.Get(ctx) >= 2)
+        { Id = "MaxRewritesCheck", Name = "Max Rewrites?" };
 
         // --- GREEN PHASE ---
         var logGreenPhaseStart = Assign(greenPhaseStart, _ => (object)DateTime.UtcNow, "LogGreenPhaseStart");
 
         var writeImplementation = new WriteImplementationActivity
         {
+            Id = "WriteImplementation",
+            Name = "Write Implementation",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx)),
             TaskDescription = new Input<string>(ctx => taskDescription.Get(ctx)),
@@ -166,18 +173,22 @@ public class TddWorkflow : WorkflowBase
         }, "MockFullTestsPassedCount");
         var mockFullTestsFailedCount = Assign(testRunFailedCount, _ => (object)0, "MockFullTestsFailedCount");
 
-        var greenTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx));
+        var greenTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
+        { Id = "GreenTestsPassCheck", Name = "Green Tests Pass?" };
 
         // Debug loop
         var markDebug = Assign(debuggingInvoked, _ => (object)true, "MarkDebug");
         var incrementDebug = Assign(debugAttempt, ctx => (object)(debugAttempt.Get(ctx) + 1), "IncrDebug");
-        var maxDebugCheck = new FlowDecision(ctx => debugAttempt.Get(ctx) >= 3);
+        var maxDebugCheck = new FlowDecision(ctx => debugAttempt.Get(ctx) >= 3)
+        { Id = "MaxDebugCheck", Name = "Max Debug?" };
 
         // --- REFACTOR PHASE ---
         var logRefactorPhaseStart = Assign(refactorPhaseStart, _ => (object)DateTime.UtcNow, "LogRefactorPhaseStart");
 
         var analyzeCode = new AnalyzeCodeActivity
         {
+            Id = "AnalyzeCode",
+            Name = "Analyze Code",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx)),
             TestCode = new Input<string>(ctx =>
@@ -199,10 +210,13 @@ public class TddWorkflow : WorkflowBase
         {
             var analysis = analysisResult.Get(ctx);
             return analysis != null && analysis.HasSuggestions && analysis.Confidence >= 0.6;
-        });
+        })
+        { Id = "RefactoringNeededCheck", Name = "Refactoring Needed?" };
 
         var applyRefactoring = new ApplyRefactoringActivity
         {
+            Id = "ApplyRefactoring",
+            Name = "Apply Refactoring",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx)),
             ImplementationCode = new Input<string>(ctx =>
@@ -230,10 +244,13 @@ public class TddWorkflow : WorkflowBase
         // Mock: refactored tests pass
         var mockRefactorTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockRefactorTestsPass");
 
-        var refactorTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx));
+        var refactorTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
+        { Id = "RefactorTestsPassCheck", Name = "Refactor Tests Pass?" };
 
         var revertRefactoring = new RevertRefactoringActivity
         {
+            Id = "RevertRefactoring",
+            Name = "Revert Refactoring",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx)),
             BranchName = new Input<string>(ctx => branchName.Get(ctx)),
@@ -247,6 +264,8 @@ public class TddWorkflow : WorkflowBase
         // --- COMMIT ---
         var commitChanges = new CommitChangesActivity
         {
+            Id = "CommitChanges",
+            Name = "Commit Changes",
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
             StoryId = new Input<string>(ctx => storyId.Get(ctx)),
             TaskDescription = new Input<string>(ctx => taskDescription.Get(ctx)),
@@ -268,12 +287,14 @@ public class TddWorkflow : WorkflowBase
         // --- OUTPUT (SetOutput sequences) ---
         var setCompletedOutputs = new Sequence
         {
+            Id = "SetCompletedOutputs",
+            Name = "Set Completed Outputs",
             Activities =
             {
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)true) },
-                new SetOutput { OutputName = new("testCount"), OutputValue = new(ctx => (object)(testGenResult.Get(ctx)?.TestCount ?? 0)) },
-                new SetOutput { OutputName = new("commitSha"), OutputValue = new(ctx => (object)(commitResultVar.Get(ctx)?.CommitSha ?? "")) },
-                new SetOutput { OutputName = new("filesChanged"), OutputValue = new(ctx => {
+                new SetOutput { Id = "SetOutputSuccess", Name = "Set Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) },
+                new SetOutput { Id = "SetOutputTestCount", Name = "Set Test Count", OutputName = new("testCount"), OutputValue = new(ctx => (object)(testGenResult.Get(ctx)?.TestCount ?? 0)) },
+                new SetOutput { Id = "SetOutputCommitSha", Name = "Set Commit SHA", OutputName = new("commitSha"), OutputValue = new(ctx => (object)(commitResultVar.Get(ctx)?.CommitSha ?? "")) },
+                new SetOutput { Id = "SetOutputFilesChanged", Name = "Set Files Changed", OutputName = new("filesChanged"), OutputValue = new(ctx => {
                     var impl = implResult.Get(ctx);
                     var gen = testGenResult.Get(ctx);
                     var files = new List<string>();
@@ -286,15 +307,17 @@ public class TddWorkflow : WorkflowBase
 
         var setFailedOutputs = new Sequence
         {
+            Id = "SetFailedOutputs",
+            Name = "Set Failed Outputs",
             Activities =
             {
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)false) },
-                new SetOutput { OutputName = new("errorMessage"), OutputValue = new(ctx => (object)$"GREEN phase failed after {debugAttempt.Get(ctx)} debug iterations") }
+                new SetOutput { Id = "SetOutputFailed", Name = "Set Failed", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
+                new SetOutput { Id = "SetOutputErrorMessage", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)$"GREEN phase failed after {debugAttempt.Get(ctx)} debug iterations") }
             }
         };
 
-        var finish = new Finish();
-        var finishFailed = new Finish();
+        var finish = new Finish { Id = "FinishSuccess", Name = "Finish Success" };
+        var finishFailed = new Finish { Id = "FinishFailed", Name = "Finish Failed" };
 
         // ============================
         // Flowchart

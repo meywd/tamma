@@ -2,12 +2,16 @@ using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
+using Elsa.Workflows.Models;
 using Tamma.Activities.Context;
 using Tamma.Activities.Context.Models;
 using ElsaParallel = Elsa.Workflows.Activities.Parallel;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 namespace Tamma.ElsaServer.Workflows;
 
@@ -19,19 +23,13 @@ namespace Tamma.ElsaServer.Workflows;
 /// (visible, auditable in ELSA Studio). After all parallel fetches complete, the workflow
 /// assembles the gathered data and applies priority-based budget trimming.
 ///
-/// Phase 1 (parallel, independent):
-///   1. FetchStoryMetadata
-///   2. FetchRecentCommits
-///   3. FetchTestResults
-///   4. FetchSessionHistory
+/// Design: Flowchart with visible nodes for each phase in ELSA Studio.
 ///
-/// Phase 2 (parallel, depends on Phase 1 results):
-///   5. FetchFileContents (uses commit files for relevance scoring)
-///   6. FetchSimilarPatterns (uses story title and tags)
-///
-/// Phase 3 (sequential):
-///   7. AssembleContext (merges all results with priority annotations)
-///   8. ApplyBudget (trims to character budget, lowest priority first)
+/// Flow:
+///   InitInputs → IndependentFetches → StoryMetadataOk?
+///     No  → FaultNode (abort)
+///     Yes → TrackPhase1 → DependentFetches → TrackPhase2
+///           → AssembleContext → ApplyBudget → SetOutputs
 /// </summary>
 public class ContextGatheringWorkflow : WorkflowBase
 {
@@ -85,39 +83,55 @@ public class ContextGatheringWorkflow : WorkflowBase
         contextSuccess.Value = true;
 
         // ============================================
-        // Input initialization: set variables from workflow input
+        // Activities
         // ============================================
+
+        // 1. Input initialization: set variables from workflow input
         var initInputs = new Sequence
         {
+            Id = "InitInputs",
+            Name = "Initialize Inputs",
             Activities =
             {
                 new SetVariable
                 {
+                    Id = "SetSessionId",
+                    Name = "Set SessionId",
                     Variable = sessionId,
                     Value = new(ctx => ctx.GetInput<Guid>("SessionId"))
                 },
                 new SetVariable
                 {
+                    Id = "SetStoryId",
+                    Name = "Set StoryId",
                     Variable = storyId,
                     Value = new(ctx => ctx.GetInput<string>("StoryId") ?? string.Empty)
                 },
                 new SetVariable
                 {
+                    Id = "SetRepositoryUrl",
+                    Name = "Set RepositoryUrl",
                     Variable = repositoryUrl,
                     Value = new(ctx => ctx.GetInput<string>("RepositoryUrl") ?? string.Empty)
                 },
                 new SetVariable
                 {
+                    Id = "SetTargetFiles",
+                    Name = "Set TargetFiles",
                     Variable = targetFiles,
                     Value = new(ctx => ctx.GetInput<List<string>?>("TargetFiles"))
                 },
                 new SetVariable
                 {
+                    Id = "SetMaxContextSize",
+                    Name = "Set MaxContextSize",
                     Variable = maxContextSize,
                     Value = new(ctx => ctx.GetInput<int?>("MaxContextSize") ?? 50000)
                 },
                 new SetVariable
                 {
+                    Id = "SetPurpose",
+                    Name = "Set Purpose",
                     Variable = purpose,
                     Value = new(ctx =>
                         ctx.GetInput<ContextPurpose?>("Purpose") ?? ContextPurpose.Assessment)
@@ -125,66 +139,76 @@ public class ContextGatheringWorkflow : WorkflowBase
             }
         };
 
-        // ============================================
-        // Phase 1: Independent parallel fetches
-        // Story metadata, recent commits, test results, and session history
-        // can all run independently without depending on each other.
-        // ============================================
+        // 2. Phase 1: Independent parallel fetches
         var independentFetches = new ElsaParallel
         {
+            Id = "IndependentFetches",
+            Name = "Phase 1: Parallel Fetches",
             Activities =
             {
                 new FetchStoryMetadataActivity
                 {
+                    Id = "FetchStoryMetadata",
+                    Name = "Fetch Story Metadata",
                     StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
                     Result = new(storyMetadataResult)
                 },
                 new FetchRecentCommitsActivity
                 {
+                    Id = "FetchRecentCommits",
+                    Name = "Fetch Recent Commits",
                     RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
                     StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
                     Result = new(recentCommitsResult)
                 },
                 new FetchTestResultsActivity
                 {
+                    Id = "FetchTestResults",
+                    Name = "Fetch Test Results",
                     RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
                     StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
                     Result = new(testResultsResult)
                 },
                 new FetchSessionHistoryActivity
                 {
+                    Id = "FetchSessionHistory",
+                    Name = "Fetch Session History",
                     SessionId = new(ctx => sessionId.Get(ctx)),
                     Result = new(sessionHistoryResult)
                 }
             }
         };
 
-        // ============================================
-        // Minimum viability check: Story metadata is the most critical source.
-        // If it fails completely, the remaining context is insufficient.
-        // ============================================
-        var storyMetadataCheck = new If
+        // 3. Viability check: Story metadata is critical
+        var storyMetadataOk = new FlowDecision(ctx => storyMetadataResult.Get(ctx) != null)
         {
-            Condition = new(ctx => storyMetadataResult.Get(ctx) == null),
-            Then = new Sequence
+            Id = "StoryMetadataOk",
+            Name = "Story Metadata OK?"
+        };
+
+        // 3a. Fault if story metadata missing
+        var faultNode = new Sequence
+        {
+            Id = "FaultNoMetadata",
+            Name = "Fault (No Metadata)",
+            Activities =
             {
-                Activities =
+                new SetVariable
                 {
-                    new SetVariable
-                    {
-                        Variable = contextSuccess,
-                        Value = new(false)
-                    },
-                    new Fault("Story metadata fetch failed completely — context gathering cannot proceed without story metadata.")
-                }
+                    Id = "SetContextFailed",
+                    Name = "Set Context Failed",
+                    Variable = contextSuccess,
+                    Value = new(false)
+                },
+                new Fault("Story metadata fetch failed completely — context gathering cannot proceed without story metadata.")
             }
         };
 
-        // ============================================
-        // Phase 1 failed sources tracking (immutable list pattern)
-        // ============================================
+        // 4. Track Phase 1 failures
         var trackPhase1Failures = new SetVariable
         {
+            Id = "TrackPhase1Failures",
+            Name = "Track Phase 1 Failures",
             Variable = failedSources,
             Value = new(ctx =>
             {
@@ -202,18 +226,17 @@ public class ContextGatheringWorkflow : WorkflowBase
             })
         };
 
-        // ============================================
-        // Phase 2: Dependent parallel fetches
-        // File contents needs commit file list for relevance scoring.
-        // Similar patterns needs story title and tags.
-        // These run in parallel with each other but after Phase 1.
-        // ============================================
+        // 5. Phase 2: Dependent parallel fetches
         var dependentFetches = new ElsaParallel
         {
+            Id = "DependentFetches",
+            Name = "Phase 2: Dependent Fetches",
             Activities =
             {
                 new FetchFileContentsActivity
                 {
+                    Id = "FetchFileContents",
+                    Name = "Fetch File Contents",
                     RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
                     StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
                     TargetFiles = new(ctx => targetFiles.Get(ctx)),
@@ -232,6 +255,8 @@ public class ContextGatheringWorkflow : WorkflowBase
                 },
                 new FetchSimilarPatternsActivity
                 {
+                    Id = "FetchSimilarPatterns",
+                    Name = "Fetch Similar Patterns",
                     RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
                     StoryTitle = new(ctx =>
                         storyMetadataResult.Get(ctx)?.Title ?? string.Empty),
@@ -241,11 +266,11 @@ public class ContextGatheringWorkflow : WorkflowBase
             }
         };
 
-        // ============================================
-        // Phase 2 failed sources tracking (immutable list pattern)
-        // ============================================
+        // 6. Track Phase 2 failures
         var trackPhase2Failures = new SetVariable
         {
+            Id = "TrackPhase2Failures",
+            Name = "Track Phase 2 Failures",
             Variable = failedSources,
             Value = new(ctx =>
             {
@@ -259,11 +284,11 @@ public class ContextGatheringWorkflow : WorkflowBase
             })
         };
 
-        // ============================================
-        // Phase 3: Assemble all results and apply budget
-        // ============================================
+        // 7. Assemble context
         var assembleContext = new AssembleContextActivity
         {
+            Id = "AssembleContext",
+            Name = "Assemble Context",
             StoryMetadata = new(ctx => storyMetadataResult.Get(ctx)),
             RecentCommits = new(ctx => recentCommitsResult.Get(ctx)),
             FileContents = new(ctx => fileContentsResult.Get(ctx)),
@@ -274,34 +299,28 @@ public class ContextGatheringWorkflow : WorkflowBase
             Result = new(assembledResult)
         };
 
+        // 8. Apply budget
         var applyBudget = new ApplyBudgetActivity
         {
+            Id = "ApplyBudget",
+            Name = "Apply Budget",
             AssembledContext = new(ctx => assembledResult.Get(ctx)!),
             MaxContextSize = new(ctx => maxContextSize.Get(ctx)),
             StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
             Result = new(budgetResult)
         };
 
-        // ============================================
-        // Workflow structure: Sequential phases
-        // Phase 1 (parallel) -> Viability Check -> Phase 2 (parallel) -> Assemble -> Budget -> SetOutputs
-        // ============================================
-        builder.Root = new Sequence
+        // 9. Set workflow outputs
+        var setOutputs = new Sequence
         {
+            Id = "SetOutputs",
+            Name = "Set Outputs",
             Activities =
             {
-                initInputs,
-                independentFetches,
-                storyMetadataCheck,
-                trackPhase1Failures,
-                dependentFetches,
-                trackPhase2Failures,
-                assembleContext,
-                applyBudget,
-
-                // ── Set workflow outputs for parent consumption ──
                 new SetOutput
                 {
+                    Id = "OutputContextJson",
+                    Name = "Output contextJson",
                     OutputName = new("contextJson"),
                     OutputValue = new(ctx =>
                     {
@@ -311,17 +330,75 @@ public class ContextGatheringWorkflow : WorkflowBase
                 },
                 new SetOutput
                 {
+                    Id = "OutputSuccess",
+                    Name = "Output success",
                     OutputName = new("success"),
                     OutputValue = new(ctx => (object)contextSuccess.Get(ctx))
                 },
                 new SetOutput
                 {
+                    Id = "OutputFailedSources",
+                    Name = "Output failedSources",
                     OutputName = new("failedSources"),
                     OutputValue = new(ctx => (object)(failedSources.Get(ctx) ?? "[]"))
                 }
             }
         };
+
+        // ============================================
+        // Flowchart
+        // ============================================
+        builder.Root = new Flowchart
+        {
+            Id = "ContextGatheringFlowchart",
+            Start = initInputs,
+            Activities =
+            {
+                initInputs, independentFetches, storyMetadataOk, faultNode,
+                trackPhase1Failures, dependentFetches, trackPhase2Failures,
+                assembleContext, applyBudget, setOutputs
+            },
+            Connections =
+            {
+                // InitInputs → Phase 1: Parallel Fetches
+                Connect(initInputs, independentFetches),
+
+                // Phase 1 → Story Metadata OK?
+                Connect(independentFetches, storyMetadataOk),
+
+                // Story Metadata OK? Yes → Track Phase 1 Failures
+                ConnectOutcome(storyMetadataOk, "True", trackPhase1Failures),
+
+                // Story Metadata OK? No → Fault
+                ConnectOutcome(storyMetadataOk, "False", faultNode),
+
+                // Track Phase 1 → Phase 2: Dependent Fetches
+                Connect(trackPhase1Failures, dependentFetches),
+
+                // Phase 2 → Track Phase 2 Failures
+                Connect(dependentFetches, trackPhase2Failures),
+
+                // Track Phase 2 → Assemble Context
+                Connect(trackPhase2Failures, assembleContext),
+
+                // Assemble → Apply Budget
+                Connect(assembleContext, applyBudget),
+
+                // Apply Budget → Set Outputs
+                Connect(applyBudget, setOutputs)
+            }
+        };
     }
+
+    // ================================================================
+    // Flowchart helpers
+    // ================================================================
+
+    private static FlowConnection Connect(IActivity source, IActivity target)
+        => new(new FlowEndpoint(source), new FlowEndpoint(target));
+
+    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
+        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 
     // ================================================================
     // Helper methods (static, used in expression lambdas)

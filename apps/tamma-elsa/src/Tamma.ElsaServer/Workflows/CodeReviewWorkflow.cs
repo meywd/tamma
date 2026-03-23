@@ -62,6 +62,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 1. Create the pull request
         var createPR = new CreatePRActivity
         {
+            Id = "CreatePR",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
@@ -71,6 +72,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 2. Check if PR creation succeeded — use workflow variable to track
         var storePRResult = new SetVariable
         {
+            Id = "StorePRResult",
             Variable = prNumber,
             Value = Expr<object?>(ctx =>
             {
@@ -86,11 +88,12 @@ public class CodeReviewWorkflow : WorkflowBase
         storePRResult.Name = "StorePRResult";
 
         var prCreatedCheck = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
-        { Name = "PRCreatedCheck" };
+        { Id = "PRCreatedCheck", Name = "PRCreatedCheck" };
 
         // 3. Request review
         var requestReview = new RequestReviewActivity
         {
+            Id = "RequestReview",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
@@ -101,6 +104,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 4. Monitor review (bookmark-based)
         var monitorReview = new MonitorReviewActivity
         {
+            Id = "MonitorReview",
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             TimeoutHours = new(24),
@@ -110,6 +114,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 5. Store review comments when changes are requested
         var storeReviewComments = new SetVariable
         {
+            Id = "StoreReviewComments",
             Variable = reviewCommentsJson,
             Value = Expr<object?>(ctx =>
             {
@@ -126,6 +131,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 6. Increment iteration counter
         var incrementIteration = new SetVariable
         {
+            Id = "IncrementIteration",
             Variable = iteration,
             Value = Expr<object?>(ctx => (object)(iteration.Get(ctx) + 1))
         };
@@ -134,6 +140,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 7. Deliver fix guidance
         var deliverGuidance = new DeliverGuidanceActivity
         {
+            Id = "DeliverGuidance",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
@@ -145,6 +152,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 8. Wait for fixes (bookmark-based)
         var waitForFixes = new WaitForFixesActivity
         {
+            Id = "WaitForFixes",
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
@@ -155,6 +163,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 9. Re-request review
         var reRequestReview = new ReRequestReviewActivity
         {
+            Id = "ReRequestReview",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
@@ -166,11 +175,12 @@ public class CodeReviewWorkflow : WorkflowBase
 
         // 10. Check if max iterations reached
         var maxIterationsCheck = new FlowDecision(ctx => iteration.Get(ctx) >= maxIterations.Get(ctx))
-        { Name = "MaxIterationsCheck" };
+        { Id = "MaxIterationsCheck", Name = "MaxIterationsCheck" };
 
         // 11. Merge and complete
         var mergeAndComplete = new MergeAndCompleteReviewActivity
         {
+            Id = "MergeAndComplete",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
@@ -183,6 +193,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 12. Escalate review (max iterations)
         var escalateReview = new EscalateReviewActivity
         {
+            Id = "EscalateReview",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
@@ -195,6 +206,7 @@ public class CodeReviewWorkflow : WorkflowBase
         // 13. Escalate due to timeout
         var escalateTimeout = new EscalateReviewActivity
         {
+            Id = "EscalateTimeout",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
@@ -207,22 +219,24 @@ public class CodeReviewWorkflow : WorkflowBase
         // 14. Terminal nodes (SetOutput sequences)
         var failedEnd = new Sequence
         {
+            Id = "FailedEnd",
             Name = "FailedEnd",
             Activities =
             {
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)false) },
-                new SetOutput { OutputName = new("errorMessage"), OutputValue = new(ctx => (object)"Code review failed") }
+                new SetOutput { Id = "OutputFailedSuccess", Name = "Output Failed Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
+                new SetOutput { Id = "OutputErrorMessage", Name = "Output Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)"Code review failed") }
             }
         };
 
         var successEnd = new Sequence
         {
+            Id = "SuccessEnd",
             Name = "SuccessEnd",
             Activities =
             {
-                new SetOutput { OutputName = new("success"), OutputValue = new(ctx => (object)true) },
-                new SetOutput { OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrl.Get(ctx) ?? "")) },
-                new SetOutput { OutputName = new("iterations"), OutputValue = new(ctx => (object)iteration.Get(ctx)) }
+                new SetOutput { Id = "OutputSuccessFlag", Name = "Output Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)true) },
+                new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrl.Get(ctx) ?? "")) },
+                new SetOutput { Id = "OutputIterations", Name = "Output Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)iteration.Get(ctx)) }
             }
         };
 
@@ -231,6 +245,8 @@ public class CodeReviewWorkflow : WorkflowBase
         // ============================================
         builder.Root = new Flowchart
         {
+            Id = "CodeReviewFlowchart",
+            Name = "Code Review Flowchart",
             Activities =
             {
                 createPR,
