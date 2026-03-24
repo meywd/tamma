@@ -78,7 +78,6 @@ public class WaitForFixesActivity : Activity
             new CreateBookmarkArgs
             {
                 BookmarkName = bookmarkName,
-                Payload = new { SessionId = sessionId, PRNumber = prNumber, Iteration = iteration },
                 Callback = OnFixesReceivedAsync,
                 AutoBurn = true
             });

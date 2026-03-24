@@ -92,7 +92,6 @@ public class DetectProgressActivity : Activity
         context.CreateBookmark(new CreateBookmarkArgs
         {
             BookmarkName = $"blocker-progress-{sessionId}-{currentLevel}",
-            Payload = payload,
             Callback = OnResumeAsync,
             AutoBurn = true
         });

@@ -126,7 +126,6 @@ public class EscalateToSeniorActivity : Activity
         context.CreateBookmark(new CreateBookmarkArgs
         {
             BookmarkName = $"blocker-escalation-{sessionId}",
-            Payload = payload,
             Callback = OnResumeAsync,
             AutoBurn = true
         });

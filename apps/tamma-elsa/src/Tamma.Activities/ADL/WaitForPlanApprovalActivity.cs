@@ -65,7 +65,6 @@ public class WaitForPlanApprovalActivity : Activity
             new CreateBookmarkArgs
             {
                 BookmarkName = bookmarkName,
-                Payload = new { IssueNumber = issueNumber },
                 Callback = OnApprovalReceivedAsync,
                 AutoBurn = true
             });

@@ -152,7 +152,6 @@ public class EscalateReviewActivity : Activity
             new CreateBookmarkArgs
             {
                 BookmarkName = bookmarkName,
-                Payload = new { SessionId = sessionId.ToString(), PRNumber = prNumber },
                 Callback = OnEscalationResponseAsync,
                 AutoBurn = true
             });

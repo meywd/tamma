@@ -69,7 +69,6 @@ public class WaitForMergeApprovalActivity : Activity
             new CreateBookmarkArgs
             {
                 BookmarkName = bookmarkName,
-                Payload = new { IssueNumber = issueNumber, PrNumber = prNumber },
                 Callback = OnMergeDecisionAsync,
                 AutoBurn = true
             });

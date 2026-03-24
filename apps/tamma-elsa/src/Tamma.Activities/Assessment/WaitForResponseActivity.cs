@@ -90,7 +90,6 @@ public class WaitForResponseActivity : Activity
             new CreateBookmarkArgs
             {
                 BookmarkName = bookmarkName,
-                Payload = payload,
                 Callback = OnResponseReceivedAsync,
                 AutoBurn = true
             });
