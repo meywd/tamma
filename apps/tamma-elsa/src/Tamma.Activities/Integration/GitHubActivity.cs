@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -20,8 +21,8 @@ namespace Tamma.Activities.Integration;
 )]
 public class GitHubActivity : CodeActivity<GitHubOperationResult>
 {
-    private readonly ILogger<GitHubActivity> _logger;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<GitHubActivity>? _logger;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>GitHub action to perform</summary>
     [Input(Description = "Action: CreateBranch, MonitorCommits, CreatePullRequest, MergePullRequest, GetFileChanges")]
@@ -51,6 +52,9 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
     [Input(Description = "Pull request body")]
     public Input<string?> PrBody { get; set; } = default!;
 
+    [JsonConstructor]
+    public GitHubActivity() { }
+
     public GitHubActivity(
         ILogger<GitHubActivity> logger,
         IIntegrationService integrationService)
@@ -72,7 +76,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         var prTitle = PrTitle.Get(context);
         var prBody = PrBody.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Executing GitHub action {Action} on repository {Repository}",
             action, repository);
 
@@ -93,7 +97,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GitHub operation failed");
+            _logger?.LogError(ex, "GitHub operation failed");
             context.SetResult(new GitHubOperationResult
             {
                 Success = false,
@@ -104,7 +108,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
 
     private async Task<GitHubOperationResult> CreateBranch(string repository, string branchName)
     {
-        var result = await _integrationService.CreateGitHubBranchAsync(repository, branchName);
+        var result = await _integrationService!.CreateGitHubBranchAsync(repository, branchName);
         return new GitHubOperationResult
         {
             Success = result.Success,
@@ -116,7 +120,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
 
     private async Task<GitHubOperationResult> MonitorCommits(string repository, string branchName)
     {
-        var commits = await _integrationService.GetGitHubCommitsAsync(
+        var commits = await _integrationService!.GetGitHubCommitsAsync(
             repository, branchName, DateTime.UtcNow.AddHours(-1));
 
         return new GitHubOperationResult
@@ -137,7 +141,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
     private async Task<GitHubOperationResult> CreatePullRequest(
         string repository, string branchName, string title, string body)
     {
-        var result = await _integrationService.CreateGitHubPullRequestAsync(repository, new CreatePullRequestRequest
+        var result = await _integrationService!.CreateGitHubPullRequestAsync(repository, new CreatePullRequestRequest
         {
             Title = title,
             Body = body,
@@ -156,7 +160,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
 
     private async Task<GitHubOperationResult> MergePullRequest(string repository, int prNumber)
     {
-        var result = await _integrationService.MergeGitHubPullRequestAsync(repository, prNumber);
+        var result = await _integrationService!.MergeGitHubPullRequestAsync(repository, prNumber);
 
         return new GitHubOperationResult
         {
@@ -168,7 +172,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
 
     private async Task<GitHubOperationResult> GetFileChanges(string repository, string branchName)
     {
-        var changes = await _integrationService.GetGitHubFileChangesAsync(repository, branchName);
+        var changes = await _integrationService!.GetGitHubFileChangesAsync(repository, branchName);
 
         return new GitHubOperationResult
         {
@@ -186,7 +190,7 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
 
     private async Task<GitHubOperationResult> RunTests(string repository, string branchName)
     {
-        var result = await _integrationService.TriggerTestsAsync(repository, branchName);
+        var result = await _integrationService!.TriggerTestsAsync(repository, branchName);
 
         return new GitHubOperationResult
         {

@@ -7,7 +7,7 @@
  * To run: pnpm test:integration
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, type TaskContext } from 'vitest';
 import { ChromaDBVectorStore } from '../../providers/chromadb.js';
 import { createChromaDBStore } from '../../factory.js';
 import type { VectorDocument, SearchQuery, HybridSearchQuery } from '../../interfaces.js';
@@ -17,24 +17,25 @@ import { join } from 'path';
 
 // Skip these tests in CI or when ChromaDB is not available
 const SKIP_INTEGRATION = process.env['SKIP_INTEGRATION_TESTS'] === 'true';
+const CHROMADB_URL = process.env['CHROMADB_TEST_URL'] ?? '';
 
-describe.skipIf(SKIP_INTEGRATION)('ChromaDB Integration Tests', () => {
+describe.skipIf(SKIP_INTEGRATION || !CHROMADB_URL)('ChromaDB Integration Tests', () => {
   let store: ChromaDBVectorStore;
   let tempDir: string;
   const testCollectionName = 'test-collection';
   const dimensions = 128; // Smaller dimensions for faster tests
 
-  beforeAll(async () => {
+  beforeAll(async (ctx: TaskContext) => {
     // Create temp directory for ChromaDB data
     tempDir = mkdtempSync(join(tmpdir(), 'chroma-test-'));
 
-    store = createChromaDBStore(tempDir, dimensions) as ChromaDBVectorStore;
+    store = createChromaDBStore(CHROMADB_URL, dimensions) as ChromaDBVectorStore;
 
     try {
       await store.initialize();
     } catch (error) {
       console.warn('ChromaDB not available, skipping integration tests');
-      throw error;
+      ctx.skip();
     }
   });
 

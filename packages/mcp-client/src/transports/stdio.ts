@@ -339,22 +339,22 @@ export class StdioTransport extends BaseTransport {
 
     // Stop resource monitoring
     this.resourceMonitor?.stop();
-    this.resourceMonitor = undefined;
+    delete this.resourceMonitor;
 
     // Clear output collector
     this.stderrCollector?.reset();
-    this.stderrCollector = undefined;
+    delete this.stderrCollector;
 
     if (this.readline) {
       this.readline.close();
-      this.readline = undefined;
+      delete this.readline;
     }
 
     if (this.process) {
       this.process.stdin?.destroy();
       this.process.stdout?.destroy();
       this.process.stderr?.destroy();
-      this.process = undefined;
+      delete this.process;
     }
   }
 

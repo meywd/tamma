@@ -44,7 +44,9 @@ export class FileStore implements ICostStorage {
     if (autoFlushIntervalMs > 0) {
       this.flushTimer = setInterval(() => {
         if (this.isDirty) {
-          this.flush().catch(console.error);
+          this.flush().catch((error: unknown) => {
+            console.warn('[FileStore] Auto-flush failed:', error instanceof Error ? error.message : String(error));
+          });
         }
       }, autoFlushIntervalMs);
     }

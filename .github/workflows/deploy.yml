@@ -1,28 +1,13 @@
 # =============================================================================
-# Deploy to VPS
+# Deploy to VPS (manual trigger only)
 #
-# Pulls pre-built Docker images from GHCR and deploys to VPS.
-# Runs after Docker images are built, or via manual dispatch.
-#
-# Required secrets:
-#   VPS_HOST              — Server hostname or IP
-#   VPS_USER              — SSH username (e.g., root)
-#   VPS_SSH_KEY           — Private SSH key for authentication
-#   VPS_DEPLOY_PATH       — Path on VPS (e.g., /opt/tamma)
-#   TAMMA_APP_PRIVATE_KEY — GitHub App private key (PEM)
-#   TAMMA_DOTENV          — Full .env file contents for docker-compose
-#
-# Optional secrets:
-#   VPS_SSH_PORT          — SSH port (default: 22)
+# For automated deploys, see docker-publish.yml which deploys after building.
+# This workflow is for re-deploying without rebuilding images.
 # =============================================================================
 
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: ["Build & Publish Docker Images"]
-    types: [completed]
-
   workflow_dispatch:
     inputs:
       environment:
@@ -33,6 +18,10 @@ on:
         options:
           - production
           - staging
+      image_tag:
+        description: 'Image tag to deploy (e.g. pr-172, sha-abc1234, main)'
+        required: true
+        default: 'main'
 
 permissions:
   contents: read
@@ -46,31 +35,27 @@ jobs:
     name: Deploy to VPS
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    # Only run if images were built successfully (or manual trigger)
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-
     environment: ${{ github.event.inputs.environment || 'production' }}
 
     steps:
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.VPS_HOST }}" ] && missing+=("VPS_HOST")
+          [ -z "${{ secrets.VPS_USER }}" ] && missing+=("VPS_USER")
+          [ -z "${{ secrets.VPS_SSH_KEY }}" ] && missing+=("VPS_SSH_KEY")
+          [ -z "${{ secrets.VPS_DEPLOY_PATH }}" ] && missing+=("VPS_DEPLOY_PATH")
+          [ -z "${{ secrets.TAMMA_APP_PRIVATE_KEY }}" ] && missing+=("TAMMA_APP_PRIVATE_KEY")
+          [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
+          [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
+          [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Determine image tag
-        id: tag
-        run: |
-          # Always use immutable SHA tag for deployments
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            SHA="${{ github.event.workflow_run.head_sha }}"
-          else
-            SHA="${{ github.sha }}"
-          fi
-          echo "tag=sha-$(echo "$SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
-          echo "Deploying image tag: sha-$(echo "$SHA" | cut -c1-7)"
 
       - name: Configure SSH
         run: |
@@ -96,12 +81,33 @@ jobs:
             ssh -i ~/.ssh/deploy_key \
               -p ${{ secrets.VPS_SSH_PORT || 22 }} \
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
-          echo '${{ secrets.TAMMA_DOTENV }}' | \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
+
+          echo '${{ secrets.TAMMA_ORIGIN_CERT }}' | \
             ssh -i ~/.ssh/deploy_key \
               -p ${{ secrets.VPS_SSH_PORT || 22 }} \
               ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem"
+
+          echo '${{ secrets.TAMMA_ORIGIN_KEY }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem"
+
+          printf '%s\n' \
+            "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
+            "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
+            "GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}" \
+            "GITHUB_OAUTH_CLIENT_ID=${{ secrets.TAMMA_OAUTH_CLIENT_ID }}" \
+            "GITHUB_OAUTH_CLIENT_SECRET=${{ secrets.TAMMA_OAUTH_CLIENT_SECRET }}" \
+            "JWT_SECRET=${{ secrets.TAMMA_JWT_SECRET }}" \
+            "API_BASE_URL=https://api.tamma.dev" \
+            "DASHBOARD_URL=https://app.tamma.dev" \
+          | ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
 
       - name: Sync docker + database files
         run: |
@@ -116,8 +122,8 @@ jobs:
 
       - name: Create docker-compose override for GHCR images
         run: |
-          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          OWNER="${{ github.repository_owner }}"
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
 
           cat > /tmp/docker-compose.images.yml << YAML
           services:
@@ -143,7 +149,7 @@ jobs:
             /tmp/docker-compose.images.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
 
-      - name: Deploy
+      - name: Pull images and stop old containers
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -151,24 +157,30 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< '${{ secrets.GITHUB_TOKEN }}' && \
               docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
+                -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
                 pull && \
               docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                up -d --remove-orphans && \
-              echo 'Waiting for health checks...' && \
-              sleep 15 && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                ps
+                -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
+                down --remove-orphans 2>/dev/null || true
+            "
+
+      - name: "Start and verify: postgres + rabbitmq"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d postgres rabbitmq chromadb && \
+              for i in \$(seq 1 30); do
+                PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
+                RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
+                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ chromadb=\$CHROMA\" && \
+                [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ] && echo 'Infrastructure healthy' && exit 0
+                sleep 2
+              done && \
+              echo 'FAILED: infrastructure not healthy' && \$COMPOSE logs --tail=30 postgres rabbitmq chromadb && exit 1
             "
 
       - name: Run database migrations
@@ -179,17 +191,94 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }} && \
               for f in database/migrations/*.sql; do
                 echo \"Running migration: \$f\" && \
-                docker compose -f docker/docker-compose.yml exec -T postgres \
-                  psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
+                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml -f docker/docker-compose.images.yml --env-file .env \
+                  exec -T postgres psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
               done
             "
 
-      - name: Health check
+      - name: "Start and verify: elsa-server"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d elsa-server && \
+              for i in \$(seq 1 30); do
+                STATE=\$(\$COMPOSE ps elsa-server --format '{{.State}}' 2>/dev/null) && \
+                HEALTH=\$(\$COMPOSE ps elsa-server --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: state=\$STATE health=\$HEALTH\" && \
+                [ \"\$STATE\" = 'exited' ] || [ \"\$STATE\" = 'dead' ] && echo 'FAILED: elsa-server crashed' && \$COMPOSE logs --tail=50 elsa-server && exit 1
+                [ \"\$HEALTH\" = 'healthy' ] && echo 'elsa-server healthy' && exit 0
+                sleep 3
+              done && \
+              echo 'FAILED: elsa-server not healthy' && \$COMPOSE logs --tail=50 elsa-server && exit 1
+            "
+
+      - name: "Start and verify: APIs"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d tamma-api-dotnet tamma-api && \
+              for i in \$(seq 1 30); do
+                API_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api | head -1) curl -4sf -o /dev/null http://127.0.0.1:3100/api/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                DOTNET_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api-dotnet | head -1) curl -4sf -o /dev/null http://127.0.0.1:3000/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                echo \"Check \$i/30: tamma-api=\$API_OK tamma-api-dotnet=\$DOTNET_OK\" && \
+                [ \"\$API_OK\" = 'ok' ] && [ \"\$DOTNET_OK\" = 'ok' ] && echo 'APIs healthy' && exit 0
+                sleep 3
+              done && \
+              echo 'FAILED: APIs not healthy' && \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && exit 1
+            "
+
+      - name: "Start: engine + dashboard + nginx-proxy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
+                up -d tamma-engine tamma-dashboard elsa-studio nginx-proxy && \
+              sleep 5 && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
+            "
+
+      - name: "Health check: API via proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sf http://localhost:3100/api/health && echo ' API OK' || echo 'API health check failed'"
+            "curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health && echo ' API OK' || curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK (http)' || (echo '::error::API health check via proxy failed' && exit 1)"
+
+      - name: "Verify: port 80 accessible and firewall"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              echo '--- Port 80 listeners ---' && \
+              ss -tlnp | grep ':80' && \
+              echo '--- Firewall (ufw) ---' && \
+              (ufw status 2>/dev/null || echo 'ufw not installed') && \
+              echo '--- Firewall (iptables port 80) ---' && \
+              iptables -L INPUT -n 2>/dev/null | grep -E '80|http' || echo 'no iptables rules for port 80' && \
+              echo '--- Curl from localhost ---' && \
+              curl -sf -H 'Host: app.tamma.dev' http://localhost/ | head -c 200 && echo '' || echo 'FAILED: app.tamma.dev not responding on localhost'
+            "
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard; do
+                echo \"=== \$svc (last 50) ===\" && \
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)'
+              done
+            "
 
       - name: Cleanup SSH
         if: always()

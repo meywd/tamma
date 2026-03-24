@@ -287,12 +287,15 @@ export class PgVectorStore extends BaseVectorStore {
 
     const tableName = this.getTableName(name);
 
-    // Get count and table size
+    // Get count and table size.
+    // Use the sanitized collection name as a regclass literal so pg_total_relation_size
+    // receives a proper schema-qualified identifier without double-quoting ambiguity.
+    const sanitizedName = name.replace(/[^a-zA-Z0-9_]/g, '');
     const result = await this.pool.query(`
       SELECT
         (SELECT count(*) FROM ${tableName}) as count,
-        pg_total_relation_size($1) as size
-    `, [tableName.replace(/"/g, '')]);
+        pg_total_relation_size('"${this.schema}"."vector_${sanitizedName}"'::regclass) as size
+    `);
 
     const row = result.rows[0] as Record<string, string | number> | undefined;
     const count = parseInt(String(row?.['count'] ?? '0'), 10);
@@ -525,8 +528,7 @@ export class PgVectorStore extends BaseVectorStore {
                ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $2)) as text_score,
                ROW_NUMBER() OVER (ORDER BY ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $2)) DESC) as text_rank
         FROM ${tableName}
-        ${whereClause}
-        WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $2)
+        ${whereClause ? `${whereClause} AND to_tsvector('english', content) @@ plainto_tsquery('english', $2)` : `WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $2)`}
         LIMIT ${fetchLimit}
       ),
       combined AS (

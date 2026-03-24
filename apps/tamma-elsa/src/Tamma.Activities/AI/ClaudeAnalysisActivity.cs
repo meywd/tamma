@@ -8,6 +8,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -29,10 +30,10 @@ namespace Tamma.Activities.AI;
 )]
 public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
 {
-    private readonly ILogger<ClaudeAnalysisActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IConfiguration _configuration;
+    private readonly ILogger<ClaudeAnalysisActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IHttpClientFactory? _httpClientFactory;
+    private readonly IConfiguration? _configuration;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -54,6 +55,9 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
     [Input(Description = "Junior skill level", DefaultValue = 3)]
     public Input<int> SkillLevel { get; set; } = new(3);
 
+    [JsonConstructor]
+    public ClaudeAnalysisActivity() { }
+
     public ClaudeAnalysisActivity(
         ILogger<ClaudeAnalysisActivity> logger,
         IMentorshipSessionRepository repository,
@@ -74,7 +78,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
         var additionalContext = Context.Get(context);
         var skillLevel = Math.Clamp(SkillLevel.Get(context), 1, 5);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Starting Claude analysis of type {AnalysisType} for session {SessionId}",
             analysisType, sessionId);
 
@@ -84,7 +88,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
             var userPrompt = GetUserPrompt(analysisType, content, additionalContext);
 
             string response;
-            var callbackUrl = _configuration["Engine:CallbackUrl"];
+            var callbackUrl = _configuration!["Engine:CallbackUrl"];
             var useMock = _configuration.GetValue<bool>("Anthropic:UseMock");
 
             if (useMock)
@@ -105,13 +109,13 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
 
             var result = ParseResponse(response, analysisType);
 
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
                 EventType = Core.Entities.EventTypes.AIAnalysis
             });
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Claude analysis completed for session {SessionId}: Confidence={Confidence}",
                 sessionId, result.Confidence);
 
@@ -119,7 +123,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during Claude analysis for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during Claude analysis for session {SessionId}", sessionId);
 
             context.SetResult(new ClaudeAnalysisOutput
             {
@@ -137,8 +141,8 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
     /// </summary>
     private async Task<string> CallClaudeApi(string systemPrompt, string userPrompt)
     {
-        var httpClient = _httpClientFactory.CreateClient("anthropic");
-        var model = _configuration["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
+        var httpClient = _httpClientFactory!.CreateClient("anthropic");
+        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
 
         var requestBody = new
         {
@@ -172,7 +176,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
                     retryAfter = TimeSpan.FromSeconds(5 * (attempt + 1));
                 }
 
-                _logger.LogWarning(
+                _logger?.LogWarning(
                     "Claude API returned {StatusCode}, retrying after {RetryAfter}s (attempt {Attempt}/{Max})",
                     statusCode, retryAfter.TotalSeconds, attempt + 1, maxRetries);
                 await Task.Delay(retryAfter);
@@ -205,7 +209,7 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
     private async Task<string> CallEngineCallback(
         string callbackUrl, string systemPrompt, string userPrompt, AnalysisType type)
     {
-        var httpClient = _httpClientFactory.CreateClient();
+        var httpClient = _httpClientFactory!.CreateClient();
 
         var requestBody = new
         {
@@ -510,7 +514,7 @@ Provide guidance in the following JSON format:
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to parse Claude response");
+            _logger?.LogWarning(ex, "Failed to parse Claude response");
 
             return new ClaudeAnalysisOutput
             {

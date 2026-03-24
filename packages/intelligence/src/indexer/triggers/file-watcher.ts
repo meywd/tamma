@@ -80,8 +80,8 @@ export class FileWatcher {
           },
         );
 
-        watcher.on('error', () => {
-          // Silently handle watcher errors (e.g., directory removed)
+        watcher.on('error', (error: unknown) => {
+          console.warn('[FileWatcher] Watcher error for path:', resolvedPath, error instanceof Error ? error.message : String(error));
         });
 
         this.watchers.push(watcher);
@@ -181,8 +181,8 @@ export class FileWatcher {
 
     try {
       this.callback(changedFiles);
-    } catch {
-      // Ignore callback errors
+    } catch (error) {
+      console.warn('[FileWatcher] Callback error:', error instanceof Error ? error.message : String(error));
     }
   }
 

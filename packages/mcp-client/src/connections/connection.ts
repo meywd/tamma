@@ -423,8 +423,9 @@ export class ServerConnection {
           inputSchema: t.inputSchema,
           serverName: this.config.name,
         }));
-      } catch {
-        // Tools not available
+      } catch (error) {
+        // Tools discovery failed — server declared capability but list request failed
+        console.warn(`[MCPConnection:${this.config.name}] tools/list failed:`, error instanceof Error ? error.message : String(error));
         this.tools = [];
       }
     }
@@ -448,8 +449,9 @@ export class ServerConnection {
           mimeType: r.mimeType,
           serverName: this.config.name,
         }));
-      } catch {
-        // Resources not available
+      } catch (error) {
+        // Resources discovery failed — server declared capability but list request failed
+        console.warn(`[MCPConnection:${this.config.name}] resources/list failed:`, error instanceof Error ? error.message : String(error));
         this.resources = [];
       }
     }
@@ -475,8 +477,9 @@ export class ServerConnection {
           arguments: p.arguments,
           serverName: this.config.name,
         }));
-      } catch {
-        // Prompts not available
+      } catch (error) {
+        // Prompts discovery failed — server declared capability but list request failed
+        console.warn(`[MCPConnection:${this.config.name}] prompts/list failed:`, error instanceof Error ? error.message : String(error));
         this.prompts = [];
       }
     }
@@ -674,8 +677,13 @@ export class ServerConnection {
     this.reconnectTimeout = setTimeout(async () => {
       try {
         await this.connect();
-      } catch {
-        // Will trigger another reconnect attempt via error handler
+      } catch (error) {
+        // connect() failed — schedule another attempt so reconnection never stalls.
+        console.warn(
+          `[MCPConnection:${this.config.name}] Reconnect attempt ${this.reconnectAttempts} failed:`,
+          error instanceof Error ? error.message : String(error),
+        );
+        this.attemptReconnect();
       }
     }, delay);
   }

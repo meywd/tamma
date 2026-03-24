@@ -182,6 +182,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // GitHub App installation callback — redirect to API server preserving query params
+    if (url.pathname === '/github/callback') {
+      const apiUrl = `https://api.tamma.dev/api/github/callback${url.search}`;
+      return Response.redirect(apiUrl, 302);
+    }
+
     // Handle API endpoints
     if (url.pathname === '/signup') {
       return handleSignup(request, env);

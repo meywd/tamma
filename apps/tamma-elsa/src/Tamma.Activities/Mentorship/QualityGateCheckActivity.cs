@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,9 +22,9 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
 {
-    private readonly ILogger<QualityGateCheckActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<QualityGateCheckActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -40,6 +41,9 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
     /// <summary>Whether to allow warnings</summary>
     [Input(Description = "Allow warnings to pass", DefaultValue = true)]
     public Input<bool> AllowWarnings { get; set; } = new(true);
+
+    [JsonConstructor]
+    public QualityGateCheckActivity() { }
 
     public QualityGateCheckActivity(
         ILogger<QualityGateCheckActivity> logger,
@@ -61,20 +65,20 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         var minCoverage = MinCoverage.Get(context);
         var allowWarnings = AllowWarnings.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Running quality gate checks for story {StoryId}",
             storyId);
 
         try
         {
             // Update session state
-            await _repository.UpdateStateAsync(sessionId, MentorshipState.QUALITY_GATE_CHECK);
+            await _repository!.UpdateStateAsync(sessionId, MentorshipState.QUALITY_GATE_CHECK);
 
             // Get story for repository URL
             var story = await _repository.GetStoryByIdAsync(storyId);
             if (story == null)
             {
-                _logger.LogError("Story {StoryId} not found", storyId);
+                _logger?.LogError("Story {StoryId} not found", storyId);
                 context.SetResult(new QualityGateOutput
                 {
                     Passed = false,
@@ -128,7 +132,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
                 StateTo = output.Passed ? MentorshipState.PREPARE_CODE_REVIEW : MentorshipState.AUTO_FIX_ISSUES
             });
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Quality gate check completed for story {StoryId}: Passed={Passed}, Issues={IssueCount}",
                 storyId, output.Passed, output.Issues.Count);
 
@@ -136,7 +140,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during quality gate check for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during quality gate check for session {SessionId}", sessionId);
 
             context.SetResult(new QualityGateOutput
             {
@@ -152,7 +156,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
     {
         try
         {
-            var testResults = await _integrationService.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
+            var testResults = await _integrationService!.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
 
             return new GateResult
             {
@@ -172,7 +176,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to run test gate");
+            _logger?.LogWarning(ex, "Failed to run test gate");
             return SimulateTestGate();
         }
     }
@@ -181,7 +185,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
     {
         try
         {
-            var testResults = await _integrationService.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
+            var testResults = await _integrationService!.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
             var coverage = testResults.CoveragePercentage ?? 0;
 
             return new GateResult
@@ -204,7 +208,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to run coverage gate");
+            _logger?.LogWarning(ex, "Failed to run coverage gate");
             return SimulateCoverageGate(minCoverage);
         }
     }
@@ -213,7 +217,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
     {
         try
         {
-            var buildStatus = await _integrationService.GetBuildStatusAsync(repositoryUrl, $"feature/{storyId}");
+            var buildStatus = await _integrationService!.GetBuildStatusAsync(repositoryUrl, $"feature/{storyId}");
 
             return new GateResult
             {
@@ -236,7 +240,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to run build gate");
+            _logger?.LogWarning(ex, "Failed to run build gate");
             return SimulateBuildGate();
         }
     }

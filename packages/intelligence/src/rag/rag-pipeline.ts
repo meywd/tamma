@@ -6,6 +6,7 @@
  * and context assembly for LLM consumption.
  */
 
+import { randomUUID } from 'node:crypto';
 import type {
   IRAGPipeline,
   RAGConfig,
@@ -34,7 +35,7 @@ import { IssuesSource, PullRequestsSource, CommitsSource } from './sources/githu
  * Generate unique query ID
  */
 function generateQueryId(): string {
-  return `rag-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `rag-${randomUUID()}`;
 }
 
 /**

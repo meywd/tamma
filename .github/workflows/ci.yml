@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/engine-mvp]
+    branches: [main, feat/engine-mvp, feat/deployment]
   pull_request:
     branches: [main]
 
@@ -48,6 +48,87 @@ jobs:
 
       - name: Shellcheck install script
         run: shellcheck install.sh
+
+  integration-tests:
+    name: Integration Tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tamma_test
+          POSTGRES_PASSWORD: tamma_test
+          POSTGRES_DB: tamma_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U tamma_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+          --tmpfs /var/lib/postgresql/data
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (builds project references)
+        run: pnpm typecheck
+
+      - name: Run integration tests
+        env:
+          INTEGRATION_TEST_PG: 'true'
+          PG_TEST_HOST: localhost
+          PG_TEST_PORT: '5433'
+          PG_TEST_USER: tamma_test
+          PG_TEST_PASSWORD: tamma_test
+          PG_TEST_DB: tamma_test
+        run: npx vitest run --config vitest.integration.config.ts
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (builds project references)
+        run: pnpm typecheck
+
+      - name: Run E2E tests
+        run: npx vitest run --config vitest.e2e.config.ts
 
   dotnet-tests:
     name: .NET Tests

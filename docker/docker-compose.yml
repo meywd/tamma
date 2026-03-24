@@ -49,17 +49,38 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Infrastructure: ChromaDB (vector database)
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:0.6.3
+    volumes:
+      - tamma-chroma-data:/chroma/chroma
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+      IS_PERSISTENT: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # ELSA .NET Workflow Engine
   # ---------------------------------------------------------------------------
   elsa-server:
     build:
-      context: ../apps/tamma-elsa/src
-      dockerfile: Tamma.ElsaServer/Dockerfile
+      context: ../apps/tamma-elsa
+      dockerfile: src/Tamma.ElsaServer/Dockerfile
     environment:
-      ConnectionStrings__PostgreSql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       RabbitMq__HostName: rabbitmq
       RabbitMq__UserName: ${RABBITMQ_USER:-tamma}
       RabbitMq__Password: ${RABBITMQ_PASSWORD:-tamma}
+      Elsa__Identity__SigningKey: ${ELSA_SIGNING_KEY:-sufficiently-long-secret-signing-key-for-elsa-jwt-tokens}
+      Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
+      ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,6 +96,21 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # ELSA Studio (Blazor WASM UI)
+  # ---------------------------------------------------------------------------
+  elsa-studio:
+    image: elsaworkflows/elsa-studio-v3-4-0:latest
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # URL must be browser-accessible (Blazor WASM runs client-side)
+      ELSASERVER__URL: https://elsa.tamma.dev/elsa/api
+    depends_on:
+      elsa-server:
+        condition: service_healthy
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # Tamma .NET REST API (ELSA management)
   # ---------------------------------------------------------------------------
   tamma-api-dotnet:
@@ -82,9 +118,10 @@ services:
       context: ../apps/tamma-elsa/src
       dockerfile: Tamma.Api/Dockerfile
     environment:
-      ConnectionStrings__PostgreSql: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
+      Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
     depends_on:
       elsa-server:
         condition: service_healthy
@@ -109,8 +146,17 @@ services:
       target: tamma-api
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CHROMADB_URL: http://chromadb:8000
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      JWT_SECRET: ${JWT_SECRET:-tamma-dev-jwt-secret}
+      API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
+      DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
+    volumes:
+      - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -132,16 +178,16 @@ services:
       dockerfile: docker/Dockerfile.ts
       target: tamma-engine
     environment:
-      GITHUB_TOKEN: ${GITHUB_TOKEN:?GITHUB_TOKEN is required}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
-      GITHUB_OWNER: ${GITHUB_OWNER:?GITHUB_OWNER is required}
-      GITHUB_REPO: ${GITHUB_REPO:?GITHUB_REPO is required}
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
+      TAMMA_API_URL: http://tamma-api:3100
     volumes:
       - tamma-engine-workdir:/home/tamma/workdir
+      - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       tamma-api:
-        condition: service_healthy
+        condition: service_started
     networks:
       - tamma-net
 
@@ -154,7 +200,24 @@ services:
       dockerfile: docker/Dockerfile.dashboard
     depends_on:
       tamma-api:
-        condition: service_healthy
+        condition: service_started
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
+  # ---------------------------------------------------------------------------
+  nginx-proxy:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../secrets/origin-cert.pem:/etc/nginx/certs/origin-cert.pem:ro
+      - ../secrets/origin-key.pem:/etc/nginx/certs/origin-key.pem:ro
+    depends_on:
+      tamma-api:
+        condition: service_started
+      tamma-dashboard:
+        condition: service_started
     networks:
       - tamma-net
 
@@ -164,6 +227,7 @@ services:
 volumes:
   tamma-pg-data:
   tamma-rmq-data:
+  tamma-chroma-data:
   tamma-engine-workdir:
 
 # =============================================================================

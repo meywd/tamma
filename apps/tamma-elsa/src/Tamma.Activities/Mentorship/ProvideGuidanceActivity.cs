@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,10 +22,10 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
 {
-    private readonly ILogger<ProvideGuidanceActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
-    private readonly IAnalyticsService _analyticsService;
+    private readonly ILogger<ProvideGuidanceActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
+    private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -50,6 +51,9 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
     [Input(Description = "Guidance level: 1=hint, 2=guidance, 3=assistance", DefaultValue = 2)]
     public Input<int> GuidanceLevel { get; set; } = new(2);
 
+    [JsonConstructor]
+    public ProvideGuidanceActivity() { }
+
     public ProvideGuidanceActivity(
         ILogger<ProvideGuidanceActivity> logger,
         IMentorshipSessionRepository repository,
@@ -74,7 +78,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         var issueContext = IssueContext.Get(context);
         var guidanceLevel = GuidanceLevel.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Providing guidance for junior {JuniorId} on blocker type {BlockerType}",
             juniorId, blockerType);
 
@@ -88,7 +92,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
                 3 => MentorshipState.PROVIDE_ASSISTANCE,
                 _ => MentorshipState.PROVIDE_GUIDANCE
             };
-            await _repository.UpdateStateAsync(sessionId, newState);
+            await _repository!.UpdateStateAsync(sessionId, newState);
 
             // Get junior information for personalization
             var junior = await _repository.GetJuniorByIdAsync(juniorId);
@@ -121,7 +125,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
             });
 
             // Record analytics
-            await _analyticsService.RecordMetricAsync(
+            await _analyticsService!.RecordMetricAsync(
                 sessionId,
                 "guidance_provided",
                 guidanceLevel,
@@ -133,7 +137,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
                 await DeliverGuidanceViaSlack(junior.SlackId, guidance, resources, guidanceLevel);
             }
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Guidance delivered to junior {JuniorId} at level {Level}",
                 juniorId, guidanceLevel);
 
@@ -154,7 +158,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error providing guidance for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error providing guidance for session {SessionId}", sessionId);
 
             context.SetResult(new GuidanceOutput
             {
@@ -550,7 +554,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
 
         message += "\n\nReply if you need more help!";
 
-        await _integrationService.SendSlackDirectMessageAsync(slackId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
     }
 }
 

@@ -2,9 +2,11 @@
  * Context Testing Service
  *
  * Provides interactive context retrieval testing and feedback collection.
+ *
+ * Delegates to a real IContextAggregator implementation when available;
+ * otherwise returns empty state.
  */
 
-import { randomUUID } from 'node:crypto';
 import type {
   ContextTestRequest,
   ContextTestResult,
@@ -12,68 +14,75 @@ import type {
   UIContextChunk,
   UIContextSource,
 } from '@tamma/shared';
+import type { IContextAggregator } from './types.js';
 
 export class ContextTestingService {
+  private readonly aggregator: IContextAggregator | null;
   private testHistory: ContextTestResult[] = [];
   private feedback: Map<string, ContextFeedbackRequest> = new Map();
 
+  constructor(aggregator?: IContextAggregator) {
+    this.aggregator = aggregator ?? null;
+  }
+
   async testContext(request: ContextTestRequest): Promise<ContextTestResult> {
-    const startTime = Date.now();
-    const requestId = randomUUID();
-    const sources = request.sources ?? ['vector_db', 'rag'] as UIContextSource[];
-
-    const chunks: UIContextChunk[] = [];
-    let chunkIndex = 0;
-
-    for (const source of sources) {
-      const count = source === 'vector_db' ? 3 : source === 'rag' ? 2 : 1;
-      for (let i = 0; i < count; i++) {
-        chunks.push({
-          id: randomUUID(),
-          content: `// Context from ${source}, chunk ${i + 1}\n// Matching query: "${request.query}"\nexport function handler${chunkIndex}() {\n  // Implementation related to the query\n  console.log('${source} result ${i + 1}');\n}`,
-          source: source as UIContextSource,
-          relevance: 0.95 - chunkIndex * 0.05,
-          metadata: {
-            filePath: `src/${source}/handler-${i + 1}.ts`,
-            startLine: 1,
-            endLine: 6,
-            language: 'typescript',
-          },
-        });
-        chunkIndex++;
-      }
+    if (!this.aggregator) {
+      throw new Error('Context aggregator is not configured');
     }
 
-    const assembledText = chunks.map((c) => c.content).join('\n\n');
-    const tokenCount = Math.ceil(assembledText.length / 4);
-    const totalLatencyMs = Date.now() - startTime + Math.floor(Math.random() * 150);
+    const options: Record<string, unknown> = {};
+    if (request.sources) {
+      options.sources = request.sources;
+    }
+    if (request.hints) {
+      options.hints = request.hints;
+    }
+    if (request.options) {
+      options.options = request.options;
+    }
 
-    const sourceContributions = sources.map((source) => {
-      const sourceChunks = chunks.filter((c) => c.source === source);
-      return {
-        source: source as UIContextSource,
-        chunksProvided: sourceChunks.length,
-        tokensUsed: sourceChunks.length * Math.floor(tokenCount / chunks.length),
-        latencyMs: Math.floor(totalLatencyMs * 0.4) + Math.floor(Math.random() * 50),
-        cacheHit: Math.random() > 0.6,
-      };
-    });
+    const aggregatorRequest: { query: string; taskType?: string; maxTokens?: number } = {
+      query: request.query,
+    };
+    if (request.taskType) {
+      aggregatorRequest.taskType = request.taskType;
+    }
+    if (request.maxTokens !== undefined) {
+      aggregatorRequest.maxTokens = request.maxTokens;
+    }
+
+    const response = await this.aggregator.getContext(aggregatorRequest, options);
+
+    // Map the response to the UI ContextTestResult shape
+    const chunks: UIContextChunk[] = response.context.chunks.map((chunk) => ({
+      id: '',
+      content: chunk.content,
+      source: chunk.source as UIContextSource,
+      relevance: chunk.score,
+      metadata: (chunk.metadata ?? {}) as UIContextChunk['metadata'],
+    }));
 
     const result: ContextTestResult = {
-      requestId,
+      requestId: response.requestId,
       context: {
-        text: assembledText,
+        text: response.context.text,
         chunks,
-        tokenCount,
+        tokenCount: response.context.tokenCount,
         format: request.options?.includeMetadata ? 'xml' : 'markdown',
       },
-      sources: sourceContributions,
+      sources: response.sources.map((s) => ({
+        source: s.name as UIContextSource,
+        chunksProvided: s.chunks,
+        tokensUsed: 0,
+        latencyMs: s.durationMs,
+        cacheHit: false,
+      })),
       metrics: {
-        totalLatencyMs,
-        totalTokens: tokenCount,
-        budgetUtilization: Math.min(tokenCount / request.maxTokens, 1),
-        deduplicationRate: 0.15,
-        cacheHitRate: sourceContributions.filter((s) => s.cacheHit).length / sourceContributions.length,
+        totalLatencyMs: response.metrics.totalLatencyMs,
+        totalTokens: response.metrics.totalTokens,
+        budgetUtilization: 0,
+        deduplicationRate: 0,
+        cacheHitRate: 0,
       },
     };
 

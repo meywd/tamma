@@ -1,21 +1,22 @@
 # Tamma ELSA Server Dockerfile
 # Multi-stage build for optimized production image
+# Build context: apps/tamma-elsa/ (includes src/ and workflows/)
 
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy project files for restore
-COPY ["Tamma.ElsaServer/Tamma.ElsaServer.csproj", "Tamma.ElsaServer/"]
-COPY ["Tamma.Activities/Tamma.Activities.csproj", "Tamma.Activities/"]
-COPY ["Tamma.Core/Tamma.Core.csproj", "Tamma.Core/"]
-COPY ["Tamma.Data/Tamma.Data.csproj", "Tamma.Data/"]
+COPY ["src/Tamma.ElsaServer/Tamma.ElsaServer.csproj", "Tamma.ElsaServer/"]
+COPY ["src/Tamma.Activities/Tamma.Activities.csproj", "Tamma.Activities/"]
+COPY ["src/Tamma.Core/Tamma.Core.csproj", "Tamma.Core/"]
+COPY ["src/Tamma.Data/Tamma.Data.csproj", "Tamma.Data/"]
 
 # Restore dependencies
 RUN dotnet restore "Tamma.ElsaServer/Tamma.ElsaServer.csproj"
 
 # Copy source code
-COPY . .
+COPY src/ .
 
 # Build the project
 WORKDIR "/src/Tamma.ElsaServer"
@@ -38,8 +39,11 @@ RUN groupadd -r tamma && useradd -r -g tamma tamma
 # Copy published files
 COPY --from=publish /app/publish .
 
-# Create directories for workflows and data
-RUN mkdir -p /app/workflows /app/activities /app/storage && \
+# Copy workflow JSON files for seeding at startup
+COPY ["workflows/", "/app/workflows/"]
+
+# Create directories for activities and storage
+RUN mkdir -p /app/activities /app/storage && \
     chown -R tamma:tamma /app
 
 # Switch to non-root user

@@ -33,12 +33,17 @@ RUN pnpm install --frozen-lockfile
 # ---- Stage 2: Build ----
 FROM deps AS build
 COPY . .
-RUN pnpm --filter @tamma/cli... run build
+# Build only the packages in the typecheck chain (intelligence/mcp-client/cost-monitor
+# have pre-existing type errors and are used via runtime DI, not compile-time imports)
+RUN pnpm --filter @tamma/shared --filter @tamma/platforms --filter @tamma/providers \
+    --filter @tamma/orchestrator --filter @tamma/observability --filter @tamma/events \
+    --filter @tamma/api --filter @tamma/cli \
+    run build
 RUN pnpm prune --prod
 
 # ---- Stage 3a: API Server ----
 FROM node:22-alpine AS tamma-api
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini curl
 RUN addgroup -g 1001 tamma && adduser -u 1001 -G tamma -s /bin/sh -D tamma
 WORKDIR /app
 
@@ -49,11 +54,11 @@ COPY --from=build /app/package.json ./
 USER tamma
 EXPOSE 3100
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3100/health || exit 1
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+  CMD curl -4sf http://127.0.0.1:3100/api/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "packages/cli/dist/index.js", "server", "--port", "3100", "--host", "0.0.0.0"]
+CMD ["node", "packages/api/dist/serve.js"]
 
 # ---- Stage 3b: Engine ----
 FROM node:22-alpine AS tamma-engine

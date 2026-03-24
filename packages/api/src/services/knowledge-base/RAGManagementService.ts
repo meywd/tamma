@@ -2,22 +2,25 @@
  * RAG Management Service
  *
  * Manages RAG pipeline configuration, testing, and metrics.
+ *
+ * Delegates to a real IRAGPipeline implementation when available;
+ * otherwise returns empty/zero state.
  */
 
-import { randomUUID } from 'node:crypto';
 import type {
   RAGConfigInfo,
   RAGMetricsInfo,
   RAGTestRequest,
   RAGTestResult,
 } from '@tamma/shared';
+import type { IRAGPipeline } from './types.js';
 
 const DEFAULT_RAG_CONFIG: RAGConfigInfo = {
   sources: {
-    vectorDb: { enabled: true, weight: 1.0, topK: 20 },
-    keyword: { enabled: true, weight: 0.5, topK: 10 },
-    docs: { enabled: true, weight: 0.3, topK: 5 },
-    issues: { enabled: false, weight: 0.2, topK: 5 },
+    vectorDb: { enabled: false, weight: 0, topK: 0 },
+    keyword: { enabled: false, weight: 0, topK: 0 },
+    docs: { enabled: false, weight: 0, topK: 0 },
+    issues: { enabled: false, weight: 0, topK: 0 },
   },
   ranking: {
     fusionMethod: 'rrf',
@@ -27,7 +30,7 @@ const DEFAULT_RAG_CONFIG: RAGConfigInfo = {
   assembly: {
     maxTokens: 4000,
     format: 'xml',
-    includeScores: true,
+    includeScores: false,
   },
   caching: {
     enabled: true,
@@ -37,10 +40,15 @@ const DEFAULT_RAG_CONFIG: RAGConfigInfo = {
 };
 
 export class RAGManagementService {
-  private config: RAGConfigInfo = { ...DEFAULT_RAG_CONFIG };
+  private readonly pipeline: IRAGPipeline | null;
+  private config: RAGConfigInfo;
   private queryCount = 0;
   private totalLatencyMs = 0;
-  private cacheHits = 0;
+
+  constructor(pipeline?: IRAGPipeline) {
+    this.pipeline = pipeline ?? null;
+    this.config = { ...DEFAULT_RAG_CONFIG };
+  }
 
   async getConfig(): Promise<RAGConfigInfo> {
     return { ...this.config };
@@ -59,67 +67,94 @@ export class RAGManagementService {
     if (config.caching) {
       this.config.caching = { ...this.config.caching, ...config.caching };
     }
+
+    // Push config to real pipeline if available
+    if (this.pipeline?.configure) {
+      this.pipeline.configure({
+        sources: this.config.sources,
+        ranking: this.config.ranking,
+        assembly: this.config.assembly,
+        caching: this.config.caching,
+      });
+    }
+
     return { ...this.config };
   }
 
   async getMetrics(): Promise<RAGMetricsInfo> {
+    if (!this.pipeline) {
+      return {
+        totalQueries: 0,
+        avgLatencyMs: 0,
+        cacheHitRate: 0,
+        avgTokensRetrieved: 0,
+        sourceBreakdown: {},
+      };
+    }
+
+    const cacheStats = this.pipeline.getCacheStats?.();
+    const feedbackOverview = this.pipeline.getFeedbackOverview?.();
+
+    const totalHits = cacheStats ? cacheStats.hits : 0;
+    const totalMisses = cacheStats ? cacheStats.misses : 0;
+    const cacheTotal = totalHits + totalMisses;
+    const cacheHitRate = cacheTotal > 0 ? totalHits / cacheTotal : 0;
+
     return {
-      totalQueries: this.queryCount,
+      totalQueries: feedbackOverview && feedbackOverview.totalFeedback > 0
+        ? feedbackOverview.totalFeedback
+        : this.queryCount,
       avgLatencyMs: this.queryCount > 0 ? this.totalLatencyMs / this.queryCount : 0,
-      cacheHitRate: this.queryCount > 0 ? this.cacheHits / this.queryCount : 0,
-      avgTokensRetrieved: 2500,
-      sourceBreakdown: {
-        vector_db: 0.65,
-        keyword: 0.2,
-        docs: 0.1,
-        issues: 0.05,
-      },
+      cacheHitRate,
+      avgTokensRetrieved: 0,
+      sourceBreakdown: {},
     };
   }
 
   async testQuery(request: RAGTestRequest): Promise<RAGTestResult> {
+    if (!this.pipeline) {
+      throw new Error('RAG pipeline is not configured');
+    }
+
     const startTime = Date.now();
     this.queryCount++;
 
-    const isCacheHit = Math.random() > 0.7;
-    if (isCacheHit) {
-      this.cacheHits++;
+    const options: Record<string, unknown> = {};
+    if (request.maxTokens !== undefined) {
+      options.maxTokens = request.maxTokens;
+    }
+    if (request.topK !== undefined) {
+      options.topK = request.topK;
     }
 
-    const topK = request.topK ?? 10;
-    const chunks = [];
-
-    for (let i = 0; i < Math.min(topK, 5); i++) {
-      chunks.push({
-        id: randomUUID(),
-        content: `// Chunk ${i + 1} for "${request.query}"\nexport class Service${i + 1} {\n  async process(): Promise<void> {\n    // Implementation\n  }\n}`,
-        source: i % 2 === 0 ? 'vector_db' : 'keyword',
-        score: 0.92 - i * 0.06,
-        metadata: {
-          filePath: `src/services/service-${i + 1}.ts`,
-          startLine: 1,
-          endLine: 6,
-        },
-      });
+    const retrieveQuery: { text: string; maxResults?: number; sources?: string[] } = {
+      text: request.query,
+    };
+    if (request.topK !== undefined) {
+      retrieveQuery.maxResults = request.topK;
+    }
+    if (request.sources) {
+      retrieveQuery.sources = request.sources;
     }
 
-    const latencyMs = Date.now() - startTime + Math.floor(Math.random() * 100);
+    const result = await this.pipeline.retrieve(retrieveQuery, options);
+
+    const latencyMs = result.latencyMs ?? (Date.now() - startTime);
     this.totalLatencyMs += latencyMs;
 
-    const assembledContext = chunks.map((c) => c.content).join('\n\n');
-    // Rough token estimate: ~4 chars per token
-    const tokenCount = Math.ceil(assembledContext.length / 4);
-
     return {
-      queryId: randomUUID(),
-      chunks,
-      assembledContext,
-      tokenCount,
+      queryId: result.queryId,
+      chunks: result.retrievedChunks.map((chunk) => ({
+        id: '',
+        content: chunk.content,
+        source: chunk.source,
+        score: chunk.score,
+        metadata: chunk.metadata ?? {},
+      })),
+      assembledContext: result.retrievedChunks.map((c) => c.content).join('\n\n'),
+      tokenCount: 0,
       latencyMs,
-      sources: [
-        { source: 'vector_db', count: 3, avgScore: 0.88, tokensUsed: Math.floor(tokenCount * 0.7) },
-        { source: 'keyword', count: 2, avgScore: 0.78, tokensUsed: Math.floor(tokenCount * 0.3) },
-      ],
+      sources: [],
     };
   }
 }

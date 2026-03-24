@@ -1,0 +1,32 @@
+# =============================================================================
+# Tamma Platform — Docker Compose (test infrastructure)
+#
+# Provides isolated PostgreSQL for integration tests.
+# Usage:
+#   docker compose -f docker/docker-compose.test.yml up -d
+#   INTEGRATION_TEST_PG=true pnpm test:integration
+#   docker compose -f docker/docker-compose.test.yml down -v
+# =============================================================================
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tamma_test
+      POSTGRES_PASSWORD: tamma_test
+      POSTGRES_DB: tamma_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tamma_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - tamma-test-net
+
+networks:
+  tamma-test-net:
+    driver: bridge

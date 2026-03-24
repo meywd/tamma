@@ -30,14 +30,15 @@ const DEFAULT_TIMEOUT = 30000;
 export class WebSocketTransport extends BaseTransport {
   private ws?: WebSocket;
   private readonly url: string;
-  private readonly headers?: Record<string, string>;
+  /** Headers for Node.js 'ws' library — unused until custom header support is added */
+  readonly headers?: Record<string, string>;
   private readonly timeout: number;
   private reconnecting = false;
 
   constructor(options: WebSocketTransportOptions) {
     super(options.serverName);
     this.url = options.url;
-    this.headers = options.headers;
+    if (options.headers !== undefined) this.headers = options.headers;
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
   }
 
@@ -73,7 +74,7 @@ export class WebSocketTransport extends BaseTransport {
           resolve();
         };
 
-        this.ws.onerror = (event) => {
+        this.ws.onerror = (_event) => {
           const error = new MCPConnectionError(
             this.serverName,
             'WebSocket connection error'
@@ -225,7 +226,7 @@ export class WebSocketTransport extends BaseTransport {
         this.ws.close();
       }
 
-      this.ws = undefined;
+      delete this.ws;
     }
   }
 

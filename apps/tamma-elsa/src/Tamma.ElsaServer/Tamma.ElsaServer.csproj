@@ -13,20 +13,20 @@
 
   <ItemGroup>
     <!-- ELSA Core -->
-    <PackageReference Include="Elsa" Version="3.0.0" />
-    <PackageReference Include="Elsa.Http" Version="3.0.0" />
-    <PackageReference Include="Elsa.Workflows.Api" Version="3.0.0" />
-    <PackageReference Include="Elsa.Identity" Version="3.0.0" />
-    <PackageReference Include="Elsa.Scheduling" Version="3.0.0" />
+    <PackageReference Include="Elsa" Version="3.5.3" />
+    <PackageReference Include="Elsa.Http" Version="3.5.3" />
+    <PackageReference Include="Elsa.Workflows.Api" Version="3.5.3" />
+    <PackageReference Include="Elsa.Identity" Version="3.5.3" />
+    <PackageReference Include="Elsa.Scheduling" Version="3.5.3" />
 
     <!-- ELSA Persistence -->
-    <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.0.0" />
-    <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.0.0" />
+    <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.5.3" />
+    <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.5.3" />
 
     <!-- ELSA Studio (Blazor WASM) -->
-    <PackageReference Include="Elsa.Studio" Version="3.0.0" />
-    <PackageReference Include="Elsa.Studio.Core.BlazorWasm" Version="3.0.0" />
-    <PackageReference Include="Elsa.Studio.Login.BlazorWasm" Version="3.0.0" />
+    <PackageReference Include="Elsa.Studio" Version="3.4.0" />
+    <PackageReference Include="Elsa.Studio.Core.BlazorWasm" Version="3.4.0" />
+    <PackageReference Include="Elsa.Studio.Login.BlazorWasm" Version="3.4.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.0" />
 
     <!-- Logging -->

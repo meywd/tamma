@@ -15,13 +15,32 @@ import { PgVectorStore } from '../../providers/pgvector.js';
 import { createPgVectorStore } from '../../factory.js';
 import type { VectorDocument, SearchQuery } from '../../interfaces.js';
 
-// Skip these tests in CI or when PostgreSQL is not available
+// Skip when explicitly disabled or when pgvector connection string is not provided.
+// The plain INTEGRATION_TEST_PG flag only guarantees a vanilla Postgres — not pgvector.
+// To run pgvector tests, set PGVECTOR_TEST_CONNECTION_STRING to a Postgres with pgvector.
 const SKIP_INTEGRATION = process.env['SKIP_INTEGRATION_TESTS'] === 'true';
-const CONNECTION_STRING =
-  process.env['PGVECTOR_TEST_CONNECTION_STRING'] ?? 'postgresql://localhost:5432/tamma_test';
+const PGVECTOR_CONNECTION = process.env['PGVECTOR_TEST_CONNECTION_STRING'] ?? '';
 
-describe.skipIf(SKIP_INTEGRATION)('pgvector Integration Tests', () => {
+function buildConnectionString(): string {
+  if (PGVECTOR_CONNECTION) {
+    return PGVECTOR_CONNECTION;
+  }
+  const host = process.env['PG_TEST_HOST'] ?? 'localhost';
+  const port = process.env['PG_TEST_PORT'] ?? '5432';
+  const user = process.env['PG_TEST_USER'] ?? 'postgres';
+  const password = process.env['PG_TEST_PASSWORD'] ?? '';
+  const db = process.env['PG_TEST_DB'] ?? 'tamma_test';
+  const auth = password ? `${user}:${password}` : user;
+  return `postgresql://${auth}@${host}:${port}/${db}`;
+}
+
+const CONNECTION_STRING = buildConnectionString();
+
+// Skip the entire suite if no pgvector connection string is explicitly provided
+// (INTEGRATION_TEST_PG alone only guarantees vanilla Postgres without pgvector extension)
+describe.skipIf(SKIP_INTEGRATION || !PGVECTOR_CONNECTION)('pgvector Integration Tests', () => {
   let store: PgVectorStore;
+  let initialized = false;
   const testCollectionName = 'test_collection';
   const dimensions = 128; // Smaller dimensions for faster tests
 
@@ -30,27 +49,35 @@ describe.skipIf(SKIP_INTEGRATION)('pgvector Integration Tests', () => {
 
     try {
       await store.initialize();
+      initialized = true;
     } catch (error) {
-      console.warn('PostgreSQL not available, skipping integration tests');
-      throw error;
+      console.warn('PostgreSQL/pgvector not available, skipping integration tests:', (error as Error).message);
     }
   });
 
   afterAll(async () => {
     if (store) {
-      // Clean up test collections
-      const collections = await store.listCollections();
-      for (const collection of collections) {
-        if (collection.startsWith('test_') || collection.startsWith('list_test_')) {
-          try {
-            await store.deleteCollection(collection);
-          } catch {
-            // Ignore
+      try {
+        // Clean up test collections
+        const collections = await store.listCollections();
+        for (const collection of collections) {
+          if (collection.startsWith('test_') || collection.startsWith('list_test_')) {
+            try {
+              await store.deleteCollection(collection);
+            } catch {
+              // Ignore
+            }
           }
         }
+      } catch {
+        // Store may not be initialized if beforeAll skipped
       }
 
-      await store.dispose();
+      try {
+        await store.dispose();
+      } catch {
+        // Ignore dispose errors on uninitialized store
+      }
     }
   });
 

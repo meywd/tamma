@@ -10,6 +10,7 @@ import { startCommand } from './commands/start.js';
 import { statusCommand } from './commands/status.js';
 import { initCommand } from './commands/init.js';
 import { serverCommand } from './commands/server.js';
+import { apiCommand } from './commands/api.js';
 import { upgradeCommand } from './commands/upgrade.js';
 import { processIssueCommand } from './commands/process-issue.js';
 import { checkForUpdates } from './update-check.js';
@@ -106,6 +107,26 @@ program
       port: parseInt(opts.port as string, 10),
       host: (opts.host as string | undefined) ?? '127.0.0.1',
     });
+  });
+
+program
+  .command('api')
+  .description('Start the API server in SaaS mode (GitHub App auth)')
+  .option('--port <number>', 'Port to listen on', '3100')
+  .option('--host <address>', 'Host to bind to', '0.0.0.0')
+  .option('--private-key-path <path>', 'Path to GitHub App private key PEM file')
+  .option('--verbose', 'Enable debug logging')
+  .action(async (opts) => {
+    printBanner(version);
+    const apiOpts: Parameters<typeof apiCommand>[0] = {
+      port: parseInt(opts.port as string, 10),
+      host: (opts.host as string | undefined) ?? '0.0.0.0',
+      verbose: opts.verbose === true,
+    };
+    if (opts.privateKeyPath !== undefined) {
+      apiOpts.privateKeyPath = opts.privateKeyPath as string;
+    }
+    await apiCommand(apiOpts);
   });
 
 program

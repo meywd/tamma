@@ -1000,17 +1000,17 @@ Testing Strategy: ${plan.testingStrategy}
 
     this.events.push(event);
 
-    // Enforce maximum events limit by removing oldest entries
-    while (this.events.length > MAX_EVENTS) {
-      this.events.shift();
+    // Enforce maximum events limit by removing oldest entries in a single splice call.
+    if (this.events.length > MAX_EVENTS) {
+      this.events.splice(0, this.events.length - MAX_EVENTS);
     }
 
     // Notify listeners
     for (const listener of this.eventListeners) {
       try {
         listener(event);
-      } catch {
-        // Ignore listener errors
+      } catch (error) {
+        console.warn('[ScrumMasterService] Event listener error:', error instanceof Error ? error.message : String(error));
       }
     }
   }

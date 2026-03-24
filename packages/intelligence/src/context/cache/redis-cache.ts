@@ -61,6 +61,15 @@ export class RedisCache implements IContextCache {
 
   async set(key: string, value: ContextResponse, ttl?: number): Promise<void> {
     try {
+      // Enforce maxEntries: count existing keys under this prefix and skip write if at capacity.
+      // This is a best-effort check; Redis does not provide atomic conditional-insert.
+      if (this.maxEntries > 0) {
+        const keys = await this.client.keys(this.prefix + '*');
+        if (keys.length >= this.maxEntries && !keys.includes(this.prefix + key)) {
+          // At capacity and this is a new key — skip the write.
+          return;
+        }
+      }
       const ttlSeconds = ttl ?? this.defaultTtlSeconds;
       const serialized = JSON.stringify(value);
       await this.client.setex(this.prefix + key, ttlSeconds, serialized);

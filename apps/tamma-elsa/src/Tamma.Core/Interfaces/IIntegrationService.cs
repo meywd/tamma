@@ -49,6 +49,21 @@ public interface IGitHubIntegrationService
 
     /// <summary>Get file changes from a branch</summary>
     Task<IntegrationResult<List<GitHubFileChange>>> GetGitHubFileChangesAsync(string repository, string branch);
+
+    /// <summary>List open issues matching labels</summary>
+    Task<IntegrationResult<List<GitHubIssue>>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open");
+
+    /// <summary>Assign an issue to a user or bot</summary>
+    Task<IntegrationResult<bool>> AssignGitHubIssueAsync(string repository, int issueNumber, string assignee);
+
+    /// <summary>Close a GitHub issue</summary>
+    Task<IntegrationResult<bool>> CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null);
+
+    /// <summary>Delete a branch</summary>
+    Task<IntegrationResult<bool>> DeleteGitHubBranchAsync(string repository, string branchName);
+
+    /// <summary>Get pull request review comments</summary>
+    Task<IntegrationResult<List<GitHubReviewComment>>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber);
 }
 
 /// <summary>
@@ -120,6 +135,21 @@ public interface IIntegrationService
 
     /// <summary>Get file changes from a branch</summary>
     Task<List<GitHubFileChange>> GetGitHubFileChangesAsync(string repository, string branch);
+
+    /// <summary>List open issues matching labels</summary>
+    Task<List<GitHubIssue>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open");
+
+    /// <summary>Assign an issue to a user or bot</summary>
+    Task AssignGitHubIssueAsync(string repository, int issueNumber, string assignee);
+
+    /// <summary>Close a GitHub issue</summary>
+    Task CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null);
+
+    /// <summary>Delete a branch</summary>
+    Task DeleteGitHubBranchAsync(string repository, string branchName);
+
+    /// <summary>Get pull request review comments</summary>
+    Task<List<GitHubReviewComment>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber);
 
     /// <summary>Trigger CI/CD tests</summary>
     Task<TestRunResult> TriggerTestsAsync(string repository, string branch);
@@ -252,4 +282,31 @@ public class JiraTicketResult
     public bool Success { get; set; }
     public string? TicketKey { get; set; }
     public string? Error { get; set; }
+}
+
+// ============================================
+// GitHub Issue & Review Models (ADL)
+// ============================================
+
+public class GitHubIssue
+{
+    public int Number { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Body { get; set; }
+    public string State { get; set; } = "open";
+    public List<string> Labels { get; set; } = new();
+    public string? Assignee { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public string Url { get; set; } = string.Empty;
+}
+
+public class GitHubReviewComment
+{
+    public int Id { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public string? Path { get; set; }
+    public int? Line { get; set; }
+    public string Author { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
 }

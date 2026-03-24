@@ -275,8 +275,8 @@ export class KnowledgeService implements IKnowledgeService {
       try {
         const text = `${newEntry.title} ${newEntry.description} ${newEntry.keywords.join(' ')}`;
         newEntry.embedding = await this.embeddingProvider.embed(text);
-      } catch {
-        // Continue without embedding
+      } catch (error) {
+        console.warn('[KnowledgeService] addKnowledge embedding failed:', error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -304,8 +304,8 @@ export class KnowledgeService implements IKnowledgeService {
         const keywords = updates.keywords ?? existing.keywords;
         const text = `${title} ${description} ${keywords.join(' ')}`;
         updates.embedding = await this.embeddingProvider.embed(text);
-      } catch {
-        // Continue without updating embedding
+      } catch (error) {
+        console.warn('[KnowledgeService] updateKnowledge embedding failed:', error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -388,8 +388,8 @@ export class KnowledgeService implements IKnowledgeService {
       try {
         const text = `${entry.title} ${entry.description} ${entry.keywords.join(' ')}`;
         entry.embedding = await this.embeddingProvider.embed(text);
-      } catch {
-        // Continue without embedding
+      } catch (error) {
+        console.warn('[KnowledgeService] approveLearning embedding failed:', error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -499,8 +499,8 @@ export class KnowledgeService implements IKnowledgeService {
           const text = `${entry.title} ${entry.description} ${entry.keywords.join(' ')}`;
           const embedding = await this.embeddingProvider.embed(text);
           await this.store.update(entry.id, { embedding });
-        } catch {
-          // Continue with next entry
+        } catch (error) {
+          console.warn(`[KnowledgeService] refreshEmbeddings failed for entry ${entry.id}:`, error instanceof Error ? error.message : String(error));
         }
       }
     }

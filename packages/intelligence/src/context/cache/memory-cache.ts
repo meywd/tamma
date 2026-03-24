@@ -73,7 +73,8 @@ export class MemoryCache implements IContextCache {
   }
 
   async healthCheck(): Promise<boolean> {
-    return true;
+    // Consider unhealthy only when the cache is full to capacity (no room for new entries).
+    return this.maxEntries === 0 || this.cache.size < this.maxEntries;
   }
 
   private evictOldest(): void {

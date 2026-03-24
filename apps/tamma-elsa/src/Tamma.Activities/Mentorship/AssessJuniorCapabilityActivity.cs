@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -22,9 +23,9 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
 {
-    private readonly ILogger<AssessJuniorCapabilityActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<AssessJuniorCapabilityActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>ID of the story to assess</summary>
     [Input(Description = "ID of the story to assess")]
@@ -41,6 +42,9 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
     /// <summary>Timeout in minutes for the assessment</summary>
     [Input(Description = "Timeout in minutes", DefaultValue = 5)]
     public Input<int> TimeoutMinutes { get; set; } = new(5);
+
+    [JsonConstructor]
+    public AssessJuniorCapabilityActivity() { }
 
     public AssessJuniorCapabilityActivity(
         ILogger<AssessJuniorCapabilityActivity> logger,
@@ -62,19 +66,19 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
         var sessionId = SessionId.Get(context);
         var timeoutMinutes = TimeoutMinutes.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Starting capability assessment for junior {JuniorId} on story {StoryId}",
             juniorId, storyId);
 
         try
         {
             // Get story and junior information
-            var story = await _repository.GetStoryByIdAsync(storyId);
+            var story = await _repository!.GetStoryByIdAsync(storyId);
             var junior = await _repository.GetJuniorByIdAsync(juniorId);
 
             if (story == null)
             {
-                _logger.LogError("Story {StoryId} not found", storyId);
+                _logger?.LogError("Story {StoryId} not found", storyId);
                 context.SetResult(new AssessmentOutput
                 {
                     Status = AssessmentStatus.Error,
@@ -86,7 +90,7 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
 
             if (junior == null)
             {
-                _logger.LogError("Junior developer {JuniorId} not found", juniorId);
+                _logger?.LogError("Junior developer {JuniorId} not found", juniorId);
                 context.SetResult(new AssessmentOutput
                 {
                     Status = AssessmentStatus.Error,
@@ -106,7 +110,7 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
             if (!string.IsNullOrEmpty(junior.SlackId))
             {
                 var message = FormatAssessmentMessage(story.Title, story.Description ?? "", questions);
-                await _integrationService.SendSlackDirectMessageAsync(junior.SlackId, message);
+                await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
             }
 
             // Log the assessment event
@@ -122,7 +126,7 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
             // In production, this would wait for actual response from the junior
             var result = SimulateAssessmentResult(junior.SkillLevel, story.Complexity);
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Assessment completed for junior {JuniorId}: Status={Status}, Confidence={Confidence}",
                 juniorId, result.Status, result.Confidence);
 
@@ -130,9 +134,9 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during capability assessment for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during capability assessment for session {SessionId}", sessionId);
 
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
                 EventType = Core.Entities.EventTypes.Error

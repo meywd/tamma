@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -20,9 +21,9 @@ namespace Tamma.Activities.AI;
 )]
 public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
 {
-    private readonly ILogger<ContextGatheringActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
+    private readonly ILogger<ContextGatheringActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -48,6 +49,9 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
     [Input(Description = "Include test files", DefaultValue = true)]
     public Input<bool> IncludeTests { get; set; } = new(true);
 
+    [JsonConstructor]
+    public ContextGatheringActivity() { }
+
     public ContextGatheringActivity(
         ILogger<ContextGatheringActivity> logger,
         IMentorshipSessionRepository repository,
@@ -70,13 +74,13 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         var includeSimilarPatterns = IncludeSimilarPatterns.Get(context);
         var includeTests = IncludeTests.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Gathering context for story {StoryId} in session {SessionId}",
             storyId, sessionId);
 
         try
         {
-            var story = await _repository.GetStoryByIdAsync(storyId);
+            var story = await _repository!.GetStoryByIdAsync(storyId);
 
             if (story == null)
             {
@@ -153,7 +157,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
             codeContext.ContextSummary = GenerateContextSummary(codeContext);
             codeContext.TotalContextSize = CalculateContextSize(codeContext);
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Context gathered for story {StoryId}: {FileCount} files, {Size} chars",
                 storyId, codeContext.FileContents.Count, codeContext.TotalContextSize);
 
@@ -161,7 +165,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error gathering context for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error gathering context for session {SessionId}", sessionId);
 
             context.SetResult(new CodeContextOutput
             {
@@ -175,7 +179,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
     {
         try
         {
-            var commits = await _integrationService.GetGitHubCommitsAsync(
+            var commits = await _integrationService!.GetGitHubCommitsAsync(
                 repositoryUrl,
                 $"feature/{storyId}",
                 DateTime.UtcNow.AddDays(-7));
@@ -203,7 +207,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to gather recent changes");
+            _logger?.LogWarning(ex, "Failed to gather recent changes");
             return new List<FileChange>();
         }
     }
@@ -267,7 +271,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
     {
         try
         {
-            var testResults = await _integrationService.TriggerTestsAsync(
+            var testResults = await _integrationService!.TriggerTestsAsync(
                 repositoryUrl,
                 $"feature/{storyId}");
 
@@ -287,7 +291,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to gather test context");
+            _logger?.LogWarning(ex, "Failed to gather test context");
             return new TestContextInfo();
         }
     }
@@ -323,7 +327,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
 
     private async Task<SessionHistoryContext> GatherSessionHistory(Guid sessionId)
     {
-        var events = await _repository.GetEventsBySessionIdAsync(sessionId);
+        var events = await _repository!.GetEventsBySessionIdAsync(sessionId);
 
         return new SessionHistoryContext
         {

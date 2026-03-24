@@ -454,7 +454,6 @@ export class CodebaseIndexer implements ICodebaseIndexer {
 
         try {
           // Delete old chunks for this file
-          const fileId = generateFileId(file.relativePath);
           const tracking = this.indexedFiles.get(file.relativePath);
           if (tracking && tracking.chunkIds.length > 0 && this.vectorStore) {
             await this.vectorStore.delete(this.collectionName, tracking.chunkIds);
@@ -653,8 +652,8 @@ export class CodebaseIndexer implements ICodebaseIndexer {
           const relative = changedFiles.map((f) =>
             path.relative(this.activeProjectPath!, f),
           );
-          this.updateIndex(this.activeProjectPath, relative).catch(() => {
-            // Silently handle re-index errors from watcher
+          this.updateIndex(this.activeProjectPath, relative).catch((error: unknown) => {
+            console.warn('[CodebaseIndexer] File watcher re-index failed:', error instanceof Error ? error.message : String(error));
           });
         }
       });
@@ -675,8 +674,8 @@ export class CodebaseIndexer implements ICodebaseIndexer {
       this.scheduler = new Scheduler({ intervalMs });
       this.scheduler.start(() => {
         if (this.activeProjectPath && this.initialized) {
-          this.updateIndex(this.activeProjectPath).catch(() => {
-            // Silently handle re-index errors from scheduler
+          this.updateIndex(this.activeProjectPath).catch((error: unknown) => {
+            console.warn('[CodebaseIndexer] Scheduled re-index failed:', error instanceof Error ? error.message : String(error));
           });
         }
       });
@@ -726,10 +725,9 @@ export class CodebaseIndexer implements ICodebaseIndexer {
       this.embeddingService = null;
     }
 
-    if (this.vectorStore) {
-      await this.vectorStore.dispose();
-      this.vectorStore = null;
-    }
+    // The vector store is injected externally — do not dispose it here.
+    // The owner is responsible for its lifecycle.
+    this.vectorStore = null;
 
     this.indexedFiles.clear();
     this.initialized = false;

@@ -2,9 +2,11 @@
  * Vector DB Management Service
  *
  * Manages vector database collections, search testing, and metrics.
+ *
+ * Delegates to a real IVectorStoreService implementation when available;
+ * otherwise returns empty state.
  */
 
-import { randomUUID } from 'node:crypto';
 import type {
   CollectionInfo,
   CollectionStatsInfo,
@@ -12,80 +14,105 @@ import type {
   VectorSearchResult,
   StorageUsage,
 } from '@tamma/shared';
+import type { IVectorStoreService } from './types.js';
 
 export class VectorDBManagementService {
-  private collections: Map<string, CollectionInfo> = new Map();
+  private readonly store: IVectorStoreService | null;
   private queryCounters: Map<string, number> = new Map();
 
-  constructor() {
-    // Seed with a default collection
-    const now = new Date().toISOString();
-    this.collections.set('codebase', {
-      name: 'codebase',
-      vectorCount: 12450,
-      dimensions: 1536,
-      storageBytes: 12450 * 1536 * 4,
-      createdAt: now,
-      lastModified: now,
-    });
-    this.queryCounters.set('codebase', 0);
+  constructor(store?: IVectorStoreService) {
+    this.store = store ?? null;
   }
 
   async listCollections(): Promise<CollectionInfo[]> {
-    return Array.from(this.collections.values());
+    if (!this.store) {
+      return [];
+    }
+
+    const names = await this.store.listCollections();
+    const collections: CollectionInfo[] = [];
+
+    for (const name of names) {
+      try {
+        if (this.store.getCollectionStats) {
+          const stats = await this.store.getCollectionStats(name);
+          collections.push({
+            name,
+            vectorCount: stats.vectorCount,
+            dimensions: stats.dimensions,
+            storageBytes: stats.storageBytes,
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+          });
+        } else {
+          collections.push({
+            name,
+            vectorCount: 0,
+            dimensions: 0,
+            storageBytes: 0,
+            createdAt: new Date().toISOString(),
+            lastModified: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // If stats fail for a collection, include it with zeroed stats
+        collections.push({
+          name,
+          vectorCount: 0,
+          dimensions: 0,
+          storageBytes: 0,
+          createdAt: new Date().toISOString(),
+          lastModified: new Date().toISOString(),
+        });
+      }
+    }
+
+    return collections;
   }
 
   async getCollectionStats(name: string): Promise<CollectionStatsInfo> {
-    const collection = this.collections.get(name);
-    if (!collection) {
+    if (!this.store || !this.store.getCollectionStats) {
       throw new Error(`Collection not found: ${name}`);
     }
 
+    const stats = await this.store.getCollectionStats(name);
     const totalQueries = this.queryCounters.get(name) ?? 0;
 
     return {
-      name: collection.name,
-      vectorCount: collection.vectorCount,
-      dimensions: collection.dimensions,
-      storageBytes: collection.storageBytes,
+      name,
+      vectorCount: stats.vectorCount,
+      dimensions: stats.dimensions,
+      storageBytes: stats.storageBytes,
       queryMetrics: {
         totalQueries,
-        avgLatencyMs: 12.5,
-        p95LatencyMs: 45.2,
-        p99LatencyMs: 89.1,
-        queriesPerMinute: totalQueries > 0 ? 2.5 : 0,
+        avgLatencyMs: 0,
+        p95LatencyMs: 0,
+        p99LatencyMs: 0,
+        queriesPerMinute: 0,
       },
     };
   }
 
   async createCollection(name: string, dimensions = 1536): Promise<void> {
-    if (this.collections.has(name)) {
-      throw new Error(`Collection already exists: ${name}`);
+    if (!this.store) {
+      throw new Error('No vector store configured');
     }
 
-    const now = new Date().toISOString();
-    this.collections.set(name, {
-      name,
-      vectorCount: 0,
-      dimensions,
-      storageBytes: 0,
-      createdAt: now,
-      lastModified: now,
-    });
+    await this.store.createCollection(name, { dimensions });
     this.queryCounters.set(name, 0);
   }
 
   async deleteCollection(name: string): Promise<void> {
-    if (!this.collections.has(name)) {
+    if (!this.store) {
       throw new Error(`Collection not found: ${name}`);
     }
-    this.collections.delete(name);
+
+    await this.store.deleteCollection(name);
     this.queryCounters.delete(name);
   }
 
   async search(request: VectorSearchRequest): Promise<VectorSearchResult[]> {
-    const collection = this.collections.get(request.collection);
-    if (!collection) {
+    if (!this.store) {
       throw new Error(`Collection not found: ${request.collection}`);
     }
 
@@ -93,38 +120,62 @@ export class VectorDBManagementService {
     const current = this.queryCounters.get(request.collection) ?? 0;
     this.queryCounters.set(request.collection, current + 1);
 
-    // Return simulated search results
-    const results: VectorSearchResult[] = [];
-    const count = Math.min(request.topK, 5);
-
-    for (let i = 0; i < count; i++) {
-      const score = 0.95 - i * 0.08;
-      if (request.scoreThreshold && score < request.scoreThreshold) {
-        break;
-      }
-      results.push({
-        id: randomUUID(),
-        score,
-        content: `// Result ${i + 1} matching "${request.query}"\nexport function example${i + 1}() {\n  // Implementation related to the query\n  return true;\n}`,
-        metadata: {
-          filePath: `src/modules/example-${i + 1}.ts`,
-          startLine: 1 + i * 10,
-          endLine: 5 + i * 10,
-          language: 'typescript',
-        },
+    // Prefer hybridSearch if available (accepts text query), fall back to search
+    if (this.store.hybridSearch) {
+      const results = await this.store.hybridSearch(request.collection, {
+        text: request.query,
+        limit: request.topK,
       });
+
+      return results.map((r) => ({
+        id: r.id,
+        score: r.score,
+        content: r.content,
+        metadata: r.metadata ?? {},
+      }));
     }
 
-    return results;
+    const results = await this.store.search(request.collection, {
+      text: request.query,
+      limit: request.topK,
+    });
+
+    return results.map((r) => ({
+      id: r.id,
+      score: r.score,
+      content: r.content,
+      metadata: r.metadata ?? {},
+    }));
   }
 
   async getStorageUsage(): Promise<StorageUsage> {
+    if (!this.store) {
+      return { totalBytes: 0, byCollection: {} };
+    }
+
+    // Use dedicated getStorageUsage if available
+    if (this.store.getStorageUsage) {
+      const usage = await this.store.getStorageUsage();
+      return { totalBytes: usage.totalBytes, byCollection: {} };
+    }
+
+    // Fall back to aggregating from collection stats
+    if (!this.store.getCollectionStats) {
+      return { totalBytes: 0, byCollection: {} };
+    }
+
+    const names = await this.store.listCollections();
     const byCollection: Record<string, number> = {};
     let totalBytes = 0;
 
-    for (const [name, info] of this.collections) {
-      byCollection[name] = info.storageBytes;
-      totalBytes += info.storageBytes;
+    for (const name of names) {
+      try {
+        const stats = await this.store.getCollectionStats(name);
+        byCollection[name] = stats.storageBytes;
+        totalBytes += stats.storageBytes;
+      } catch {
+        byCollection[name] = 0;
+      }
     }
 
     return { totalBytes, byCollection };

@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -21,10 +22,10 @@ namespace Tamma.Activities.Mentorship;
 )]
 public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
 {
-    private readonly ILogger<MergeCompleteActivity> _logger;
-    private readonly IMentorshipSessionRepository _repository;
-    private readonly IIntegrationService _integrationService;
-    private readonly IAnalyticsService _analyticsService;
+    private readonly ILogger<MergeCompleteActivity>? _logger;
+    private readonly IMentorshipSessionRepository? _repository;
+    private readonly IIntegrationService? _integrationService;
+    private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -45,6 +46,9 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
     /// <summary>Whether to auto-merge or just prepare for merge</summary>
     [Input(Description = "Auto-merge the PR", DefaultValue = true)]
     public Input<bool> AutoMerge { get; set; } = new(true);
+
+    [JsonConstructor]
+    public MergeCompleteActivity() { }
 
     public MergeCompleteActivity(
         ILogger<MergeCompleteActivity> logger,
@@ -69,14 +73,14 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         var prNumber = PullRequestNumber.Get(context);
         var autoMerge = AutoMerge.Get(context);
 
-        _logger.LogInformation(
+        _logger?.LogInformation(
             "Starting merge and completion for session {SessionId}, PR #{PrNumber}",
             sessionId, prNumber);
 
         try
         {
             // Update session state
-            await _repository.UpdateStateAsync(sessionId, MentorshipState.MERGE_AND_COMPLETE);
+            await _repository!.UpdateStateAsync(sessionId, MentorshipState.MERGE_AND_COMPLETE);
 
             // Get required entities
             var session = await _repository.GetByIdAsync(sessionId);
@@ -97,13 +101,13 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
             GitHubMergeResult? mergeResult = null;
             if (autoMerge && !string.IsNullOrEmpty(story.RepositoryUrl))
             {
-                mergeResult = await _integrationService.MergeGitHubPullRequestAsync(
+                mergeResult = await _integrationService!.MergeGitHubPullRequestAsync(
                     story.RepositoryUrl,
                     prNumber);
 
                 if (!mergeResult.Success)
                 {
-                    _logger.LogWarning("PR merge failed: {Error}", mergeResult.Error);
+                    _logger?.LogWarning("PR merge failed: {Error}", mergeResult.Error);
                     // Don't fail the whole process - PR can be merged manually
                 }
             }
@@ -120,7 +124,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
                 junior.SkillLevel = skillUpdate.NewSkillLevel;
                 await _repository.UpdateJuniorAsync(junior);
 
-                _logger.LogInformation(
+                _logger?.LogInformation(
                     "Updated junior {JuniorId} skill level from {OldLevel} to {NewLevel}",
                     juniorId, skillUpdate.OldSkillLevel, skillUpdate.NewSkillLevel);
             }
@@ -128,7 +132,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
             // Step 5: Update JIRA ticket if configured
             if (!string.IsNullOrEmpty(story.JiraTicketId))
             {
-                await _integrationService.UpdateJiraTicketAsync(
+                await _integrationService!.UpdateJiraTicketAsync(
                     story.JiraTicketId,
                     new JiraTicketUpdate
                     {
@@ -159,7 +163,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
                 await NotifyCompletion(junior.SlackId, story, report, skillUpdate);
             }
 
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "Mentorship session {SessionId} completed successfully",
                 sessionId);
 
@@ -175,7 +179,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during merge and completion for session {SessionId}", sessionId);
+            _logger?.LogError(ex, "Error during merge and completion for session {SessionId}", sessionId);
 
             context.SetResult(new MergeCompleteOutput
             {
@@ -191,10 +195,10 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         Core.Entities.JuniorDeveloper junior)
     {
         // Get all events for the session
-        var events = await _repository.GetEventsBySessionIdAsync(session.Id);
+        var events = await _repository!.GetEventsBySessionIdAsync(session.Id);
 
         // Get session metrics
-        var metrics = await _analyticsService.GetSessionMetricsAsync(session.Id);
+        var metrics = await _analyticsService!.GetSessionMetricsAsync(session.Id);
 
         // Calculate statistics
         var sessionDuration = session.CompletedAt.HasValue
@@ -278,7 +282,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         SessionReport report)
     {
         // Get skill recommendation from analytics
-        var recommendation = await _analyticsService.CalculateSkillLevelAsync(junior.Id);
+        var recommendation = await _analyticsService!.CalculateSkillLevelAsync(junior.Id);
 
         var result = new SkillUpdateResult
         {
@@ -321,7 +325,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         Core.Entities.MentorshipSession session,
         SessionReport report)
     {
-        await _analyticsService.RecordMetricAsync(sessionId, "session_completed", 1);
+        await _analyticsService!.RecordMetricAsync(sessionId, "session_completed", 1);
         await _analyticsService.RecordMetricAsync(sessionId, "duration_hours", report.ActualHours, "hours");
         await _analyticsService.RecordMetricAsync(sessionId, "overall_score", report.OverallScore, "score");
         await _analyticsService.RecordMetricAsync(sessionId, "blocker_count", report.BlockerCount, "count");
@@ -395,7 +399,7 @@ Your skill level has been updated from {skillUpdate.OldSkillLevel} to {skillUpda
 
 Great work! Ready for your next challenge?";
 
-        await _integrationService.SendSlackDirectMessageAsync(slackId, message);
+        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
     }
 }
 

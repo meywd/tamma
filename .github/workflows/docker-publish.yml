@@ -1,10 +1,10 @@
 # =============================================================================
-# Build & Publish Docker Images
+# Build & Publish Docker Images + Deploy
 #
-# Builds all Tamma Docker images and pushes them to GitHub Container Registry.
+# Builds all Tamma Docker images, pushes to GHCR, then deploys to VPS.
 # - main: tagged as :main and :sha-<commit>
 # - tags: tagged as :v1.2.3 and :latest
-# - PRs: tagged as :pr-<number> (pre-release)
+# - PRs: tagged as :pr-<number>
 # =============================================================================
 
 name: Build & Publish Docker Images
@@ -117,7 +117,7 @@ jobs:
       matrix:
         include:
           - name: tamma-elsa
-            context: apps/tamma-elsa/src
+            context: apps/tamma-elsa
             dockerfile: apps/tamma-elsa/src/Tamma.ElsaServer/Dockerfile
           - name: tamma-api-dotnet
             context: apps/tamma-elsa/src
@@ -154,3 +154,345 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Deploy to VPS (runs after all images are built)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to VPS
+    needs: [build-ts, build-dashboard, build-dotnet]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.VPS_HOST }}" ] && missing+=("VPS_HOST")
+          [ -z "${{ secrets.VPS_USER }}" ] && missing+=("VPS_USER")
+          [ -z "${{ secrets.VPS_SSH_KEY }}" ] && missing+=("VPS_SSH_KEY")
+          [ -z "${{ secrets.VPS_DEPLOY_PATH }}" ] && missing+=("VPS_DEPLOY_PATH")
+          [ -z "${{ secrets.TAMMA_APP_PRIVATE_KEY }}" ] && missing+=("TAMMA_APP_PRIVATE_KEY")
+          [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
+          [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
+          [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAG="pr-${{ github.event.pull_request.number }}"
+          else
+            TAG="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+          echo "Deploying ${TAG}"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT || 22 }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Setup VPS (idempotent)
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'if ! command -v docker &>/dev/null; then
+               echo "Installing Docker..."
+               curl -fsSL https://get.docker.com | sh
+             fi
+             mkdir -p ${{ secrets.VPS_DEPLOY_PATH }}/{secrets,database/migrations}'
+
+      - name: Write secrets to VPS
+        run: |
+          echo '${{ secrets.TAMMA_APP_PRIVATE_KEY }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/private-key.pem"
+
+          echo '${{ secrets.TAMMA_ORIGIN_CERT }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem && chmod 644 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-cert.pem"
+
+          echo '${{ secrets.TAMMA_ORIGIN_KEY }}' | \
+            ssh -i ~/.ssh/deploy_key \
+              -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cat > ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/secrets/origin-key.pem"
+
+          printf '%s\n' \
+            "POSTGRES_PASSWORD=${{ secrets.TAMMA_POSTGRES_PASSWORD }}" \
+            "GITHUB_APP_ID=${{ secrets.TAMMA_APP_ID }}" \
+            "GITHUB_WEBHOOK_SECRET=${{ secrets.TAMMA_WEBHOOK_SECRET }}" \
+            "GITHUB_OAUTH_CLIENT_ID=${{ secrets.TAMMA_OAUTH_CLIENT_ID }}" \
+            "GITHUB_OAUTH_CLIENT_SECRET=${{ secrets.TAMMA_OAUTH_CLIENT_SECRET }}" \
+            "JWT_SECRET=${{ secrets.TAMMA_JWT_SECRET }}" \
+            "API_BASE_URL=https://api.tamma.dev" \
+            "DASHBOARD_URL=https://app.tamma.dev" \
+          | ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cat > ${{ secrets.VPS_DEPLOY_PATH }}/.env && chmod 600 ${{ secrets.VPS_DEPLOY_PATH }}/.env"
+
+      - name: Sync docker + database files
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            docker/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            database/ \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/database/
+
+      - name: Create docker-compose override for GHCR images
+        run: |
+          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
+          OWNER="${{ steps.tag.outputs.owner }}"
+
+          cat > /tmp/docker-compose.images.yml << YAML
+          services:
+            tamma-api:
+              image: ghcr.io/${OWNER}/tamma-api:${IMAGE_TAG}
+              build: !reset null
+            tamma-engine:
+              image: ghcr.io/${OWNER}/tamma-engine:${IMAGE_TAG}
+              build: !reset null
+            tamma-dashboard:
+              image: ghcr.io/${OWNER}/tamma-dashboard:${IMAGE_TAG}
+              build: !reset null
+            elsa-server:
+              image: ghcr.io/${OWNER}/tamma-elsa:${IMAGE_TAG}
+              build: !reset null
+            tamma-api-dotnet:
+              image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
+              build: !reset null
+          YAML
+
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
+            /tmp/docker-compose.images.yml \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
+
+      - name: Pull images and stop old containers
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< '${{ secrets.GITHUB_TOKEN }}' && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                pull && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                down --remove-orphans 2>/dev/null || true && \
+              docker container prune -f 2>/dev/null || true
+            "
+
+      - name: "Start layer 1: postgres + rabbitmq"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                up -d --force-recreate postgres rabbitmq chromadb
+            "
+
+      - name: "Verify layer 1: postgres + rabbitmq healthy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              for i in \$(seq 1 30); do
+                PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
+                RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
+                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+                echo \"Check \$i/30: postgres=\$PG rabbitmq=\$RMQ chromadb=\$CHROMA\" && \
+                if [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ]; then
+                  echo 'Layer 1 healthy' && exit 0
+                fi && \
+                sleep 2
+              done && \
+              echo '::error::Layer 1 (postgres/rabbitmq/chromadb) failed to become healthy' && \
+              \$COMPOSE logs --tail=30 postgres rabbitmq && \
+              exit 1
+            "
+
+      - name: Run database migrations
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }} && \
+              for f in database/migrations/*.sql; do
+                echo \"Running migration: \$f\" && \
+                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml -f docker/docker-compose.images.yml --env-file .env \
+                  exec -T postgres \
+                  psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
+              done
+            "
+
+      - name: "Start layer 2: elsa-server"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                up -d --force-recreate elsa-server
+            "
+
+      - name: "Verify layer 2: elsa-server healthy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              CONTAINER=\$(\$COMPOSE ps -q elsa-server | head -1) && \
+              if [ -z \"\$CONTAINER\" ]; then
+                echo '::error::elsa-server container not found' && exit 1
+              fi && \
+              for i in \$(seq 1 30); do
+                STATE=\$(docker inspect --format '{{.State.Status}}' \$CONTAINER 2>/dev/null || echo 'unknown') && \
+                HEALTH=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \$CONTAINER 2>/dev/null || echo 'unknown') && \
+                echo \"Check \$i/30: state=\$STATE health=\$HEALTH\" && \
+                if [ \"\$STATE\" = 'exited' ] || [ \"\$STATE\" = 'dead' ]; then
+                  echo '::error::elsa-server crashed (state='\$STATE')' && \
+                  \$COMPOSE logs --tail=50 elsa-server && \
+                  exit 1
+                fi && \
+                if [ \"\$HEALTH\" = 'healthy' ]; then
+                  echo 'Layer 2 healthy' && exit 0
+                fi && \
+                sleep 3
+              done && \
+              echo '::error::elsa-server failed to become healthy within 90s' && \
+              \$COMPOSE logs --tail=50 elsa-server && \
+              exit 1
+            "
+
+      - name: "Start layer 3: tamma-api-dotnet + tamma-api"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                up -d --force-recreate tamma-api-dotnet tamma-api
+            "
+
+      - name: "Verify layer 3: tamma-api healthy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              for i in \$(seq 1 30); do
+                API_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api | head -1) curl -4sf -o /dev/null http://127.0.0.1:3100/api/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                DOTNET_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api-dotnet | head -1) curl -4sf -o /dev/null http://127.0.0.1:3000/health 2>/dev/null && echo 'ok' || echo 'fail') && \
+                echo \"Check \$i/30: tamma-api=\$API_OK tamma-api-dotnet=\$DOTNET_OK\" && \
+                if [ \"\$API_OK\" = 'ok' ] && [ \"\$DOTNET_OK\" = 'ok' ]; then
+                  echo 'Layer 3 healthy' && exit 0
+                fi && \
+                sleep 3
+              done && \
+              echo '::error::Layer 3 (APIs) failed to become healthy' && \
+              \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && \
+              exit 1
+            "
+
+      - name: "Start layer 4: tamma-engine + tamma-dashboard + nginx-proxy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                up -d --force-recreate tamma-engine tamma-dashboard elsa-studio nginx-proxy
+            "
+
+      - name: "Verify: all services running"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              sleep 5 && \
+              docker compose \
+                -f docker-compose.yml \
+                -f docker-compose.prod.yml \
+                -f docker-compose.images.yml \
+                --env-file ../.env \
+                ps
+            "
+
+      - name: "Health check: API via proxy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health && echo ' API OK' || curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK (http)' || (echo '::error::API health check via proxy failed' && exit 1)"
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              echo '=== Container Status ===' && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
+              echo '' && \
+              for svc in postgres rabbitmq elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
+                echo \"=== Logs: \$svc (last 50 lines) ===\" && \
+                docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
+                echo ''
+              done
+            "
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

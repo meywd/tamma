@@ -26,6 +26,7 @@ function loadConfig(): TammaConfig {
     mode: 'standalone',
     logLevel: optionalEnv('LOG_LEVEL', 'info') as TammaConfig['logLevel'],
     github: {
+      authMode: 'pat' as const,
       token: requireEnv('GITHUB_TOKEN'),
       owner: requireEnv('GITHUB_OWNER'),
       repo: requireEnv('GITHUB_REPO'),
@@ -64,7 +65,10 @@ async function main(): Promise<void> {
   const agent = new ClaudeAgentProvider();
   const platform = new GitHubPlatform();
 
-  await platform.initialize({ token: config.github.token });
+  await platform.initialize({
+    type: 'pat',
+    token: config.github.authMode === 'pat' ? config.github.token : '',
+  });
 
   const engine = new TammaEngine({ config, platform, agent, logger });
 
