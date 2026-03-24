@@ -4,7 +4,6 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Activities.Flowchart.Models;
-using Elsa.Workflows.Contracts;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Models;
 using Tamma.Activities.Testing;
