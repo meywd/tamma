@@ -68,20 +68,20 @@ public class TddWorkflow : WorkflowBase
         // ============================
 
         // --- INIT: Capture inputs ---
-        var setSessionId = Assign(sessionId, ctx => (object)ctx.GetInput<Guid>("sessionId"), "SetSessionId");
-        var setStoryId = Assign(storyId, ctx => (object)(ctx.GetInput<string>("storyId") ?? ""), "SetStoryId");
-        var setTaskDescription = Assign(taskDescription, ctx => (object)(ctx.GetInput<string>("taskDescription") ?? ""), "SetTaskDescription");
-        var setTaskFiles = Assign(taskFiles, ctx => (object)(ctx.GetInput<List<string>>("taskFiles") ?? new List<string>()), "SetTaskFiles");
-        var setRepositoryUrl = Assign(repositoryUrl, ctx => (object)(ctx.GetInput<string>("repositoryUrl") ?? ""), "SetRepositoryUrl");
-        var setBranchName = Assign(branchName, ctx => (object)(ctx.GetInput<string>("branchName") ?? ""), "SetBranchName");
-        var setSkillLevel = Assign(skillLevel, ctx => (object)ctx.GetInput<int>("skillLevel"), "SetSkillLevel");
-        var initRewriteAttempt = Assign(rewriteAttempt, _ => (object)0, "InitRewriteAttempt");
-        var initDebugAttempt = Assign(debugAttempt, _ => (object)0, "InitDebugAttempt");
-        var initDebuggingInvoked = Assign(debuggingInvoked, _ => (object)false, "InitDebuggingInvoked");
-        var initRefactorApplied = Assign(refactorApplied, _ => (object)false, "InitRefactorApplied");
+        var setSessionId = Assign(sessionId, ctx => (object)ctx.GetInput<Guid>("sessionId"), "SetSessionId", "Capture Session ID");
+        var setStoryId = Assign(storyId, ctx => (object)(ctx.GetInput<string>("storyId") ?? ""), "SetStoryId", "Capture Story ID");
+        var setTaskDescription = Assign(taskDescription, ctx => (object)(ctx.GetInput<string>("taskDescription") ?? ""), "SetTaskDescription", "Capture Task Description");
+        var setTaskFiles = Assign(taskFiles, ctx => (object)(ctx.GetInput<List<string>>("taskFiles") ?? new List<string>()), "SetTaskFiles", "Capture Task Files");
+        var setRepositoryUrl = Assign(repositoryUrl, ctx => (object)(ctx.GetInput<string>("repositoryUrl") ?? ""), "SetRepositoryUrl", "Capture Repository URL");
+        var setBranchName = Assign(branchName, ctx => (object)(ctx.GetInput<string>("branchName") ?? ""), "SetBranchName", "Capture Branch Name");
+        var setSkillLevel = Assign(skillLevel, ctx => (object)ctx.GetInput<int>("skillLevel"), "SetSkillLevel", "Capture Skill Level");
+        var initRewriteAttempt = Assign(rewriteAttempt, _ => (object)0, "InitRewriteAttempt", "Initialize Rewrite Counter");
+        var initDebugAttempt = Assign(debugAttempt, _ => (object)0, "InitDebugAttempt", "Initialize Debug Counter");
+        var initDebuggingInvoked = Assign(debuggingInvoked, _ => (object)false, "InitDebuggingInvoked", "Initialize Debugging Flag");
+        var initRefactorApplied = Assign(refactorApplied, _ => (object)false, "InitRefactorApplied", "Initialize Refactor Flag");
 
         // --- RED PHASE ---
-        var logRedPhaseStart = Assign(redPhaseStart, _ => (object)DateTime.UtcNow, "LogRedPhaseStart");
+        var logRedPhaseStart = Assign(redPhaseStart, _ => (object)DateTime.UtcNow, "LogRedPhaseStart", "Log RED Phase Start");
 
         // WriteTests: output bound to testGenResult variable
         var writeTests = new WriteTestsActivity
@@ -105,13 +105,13 @@ public class TddWorkflow : WorkflowBase
 
         // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
         // Mock: simulate running new tests (tests FAIL = correct TDD)
-        var mockNewTestsFail = Assign(testRunAllPassed, _ => (object)false, "MockNewTestsFail");
+        var mockNewTestsFail = Assign(testRunAllPassed, _ => (object)false, "MockNewTestsFail", "Mock: New Tests Fail");
         var mockNewTestsFailCount = Assign(testRunFailedCount, ctx =>
         {
             var gen = testGenResult.Get(ctx);
             return (object)(gen?.TestCount ?? 2);
-        }, "MockNewTestsFailCount");
-        var mockNewTestsPassCount = Assign(testRunPassedCount, _ => (object)0, "MockNewTestsPassCount");
+        }, "MockNewTestsFailCount", "Mock: Set Failed Count");
+        var mockNewTestsPassCount = Assign(testRunPassedCount, _ => (object)0, "MockNewTestsPassCount", "Mock: Set Passed Count");
 
         // RED phase guard
         var checkTestsFail = new CheckTestsFailActivity
@@ -135,14 +135,14 @@ public class TddWorkflow : WorkflowBase
             MaxRewriteAttempts = new Input<int>(2)
         };
 
-        var incrementRewrite = Assign(rewriteAttempt, ctx => (object)(rewriteAttempt.Get(ctx) + 1), "IncrRewrite");
+        var incrementRewrite = Assign(rewriteAttempt, ctx => (object)(rewriteAttempt.Get(ctx) + 1), "IncrRewrite", "Increment Rewrite Attempt");
 
         // If tests pass AND max rewrites exhausted -> proceed anyway
         var maxRewritesCheck = new FlowDecision(ctx => rewriteAttempt.Get(ctx) >= 2)
         { Id = "MaxRewritesCheck", Name = "Max Rewrites?" };
 
         // --- GREEN PHASE ---
-        var logGreenPhaseStart = Assign(greenPhaseStart, _ => (object)DateTime.UtcNow, "LogGreenPhaseStart");
+        var logGreenPhaseStart = Assign(greenPhaseStart, _ => (object)DateTime.UtcNow, "LogGreenPhaseStart", "Log GREEN Phase Start");
 
         var writeImplementation = new WriteImplementationActivity
         {
@@ -164,25 +164,25 @@ public class TddWorkflow : WorkflowBase
 
         // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
         // Mock: simulate full test suite passing
-        var mockFullTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockFullTestsPass");
+        var mockFullTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockFullTestsPass", "Mock: Full Tests Pass");
         var mockFullTestsPassedCount = Assign(testRunPassedCount, ctx =>
         {
             var gen = testGenResult.Get(ctx);
             return (object)((gen?.TestCount ?? 0) + 10);
-        }, "MockFullTestsPassedCount");
-        var mockFullTestsFailedCount = Assign(testRunFailedCount, _ => (object)0, "MockFullTestsFailedCount");
+        }, "MockFullTestsPassedCount", "Mock: Full Tests Passed Count");
+        var mockFullTestsFailedCount = Assign(testRunFailedCount, _ => (object)0, "MockFullTestsFailedCount", "Mock: Full Tests Failed Count");
 
         var greenTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
         { Id = "GreenTestsPassCheck", Name = "Green Tests Pass?" };
 
         // Debug loop
-        var markDebug = Assign(debuggingInvoked, _ => (object)true, "MarkDebug");
-        var incrementDebug = Assign(debugAttempt, ctx => (object)(debugAttempt.Get(ctx) + 1), "IncrDebug");
+        var markDebug = Assign(debuggingInvoked, _ => (object)true, "MarkDebug", "Mark Debug Invoked");
+        var incrementDebug = Assign(debugAttempt, ctx => (object)(debugAttempt.Get(ctx) + 1), "IncrDebug", "Increment Debug Attempt");
         var maxDebugCheck = new FlowDecision(ctx => debugAttempt.Get(ctx) >= 3)
         { Id = "MaxDebugCheck", Name = "Max Debug?" };
 
         // --- REFACTOR PHASE ---
-        var logRefactorPhaseStart = Assign(refactorPhaseStart, _ => (object)DateTime.UtcNow, "LogRefactorPhaseStart");
+        var logRefactorPhaseStart = Assign(refactorPhaseStart, _ => (object)DateTime.UtcNow, "LogRefactorPhaseStart", "Log REFACTOR Phase Start");
 
         var analyzeCode = new AnalyzeCodeActivity
         {
@@ -237,11 +237,11 @@ public class TddWorkflow : WorkflowBase
             Result = new Output<RefactoringResult>(refactorResult)
         };
 
-        var markRefactored = Assign(refactorApplied, _ => (object)true, "MarkRefactored");
+        var markRefactored = Assign(refactorApplied, _ => (object)true, "MarkRefactored", "Mark Refactoring Applied");
 
         // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
         // Mock: refactored tests pass
-        var mockRefactorTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockRefactorTestsPass");
+        var mockRefactorTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockRefactorTestsPass", "Mock: Refactor Tests Pass");
 
         var refactorTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
         { Id = "RefactorTestsPassCheck", Name = "Refactor Tests Pass?" };
@@ -446,13 +446,13 @@ public class TddWorkflow : WorkflowBase
     /// <summary>
     /// Create a SetVariable with proper Input&lt;object?&gt; boxing.
     /// </summary>
-    private static SetVariable Assign(Variable variable, Func<ExpressionExecutionContext, object?> valueFunc, string? id = null)
+    private static SetVariable Assign(Variable variable, Func<ExpressionExecutionContext, object?> valueFunc, string? id = null, string? name = null)
     {
         var activityId = id ?? Guid.NewGuid().ToString("N")[..8];
         return new SetVariable
         {
             Id = activityId,
-            Name = activityId,
+            Name = name ?? activityId,
             Variable = variable,
             Value = new Input<object?>(valueFunc)
         };

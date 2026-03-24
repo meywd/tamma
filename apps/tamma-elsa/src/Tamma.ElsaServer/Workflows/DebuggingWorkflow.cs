@@ -382,7 +382,7 @@ public class DebuggingWorkflow : WorkflowBase
         };
 
         // 18. Final finish
-        var finish = new Finish { Id = "finish", Name = "Finish" };
+        var finish = new Finish { Id = "finish", Name = "Complete: Debugging Done" };
 
         // ---- Build Flowchart ----
         builder.Root = new Flowchart

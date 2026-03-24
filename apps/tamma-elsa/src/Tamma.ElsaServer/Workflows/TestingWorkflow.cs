@@ -60,7 +60,7 @@ public class TestingWorkflow : WorkflowBase
         var triggerCI = new TriggerCIActivity
         {
             Id = "TriggerCI",
-            Name = "TriggerCI",
+            Name = "Trigger CI Pipeline",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             Repository = new(ctx => repositoryVar.Get(ctx)),
             Branch = new(ctx => branchVar.Get(ctx)),
@@ -73,7 +73,7 @@ public class TestingWorkflow : WorkflowBase
         var waitForCI = new WaitForCIResultsActivity
         {
             Id = "WaitForCIResults",
-            Name = "WaitForCIResults",
+            Name = "Wait for CI Results",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
             TimeoutMinutes = new(30),
@@ -84,7 +84,7 @@ public class TestingWorkflow : WorkflowBase
         var storeCIResults = new SetVariable
         {
             Id = "StoreCIResults",
-            Name = "StoreCIResults",
+            Name = "Store CI Results",
             Variable = ciResultsVar,
             Value = new(ctx => (object?)ciResultsFromWaitVar.Get(ctx))
         };
@@ -95,7 +95,7 @@ public class TestingWorkflow : WorkflowBase
         var evaluateResults = new EvaluateResultsActivity
         {
             Id = "EvaluateResults",
-            Name = "EvaluateResults",
+            Name = "Evaluate CI Results",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
@@ -108,7 +108,7 @@ public class TestingWorkflow : WorkflowBase
         var checkCoverage = new CheckCoverageActivity
         {
             Id = "CheckCoverage",
-            Name = "CheckCoverage",
+            Name = "Check Code Coverage",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
@@ -117,7 +117,7 @@ public class TestingWorkflow : WorkflowBase
         var checkLinting = new CheckLintingActivity
         {
             Id = "CheckLinting",
-            Name = "CheckLinting",
+            Name = "Check Linting Rules",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
@@ -126,7 +126,7 @@ public class TestingWorkflow : WorkflowBase
         var checkSecurity = new CheckSecurityActivity
         {
             Id = "CheckSecurity",
-            Name = "CheckSecurity",
+            Name = "Check Security Issues",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
@@ -135,7 +135,7 @@ public class TestingWorkflow : WorkflowBase
         var generateReport = new GenerateQualityReportActivity
         {
             Id = "GenerateQualityReport",
-            Name = "GenerateQualityReport",
+            Name = "Generate Quality Report",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             CoverageResult = new(ctx => coverageResultVar.Get(ctx)!),
@@ -152,7 +152,7 @@ public class TestingWorkflow : WorkflowBase
         var checkCoverageCritical = new CheckCoverageActivity
         {
             Id = "CheckCoverageCritical",
-            Name = "CheckCoverageCritical",
+            Name = "Check Coverage (Critical)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
@@ -161,7 +161,7 @@ public class TestingWorkflow : WorkflowBase
         var checkLintCritical = new CheckLintingActivity
         {
             Id = "CheckLintCritical",
-            Name = "CheckLintCritical",
+            Name = "Check Lint (Critical)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
@@ -170,7 +170,7 @@ public class TestingWorkflow : WorkflowBase
         var checkSecurityCritical = new CheckSecurityActivity
         {
             Id = "CheckSecurityCritical",
-            Name = "CheckSecurityCritical",
+            Name = "Check Security (Critical)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
@@ -179,7 +179,7 @@ public class TestingWorkflow : WorkflowBase
         var generateReportCritical = new GenerateQualityReportActivity
         {
             Id = "GenerateQualityReportCritical",
-            Name = "GenerateQualityReportCritical",
+            Name = "Generate Report (Critical)",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             CoverageResult = new(ctx => coverageResultVar.Get(ctx)!),
@@ -196,7 +196,7 @@ public class TestingWorkflow : WorkflowBase
         var commitFix = new CommitFixActivity
         {
             Id = "CommitFix",
-            Name = "CommitFix",
+            Name = "Commit Auto-Fix",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             Repository = new(ctx => repositoryVar.Get(ctx)),
             Branch = new(ctx => branchVar.Get(ctx)),
@@ -212,14 +212,14 @@ public class TestingWorkflow : WorkflowBase
             attemptNumberVar.Get(ctx) + 1)
         {
             Id = "IncrementAttempt",
-            Name = "IncrementAttempt"
+            Name = "Increment Fix Attempt"
         };
 
         // Re-trigger CI after fix
         var reTriggerCI = new TriggerCIActivity
         {
             Id = "ReTriggerCI",
-            Name = "ReTriggerCI",
+            Name = "Re-Trigger CI After Fix",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             Repository = new(ctx => repositoryVar.Get(ctx)),
             Branch = new(ctx => branchVar.Get(ctx)),
@@ -229,7 +229,7 @@ public class TestingWorkflow : WorkflowBase
         var waitForCIRetry = new WaitForCIResultsActivity
         {
             Id = "WaitForCIResultsRetry",
-            Name = "WaitForCIResultsRetry",
+            Name = "Wait for CI Results (Retry)",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             RunId = new(ctx => ciTriggerResultVar.Get(ctx)?.RunId ?? "unknown"),
             TimeoutMinutes = new(30),
@@ -239,7 +239,7 @@ public class TestingWorkflow : WorkflowBase
         var storeRetryResults = new SetVariable
         {
             Id = "StoreRetryResults",
-            Name = "StoreRetryResults",
+            Name = "Store Retry CI Results",
             Variable = ciResultsVar,
             Value = new(ctx => (object?)ciResultsFromWaitVar.Get(ctx))
         };
@@ -248,7 +248,7 @@ public class TestingWorkflow : WorkflowBase
         var evaluateRetryResults = new EvaluateResultsActivity
         {
             Id = "EvaluateRetryResults",
-            Name = "EvaluateRetryResults",
+            Name = "Evaluate Retry Results",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
@@ -259,7 +259,7 @@ public class TestingWorkflow : WorkflowBase
         var checkCoverageRetry = new CheckCoverageActivity
         {
             Id = "CheckCoverageRetry",
-            Name = "CheckCoverageRetry",
+            Name = "Check Coverage (Retry)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
@@ -268,7 +268,7 @@ public class TestingWorkflow : WorkflowBase
         var checkLintRetry = new CheckLintingActivity
         {
             Id = "CheckLintRetry",
-            Name = "CheckLintRetry",
+            Name = "Check Lint (Retry)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
@@ -277,7 +277,7 @@ public class TestingWorkflow : WorkflowBase
         var checkSecurityRetry = new CheckSecurityActivity
         {
             Id = "CheckSecurityRetry",
-            Name = "CheckSecurityRetry",
+            Name = "Check Security (Retry)",
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
@@ -286,7 +286,7 @@ public class TestingWorkflow : WorkflowBase
         var generateRetryReport = new GenerateQualityReportActivity
         {
             Id = "GenerateQualityReportRetry",
-            Name = "GenerateQualityReportRetry",
+            Name = "Generate Report (Retry)",
             SessionId = new(ctx => sessionIdVar.Get(ctx)),
             CIResults = new(ctx => ciResultsVar.Get(ctx)!),
             CoverageResult = new(ctx => coverageResultVar.Get(ctx)!),
@@ -302,7 +302,7 @@ public class TestingWorkflow : WorkflowBase
         // ============================================
         var maxAttemptGuard = new FlowDecision(ctx =>
             attemptNumberVar.Get(ctx) < maxAttemptsVar.Get(ctx))
-        { Id = "MaxAttemptGuard", Name = "MaxAttemptGuard" };
+        { Id = "MaxAttemptGuard", Name = "Fix Attempts Remaining?" };
 
         // ============================================
         // SetOutput activities (expose workflow outputs before each Finish)
@@ -312,21 +312,21 @@ public class TestingWorkflow : WorkflowBase
         var setOutputPassReport = new SetOutput
         {
             Id = "SetOutputPassReport",
-            Name = "SetOutputPassReport",
+            Name = "Output: Quality Report (Pass)",
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
         var setOutputPassPassed = new SetOutput
         {
             Id = "SetOutputPassPassed",
-            Name = "SetOutputPassPassed",
+            Name = "Output: Passed Flag (Pass)",
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? true))
         };
         var setOutputPassFeedback = new SetOutput
         {
             Id = "SetOutputPassFeedback",
-            Name = "SetOutputPassFeedback",
+            Name = "Output: Teaching Feedback (Pass)",
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
@@ -335,21 +335,21 @@ public class TestingWorkflow : WorkflowBase
         var setOutputFailReport = new SetOutput
         {
             Id = "SetOutputFailReport",
-            Name = "SetOutputFailReport",
+            Name = "Output: Quality Report (Fail)",
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
         var setOutputFailPassed = new SetOutput
         {
             Id = "SetOutputFailPassed",
-            Name = "SetOutputFailPassed",
+            Name = "Output: Passed Flag (Fail)",
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? false))
         };
         var setOutputFailFeedback = new SetOutput
         {
             Id = "SetOutputFailFeedback",
-            Name = "SetOutputFailFeedback",
+            Name = "Output: Teaching Feedback (Fail)",
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
@@ -358,21 +358,21 @@ public class TestingWorkflow : WorkflowBase
         var setOutputRetryPassReport = new SetOutput
         {
             Id = "SetOutputRetryPassReport",
-            Name = "SetOutputRetryPassReport",
+            Name = "Output: Quality Report (Retry Pass)",
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
         var setOutputRetryPassPassed = new SetOutput
         {
             Id = "SetOutputRetryPassPassed",
-            Name = "SetOutputRetryPassPassed",
+            Name = "Output: Passed Flag (Retry Pass)",
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? true))
         };
         var setOutputRetryPassFeedback = new SetOutput
         {
             Id = "SetOutputRetryPassFeedback",
-            Name = "SetOutputRetryPassFeedback",
+            Name = "Output: Teaching Feedback (Retry Pass)",
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
@@ -380,9 +380,9 @@ public class TestingWorkflow : WorkflowBase
         // ============================================
         // Finish activities
         // ============================================
-        var finishPass = new Finish { Id = "FinishPass", Name = "FinishPass" };
-        var finishFail = new Finish { Id = "FinishFail", Name = "FinishFail" };
-        var finishRetryPass = new Finish { Id = "FinishRetryPass", Name = "FinishRetryPass" };
+        var finishPass = new Finish { Id = "FinishPass", Name = "Complete: Tests Passed" };
+        var finishFail = new Finish { Id = "FinishFail", Name = "Complete: Tests Failed" };
+        var finishRetryPass = new Finish { Id = "FinishRetryPass", Name = "Complete: Tests Passed After Retry" };
 
         // ============================================
         // Build the Flowchart

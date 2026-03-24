@@ -577,7 +577,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             }
         };
 
-        var finish = new Finish { Id = "Finish", Name = "Finish" };
+        var finish = new Finish { Id = "Finish", Name = "Complete: Issue Cycle Done" };
 
         // ================================================================
         // Flowchart

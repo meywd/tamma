@@ -65,14 +65,14 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
-            Name = "CreatePR"
+            Name = "Create Pull Request"
         };
 
         // 2. Check if PR creation succeeded — use workflow variable to track
         var storePRResult = new SetVariable
         {
             Id = "StorePRResult",
-            Name = "StorePRResult",
+            Name = "Store PR Result",
             Variable = prNumber,
             Value = Expr<object?>(ctx =>
             {
@@ -87,7 +87,7 @@ public class CodeReviewWorkflow : WorkflowBase
         };
 
         var prCreatedCheck = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
-        { Id = "PRCreatedCheck", Name = "PRCreatedCheck" };
+        { Id = "PRCreatedCheck", Name = "PR Created?" };
 
         // 3. Request review
         var requestReview = new RequestReviewActivity
@@ -97,7 +97,7 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
-            Name = "RequestReview"
+            Name = "Request Code Review"
         };
 
         // 4. Monitor review (bookmark-based)
@@ -107,14 +107,14 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             TimeoutHours = new(24),
-            Name = "MonitorReview"
+            Name = "Monitor Review Status"
         };
 
         // 5. Store review comments when changes are requested
         var storeReviewComments = new SetVariable
         {
             Id = "StoreReviewComments",
-            Name = "StoreReviewComments",
+            Name = "Store Review Comments",
             Variable = reviewCommentsJson,
             Value = Expr<object?>(ctx =>
             {
@@ -131,7 +131,7 @@ public class CodeReviewWorkflow : WorkflowBase
         var incrementIteration = new SetVariable
         {
             Id = "IncrementIteration",
-            Name = "IncrementIteration",
+            Name = "Increment Review Iteration",
             Variable = iteration,
             Value = Expr<object?>(ctx => (object)(iteration.Get(ctx) + 1))
         };
@@ -145,7 +145,7 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             ReviewCommentsJson = Expr<string>(ctx => reviewCommentsJson.Get(ctx)),
-            Name = "DeliverGuidance"
+            Name = "Deliver Fix Guidance"
         };
 
         // 8. Wait for fixes (bookmark-based)
@@ -156,7 +156,7 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             TimeoutHours = new(24),
-            Name = "WaitForFixes"
+            Name = "Wait for Fix Submission"
         };
 
         // 9. Re-request review
@@ -169,12 +169,12 @@ public class CodeReviewWorkflow : WorkflowBase
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             MaxIterations = Expr<int>(ctx => maxIterations.Get(ctx)),
-            Name = "ReRequestReview"
+            Name = "Re-Request Code Review"
         };
 
         // 10. Check if max iterations reached
         var maxIterationsCheck = new FlowDecision(ctx => iteration.Get(ctx) >= maxIterations.Get(ctx))
-        { Id = "MaxIterationsCheck", Name = "MaxIterationsCheck" };
+        { Id = "MaxIterationsCheck", Name = "Max Iterations Reached?" };
 
         // 11. Merge and complete
         var mergeAndComplete = new MergeAndCompleteReviewActivity
@@ -186,7 +186,7 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Strategy = Expr<MergeStrategy>(ctx => mergeStrategy.Get(ctx)),
             TotalIterations = Expr<int>(ctx => iteration.Get(ctx)),
-            Name = "MergeAndComplete"
+            Name = "Merge and Complete Review"
         };
 
         // 12. Escalate review (max iterations)
@@ -199,7 +199,7 @@ public class CodeReviewWorkflow : WorkflowBase
             Reason = new(EscalationReason.MaxIterationsReached),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Maximum fix iterations reached during code review."),
-            Name = "EscalateReview"
+            Name = "Escalate: Max Iterations"
         };
 
         // 13. Escalate due to timeout
@@ -212,14 +212,14 @@ public class CodeReviewWorkflow : WorkflowBase
             Reason = new(EscalationReason.ReviewTimeout),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Review or fix submission timed out."),
-            Name = "EscalateTimeout"
+            Name = "Escalate: Review Timeout"
         };
 
         // 14. Terminal nodes (SetOutput sequences)
         var failedEnd = new Sequence
         {
             Id = "FailedEnd",
-            Name = "FailedEnd",
+            Name = "Emit Failure Outputs",
             Activities =
             {
                 new SetOutput { Id = "OutputFailedSuccess", Name = "Output Failed Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
@@ -230,7 +230,7 @@ public class CodeReviewWorkflow : WorkflowBase
         var successEnd = new Sequence
         {
             Id = "SuccessEnd",
-            Name = "SuccessEnd",
+            Name = "Emit Success Outputs",
             Activities =
             {
                 new SetOutput { Id = "OutputSuccessFlag", Name = "Output Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)true) },

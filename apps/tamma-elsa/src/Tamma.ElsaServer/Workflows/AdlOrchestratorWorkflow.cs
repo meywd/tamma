@@ -189,7 +189,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             }
         };
 
-        var finish = new Finish { Id = "Finish", Name = "Finish" };
+        var finish = new Finish { Id = "Finish", Name = "Complete: Orchestrator Done" };
 
         // ================================================================
         // Flowchart

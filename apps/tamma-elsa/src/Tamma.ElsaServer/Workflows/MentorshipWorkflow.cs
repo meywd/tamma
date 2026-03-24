@@ -64,13 +64,13 @@ public class MentorshipWorkflow : WorkflowBase
         var initStoryProcessing = new InitStoryProcessingActivity
         {
             Id = "InitStoryProcessing",
-            Name = "INIT_STORY_PROCESSING"
+            Name = "Initialize Story Processing"
         };
 
         var validateStory = new ValidateStoryActivity
         {
             Id = "ValidateStory",
-            Name = "VALIDATE_STORY"
+            Name = "Validate Story"
         };
 
         // =====================================================================
@@ -80,19 +80,19 @@ public class MentorshipWorkflow : WorkflowBase
         var assessJunior = new AssessJuniorFlowActivity
         {
             Id = "AssessJuniorCapability",
-            Name = "ASSESS_JUNIOR_CAPABILITY"
+            Name = "Assess Junior Capability"
         };
 
         var clarifyRequirements = new ClarifyRequirementsActivity
         {
             Id = "ClarifyRequirements",
-            Name = "CLARIFY_REQUIREMENTS"
+            Name = "Clarify Requirements"
         };
 
         var reExplainStory = new ReExplainStoryActivity
         {
             Id = "ReExplainStory",
-            Name = "RE_EXPLAIN_STORY"
+            Name = "Re-Explain Story"
         };
 
         // =====================================================================
@@ -102,19 +102,19 @@ public class MentorshipWorkflow : WorkflowBase
         var planDecomposition = new PlanDecompositionActivity
         {
             Id = "PlanDecomposition",
-            Name = "PLAN_DECOMPOSITION"
+            Name = "Plan Decomposition"
         };
 
         var reviewPlan = new ReviewPlanActivity
         {
             Id = "ReviewPlan",
-            Name = "REVIEW_PLAN"
+            Name = "Review Plan"
         };
 
         var adjustPlan = new AdjustPlanActivity
         {
             Id = "AdjustPlan",
-            Name = "ADJUST_PLAN"
+            Name = "Adjust Plan"
         };
 
         // =====================================================================
@@ -124,19 +124,19 @@ public class MentorshipWorkflow : WorkflowBase
         var startImplementation = new StartImplementationActivity
         {
             Id = "StartImplementation",
-            Name = "START_IMPLEMENTATION"
+            Name = "Start Implementation"
         };
 
         var monitorProgress = new MonitorProgressFlowActivity
         {
             Id = "MonitorProgress",
-            Name = "MONITOR_PROGRESS"
+            Name = "Monitor Progress"
         };
 
         var detectPattern = new DetectPatternActivity
         {
             Id = "DetectPattern",
-            Name = "DETECT_PATTERN"
+            Name = "Detect Circular Pattern"
         };
 
         // =====================================================================
@@ -146,31 +146,31 @@ public class MentorshipWorkflow : WorkflowBase
         var diagnoseBlocker = new DiagnoseBlockerFlowActivity
         {
             Id = "DiagnoseBlocker",
-            Name = "DIAGNOSE_BLOCKER"
+            Name = "Diagnose Blocker"
         };
 
         var provideHint = new ProvideHintFlowActivity
         {
             Id = "ProvideHint",
-            Name = "PROVIDE_HINT"
+            Name = "Provide Hint (Socratic)"
         };
 
         var provideGuidance = new ProvideGuidanceFlowActivity
         {
             Id = "ProvideGuidance",
-            Name = "PROVIDE_GUIDANCE"
+            Name = "Provide Direct Guidance"
         };
 
         var provideAssistance = new ProvideAssistanceFlowActivity
         {
             Id = "ProvideAssistance",
-            Name = "PROVIDE_ASSISTANCE"
+            Name = "Provide Code Assistance"
         };
 
         var escalateToSenior = new EscalateToSeniorActivity
         {
             Id = "EscalateToSenior",
-            Name = "ESCALATE_TO_SENIOR"
+            Name = "Escalate to Senior Developer"
         };
 
         // =====================================================================
@@ -180,19 +180,19 @@ public class MentorshipWorkflow : WorkflowBase
         var qualityGateCheck = new QualityGateFlowActivity
         {
             Id = "QualityGateCheck",
-            Name = "QUALITY_GATE_CHECK"
+            Name = "Quality Gate Check"
         };
 
         var autoFixIssues = new AutoFixIssuesActivity
         {
             Id = "AutoFixIssues",
-            Name = "AUTO_FIX_ISSUES"
+            Name = "Auto-Fix Quality Issues"
         };
 
         var manualFixRequired = new ManualFixRequiredActivity
         {
             Id = "ManualFixRequired",
-            Name = "MANUAL_FIX_REQUIRED"
+            Name = "Manual Fix Required"
         };
 
         // =====================================================================
@@ -202,25 +202,25 @@ public class MentorshipWorkflow : WorkflowBase
         var prepareCodeReview = new PrepareCodeReviewFlowActivity
         {
             Id = "PrepareCodeReview",
-            Name = "PREPARE_CODE_REVIEW"
+            Name = "Prepare Code Review"
         };
 
         var monitorReview = new MonitorReviewFlowActivity
         {
             Id = "MonitorReview",
-            Name = "MONITOR_REVIEW"
+            Name = "Monitor Review Status"
         };
 
         var guideFixes = new GuideFixesFlowActivity
         {
             Id = "GuideFixes",
-            Name = "GUIDE_FIXES"
+            Name = "Guide Review Fixes"
         };
 
         var reRequestReview = new ReRequestReviewActivity
         {
             Id = "ReRequestReview",
-            Name = "RE_REQUEST_REVIEW"
+            Name = "Re-Request Review"
         };
 
         // =====================================================================
@@ -230,25 +230,25 @@ public class MentorshipWorkflow : WorkflowBase
         var mergeAndComplete = new MergeAndCompleteFlowActivity
         {
             Id = "MergeAndComplete",
-            Name = "MERGE_AND_COMPLETE"
+            Name = "Merge and Complete"
         };
 
         var generateReport = new GenerateReportFlowActivity
         {
             Id = "GenerateReport",
-            Name = "GENERATE_REPORT"
+            Name = "Generate Session Report"
         };
 
         var updateSkillProfile = new UpdateSkillProfileFlowActivity
         {
             Id = "UpdateSkillProfile",
-            Name = "UPDATE_SKILL_PROFILE"
+            Name = "Update Skill Profile"
         };
 
         var completed = new CompletedActivity
         {
             Id = "Completed",
-            Name = "COMPLETED"
+            Name = "Session Completed"
         };
 
         // =====================================================================
@@ -258,25 +258,25 @@ public class MentorshipWorkflow : WorkflowBase
         var paused = new PauseSessionActivity
         {
             Id = "Paused",
-            Name = "PAUSED"
+            Name = "Session Paused"
         };
 
         var cancelled = new CancelSessionActivity
         {
             Id = "Cancelled",
-            Name = "CANCELLED"
+            Name = "Session Cancelled"
         };
 
         var failed = new FailSessionActivity
         {
             Id = "Failed",
-            Name = "FAILED"
+            Name = "Session Failed"
         };
 
         var timeout = new TimeoutSessionActivity
         {
             Id = "Timeout",
-            Name = "TIMEOUT"
+            Name = "Session Timed Out"
         };
 
         // =====================================================================

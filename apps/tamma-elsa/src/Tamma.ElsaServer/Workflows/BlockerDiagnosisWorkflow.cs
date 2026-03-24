@@ -273,7 +273,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         var setOutput = new SetOutput
         {
             Id = "SetBlockerOutput",
-            Name = "Set Output",
+            Name = "Output: Blocker Resolution",
             OutputName = new("BlockerResolution"),
             OutputValue = new(context =>
             {
