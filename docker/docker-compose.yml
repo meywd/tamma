@@ -99,7 +99,7 @@ services:
   # ELSA Studio (Blazor WASM UI)
   # ---------------------------------------------------------------------------
   elsa-studio:
-    image: elsaworkflows/elsa-studio-v3-2-1-blueberry:latest
+    image: elsaworkflows/elsa-studio-v3-4-0:latest
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       # URL must be browser-accessible (Blazor WASM runs client-side)
