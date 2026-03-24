@@ -33,9 +33,11 @@ public class ReviewFixWorkflow : WorkflowBase
             HasActionableComments = new Output<bool>(hasActionableVar),
             AnalysisJson = new Output<string?>(analysisJsonVar)
         };
+        analyze.SetDisplayText("Analyze Review");
 
         var hasActionable = new FlowDecision(ctx => hasActionableVar.Get(ctx))
         { Id = "HasActionable", Name = "Has Actionable?" };
+        hasActionable.SetDisplayText("Has Actionable?");
 
         var generateFixes = new DispatchWorkflow
         {
@@ -50,6 +52,7 @@ public class ReviewFixWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(llmResultVar)
         };
+        generateFixes.SetDisplayText("Generate Fixes");
 
         var applyFixes = new ApplyReviewFixesActivity
         {
@@ -59,10 +62,14 @@ public class ReviewFixWorkflow : WorkflowBase
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
             FixesApplied = new Output<bool>(fixesAppliedVar)
         };
+        applyFixes.SetDisplayText("Apply Fixes");
 
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) };
+        outputSuccess.SetDisplayText("Output Success");
         var outputHasComments = new SetOutput { Id = "OutputHasComments", Name = "Output Has Comments", OutputName = new("hasComments"), OutputValue = new(ctx => (object)hasActionableVar.Get(ctx)) };
+        outputHasComments.SetDisplayText("Output Has Comments");
         var outputFixesApplied = new SetOutput { Id = "OutputFixesApplied", Name = "Output Fixes Applied", OutputName = new("fixesApplied"), OutputValue = new(ctx => (object)fixesAppliedVar.Get(ctx)) };
+        outputFixesApplied.SetDisplayText("Output Fixes Applied");
 
         builder.Root = new Flowchart
         {

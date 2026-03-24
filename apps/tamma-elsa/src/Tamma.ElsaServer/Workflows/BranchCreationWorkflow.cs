@@ -39,6 +39,7 @@ public class BranchCreationWorkflow : WorkflowBase
             IssueTitle = new Input<string>(ctx => ctx.GetInput<string>("issueTitle") ?? ""),
             BranchName = new Output<string?>(branchNameVar)
         };
+        createBranch.SetDisplayText("Create Branch");
 
         var setSuccess = new SetVariable
         {
@@ -47,6 +48,7 @@ public class BranchCreationWorkflow : WorkflowBase
             Variable = successVar,
             Value = new Input<object?>(ctx => (object)!string.IsNullOrEmpty(branchNameVar.Get(ctx)))
         };
+        setSuccess.SetDisplayText("Set Success");
 
         var outputSuccess = new SetOutput
         {
@@ -55,6 +57,7 @@ public class BranchCreationWorkflow : WorkflowBase
             OutputName = new("success"),
             OutputValue = new(ctx => (object)successVar.Get(ctx))
         };
+        outputSuccess.SetDisplayText("Output Success");
 
         var outputBranchName = new SetOutput
         {
@@ -63,6 +66,7 @@ public class BranchCreationWorkflow : WorkflowBase
             OutputName = new("branchName"),
             OutputValue = new(ctx => (object)(branchNameVar.Get(ctx) ?? ""))
         };
+        outputBranchName.SetDisplayText("Output Branch Name");
 
         builder.Root = new Flowchart
         {

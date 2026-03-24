@@ -10,6 +10,8 @@ using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -50,6 +52,7 @@ public class PlanGenerationWorkflow : WorkflowBase
                 return (object)ctx.GetInput<int>("issueNumber");
             })
         };
+        initVars.SetDisplayText("Init Variables");
 
         var planLoop = new While(ctx => planLoopVar.Get(ctx))
         {
@@ -59,7 +62,7 @@ public class PlanGenerationWorkflow : WorkflowBase
                 Id = "PlanLoopBody", Name = "Plan Loop Body",
                 Activities =
                 {
-                    new DispatchWorkflow
+                    WithLabel(new DispatchWorkflow
                     {
                         Id = "DispatchPlanGeneration", Name = "Generate Plan via LLM",
                         WorkflowDefinitionId = new("llm-call"),
@@ -71,8 +74,8 @@ public class PlanGenerationWorkflow : WorkflowBase
                         }),
                         WaitForCompletion = new(true),
                         Result = new(llmResultVar)
-                    },
-                    new SetVariable
+                    }, "Generate Plan via LLM"),
+                    WithLabel(new SetVariable
                     {
                         Id = "ExtractPlan", Name = "Extract Plan",
                         Variable = planJsonVar,
@@ -83,16 +86,16 @@ public class PlanGenerationWorkflow : WorkflowBase
                                 return resp?.ToString() ?? "{}";
                             return "{}";
                         })
-                    },
-                    new WaitForPlanApprovalActivity
+                    }, "Extract Plan"),
+                    WithLabel(new WaitForPlanApprovalActivity
                     {
                         Id = "WaitPlanApproval", Name = "Wait for Plan Approval",
                         IssueNumber = new Input<int>(ctx => issueNumberVar.Get(ctx)),
                         PlanJson = new Input<string>(ctx => planJsonVar.Get(ctx)),
                         ApprovalResultJson = new Output<string?>(new Variable<string>()),
                         EditedPlanJson = new Output<string?>(editedPlanJsonVar)
-                    },
-                    new SetVariable
+                    }, "Wait for Plan Approval"),
+                    WithLabel(new SetVariable
                     {
                         Id = "CheckApprovalDecision", Name = "Check Approval Decision",
                         Variable = planLoopVar,
@@ -107,13 +110,16 @@ public class PlanGenerationWorkflow : WorkflowBase
                             planLoopVar.Set(ctx, false);
                             return (object)false;
                         })
-                    }
+                    }, "Check Approval Decision")
                 }
             }
         };
+        planLoop.SetDisplayText("Plan Approval Loop");
 
         var outputApproved = new SetOutput { Id = "OutputApproved", Name = "Output Approved", OutputName = new("approved"), OutputValue = new(ctx => (object)(!string.IsNullOrEmpty(planJsonVar.Get(ctx)))) };
+        outputApproved.SetDisplayText("Output Approved");
         var outputPlanJson = new SetOutput { Id = "OutputPlanJson", Name = "Output Plan JSON", OutputName = new("planJson"), OutputValue = new(ctx => (object)(planJsonVar.Get(ctx) ?? "{}")) };
+        outputPlanJson.SetDisplayText("Output Plan JSON");
 
         builder.Root = new Flowchart
         {

@@ -292,6 +292,23 @@ public class BudgetState
 }
 
 // ============================================================
+// Agent Custom Settings (stored in ExecutionSettings.ResponseFormat)
+// ============================================================
+
+/// <summary>
+/// Custom settings stored as JSON in the ELSA Agent's ExecutionSettings.ResponseFormat field.
+/// Contains Tamma-specific configuration that doesn't map to standard Semantic Kernel settings.
+/// </summary>
+public class AgentCustomSettings
+{
+    /// <summary>Ordered provider chain for this agent (e.g. ["anthropic", "openai", "openrouter"]).</summary>
+    public List<string>? ProviderChain { get; set; }
+
+    /// <summary>Maximum budget in USD for a single LLM call by this agent.</summary>
+    public decimal MaxBudgetUsd { get; set; }
+}
+
+// ============================================================
 // Provider Configuration (read from IConfiguration)
 // ============================================================
 

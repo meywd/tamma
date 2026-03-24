@@ -1,3 +1,4 @@
+using Elsa.Agents;
 using Elsa.EntityFrameworkCore.Extensions;
 using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.EntityFrameworkCore.Modules.Runtime;
@@ -53,6 +54,15 @@ builder.Services.AddElsa(elsa =>
             ef.RunMigrations = true;
         }));
 
+    // Agents module — DB-backed agent config store with Studio UI and REST API.
+    // Auto-creates AgentDefinitions, ApiKeysDefinitions, ServicesDefinitions tables.
+    // We intentionally omit UseAgentActivities() to avoid registering Semantic Kernel's
+    // AgentActivity — our llm-call workflow is the execution engine.
+    elsa.UseAgentPersistence(p =>
+        p.UseEntityFrameworkCore(ef => ef.UsePostgreSql(connectionString)));
+    elsa.UseAgents();
+    elsa.UseAgentsApi();
+
     // Scheduling (timer/cron activities)
     elsa.UseScheduling();
 
@@ -90,6 +100,9 @@ builder.Services.AddHealthChecks();
 
 // Seed workflow definitions from JSON files at startup
 builder.Services.AddHostedService<Tamma.ElsaServer.WorkflowSeeder>();
+
+// Seed default agent definitions (prompts, settings) into ELSA Agents store
+builder.Services.AddHostedService<Tamma.ElsaServer.AgentSeeder>();
 
 var app = builder.Build();
 

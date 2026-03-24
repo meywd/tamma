@@ -66,6 +66,7 @@ public class TestingWorkflow : WorkflowBase
             Branch = new(ctx => branchVar.Get(ctx)),
             Result = new(ciTriggerResultVar)
         };
+        triggerCI.SetDisplayText("Trigger CI Pipeline");
 
         // ============================================
         // Step 2: Wait for CI results (bookmark-based)
@@ -79,6 +80,7 @@ public class TestingWorkflow : WorkflowBase
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };
+        waitForCI.SetDisplayText("Wait for CI Results");
 
         // Store CI results into the shared variable via Inline
         var storeCIResults = new SetVariable
@@ -88,6 +90,7 @@ public class TestingWorkflow : WorkflowBase
             Variable = ciResultsVar,
             Value = new(ctx => (object?)ciResultsFromWaitVar.Get(ctx))
         };
+        storeCIResults.SetDisplayText("Store CI Results");
 
         // ============================================
         // Step 3: Evaluate results with outcome-based routing
@@ -101,6 +104,7 @@ public class TestingWorkflow : WorkflowBase
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
             EvaluationResult = new(evaluationResultVar)
         };
+        evaluateResults.SetDisplayText("Evaluate CI Results");
 
         // ============================================
         // AllPass/MinorIssues path: detailed checks
@@ -113,6 +117,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
         };
+        checkCoverage.SetDisplayText("Check Code Coverage");
 
         var checkLinting = new CheckLintingActivity
         {
@@ -122,6 +127,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
         };
+        checkLinting.SetDisplayText("Check Linting Rules");
 
         var checkSecurity = new CheckSecurityActivity
         {
@@ -131,6 +137,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
         };
+        checkSecurity.SetDisplayText("Check Security Issues");
 
         var generateReport = new GenerateQualityReportActivity
         {
@@ -145,6 +152,7 @@ public class TestingWorkflow : WorkflowBase
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
             Result = new(qualityReportVar)
         };
+        generateReport.SetDisplayText("Generate Quality Report");
 
         // ============================================
         // Critical path: same checks, different finish
@@ -157,6 +165,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
         };
+        checkCoverageCritical.SetDisplayText("Check Coverage (Critical)");
 
         var checkLintCritical = new CheckLintingActivity
         {
@@ -166,6 +175,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
         };
+        checkLintCritical.SetDisplayText("Check Lint (Critical)");
 
         var checkSecurityCritical = new CheckSecurityActivity
         {
@@ -175,6 +185,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
         };
+        checkSecurityCritical.SetDisplayText("Check Security (Critical)");
 
         var generateReportCritical = new GenerateQualityReportActivity
         {
@@ -189,6 +200,7 @@ public class TestingWorkflow : WorkflowBase
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
             Result = new(qualityReportVar)
         };
+        generateReportCritical.SetDisplayText("Generate Report (Critical)");
 
         // ============================================
         // MajorIssues path: auto-fix loop
@@ -207,6 +219,7 @@ public class TestingWorkflow : WorkflowBase
             FixDescription = new("Auto-fix quality issues via LLM"),
             Result = new(commitFixResultVar)
         };
+        commitFix.SetDisplayText("Commit Auto-Fix");
 
         var incrementAttempt = new SetVariable<int>(attemptNumberVar, ctx =>
             attemptNumberVar.Get(ctx) + 1)
@@ -214,6 +227,7 @@ public class TestingWorkflow : WorkflowBase
             Id = "IncrementAttempt",
             Name = "Increment Fix Attempt"
         };
+        incrementAttempt.SetDisplayText("Increment Fix Attempt");
 
         // Re-trigger CI after fix
         var reTriggerCI = new TriggerCIActivity
@@ -225,6 +239,7 @@ public class TestingWorkflow : WorkflowBase
             Branch = new(ctx => branchVar.Get(ctx)),
             Result = new(ciTriggerResultVar)
         };
+        reTriggerCI.SetDisplayText("Re-Trigger CI After Fix");
 
         var waitForCIRetry = new WaitForCIResultsActivity
         {
@@ -235,6 +250,7 @@ public class TestingWorkflow : WorkflowBase
             TimeoutMinutes = new(30),
             Results = new(ciResultsFromWaitVar)
         };
+        waitForCIRetry.SetDisplayText("Wait for CI Results (Retry)");
 
         var storeRetryResults = new SetVariable
         {
@@ -243,6 +259,7 @@ public class TestingWorkflow : WorkflowBase
             Variable = ciResultsVar,
             Value = new(ctx => (object?)ciResultsFromWaitVar.Get(ctx))
         };
+        storeRetryResults.SetDisplayText("Store Retry CI Results");
 
         // Re-evaluate after retry
         var evaluateRetryResults = new EvaluateResultsActivity
@@ -254,6 +271,7 @@ public class TestingWorkflow : WorkflowBase
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
             EvaluationResult = new(evaluationResultVar)
         };
+        evaluateRetryResults.SetDisplayText("Evaluate Retry Results");
 
         // Retry pass path: detailed checks
         var checkCoverageRetry = new CheckCoverageActivity
@@ -264,6 +282,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(coverageResultVar)
         };
+        checkCoverageRetry.SetDisplayText("Check Coverage (Retry)");
 
         var checkLintRetry = new CheckLintingActivity
         {
@@ -273,6 +292,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(lintResultVar)
         };
+        checkLintRetry.SetDisplayText("Check Lint (Retry)");
 
         var checkSecurityRetry = new CheckSecurityActivity
         {
@@ -282,6 +302,7 @@ public class TestingWorkflow : WorkflowBase
             SkillLevel = new(ctx => skillLevelVar.Get(ctx)),
             Result = new(securityResultVar)
         };
+        checkSecurityRetry.SetDisplayText("Check Security (Retry)");
 
         var generateRetryReport = new GenerateQualityReportActivity
         {
@@ -296,6 +317,7 @@ public class TestingWorkflow : WorkflowBase
             ConsecutivePassCount = new(ctx => consecutivePassCountVar.Get(ctx)),
             Result = new(qualityReportVar)
         };
+        generateRetryReport.SetDisplayText("Generate Report (Retry)");
 
         // ============================================
         // Max-attempt guard for MajorIssues retry loop
@@ -303,6 +325,7 @@ public class TestingWorkflow : WorkflowBase
         var maxAttemptGuard = new FlowDecision(ctx =>
             attemptNumberVar.Get(ctx) < maxAttemptsVar.Get(ctx))
         { Id = "MaxAttemptGuard", Name = "Fix Attempts Remaining?" };
+        maxAttemptGuard.SetDisplayText("Fix Attempts Remaining?");
 
         // ============================================
         // SetOutput activities (expose workflow outputs before each Finish)
@@ -316,6 +339,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
+        setOutputPassReport.SetDisplayText("Output: Quality Report (Pass)");
         var setOutputPassPassed = new SetOutput
         {
             Id = "SetOutputPassPassed",
@@ -323,6 +347,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? true))
         };
+        setOutputPassPassed.SetDisplayText("Output: Passed Flag (Pass)");
         var setOutputPassFeedback = new SetOutput
         {
             Id = "SetOutputPassFeedback",
@@ -330,6 +355,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
+        setOutputPassFeedback.SetDisplayText("Output: Teaching Feedback (Pass)");
 
         // Fail path outputs
         var setOutputFailReport = new SetOutput
@@ -339,6 +365,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
+        setOutputFailReport.SetDisplayText("Output: Quality Report (Fail)");
         var setOutputFailPassed = new SetOutput
         {
             Id = "SetOutputFailPassed",
@@ -346,6 +373,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? false))
         };
+        setOutputFailPassed.SetDisplayText("Output: Passed Flag (Fail)");
         var setOutputFailFeedback = new SetOutput
         {
             Id = "SetOutputFailFeedback",
@@ -353,6 +381,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
+        setOutputFailFeedback.SetDisplayText("Output: Teaching Feedback (Fail)");
 
         // Retry pass path outputs
         var setOutputRetryPassReport = new SetOutput
@@ -362,6 +391,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("qualityReport"),
             OutputValue = new(ctx => (object)JsonSerializer.Serialize(qualityReportVar.Get(ctx)))
         };
+        setOutputRetryPassReport.SetDisplayText("Output: Quality Report (Retry Pass)");
         var setOutputRetryPassPassed = new SetOutput
         {
             Id = "SetOutputRetryPassPassed",
@@ -369,6 +399,7 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("passed"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.Passed ?? true))
         };
+        setOutputRetryPassPassed.SetDisplayText("Output: Passed Flag (Retry Pass)");
         var setOutputRetryPassFeedback = new SetOutput
         {
             Id = "SetOutputRetryPassFeedback",
@@ -376,18 +407,23 @@ public class TestingWorkflow : WorkflowBase
             OutputName = new("teachingFeedback"),
             OutputValue = new(ctx => (object)(qualityReportVar.Get(ctx)?.TeachingFeedback ?? ""))
         };
+        setOutputRetryPassFeedback.SetDisplayText("Output: Teaching Feedback (Retry Pass)");
 
         // ============================================
         // Finish activities
         // ============================================
         var finishPass = new Finish { Id = "FinishPass", Name = "Complete: Tests Passed" };
+        finishPass.SetDisplayText("Complete: Tests Passed");
         var finishFail = new Finish { Id = "FinishFail", Name = "Complete: Tests Failed" };
+        finishFail.SetDisplayText("Complete: Tests Failed");
         var finishRetryPass = new Finish { Id = "FinishRetryPass", Name = "Complete: Tests Passed After Retry" };
+        finishRetryPass.SetDisplayText("Complete: Tests Passed After Retry");
 
         // ============================================
         // Build the Flowchart
         // ============================================
         var flowchart = new Flowchart { Id = "TestingPipelineFlowchart", Name = "Testing Pipeline Flowchart" };
+        flowchart.SetDisplayText("Testing Pipeline Flowchart");
 
         // Add all activities to the flowchart
         var allActivities = new IActivity[]

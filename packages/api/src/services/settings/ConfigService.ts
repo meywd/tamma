@@ -3,10 +3,15 @@
  *
  * Reads and writes TammaConfig for agent and security settings.
  * In-memory store with validation via shared validateAgentsConfig/validateSecurityConfig.
+ *
+ * On prompt template updates, syncs to the ELSA Agents store if an ElsaAgentsClient
+ * is configured. The ELSA Agents DB is the single source of truth for the llm-call
+ * workflow — edits via ELSA Studio take effect immediately without API sync.
  */
 
 import type { IAgentsConfig, SecurityConfig, AgentType } from '@tamma/shared';
 import { validateAgentsConfig, validateSecurityConfig } from '@tamma/shared';
+import type { ElsaAgentsClient } from './ElsaAgentsClient.js';
 
 const DEFAULT_CONFIG: IAgentsConfig = {
   defaults: {
@@ -25,10 +30,12 @@ const DEFAULT_SECURITY: SecurityConfig = {
 export class ConfigService {
   private agentsConfig: IAgentsConfig;
   private securityConfig: SecurityConfig;
+  private elsaClient: ElsaAgentsClient | null;
 
   constructor(
     initialAgents?: IAgentsConfig,
     initialSecurity?: SecurityConfig,
+    elsaAgentsClient?: ElsaAgentsClient | null,
   ) {
     this.agentsConfig = initialAgents
       ? structuredClone(initialAgents)
@@ -36,6 +43,7 @@ export class ConfigService {
     this.securityConfig = initialSecurity
       ? structuredClone(initialSecurity)
       : structuredClone(DEFAULT_SECURITY);
+    this.elsaClient = elsaAgentsClient ?? null;
   }
 
   async getAgentsConfig(): Promise<IAgentsConfig> {
@@ -144,5 +152,38 @@ export class ConfigService {
     }
     updated.roles[role as AgentType] = existing;
     this.agentsConfig = updated;
+
+    // Sync to ELSA Agents store (best-effort — failure is logged, not thrown)
+    if (normalizedPrompt !== undefined) {
+      await this.syncPromptToElsa(role, normalizedPrompt);
+    }
+  }
+
+  /**
+   * Best-effort sync of a prompt template to the ELSA Agents store.
+   * The llm-call workflow reads prompts from the ELSA Agents DB directly,
+   * so this ensures edits via the Tamma Dashboard are reflected immediately.
+   * Failures are swallowed — the in-memory update still succeeds.
+   */
+  private async syncPromptToElsa(role: string, promptTemplate: string): Promise<void> {
+    if (!this.elsaClient) return;
+
+    try {
+      const agentName = `tamma-${role}`;
+      const agent = await this.elsaClient.findAgentByName(agentName);
+      if (!agent) return;
+
+      await this.elsaClient.updateAgent(agent.id, {
+        name: agent.name,
+        description: agent.description,
+        agentConfig: {
+          ...agent.agentConfig,
+          promptTemplate,
+        },
+      });
+    } catch {
+      // ELSA sync failure is non-fatal — the llm-call workflow will pick up
+      // the change on next startup via AgentSeeder, or via direct ELSA Studio edit.
+    }
   }
 }

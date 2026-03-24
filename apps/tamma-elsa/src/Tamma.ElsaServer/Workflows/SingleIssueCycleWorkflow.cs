@@ -10,6 +10,8 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -87,6 +89,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)(ctx.GetInput<string>("repository") ?? "");
             })
         };
+        initConfig.SetDisplayText("Init Config");
 
         // ================================================================
         // Step 1: Issue Selection
@@ -105,6 +108,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(issueResult)
         };
+        selectIssue.SetDisplayText("Select Issue");
 
         var extractIssue = new SetVariable
         {
@@ -126,9 +130,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)0;
             })
         };
+        extractIssue.SetDisplayText("Extract Issue Data");
 
         var hasIssue = new FlowDecision(ctx => issueNumber.Get(ctx) > 0)
         { Id = "HasIssue", Name = "Issue Found?" };
+        hasIssue.SetDisplayText("Issue Found?");
 
         // ================================================================
         // Step 2: Context Gathering (existing workflow)
@@ -148,6 +154,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(contextResult)
         };
+        gatherContext.SetDisplayText("Gather Context");
 
         var extractContext = new SetVariable
         {
@@ -162,6 +169,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)"{}";
             })
         };
+        extractContext.SetDisplayText("Extract Context Data");
 
         // ================================================================
         // Step 3: Plan Generation (with approval bookmark)
@@ -182,6 +190,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(planResult)
         };
+        generatePlan.SetDisplayText("Generate Plan");
 
         var extractPlan = new SetVariable
         {
@@ -196,6 +205,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)"{}";
             })
         };
+        extractPlan.SetDisplayText("Extract Plan Data");
 
         var planApproved = new FlowDecision(ctx =>
         {
@@ -205,6 +215,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "PlanApproved", Name = "Plan Approved?" };
+        planApproved.SetDisplayText("Plan Approved?");
 
         // ================================================================
         // Step 4: Branch Creation
@@ -223,6 +234,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(branchResult)
         };
+        createBranch.SetDisplayText("Create Branch");
 
         var extractBranch = new SetVariable
         {
@@ -237,9 +249,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)"";
             })
         };
+        extractBranch.SetDisplayText("Extract Branch Data");
 
         var branchCreated = new FlowDecision(ctx => !string.IsNullOrEmpty(branchName.Get(ctx)))
         { Id = "BranchCreated", Name = "Branch Created?" };
+        branchCreated.SetDisplayText("Branch Created?");
 
         // ================================================================
         // Steps 5-7: TDD Cycle (existing workflow)
@@ -262,6 +276,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(tddResult)
         };
+        tddCycle.SetDisplayText("TDD Cycle");
 
         var tddSuccess = new FlowDecision(ctx =>
         {
@@ -271,10 +286,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "TddSuccess", Name = "TDD Passed?" };
+        tddSuccess.SetDisplayText("TDD Passed?");
 
         // TDD debug retry guard
         var tddDebugGuard = new FlowDecision(ctx => tddDebugAttempt.Get(ctx) < 3)
         { Id = "TddDebugGuard", Name = "TDD Debug < 3?" };
+        tddDebugGuard.SetDisplayText("TDD Debug < 3?");
 
         var incrementTddDebug = new SetVariable
         {
@@ -283,6 +300,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Variable = tddDebugAttempt,
             Value = new Input<object?>(ctx => (object)(tddDebugAttempt.Get(ctx) + 1))
         };
+        incrementTddDebug.SetDisplayText("Increment TDD Debug");
 
         var dispatchTddDebugging = new DispatchWorkflow
         {
@@ -302,6 +320,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(debugResult)
         };
+        dispatchTddDebugging.SetDisplayText("Debug TDD Failure");
 
         // ================================================================
         // Step 8: Create PR
@@ -323,6 +342,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(prResult)
         };
+        createPr.SetDisplayText("Create PR");
 
         var extractPr = new SetVariable
         {
@@ -342,9 +362,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 return (object)0;
             })
         };
+        extractPr.SetDisplayText("Extract PR Data");
 
         var prCreated = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
         { Id = "PrCreated", Name = "PR Created?" };
+        prCreated.SetDisplayText("PR Created?");
 
         // ================================================================
         // Step 9: Testing Pipeline (existing workflow)
@@ -364,6 +386,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(testResult)
         };
+        testingPipeline.SetDisplayText("Testing Pipeline");
 
         var testsPassed = new FlowDecision(ctx =>
         {
@@ -373,10 +396,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "TestsPassed", Name = "Tests Passed?" };
+        testsPassed.SetDisplayText("Tests Passed?");
 
         // CI retry guard
         var ciRetryGuard = new FlowDecision(ctx => ciRetryCount.Get(ctx) < 3)
         { Id = "CiRetryGuard", Name = "CI Retries < 3?" };
+        ciRetryGuard.SetDisplayText("CI Retries < 3?");
 
         var incrementCiRetry = new SetVariable
         {
@@ -385,6 +410,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Variable = ciRetryCount,
             Value = new Input<object?>(ctx => (object)(ciRetryCount.Get(ctx) + 1))
         };
+        incrementCiRetry.SetDisplayText("Increment CI Retry");
 
         var dispatchCiDebugging = new DispatchWorkflow
         {
@@ -404,6 +430,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(debugResult)
         };
+        dispatchCiDebugging.SetDisplayText("Debug CI Failure");
 
         // ================================================================
         // Step 10: Review Fix Check
@@ -422,6 +449,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(reviewResult)
         };
+        reviewFixCheck.SetDisplayText("Review Fix Check");
 
         var hasReviewComments = new FlowDecision(ctx =>
         {
@@ -431,6 +459,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "HasReviewComments", Name = "Has Comments?" };
+        hasReviewComments.SetDisplayText("Has Comments?");
 
         // ================================================================
         // Step 11: Merge Approval (bookmark)
@@ -449,6 +478,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(mergeApprovalResult)
         };
+        mergeApproval.SetDisplayText("Merge Approval");
 
         var mergeDecision = new FlowDecision(ctx =>
         {
@@ -458,6 +488,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "MergeDecision", Name = "Merge Approved?" };
+        mergeDecision.SetDisplayText("Merge Approved?");
 
         var testDecision = new FlowDecision(ctx =>
         {
@@ -467,6 +498,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "TestDecision", Name = "Run More Tests?" };
+        testDecision.SetDisplayText("Run More Tests?");
 
         // ================================================================
         // Step 12: Merge PR
@@ -486,6 +518,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(mergeResult)
         };
+        mergePr.SetDisplayText("Merge PR");
 
         var mergeSuccess = new FlowDecision(ctx =>
         {
@@ -495,6 +528,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return false;
         })
         { Id = "MergeSuccess", Name = "Merged?" };
+        mergeSuccess.SetDisplayText("Merged?");
 
         // ================================================================
         // Finish nodes with SetOutput
@@ -505,17 +539,18 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish Success",
             Activities =
             {
-                new SetVariable { Id = "SetSuccessReason", Name = "Set Success Reason", Variable = exitReason, Value = new Input<object?>(_ => (object)"success") },
-                new SetOutput { Id = "SetOutputExitReasonSuccess", Name = "Set Exit Reason Success", OutputName = new("exitReason"), OutputValue = new(_ => (object)"success") },
-                new SetOutput { Id = "SetOutputIssueNumber", Name = "Set Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) },
-                new SetOutput { Id = "SetOutputPrNumber", Name = "Set PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) },
-                new SetOutput { Id = "SetOutputMergeSha", Name = "Set Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx =>
+                WithLabel(new SetVariable { Id = "SetSuccessReason", Name = "Set Success Reason", Variable = exitReason, Value = new Input<object?>(_ => (object)"success") }, "Set Success Reason"),
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonSuccess", Name = "Set Exit Reason Success", OutputName = new("exitReason"), OutputValue = new(_ => (object)"success") }, "Set Exit Reason Success"),
+                WithLabel(new SetOutput { Id = "SetOutputIssueNumber", Name = "Set Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) }, "Set Issue Number"),
+                WithLabel(new SetOutput { Id = "SetOutputPrNumber", Name = "Set PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) }, "Set PR Number"),
+                WithLabel(new SetOutput { Id = "SetOutputMergeSha", Name = "Set Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx =>
                 {
                     var r = mergeResult.Get(ctx);
                     return (object)(r != null && r.TryGetValue("mergeSha", out var ms) ? ms?.ToString() ?? "" : "");
-                }) }
+                }) }, "Set Merge SHA")
             }
         };
+        finishSuccess.SetDisplayText("Finish Success");
 
         var finishNoIssues = new Sequence
         {
@@ -523,9 +558,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish No Issues",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonNoIssues", Name = "Set Exit Reason No Issues", OutputName = new("exitReason"), OutputValue = new(_ => (object)"noIssues") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonNoIssues", Name = "Set Exit Reason No Issues", OutputName = new("exitReason"), OutputValue = new(_ => (object)"noIssues") }, "Set Exit Reason No Issues")
             }
         };
+        finishNoIssues.SetDisplayText("Finish No Issues");
 
         var finishRejected = new Sequence
         {
@@ -533,9 +569,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish Rejected",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonRejected", Name = "Set Exit Reason Rejected", OutputName = new("exitReason"), OutputValue = new(_ => (object)"rejected") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonRejected", Name = "Set Exit Reason Rejected", OutputName = new("exitReason"), OutputValue = new(_ => (object)"rejected") }, "Set Exit Reason Rejected")
             }
         };
+        finishRejected.SetDisplayText("Finish Rejected");
 
         var finishError = new Sequence
         {
@@ -543,9 +580,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish Error",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonError", Name = "Set Exit Reason Error", OutputName = new("exitReason"), OutputValue = new(_ => (object)"error") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonError", Name = "Set Exit Reason Error", OutputName = new("exitReason"), OutputValue = new(_ => (object)"error") }, "Set Exit Reason Error")
             }
         };
+        finishError.SetDisplayText("Finish Error");
 
         var finishTddFailed = new Sequence
         {
@@ -553,9 +591,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish TDD Failed",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonTddFailed", Name = "Set Exit Reason TDD Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"tddFailed") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonTddFailed", Name = "Set Exit Reason TDD Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"tddFailed") }, "Set Exit Reason TDD Failed")
             }
         };
+        finishTddFailed.SetDisplayText("Finish TDD Failed");
 
         var finishCiFailed = new Sequence
         {
@@ -563,9 +602,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish CI Failed",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonCiFailed", Name = "Set Exit Reason CI Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"ciFailed") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonCiFailed", Name = "Set Exit Reason CI Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"ciFailed") }, "Set Exit Reason CI Failed")
             }
         };
+        finishCiFailed.SetDisplayText("Finish CI Failed");
 
         var finishMergeFailed = new Sequence
         {
@@ -573,11 +613,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Name = "Finish Merge Failed",
             Activities =
             {
-                new SetOutput { Id = "SetOutputExitReasonMergeFailed", Name = "Set Exit Reason Merge Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"mergeFailed") }
+                WithLabel(new SetOutput { Id = "SetOutputExitReasonMergeFailed", Name = "Set Exit Reason Merge Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"mergeFailed") }, "Set Exit Reason Merge Failed")
             }
         };
+        finishMergeFailed.SetDisplayText("Finish Merge Failed");
 
         var finish = new Finish { Id = "Finish", Name = "Complete: Issue Cycle Done" };
+        finish.SetDisplayText("Complete: Issue Cycle Done");
 
         // ================================================================
         // Flowchart

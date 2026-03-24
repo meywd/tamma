@@ -13,6 +13,8 @@ using Tamma.Activities.LlmCall.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -36,7 +38,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// Design: Flowchart with visible nodes for each phase in ELSA Studio.
 ///
 /// Flow:
-///   InitInputs → SetupBudget → ResolveChain → ForEachProviderChain
+///   InitInputs → SetupBudget → ResolveAgentConfig → ResolveChain → ForEachProviderChain
 ///     → FailureCheck → [success?]
 ///       Yes → SetOutputs
 ///       No  → BuildFailureOutput → SetOutputs
@@ -74,6 +76,7 @@ public class LlmCallWorkflow : WorkflowBase
         var attemptNumberVar = builder.WithVariable<int>("AttemptNumber", 1);
         var maxRetriesVar = builder.WithVariable<int>("MaxRetries", 3);
         var providerChainVar = builder.WithVariable<object>("ProviderChain", new List<string>());
+        var systemPromptOverrideVar = builder.WithVariable<string>("SystemPromptOverride", "");
         var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "");
         var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
 
@@ -95,6 +98,7 @@ public class LlmCallWorkflow : WorkflowBase
                     taskPromptVar.Set(context, context.GetInput<string>("taskPrompt") ?? "");
                     contextVar.Set(context, context.GetInput<string>("context") ?? "");
                     sessionIdVar.Set(context, context.GetInput<string>("sessionId") ?? "");
+                    systemPromptOverrideVar.Set(context, context.GetInput<string>("systemPromptOverride") ?? "");
                     return role;
                 }
 
@@ -105,6 +109,7 @@ public class LlmCallWorkflow : WorkflowBase
                 taskPromptVar.Set(context, input.UserPrompt);
                 contextVar.Set(context, "");
                 sessionIdVar.Set(context, input.CorrelationId ?? "");
+                systemPromptOverrideVar.Set(context, input.SystemPromptOverride ?? "");
 
                 // Also check dict-style inputs (from BlockerDiagnosis etc.)
                 var dictRole = context.GetInput<string>("role");
@@ -118,6 +123,7 @@ public class LlmCallWorkflow : WorkflowBase
                 return input.Role ?? "assistant";
             })
         };
+        initInputs.SetDisplayText("Initialize Inputs");
 
         // 2. Parse input and set up budget
         var setupBudget = new SetVariable
@@ -131,42 +137,52 @@ public class LlmCallWorkflow : WorkflowBase
                 return JsonSerializer.Serialize(new BudgetState { CapUsd = input.BudgetCapUsd });
             })
         };
+        setupBudget.SetDisplayText("Setup Budget");
 
-        // 3. Resolve provider chain from config
+        // 3. Resolve agent config from ELSA Agents DB (prompt, provider chain, settings)
+        var resolveAgentConfig = WithLabel(new ResolveAgentConfigActivity
+        {
+            Id = "ResolveAgentConfig",
+            Name = "Resolve Agent Config",
+            AgentRoleProp = new(context => agentRoleVar.Get(context) ?? "assistant"),
+            SystemPromptOverrideProp = new(context => systemPromptOverrideVar.Get(context))
+        }, "Resolve Agent Config");
+
+        // 4. Resolve provider chain — prefers: caller input > DB agent config > default
         var resolveChain = new SetVariable
         {
             Id = "ResolveChain",
             Name = "Resolve Provider Chain",
             Variable = providerChainVar,
             Value = new(context => {
-                var role = agentRoleVar.Get(context) ?? "default";
                 var raw = inputVar.Get(context);
                 var input = ParseInput(raw);
 
-                // If caller provided an explicit chain, use it
+                // Priority 1: Caller provided an explicit chain in input
                 if (input.ProviderChain.Count > 0)
                     return (object)input.ProviderChain;
 
-                // Otherwise resolve from config: AgentsConfig:ProviderChains:{role}
-                // Config isn't available in expression lambdas, so fall back to default
-                var chain = new List<string> { "anthropic", "openai", "openrouter" };
-                return (object)chain;
+                // Priority 2: Agent config from DB set a chain (via ResolveAgentConfigActivity)
+                var existing = providerChainVar.Get(context);
+                if (existing is ICollection<string> dbChain && dbChain.Count > 0)
+                    return (object)dbChain;
+
+                // Priority 3: Default chain
+                return (object)new List<string> { "anthropic", "openai", "openrouter" };
             })
         };
+        resolveChain.SetDisplayText("Resolve Provider Chain");
 
-        // 4. ForEach provider in chain — kept as a Sequence-bodied ForEach (composite activity)
+        // 5. ForEach provider in chain — reads from the resolved providerChainVar
         var forEachProviders = new ForEach<string>
         {
             Id = "ForEachProviderChain",
             Name = "For Each Provider",
             Items = new(context => {
-                var role = agentRoleVar.Get(context) ?? "default";
-                var raw = inputVar.Get(context);
-                var input = ParseInput(raw);
-
-                if (input.ProviderChain.Count > 0)
-                    return (ICollection<string>)input.ProviderChain;
-
+                var chain = providerChainVar.Get(context);
+                if (chain is ICollection<string> list && list.Count > 0)
+                    return list;
+                // Fallback (should not reach here since ResolveChain always sets a value)
                 return (ICollection<string>)new List<string> { "anthropic", "openai", "openrouter" };
             }),
             Body = new Sequence
@@ -189,22 +205,22 @@ public class LlmCallWorkflow : WorkflowBase
                             Activities =
                             {
                                 // Set current provider from the ForEach current value
-                                new SetVariable
+                                WithLabel(new SetVariable
                                 {
                                     Id = "SetCurrentProvider",
                                     Name = "Set Current Provider",
                                     Variable = currentProviderVar,
                                     Value = new(context => context.GetVariable<string>("CurrentValue") ?? "anthropic")
-                                },
+                                }, "Set Current Provider"),
 
                                 // Reset attempt counter
-                                new SetVariable
+                                WithLabel(new SetVariable
                                 {
                                     Id = "ResetAttemptNumber",
                                     Name = "Reset Attempt",
                                     Variable = attemptNumberVar,
                                     Value = new(1)
-                                },
+                                }, "Reset Attempt"),
 
                                 // ── 3a. Check circuit breaker ──
                                 new If
@@ -223,7 +239,7 @@ public class LlmCallWorkflow : WorkflowBase
                                         Name = "Record CB Skip",
                                         Activities =
                                         {
-                                            new SetVariable
+                                            WithLabel(new SetVariable
                                             {
                                                 Id = "DiagCBSkip",
                                                 Name = "Diag: CB Skip",
@@ -242,7 +258,7 @@ public class LlmCallWorkflow : WorkflowBase
                                                     });
                                                     return JsonSerializer.Serialize(newList);
                                                 })
-                                            }
+                                            }, "Diag: CB Skip")
                                         }
                                     },
                                     // Circuit breaker is CLOSED or HALF_OPEN → proceed
@@ -268,7 +284,7 @@ public class LlmCallWorkflow : WorkflowBase
                                                     Name = "Record Budget Skip",
                                                     Activities =
                                                     {
-                                                        new SetVariable
+                                                        WithLabel(new SetVariable
                                                         {
                                                             Id = "DiagBudgetSkip",
                                                             Name = "Diag: Budget Skip",
@@ -287,34 +303,19 @@ public class LlmCallWorkflow : WorkflowBase
                                                                 });
                                                                 return JsonSerializer.Serialize(newList);
                                                             })
-                                                        }
+                                                        }, "Diag: Budget Skip")
                                                     }
                                                 },
-                                                // Budget OK → resolve prompt and call
+                                                // Budget OK → resolve tools and call
+                                                // (System prompt is already resolved by ResolveAgentConfigActivity)
                                                 Else = new Sequence
                                                 {
                                                     Id = "BudgetOk",
                                                     Name = "Budget OK",
                                                     Activities =
                                                     {
-                                                        // ── 3c. Resolve prompt ──
-                                                        new SetVariable
-                                                        {
-                                                            Id = "ResolvePrompt",
-                                                            Name = "Resolve Prompt",
-                                                            Variable = resolvedSystemPromptVar,
-                                                            Value = new(context => {
-                                                                var raw = inputVar.Get(context);
-                                                                var input = ParseInput(raw);
-                                                                if (!string.IsNullOrWhiteSpace(input.SystemPromptOverride))
-                                                                    return input.SystemPromptOverride;
-                                                                var role = agentRoleVar.Get(context) ?? "assistant";
-                                                                return GetRolePrompt(role);
-                                                            })
-                                                        },
-
-                                                        // ── 3d. Resolve tools ──
-                                                        new SetVariable
+                                                        // ── Resolve tools ──
+                                                        WithLabel(new SetVariable
                                                         {
                                                             Id = "ResolveTools",
                                                             Name = "Resolve Tools",
@@ -326,9 +327,9 @@ public class LlmCallWorkflow : WorkflowBase
                                                                     return "";
                                                                 return JsonSerializer.Serialize(input.ToolNames);
                                                             })
-                                                        },
+                                                        }, "Resolve Tools"),
 
-                                                        // ── 3e. Call LLM with retry loop ──
+                                                        // ── Call LLM with retry loop ──
                                                         BuildRetryLoop(
                                                             inputVar,
                                                             taskPromptVar,
@@ -356,6 +357,7 @@ public class LlmCallWorkflow : WorkflowBase
                 }
             }
         };
+        forEachProviders.SetDisplayText("For Each Provider");
 
         // 5. Check if call succeeded
         var failureCheck = new FlowDecision(context => successVar.Get(context))
@@ -363,6 +365,7 @@ public class LlmCallWorkflow : WorkflowBase
             Id = "FailureCheck",
             Name = "Call Succeeded?"
         };
+        failureCheck.SetDisplayText("Call Succeeded?");
 
         // 5a. Build failure output (all providers failed)
         var buildFailureOutput = new SetVariable
@@ -382,6 +385,7 @@ public class LlmCallWorkflow : WorkflowBase
                 return JsonSerializer.Serialize(output, SerializerOptions);
             })
         };
+        buildFailureOutput.SetDisplayText("Build Failure Output");
 
         // 6. Set workflow outputs for parent consumption
         var setOutputs = new Sequence
@@ -390,21 +394,21 @@ public class LlmCallWorkflow : WorkflowBase
             Name = "Set Outputs",
             Activities =
             {
-                new SetOutput
+                WithLabel(new SetOutput
                 {
                     Id = "OutputSuccess",
                     Name = "Output: success",
                     OutputName = new("success"),
                     OutputValue = new(context => (object)successVar.Get(context))
-                },
-                new SetOutput
+                }, "Output: success"),
+                WithLabel(new SetOutput
                 {
                     Id = "OutputWorkflowOutput",
                     Name = "Output: workflowOutput",
                     OutputName = new("workflowOutput"),
                     OutputValue = new(context => (object)(workflowOutputVar.Get(context) ?? "{}"))
-                },
-                new SetOutput
+                }, "Output: workflowOutput"),
+                WithLabel(new SetOutput
                 {
                     Id = "OutputLlmResponse",
                     Name = "Output: llmResponse",
@@ -415,8 +419,8 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.ResponseText ?? "");
                     })
-                },
-                new SetOutput
+                }, "Output: llmResponse"),
+                WithLabel(new SetOutput
                 {
                     Id = "OutputProviderUsed",
                     Name = "Output: providerUsed",
@@ -427,8 +431,8 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.SuccessfulProvider ?? "");
                     })
-                },
-                new SetOutput
+                }, "Output: providerUsed"),
+                WithLabel(new SetOutput
                 {
                     Id = "OutputCostUsd",
                     Name = "Output: costUsd",
@@ -439,8 +443,8 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.EstimatedCostUsd ?? 0m);
                     })
-                },
-                new SetOutput
+                }, "Output: costUsd"),
+                WithLabel(new SetOutput
                 {
                     Id = "OutputTokensUsed",
                     Name = "Output: tokensUsed",
@@ -451,9 +455,10 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.TotalTokens ?? 0);
                     })
-                }
+                }, "Output: tokensUsed")
             }
         };
+        setOutputs.SetDisplayText("Set Outputs");
 
         // ============================================================
         // Flowchart
@@ -464,16 +469,19 @@ public class LlmCallWorkflow : WorkflowBase
             Start = initInputs,
             Activities =
             {
-                initInputs, setupBudget, resolveChain, forEachProviders,
-                failureCheck, buildFailureOutput, setOutputs
+                initInputs, setupBudget, resolveAgentConfig, resolveChain,
+                forEachProviders, failureCheck, buildFailureOutput, setOutputs
             },
             Connections =
             {
                 // InitInputs → Setup Budget
                 Connect(initInputs, setupBudget),
 
-                // Setup Budget → Resolve Provider Chain
-                Connect(setupBudget, resolveChain),
+                // Setup Budget → Resolve Agent Config (DB lookup)
+                Connect(setupBudget, resolveAgentConfig),
+
+                // Resolve Agent Config → Resolve Provider Chain
+                Connect(resolveAgentConfig, resolveChain),
 
                 // Resolve Provider Chain → For Each Provider
                 Connect(resolveChain, forEachProviders),
@@ -551,6 +559,7 @@ public class LlmCallWorkflow : WorkflowBase
                 Value = new(context => maxRetriesVar.Get(context) + 1)
             }
         };
+        retryCheckIf.SetDisplayText("Transient Error?");
 
         var successCheckIf = new If
         {
@@ -573,14 +582,14 @@ public class LlmCallWorkflow : WorkflowBase
                 Name = "Record Success",
                 Activities =
                 {
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "SetSuccessTrue",
                         Name = "Set Success",
                         Variable = successVar,
                         Value = new(true)
-                    },
-                    new SetVariable
+                    }, "Set Success"),
+                    WithLabel(new SetVariable
                     {
                         Id = "BuildSuccessOutput",
                         Name = "Build Success Output",
@@ -609,7 +618,7 @@ public class LlmCallWorkflow : WorkflowBase
                             };
                             return JsonSerializer.Serialize(output, SerializerOptions);
                         })
-                    }
+                    }, "Build Success Output")
                 }
             },
             Else = new Sequence
@@ -619,6 +628,7 @@ public class LlmCallWorkflow : WorkflowBase
                 Activities = { retryCheckIf }
             }
         };
+        successCheckIf.SetDisplayText("LLM Succeeded?");
 
         var loopBody = new Sequence
         {
@@ -626,7 +636,7 @@ public class LlmCallWorkflow : WorkflowBase
             Name = "Retry Loop Body",
             Activities =
             {
-                new CallLlmInlineActivity
+                WithLabel(new CallLlmInlineActivity
                 {
                     Id = "CallLlm",
                     Name = "Call LLM",
@@ -635,8 +645,8 @@ public class LlmCallWorkflow : WorkflowBase
                     SystemPromptProp = new(context => resolvedSystemPromptVar.Get(context)),
                     ToolsJsonProp = new(context => resolvedToolsJsonVar.Get(context)),
                     AttemptNumberProp = new(context => attemptNumberVar.Get(context))
-                },
-                new RecordDiagnosticsInlineActivity
+                }, "Call LLM"),
+                WithLabel(new RecordDiagnosticsInlineActivity
                 {
                     Id = "RecordDiagnostics",
                     Name = "Record Diagnostics",
@@ -644,10 +654,11 @@ public class LlmCallWorkflow : WorkflowBase
                     DiagnosticsListJsonProp = new(context => diagnosticsListVar.Get(context)),
                     CircuitBreakerStatesJsonProp = new(context => circuitBreakerStatesVar.Get(context)),
                     BudgetStateJsonProp = new(context => budgetStateVar.Get(context))
-                },
+                }, "Record Diagnostics"),
                 successCheckIf
             }
         };
+        loopBody.SetDisplayText("Retry Loop Body");
 
         whileLoop.Body = loopBody;
         return whileLoop;
@@ -686,28 +697,6 @@ public class LlmCallWorkflow : WorkflowBase
         {
             return new LlmCallWorkflowInput();
         }
-    }
-
-    /// <summary>
-    /// Gets a role-based system prompt. In production, ResolveLlmPromptActivity
-    /// handles the full 6-level hierarchy via IConfiguration DI. This provides
-    /// a fallback for the inline Sequence pattern.
-    /// </summary>
-    private static string GetRolePrompt(string role)
-    {
-        return role.ToLowerInvariant() switch
-        {
-            "mentor" => "You are an experienced software development mentor guiding a junior developer. " +
-                        "Provide encouraging, educational explanations. Use Socratic questioning when appropriate.",
-            "analyst" => "You are a technical analyst specializing in software development. " +
-                         "Analyze code, diagnose issues, and provide structured assessments. Be precise and evidence-based.",
-            "implementer" => "You are an expert software developer. Write clean, well-tested, production-quality code. " +
-                            "Follow established patterns and conventions.",
-            "reviewer" => "You are an expert code reviewer. Identify bugs, security issues, performance problems, " +
-                         "and style violations. Provide specific, actionable feedback.",
-            _ => "You are Tamma, an AI-powered development assistant. Provide clear, accurate, and helpful responses. " +
-                 "Focus on actionable guidance and best practices. Be concise but thorough."
-        };
     }
 
     private static bool IsCircuitBreakerOpen(string? provider, string? statesJson)
