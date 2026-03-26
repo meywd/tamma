@@ -1,232 +1,309 @@
-# Story 10.1: Engine Static Workflow & Brain
+# Story 10.1: Engine Static Workflow — Orchestrator Tool Loop
 
 Status: ready-for-dev
 
 ## Story
 
 As a **platform architect**,
-I want the engine to have its own static workflow that receives all inputs, consults an LLM to understand context, and decides whether to answer directly, trigger a workflow, or reject a duplicate,
-so that the engine acts as an intelligent brain that routes work rather than executing it, and continues functioning even when the workflow provider is unavailable.
+I want the engine to run a standard agentic tool-calling loop where the LLM (configured via the `orchestrator` role) receives tools for querying state, triggering workflows, signaling workflows, and answering users, and the LLM itself decides what to do on each turn,
+so that the engine's behavior is driven by the LLM and system prompt — not by hardcoded routing logic — and all configuration (model, provider, prompt, budget) flows through the existing LLM Engine config.
 
 ## Acceptance Criteria
 
-1. Engine implements a static workflow loop: intake -> load state -> LLM decision -> route -> record
-2. The static workflow is hardcoded in the engine (not defined in Elsa or any external workflow provider)
-3. Engine receives inputs from all channels (UI commands, platform events, workflow callbacks) through a single normalized intake
-4. Engine calls LLM (via existing LLM Engine from Epic 1) to classify intent and decide routing
-5. LLM decision produces one of four outcomes: answer directly, trigger workflow, signal running workflow, reject as duplicate/invalid
-6. Every decision is recorded to the event store before any action is taken
-7. Engine responds to queries (status, history, plan review) directly from event store without needing the workflow provider
-8. Engine uses a fast/lightweight LLM model for routing decisions (configurable, defaults to Haiku-class)
-9. Unambiguous commands bypass LLM (e.g., "approve" when exactly one plan is pending) for sub-100ms response
-10. Engine brain has access to full conversation context and project state when making decisions
+1. Engine runs the standard agentic loop: LLM responds with tool calls → engine executes tools → results fed back → LLM responds again → loop until LLM produces text-only response
+2. The LLM uses the `orchestrator` role — model, provider chain, prompt, budget, and timeout are all determined by config via `RoleBasedAgentResolver`, same as every other role
+3. No hardcoded routing, no fast paths, no decision trees — the LLM decides what to do based on tools available and context provided
+4. Engine provides tools to the LLM: `query_state`, `trigger_workflow`, `signal_workflow`, `query_events`, `answer_user` — each tool is a well-defined operation the engine can execute
+5. Tool definitions are provided via config (not hardcoded) — tools can be added, removed, or modified without code changes
+6. Every tool execution is recorded to the event store (tool call event + tool result event)
+7. Context assembly provides the LLM with: current project state (from projections), active workflows, recent events, and the incoming input — all injected into the conversation
+8. The loop continues until the LLM produces a final text response (no more tool calls), at which point the response is sent to the client
+9. Context window management: conversation history within a session, with compaction when approaching limits (following industry pattern)
+10. The static workflow is the engine's own loop — it is NOT defined in Elsa or any external workflow provider
+11. When workflow provider is down, tools that interact with it (`trigger_workflow`, `signal_workflow`) return error results — the LLM sees this and adapts (e.g., informs user, queues intent)
 
 ## Technical Context
 
-### Static Workflow Steps
+### The Agentic Loop Pattern (Industry Standard)
+
+Every major AI coding tool uses the same pattern. Research across Claude Code, OpenCode, Codex CLI, Cline, Aider, and Copilot confirms:
+
+```
+while LLM_response contains tool_calls:
+    for each tool_call in response:
+        result = execute_tool(tool_call)
+        record_event(TOOL_EXECUTED, { tool, args, result })
+    feed results back to LLM
+# loop exits when LLM produces text-only response
+```
+
+**The LLM IS the router.** There is no external brain that decides what the LLM should do. The orchestration gives the LLM good tools, good context, and lets it loop.
+
+Key findings from research:
+- **Claude Code**: Single-threaded while-loop. Model decides to call tools or respond. 110+ conditionally-injected prompt sections. Sub-agents for isolated tasks.
+- **OpenCode**: `SessionPrompt.loop()` — streams tool calls, executes immediately, feeds results back. Provider-specific prompts. SQLite-backed session persistence.
+- **Codex CLI**: Stateless request-response turns. Full history per request. Auto-compaction when tokens exceed threshold.
+- **Cline**: `attempt_completion` tool signals the loop is done. Plan/Act modes with different tool sets. Model-family-specific prompt variants.
+- **Aider**: Two-model pipeline (architect proposes, editor implements). Repository map for compressed codebase context. Deliberately avoids structured output.
+- **Copilot**: Four autonomy levels. Fleet mode for parallel subagents. Dual-format plans (Markdown + JSON).
+
+### Engine Tool Definitions
+
+The orchestrator LLM receives these tools. Each is an operation the engine can execute:
 
 ```typescript
-interface EngineIntakeEvent {
-  source: 'cli' | 'web' | 'mobile' | 'desktop' | 'webhook' | 'callback';
-  channel: string; // e.g., 'github', 'gitea', 'gitlab', 'direct'
-  actor: {
-    type: 'user' | 'system' | 'platform' | 'workflow-provider';
-    id: string;
-    name?: string;
+// Tools provided to the orchestrator LLM
+// Defined via config, not hardcoded — these are the defaults
+
+interface OrchestratorTools {
+  // Read current state from event store projections
+  query_state: {
+    input: { projection: 'project' | 'cost' | 'queue' | 'workflow'; filter?: Record<string, unknown> };
+    output: { state: Record<string, unknown> };
   };
-  payload: NormalizedInput;
-  rawEvent?: unknown; // Original event before normalization
-  receivedAt: string; // ISO 8601
+
+  // Query raw events from the event store
+  query_events: {
+    input: { filter: EventFilter; limit?: number };
+    output: { events: TammaEvent[]; totalCount: number };
+  };
+
+  // Start a new workflow on the workflow provider
+  trigger_workflow: {
+    input: { workflowName: string; input: Record<string, unknown> };
+    output: { instanceId: string; status: string } | { error: string; queued: boolean };
+  };
+
+  // Send a signal to a running workflow
+  signal_workflow: {
+    input: { instanceId: string; signal: string; payload?: unknown };
+    output: { acknowledged: boolean } | { error: string; queued: boolean };
+  };
+
+  // Send a response to the user/client
+  answer_user: {
+    input: { message: string; data?: Record<string, unknown> };
+    output: { delivered: boolean; channel: string };
+  };
+
+  // Queue an intent for later dispatch (when workflow provider is down)
+  queue_intent: {
+    input: { type: 'trigger' | 'signal'; workflowName?: string; instanceId?: string; signal?: string; payload?: unknown };
+    output: { intentId: string; position: number };
+  };
 }
-
-interface BrainDecision {
-  action: 'answer' | 'trigger_workflow' | 'signal_workflow' | 'reject';
-  confidence: number; // 0-1
-  reasoning: string; // LLM's explanation
-
-  // For 'answer': direct response to client
-  response?: string;
-
-  // For 'trigger_workflow': what to start
-  workflowName?: string;
-  workflowInput?: Record<string, unknown>;
-
-  // For 'signal_workflow': what to send
-  workflowInstanceId?: string;
-  signal?: string;
-  signalPayload?: unknown;
-
-  // For 'reject': why
-  rejectionReason?: string;
-}
-
-type NormalizedInput =
-  | { type: 'command'; command: string; args: Record<string, unknown> }
-  | { type: 'query'; question: string }
-  | { type: 'approval'; decision: 'approve' | 'reject' | 'skip'; target?: string }
-  | { type: 'platform_event'; event: string; data: Record<string, unknown> }
-  | { type: 'workflow_callback'; instanceId: string; step: string; result: unknown };
 ```
 
-### Static Workflow Sequence
+### The Loop in Practice
+
+**Example: User says "start working on issue #42"**
 
 ```
-1. INTAKE
-   - Receive raw input from any channel
-   - Normalize to EngineIntakeEvent
-   - Record INPUT_RECEIVED event to event store
+Turn 1: LLM receives input + tools + system prompt
+  LLM decides: "I should check if there's already a workflow for #42"
+  Tool call: query_state({ projection: 'project' })
+  Result: { activeWorkflows: [], pendingApprovals: [], issuesInProgress: [] }
 
-2. STATE LOAD
-   - Query event store for current state
-   - Build WorkflowState for all active workflows
-   - Build ProjectState (issues in progress, pending approvals, etc.)
-   - Record CONTEXT_LOADED event
+Turn 2: LLM sees no active workflow for #42
+  LLM decides: "I should start the autonomous-dev workflow"
+  Tool call: trigger_workflow({ workflowName: 'autonomous-dev', input: { issueNumber: 42 } })
+  Result: { instanceId: 'xyz-123', status: 'started' }
 
-3. FAST-PATH CHECK
-   - Is this an unambiguous command? (approve with one pending, simple status query)
-   - If yes: skip LLM, produce decision directly
-   - If no: proceed to LLM decision
+Turn 3: LLM sees workflow started successfully
+  LLM decides: "I should inform the user"
+  Tool call: answer_user({ message: 'Started working on issue #42. Workflow xyz-123 is running.' })
+  Result: { delivered: true, channel: 'cli' }
 
-4. LLM DECISION
-   - Build prompt with: current state + input + conversation history
-   - Call LLM via existing RoleBasedAgentResolver (role: 'engine_brain')
-   - Parse structured response into BrainDecision
-   - Record LLM_DECISION_REQUESTED and LLM_DECISION_RECEIVED events
-
-5. ROUTE
-   - answer: Send response directly to client transport
-   - trigger_workflow: Enqueue to Smart Queue (Story 10.4)
-   - signal_workflow: Enqueue signal to Smart Queue
-   - reject: Send rejection reason to client
-   - Record ACTION_DECIDED event
-
-6. RESPOND
-   - Send response/acknowledgment back to originating client
-   - Record RESPONSE_SENT event
+Turn 4: LLM produces text-only response (loop ends)
+  "Issue #42 is now being processed."
 ```
 
-### Engine Brain Prompt Template
-
-The engine brain uses a dedicated agent role (`engine_brain`) registered in the prompt registry:
+**Example: User says "start working on #42" but it's already running**
 
 ```
-You are the Tamma Engine Brain. Your job is to understand what the user or system
-wants and decide the appropriate action.
+Turn 1: LLM receives input
+  Tool call: query_state({ projection: 'project' })
+  Result: { activeWorkflows: [{ instanceId: 'xyz', issue: 42, step: 'implementation' }] }
 
-CURRENT STATE:
-{{project_state}}
+Turn 2: LLM sees workflow already running
+  Tool call: answer_user({ message: 'Issue #42 is already being worked on (currently in implementation step).' })
+  Result: { delivered: true }
 
-ACTIVE WORKFLOWS:
-{{active_workflows}}
-
-PENDING APPROVALS:
-{{pending_approvals}}
-
-RECENT EVENTS (last 20):
-{{recent_events}}
-
-INPUT:
-{{normalized_input}}
-
-Decide ONE of:
-1. ANSWER - You can respond directly (status queries, information requests)
-2. TRIGGER_WORKFLOW - A new workflow should be started (specify which and with what input)
-3. SIGNAL_WORKFLOW - An existing workflow needs a signal (approval, data, resume)
-4. REJECT - This is invalid or duplicate (explain why)
-
-Respond in JSON: { action, confidence, reasoning, ...action-specific fields }
+Turn 3: Text-only response (loop ends)
 ```
+
+**Example: Workflow provider is down**
+
+```
+Turn 1: LLM receives input
+  Tool call: query_state({ projection: 'project' })
+  Result: { activeWorkflows: [], ... }
+
+Turn 2: LLM decides to start workflow
+  Tool call: trigger_workflow({ workflowName: 'autonomous-dev', input: { issueNumber: 42 } })
+  Result: { error: 'Workflow provider unavailable', queued: false }
+
+Turn 3: LLM sees the error, decides to queue
+  Tool call: queue_intent({ type: 'trigger', workflowName: 'autonomous-dev', payload: { issueNumber: 42 } })
+  Result: { intentId: 'abc', position: 1 }
+
+Turn 4: LLM informs user
+  Tool call: answer_user({ message: 'Workflow engine is temporarily unavailable. Your request to work on #42 has been queued and will execute when the engine recovers.' })
+  Result: { delivered: true }
+
+Turn 5: Text-only (loop ends)
+```
+
+**No hardcoded logic decided any of this. The LLM did.**
+
+### Configuration — Everything Through Existing LLM Engine
+
+The `orchestrator` role uses the same config system as all other roles:
+
+```yaml
+agents:
+  roles:
+    orchestrator:
+      providerChain:
+        - provider: anthropic
+          model: claude-sonnet-4-20250514  # or whatever the operator chooses
+        - provider: openrouter
+          model: anthropic/claude-sonnet   # fallback
+      systemPrompt: |
+        You are the Tamma Orchestrator. You manage autonomous development workflows.
+        Use the provided tools to query state, trigger workflows, and communicate
+        with users. Always check current state before taking action.
+      maxBudgetUsd: 1.0
+      timeout: 30000
+      tools:
+        - query_state
+        - query_events
+        - trigger_workflow
+        - signal_workflow
+        - answer_user
+        - queue_intent
+```
+
+The system prompt, model, provider, budget, timeout, and available tools are ALL config. The engine code just runs the loop.
+
+### Session Management
+
+Following the industry pattern (Claude Code, OpenCode, Codex all do this):
+
+- **Session per interaction**: Each user command or webhook event starts a session (or continues one)
+- **Conversation history**: Tool calls and results accumulate as conversation turns
+- **Context assembly**: Before each LLM call, inject current state as system context
+- **Compaction**: When context approaches limits, summarize older turns (configurable strategy)
+- **Persistence**: Sessions stored in event store (SESSION_STARTED, SESSION_TURN, SESSION_COMPLETED events)
 
 ### Relationship to Existing Code
 
 | Current | New |
 |---------|-----|
-| `TammaEngine.run()` polling loop | Removed -- engine reacts to events, not polls |
-| `TammaEngine.runPipeline()` 8 steps | Removed -- replaced by static workflow + Elsa workflows |
+| `TammaEngine.run()` polling loop | Removed — engine reacts to intake events |
+| `TammaEngine.runPipeline()` 8 steps | Removed — replaced by orchestrator tool loop + Elsa workflows |
 | `TammaEngine.selectIssue()` | Moved to Elsa workflow activity |
 | `TammaEngine.analyzeIssue()` | Moved to Elsa workflow activity |
 | `TammaEngine.generatePlan()` | Moved to Elsa workflow activity |
-| `TammaEngine.awaitApproval()` | Engine brain handles approval routing |
+| `TammaEngine.awaitApproval()` | Orchestrator LLM handles via tools |
 | `TammaEngine.implementCode()` | Moved to Elsa workflow activity |
 | `TammaEngine.createPR()` | Moved to Elsa workflow activity |
 | `TammaEngine.monitorAndMerge()` | Moved to Elsa workflow activity |
-| `EngineState` enum | Derived from event store, not stored in memory |
+| `EngineState` enum | Derived from event store projections |
+| Hardcoded decision logic | LLM decides via tool loop |
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Define Engine Brain interfaces and types (AC: 1, 3)
-  - [ ] Subtask 1.1: Define `EngineIntakeEvent` type with all source/channel variants
-  - [ ] Subtask 1.2: Define `NormalizedInput` discriminated union for all input types
-  - [ ] Subtask 1.3: Define `BrainDecision` type with all action variants
-  - [ ] Subtask 1.4: Define `IEngineBrain` interface with `decide(intake, state): Promise<BrainDecision>`
-  - [ ] Subtask 1.5: Define `IInputNormalizer` interface for converting raw inputs to `NormalizedInput`
+- [ ] Task 1: Define orchestrator tool interfaces (AC: 4, 5)
+  - [ ] Subtask 1.1: Define tool input/output types for each orchestrator tool
+  - [ ] Subtask 1.2: Define `IOrchestratorTool` interface with `name`, `description`, `inputSchema`, `execute()`
+  - [ ] Subtask 1.3: Define tool registry that loads tool definitions from config
+  - [ ] Subtask 1.4: Implement `QueryStateTool` — reads from projection engine
+  - [ ] Subtask 1.5: Implement `QueryEventsTool` — reads from event store with filters
+  - [ ] Subtask 1.6: Implement `TriggerWorkflowTool` — dispatches to workflow provider or returns error
+  - [ ] Subtask 1.7: Implement `SignalWorkflowTool` — sends signal to workflow provider or returns error
+  - [ ] Subtask 1.8: Implement `AnswerUserTool` — sends response to originating client transport
+  - [ ] Subtask 1.9: Implement `QueueIntentTool` — enqueues to Smart Queue
 
-- [ ] Task 2: Implement static workflow orchestrator (AC: 1, 2, 6)
-  - [ ] Subtask 2.1: Create `StaticWorkflow` class implementing the 6-step sequence
-  - [ ] Subtask 2.2: Wire intake -> state load -> decide -> route -> record pipeline
-  - [ ] Subtask 2.3: Record events at each step (INPUT_RECEIVED, CONTEXT_LOADED, ACTION_DECIDED, RESPONSE_SENT)
-  - [ ] Subtask 2.4: Handle errors at each step with ERROR_OCCURRED events
-  - [ ] Subtask 2.5: Implement timeout handling for LLM decisions (configurable, default 10s)
+- [ ] Task 2: Implement the agentic tool loop (AC: 1, 8, 10)
+  - [ ] Subtask 2.1: Create `OrchestratorLoop` class implementing the standard while-loop pattern
+  - [ ] Subtask 2.2: Call LLM via `RoleBasedAgentResolver.getAgentForRole('orchestrator')` — model/provider from config
+  - [ ] Subtask 2.3: Parse LLM response: extract tool calls or detect text-only termination
+  - [ ] Subtask 2.4: Execute tool calls, collect results, feed back as next turn
+  - [ ] Subtask 2.5: Handle loop termination: LLM produces text-only response → send to client
+  - [ ] Subtask 2.6: Implement configurable max turns safety cap (from config, not hardcoded)
+  - [ ] Subtask 2.7: Handle LLM errors: provider failure → retry via provider chain fallback
 
-- [ ] Task 3: Implement LLM brain integration (AC: 4, 5, 8, 10)
-  - [ ] Subtask 3.1: Register `engine_brain` role in `AgentPromptRegistry` with routing prompt
-  - [ ] Subtask 3.2: Implement `LLMEngineBrain` class using `RoleBasedAgentResolver`
-  - [ ] Subtask 3.3: Build context assembly: project state + active workflows + recent events
-  - [ ] Subtask 3.4: Parse LLM structured JSON response into `BrainDecision`
-  - [ ] Subtask 3.5: Handle LLM parsing failures with fallback (re-prompt once, then reject)
-  - [ ] Subtask 3.6: Configure default model as Haiku-class via engine config
+- [ ] Task 3: Implement context assembly (AC: 7)
+  - [ ] Subtask 3.1: Build system context block: project state from projections, active workflows, recent events
+  - [ ] Subtask 3.2: Inject incoming input (normalized EngineIntakeEvent) as user message
+  - [ ] Subtask 3.3: Maintain conversation history within session (tool calls + results as turns)
+  - [ ] Subtask 3.4: Inject project-specific instructions (equivalent of CLAUDE.md/AGENTS.md pattern)
 
-- [ ] Task 4: Implement fast-path bypass for unambiguous commands (AC: 9)
-  - [ ] Subtask 4.1: Define fast-path rules engine (pattern matching on normalized input + state)
-  - [ ] Subtask 4.2: Implement: "approve" when exactly one pending approval -> auto-route
-  - [ ] Subtask 4.3: Implement: "status" -> answer from event store directly
-  - [ ] Subtask 4.4: Implement: "stop" with one active workflow -> signal cancel
-  - [ ] Subtask 4.5: Record FAST_PATH_USED event when LLM is bypassed
+- [ ] Task 4: Implement session management (AC: 9)
+  - [ ] Subtask 4.1: Create session on intake, assign session ID
+  - [ ] Subtask 4.2: Persist session turns to event store (SESSION_STARTED, SESSION_TURN events)
+  - [ ] Subtask 4.3: Implement context compaction when approaching context window limits
+  - [ ] Subtask 4.4: Support session continuation (subsequent inputs in same interaction)
+  - [ ] Subtask 4.5: Record SESSION_COMPLETED on loop termination
 
-- [ ] Task 5: Implement direct-answer capability (AC: 7)
-  - [ ] Subtask 5.1: Status queries answered from event store state reconstruction
-  - [ ] Subtask 5.2: History queries answered from event store with pagination
-  - [ ] Subtask 5.3: Plan review answered from last PLAN_GENERATED event
-  - [ ] Subtask 5.4: Cost queries answered from aggregated LLM_CALL_COMPLETED events
-  - [ ] Subtask 5.5: Verify all query responses work without workflow provider
+- [ ] Task 5: Record all tool executions to event store (AC: 6)
+  - [ ] Subtask 5.1: Record TOOL_CALL_REQUESTED event before each tool execution
+  - [ ] Subtask 5.2: Record TOOL_CALL_COMPLETED event after each tool execution (with result)
+  - [ ] Subtask 5.3: Record TOOL_CALL_FAILED event on tool execution errors
+  - [ ] Subtask 5.4: Link tool events via correlationId to the session
 
-- [ ] Task 6: Implement routing to Smart Queue (AC: 5)
-  - [ ] Subtask 6.1: Define `ISmartQueue` interface (implemented in Story 10.4)
-  - [ ] Subtask 6.2: Route `trigger_workflow` decisions to queue with workflow name and input
-  - [ ] Subtask 6.3: Route `signal_workflow` decisions to queue with instance ID and signal
-  - [ ] Subtask 6.4: Handle queue-full scenarios (backpressure to client)
-  - [ ] Subtask 6.5: Record INTENT_QUEUED event for every queued item
+- [ ] Task 6: Handle workflow provider unavailability (AC: 11)
+  - [ ] Subtask 6.1: `trigger_workflow` tool returns error result when provider unhealthy
+  - [ ] Subtask 6.2: `signal_workflow` tool returns error result when provider unhealthy
+  - [ ] Subtask 6.3: LLM sees error results and can choose to use `queue_intent` or `answer_user`
+  - [ ] Subtask 6.4: No special handling code — the LLM adapts based on tool results
 
-- [ ] Task 7: Refactor TammaEngine to use static workflow (AC: 1, 2)
+- [ ] Task 7: Refactor TammaEngine (AC: 1, 2, 10)
   - [ ] Subtask 7.1: Replace `run()` polling loop with event-driven intake
   - [ ] Subtask 7.2: Remove `runPipeline()` and all 8 inline step methods
-  - [ ] Subtask 7.3: Inject `IEngineBrain`, `ISmartQueue`, `IEventStore` dependencies
-  - [ ] Subtask 7.4: Preserve existing transport interfaces (InProcess, Remote)
-  - [ ] Subtask 7.5: Update engine API routes to use new static workflow
-  - [ ] Subtask 7.6: Ensure backward compatibility for CLI and web clients
+  - [ ] Subtask 7.3: Inject `RoleBasedAgentResolver`, `ISmartQueue`, `IEventStore`, tool registry
+  - [ ] Subtask 7.4: Preserve existing transport interfaces (InProcess, Remote) — they produce intake events
+  - [ ] Subtask 7.5: Update engine API routes to trigger orchestrator loop on intake
+  - [ ] Subtask 7.6: Register `orchestrator` role in agent config with default prompt and tools
 
 - [ ] Task 8: Testing (AC: all)
-  - [ ] Subtask 8.1: Unit test static workflow with mocked brain and queue
-  - [ ] Subtask 8.2: Unit test LLM brain with mocked provider
-  - [ ] Subtask 8.3: Unit test fast-path rules for all unambiguous commands
-  - [ ] Subtask 8.4: Integration test: user command -> decision -> event recorded
-  - [ ] Subtask 8.5: Integration test: engine answers queries without workflow provider
-  - [ ] Subtask 8.6: Test error handling: LLM timeout, parse failure, queue full
+  - [ ] Subtask 8.1: Unit test tool loop with mocked LLM (scripted tool call sequences)
+  - [ ] Subtask 8.2: Unit test each orchestrator tool in isolation
+  - [ ] Subtask 8.3: Unit test context assembly includes state + input + history
+  - [ ] Subtask 8.4: Unit test loop termination on text-only response
+  - [ ] Subtask 8.5: Unit test max turns safety cap
+  - [ ] Subtask 8.6: Integration test: user command → loop → tool calls → events recorded
+  - [ ] Subtask 8.7: Integration test: workflow provider down → LLM queues intent via tools
+  - [ ] Subtask 8.8: Integration test: session persistence and continuation
 
 ## Dev Notes
 
 ### Requirements Context Summary
 
-This story is the centerpiece of Epic 10. It replaces the current imperative engine loop with an event-driven brain. The existing `TammaEngine` class (1132 lines in `packages/orchestrator/src/engine.ts`) will be substantially refactored -- the 8 pipeline steps become Elsa workflow activities (Story 10.5), and the engine becomes a thin decision-making layer.
+This story is the centerpiece of Epic 10. It replaces the current imperative engine loop with an LLM-driven agentic tool loop. The key insight from researching Claude Code, OpenCode, Codex, Cline, Aider, and Copilot is that **none of them use external routing logic** — the LLM itself decides via tool calls. The engine's job is to provide good tools, good context, and run the loop.
+
+### Design Principles (from research)
+
+1. **The LLM IS the router** — no external decision trees, no fast paths, no hardcoded routing
+2. **Tools are the API** — well-defined tools with clear descriptions let the LLM understand what it can do
+3. **Context is king** — assemble rich context (state, history, events) so the LLM can make informed decisions
+4. **Config controls everything** — model, provider, prompt, tools, budget, timeout — all via existing LLM Engine config
+5. **The loop is simple** — while has tool calls → execute → feed back. Complexity lives in the tools and prompt, not the loop.
 
 ### Project Structure Notes
 
-- New types: `packages/shared/src/types/engine-brain.ts`
-- New implementation: `packages/orchestrator/src/brain/static-workflow.ts`
-- New implementation: `packages/orchestrator/src/brain/llm-engine-brain.ts`
-- New implementation: `packages/orchestrator/src/brain/fast-path.ts`
+- New types: `packages/shared/src/types/orchestrator.ts`
+- New implementation: `packages/orchestrator/src/loop/orchestrator-loop.ts`
+- New implementation: `packages/orchestrator/src/loop/session.ts`
+- New implementation: `packages/orchestrator/src/tools/query-state.ts`
+- New implementation: `packages/orchestrator/src/tools/query-events.ts`
+- New implementation: `packages/orchestrator/src/tools/trigger-workflow.ts`
+- New implementation: `packages/orchestrator/src/tools/signal-workflow.ts`
+- New implementation: `packages/orchestrator/src/tools/answer-user.ts`
+- New implementation: `packages/orchestrator/src/tools/queue-intent.ts`
 - Modified: `packages/orchestrator/src/engine.ts` (major refactor)
-- Modified: `packages/providers/src/agent-prompt-registry.ts` (add engine_brain role)
+- Modified: `packages/shared/src/types/agent-config.ts` (add orchestrator to DEFAULT_PHASE_ROLE_MAP)
 
 ### References
 
@@ -235,9 +312,13 @@ This story is the centerpiece of Epic 10. It replaces the current imperative eng
 - **LLM Engine:** `packages/providers/src/role-based-agent-resolver.ts`
 - **Prompt Registry:** `packages/providers/src/agent-prompt-registry.ts`
 - **Existing Transports:** `packages/orchestrator/src/transports/`
+- **Claude Code Architecture:** Single-threaded tool loop, 110+ prompt sections, sub-agents
+- **OpenCode Architecture:** `SessionPrompt.loop()`, provider-specific prompts, SQLite sessions
+- **Codex CLI Architecture:** Stateless turns, auto-compaction, OS-level sandboxing
 
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-26 | 1.0 | Initial story creation | Architecture Team |
+| 2026-03-26 | 2.0 | Complete rewrite: removed fast paths, role is orchestrator, LLM-driven tool loop pattern based on industry research (Claude Code, OpenCode, Codex, Cline, Aider, Copilot) | Architecture Team |

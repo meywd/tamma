@@ -22,14 +22,21 @@ This epic replaces the current `TammaEngine.runPipeline()` 8-step imperative loo
 
 ## Architectural Principles
 
-### 1. Engine Is the Brain, Not the Hands
+### 1. Engine Runs an Orchestrator Tool Loop (Industry-Proven Pattern)
 
-The engine does NOT execute development tasks. It:
-- Receives inputs (user commands, platform events, workflow callbacks)
-- Loads current state from the event store
-- Calls the LLM to understand context and decide what to do
-- Routes decisions to workflow triggers, direct answers, or queued intents
-- Records every decision to the event store
+The engine does NOT execute development tasks. It runs a standard **agentic tool-calling loop** — the same pattern used by Claude Code, OpenCode, Codex CLI, Cline, Aider, and Copilot:
+
+```
+while LLM_response contains tool_calls:
+    execute each tool
+    record events
+    feed results back to LLM
+# loop exits when LLM produces text-only response
+```
+
+The LLM (configured via the `orchestrator` role) receives tools for querying state, triggering workflows, signaling workflows, and answering users. **The LLM itself decides what to do** — there is no external routing logic, no fast paths, no hardcoded decision trees. The engine's job is to provide good tools, good context, and run the loop.
+
+All configuration — model, provider chain, prompt, budget, timeout, available tools — flows through the existing LLM Engine config system (`RoleBasedAgentResolver`, `AgentPromptRegistry`, provider chains).
 
 ### 2. Elsa Is Replaceable
 
@@ -67,15 +74,22 @@ LLM calls produce: raw request event → sanitization event → dispatched event
 │                     ENGINE (Static Workflow / Brain)                       │
 │                                                                           │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  1. INTAKE: Receive normalized input event                         │  │
-│  │  2. STATE:  Load current state from Event Store                    │  │
-│  │  3. DECIDE: Call LLM brain — "given state + input, what to do?"    │  │
-│  │  4. ROUTE:                                                         │  │
-│  │     ├─ Answer directly → respond to client                         │  │
-│  │     ├─ Trigger workflow → enqueue to Smart Queue                   │  │
-│  │     ├─ Signal workflow → enqueue signal to Smart Queue             │  │
-│  │     └─ Reject → duplicate/invalid, respond with reason             │  │
-│  │  5. RECORD: Write decision event to Event Store                    │  │
+│  │  ORCHESTRATOR TOOL LOOP (standard agentic pattern):               │  │
+│  │                                                                    │  │
+│  │  1. INTAKE: Receive normalized input, start session                │  │
+│  │  2. CONTEXT: Assemble state + input + history as LLM context       │  │
+│  │  3. LLM TURN: Call orchestrator LLM (role: 'orchestrator')         │  │
+│  │  4. TOOLS: LLM calls tools — engine executes, records events:      │  │
+│  │     ├─ query_state      → read projections from event store        │  │
+│  │     ├─ query_events     → read raw events                          │  │
+│  │     ├─ trigger_workflow → dispatch to Elsa (or return error)       │  │
+│  │     ├─ signal_workflow  → signal Elsa (or return error)            │  │
+│  │     ├─ queue_intent     → enqueue for later dispatch               │  │
+│  │     └─ answer_user      → send response to client                  │  │
+│  │  5. LOOP: Feed tool results back → LLM decides next action         │  │
+│  │  6. EXIT: LLM produces text-only response → session ends           │  │
+│  │                                                                    │  │
+│  │  No hardcoded routing. LLM decides. Config controls everything.    │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                           │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
@@ -311,6 +325,53 @@ Emmett sits as a thin layer over PostgreSQL — it does NOT add significant over
 
 ---
 
+## Industry Research: How AI Coding Tools Manage LLM Sessions
+
+Research conducted across 7 major AI coding tools to inform the engine's orchestrator design.
+
+### Universal Pattern: The Tool Loop
+
+Every tool uses the same core loop:
+
+```
+while LLM_response has tool_calls:
+    execute tools
+    feed results back to LLM
+# done when LLM stops emitting tool calls
+```
+
+**No tool builds external routing logic.** The LLM IS the router. The loop exits when the model stops emitting tool calls.
+
+### Tool-by-Tool Findings
+
+| Tool | Loop Pattern | Context Strategy | LLM Direction | Unique Strength |
+|------|-------------|-----------------|---------------|-----------------|
+| **Claude Code** | Single-threaded while-loop; exits on text-only response | 110+ conditional prompt sections (~110KB); auto-compact at 92% usage; CLAUDE.md for persistent memory | Modular system prompt; sub-agents via Agent tool with isolated context | Prompt caching across users; deferred tool loading |
+| **OpenCode** | `SessionPrompt.loop()`; stream tool calls, execute immediately | SQLite-backed sessions; provider-specific prompts (Anthropic vs OpenAI variants); auto-compact + summarizer agent | 4 agent types (build, plan, explore, compaction) with different tool sets | Persistent background server; any client connects via REST+SSE |
+| **Codex CLI** | Request-response turns; stateless (full history per request) | Auto-compaction when tokens exceed threshold; prompt caching (exact prefix match) | Role-based messages (system/developer/user) + AGENTS.md | OS-level sandboxing; parallel subagents (spawn/send/wait) |
+| **Cline** | Loop until `attempt_completion` tool | Workspace snapshots at each step; AST-based file structure | 10K+ token prompt; model-family variants via PromptRegistry; Plan/Act modes | Strict plan mode enforced at code level, not just prompt |
+| **Aider** | Chat-based; architect proposes, editor implements | Repository map (compressed codebase signatures); explicit file management (/add, /drop) | Text edit formats (NOT JSON) tuned per model capability | Deliberately rejects structured output; benchmark-driven format design |
+| **Copilot** | Continuous iteration with error monitoring | Autonomous workspace search + compiler/linter feedback | Tool definitions + dual-format plans (Markdown + JSON) | Fleet mode parallel subagents; 4 autonomy levels |
+
+### Key Insights for Tamma's Orchestrator
+
+1. **No one builds a decision engine outside the LLM.** The LLM decides via tools. The code runs the loop.
+2. **System prompts do the heavy lifting.** Claude Code has 110+ prompt sections. Cline has 10K+ tokens. OpenCode has provider-specific variants. The prompt tells the LLM how to behave — not code.
+3. **Context management is critical.** Every tool hits the context window wall. Solutions: compaction (Claude Code, OpenCode, Codex), repository maps (Aider), RAG indexing (Cursor), sub-agents for isolation (Claude Code, Codex, Copilot).
+4. **Tools should be well-described, not numerous.** Clear tool descriptions with input/output schemas let the LLM understand what it can do.
+5. **Config, not code, controls behavior.** Model selection, prompt content, tool availability, budget — all configurable. Operators choose the tradeoff.
+
+### Application to Tamma
+
+The orchestrator role follows this proven pattern:
+- **Tools**: `query_state`, `query_events`, `trigger_workflow`, `signal_workflow`, `answer_user`, `queue_intent`
+- **Context**: Project state from event store projections + incoming input + session history
+- **Prompt**: Configured via `AgentPromptRegistry` for the `orchestrator` role
+- **Model/Provider**: Configured via `RoleBasedAgentResolver` — `roles.orchestrator.providerChain`
+- **Loop**: Standard tool-calling while-loop, same as every other tool in the industry
+
+---
+
 ## Stories Breakdown
 
 | Story | Title | Priority | Dependencies |
@@ -358,9 +419,9 @@ Emmett sits as a thin layer over PostgreSQL — it does NOT add significant over
 
 ## Risks and Mitigations
 
-### Risk 1: LLM Decision Latency
-- **Risk:** Engine brain LLM call adds 1-3 seconds to every user interaction
-- **Mitigation:** Use fast model (Haiku-class) for routing decisions; cache common decision patterns; bypass LLM for unambiguous commands (e.g., "approve" when one plan pending)
+### Risk 1: LLM Orchestrator Latency
+- **Risk:** Orchestrator LLM tool loop adds latency to every user interaction (multiple turns possible)
+- **Mitigation:** Model/provider selection is config-driven — operators choose the speed/quality tradeoff for their `orchestrator` role. Simple interactions (status query) typically complete in 1-2 turns. Complex routing may take 3-4 turns. The loop pattern is proven at scale by Claude Code, Codex, and others.
 
 ### Risk 2: Event Store as Bottleneck
 - **Risk:** Reading full event stream for state reconstruction becomes slow at scale
