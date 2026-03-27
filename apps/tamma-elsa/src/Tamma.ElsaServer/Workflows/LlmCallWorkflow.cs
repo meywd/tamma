@@ -185,20 +185,20 @@ public class LlmCallWorkflow : WorkflowBase
                 // Fallback (should not reach here since ResolveChain always sets a value)
                 return (ICollection<string>)new List<string> { "anthropic", "openai", "openrouter" };
             }),
-            Body = new Sequence
+            Body = WithLabel(new Sequence
             {
                 Id = "ProviderIterationBody",
                 Name = "Provider Iteration",
                 Activities =
                 {
                     // ── Skip if already succeeded ──
-                    new If
+                    WithLabel(new If
                     {
                         Id = "SkipIfSucceeded",
                         Name = "Already Succeeded?",
                         Condition = new(context => successVar.Get(context)),
-                        Then = new Sequence { Id = "SkipNoop", Name = "Skip (No-op)", Activities = { /* skip */ } },
-                        Else = new Sequence
+                        Then = WithLabel(new Sequence { Id = "SkipNoop", Name = "Skip (No-op)", Activities = { /* skip */ } }, "Skip (No-op)"),
+                        Else = WithLabel(new Sequence
                         {
                             Id = "TryProvider",
                             Name = "Try Provider",
@@ -223,7 +223,7 @@ public class LlmCallWorkflow : WorkflowBase
                                 }, "Reset Attempt"),
 
                                 // ── 3a. Check circuit breaker ──
-                                new If
+                                WithLabel(new If
                                 {
                                     Id = "CheckCircuitBreaker",
                                     Name = "Circuit Breaker Open?",
@@ -233,7 +233,7 @@ public class LlmCallWorkflow : WorkflowBase
                                         return IsCircuitBreakerOpen(provider, statesJson);
                                     }),
                                     // Circuit breaker is OPEN → skip this provider
-                                    Then = new Sequence
+                                    Then = WithLabel(new Sequence
                                     {
                                         Id = "RecordCBSkip",
                                         Name = "Record CB Skip",
@@ -260,16 +260,16 @@ public class LlmCallWorkflow : WorkflowBase
                                                 })
                                             }, "Diag: CB Skip")
                                         }
-                                    },
+                                    }, "Record CB Skip"),
                                     // Circuit breaker is CLOSED or HALF_OPEN → proceed
-                                    Else = new Sequence
+                                    Else = WithLabel(new Sequence
                                     {
                                         Id = "CBClosed",
                                         Name = "CB Closed",
                                         Activities =
                                         {
                                             // ── 3b. Check budget ──
-                                            new If
+                                            WithLabel(new If
                                             {
                                                 Id = "CheckBudget",
                                                 Name = "Budget Exhausted?",
@@ -278,7 +278,7 @@ public class LlmCallWorkflow : WorkflowBase
                                                     return IsBudgetExhausted(budgetJson);
                                                 }),
                                                 // Budget exhausted → skip
-                                                Then = new Sequence
+                                                Then = WithLabel(new Sequence
                                                 {
                                                     Id = "RecordBudgetSkip",
                                                     Name = "Record Budget Skip",
@@ -305,10 +305,10 @@ public class LlmCallWorkflow : WorkflowBase
                                                             })
                                                         }, "Diag: Budget Skip")
                                                     }
-                                                },
+                                                }, "Record Budget Skip"),
                                                 // Budget OK → resolve tools and call
                                                 // (System prompt is already resolved by ResolveAgentConfigActivity)
-                                                Else = new Sequence
+                                                Else = WithLabel(new Sequence
                                                 {
                                                     Id = "BudgetOk",
                                                     Name = "Budget OK",
@@ -346,16 +346,16 @@ public class LlmCallWorkflow : WorkflowBase
                                                             budgetStateVar,
                                                             workflowOutputVar)
                                                     }
-                                                }
-                                            }
+                                                }, "Budget OK")
+                                            }, "Budget Exhausted?")
                                         }
-                                    }
-                                }
+                                    }, "CB Closed")
+                                }, "Circuit Breaker Open?")
                             }
-                        }
-                    }
+                        }, "Try Provider")
+                    }, "Already Succeeded?")
                 }
-            }
+            }, "Provider Iteration")
         };
         forEachProviders.SetDisplayText("For Each Provider");
 
@@ -522,6 +522,7 @@ public class LlmCallWorkflow : WorkflowBase
         var whileLoop = new While((string?)null);
         whileLoop.Id = "RetryLoop";
         whileLoop.Name = "Retry Loop";
+        whileLoop.SetDisplayText("Retry Loop");
         whileLoop.Condition = new Input<bool>(context =>
             !successVar.Get(context) &&
             attemptNumberVar.Get(context) <= maxRetriesVar.Get(context));
@@ -544,20 +545,20 @@ public class LlmCallWorkflow : WorkflowBase
                 }
                 catch { return false; }
             }),
-            Then = new SetVariable
+            Then = WithLabel(new SetVariable
             {
                 Id = "IncrementAttempt",
                 Name = "Increment Attempt",
                 Variable = attemptNumberVar,
                 Value = new(context => attemptNumberVar.Get(context) + 1)
-            },
-            Else = new SetVariable
+            }, "Increment Attempt"),
+            Else = WithLabel(new SetVariable
             {
                 Id = "ExhaustAttempts",
                 Name = "Exhaust Attempts",
                 Variable = attemptNumberVar,
                 Value = new(context => maxRetriesVar.Get(context) + 1)
-            }
+            }, "Exhaust Attempts")
         };
         retryCheckIf.SetDisplayText("Transient Error?");
 
@@ -576,7 +577,7 @@ public class LlmCallWorkflow : WorkflowBase
                 }
                 catch { return false; }
             }),
-            Then = new Sequence
+            Then = WithLabel(new Sequence
             {
                 Id = "RecordSuccess",
                 Name = "Record Success",
@@ -620,13 +621,13 @@ public class LlmCallWorkflow : WorkflowBase
                         })
                     }, "Build Success Output")
                 }
-            },
-            Else = new Sequence
+            }, "Record Success"),
+            Else = WithLabel(new Sequence
             {
                 Id = "HandleRetry",
                 Name = "Handle Retry",
                 Activities = { retryCheckIf }
-            }
+            }, "Handle Retry")
         };
         successCheckIf.SetDisplayText("LLM Succeeded?");
 

@@ -204,7 +204,7 @@ public class ContextGatheringWorkflow : WorkflowBase
                     Variable = contextSuccess,
                     Value = new(false)
                 }, "Set Context Failed"),
-                new Fault("Story metadata fetch failed completely — context gathering cannot proceed without story metadata.")
+                WithLabel(new Fault("Story metadata fetch failed completely — context gathering cannot proceed without story metadata."), "Fault: No Story Metadata")
             }
         };
         faultNode.SetDisplayText("Fault (No Metadata)");

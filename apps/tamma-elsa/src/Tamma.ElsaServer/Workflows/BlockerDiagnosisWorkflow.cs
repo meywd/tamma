@@ -388,19 +388,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var hintBody = WithLabel(new Sequence
         {
-            Id = "HintCondition",
-            Name = "Hint Applicable?",
-            // Only execute if current level is Hint (not skipped) and not yet resolved
-            Condition = new(context =>
-                currentLevel.Get(context) == "Hint" && !isResolved.Get(context)),
-            Then = new Sequence
+            Id = "HintBody",
+            Name = "Hint Body",
+            Activities =
             {
-                Id = "HintBody",
-                Name = "Hint Body",
-                Activities =
-                {
                     // Dispatch LLM for Socratic hints
                     WithLabel(new DispatchWorkflow
                     {
@@ -463,8 +456,18 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Hint: Check Progress")
                 }
-            }
+            }, "Hint Body");
+
+        var hintIf = new If
+        {
+            Id = "HintCondition",
+            Name = "Hint Applicable?",
+            Condition = new(context =>
+                currentLevel.Get(context) == "Hint" && !isResolved.Get(context)),
+            Then = hintBody
         };
+        hintIf.SetDisplayText("Hint Applicable?");
+        return hintIf;
     }
 
     /// <summary>
@@ -482,15 +485,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var guidanceBody = WithLabel(new Sequence
         {
-            Id = "GuidanceCondition",
-            Name = "Guidance Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "GuidanceBody",
-                Name = "Guidance Body",
+            Id = "GuidanceBody",
+            Name = "Guidance Body",
                 Activities =
                 {
                     // Update current level
@@ -564,8 +562,17 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Guidance: Check Progress")
                 }
-            }
+            }, "Guidance Body");
+
+        var guidanceIf = new If
+        {
+            Id = "GuidanceCondition",
+            Name = "Guidance Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = guidanceBody
         };
+        guidanceIf.SetDisplayText("Guidance Applicable?");
+        return guidanceIf;
     }
 
     /// <summary>
@@ -583,15 +590,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var assistanceBody = WithLabel(new Sequence
         {
-            Id = "AssistanceCondition",
-            Name = "Assistance Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "AssistanceBody",
-                Name = "Assistance Body",
+            Id = "AssistanceBody",
+            Name = "Assistance Body",
                 Activities =
                 {
                     // Update current level
@@ -666,8 +668,17 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Assistance: Check Progress")
                 }
-            }
+            }, "Assistance Body");
+
+        var assistanceIf = new If
+        {
+            Id = "AssistanceCondition",
+            Name = "Assistance Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = assistanceBody
         };
+        assistanceIf.SetDisplayText("Assistance Applicable?");
+        return assistanceIf;
     }
 
     /// <summary>
@@ -684,15 +695,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<List<string>> feedbackProvided,
         Variable<bool> isResolved)
     {
-        return new If
+        var escalationBody = WithLabel(new Sequence
         {
-            Id = "EscalationCondition",
-            Name = "Escalation Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "EscalationBody",
-                Name = "Escalation Body",
+            Id = "EscalationBody",
+            Name = "Escalation Body",
                 Activities =
                 {
                     // Update current level
@@ -734,8 +740,17 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Record Escalation Feedback")
                 }
-            }
+            }, "Escalation Body");
+
+        var escalationIf = new If
+        {
+            Id = "EscalationCondition",
+            Name = "Escalation Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = escalationBody
         };
+        escalationIf.SetDisplayText("Escalation Applicable?");
+        return escalationIf;
     }
 
     /// <summary>
