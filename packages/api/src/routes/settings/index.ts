@@ -13,6 +13,7 @@ import { registerSecurityRoutes } from './security-routes.js';
 import { registerHealthRoutes } from './health-routes.js';
 import { registerDiagnosticsRoutes } from './diagnostics-routes.js';
 import { registerPromptsRoutes } from './prompts-routes.js';
+import { registerProvidersRoutes } from './providers-routes.js';
 
 export interface SettingsServices {
   configService: ConfigService;
@@ -40,6 +41,7 @@ export async function registerSettingsRoutes(
       registerAgentsRoutes(instance, svc.configService);
       registerSecurityRoutes(instance, svc.configService);
       registerPromptsRoutes(instance, svc.configService);
+      registerProvidersRoutes(instance, svc.configService);
     },
     { prefix: '/api/config' },
   );

@@ -9,9 +9,11 @@
  * workflow — edits via ELSA Studio take effect immediately without API sync.
  */
 
-import type { IAgentsConfig, SecurityConfig, AgentType } from '@tamma/shared';
-import { validateAgentsConfig, validateSecurityConfig } from '@tamma/shared';
+import type { IAgentsConfig, SecurityConfig, AgentType, IProvidersConfig, IRepoConfig, TammaConfig } from '@tamma/shared';
+import { validateAgentsConfig, validateSecurityConfig, validateProvidersConfig, resolveConfig } from '@tamma/shared';
 import type { ElsaAgentsClient } from './ElsaAgentsClient.js';
+import type { IUserStore } from '../../persistence/user-store.js';
+import type { RepoConfigReader } from './repo-config-reader.js';
 
 const DEFAULT_CONFIG: IAgentsConfig = {
   defaults: {
@@ -31,11 +33,15 @@ export class ConfigService {
   private agentsConfig: IAgentsConfig;
   private securityConfig: SecurityConfig;
   private elsaClient: ElsaAgentsClient | null;
+  private userStore: IUserStore | null;
+  private repoConfigReader: RepoConfigReader | null;
 
   constructor(
     initialAgents?: IAgentsConfig,
     initialSecurity?: SecurityConfig,
     elsaAgentsClient?: ElsaAgentsClient | null,
+    userStore?: IUserStore | null,
+    repoConfigReader?: RepoConfigReader | null,
   ) {
     this.agentsConfig = initialAgents
       ? structuredClone(initialAgents)
@@ -44,6 +50,8 @@ export class ConfigService {
       ? structuredClone(initialSecurity)
       : structuredClone(DEFAULT_SECURITY);
     this.elsaClient = elsaAgentsClient ?? null;
+    this.userStore = userStore ?? null;
+    this.repoConfigReader = repoConfigReader ?? null;
   }
 
   async getAgentsConfig(): Promise<IAgentsConfig> {
@@ -157,6 +165,53 @@ export class ConfigService {
     if (normalizedPrompt !== undefined) {
       await this.syncPromptToElsa(role, normalizedPrompt);
     }
+  }
+
+  // --- User-scoped provider settings (SaaS mode) ---
+
+  /**
+   * Get a user's provider settings.
+   * Returns empty config if user store is not configured or user not found.
+   */
+  async getUserProviders(userId: string): Promise<IProvidersConfig> {
+    if (!this.userStore) {
+      return { providers: {} };
+    }
+    return this.userStore.getUserSettings(userId);
+  }
+
+  /**
+   * Update a user's provider settings.
+   * Validates before persisting.
+   */
+  async updateUserProviders(userId: string, config: IProvidersConfig): Promise<IProvidersConfig> {
+    if (!this.userStore) {
+      throw new Error('User store not configured — cannot update user providers in this mode');
+    }
+    validateProvidersConfig(config);
+    return this.userStore.updateUserSettings(userId, config);
+  }
+
+  /**
+   * Resolve a full TammaConfig for a specific repo in SaaS mode.
+   * Merges: user providers → repo config (from git) → resolved TammaConfig.
+   */
+  async resolveForRepo(
+    userId: string,
+    owner: string,
+    repo: string,
+    branch: string,
+  ): Promise<{ config: TammaConfig; warnings: string[] }> {
+    // Get user provider settings
+    const providers = await this.getUserProviders(userId);
+
+    // Get repo config from git
+    let repoConfig: IRepoConfig = {};
+    if (this.repoConfigReader) {
+      repoConfig = await this.repoConfigReader.readRepoConfig(owner, repo, branch);
+    }
+
+    return resolveConfig(providers, repoConfig);
   }
 
   /**

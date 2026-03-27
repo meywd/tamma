@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
   TammaConfig,
@@ -11,7 +12,10 @@ import type {
   AgentConfig,
   EngineConfig,
   SecurityConfig,
+  IProvidersConfig,
+  IRepoConfig,
 } from '@tamma/shared';
+import { resolveConfig, validateProvidersConfig, validateRepoConfig } from '@tamma/shared';
 import type { GitPlatformConfig } from '@tamma/platforms';
 
 // Re-export normalizeAgentsConfig from @tamma/shared for CLI import convenience
@@ -249,26 +253,157 @@ function loadEnvConfig(): Partial<TammaConfig> {
   return config;
 }
 
+/** Default empty providers config when no providers.json is found. */
+const EMPTY_PROVIDERS: Readonly<IProvidersConfig> = Object.freeze({ providers: Object.freeze({}) });
+
 /**
- * Merge configs with priority: env vars > CLI options > config file > defaults.
+ * Load user-level provider settings from ~/.tamma/providers.json.
+ * Returns empty config if file doesn't exist or is invalid.
+ */
+export function loadProvidersConfig(): { config: IProvidersConfig; warnings: string[] } {
+  const homePath = path.join(os.homedir(), '.tamma', 'providers.json');
+  if (!fs.existsSync(homePath)) {
+    return { config: EMPTY_PROVIDERS, warnings: [] };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(homePath, 'utf-8');
+  } catch {
+    return { config: EMPTY_PROVIDERS, warnings: [`Could not read ${homePath}`] };
+  }
+
+  let parsed: IProvidersConfig;
+  try {
+    parsed = JSON.parse(raw) as IProvidersConfig;
+  } catch {
+    return { config: EMPTY_PROVIDERS, warnings: [`Failed to parse ${homePath} as JSON`] };
+  }
+
+  // If the file doesn't look like a providers config (no providers field), skip it
+  if (!parsed.providers || typeof parsed.providers !== 'object') {
+    return { config: EMPTY_PROVIDERS, warnings: [] };
+  }
+
+  try {
+    const warnings = validateProvidersConfig(parsed);
+    return { config: parsed, warnings };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Unknown validation error';
+    return { config: EMPTY_PROVIDERS, warnings: [`Invalid providers config at ${homePath}: ${msg}`] };
+  }
+}
+
+/**
+ * Load repo-level config from <cwd>/.tamma/config.json.
+ * Falls back to tamma.config.json with a deprecation warning.
+ * Returns empty {} if neither exists.
+ */
+export function loadRepoConfig(customPath?: string): { config: IRepoConfig; warnings: string[]; legacyFallback: boolean } {
+  const warnings: string[] = [];
+
+  // If custom path explicitly provided, caller wants the legacy TammaConfig path
+  if (customPath !== undefined) {
+    return { config: {}, warnings: [], legacyFallback: true };
+  }
+
+  // Try new location: .tamma/config.json
+  const newPath = path.resolve('.tamma', 'config.json');
+  if (fs.existsSync(newPath)) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(newPath, 'utf-8');
+    } catch {
+      // Can't read — skip
+      return { config: {}, warnings, legacyFallback: false };
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Failed to parse repo config at ${newPath}. Ensure it contains valid JSON.`);
+    }
+    // Detect if this is actually a legacy TammaConfig (has github, agent, mode)
+    // rather than the new IRepoConfig format
+    if ('github' in parsed || 'agent' in parsed || 'mode' in parsed) {
+      // This looks like a full TammaConfig, not an IRepoConfig.
+      // Fall through to legacy path.
+      warnings.push(
+        `.tamma/config.json appears to be a full TammaConfig, not a repo config. ` +
+        `Consider migrating to the new layered format.`,
+      );
+      return { config: {}, warnings, legacyFallback: true };
+    }
+    const repoConfig = parsed as IRepoConfig;
+    validateRepoConfig(repoConfig);
+    return { config: repoConfig, warnings, legacyFallback: false };
+  }
+
+  // Fallback: tamma.config.json (deprecated)
+  const legacyPath = path.resolve('tamma.config.json');
+  if (fs.existsSync(legacyPath)) {
+    warnings.push(
+      `[DEPRECATED] Using tamma.config.json — migrate to .tamma/config.json. ` +
+      `Run "tamma init" to generate the new format, or manually split config into ` +
+      `~/.tamma/providers.json (credentials) and .tamma/config.json (project settings).`,
+    );
+    // Legacy file is a full TammaConfig, not IRepoConfig — signal caller to use legacy path
+    return { config: {}, warnings, legacyFallback: true };
+  }
+
+  return { config: {}, warnings: [], legacyFallback: false };
+}
+
+/**
+ * Load configuration with layered resolution:
+ *   defaults → ~/.tamma/providers.json → .tamma/config.json → env vars → CLI flags
+ *
+ * Falls back to legacy tamma.config.json loading if no new-format files exist.
  */
 export function loadConfig(cliOptions: CLIOptions): TammaConfig {
-  const configPath = cliOptions.config ?? './tamma.config.json';
-  const fileConfig = loadConfigFile(configPath);
+  // Load layered config sources
+  const { config: providersConfig, warnings: providerWarnings } = loadProvidersConfig();
+  const { config: repoConfig, warnings: repoWarnings, legacyFallback } = loadRepoConfig(cliOptions.config);
   const envConfig = loadEnvConfig();
 
-  // Start with defaults
+  // Log warnings
+  for (const w of [...providerWarnings, ...repoWarnings]) {
+    console.warn(w);
+  }
+
+  // If we have providers.json OR .tamma/config.json, use the new layered path
+  const hasNewConfig = Object.keys(providersConfig.providers).length > 0 || Object.keys(repoConfig).length > 0;
+
+  if (hasNewConfig && !legacyFallback) {
+    // New layered resolution
+    const { config, warnings } = resolveConfig(providersConfig, repoConfig, envConfig);
+    for (const w of warnings) {
+      console.warn(w);
+    }
+
+    // CLI flag overrides (highest priority)
+    if (cliOptions.approval !== undefined) {
+      config.engine.approvalMode = cliOptions.approval;
+    }
+    if (cliOptions.verbose === true) {
+      config.logLevel = 'debug';
+    }
+
+    return config;
+  }
+
+  // Legacy path: load from tamma.config.json or custom path
+  const configPath = cliOptions.config ?? './tamma.config.json';
+  const fileConfig = loadConfigFile(configPath);
+
   let config = structuredClone(DEFAULT_CONFIG);
 
-  // Layer 1: config file
   if (fileConfig !== undefined) {
     config = mergeConfig(config, fileConfig);
   }
 
-  // Layer 2: env vars
   config = mergeConfig(config, envConfig);
 
-  // Layer 3: CLI options
   if (cliOptions.approval !== undefined) {
     config.engine.approvalMode = cliOptions.approval;
   }
@@ -411,7 +546,7 @@ export function buildPlatformConfig(gh: GitHubRepoConfig): GitPlatformConfig {
 }
 
 /**
- * Generate a tamma.config.json content from answers.
+ * Generate a tamma.config.json content from answers (legacy format).
  * Token is NOT stored in the config file — it belongs in .env.
  */
 export function generateConfigFile(answers: {
@@ -449,6 +584,72 @@ export function generateConfigFile(answers: {
       ciMonitorTimeoutMs: 3_600_000,
     },
   };
+
+  return JSON.stringify(config, null, 2);
+}
+
+/**
+ * Generate a .tamma/config.json (repo config, new layered format).
+ * Contains only project settings — no credentials.
+ */
+export function generateRepoConfigFile(answers: {
+  owner: string;
+  repo: string;
+  labels: string;
+  approvalMode: string;
+  model?: string;
+  maxBudgetUsd?: number;
+  workingDirectory?: string;
+  providerName?: string;
+}): string {
+  const repoConfig: IRepoConfig = {
+    engine: {
+      approvalMode: answers.approvalMode === 'auto' ? 'auto' : 'cli',
+    },
+    github: {
+      issueLabels: answers.labels.split(',').map((s) => s.trim()),
+      excludeLabels: ['wontfix'],
+      botUsername: 'tamma-bot',
+    },
+  };
+
+  // If a role configuration is provided, add a default implementer role
+  if (answers.providerName) {
+    const roleEntry: { provider: string; model?: string; maxBudgetUsd?: number } = {
+      provider: answers.providerName,
+    };
+    if (answers.model) {
+      roleEntry.model = answers.model;
+    }
+    if (answers.maxBudgetUsd !== undefined) {
+      roleEntry.maxBudgetUsd = answers.maxBudgetUsd;
+    }
+    repoConfig.roles = { implementer: roleEntry };
+  }
+
+  return JSON.stringify(repoConfig, null, 2);
+}
+
+/**
+ * Generate a ~/.tamma/providers.json (user-level provider credentials).
+ * Contains API keys and provider-specific settings.
+ */
+export function generateProvidersFile(providers: {
+  name: string;
+  apiKey: string;
+  defaultModel?: string;
+}[]): string {
+  const config: IProvidersConfig = { providers: {} };
+
+  for (const p of providers) {
+    config.providers[p.name] = {};
+    if (p.apiKey) {
+      config.providers[p.name]!.apiKey = p.apiKey;
+    }
+    if (p.defaultModel) {
+      config.providers[p.name]!.defaultModel = p.defaultModel;
+    }
+  }
 
   return JSON.stringify(config, null, 2);
 }

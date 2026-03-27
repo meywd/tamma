@@ -36,7 +36,7 @@ import { InMemoryInstallationStore } from './persistence/installation-store.js';
 import type { IGitHubInstallationStore, GitHubInstallation, GitHubInstallationRepo } from './persistence/installation-store.js';
 import { PgInstallationStore } from './persistence/pg-installation-store.js';
 import { InMemoryUserStore } from './persistence/user-store.js';
-import type { IUserStore, User, UserInstallation } from './persistence/user-store.js';
+import type { IUserStore, User, UserInstallation, UpsertUserInput } from './persistence/user-store.js';
 import { PgUserStore } from './persistence/pg-user-store.js';
 import { generateApiKey, hashApiKey, getApiKeyPrefix } from './auth/api-key.js';
 import { registerApiKeyAuthPlugin } from './auth/api-key-auth.js';
@@ -44,6 +44,8 @@ import type { InstallationContext, ApiKeyAuthConfig } from './auth/api-key-auth.
 import { registerGitHubOAuthRoutes } from './routes/auth/github-oauth.js';
 import type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
+import { GitHubRepoConfigReader } from './services/settings/repo-config-reader.js';
+import type { RepoConfigReader } from './services/settings/repo-config-reader.js';
 import type { ProvisionResult } from './services/github-secrets-provisioner.js';
 import { InstallationRouter } from './services/installation-router.js';
 import type { InstallationResolveResult, InstallationRouterOptions } from './services/installation-router.js';
@@ -80,6 +82,7 @@ export {
   getApiKeyPrefix,
   registerApiKeyAuthPlugin,
   GitHubSecretsProvisioner,
+  GitHubRepoConfigReader,
   InstallationRouter,
   InMemoryTaskQueue,
   registerGitHubOAuthRoutes,
@@ -109,11 +112,13 @@ export type {
   IUserStore,
   User,
   UserInstallation,
+  UpsertUserInput,
   InstallationContext,
   ApiKeyAuthConfig,
   ProvisionResult,
   InstallationResolveResult,
   InstallationRouterOptions,
+  RepoConfigReader,
   InMemoryTaskQueueOptions,
   ITask,
   ITaskQueue,
