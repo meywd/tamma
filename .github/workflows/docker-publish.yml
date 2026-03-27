@@ -5,6 +5,8 @@
 # - main: tagged as :main and :sha-<commit>
 # - tags: tagged as :v1.2.3 and :latest
 # - PRs: tagged as :pr-<number>
+#
+# All Docker steps retry up to 3 times to handle Docker Hub rate limits.
 # =============================================================================
 
 name: Build & Publish Docker Images
@@ -37,16 +39,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 3
-          max_attempts: 3
-          retry_wait_seconds: 60
-          command: |
-            # Manually invoke buildx setup — retries on Docker Hub rate limit
-            docker buildx create --use --name tamma-builder --driver docker-container 2>/dev/null || true
-            docker buildx inspect --bootstrap
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        id: buildx2
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure' && steps.buildx2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 3)
+        if: steps.buildx1.outcome == 'failure' && steps.buildx2.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -66,22 +80,55 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - name: Build and push
-        uses: nick-fields/retry@v3
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
         with:
-          timeout_minutes: 15
-          max_attempts: 3
-          retry_wait_seconds: 30
-          command: |
-            docker buildx build \
-              --file docker/Dockerfile.ts \
-              --target ${{ matrix.target }} \
-              --push \
-              --cache-from type=gha \
-              --cache-to type=gha,mode=max \
-              $(echo '${{ steps.meta.outputs.tags }}' | sed 's/^/--tag /') \
-              $(echo '${{ steps.meta.outputs.labels }}' | sed 's/^/--label /') \
-              .
+          context: .
+          file: docker/Dockerfile.ts
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        id: build2
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/Dockerfile.ts
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure' && steps.build2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Build and push (attempt 3)
+        if: steps.build1.outcome == 'failure' && steps.build2.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.ts
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
   # Dashboard (React SPA via nginx)
@@ -92,15 +139,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 3
-          max_attempts: 3
-          retry_wait_seconds: 60
-          command: |
-            docker buildx create --use --name tamma-builder --driver docker-container 2>/dev/null || true
-            docker buildx inspect --bootstrap
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -120,21 +170,34 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - name: Build and push
-        uses: nick-fields/retry@v3
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
         with:
-          timeout_minutes: 15
-          max_attempts: 3
-          retry_wait_seconds: 30
-          command: |
-            docker buildx build \
-              --file docker/Dockerfile.dashboard \
-              --push \
-              --cache-from type=gha \
-              --cache-to type=gha,mode=max \
-              $(echo '${{ steps.meta.outputs.tags }}' | sed 's/^/--tag /') \
-              $(echo '${{ steps.meta.outputs.labels }}' | sed 's/^/--label /') \
-              .
+          context: .
+          file: docker/Dockerfile.dashboard
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dashboard
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
   # .NET services (ELSA server, Tamma .NET API)
@@ -154,15 +217,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Docker Buildx
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 3
-          max_attempts: 3
-          retry_wait_seconds: 60
-          command: |
-            docker buildx create --use --name tamma-builder --driver docker-container 2>/dev/null || true
-            docker buildx inspect --bootstrap
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -182,21 +248,34 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - name: Build and push
-        uses: nick-fields/retry@v3
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
         with:
-          timeout_minutes: 15
-          max_attempts: 3
-          retry_wait_seconds: 30
-          command: |
-            docker buildx build \
-              --file ${{ matrix.dockerfile }} \
-              --push \
-              --cache-from type=gha \
-              --cache-to type=gha,mode=max \
-              $(echo '${{ steps.meta.outputs.tags }}' | sed 's/^/--tag /') \
-              $(echo '${{ steps.meta.outputs.labels }}' | sed 's/^/--label /') \
-              ${{ matrix.context }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
   # Deploy to VPS (runs after all images are built)
