@@ -37,6 +37,7 @@ public class AssessmentWorkflow : WorkflowBase
     {
         builder.Name = "Assessment";
         builder.DefinitionId = "assessment";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Evaluate junior developer's understanding of story requirements";
 
         // ── Workflow variables ──────────────────────────────────────────

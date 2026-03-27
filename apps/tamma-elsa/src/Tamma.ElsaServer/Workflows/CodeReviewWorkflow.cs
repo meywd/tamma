@@ -39,6 +39,7 @@ public class CodeReviewWorkflow : WorkflowBase
     {
         builder.Name = "Code Review Sub-Workflow";
         builder.DefinitionId = "code-review";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Manages the full PR lifecycle from creation through review, " +
                               "fix guidance, and merge with bookmark-based waiting.";
 

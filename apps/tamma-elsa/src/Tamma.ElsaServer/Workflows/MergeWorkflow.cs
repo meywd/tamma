@@ -17,6 +17,7 @@ public class MergeWorkflow : WorkflowBase
     {
         builder.Name = "Merge Complete";
         builder.DefinitionId = "merge-complete";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Squash-merge PR, close issue, and delete branch";
 
         var mergeShaVar = builder.WithVariable<string>("MergeSha", "");

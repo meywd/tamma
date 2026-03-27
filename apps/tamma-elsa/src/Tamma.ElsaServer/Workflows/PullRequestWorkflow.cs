@@ -17,6 +17,7 @@ public class PullRequestWorkflow : WorkflowBase
     {
         builder.Name = "Pull Request";
         builder.DefinitionId = "pull-request";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Create a pull request with plan and test summary";
 
         var prNumberVar = builder.WithVariable<int>("PrNumber", 0);

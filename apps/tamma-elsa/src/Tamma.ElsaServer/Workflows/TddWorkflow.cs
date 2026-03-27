@@ -33,6 +33,7 @@ public class TddWorkflow : WorkflowBase
     {
         builder.Name = "TDD Cycle";
         builder.DefinitionId = "tdd-cycle";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Drives the red-green-refactor TDD cycle for a single implementation task";
 
         // -- Workflow variables --

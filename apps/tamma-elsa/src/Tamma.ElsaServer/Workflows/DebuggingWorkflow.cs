@@ -46,6 +46,7 @@ public class DebuggingWorkflow : WorkflowBase
     {
         builder.Name = "Debugging";
         builder.DefinitionId = "debugging";
+        builder.Version = WorkflowVersions.ComputedVersion;
 
         // ---- Workflow variables ----
         var sessionId = builder.WithVariable<Guid>();

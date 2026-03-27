@@ -49,6 +49,7 @@ public class LlmCallWorkflow : WorkflowBase
     {
         builder.Name = "LLM Call Sub-Workflow";
         builder.DefinitionId = "llm-call";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Universal LLM call with provider chain, circuit breaker, retry, and 6-level prompt resolution";
 
         // ============================================================

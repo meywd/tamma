@@ -41,6 +41,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     {
         builder.Name = "Blocker Diagnosis";
         builder.DefinitionId = "blocker-diagnosis";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Diagnoses blocker type and applies progressive resolution (hint -> guidance -> assistance -> escalation)";
 
         // ============================================

@@ -17,6 +17,7 @@ public class IssueSelectionWorkflow : WorkflowBase
     {
         builder.Name = "Issue Selection";
         builder.DefinitionId = "issue-selection";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Select and assign the next GitHub issue for autonomous development";
 
         var repositoryVar = builder.WithVariable<string>("Repository", "");

@@ -44,7 +44,7 @@ public class MentorshipWorkflow : WorkflowBase
         builder.DefinitionId = "mentorship";
         builder.Description = "Orchestrates the complete mentorship session lifecycle with 28 states, " +
                               "outcome-based routing, guard conditions, and sub-workflow invocations.";
-        builder.Version = 1;
+        builder.Version = WorkflowVersions.ComputedVersion;
 
         // =====================================================================
         // Workflow Variables

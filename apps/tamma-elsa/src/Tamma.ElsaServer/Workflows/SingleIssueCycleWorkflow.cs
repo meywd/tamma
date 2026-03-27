@@ -32,6 +32,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
     {
         builder.Name = "Single Issue Cycle";
         builder.DefinitionId = "single-issue-cycle";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "14-step autonomous development cycle for one issue";
 
         // ================================================================

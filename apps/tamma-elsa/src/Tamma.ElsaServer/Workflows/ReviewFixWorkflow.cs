@@ -19,6 +19,7 @@ public class ReviewFixWorkflow : WorkflowBase
     {
         builder.Name = "Review Fix";
         builder.DefinitionId = "review-fix";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Analyze PR review comments and apply AI-generated fixes";
 
         var hasActionableVar = builder.WithVariable<bool>("HasActionable", false);

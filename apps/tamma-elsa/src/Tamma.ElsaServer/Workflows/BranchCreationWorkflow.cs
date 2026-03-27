@@ -25,6 +25,7 @@ public class BranchCreationWorkflow : WorkflowBase
     {
         builder.Name = "Branch Creation";
         builder.DefinitionId = "branch-creation";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Create a feature branch for autonomous development";
 
         var branchNameVar = builder.WithVariable<string>("BranchName", "");

@@ -36,6 +36,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
     {
         builder.Name = "ADL Orchestrator";
         builder.DefinitionId = "adl-orchestrator";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Top-level loop that picks issues and dispatches autonomous development cycles";
 
         // ================================================================

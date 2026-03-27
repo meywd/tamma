@@ -17,6 +17,7 @@ public class MergeApprovalWorkflow : WorkflowBase
     {
         builder.Name = "Merge Approval";
         builder.DefinitionId = "merge-approval";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Wait for human merge/test/reject decision";
 
         var decisionVar = builder.WithVariable<string>("Decision", "");

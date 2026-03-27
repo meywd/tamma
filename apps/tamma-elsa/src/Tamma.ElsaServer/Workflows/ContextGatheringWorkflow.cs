@@ -38,6 +38,7 @@ public class ContextGatheringWorkflow : WorkflowBase
     {
         builder.Name = "Context Gathering Sub-Workflow";
         builder.DefinitionId = "context-gathering";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description =
             "Gathers context from multiple sources in parallel, assembles it, and applies budget trimming.";
 

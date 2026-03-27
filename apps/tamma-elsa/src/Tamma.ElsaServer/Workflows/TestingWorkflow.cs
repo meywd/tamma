@@ -33,6 +33,7 @@ public class TestingWorkflow : WorkflowBase
     {
         builder.Name = "Testing Pipeline";
         builder.DefinitionId = "testing-pipeline";
+        builder.Version = WorkflowVersions.ComputedVersion;
 
         // ============================================
         // Workflow Variables

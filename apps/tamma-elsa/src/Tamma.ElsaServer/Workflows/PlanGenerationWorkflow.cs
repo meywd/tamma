@@ -26,6 +26,7 @@ public class PlanGenerationWorkflow : WorkflowBase
     {
         builder.Name = "Plan Generation";
         builder.DefinitionId = "plan-generation";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Generate AI plan and wait for human approval";
 
         var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
