@@ -6,6 +6,7 @@ using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Activities.Flowchart.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Models;
+using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Testing;
 using Tamma.Activities.Testing.Models;
 
@@ -220,6 +221,17 @@ public class TestingWorkflow : WorkflowBase
             Result = new(commitFixResultVar)
         };
         commitFix.SetDisplayText("Commit Auto-Fix");
+
+        // CommitFixResult only has FilesChanged (int count), no file paths —
+        // pass null so the indexer falls back to git-diff detection.
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx => (string?)null),
+            RepositoryPath = new Input<string?>(ctx => repositoryVar.Get(ctx))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
 
         var incrementAttempt = new SetVariable<int>(attemptNumberVar, ctx =>
             attemptNumberVar.Get(ctx) + 1)
@@ -438,7 +450,7 @@ public class TestingWorkflow : WorkflowBase
             generateReportCritical,
             setOutputFailReport, setOutputFailPassed, setOutputFailFeedback, finishFail,
             // MajorIssues (auto-fix loop) path with max-attempt guard
-            maxAttemptGuard, commitFix, incrementAttempt, reTriggerCI, waitForCIRetry,
+            maxAttemptGuard, commitFix, updateCodeIndex, incrementAttempt, reTriggerCI, waitForCIRetry,
             storeRetryResults, evaluateRetryResults,
             // Retry pass path
             checkCoverageRetry, checkLintRetry, checkSecurityRetry,
@@ -490,7 +502,8 @@ public class TestingWorkflow : WorkflowBase
         Connect(flowchart, maxAttemptGuard, commitFix, "True");
         // Guard False (attempts >= max): fail out via SetOutputs -> finishFail
         Connect(flowchart, maxAttemptGuard, setOutputFailReport, "False");
-        Connect(flowchart, commitFix, incrementAttempt);
+        Connect(flowchart, commitFix, updateCodeIndex);
+        Connect(flowchart, updateCodeIndex, incrementAttempt);
         Connect(flowchart, incrementAttempt, reTriggerCI);
         Connect(flowchart, reTriggerCI, waitForCIRetry);
         Connect(flowchart, waitForCIRetry, storeRetryResults);

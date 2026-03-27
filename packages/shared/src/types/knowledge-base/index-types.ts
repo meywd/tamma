@@ -71,4 +71,6 @@ export interface TriggerConfig {
 /** Request to trigger an index operation */
 export interface TriggerIndexRequest {
   fullReindex?: boolean;
+  changedFiles?: string[];
+  repositoryPath?: string;
 }

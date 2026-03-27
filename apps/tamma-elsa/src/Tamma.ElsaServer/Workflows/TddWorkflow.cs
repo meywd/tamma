@@ -6,6 +6,7 @@ using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
+using Tamma.Activities.CodeIndex;
 using Tamma.Activities.TDD;
 using Tamma.Activities.TDD.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
@@ -297,6 +298,22 @@ public class TddWorkflow : WorkflowBase
         };
         commitChanges.SetDisplayText("Commit Changes");
 
+        // --- UPDATE CODE INDEX (fire-and-forget) ---
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx =>
+            {
+                var commit = commitResultVar.Get(ctx);
+                return commit?.FilesCommitted != null
+                    ? System.Text.Json.JsonSerializer.Serialize(commit.FilesCommitted)
+                    : null;
+            }),
+            RepositoryPath = new Input<string?>(ctx => repositoryUrl.Get(ctx))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
+
         // --- OUTPUT (SetOutput sequences) ---
         var setCompletedOutputs = new Sequence
         {
@@ -373,8 +390,9 @@ public class TddWorkflow : WorkflowBase
                 refactorTestsPassCheck,
                 revertRefactoring,
 
-                // Commit
+                // Commit & Index
                 commitChanges,
+                updateCodeIndex,
 
                 // Outputs
                 setCompletedOutputs, setFailedOutputs,
@@ -451,8 +469,9 @@ public class TddWorkflow : WorkflowBase
                 ConnectOutcome(refactorTestsPassCheck, "False", revertRefactoring),
                 Connect(revertRefactoring, commitChanges),
 
-                // --- COMMIT & OUTPUT ---
-                Connect(commitChanges, setCompletedOutputs),
+                // --- COMMIT & INDEX & OUTPUT ---
+                Connect(commitChanges, updateCodeIndex),
+                Connect(updateCodeIndex, setCompletedOutputs),
                 Connect(setCompletedOutputs, finish),
 
                 // --- FAILED ---

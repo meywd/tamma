@@ -7,6 +7,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.CodeIndex;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -64,6 +65,17 @@ public class ReviewFixWorkflow : WorkflowBase
         };
         applyFixes.SetDisplayText("Apply Fixes");
 
+        // ApplyReviewFixesActivity only outputs FixesApplied (bool), no file paths —
+        // pass null so the indexer falls back to git-diff detection.
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx => (string?)null),
+            RepositoryPath = new Input<string?>(ctx => ctx.GetInput<string>("repository"))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
+
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) };
         outputSuccess.SetDisplayText("Output Success");
         var outputHasComments = new SetOutput { Id = "OutputHasComments", Name = "Output Has Comments", OutputName = new("hasComments"), OutputValue = new(ctx => (object)hasActionableVar.Get(ctx)) };
@@ -76,13 +88,14 @@ public class ReviewFixWorkflow : WorkflowBase
             Id = "ReviewFixFlowchart",
             Name = "Review Fix Flowchart",
             Start = analyze,
-            Activities = { analyze, hasActionable, generateFixes, applyFixes, outputSuccess, outputHasComments, outputFixesApplied },
+            Activities = { analyze, hasActionable, generateFixes, applyFixes, updateCodeIndex, outputSuccess, outputHasComments, outputFixesApplied },
             Connections =
             {
                 Connect(analyze, hasActionable),
                 ConnectOutcome(hasActionable, "True", generateFixes),
                 Connect(generateFixes, applyFixes),
-                Connect(applyFixes, outputSuccess),
+                Connect(applyFixes, updateCodeIndex),
+                Connect(updateCodeIndex, outputSuccess),
                 ConnectOutcome(hasActionable, "False", outputSuccess),
                 Connect(outputSuccess, outputHasComments),
                 Connect(outputHasComments, outputFixesApplied)

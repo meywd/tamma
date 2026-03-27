@@ -13,7 +13,7 @@
 
 export interface ICodebaseIndexer {
   indexProject(projectPath: string, options?: { fullReindex?: boolean }): Promise<void>;
-  updateIndex?(projectPath: string): Promise<void>;
+  updateIndex?(projectPath: string, changedFiles?: string[]): Promise<void>;
   stop?(): Promise<void>;
   getIndexStatus?(): Promise<{ status: string; filesIndexed: number; chunksCreated: number; lastIndexedAt?: string }>;
   configure?(config: Record<string, unknown>): void;

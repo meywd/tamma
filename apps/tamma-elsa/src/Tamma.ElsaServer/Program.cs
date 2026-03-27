@@ -95,6 +95,9 @@ builder.Services.AddCors(options =>
             .WithExposedHeaders("x-elsa-workflow-instance-id"));
 });
 
+// HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
+builder.Services.AddHttpClient();
+
 // Health checks
 builder.Services.AddHealthChecks();
 

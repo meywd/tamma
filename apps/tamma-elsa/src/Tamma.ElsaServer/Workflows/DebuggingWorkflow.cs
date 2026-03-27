@@ -8,6 +8,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
+using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Debug;
 using Tamma.Activities.Debug.Models;
 using Endpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
@@ -354,6 +355,15 @@ public class DebuggingWorkflow : WorkflowBase
         };
         recordResolution.SetDisplayText("Record Resolution");
 
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx => allFilesModified.Get(ctx)),
+            RepositoryPath = new Input<string?>(ctx => repositoryUrl.Get(ctx))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
+
         var setResolvedOutputs = new Sequence
         {
             Id = "setResolvedOutputs",
@@ -439,7 +449,7 @@ public class DebuggingWorkflow : WorkflowBase
                 selectHypothesis, hasHypothesis,
                 isBugMode, writeRegressionTest, markRegressionTestWritten,
                 applyFix, runTests, testsPass,
-                recordResolution, setResolvedOutputs,
+                recordResolution, updateCodeIndex, setResolvedOutputs,
                 refineHypothesis, incrementIteration,
                 compileReport, setEscalatedOutputs,
                 finish
@@ -510,7 +520,8 @@ public class DebuggingWorkflow : WorkflowBase
 
                 // Tests pass? Yes -> record resolution
                 new(new Endpoint(testsPass, "True"), new Endpoint(recordResolution)),
-                new(recordResolution, setResolvedOutputs),
+                new(recordResolution, updateCodeIndex),
+                new(updateCodeIndex, setResolvedOutputs),
                 new(setResolvedOutputs, finish),
 
                 // Tests pass? No -> refine hypothesis
