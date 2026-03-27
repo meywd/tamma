@@ -28,10 +28,10 @@
     <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.5.3" />
     <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.5.3" />
 
-    <!-- ELSA Studio (Blazor WASM) -->
-    <PackageReference Include="Elsa.Studio" Version="3.4.0" />
-    <PackageReference Include="Elsa.Studio.Core.BlazorWasm" Version="3.4.0" />
-    <PackageReference Include="Elsa.Studio.Login.BlazorWasm" Version="3.4.0" />
+    <!-- ELSA Studio (Blazor WASM) — must match server version to avoid InputsTab NullReferenceException -->
+    <PackageReference Include="Elsa.Studio" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Core.BlazorWasm" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Login.BlazorWasm" Version="3.5.3" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.0" />
 
     <!-- Logging -->
