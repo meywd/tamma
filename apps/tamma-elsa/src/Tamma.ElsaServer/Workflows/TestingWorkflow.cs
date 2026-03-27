@@ -31,6 +31,7 @@ public class TestingWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
     {
+        builder.Name = "Testing Pipeline";
         builder.DefinitionId = "testing-pipeline";
 
         // ============================================

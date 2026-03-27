@@ -57,7 +57,7 @@ public class PlanGenerationWorkflow : WorkflowBase
         var planLoop = new While(ctx => planLoopVar.Get(ctx))
         {
             Id = "PlanApprovalLoop", Name = "Plan Approval Loop",
-            Body = new Sequence
+            Body = WithLabel(new Sequence
             {
                 Id = "PlanLoopBody", Name = "Plan Loop Body",
                 Activities =
@@ -112,7 +112,7 @@ public class PlanGenerationWorkflow : WorkflowBase
                         })
                     }, "Check Approval Decision")
                 }
-            }
+            }, "Plan Loop Body")
         };
         planLoop.SetDisplayText("Plan Approval Loop");
 
