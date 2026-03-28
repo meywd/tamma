@@ -5,6 +5,7 @@ using Elsa.EntityFrameworkCore.Modules.Runtime;
 using Elsa.Extensions;
 using Serilog;
 using Tamma.Activities.AI;
+using Tamma.Activities.Security;
 using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -97,6 +98,19 @@ builder.Services.AddCors(options =>
 
 // HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
 builder.Services.AddHttpClient();
+
+// Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileReadTool>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileWriteTool>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry, Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
+
+// Security services (Epic 11 — LLM injection hardening)
+builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
+builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 
 // Health checks
 builder.Services.AddHealthChecks();
