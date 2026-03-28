@@ -115,8 +115,47 @@ FlowDecision(tddResult.success)
 
 1.5 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. Sub-workflow dispatch and retry loops are critical paths for understanding why an issue cycle succeeded or failed.
+
+### Required Additions
+
+`TddWithDebugRetryWorkflow` should use `ILogger<T>` (injected via constructor or resolved from the execution context).
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Sub-workflow started | INFO | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{StoryId}`, `{BranchName}` | Entry point — correlate parent and child workflows |
+| TDD cycle dispatched | INFO | `{WorkflowInstanceId}`, `{TddAttempt}`, `{StoryId}` | Each dispatch to the TDD workflow |
+| TDD cycle result received | INFO | `{WorkflowInstanceId}`, `{TddAttempt}`, `{Success}`, `{DurationMs}` | TDD pass/fail result |
+| TDD debug retry guard evaluated | DEBUG | `{WorkflowInstanceId}`, `{TddDebugCount}`, `{MaxRetries}`, `{Allowed}` | Whether retry is within limit |
+| TDD debug counter incremented | DEBUG | `{WorkflowInstanceId}`, `{TddDebugCount}` (new value) | Counter state after increment |
+| Debugging workflow dispatched (TDD retry) | INFO | `{WorkflowInstanceId}`, `{TddDebugCount}`, `{StoryId}` | Debugging sub-workflow dispatch for TDD failure |
+| Sub-workflow completed: success | INFO | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{TotalAttempts}`, `{TotalDurationMs}` | Normal exit |
+| Sub-workflow completed: retry limit reached | WARN | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{TddDebugCount}`, `{MaxRetries}`, `{ErrorMessage}` | Failure exit — retry budget exhausted |
+| Parent workflow: sub-workflow dispatched | INFO | `{WorkflowInstanceId}`, `{ChildDefinitionId}` ("tdd-with-debug-retry"), `{StoryId}` | From `SingleIssueCycleWorkflow` when dispatching the sub-workflow |
+| Parent workflow: sub-workflow result received | INFO | `{WorkflowInstanceId}`, `{ChildSuccess}`, `{ChildErrorMessage}` | From `SingleIssueCycleWorkflow` when reading the sub-workflow output |
+
+### Sensitive Data Redaction
+
+- Do NOT log `planJson` content — it may contain full code plans.
+- Log only `storyId`, `branchName`, and counter values.
+
+### Correlation IDs
+
+- `{WorkflowInstanceId}` is the child workflow's instance ID.
+- `{ParentWorkflowInstanceId}` must be passed as input from the parent `SingleIssueCycleWorkflow` and included in all child logs.
+- This enables tracing the full hierarchy: parent workflow -> TDD sub-workflow -> TDD workflow -> debugging workflow.
+
+### Execution Store Operations
+
+- ELSA's `DispatchWorkflow` activity automatically records execution journal entries. No additional logging needed for the dispatch mechanism itself, but the custom workflow should log business-level events (success, failure, retry) as listed above.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/single-issue-workflow-split.md` Phases 1+2 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

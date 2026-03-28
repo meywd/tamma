@@ -117,8 +117,46 @@ public record ToolCallInfo(
 
 3 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. This is a significant gap — tool execution is one of the most critical paths to observe for debugging workflows and diagnosing LLM behavior.
+
+### Required Additions
+
+Every `IToolExecutor` implementation and the `ToolExecutorRegistry` **must** inject `ILogger<T>` via constructor.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Tool execution started | INFO | `{ToolName}`, `{ToolCallId}`, `{ArgumentsSizeBytes}`, `{WorkflowInstanceId}` | Entry point for every tool execution. Do NOT log argument contents. |
+| Tool execution completed | INFO | `{ToolName}`, `{ToolCallId}`, `{Success}`, `{DurationMs}`, `{OutputSizeBytes}`, `{WorkflowInstanceId}` | Exit point with performance data |
+| Tool execution failed (exception) | ERROR | `{ToolName}`, `{ToolCallId}`, `{ExceptionType}`, `{ExceptionMessage}`, `{DurationMs}`, `{WorkflowInstanceId}` | Caught exception during tool execution |
+| Tool output truncated | WARN | `{ToolName}`, `{ToolCallId}`, `{OriginalSizeBytes}`, `{TruncatedSizeBytes}`, `{WorkflowInstanceId}` | When 50KB limit is applied |
+| Tool executor not found in registry | WARN | `{ToolName}`, `{RegisteredToolCount}` | Unknown tool name requested |
+| Tool rejected by allowlist | WARN | `{ToolName}`, `{ToolCallId}`, `{WorkflowInstanceId}` | Tool exists but not in workflow's allowed list |
+| Shell command blocked by ActionGate | WARN | `{ToolName}`, `{ToolCallId}`, `{BlockedPatternName}`, `{WorkflowInstanceId}` | Never log the command itself |
+| Shell command execution started | DEBUG | `{ToolName}`, `{ToolCallId}`, `{TimeoutMs}`, `{WorkflowInstanceId}` | Never log the command itself |
+| Shell command timed out | WARN | `{ToolName}`, `{ToolCallId}`, `{TimeoutMs}`, `{WorkflowInstanceId}` | Process exceeded timeout |
+| File path validation failed (traversal) | WARN | `{ToolName}`, `{ToolCallId}`, `{WorkflowInstanceId}` | Never log the rejected path (may contain sensitive info) |
+| Git operation executed | DEBUG | `{ToolName}`, `{ToolCallId}`, `{Subcommand}`, `{DurationMs}` | Log the subcommand (status, diff, etc.) but not full args |
+| Registry initialized | INFO | `{RegisteredToolCount}`, `{ToolNames}` | Emitted once at startup during DI |
+
+### Sensitive Data Redaction
+
+- **Never** log tool call arguments content — may contain file paths, shell commands, or code.
+- **Never** log tool output content — may contain file contents, credentials, or secrets.
+- Log only sizes (bytes), durations, tool names (from a known vocabulary), and success/failure status.
+- Shell commands must not be logged — only the tool name and blocked pattern name (if blocked).
+
+### Correlation IDs
+
+- All tool execution logs must include `{WorkflowInstanceId}` and `{ToolCallId}` for tracing across the tool loop (Story 12.2).
+- `ToolCallId` is the LLM-assigned identifier that links the tool execution back to the specific LLM request.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-agentic-tool-loop.md` Phases 1.1-1.4 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

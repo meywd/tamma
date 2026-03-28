@@ -125,8 +125,42 @@ Tool calls in streaming mode are accumulated from the stream (they arrive as par
 
 2-3 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story defines SSE events (`TOOL_LOOP.TURN_STARTED`, `TOOL_LOOP.TOOL_EXECUTING`, etc.) which serve as external observability events, but **no structured logging** (ILogger) is specified. SSE events are client-facing; server-side logs are needed independently for backend debugging.
+
+### Required Additions
+
+`ToolLoopEventEmitter` and `ParallelToolExecutor` **must** inject `ILogger<T>` via constructor.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| SSE event emitted | DEBUG | `{EventType}`, `{TurnNumber}`, `{ToolName}` (if applicable), `{WorkflowInstanceId}` | Trace each SSE event emission for debugging client connectivity issues |
+| SSE connection not active (event dropped) | DEBUG | `{EventType}`, `{WorkflowInstanceId}` | Silent drop — only log for debugging, not a problem |
+| Parallel tool execution started | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{TotalToolCalls}`, `{ParallelBatchCount}` | How many tools run in this parallel batch |
+| Parallel tool execution completed | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{TotalToolCalls}`, `{TotalDurationMs}`, `{SuccessCount}`, `{FailureCount}` | Batch summary |
+| File semaphore acquired | DEBUG | `{ToolCallId}`, `{ToolName}`, `{NormalizedPath}`, `{WaitDurationMs}`, `{WorkflowInstanceId}` | Semaphore contention tracking — do NOT log the actual file path if it may be sensitive |
+| File semaphore released | DEBUG | `{ToolCallId}`, `{ToolName}`, `{WorkflowInstanceId}` | Semaphore release confirmation |
+| Individual tool timeout in parallel batch | WARN | `{ToolCallId}`, `{ToolName}`, `{TimeoutMs}`, `{WorkflowInstanceId}` | One tool timed out; others continued |
+| Streaming response accumulation started | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{Provider}` | Streaming mode entry |
+| Streaming response accumulation completed | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{AccumulatedToolCallCount}`, `{ResponseChunkCount}`, `{DurationMs}` | Streaming mode exit — how many chunks were accumulated |
+| Streaming tool call parsing error | WARN | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ErrorMessage}` | Partial JSON delta could not be accumulated |
+
+### Sensitive Data Redaction
+
+- **Never** log file paths from the semaphore key (use a hash or normalized form only if needed for debugging).
+- **Never** log streaming response content — only chunk counts and accumulated tool call counts.
+- Normalized path in semaphore logs should be relative to workspace root, not absolute.
+
+### Correlation IDs
+
+- All parallel execution logs must include `{WorkflowInstanceId}`, `{TurnNumber}`, and `{ToolCallId}` (where applicable) for correlation with the sequential tool loop logs (Story 12.2).
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-agentic-tool-loop.md` Phase 3 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

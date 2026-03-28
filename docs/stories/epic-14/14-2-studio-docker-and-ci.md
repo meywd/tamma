@@ -138,8 +138,39 @@ elsa-studio:
 
 2-3 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. This is a Docker/CI story with no application code, but the `docker-entrypoint.sh` and nginx access logs need consideration.
+
+### Required Additions
+
+This story produces infrastructure (Dockerfile, nginx, entrypoint script) rather than C# code. Logging is shell-level and nginx-level.
+
+| Event | Level | Output | Notes |
+|-------|-------|--------|-------|
+| Entrypoint: env var injection performed | stdout | `ELSASERVER__URL` value injected (print the URL, not any secret) | `echo` in `docker-entrypoint.sh` confirming the URL was replaced |
+| Entrypoint: env var not set, using default | stdout | Warning that `ELSASERVER__URL` was not set | Helps debug "Studio can't connect to server" issues |
+| nginx access log | nginx default | Standard combined format | `access_log /var/log/nginx/access.log;` — leave default nginx logging enabled |
+| nginx error log | nginx default | Standard error format | `error_log /var/log/nginx/error.log warn;` — set to warn level to catch 404s and upstream errors |
+
+### Sensitive Data Redaction
+
+- The `ELSASERVER__URL` is not a secret (it is a URL). Safe to print in entrypoint.
+- nginx access logs may contain query parameters — ensure no API keys are passed as query params to the Studio.
+
+### Correlation IDs
+
+- Not applicable for this story (no workflow correlation in a static file server).
+
+### Note on Log Priority
+
+This story has **low logging priority**. The entrypoint `echo` and nginx access/error logs are sufficient for debugging container startup and connectivity issues.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/elsa-studio-customization.md` Phases 3+4 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

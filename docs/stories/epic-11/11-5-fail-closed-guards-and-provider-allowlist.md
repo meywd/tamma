@@ -101,8 +101,41 @@ anthropic, openai, openrouter, google, github-copilot, local-llm, opencode, z-ai
 
 1.5 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 71 mentions: "add a WARN-level log in each catch to alert operators that a safety check failed." Line 72 mentions: "log WARN" when a provider is not in the allowlist. This is a good start but needs formalization.
+
+### Required Additions
+
+`ProviderAllowlist` **must** inject `ILogger<T>`. Fail-closed catch blocks use existing workflow/activity loggers.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Circuit breaker check failed, defaulting to CLOSED (deny) | WARN | `{ExceptionType}`, `{ExceptionMessage}`, `{Provider}`, `{WorkflowInstanceId}` | Critical security event — infrastructure failure caused a safety default |
+| Budget check failed, defaulting to EXHAUSTED (deny) | WARN | `{ExceptionType}`, `{ExceptionMessage}`, `{Provider}`, `{WorkflowInstanceId}` | Critical security event — budget system failure |
+| Circuit breaker check succeeded | DEBUG | `{IsOpen}`, `{Provider}`, `{WorkflowInstanceId}` | Normal operation trace |
+| Budget check succeeded | DEBUG | `{IsExhausted}`, `{Provider}`, `{WorkflowInstanceId}` | Normal operation trace |
+| Provider rejected by allowlist | WARN | `{ProviderName}`, `{WorkflowInstanceId}` | Security event — unknown provider attempted |
+| Provider accepted by allowlist | DEBUG | `{ProviderName}` | Normal operation trace |
+| Provider chain resolution: all providers rejected | ERROR | `{RejectedProviders}` (list of names), `{WorkflowInstanceId}` | No valid providers available — activity will fail |
+| Provider chain resolution: provider skipped, trying next | INFO | `{SkippedProvider}`, `{NextProvider}`, `{Reason}` ("not in allowlist"), `{WorkflowInstanceId}` | Fallback in the provider chain |
+| Allowlist configuration loaded | INFO | `{DefaultProviderCount}`, `{AdditionalProviderCount}`, `{TotalProviders}` | Startup/configuration log — emitted once during DI registration |
+
+### Sensitive Data Redaction
+
+- Do NOT log API keys, tokens, or configuration secrets when logging provider names.
+- Exception messages from DB connection failures may contain connection strings — ensure `{ExceptionMessage}` is truncated and does not include credential segments.
+
+### Correlation IDs
+
+- Fail-closed catch blocks in `LlmCallWorkflow`, `CheckCircuitBreakerActivity`, and `CheckBudgetActivity` must include `{WorkflowInstanceId}` and `{Provider}` for tracing.
+- `ProviderAllowlist` logs during `ResolveAgentConfigActivity` should include the same correlation context.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-injection-security-fix.md` Phases 6+7 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

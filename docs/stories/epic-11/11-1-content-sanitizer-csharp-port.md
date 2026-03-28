@@ -88,8 +88,38 @@ The TypeScript implementation lives in `packages/shared/src/security/content-san
 
 2-3 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 72 mentions: "Log at DEBUG level when any sanitization pattern matches, including the pattern name (never log the matched content itself)." This is a good start but insufficient for a security-critical subsystem.
+
+### Required Additions
+
+All new classes (`ContentSanitizer`, `ErrorRedactor`) **must** inject `ILogger<T>` via constructor.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Sanitization pattern matched | DEBUG | `{PatternName}`, `{InputLengthChars}`, `{ActivityName}` | Never log the matched content itself (may contain PII or attack payloads) |
+| Input sanitization summary (per call) | DEBUG | `{PatternsMatchedCount}`, `{InputLengthChars}`, `{OutputLengthChars}` | One log per `SanitizeInput()` call summarizing total matches |
+| Output sanitization summary | DEBUG | `{PatternsMatchedCount}`, `{InputLengthChars}`, `{OutputLengthChars}` | One log per `SanitizeOutput()` call |
+| Error redaction performed | INFO | `{RedactionCount}`, `{RedactedPatterns}` (pattern names, not values) | Log whenever credentials or internal URLs are stripped from error text |
+| Sanitization exception (regex timeout, etc.) | ERROR | `{PatternName}`, `{ExceptionMessage}`, `{InputLengthChars}` | If a compiled regex throws, log and continue with remaining patterns |
+| Performance warning: slow sanitization | WARN | `{DurationMs}`, `{InputLengthChars}`, `{PatternCount}` | If sanitization exceeds 5ms threshold, emit a warning |
+
+### Sensitive Data Redaction
+
+- **Never** log raw input content, matched substrings, or API keys/tokens found during redaction.
+- Log only pattern names, counts, and lengths.
+- Error messages from `ErrorRedactor` should themselves be redacted before logging (avoid logging the very secrets being stripped).
+
+### Correlation IDs
+
+- `ContentSanitizer` and `ErrorRedactor` are stateless services; they do not have access to workflow correlation IDs directly. Callers (activities) should include `{WorkflowInstanceId}` in their log scopes. Document this expectation for downstream stories (11.2+).
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-injection-security-fix.md` Phase 1 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

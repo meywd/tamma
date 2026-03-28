@@ -110,8 +110,41 @@ python.*-c.*import\s+os # python os command execution
 
 2 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. This is a critical gap for a security-sensitive component.
+
+### Required Additions
+
+`ToolCallValidator` and `ActionGate` **must** inject `ILogger<T>` via constructor.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Tool call validation started | DEBUG | `{ToolName}`, `{ToolCallId}`, `{ArgumentsSizeBytes}`, `{WorkflowInstanceId}` | Entry point trace |
+| Tool call rejected: not in allowlist | WARN | `{ToolName}`, `{ToolCallId}`, `{AllowedToolCount}`, `{WorkflowInstanceId}` | Security event — operator should know about unauthorized tool attempts |
+| Tool call rejected: invalid name format | WARN | `{ToolName}`, `{ToolCallId}`, `{WorkflowInstanceId}` | Possible injection attempt |
+| Tool call rejected: invalid JSON arguments | WARN | `{ToolCallId}`, `{ToolName}`, `{ErrorMessage}`, `{WorkflowInstanceId}` | Do NOT log the raw arguments (may contain injection payloads) |
+| Tool call rejected: arguments exceed size limit | WARN | `{ToolCallId}`, `{ToolName}`, `{ArgumentsSizeBytes}`, `{MaxSizeBytes}`, `{WorkflowInstanceId}` | Memory protection trigger |
+| Tool arguments sanitized | DEBUG | `{ToolCallId}`, `{ToolName}`, `{StringFieldsSanitizedCount}` | How many string fields were sanitized in the recursive walk |
+| ActionGate: command blocked | WARN | `{ToolCallId}`, `{ToolName}`, `{BlockedPatternName}`, `{WorkflowInstanceId}` | Never log the actual command — it may contain credentials or dangerous payloads |
+| ActionGate: command allowed | DEBUG | `{ToolCallId}`, `{ToolName}` | Only log tool name, never the command itself |
+| Tool call validation passed | DEBUG | `{ToolCallId}`, `{ToolName}`, `{ValidationDurationMs}` | Exit point trace with performance metric |
+
+### Sensitive Data Redaction
+
+- **Never** log raw tool call arguments — they may contain shell commands, file paths, or injected content.
+- **Never** log the blocked command string — only the pattern name that triggered the block.
+- Log only tool names (which are from a known vocabulary), tool call IDs, and counts.
+
+### Correlation IDs
+
+- All log messages from `ToolCallValidator` and `ActionGate` must include `{WorkflowInstanceId}` and `{ToolCallId}` for cross-referencing with the tool loop logs in Story 12.2.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-injection-security-fix.md` Phase 3 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

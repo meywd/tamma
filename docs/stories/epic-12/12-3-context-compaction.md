@@ -106,8 +106,39 @@ were run, what errors occurred, and what decisions were made. Be concise but com
 
 2 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 9 (AC#9) specifies: "Compaction events are logged: 'Context compaction triggered at {tokenCount}/{contextWindow} tokens, compacted {messageCount} messages'". Line 87 specifies: "Log compaction at INFO level (not DEBUG) since it is a significant event." Good foundation, but insufficient for debugging compaction failures and performance issues.
+
+### Required Additions
+
+`ContextCompactor` **must** inject `ILogger<T>` via constructor. `TokenEstimator` is a static utility — callers log.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Token estimate computed | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{EstimatedTokens}`, `{ContextWindowTokens}`, `{ThresholdPercent}`, `{IsAboveThreshold}` | Per-turn check before LLM call |
+| Context compaction triggered | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{EstimatedTokens}`, `{ContextWindowTokens}`, `{MessageCountBefore}`, `{MessageCountToSummarize}` | Already partially specified in AC#9 — formalized here |
+| Context compaction completed | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{MessageCountBefore}`, `{MessageCountAfter}`, `{TokensBefore}`, `{TokensAfter}`, `{CompactionDurationMs}`, `{SummarizationTokensUsed}` | Post-compaction summary |
+| Context compaction skipped (too few messages) | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{MessageCount}` | Fewer than 6 messages — nothing to compact |
+| Context compaction failed (LLM error) | WARN | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ExceptionType}`, `{ExceptionMessage}` | Best-effort failure — loop continues with uncompacted history |
+| Summarization LLM call started | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{InputSizeChars}` | The separate summarization call |
+| Summarization LLM call completed | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{SummaryLengthChars}`, `{SummarizationTokens}`, `{DurationMs}` | Summarization result metadata |
+
+### Sensitive Data Redaction
+
+- **Never** log the summarization prompt content or the generated summary text.
+- Log only message counts, token estimates, and durations.
+
+### Correlation IDs
+
+- All compaction logs must include `{WorkflowInstanceId}` and `{TurnNumber}` to correlate with the tool loop turn that triggered compaction.
+- Summarization token usage should be included in `{CumulativeTokens}` reported by the tool loop (Story 12.2).
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-agentic-tool-loop.md` Phase 2 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

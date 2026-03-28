@@ -140,8 +140,51 @@ return await AgenticToolLoop(systemPrompt, userPrompt, tools, config, ct);
 
 3-4 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 121 mentions: "log WARN: 'Tool loop reached maxSteps ({maxSteps}), returning last response'". This is a single log statement. The tool loop is the most complex runtime path in the system and needs comprehensive observability.
+
+### Required Additions
+
+`CallLlmInlineActivity` already has `ILogger<CallLlmInlineActivity>`. Use it throughout the loop.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Tool loop entered | INFO | `{WorkflowInstanceId}`, `{Provider}`, `{Model}`, `{MaxSteps}`, `{AllowedToolCount}` | One-time log at loop entry |
+| Tool loop turn started | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{MessageCount}`, `{EstimatedTokens}` | Per-turn entry point |
+| LLM response received in loop | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{StopReason}`, `{ToolCallCount}`, `{InputTokens}`, `{OutputTokens}`, `{DurationMs}` | Per-turn LLM response metadata |
+| Tool call dispatched | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolCallId}`, `{ToolName}` | Before each tool execution |
+| Tool call result received | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolCallId}`, `{ToolName}`, `{Success}`, `{DurationMs}`, `{OutputSizeBytes}` | After each tool execution |
+| Tool call rejected (not allowed) | WARN | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolCallId}`, `{ToolName}` | Tool not in allowedTools list |
+| Tool call rejected (unknown tool) | WARN | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolCallId}`, `{ToolName}` | Tool not in registry |
+| Tool call exception | ERROR | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolCallId}`, `{ToolName}`, `{ExceptionType}`, `{ExceptionMessage}` | Tool execution threw |
+| Tool loop turn completed | INFO | `{WorkflowInstanceId}`, `{TurnNumber}`, `{ToolsExecuted}`, `{ToolsSucceeded}`, `{ToolsFailed}`, `{TurnDurationMs}`, `{CumulativeTokens}` | Per-turn summary |
+| Tool loop completed (text response) | INFO | `{WorkflowInstanceId}`, `{TotalTurns}`, `{TotalToolCalls}`, `{TotalTokens}`, `{TotalDurationMs}` | Normal termination |
+| Tool loop completed (end_turn) | INFO | `{WorkflowInstanceId}`, `{TotalTurns}`, `{TotalToolCalls}`, `{TotalTokens}`, `{TotalDurationMs}` | Normal termination via stop reason |
+| Tool loop exhausted (maxSteps) | WARN | `{WorkflowInstanceId}`, `{MaxSteps}`, `{TotalToolCalls}`, `{TotalTokens}`, `{TotalDurationMs}` | Abnormal termination — LLM did not finish within budget |
+| Token usage per turn | DEBUG | `{WorkflowInstanceId}`, `{TurnNumber}`, `{InputTokens}`, `{OutputTokens}`, `{CumulativeInputTokens}`, `{CumulativeOutputTokens}` | Running token accounting |
+
+### Sensitive Data Redaction
+
+- **Never** log prompt content, tool call arguments, or tool execution output.
+- **Never** log the LLM response text — only metadata (stop reason, token counts, tool call count).
+- Log tool names (from a known vocabulary) and tool call IDs (LLM-assigned, opaque).
+
+### Correlation IDs
+
+- All loop logs must include `{WorkflowInstanceId}` for tracing across the entire workflow execution.
+- `{TurnNumber}` is the loop iteration counter (0-based) — critical for debugging multi-turn sessions.
+- `{ToolCallId}` links to specific tool execution logs from Story 12.1.
+
+### Execution Store Operations
+
+- When `ToolLoopTokens` and `ToolLoopTurns` are written to workflow output variables, log at DEBUG: `{WorkflowInstanceId}`, `{ToolLoopTokens}`, `{ToolLoopTurns}`.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-agentic-tool-loop.md` Phases 1.5-1.7 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

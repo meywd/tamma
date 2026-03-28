@@ -135,8 +135,41 @@ public class TammaThemeProvider
 
 2-3 days (including NuGet troubleshooting)
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. As a Blazor WASM application running in the browser, traditional server-side ILogger is not directly applicable. However, Blazor WASM has its own `ILogger` infrastructure that logs to the browser console.
+
+### Required Additions
+
+`Program.cs` should configure Blazor WASM logging. Custom providers should use `ILogger<T>` where available.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Studio application started | INFO | `{ElsaServerUrl}`, `{AppVersion}` | Logged during `Program.cs` initialization — confirms the backend URL is configured |
+| Branding provider loaded | DEBUG | `{AppTitle}`, `{PrimaryColor}` | Confirms TammaBrandingProvider is active |
+| Theme provider loaded | DEBUG | `{ThemeMode}` ("light" or "dark") | Confirms TammaThemeProvider is active |
+| Backend connection established | INFO | `{ElsaServerUrl}`, `{ConnectionDurationMs}` | First successful API call to the ELSA Server |
+| Backend connection failed | ERROR | `{ElsaServerUrl}`, `{ErrorMessage}` | Studio cannot reach the ELSA Server |
+
+### Sensitive Data Redaction
+
+- Do NOT log API keys or authentication tokens in the browser console.
+- The `ElsaServerUrl` is safe to log (it is a URL, not a secret).
+
+### Correlation IDs
+
+- Blazor WASM does not participate in server-side workflow correlation. No `WorkflowInstanceId` needed.
+- Consider adding a `{SessionId}` (generated at startup) for correlating browser console logs during a user session.
+
+### Note on Log Priority
+
+This story has the **lowest logging priority** in the audit. It is a UI scaffold with no security or workflow implications. The 5 log statements above are sufficient for MVP.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/elsa-studio-customization.md` Phases 1+2 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

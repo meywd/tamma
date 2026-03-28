@@ -138,8 +138,40 @@ The hint name must match the `UIHint` property on the handler class.
 
 3-4 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. UI hint handlers and Blazor components run in the browser — same constraints as Story 14.1.
+
+### Required Additions
+
+UI hint handlers can use Blazor WASM's `ILogger<T>` for browser console logging.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| JSON editor UI hint handler registered | DEBUG | `{HintName}` ("tamma-json-editor") | Logged during DI registration in `Program.cs` |
+| Provider selector UI hint handler registered | DEBUG | `{HintName}` ("tamma-provider-selector") | Logged during DI registration in `Program.cs` |
+| Menu provider registered | DEBUG | `{MenuItemCount}` | Logged during DI registration |
+| JSON validation error in editor | WARN | `{FieldName}`, `{ErrorMessage}` | When user enters invalid JSON — browser console feedback for developers |
+| Provider selection changed | DEBUG | `{SelectedProviders}`, `{FieldName}` | User interaction trace |
+
+### Sensitive Data Redaction
+
+- Do NOT log the JSON content from the editor — it may contain tool definitions with sensitive schema details.
+- Provider names are from a known list and safe to log.
+
+### Correlation IDs
+
+- Not applicable for browser-side UI components. No workflow correlation needed.
+
+### Note on Log Priority
+
+This story has the **lowest logging priority** in the entire audit. It is a UI customization story. The 5 log statements above are for developer convenience during debugging, not for production observability.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/elsa-studio-customization.md` Phases 5+6 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

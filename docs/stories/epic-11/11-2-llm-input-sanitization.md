@@ -96,8 +96,38 @@ var sanitizedInput = SecurityHelpers.SanitizeForPrompt(rawInput);
 
 2-3 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 78 mentions: "Add a DEBUG log line at each sanitization point: `Sanitized input for {ActivityName}, patterns matched: {count}`." This is adequate for per-call tracing but lacks broader coverage.
+
+### Required Additions
+
+All activities already have `ILogger<T>` (see `CallLlmInlineActivity`, `CallLlmActivity` in codebase). Use existing logger instances.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Input sanitization applied | DEBUG | `{ActivityName}`, `{PatternsMatchedCount}`, `{InputField}` (e.g., "SystemPrompt", "UserPrompt") | Per-field, per-activity. Already partially specified in implementation notes. |
+| Workflow prompt sanitization applied | DEBUG | `{WorkflowName}`, `{FieldName}`, `{PatternsMatchedCount}` | For workflow lambda contexts using `SecurityHelpers.SanitizeForPrompt()` |
+| Sanitization skipped (empty/null input) | DEBUG | `{ActivityName}`, `{InputField}` | Avoid unnecessary sanitizer calls; log that skip happened |
+| Injection pattern detected in input | WARN | `{ActivityName}`, `{PatternName}`, `{InputField}`, `{WorkflowInstanceId}` | Elevated from DEBUG because an actual injection attempt warrants operator attention |
+| Total injection patterns detected per LLM call | INFO | `{ActivityName}`, `{TotalPatternsMatched}`, `{Provider}`, `{WorkflowInstanceId}` | Aggregate count per LLM call for security dashboards |
+
+### Sensitive Data Redaction
+
+- **Never** log the raw prompt content (system or user) — prompts may contain proprietary instructions or user-supplied PII.
+- Log only field names, pattern counts, and activity/workflow identifiers.
+- The `SecurityHelpers.SanitizeForPrompt()` static helper cannot log (no DI). Document that callers in workflow lambdas must log before/after calling the helper.
+
+### Correlation IDs
+
+- Activities have access to `ActivityExecutionContext` which provides `WorkflowInstanceId`. Include `{WorkflowInstanceId}` and `{ActivityId}` in all log messages from activity classes.
+- Workflow prompt builders should include `{WorkflowDefinitionId}` when logging sanitization in lambda contexts.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/llm-injection-security-fix.md` Phase 2 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

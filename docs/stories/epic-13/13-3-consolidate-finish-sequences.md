@@ -96,8 +96,41 @@ END
 
 1 day
 
+## Logging Requirements
+
+### Existing Coverage
+
+Line 79 mentions: "Add `finishReason` to the workflow completion event payload. This is net-new information that improves observability." This is about event payloads, not structured logging. The story has **no ILogger logging requirements** specified.
+
+### Required Additions
+
+The shared finish sequence in `SingleIssueCycleWorkflow` should log via the workflow's `ILogger<T>`.
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Workflow finish reason set | INFO | `{WorkflowInstanceId}`, `{FinishReason}`, `{IssueNumber}` | Logged when `SetVariable(finishReason = "...")` executes — one of 7 values |
+| Shared finish sequence entered | INFO | `{WorkflowInstanceId}`, `{FinishReason}`, `{Success}`, `{IssueNumber}`, `{TotalDurationMs}` | The single consolidated finish point — primary audit log for workflow completion |
+| Workflow completion event emitted | DEBUG | `{WorkflowInstanceId}`, `{FinishReason}`, `{EventType}` | Confirmation that the completion event was recorded in the event store |
+| Workflow output variables set | DEBUG | `{WorkflowInstanceId}`, `{FinishReason}`, `{Success}` | Confirmation that output variables were written |
+
+### Sensitive Data Redaction
+
+- `{FinishReason}` values are from a known enum (`limits_exceeded`, `plan_rejected`, `tdd_failure`, `ci_failure`, `review_rejected`, `merge_failure`, `success`) — safe to log.
+- Do NOT log error message details in the finish log — those are already logged at the point of failure.
+
+### Correlation IDs
+
+- `{WorkflowInstanceId}` and `{IssueNumber}` must be included in all finish logs.
+- `{FinishReason}` serves as the primary categorization for workflow outcome analytics.
+- The shared finish sequence log is the canonical "workflow completed" signal — dashboards and alerting should key on this log entry.
+
+### Execution Store Operations
+
+- The `finishReason` field added to the workflow completion event payload (line 79) enhances the execution store record. Log at DEBUG level when this event is emitted to confirm it was recorded.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/single-issue-workflow-split.md` Phase 4 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |

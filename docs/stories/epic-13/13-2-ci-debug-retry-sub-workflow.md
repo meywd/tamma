@@ -115,8 +115,50 @@ dispatchCiDebugging (DispatchWorkflow: DebuggingWorkflow)
 
 2 days
 
+## Logging Requirements
+
+### Existing Coverage
+
+The story has **no logging requirements** specified. The CI retry loop is the second most complex sub-workflow extraction, with 3 loop-back paths in the parent that all need traceability.
+
+### Required Additions
+
+`CiWithDebugRetryWorkflow` should use `ILogger<T>` (injected via constructor or resolved from the execution context).
+
+| Event | Level | Structured Properties | Notes |
+|-------|-------|----------------------|-------|
+| Sub-workflow started | INFO | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{IssueNumber}`, `{BranchName}`, `{InitialCiRetryCount}` | Entry point — include initial counter value for debugging the pass-through behavior |
+| Testing pipeline dispatched | INFO | `{WorkflowInstanceId}`, `{CiAttempt}`, `{IssueNumber}` | Each dispatch to the testing workflow |
+| Testing pipeline result received | INFO | `{WorkflowInstanceId}`, `{CiAttempt}`, `{Passed}`, `{DurationMs}` | CI pass/fail result |
+| CI retry guard evaluated | DEBUG | `{WorkflowInstanceId}`, `{CiRetryCount}`, `{MaxRetries}`, `{Allowed}` | Whether retry is within limit |
+| CI retry counter incremented | DEBUG | `{WorkflowInstanceId}`, `{CiRetryCount}` (new value) | Counter state after increment |
+| Debugging workflow dispatched (CI retry) | INFO | `{WorkflowInstanceId}`, `{CiRetryCount}`, `{IssueNumber}` | Debugging sub-workflow dispatch for CI failure |
+| Sub-workflow completed: passed | INFO | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{TotalAttempts}`, `{FinalCiRetryCount}`, `{TotalDurationMs}` | Normal exit |
+| Sub-workflow completed: retry limit reached | WARN | `{WorkflowInstanceId}`, `{ParentWorkflowInstanceId}`, `{CiRetryCount}`, `{MaxRetries}`, `{ErrorMessage}` | Failure exit |
+| Parent workflow: CI sub-workflow dispatched | INFO | `{WorkflowInstanceId}`, `{ChildDefinitionId}` ("ci-with-debug-retry"), `{IssueNumber}`, `{CiRetryCountPassed}` | From parent — includes counter pass-through value |
+| Parent workflow: CI sub-workflow result received | INFO | `{WorkflowInstanceId}`, `{ChildPassed}`, `{ReturnedCiRetryCount}` | Counter return value for debugging |
+| Parent workflow: loop-back to CI (review-fix) | INFO | `{WorkflowInstanceId}`, `{LoopBackReason}` ("review-fix"), `{CiRetryCountPassed}` | Traces which loop-back path re-dispatched CI |
+| Parent workflow: loop-back to CI (merge-approval-test) | INFO | `{WorkflowInstanceId}`, `{LoopBackReason}` ("merge-approval-test"), `{CiRetryCountPassed}` | Traces the "test" signal loop-back |
+
+### Sensitive Data Redaction
+
+- Do NOT log test output, CI logs, or repository URLs.
+- Log only issue numbers, branch names, counter values, and pass/fail status.
+
+### Correlation IDs
+
+- `{WorkflowInstanceId}` is the child CI sub-workflow's instance ID.
+- `{ParentWorkflowInstanceId}` must be passed as input and included in all child logs.
+- `{IssueNumber}` is the primary business identifier — include in all logs for filtering.
+- `{LoopBackReason}` in parent logs is critical for understanding why CI was re-dispatched (3 possible reasons).
+
+### Execution Store Operations
+
+- The `ciRetryCount` pass-through (documented as likely bug) must be logged at INFO level when passed and when returned, to provide evidence for the future fix ticket.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation from `.dev/plans/single-issue-workflow-split.md` Phase 3 | Architecture Team |
+| 2026-03-28 | 1.1 | Added Logging Requirements section | Logging Audit |
