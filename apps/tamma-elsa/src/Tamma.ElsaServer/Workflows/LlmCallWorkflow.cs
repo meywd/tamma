@@ -191,12 +191,14 @@ public class LlmCallWorkflow : WorkflowBase
                 else
                     chain = new List<string> { "anthropic", "openai", "openrouter" };
 
-                // Filter through provider allowlist
+                // Filter through provider allowlist — reject unknown providers
                 var filtered = ProviderAllowlist.FilterAllowedDefault(chain);
                 if (filtered.Count == 0)
                 {
-                    // All providers rejected — fall back to default allowed providers
-                    filtered = new List<string> { "anthropic", "openai", "openrouter" };
+                    // All providers rejected — fail with clear error, do not silently fall back
+                    throw new InvalidOperationException(
+                        $"All providers in chain were rejected by allowlist: [{string.Join(", ", chain)}]. " +
+                        "Configure allowed providers via Security:ProviderAllowlist:AdditionalProviders.");
                 }
 
                 return (object)filtered;
