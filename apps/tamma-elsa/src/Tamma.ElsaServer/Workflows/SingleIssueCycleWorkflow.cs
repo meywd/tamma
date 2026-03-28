@@ -480,16 +480,87 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         mergeSuccess.SetDisplayText("Merged?");
 
         // ================================================================
-        // Finish nodes with SetOutput
+        // Finish reason SetVariable nodes (one per exit path)
         // ================================================================
-        var finishSuccess = new Sequence
+        var setReasonSuccess = new SetVariable
         {
-            Id = "FinishSuccess",
-            Name = "Finish Success",
+            Id = "SetReasonSuccess",
+            Name = "Set Reason: Success",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"success")
+        };
+        setReasonSuccess.SetDisplayText("Set Reason: Success");
+
+        var setReasonNoIssues = new SetVariable
+        {
+            Id = "SetReasonNoIssues",
+            Name = "Set Reason: No Issues",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"noIssues")
+        };
+        setReasonNoIssues.SetDisplayText("Set Reason: No Issues");
+
+        var setReasonRejected = new SetVariable
+        {
+            Id = "SetReasonRejected",
+            Name = "Set Reason: Rejected",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"rejected")
+        };
+        setReasonRejected.SetDisplayText("Set Reason: Rejected");
+
+        var setReasonError = new SetVariable
+        {
+            Id = "SetReasonError",
+            Name = "Set Reason: Error",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"error")
+        };
+        setReasonError.SetDisplayText("Set Reason: Error");
+
+        var setReasonTddFailed = new SetVariable
+        {
+            Id = "SetReasonTddFailed",
+            Name = "Set Reason: TDD Failed",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"tddFailed")
+        };
+        setReasonTddFailed.SetDisplayText("Set Reason: TDD Failed");
+
+        var setReasonCiFailed = new SetVariable
+        {
+            Id = "SetReasonCiFailed",
+            Name = "Set Reason: CI Failed",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"ciFailed")
+        };
+        setReasonCiFailed.SetDisplayText("Set Reason: CI Failed");
+
+        var setReasonMergeFailed = new SetVariable
+        {
+            Id = "SetReasonMergeFailed",
+            Name = "Set Reason: Merge Failed",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"mergeFailed")
+        };
+        setReasonMergeFailed.SetDisplayText("Set Reason: Merge Failed");
+
+        // ================================================================
+        // Shared Finish Sequence — all exit paths converge here
+        // ================================================================
+        var sharedFinish = new Sequence
+        {
+            Id = "SharedFinishSequence",
+            Name = "Shared Finish",
             Activities =
             {
-                WithLabel(new SetVariable { Id = "SetSuccessReason", Name = "Set Success Reason", Variable = exitReason, Value = new Input<object?>(_ => (object)"success") }, "Set Success Reason"),
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonSuccess", Name = "Set Exit Reason Success", OutputName = new("exitReason"), OutputValue = new(_ => (object)"success") }, "Set Exit Reason Success"),
+                // Always set exitReason output
+                WithLabel(new SetOutput { Id = "SetOutputExitReason", Name = "Set Exit Reason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)exitReason.Get(ctx)) }, "Set Exit Reason"),
+                // Always set finishReason output (same value, explicit name for analytics)
+                WithLabel(new SetOutput { Id = "SetOutputFinishReason", Name = "Set Finish Reason", OutputName = new("finishReason"), OutputValue = new(ctx => (object)exitReason.Get(ctx)) }, "Set Finish Reason"),
+                // Derive success flag from reason
+                WithLabel(new SetOutput { Id = "SetOutputSuccess", Name = "Set Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)(exitReason.Get(ctx) == "success")) }, "Set Success Flag"),
+                // Conditionally set success-specific outputs (issueNumber, prNumber, mergeSha)
                 WithLabel(new SetOutput { Id = "SetOutputIssueNumber", Name = "Set Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) }, "Set Issue Number"),
                 WithLabel(new SetOutput { Id = "SetOutputPrNumber", Name = "Set PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) }, "Set PR Number"),
                 WithLabel(new SetOutput { Id = "SetOutputMergeSha", Name = "Set Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx =>
@@ -499,73 +570,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 }) }, "Set Merge SHA")
             }
         };
-        finishSuccess.SetDisplayText("Finish Success");
-
-        var finishNoIssues = new Sequence
-        {
-            Id = "FinishNoIssues",
-            Name = "Finish No Issues",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonNoIssues", Name = "Set Exit Reason No Issues", OutputName = new("exitReason"), OutputValue = new(_ => (object)"noIssues") }, "Set Exit Reason No Issues")
-            }
-        };
-        finishNoIssues.SetDisplayText("Finish No Issues");
-
-        var finishRejected = new Sequence
-        {
-            Id = "FinishRejected",
-            Name = "Finish Rejected",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonRejected", Name = "Set Exit Reason Rejected", OutputName = new("exitReason"), OutputValue = new(_ => (object)"rejected") }, "Set Exit Reason Rejected")
-            }
-        };
-        finishRejected.SetDisplayText("Finish Rejected");
-
-        var finishError = new Sequence
-        {
-            Id = "FinishError",
-            Name = "Finish Error",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonError", Name = "Set Exit Reason Error", OutputName = new("exitReason"), OutputValue = new(_ => (object)"error") }, "Set Exit Reason Error")
-            }
-        };
-        finishError.SetDisplayText("Finish Error");
-
-        var finishTddFailed = new Sequence
-        {
-            Id = "FinishTddFailed",
-            Name = "Finish TDD Failed",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonTddFailed", Name = "Set Exit Reason TDD Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"tddFailed") }, "Set Exit Reason TDD Failed")
-            }
-        };
-        finishTddFailed.SetDisplayText("Finish TDD Failed");
-
-        var finishCiFailed = new Sequence
-        {
-            Id = "FinishCiFailed",
-            Name = "Finish CI Failed",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonCiFailed", Name = "Set Exit Reason CI Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"ciFailed") }, "Set Exit Reason CI Failed")
-            }
-        };
-        finishCiFailed.SetDisplayText("Finish CI Failed");
-
-        var finishMergeFailed = new Sequence
-        {
-            Id = "FinishMergeFailed",
-            Name = "Finish Merge Failed",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputExitReasonMergeFailed", Name = "Set Exit Reason Merge Failed", OutputName = new("exitReason"), OutputValue = new(_ => (object)"mergeFailed") }, "Set Exit Reason Merge Failed")
-            }
-        };
-        finishMergeFailed.SetDisplayText("Finish Merge Failed");
+        sharedFinish.SetDisplayText("Shared Finish");
 
         var finish = new Finish { Id = "Finish", Name = "Complete: Issue Cycle Done" };
         finish.SetDisplayText("Complete: Issue Cycle Done");
@@ -613,10 +618,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // Step 12: Merge PR
                 mergePr, mergeSuccess,
 
-                // Finish nodes
-                finishSuccess, finishNoIssues, finishRejected,
-                finishError, finishTddFailed, finishCiFailed,
-                finishMergeFailed, finish
+                // Finish reason nodes + shared finish
+                setReasonSuccess, setReasonNoIssues, setReasonRejected,
+                setReasonError, setReasonTddFailed, setReasonCiFailed,
+                setReasonMergeFailed, sharedFinish, finish
             },
 
             Connections =
@@ -628,7 +633,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(selectIssue, extractIssue),
                 Connect(extractIssue, hasIssue),
                 ConnectOutcome(hasIssue, "True", gatherContext),
-                ConnectOutcome(hasIssue, "False", finishNoIssues),
+                ConnectOutcome(hasIssue, "False", setReasonNoIssues),
 
                 // --- Step 2: Context Gathering ---
                 Connect(gatherContext, extractContext),
@@ -638,30 +643,30 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(generatePlan, extractPlan),
                 Connect(extractPlan, planApproved),
                 ConnectOutcome(planApproved, "True", createBranch),
-                ConnectOutcome(planApproved, "False", finishRejected),
+                ConnectOutcome(planApproved, "False", setReasonRejected),
 
                 // --- Step 4: Branch Creation ---
                 Connect(createBranch, extractBranch),
                 Connect(extractBranch, branchCreated),
                 ConnectOutcome(branchCreated, "True", dispatchTddRetry),
-                ConnectOutcome(branchCreated, "False", finishError),
+                ConnectOutcome(branchCreated, "False", setReasonError),
 
                 // --- Steps 5-7: TDD Cycle (sub-workflow) ---
                 Connect(dispatchTddRetry, tddRetrySuccess),
                 ConnectOutcome(tddRetrySuccess, "True", createPr),
-                ConnectOutcome(tddRetrySuccess, "False", finishTddFailed),
+                ConnectOutcome(tddRetrySuccess, "False", setReasonTddFailed),
 
                 // --- Step 8: Create PR ---
                 Connect(createPr, extractPr),
                 Connect(extractPr, prCreated),
                 ConnectOutcome(prCreated, "True", dispatchCiRetry),
-                ConnectOutcome(prCreated, "False", finishError),
+                ConnectOutcome(prCreated, "False", setReasonError),
 
                 // --- Step 9: CI Pipeline (sub-workflow) ---
                 Connect(dispatchCiRetry, extractCiRetryCount),
                 Connect(extractCiRetryCount, ciRetryPassed),
                 ConnectOutcome(ciRetryPassed, "True", reviewFixCheck),
-                ConnectOutcome(ciRetryPassed, "False", finishCiFailed),
+                ConnectOutcome(ciRetryPassed, "False", setReasonCiFailed),
 
                 // --- Step 10: Review Fix Check ---
                 Connect(reviewFixCheck, hasReviewComments),
@@ -673,21 +678,22 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(mergeDecision, "True", mergePr),
                 ConnectOutcome(mergeDecision, "False", testDecision),
                 ConnectOutcome(testDecision, "True", dispatchCiRetry), // re-run tests
-                ConnectOutcome(testDecision, "False", finishRejected), // rejected
+                ConnectOutcome(testDecision, "False", setReasonRejected), // rejected
 
                 // --- Step 12: Merge PR ---
                 Connect(mergePr, mergeSuccess),
-                ConnectOutcome(mergeSuccess, "True", finishSuccess),
-                ConnectOutcome(mergeSuccess, "False", finishMergeFailed),
+                ConnectOutcome(mergeSuccess, "True", setReasonSuccess),
+                ConnectOutcome(mergeSuccess, "False", setReasonMergeFailed),
 
-                // --- All finish nodes lead to terminal ---
-                Connect(finishSuccess, finish),
-                Connect(finishNoIssues, finish),
-                Connect(finishRejected, finish),
-                Connect(finishError, finish),
-                Connect(finishTddFailed, finish),
-                Connect(finishCiFailed, finish),
-                Connect(finishMergeFailed, finish)
+                // --- All reason nodes lead to shared finish, then terminal ---
+                Connect(setReasonSuccess, sharedFinish),
+                Connect(setReasonNoIssues, sharedFinish),
+                Connect(setReasonRejected, sharedFinish),
+                Connect(setReasonError, sharedFinish),
+                Connect(setReasonTddFailed, sharedFinish),
+                Connect(setReasonCiFailed, sharedFinish),
+                Connect(setReasonMergeFailed, sharedFinish),
+                Connect(sharedFinish, finish)
             }
         };
     }
