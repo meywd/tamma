@@ -38,3 +38,7 @@ services:
   tamma-dashboard:
     ports:
       - "3001:3001"
+
+  elsa-studio:
+    ports:
+      - "14000:80"

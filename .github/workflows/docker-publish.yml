@@ -214,6 +214,9 @@ jobs:
           - name: tamma-api-dotnet
             context: apps/tamma-elsa/src
             dockerfile: apps/tamma-elsa/src/Tamma.Api/Dockerfile
+          - name: tamma-studio
+            context: apps/tamma-elsa/src
+            dockerfile: apps/tamma-elsa/src/Tamma.Studio/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -403,6 +406,9 @@ jobs:
               build: !reset null
             tamma-api-dotnet:
               image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
+              build: !reset null
+            elsa-studio:
+              image: ghcr.io/${OWNER}/tamma-studio:${IMAGE_TAG}
               build: !reset null
           YAML
 

@@ -96,12 +96,13 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # ELSA Studio (Blazor WASM UI)
+  # ELSA Studio (Custom Tamma Blazor WASM UI via nginx)
   # ---------------------------------------------------------------------------
   elsa-studio:
-    image: elsaworkflows/elsa-studio-v3-5:latest
+    build:
+      context: ../apps/tamma-elsa/src
+      dockerfile: Tamma.Studio/Dockerfile
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
       # URL must be browser-accessible (Blazor WASM runs client-side)
       ELSASERVER__URL: https://elsa.tamma.dev/elsa/api
     depends_on:

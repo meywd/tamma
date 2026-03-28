@@ -67,6 +67,14 @@ services:
           memory: 256M
     # No exposed ports — reachable via nginx-proxy only
 
+  elsa-studio:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    # No exposed ports — reachable via nginx-proxy only
+
   nginx-proxy:
     deploy:
       resources:
