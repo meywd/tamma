@@ -32,8 +32,8 @@ if (opensearchEnabled)
         ModifyConnectionSettings = conn =>
             conn.ServerCertificateValidationCallback((_, _, _, _) => true),
         EmitEventFailure = EmitEventFailureHandling.WriteToSelfLog,
-        FailureCallback = e => Console.Error.WriteLine(
-            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate}"),
+        FailureCallback = (e, ex) => Console.Error.WriteLine(
+            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate} — {ex?.Message}"),
         BufferBaseFilename = "./logs/opensearch-buffer",
         BufferFileSizeLimitBytes = 50_000_000, // 50 MB buffer
         Period = TimeSpan.FromSeconds(2),
