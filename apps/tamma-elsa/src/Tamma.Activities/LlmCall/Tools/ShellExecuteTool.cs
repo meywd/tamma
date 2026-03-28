@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
@@ -17,24 +16,6 @@ public class ShellExecuteTool : IToolExecutor
     private readonly ILogger<ShellExecuteTool> _logger;
     private readonly string _workspaceRoot;
     private readonly int _timeoutSeconds;
-
-    /// <summary>
-    /// Minimal blocked command patterns (until ActionGate from Story 11.3 is available).
-    /// Each entry has a name for logging and a regex pattern.
-    /// </summary>
-    public static readonly (string Name, Regex Pattern)[] BlockedPatterns =
-    {
-        ("rm_rf_root", new Regex(@"\brm\s+-rf\s+/", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("sudo", new Regex(@"\bsudo\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("mkfs", new Regex(@"\bmkfs\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("dd_if", new Regex(@"\bdd\s+if=", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("recursive_chmod_root", new Regex(@"\b(chmod|chown)\s+.*(-R|--recursive)\s+/", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("curl_pipe_shell", new Regex(@"\bcurl\b.*\|\s*(bash|sh)", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("wget_pipe_shell", new Regex(@"\bwget\b.*\|\s*(bash|sh)", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("truncate_system_file", new Regex(@":>\s*/", RegexOptions.Compiled)),
-        ("format_disk", new Regex(@"\bformat\b.*[a-zA-Z]:", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-        ("reboot_shutdown", new Regex(@"\b(reboot|shutdown|halt|poweroff)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
-    };
 
     public string ToolName => "shell_execute";
 
@@ -80,20 +61,18 @@ public class ShellExecuteTool : IToolExecutor
             var command = args.GetProperty("command").GetString()
                           ?? throw new ArgumentException("Missing 'command' argument");
 
-            // Validate against blocked patterns
-            foreach (var (name, pattern) in BlockedPatterns)
+            // Validate against blocked patterns (shared via CommandValidator)
+            var blockedPattern = CommandValidator.GetBlockedPatternName(command);
+            if (blockedPattern != null)
             {
-                if (pattern.IsMatch(command))
-                {
-                    _logger.LogWarning(
-                        "Shell command blocked by ActionGate: {ToolName} {ToolCallId} blockedPattern={BlockedPatternName}",
-                        ToolName, toolCallId, name);
+                _logger.LogWarning(
+                    "Shell command blocked by ActionGate: {ToolName} {ToolCallId} blockedPattern={BlockedPatternName}",
+                    ToolName, toolCallId, blockedPattern);
 
-                    var blockedResult = new ToolExecutionResult(toolCallId, ToolName, false,
-                        $"Command blocked by security policy (matched: {name}).", sw.ElapsedMilliseconds);
-                    LogCompletion(toolCallId, blockedResult);
-                    return blockedResult;
-                }
+                var blockedResult = new ToolExecutionResult(toolCallId, ToolName, false,
+                    $"Command blocked by security policy (matched: {blockedPattern}).", sw.ElapsedMilliseconds);
+                LogCompletion(toolCallId, blockedResult);
+                return blockedResult;
             }
 
             _logger.LogDebug(
@@ -159,6 +138,10 @@ public class ShellExecuteTool : IToolExecutor
                 LogCompletion(toolCallId, timeoutResult);
                 return timeoutResult;
             }
+
+            // Synchronous WaitForExit ensures async OutputDataReceived/ErrorDataReceived
+            // event handlers have completed before we read the builders.
+            process.WaitForExit();
 
             var stdout = stdoutBuilder.ToString();
             var stderr = stderrBuilder.ToString();

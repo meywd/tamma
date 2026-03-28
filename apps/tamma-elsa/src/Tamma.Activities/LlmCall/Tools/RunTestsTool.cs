@@ -89,6 +89,21 @@ public class RunTestsTool : IToolExecutor
             if (!string.IsNullOrWhiteSpace(filter))
                 fullCommand.Append($" --filter \"{filter}\"");
 
+            // Validate against blocked patterns (shared via CommandValidator)
+            var commandStr = fullCommand.ToString();
+            var blockedPattern = CommandValidator.GetBlockedPatternName(commandStr);
+            if (blockedPattern != null)
+            {
+                _logger.LogWarning(
+                    "Test command blocked by security policy: {ToolName} {ToolCallId} blockedPattern={BlockedPatternName}",
+                    ToolName, toolCallId, blockedPattern);
+
+                var blockedResult = new ToolExecutionResult(toolCallId, ToolName, false,
+                    $"Command blocked by security policy (matched: {blockedPattern}).", sw.ElapsedMilliseconds);
+                LogCompletion(toolCallId, blockedResult);
+                return blockedResult;
+            }
+
             _logger.LogDebug(
                 "Test execution started: {ToolName} {ToolCallId} timeout={TimeoutMs}ms",
                 ToolName, toolCallId, _timeoutSeconds * 1000);
@@ -97,7 +112,6 @@ public class RunTestsTool : IToolExecutor
             cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
 
             var isWindows = OperatingSystem.IsWindows();
-            var commandStr = fullCommand.ToString();
 
             var psi = new ProcessStartInfo
             {
@@ -154,6 +168,10 @@ public class RunTestsTool : IToolExecutor
                 LogCompletion(toolCallId, timeoutResult);
                 return timeoutResult;
             }
+
+            // Synchronous WaitForExit ensures async OutputDataReceived/ErrorDataReceived
+            // event handlers have completed before we read the builders.
+            process.WaitForExit();
 
             var stdout = stdoutBuilder.ToString();
             var stderr = stderrBuilder.ToString();

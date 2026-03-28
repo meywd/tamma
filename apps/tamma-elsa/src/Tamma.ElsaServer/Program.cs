@@ -100,12 +100,14 @@ builder.Services.AddCors(options =>
 builder.Services.AddHttpClient();
 
 // Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileReadTool>();
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileWriteTool>();
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
-builder.Services.AddTransient<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
+// All tools are stateless singletons. The registry (also Singleton) captures them via
+// IEnumerable<IToolExecutor>, so they must share the same lifetime to avoid a captive dependency.
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileReadTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileWriteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
 builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry, Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
 
 // Security services (Epic 11 — LLM injection hardening)

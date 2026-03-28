@@ -84,9 +84,22 @@ public class GitOperationsTool : IToolExecutor
                 return errorResult;
             }
 
-            var gitArgs = string.IsNullOrWhiteSpace(extraArgs)
-                ? subcommand
-                : $"{subcommand} {extraArgs}";
+            // Block shell metacharacters in extra args to prevent command injection.
+            // Git is invoked directly (not via shell), so metacharacters have no
+            // legitimate use and indicate an injection attempt.
+            if (!string.IsNullOrWhiteSpace(extraArgs) &&
+                CommandValidator.ContainsShellMetacharacters(extraArgs))
+            {
+                _logger.LogWarning(
+                    "Git args blocked — shell metacharacters detected: {ToolName} {ToolCallId}",
+                    ToolName, toolCallId);
+
+                var injectionResult = new ToolExecutionResult(toolCallId, ToolName, false,
+                    "Git arguments blocked: shell metacharacters are not allowed.",
+                    sw.ElapsedMilliseconds);
+                LogCompletion(toolCallId, injectionResult, subcommand);
+                return injectionResult;
+            }
 
             _logger.LogDebug(
                 "Git operation: {ToolName} {ToolCallId} subcommand={Subcommand}",
@@ -98,13 +111,23 @@ public class GitOperationsTool : IToolExecutor
             var psi = new ProcessStartInfo
             {
                 FileName = _gitBinary,
-                Arguments = gitArgs,
                 WorkingDirectory = _workspaceRoot,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
+            // Use ArgumentList (not Arguments string) to prevent injection.
+            // Each token is passed as a separate OS-level argument.
+            psi.ArgumentList.Add(subcommand);
+            if (!string.IsNullOrWhiteSpace(extraArgs))
+            {
+                foreach (var token in extraArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    psi.ArgumentList.Add(token);
+                }
+            }
 
             using var process = new Process { StartInfo = psi };
             var stdoutBuilder = new StringBuilder();
@@ -140,6 +163,10 @@ public class GitOperationsTool : IToolExecutor
                 LogCompletion(toolCallId, timeoutResult, subcommand);
                 return timeoutResult;
             }
+
+            // Synchronous WaitForExit ensures async OutputDataReceived/ErrorDataReceived
+            // event handlers have completed before we read the builders.
+            process.WaitForExit();
 
             var stdout = stdoutBuilder.ToString();
             var stderr = stderrBuilder.ToString();

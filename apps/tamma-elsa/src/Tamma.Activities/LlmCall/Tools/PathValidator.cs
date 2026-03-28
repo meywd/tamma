@@ -2,6 +2,7 @@ namespace Tamma.Activities.LlmCall.Tools;
 
 /// <summary>
 /// Validates and resolves file paths against a workspace root to prevent directory traversal.
+/// Also resolves symlinks so that a symlink pointing outside the workspace is rejected.
 /// </summary>
 public static class PathValidator
 {
@@ -32,7 +33,47 @@ public static class PathValidator
 
         var resolvedPath = Path.GetFullPath(combinedPath);
 
-        // Check if the resolved path is within or equal to the workspace root
+        // First check: the logical path must be within the workspace
+        ValidateWithinWorkspace(resolvedPath, normalizedRoot);
+
+        // Second check: if the path exists on disk, resolve symlinks and re-validate
+        // the final physical target. This prevents symlink-based traversal attacks
+        // where a symlink inside the workspace points to a file outside it.
+        if (File.Exists(resolvedPath) || Directory.Exists(resolvedPath))
+        {
+            var fileInfo = new FileInfo(resolvedPath);
+            if (fileInfo.LinkTarget != null)
+            {
+                // ResolveLinkTarget(true) follows the entire chain to the final target.
+                var finalTarget = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
+                if (finalTarget != null)
+                {
+                    var symlinkResolvedPath = Path.GetFullPath(finalTarget.FullName);
+                    ValidateWithinWorkspace(symlinkResolvedPath, normalizedRoot);
+                }
+            }
+
+            // Also check if it's a directory symlink
+            var dirInfo = new DirectoryInfo(resolvedPath);
+            if (dirInfo.LinkTarget != null)
+            {
+                var finalTarget = dirInfo.ResolveLinkTarget(returnFinalTarget: true);
+                if (finalTarget != null)
+                {
+                    var symlinkResolvedPath = Path.GetFullPath(finalTarget.FullName);
+                    ValidateWithinWorkspace(symlinkResolvedPath, normalizedRoot);
+                }
+            }
+        }
+
+        return resolvedPath;
+    }
+
+    /// <summary>
+    /// Validates that a resolved path is within or equal to the workspace root.
+    /// </summary>
+    private static void ValidateWithinWorkspace(string resolvedPath, string normalizedRoot)
+    {
         var normalizedRootWithout = normalizedRoot.TrimEnd(Path.DirectorySeparatorChar);
         if (!resolvedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(resolvedPath, normalizedRootWithout, StringComparison.OrdinalIgnoreCase))
@@ -40,7 +81,5 @@ public static class PathValidator
             throw new InvalidOperationException(
                 "Path resolves outside the workspace root.");
         }
-
-        return resolvedPath;
     }
 }

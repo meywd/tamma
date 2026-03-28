@@ -103,4 +103,84 @@ public class PathValidatorTests
         Action act = () => PathValidator.ResolveSafePath("   ", _workspaceRoot);
         act.Should().Throw<ArgumentException>();
     }
+
+    [Test]
+    public void ResolveSafePath_SymlinkPointingOutsideWorkspace_Throws()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Symlink creation may require elevated privileges on Windows.");
+            return;
+        }
+
+        // Arrange — create a symlink inside workspace that points to /tmp (outside workspace)
+        var outsideTarget = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+        var symlinkPath = Path.Combine(_workspaceRoot, "evil_link");
+        File.CreateSymbolicLink(symlinkPath, outsideTarget);
+
+        // Act
+        Action act = () => PathValidator.ResolveSafePath("evil_link", _workspaceRoot);
+
+        // Assert — should throw because the symlink target is outside workspace
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*outside*");
+    }
+
+    [Test]
+    public void ResolveSafePath_SymlinkPointingInsideWorkspace_Succeeds()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Symlink creation may require elevated privileges on Windows.");
+            return;
+        }
+
+        // Arrange — create a real target inside workspace, then a symlink to it
+        var subdir = Path.Combine(_workspaceRoot, "real_dir");
+        Directory.CreateDirectory(subdir);
+        var realFile = Path.Combine(subdir, "file.txt");
+        File.WriteAllText(realFile, "content");
+
+        var symlinkPath = Path.Combine(_workspaceRoot, "good_link");
+        File.CreateSymbolicLink(symlinkPath, realFile);
+
+        // Act
+        var result = PathValidator.ResolveSafePath("good_link", _workspaceRoot);
+
+        // Assert — should succeed; the resolved path is the symlink path itself
+        result.Should().Be(symlinkPath);
+    }
+
+    [Test]
+    public void ResolveSafePath_ChainedSymlinksEscapingWorkspace_Throws()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Symlink creation may require elevated privileges on Windows.");
+            return;
+        }
+
+        // Arrange — create a chain: link1 -> link2 -> /tmp (outside workspace)
+        // We create an intermediate directory outside workspace to be the final target
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"tamma_outside_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDir);
+
+        try
+        {
+            var link1 = Path.Combine(_workspaceRoot, "chain_link");
+            File.CreateSymbolicLink(link1, outsideDir);
+
+            // Act
+            Action act = () => PathValidator.ResolveSafePath("chain_link", _workspaceRoot);
+
+            // Assert
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*outside*");
+        }
+        finally
+        {
+            if (Directory.Exists(outsideDir))
+                Directory.Delete(outsideDir, recursive: true);
+        }
+    }
 }
