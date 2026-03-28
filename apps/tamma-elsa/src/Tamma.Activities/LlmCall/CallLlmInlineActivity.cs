@@ -57,9 +57,10 @@ public class CallLlmInlineActivity : CodeActivity
     private readonly ILogger<CallLlmInlineActivity>? _logger;
     private readonly IContentSanitizer? _sanitizer;
     private readonly IToolExecutorRegistry? _toolRegistry;
+    private readonly IToolCallValidator? _toolCallValidator;
 
     [JsonConstructor]
-    public CallLlmInlineActivity() : this(null, null, null, null, null)
+    public CallLlmInlineActivity() : this(null, null, null, null, null, null)
     {
     }
 
@@ -68,13 +69,15 @@ public class CallLlmInlineActivity : CodeActivity
         IHttpClientFactory? httpClientFactory,
         IConfiguration? configuration,
         IContentSanitizer? sanitizer,
-        IToolExecutorRegistry? toolRegistry = null)
+        IToolExecutorRegistry? toolRegistry = null,
+        IToolCallValidator? toolCallValidator = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _sanitizer = sanitizer;
         _toolRegistry = toolRegistry;
+        _toolCallValidator = toolCallValidator;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -138,6 +141,13 @@ public class CallLlmInlineActivity : CodeActivity
                 input.UserPrompt, input.MaxTokens, input.Temperature, tools, loopConfig);
 
             sw.Stop();
+
+            // Output sanitization: strip HTML/zero-width from LLM response before storage
+            if (_sanitizer != null && response.ResponseText != null)
+            {
+                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
+                response.ResponseText = outputResult.Result;
+            }
 
             var diagnostic = new ProviderAttemptDiagnostic
             {
@@ -293,6 +303,35 @@ public class CallLlmInlineActivity : CodeActivity
 
             sw.Stop();
 
+            // Output sanitization: strip HTML/zero-width from LLM response before storage
+            if (_sanitizer != null && response.ResponseText != null)
+            {
+                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
+                response.ResponseText = outputResult.Result;
+            }
+
+            // Tool call validation (Story 11.3): validate tool calls in single-turn response
+            if (_toolCallValidator != null && response.ToolCalls != null && response.ToolCalls.Count > 0)
+            {
+                var allowedNames = GetAllowedToolNames(toolsJson);
+                foreach (var tc in response.ToolCalls)
+                {
+                    var vr = _toolCallValidator.Validate(tc, allowedNames);
+                    if (vr.IsValid)
+                    {
+                        tc.ArgumentsJson = vr.SanitizedArgumentsJson ?? tc.ArgumentsJson;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Tool call '{ToolName}' rejected in single-turn path: {Error}",
+                            tc.ToolName, vr.ErrorMessage);
+                        response.Success = false;
+                        response.ErrorMessage = $"Tool call validation failed: {vr.ErrorMessage}";
+                    }
+                }
+            }
+
             var diagnostic = new ProviderAttemptDiagnostic
             {
                 ProviderName = providerName,
@@ -439,6 +478,35 @@ public class CallLlmInlineActivity : CodeActivity
                 break;
             }
 
+            // ---- Tool call validation (Story 11.3) ----
+            // Validate each tool call before execution. Build the allowlist from the
+            // resolved tools sent to the LLM. Rejected calls produce error messages
+            // that are tracked and fed back to the LLM as tool results (not crashes).
+            var rejectedToolCalls = new Dictionary<string, string>(); // toolCallId -> errorMessage
+            if (_toolCallValidator != null)
+            {
+                var allowedToolNames = tools?.Select(t => t.Name).ToList()
+                    ?? new List<string>();
+
+                foreach (var tc in response.ToolCalls)
+                {
+                    var validationResult = _toolCallValidator.Validate(tc, allowedToolNames);
+                    if (validationResult.IsValid)
+                    {
+                        // Use sanitized arguments
+                        tc.ArgumentsJson = validationResult.SanitizedArgumentsJson ?? tc.ArgumentsJson;
+                    }
+                    else
+                    {
+                        rejectedToolCalls[tc.Id] = validationResult.ErrorMessage
+                            ?? "Tool call validation failed.";
+                        _logger?.LogWarning(
+                            "Tool call rejected by validator: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
+                            workflowInstanceId, step, tc.Id, tc.ToolName);
+                    }
+                }
+            }
+
             // Append assistant message to conversation history
             messages.Add(new ConversationMessage
             {
@@ -456,6 +524,25 @@ public class CallLlmInlineActivity : CodeActivity
             foreach (var toolCall in response.ToolCalls)
             {
                 ToolExecutionResult result;
+
+                // If the validator rejected this tool call, return the error to the LLM
+                if (rejectedToolCalls.TryGetValue(toolCall.Id, out var rejectionMsg))
+                {
+                    result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
+                        rejectionMsg, 0);
+                    toolsFailed++;
+                    totalToolCalls++;
+                    toolsExecuted++;
+
+                    messages.Add(new ConversationMessage
+                    {
+                        Role = "tool",
+                        Content = result.Output,
+                        ToolCallId = toolCall.Id,
+                        ToolName = toolCall.ToolName
+                    });
+                    continue;
+                }
 
                 if (_toolRegistry == null)
                 {
@@ -530,11 +617,20 @@ public class CallLlmInlineActivity : CodeActivity
                 totalToolCalls++;
                 toolsExecuted++;
 
+                // Sanitize tool output before feeding back to LLM (defense against
+                // indirect prompt injection via file contents, test output, CI logs, etc.)
+                var toolOutput = result.Output;
+                if (_sanitizer != null && !string.IsNullOrEmpty(toolOutput))
+                {
+                    var sanitized = _sanitizer.SanitizeInput(toolOutput);
+                    toolOutput = sanitized.Result;
+                }
+
                 // Append tool result to conversation history
                 messages.Add(new ConversationMessage
                 {
                     Role = "tool",
-                    Content = result.Output,
+                    Content = toolOutput,
                     ToolCallId = toolCall.Id,
                     ToolName = toolCall.ToolName
                 });
@@ -1200,5 +1296,25 @@ public class CallLlmInlineActivity : CodeActivity
     {
         if (string.IsNullOrEmpty(s)) return "(empty)";
         return s.Length > max ? s[..max] + "..." : s;
+    }
+
+    /// <summary>
+    /// Extract the list of allowed tool names from the serialized tools JSON.
+    /// Used by tool call validation in the single-turn code path.
+    /// </summary>
+    private static IReadOnlyList<string> GetAllowedToolNames(string? toolsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolsJson))
+            return Array.Empty<string>();
+
+        try
+        {
+            var tools = JsonSerializer.Deserialize<List<ResolvedTool>>(toolsJson);
+            return tools?.Select(t => t.Name).ToList() ?? new List<string>();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
     }
 }
