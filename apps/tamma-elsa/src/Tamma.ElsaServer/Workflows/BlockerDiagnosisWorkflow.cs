@@ -11,6 +11,7 @@ using Elsa.Workflows.Memory;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Activities.Security;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -405,7 +406,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "analyst",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide Socratic hints for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide Socratic hints for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Use guiding questions, not direct answers. Employ the Socratic method.",
                             ["sessionId"] = sessionId.Get(context),
@@ -511,7 +512,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "analyst",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide direct guidance for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide direct guidance for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Give clear, step-by-step instructions. Be specific and actionable.",
                             ["sessionId"] = sessionId.Get(context),
@@ -616,7 +617,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "implementer",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide code example for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide code example for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Include a working code example with detailed explanation. " +
                                           "Show the solution step by step.",
@@ -782,9 +783,9 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             parts.Add($"CI Status: Build={ci.BuildStatus}, Tests={ci.PassedTests}/{ci.TotalTests} passed, " +
                        $"{ci.FailedTests} failed");
             if (!string.IsNullOrEmpty(ci.BuildError))
-                parts.Add($"Build Error: {ci.BuildError}");
+                parts.Add($"Build Error: {SecurityHelpers.SanitizeForPrompt(ci.BuildError)}");
             if (ci.FailingTestNames.Count > 0)
-                parts.Add($"Failing Tests: {string.Join(", ", ci.FailingTestNames.Take(5))}");
+                parts.Add($"Failing Tests: {SecurityHelpers.SanitizeForPrompt(string.Join(", ", ci.FailingTestNames.Take(5)))}");
         }
 
         if (signals?.Inactivity?.CollectionSucceeded == true)
@@ -804,7 +805,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         if (!string.IsNullOrEmpty(blockerContext))
         {
             parts.Add("");
-            parts.Add($"Additional Context: {blockerContext}");
+            parts.Add($"Additional Context: {SecurityHelpers.SanitizeForPrompt(blockerContext)}");
         }
 
         parts.Add("");

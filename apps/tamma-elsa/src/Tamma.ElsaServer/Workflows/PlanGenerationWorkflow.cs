@@ -10,6 +10,7 @@ using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Activities.Security;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -141,13 +142,19 @@ public class PlanGenerationWorkflow : WorkflowBase
 
     private static string BuildPlanPrompt(string title, string body, string context, string feedback)
     {
+        // Sanitize all dynamic inputs (untrusted: from GitHub issue body, user feedback)
+        var safeTitle = SecurityHelpers.SanitizeForPrompt(title);
+        var safeBody = SecurityHelpers.SanitizeForPrompt(body);
+        var safeContext = SecurityHelpers.SanitizeForPrompt(context);
+        var safeFeedback = SecurityHelpers.SanitizeForPrompt(feedback);
+
         var prompt = $"Generate a detailed implementation plan for the following GitHub issue:\n\n" +
-                     $"**Title:** {title}\n" +
-                     $"**Description:** {body}\n\n";
-        if (!string.IsNullOrEmpty(context))
-            prompt += $"**Context:** {context}\n\n";
-        if (!string.IsNullOrEmpty(feedback))
-            prompt += $"**Previous Feedback:** {feedback}\n\n";
+                     $"**Title:** {safeTitle}\n" +
+                     $"**Description:** {safeBody}\n\n";
+        if (!string.IsNullOrEmpty(safeContext))
+            prompt += $"**Context:** {safeContext}\n\n";
+        if (!string.IsNullOrEmpty(safeFeedback))
+            prompt += $"**Previous Feedback:** {safeFeedback}\n\n";
         prompt += "Respond with a JSON object containing: summary, steps (array), " +
                   "filesToModify (array), filesToCreate (array), testStrategy, estimatedComplexity.";
         return prompt;

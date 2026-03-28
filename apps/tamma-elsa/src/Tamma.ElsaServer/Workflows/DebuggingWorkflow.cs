@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Debug;
+using Tamma.Activities.Security;
 using Tamma.Activities.Debug.Models;
 using Endpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
@@ -288,7 +289,7 @@ public class DebuggingWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["agentRole"] = "implementer",
-                ["taskPrompt"] = $"Apply fix for hypothesis: {selectedHypothesisJson.Get(ctx) ?? "unknown"} (mode: {debugContextMode.Get(ctx)}, iteration: {currentIteration.Get(ctx)})",
+                ["taskPrompt"] = $"Apply fix for hypothesis: {SecurityHelpers.SanitizeForPrompt(selectedHypothesisJson.Get(ctx) ?? "unknown")} (mode: {debugContextMode.Get(ctx)}, iteration: {currentIteration.Get(ctx)})",
                 ["sessionId"] = sessionId.Get(ctx).ToString()
             }),
             WaitForCompletion = new(true)

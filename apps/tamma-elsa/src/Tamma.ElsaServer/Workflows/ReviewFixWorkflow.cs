@@ -8,6 +8,7 @@ using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
 using Tamma.Activities.CodeIndex;
+using Tamma.Activities.Security;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -48,7 +49,7 @@ public class ReviewFixWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["agentRole"] = "implementer",
-                ["taskPrompt"] = $"Apply fixes for the following review comments:\n{analysisJsonVar.Get(ctx)}",
+                ["taskPrompt"] = $"Apply fixes for the following review comments:\n{SecurityHelpers.SanitizeForPrompt(analysisJsonVar.Get(ctx))}",
                 ["sessionId"] = $"adl-review-fix-{ctx.GetInput<int>("prNumber")}"
             }),
             WaitForCompletion = new(true),

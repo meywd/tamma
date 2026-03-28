@@ -11,6 +11,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -36,6 +37,7 @@ public class CallLlmActivity : Activity
     private readonly ILogger<CallLlmActivity> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly IContentSanitizer? _sanitizer;
 
     /// <summary>Provider key (e.g. "anthropic", "openai").</summary>
     [Input(Description = "Provider key")]
@@ -70,26 +72,66 @@ public class CallLlmActivity : Activity
     public Input<int> AttemptNumber { get; set; } = new(1);
 
     [JsonConstructor]
-    public CallLlmActivity() : this(null!, null!, null!)
+    public CallLlmActivity() : this(null!, null!, null!, null)
     {
     }
 
     public CallLlmActivity(
         ILogger<CallLlmActivity> logger,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IContentSanitizer? sanitizer)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _sanitizer = sanitizer;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var providerName = ProviderName.Get(context);
-        var systemPrompt = SystemPrompt.Get(context);
-        var userPrompt = UserPrompt.Get(context);
+        var systemPromptRaw = SystemPrompt.Get(context);
+        var userPromptRaw = UserPrompt.Get(context);
         var modelOverride = ModelOverride.Get(context);
+
+        // Sanitize prompts before LLM call (defense-in-depth against prompt injection)
+        string systemPrompt;
+        string userPrompt;
+        if (_sanitizer != null)
+        {
+            var totalPatterns = 0;
+
+            var systemResult = _sanitizer.SanitizeInput(systemPromptRaw);
+            systemPrompt = systemResult.Result;
+            if (systemResult.Warnings.Count > 0)
+            {
+                totalPatterns += systemResult.Warnings.Count;
+                _logger?.LogWarning(
+                    "Injection pattern detected in SystemPrompt for CallLlmActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
+                    systemResult.Warnings.Count, context.WorkflowExecutionContext.Id);
+            }
+
+            var userResult = _sanitizer.SanitizeInput(userPromptRaw);
+            userPrompt = userResult.Result;
+            if (userResult.Warnings.Count > 0)
+            {
+                totalPatterns += userResult.Warnings.Count;
+                _logger?.LogWarning(
+                    "Injection pattern detected in UserPrompt for CallLlmActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
+                    userResult.Warnings.Count, context.WorkflowExecutionContext.Id);
+            }
+
+            if (totalPatterns > 0)
+                _logger?.LogInformation(
+                    "Total injection patterns detected per LLM call: {TotalPatternsMatched}, activity=CallLlmActivity, provider={Provider}, workflow: {WorkflowInstanceId}",
+                    totalPatterns, providerName, context.WorkflowExecutionContext.Id);
+        }
+        else
+        {
+            systemPrompt = systemPromptRaw;
+            userPrompt = userPromptRaw;
+        }
         var maxTokens = MaxTokens.Get(context);
         var temperature = Temperature.Get(context);
         var toolsJson = ToolsJson.Get(context);
