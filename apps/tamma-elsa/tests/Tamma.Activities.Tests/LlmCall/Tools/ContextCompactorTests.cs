@@ -417,8 +417,8 @@ public class ContextCompactorTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // The summarize delegate checks cancellation
-        var (result, tokens, compacted) = await _compactor.CompactIfNeeded(
+        // OperationCanceledException should propagate (not be swallowed)
+        var act = async () => await _compactor.CompactIfNeeded(
             messages, 1000, 0.8,
             async (_, ct) =>
             {
@@ -427,8 +427,6 @@ public class ContextCompactorTests
             },
             cancellationToken: cts.Token);
 
-        // Should have caught the OperationCanceledException and returned original
-        compacted.Should().BeFalse();
-        result.Should().BeSameAs(messages);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }
