@@ -500,14 +500,23 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         setReasonNoIssues.SetDisplayText("Set Reason: No Issues");
 
-        var setReasonRejected = new SetVariable
+        var setReasonPlanRejected = new SetVariable
         {
-            Id = "SetReasonRejected",
-            Name = "Set Reason: Rejected",
+            Id = "SetReasonPlanRejected",
+            Name = "Set Reason: Plan Rejected",
             Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"rejected")
+            Value = new Input<object?>(_ => (object)"plan_rejected")
         };
-        setReasonRejected.SetDisplayText("Set Reason: Rejected");
+        setReasonPlanRejected.SetDisplayText("Set Reason: Plan Rejected");
+
+        var setReasonReviewRejected = new SetVariable
+        {
+            Id = "SetReasonReviewRejected",
+            Name = "Set Reason: Review Rejected",
+            Variable = exitReason,
+            Value = new Input<object?>(_ => (object)"review_rejected")
+        };
+        setReasonReviewRejected.SetDisplayText("Set Reason: Review Rejected");
 
         var setReasonError = new SetVariable
         {
@@ -619,7 +628,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 mergePr, mergeSuccess,
 
                 // Finish reason nodes + shared finish
-                setReasonSuccess, setReasonNoIssues, setReasonRejected,
+                setReasonSuccess, setReasonNoIssues, setReasonPlanRejected, setReasonReviewRejected,
                 setReasonError, setReasonTddFailed, setReasonCiFailed,
                 setReasonMergeFailed, sharedFinish, finish
             },
@@ -643,7 +652,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(generatePlan, extractPlan),
                 Connect(extractPlan, planApproved),
                 ConnectOutcome(planApproved, "True", createBranch),
-                ConnectOutcome(planApproved, "False", setReasonRejected),
+                ConnectOutcome(planApproved, "False", setReasonPlanRejected),
 
                 // --- Step 4: Branch Creation ---
                 Connect(createBranch, extractBranch),
@@ -678,7 +687,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(mergeDecision, "True", mergePr),
                 ConnectOutcome(mergeDecision, "False", testDecision),
                 ConnectOutcome(testDecision, "True", dispatchCiRetry), // re-run tests
-                ConnectOutcome(testDecision, "False", setReasonRejected), // rejected
+                ConnectOutcome(testDecision, "False", setReasonReviewRejected),
 
                 // --- Step 12: Merge PR ---
                 Connect(mergePr, mergeSuccess),
@@ -688,7 +697,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // --- All reason nodes lead to shared finish, then terminal ---
                 Connect(setReasonSuccess, sharedFinish),
                 Connect(setReasonNoIssues, sharedFinish),
-                Connect(setReasonRejected, sharedFinish),
+                Connect(setReasonPlanRejected, sharedFinish),
+                Connect(setReasonReviewRejected, sharedFinish),
                 Connect(setReasonError, sharedFinish),
                 Connect(setReasonTddFailed, sharedFinish),
                 Connect(setReasonCiFailed, sharedFinish),
