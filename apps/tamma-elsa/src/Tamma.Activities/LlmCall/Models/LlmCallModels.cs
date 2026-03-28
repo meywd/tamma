@@ -468,6 +468,9 @@ public record ToolLoopConfig
 
     /// <summary>Whether to enable SSE streaming for tool loop progress events.</summary>
     public bool EnableStreaming { get; init; } = false;
+
+    /// <summary>Whether to enable parallel tool execution when multiple tools are called in a single turn. Default: false.</summary>
+    public bool EnableParallelTools { get; init; } = false;
 }
 
 /// <summary>

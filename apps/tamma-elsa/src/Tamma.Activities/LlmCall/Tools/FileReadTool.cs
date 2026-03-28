@@ -3,13 +3,16 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.ToolExecution;
 
 namespace Tamma.Activities.LlmCall.Tools;
 
 /// <summary>
 /// Reads file contents with path validation against the workspace root.
+/// Implements <see cref="IFileSystemTool"/> so that ParallelToolExecutor
+/// serializes concurrent reads/writes to the same file via per-path semaphores.
 /// </summary>
-public class FileReadTool : IToolExecutor
+public class FileReadTool : IToolExecutor, IFileSystemTool
 {
     private readonly ILogger<FileReadTool> _logger;
     private readonly string _workspaceRoot;
@@ -98,6 +101,20 @@ public class FileReadTool : IToolExecutor
 
             return new ToolExecutionResult(toolCallId, ToolName, false,
                 $"Error reading file: {ex.Message}", sw.ElapsedMilliseconds);
+        }
+    }
+
+    /// <inheritdoc/>
+    public string GetTargetPath(string argumentsJson)
+    {
+        try
+        {
+            var args = JsonSerializer.Deserialize<JsonElement>(argumentsJson ?? "{}");
+            return args.GetProperty("path").GetString() ?? "";
+        }
+        catch
+        {
+            return "";
         }
     }
 

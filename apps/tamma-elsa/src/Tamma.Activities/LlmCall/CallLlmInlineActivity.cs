@@ -60,9 +60,11 @@ public class CallLlmInlineActivity : CodeActivity
     private readonly IToolExecutorRegistry? _toolRegistry;
     private readonly IToolCallValidator? _toolCallValidator;
     private readonly ContextCompactor? _contextCompactor;
+    private readonly ToolLoopEventEmitter? _eventEmitter;
+    private readonly ParallelToolExecutor? _parallelExecutor;
 
     [JsonConstructor]
-    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null)
+    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null, null, null)
     {
     }
 
@@ -73,7 +75,9 @@ public class CallLlmInlineActivity : CodeActivity
         IContentSanitizer? sanitizer,
         IToolExecutorRegistry? toolRegistry = null,
         IToolCallValidator? toolCallValidator = null,
-        ContextCompactor? contextCompactor = null)
+        ContextCompactor? contextCompactor = null,
+        ToolLoopEventEmitter? eventEmitter = null,
+        ParallelToolExecutor? parallelExecutor = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -82,6 +86,8 @@ public class CallLlmInlineActivity : CodeActivity
         _toolRegistry = toolRegistry;
         _toolCallValidator = toolCallValidator;
         _contextCompactor = contextCompactor;
+        _eventEmitter = eventEmitter;
+        _parallelExecutor = parallelExecutor;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -427,6 +433,14 @@ public class CallLlmInlineActivity : CodeActivity
                 "Tool loop turn started: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, MessageCount={MessageCount}",
                 workflowInstanceId, step, messages.Count);
 
+            // Emit TURN_STARTED event if streaming is enabled
+            if (loopConfig.EnableStreaming && _eventEmitter != null)
+            {
+                await _eventEmitter.EmitTurnStarted(
+                    step, messages.Count, totalPromptTokens + totalCompletionTokens,
+                    workflowInstanceId, context.CancellationToken);
+            }
+
             // ═══ Context compaction check (Story 12.3) ═══
             // CompactIfNeeded handles the "fewer than 6 messages" edge case internally
             if (_contextCompactor != null)
@@ -551,124 +565,231 @@ public class CallLlmInlineActivity : CodeActivity
                     new ToolCallInfo(tc.Id, tc.ToolName, tc.ArgumentsJson)).ToArray()
             });
 
-            // Execute each tool call
+            // ---- Execute tool calls ----
+            // Separate rejected tool calls (from validator) and executable tool calls.
+            // Rejected calls get immediate error results; executable calls may run in parallel.
             var toolsExecuted = 0;
             var toolsSucceeded = 0;
             var toolsFailed = 0;
 
+            // First, handle all rejected tool calls
             foreach (var toolCall in response.ToolCalls)
             {
-                ToolExecutionResult result;
-
-                // If the validator rejected this tool call, return the error to the LLM
                 if (rejectedToolCalls.TryGetValue(toolCall.Id, out var rejectionMsg))
                 {
-                    result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
+                    var rejResult = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
                         rejectionMsg, 0);
                     toolsFailed++;
                     totalToolCalls++;
                     toolsExecuted++;
 
+                    var rejOutput = rejResult.Output;
+                    if (_sanitizer != null && !string.IsNullOrEmpty(rejOutput))
+                    {
+                        var sanitized = _sanitizer.SanitizeInput(rejOutput);
+                        rejOutput = sanitized.Result;
+                    }
+
                     messages.Add(new ConversationMessage
                     {
                         Role = "tool",
-                        Content = result.Output,
+                        Content = rejOutput,
                         ToolCallId = toolCall.Id,
                         ToolName = toolCall.ToolName
                     });
-                    continue;
                 }
+            }
 
-                if (_toolRegistry == null)
+            // Collect executable tool calls (not rejected by validator)
+            var executableToolCalls = response.ToolCalls
+                .Where(tc => !rejectedToolCalls.ContainsKey(tc.Id))
+                .ToList();
+
+            // ---- Parallel execution path (Story 12.4) ----
+            if (loopConfig.EnableParallelTools && _parallelExecutor != null && _toolRegistry != null
+                && executableToolCalls.Count > 0)
+            {
+                // Pre-filter: check allowlist and registry availability before sending to parallel executor
+                var validForExecution = new List<LlmToolCall>();
+                foreach (var toolCall in executableToolCalls)
                 {
-                    result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
-                        "Tool execution not available (registry not configured)", 0);
-                    toolsFailed++;
-                }
-                else if (!_toolRegistry.IsAllowed(toolCall.ToolName, loopConfig.AllowedTools))
-                {
-                    _logger?.LogWarning(
-                        "Tool call rejected (not allowed): WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
-                        workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
-                    result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
-                        $"Tool '{toolCall.ToolName}' is not allowed. Available tools: {string.Join(", ", loopConfig.AllowedTools ?? Array.Empty<string>())}",
-                        0);
-                    toolsFailed++;
-                }
-                else
-                {
-                    var executor = _toolRegistry.GetExecutor(toolCall.ToolName);
-                    if (executor == null)
+                    if (!_toolRegistry.IsAllowed(toolCall.ToolName, loopConfig.AllowedTools))
                     {
                         _logger?.LogWarning(
-                            "Tool call rejected (unknown tool): WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
+                            "Tool call rejected (not allowed): WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
+                            workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
+                        var notAllowedResult = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
+                            $"Tool '{toolCall.ToolName}' is not allowed. Available tools: {string.Join(", ", loopConfig.AllowedTools ?? Array.Empty<string>())}",
+                            0);
+                        toolsFailed++;
+                        totalToolCalls++;
+                        toolsExecuted++;
+
+                        var naOutput = notAllowedResult.Output;
+                        if (_sanitizer != null && !string.IsNullOrEmpty(naOutput))
+                        {
+                            var sanitized = _sanitizer.SanitizeInput(naOutput);
+                            naOutput = sanitized.Result;
+                        }
+                        messages.Add(new ConversationMessage
+                        {
+                            Role = "tool", Content = naOutput,
+                            ToolCallId = toolCall.Id, ToolName = toolCall.ToolName
+                        });
+                    }
+                    else
+                    {
+                        validForExecution.Add(toolCall);
+                    }
+                }
+
+                if (validForExecution.Count > 0)
+                {
+                    var parallelResults = await _parallelExecutor.ExecuteToolsInParallelAsync(
+                        validForExecution.ToArray(), _toolRegistry, loopConfig.ToolTimeoutMs,
+                        workflowInstanceId, step,
+                        loopConfig.EnableStreaming ? _eventEmitter : null,
+                        context.CancellationToken);
+
+                    foreach (var result in parallelResults)
+                    {
+                        totalToolCalls++;
+                        toolsExecuted++;
+                        if (result.Success) toolsSucceeded++;
+                        else toolsFailed++;
+
+                        var toolOutput = result.Output;
+                        if (_sanitizer != null && !string.IsNullOrEmpty(toolOutput))
+                        {
+                            var sanitized = _sanitizer.SanitizeInput(toolOutput);
+                            toolOutput = sanitized.Result;
+                        }
+
+                        messages.Add(new ConversationMessage
+                        {
+                            Role = "tool",
+                            Content = toolOutput,
+                            ToolCallId = result.ToolCallId,
+                            ToolName = result.ToolName
+                        });
+                    }
+                }
+            }
+            else
+            {
+                // ---- Sequential execution path (original behavior) ----
+                foreach (var toolCall in executableToolCalls)
+                {
+                    ToolExecutionResult result;
+
+                    if (_toolRegistry == null)
+                    {
+                        result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
+                            "Tool execution not available (registry not configured)", 0);
+                        toolsFailed++;
+                    }
+                    else if (!_toolRegistry.IsAllowed(toolCall.ToolName, loopConfig.AllowedTools))
+                    {
+                        _logger?.LogWarning(
+                            "Tool call rejected (not allowed): WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
                             workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
                         result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
-                            $"Unknown tool: '{toolCall.ToolName}'", 0);
+                            $"Tool '{toolCall.ToolName}' is not allowed. Available tools: {string.Join(", ", loopConfig.AllowedTools ?? Array.Empty<string>())}",
+                            0);
                         toolsFailed++;
                     }
                     else
                     {
-                        _logger?.LogDebug(
-                            "Tool call dispatched: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
-                            workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
-
-                        var toolSw = System.Diagnostics.Stopwatch.StartNew();
-                        try
+                        var executor = _toolRegistry.GetExecutor(toolCall.ToolName);
+                        if (executor == null)
                         {
-                            using var toolCts = CancellationTokenSource.CreateLinkedTokenSource(
-                                context.CancellationToken);
-                            toolCts.CancelAfter(loopConfig.ToolTimeoutMs);
-
-                            result = await executor.ExecuteAsync(
-                                toolCall.Id, toolCall.ArgumentsJson, toolCts.Token);
-                            toolSw.Stop();
-
-                            _logger?.LogDebug(
-                                "Tool call result received: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}, Success={Success}, DurationMs={DurationMs}, OutputSizeBytes={OutputSizeBytes}",
-                                workflowInstanceId, step, toolCall.Id, toolCall.ToolName,
-                                result.Success, toolSw.ElapsedMilliseconds,
-                                Encoding.UTF8.GetByteCount(result.Output ?? ""));
-
-                            if (result.Success)
-                                toolsSucceeded++;
-                            else
-                                toolsFailed++;
-                        }
-                        catch (Exception ex)
-                        {
-                            toolSw.Stop();
-                            _logger?.LogError(
-                                "Tool call exception: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}, ExceptionType={ExceptionType}, ExceptionMessage={ExceptionMessage}",
-                                workflowInstanceId, step, toolCall.Id, toolCall.ToolName,
-                                ex.GetType().Name, ex.Message);
+                            _logger?.LogWarning(
+                                "Tool call rejected (unknown tool): WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
+                                workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
                             result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
-                                $"Tool execution error: {ex.Message}", toolSw.ElapsedMilliseconds);
+                                $"Unknown tool: '{toolCall.ToolName}'", 0);
                             toolsFailed++;
                         }
+                        else
+                        {
+                            // Emit TOOL_EXECUTING event (sequential path)
+                            if (loopConfig.EnableStreaming && _eventEmitter != null)
+                            {
+                                await _eventEmitter.EmitToolExecuting(
+                                    step, toolCall.ToolName, toolCall.Id,
+                                    workflowInstanceId, context.CancellationToken);
+                            }
+
+                            _logger?.LogDebug(
+                                "Tool call dispatched: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
+                                workflowInstanceId, step, toolCall.Id, toolCall.ToolName);
+
+                            var toolSw = System.Diagnostics.Stopwatch.StartNew();
+                            try
+                            {
+                                using var toolCts = CancellationTokenSource.CreateLinkedTokenSource(
+                                    context.CancellationToken);
+                                toolCts.CancelAfter(loopConfig.ToolTimeoutMs);
+
+                                result = await executor.ExecuteAsync(
+                                    toolCall.Id, toolCall.ArgumentsJson, toolCts.Token);
+                                toolSw.Stop();
+
+                                _logger?.LogDebug(
+                                    "Tool call result received: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}, Success={Success}, DurationMs={DurationMs}, OutputSizeBytes={OutputSizeBytes}",
+                                    workflowInstanceId, step, toolCall.Id, toolCall.ToolName,
+                                    result.Success, toolSw.ElapsedMilliseconds,
+                                    Encoding.UTF8.GetByteCount(result.Output ?? ""));
+
+                                if (result.Success)
+                                    toolsSucceeded++;
+                                else
+                                    toolsFailed++;
+                            }
+                            catch (Exception ex)
+                            {
+                                toolSw.Stop();
+                                _logger?.LogError(
+                                    "Tool call exception: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}, ExceptionType={ExceptionType}, ExceptionMessage={ExceptionMessage}",
+                                    workflowInstanceId, step, toolCall.Id, toolCall.ToolName,
+                                    ex.GetType().Name, ex.Message);
+                                result = new ToolExecutionResult(toolCall.Id, toolCall.ToolName, false,
+                                    $"Tool execution error: {ex.Message}", toolSw.ElapsedMilliseconds);
+                                toolsFailed++;
+                            }
+
+                            // Emit TOOL_COMPLETED event (sequential path)
+                            if (loopConfig.EnableStreaming && _eventEmitter != null)
+                            {
+                                await _eventEmitter.EmitToolCompleted(
+                                    step, toolCall.ToolName, toolCall.Id,
+                                    result.Success, result.DurationMs,
+                                    workflowInstanceId, context.CancellationToken);
+                            }
+                        }
                     }
+
+                    totalToolCalls++;
+                    toolsExecuted++;
+
+                    // Sanitize tool output before feeding back to LLM (defense against
+                    // indirect prompt injection via file contents, test output, CI logs, etc.)
+                    var toolOutput = result.Output;
+                    if (_sanitizer != null && !string.IsNullOrEmpty(toolOutput))
+                    {
+                        var sanitized = _sanitizer.SanitizeInput(toolOutput);
+                        toolOutput = sanitized.Result;
+                    }
+
+                    // Append tool result to conversation history
+                    messages.Add(new ConversationMessage
+                    {
+                        Role = "tool",
+                        Content = toolOutput,
+                        ToolCallId = toolCall.Id,
+                        ToolName = toolCall.ToolName
+                    });
                 }
-
-                totalToolCalls++;
-                toolsExecuted++;
-
-                // Sanitize tool output before feeding back to LLM (defense against
-                // indirect prompt injection via file contents, test output, CI logs, etc.)
-                var toolOutput = result.Output;
-                if (_sanitizer != null && !string.IsNullOrEmpty(toolOutput))
-                {
-                    var sanitized = _sanitizer.SanitizeInput(toolOutput);
-                    toolOutput = sanitized.Result;
-                }
-
-                // Append tool result to conversation history
-                messages.Add(new ConversationMessage
-                {
-                    Role = "tool",
-                    Content = toolOutput,
-                    ToolCallId = toolCall.Id,
-                    ToolName = toolCall.ToolName
-                });
             }
 
             turnSw.Stop();
@@ -676,6 +797,15 @@ public class CallLlmInlineActivity : CodeActivity
                 "Tool loop turn completed: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolsExecuted={ToolsExecuted}, ToolsSucceeded={ToolsSucceeded}, ToolsFailed={ToolsFailed}, TurnDurationMs={TurnDurationMs}, CumulativeTokens={CumulativeTokens}",
                 workflowInstanceId, step, toolsExecuted, toolsSucceeded, toolsFailed,
                 turnSw.ElapsedMilliseconds, totalPromptTokens + totalCompletionTokens);
+
+            // Emit TURN_COMPLETED event if streaming is enabled
+            if (loopConfig.EnableStreaming && _eventEmitter != null)
+            {
+                await _eventEmitter.EmitTurnCompleted(
+                    step, toolsExecuted, turnSw.ElapsedMilliseconds,
+                    totalPromptTokens + totalCompletionTokens,
+                    workflowInstanceId, context.CancellationToken);
+            }
 
             // Check if this is the last iteration (we executed tools but won't loop again)
             if (step == loopConfig.MaxSteps - 1)

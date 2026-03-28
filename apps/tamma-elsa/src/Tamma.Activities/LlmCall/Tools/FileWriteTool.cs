@@ -3,14 +3,17 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.ToolExecution;
 
 namespace Tamma.Activities.LlmCall.Tools;
 
 /// <summary>
 /// Writes content to a file with path validation against the workspace root.
 /// Creates parent directories if needed.
+/// Implements <see cref="IFileSystemTool"/> so that ParallelToolExecutor
+/// serializes concurrent reads/writes to the same file via per-path semaphores.
 /// </summary>
-public class FileWriteTool : IToolExecutor
+public class FileWriteTool : IToolExecutor, IFileSystemTool
 {
     private readonly ILogger<FileWriteTool> _logger;
     private readonly string _workspaceRoot;
@@ -103,6 +106,20 @@ public class FileWriteTool : IToolExecutor
 
             return new ToolExecutionResult(toolCallId, ToolName, false,
                 $"Error writing file: {ex.Message}", sw.ElapsedMilliseconds);
+        }
+    }
+
+    /// <inheritdoc/>
+    public string GetTargetPath(string argumentsJson)
+    {
+        try
+        {
+            var args = JsonSerializer.Deserialize<JsonElement>(argumentsJson ?? "{}");
+            return args.GetProperty("path").GetString() ?? "";
+        }
+        catch
+        {
+            return "";
         }
     }
 
