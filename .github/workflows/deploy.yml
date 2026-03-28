@@ -245,12 +245,23 @@ jobs:
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
             "
 
-      - name: "Health check: API via proxy"
+      - name: "Health check: API via proxy (with retry)"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health && echo ' API OK' || curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK (http)' || (echo '::error::API health check via proxy failed' && exit 1)"
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              for i in \$(seq 1 15); do
+                if curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null; then
+                  echo ' API OK (https)' && exit 0
+                elif curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health 2>/dev/null; then
+                  echo ' API OK (http)' && exit 0
+                fi
+                echo \"Health check attempt \$i/15 failed, retrying in 5s...\"
+                sleep 5
+              done
+              echo '::error::API health check via proxy failed after 15 attempts (75s)'
+              exit 1
+            "
 
       - name: "Verify: port 80 accessible and firewall"
         run: |
