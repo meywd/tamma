@@ -38,6 +38,7 @@ public class CallLlmActivity : Activity
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly IContentSanitizer? _sanitizer;
+    private readonly IToolCallValidator? _toolCallValidator;
 
     /// <summary>Provider key (e.g. "anthropic", "openai").</summary>
     [Input(Description = "Provider key")]
@@ -72,7 +73,7 @@ public class CallLlmActivity : Activity
     public Input<int> AttemptNumber { get; set; } = new(1);
 
     [JsonConstructor]
-    public CallLlmActivity() : this(null!, null!, null!, null)
+    public CallLlmActivity() : this(null!, null!, null!, null, null)
     {
     }
 
@@ -80,12 +81,14 @@ public class CallLlmActivity : Activity
         ILogger<CallLlmActivity> logger,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        IContentSanitizer? sanitizer)
+        IContentSanitizer? sanitizer,
+        IToolCallValidator? toolCallValidator = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _sanitizer = sanitizer;
+        _toolCallValidator = toolCallValidator;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -157,6 +160,37 @@ public class CallLlmActivity : Activity
             var response = await ExecuteProviderCall(
                 providerName, providerConfig, model, systemPrompt, userPrompt,
                 maxTokens, temperature, tools);
+
+            // Output sanitization: strip HTML/zero-width from LLM response before storage
+            if (_sanitizer != null && response.ResponseText != null)
+            {
+                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
+                response.ResponseText = outputResult.Result;
+            }
+
+            // Tool call validation (Story 11.3): validate tool calls before returning
+            if (_toolCallValidator != null && response.ToolCalls != null && response.ToolCalls.Count > 0)
+            {
+                var allowedToolNames = tools?.Select(t => t.Name).ToList()
+                    ?? new List<string>();
+                foreach (var tc in response.ToolCalls)
+                {
+                    var vr = _toolCallValidator.Validate(tc, allowedToolNames);
+                    if (vr.IsValid)
+                    {
+                        tc.ArgumentsJson = vr.SanitizedArgumentsJson ?? tc.ArgumentsJson;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Tool call '{ToolName}' rejected in CallLlmActivity: {Error}",
+                            tc.ToolName, vr.ErrorMessage);
+                        response.Success = false;
+                        response.ErrorMessage = $"Tool validation failed: {vr.ErrorMessage}";
+                        break;
+                    }
+                }
+            }
 
             sw.Stop();
 

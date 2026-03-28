@@ -9,6 +9,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -50,7 +51,9 @@ public class ResolveAgentConfigActivity : CodeActivity
         if (!string.IsNullOrWhiteSpace(systemPromptOverride))
         {
             logger.LogDebug("Using caller-provided system prompt override for role '{Role}'", role);
-            context.SetVariable("ResolvedSystemPrompt", systemPromptOverride);
+            // Sanitize untrusted override input, then harden
+            var sanitizedOverride = SecurityHelpers.SanitizeForPrompt(systemPromptOverride);
+            context.SetVariable("ResolvedSystemPrompt", PromptHardening.Harden(sanitizedOverride));
             return;
         }
 
@@ -66,8 +69,8 @@ public class ResolveAgentConfigActivity : CodeActivity
             {
                 var config = agent.AgentConfig;
 
-                // Set resolved system prompt from DB
-                context.SetVariable("ResolvedSystemPrompt", config.PromptTemplate);
+                // Set resolved system prompt from DB (hardened against extraction)
+                context.SetVariable("ResolvedSystemPrompt", PromptHardening.Harden(config.PromptTemplate ?? ""));
 
                 // Parse custom settings from ResponseFormat (provider chain, budget)
                 var customSettings = ParseCustomSettings(config.ExecutionSettings.ResponseFormat);
@@ -95,8 +98,8 @@ public class ResolveAgentConfigActivity : CodeActivity
                 "Failed to resolve agent config from DB for role '{Role}', using fallback", role);
         }
 
-        // Priority 3: Hardcoded fallback
-        context.SetVariable("ResolvedSystemPrompt", GetFallbackPrompt(role));
+        // Priority 3: Hardcoded fallback (hardened against extraction)
+        context.SetVariable("ResolvedSystemPrompt", PromptHardening.Harden(GetFallbackPrompt(role)));
     }
 
     private static AgentCustomSettings? ParseCustomSettings(string? responseFormat)

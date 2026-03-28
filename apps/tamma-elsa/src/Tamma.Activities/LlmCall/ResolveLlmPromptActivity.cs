@@ -7,6 +7,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -74,14 +75,15 @@ public class ResolveLlmPromptActivity : CodeActivity<ResolvedPrompt>
         var userPrompt = UserPrompt.Get(context);
         var systemOverride = SystemPromptOverride.Get(context);
 
-        // If caller provided an explicit override, use it directly
+        // If caller provided an explicit override, sanitize untrusted input then harden
         if (!string.IsNullOrWhiteSpace(systemOverride))
         {
             _logger?.LogDebug("Using caller-provided system prompt override");
 
+            var sanitized = SecurityHelpers.SanitizeForPrompt(systemOverride);
             context.SetResult(new ResolvedPrompt
             {
-                SystemPrompt = systemOverride,
+                SystemPrompt = PromptHardening.Harden(sanitized),
                 UserPrompt = userPrompt,
                 ResolvedLevel = PromptResolutionLevel.CallerOverride,
                 MatchedConfigKey = "(caller override)"
@@ -98,7 +100,7 @@ public class ResolveLlmPromptActivity : CodeActivity<ResolvedPrompt>
 
         context.SetResult(new ResolvedPrompt
         {
-            SystemPrompt = prompt,
+            SystemPrompt = PromptHardening.Harden(prompt),
             UserPrompt = userPrompt,
             ResolvedLevel = level,
             MatchedConfigKey = key
