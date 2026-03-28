@@ -163,6 +163,7 @@ export type {
   AuthenticatedUser,
   AuthMeRouteOptions,
   AuthMeUser,
+  AdminRouteOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -189,6 +190,8 @@ export interface CreateAppOptions {
   githubOAuth?: GitHubOAuthOptions;
   /** User management route options (optional; enables /api/admin/users/* routes). */
   userManagement?: UserManagementRouteOptions;
+  /** Admin routes options (optional; enables /api/admin/health). */
+  admin?: AdminRouteOptions;
   /** Enable Fastify logger (boolean or pino options object). */
   logger?: boolean | object;
 }
@@ -288,6 +291,11 @@ export async function createApp(options?: CreateAppOptions) {
   // User management routes (admin panel)
   if (options?.userManagement !== undefined) {
     await registerUserManagementRoutes(app, options.userManagement);
+  }
+
+  // Admin routes (system health aggregation)
+  if (options?.admin !== undefined) {
+    await registerAdminRoutes(app, options.admin);
   }
 
   // Dashboard routes (requires both engine registry and workflow store)

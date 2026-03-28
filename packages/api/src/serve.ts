@@ -101,6 +101,9 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
       inviteStore,
       dashboardUrl: dashUrl,
     },
+    admin: {
+      pgPool: pool,
+    },
   };
 
   // Register GitHub App routes if configured
