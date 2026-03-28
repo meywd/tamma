@@ -52,9 +52,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var prNumber = builder.WithVariable<int>("PrNumber", 0);
         var prUrl = builder.WithVariable<string>("PrUrl", "");
 
-        var tddDebugAttempt = builder.WithVariable<int>("TddDebugAttempt", 0);
         var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0);
-        var reviewFixAttempt = builder.WithVariable<int>("ReviewFixAttempt", 0);
 
         // DispatchWorkflow result capture variables
         var issueResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -257,71 +255,36 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         branchCreated.SetDisplayText("Branch Created?");
 
         // ================================================================
-        // Steps 5-7: TDD Cycle (existing workflow)
+        // Steps 5-7: TDD Cycle (dispatched to sub-workflow)
         // ================================================================
-        var tddCycle = new DispatchWorkflow
+        var dispatchTddRetry = new DispatchWorkflow
         {
-            Id = "DispatchTddCycle",
-            Name = "TDD Cycle",
-            WorkflowDefinitionId = new("tdd-cycle"),
+            Id = "DispatchTddWithDebugRetry",
+            Name = "TDD with Debug Retry",
+            WorkflowDefinitionId = new("tdd-with-debug-retry"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["sessionId"] = Guid.NewGuid(),
                 ["storyId"] = $"adl-{issueNumber.Get(ctx)}",
-                ["taskDescription"] = planJson.Get(ctx),
-                ["taskFiles"] = new List<string>(),
+                ["planJson"] = planJson.Get(ctx),
                 ["repositoryUrl"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = 5
+                ["skillLevel"] = 5,
+                ["issueNumber"] = issueNumber.Get(ctx)
             }),
             WaitForCompletion = new(true),
             Result = new(tddResult)
         };
-        tddCycle.SetDisplayText("TDD Cycle");
+        dispatchTddRetry.SetDisplayText("TDD with Debug Retry");
 
-        var tddSuccess = new FlowDecision(ctx =>
+        var tddRetrySuccess = new FlowDecision(ctx =>
         {
             var result = tddResult.Get(ctx);
             if (result != null && result.TryGetValue("success", out var s))
                 return s is true || s?.ToString() == "True";
             return false;
         })
-        { Id = "TddSuccess", Name = "TDD Passed?" };
-        tddSuccess.SetDisplayText("TDD Passed?");
-
-        // TDD debug retry guard
-        var tddDebugGuard = new FlowDecision(ctx => tddDebugAttempt.Get(ctx) < 3)
-        { Id = "TddDebugGuard", Name = "TDD Debug < 3?" };
-        tddDebugGuard.SetDisplayText("TDD Debug < 3?");
-
-        var incrementTddDebug = new SetVariable
-        {
-            Id = "IncrTddDebug",
-            Name = "Increment TDD Debug",
-            Variable = tddDebugAttempt,
-            Value = new Input<object?>(ctx => (object)(tddDebugAttempt.Get(ctx) + 1))
-        };
-        incrementTddDebug.SetDisplayText("Increment TDD Debug");
-
-        var dispatchTddDebugging = new DispatchWorkflow
-        {
-            Id = "DispatchTddDebugging",
-            Name = "Debug TDD Failure",
-            WorkflowDefinitionId = new("debugging"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["sessionId"] = Guid.NewGuid(),
-                ["storyId"] = $"adl-{issueNumber.Get(ctx)}",
-                ["debugContextMode"] = "TddFailure",
-                ["errorOutput"] = GetTddErrorOutput(tddResult.Get(ctx)),
-                ["repositoryUrl"] = repository.Get(ctx),
-                ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = 5
-            }),
-            WaitForCompletion = new(true),
-            Result = new(debugResult)
-        };
-        dispatchTddDebugging.SetDisplayText("Debug TDD Failure");
+        { Id = "TddRetrySuccess", Name = "TDD Passed?" };
+        tddRetrySuccess.SetDisplayText("TDD Passed?");
 
         // ================================================================
         // Step 8: Create PR
@@ -647,9 +610,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // Step 4: Branch Creation
                 createBranch, extractBranch, branchCreated,
 
-                // Steps 5-7: TDD Cycle + Debug
-                tddCycle, tddSuccess, tddDebugGuard,
-                incrementTddDebug, dispatchTddDebugging,
+                // Steps 5-7: TDD Cycle (sub-workflow)
+                dispatchTddRetry, tddRetrySuccess,
 
                 // Step 8: Create PR
                 createPr, extractPr, prCreated,
@@ -697,19 +659,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // --- Step 4: Branch Creation ---
                 Connect(createBranch, extractBranch),
                 Connect(extractBranch, branchCreated),
-                ConnectOutcome(branchCreated, "True", tddCycle),
+                ConnectOutcome(branchCreated, "True", dispatchTddRetry),
                 ConnectOutcome(branchCreated, "False", finishError),
 
-                // --- Steps 5-7: TDD Cycle ---
-                Connect(tddCycle, tddSuccess),
-                ConnectOutcome(tddSuccess, "True", createPr),
-                ConnectOutcome(tddSuccess, "False", tddDebugGuard),
-
-                // TDD Debug retry loop
-                ConnectOutcome(tddDebugGuard, "True", incrementTddDebug),
-                ConnectOutcome(tddDebugGuard, "False", finishTddFailed),
-                Connect(incrementTddDebug, dispatchTddDebugging),
-                Connect(dispatchTddDebugging, tddCycle), // retry TDD
+                // --- Steps 5-7: TDD Cycle (sub-workflow) ---
+                Connect(dispatchTddRetry, tddRetrySuccess),
+                ConnectOutcome(tddRetrySuccess, "True", createPr),
+                ConnectOutcome(tddRetrySuccess, "False", finishTddFailed),
 
                 // --- Step 8: Create PR ---
                 Connect(createPr, extractPr),
@@ -766,13 +722,6 @@ public class SingleIssueCycleWorkflow : WorkflowBase
 
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
-
-    private static string GetTddErrorOutput(IDictionary<string, object>? result)
-    {
-        if (result != null && result.TryGetValue("errorMessage", out var err))
-            return err?.ToString() ?? "TDD cycle failed";
-        return "TDD cycle failed with unknown error";
-    }
 
     private static string GetTestErrorOutput(IDictionary<string, object>? result)
     {
