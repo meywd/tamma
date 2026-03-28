@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
+using Tamma.Activities.ToolExecution;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -427,7 +428,8 @@ public class CallLlmInlineActivity : CodeActivity
                 workflowInstanceId, step, messages.Count);
 
             // ═══ Context compaction check (Story 12.3) ═══
-            if (_contextCompactor != null && step > 0)
+            // CompactIfNeeded handles the "fewer than 6 messages" edge case internally
+            if (_contextCompactor != null)
             {
                 var (compactedMessages, compactionTokens, wasCompacted) =
                     await _contextCompactor.CompactIfNeeded(

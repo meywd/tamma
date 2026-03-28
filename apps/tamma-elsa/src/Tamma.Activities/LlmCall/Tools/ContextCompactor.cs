@@ -159,6 +159,11 @@ public class ContextCompactor
 
             return (compacted, summaryTokens, true);
         }
+        catch (OperationCanceledException)
+        {
+            compactionSw.Stop();
+            throw; // Cancellation is not a compaction failure — propagate
+        }
         catch (Exception ex)
         {
             compactionSw.Stop();
