@@ -16,7 +16,7 @@ public static class CommandValidator
     public static readonly (string Name, Regex Pattern)[] BlockedPatterns =
     {
         // Destructive file operations
-        ("rm_rf_root", new Regex(@"\brm\s+-rf\s+/", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+        ("rm_rf_root", new Regex(@"\brm\b[^|;]*(-r\b|-R\b|--recursive\b)[^|;]*(-f\b|--force\b)[^|;]*/|\brm\b[^|;]*(-f\b|--force\b)[^|;]*(-r\b|-R\b|--recursive\b)[^|;]*/", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
 
         // Privilege escalation
         ("sudo", new Regex(@"\bsudo\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)),

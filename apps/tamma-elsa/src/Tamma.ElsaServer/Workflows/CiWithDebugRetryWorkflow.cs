@@ -75,8 +75,8 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 if (issue > 0) issueNumber.Set(ctx, issue);
                 var skill = ctx.GetInput<int>("skillLevel");
                 if (skill > 0) skillLevel.Set(ctx, skill);
-                var retryCount = ctx.GetInput<int>("ciRetryCount");
-                if (retryCount > 0) ciRetryCount.Set(ctx, retryCount);
+                // Always set ciRetryCount — 0 is a valid value meaning "no retries yet"
+                ciRetryCount.Set(ctx, ctx.GetInput<int>("ciRetryCount"));
                 return (object)(ctx.GetInput<string>("repository") ?? "");
             })
         };
