@@ -65,8 +65,6 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var reviewResult = builder.WithVariable<IDictionary<string, object>?>();
         var mergeApprovalResult = builder.WithVariable<IDictionary<string, object>?>();
         var mergeResult = builder.WithVariable<IDictionary<string, object>?>();
-        var debugResult = builder.WithVariable<IDictionary<string, object>?>();
-
         var exitReason = builder.WithVariable<string>("ExitReason", "");
 
         // ================================================================
@@ -333,68 +331,55 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         prCreated.SetDisplayText("PR Created?");
 
         // ================================================================
-        // Step 9: Testing Pipeline (existing workflow)
+        // Step 9: CI Pipeline (dispatched to sub-workflow)
         // ================================================================
-        var testingPipeline = new DispatchWorkflow
+        var dispatchCiRetry = new DispatchWorkflow
         {
-            Id = "DispatchTestingPipeline",
-            Name = "Testing Pipeline",
-            WorkflowDefinitionId = new("testing-pipeline"),
+            Id = "DispatchCiWithDebugRetry",
+            Name = "CI with Debug Retry",
+            WorkflowDefinitionId = new("ci-with-debug-retry"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["SessionId"] = Guid.NewGuid(),
-                ["Repository"] = repository.Get(ctx),
-                ["Branch"] = branchName.Get(ctx),
-                ["SkillLevel"] = 5
+                ["repository"] = repository.Get(ctx),
+                ["branchName"] = branchName.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+                ["skillLevel"] = 5,
+                // NOTE: ciRetryCount is passed through to preserve existing behavior.
+                // This means the counter persists across re-entries (review-fix, merge re-test).
+                // This is likely a bug — re-entry should reset the counter.
+                // Fix tracked as a separate ticket.
+                ["ciRetryCount"] = ciRetryCount.Get(ctx)
             }),
             WaitForCompletion = new(true),
             Result = new(testResult)
         };
-        testingPipeline.SetDisplayText("Testing Pipeline");
+        dispatchCiRetry.SetDisplayText("CI with Debug Retry");
 
-        var testsPassed = new FlowDecision(ctx =>
+        // Extract ciRetryCount from sub-workflow output to preserve across re-entries
+        var extractCiRetryCount = new SetVariable
+        {
+            Id = "ExtractCiRetryCount",
+            Name = "Extract CI Retry Count",
+            Variable = ciRetryCount,
+            Value = new Input<object?>(ctx =>
+            {
+                var result = testResult.Get(ctx);
+                if (result != null && result.TryGetValue("ciRetryCount", out var c) && c is int count)
+                    return (object)count;
+                return (object)ciRetryCount.Get(ctx);
+            })
+        };
+        extractCiRetryCount.SetDisplayText("Extract CI Retry Count");
+
+        var ciRetryPassed = new FlowDecision(ctx =>
         {
             var result = testResult.Get(ctx);
             if (result != null && result.TryGetValue("passed", out var p))
                 return p is true || p?.ToString() == "True";
             return false;
         })
-        { Id = "TestsPassed", Name = "Tests Passed?" };
-        testsPassed.SetDisplayText("Tests Passed?");
-
-        // CI retry guard
-        var ciRetryGuard = new FlowDecision(ctx => ciRetryCount.Get(ctx) < 3)
-        { Id = "CiRetryGuard", Name = "CI Retries < 3?" };
-        ciRetryGuard.SetDisplayText("CI Retries < 3?");
-
-        var incrementCiRetry = new SetVariable
-        {
-            Id = "IncrCiRetry",
-            Name = "Increment CI Retry",
-            Variable = ciRetryCount,
-            Value = new Input<object?>(ctx => (object)(ciRetryCount.Get(ctx) + 1))
-        };
-        incrementCiRetry.SetDisplayText("Increment CI Retry");
-
-        var dispatchCiDebugging = new DispatchWorkflow
-        {
-            Id = "DispatchCiDebugging",
-            Name = "Debug CI Failure",
-            WorkflowDefinitionId = new("debugging"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["sessionId"] = Guid.NewGuid(),
-                ["storyId"] = $"adl-{issueNumber.Get(ctx)}",
-                ["debugContextMode"] = "RuntimeError",
-                ["errorOutput"] = GetTestErrorOutput(testResult.Get(ctx)),
-                ["repositoryUrl"] = repository.Get(ctx),
-                ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = 5
-            }),
-            WaitForCompletion = new(true),
-            Result = new(debugResult)
-        };
-        dispatchCiDebugging.SetDisplayText("Debug CI Failure");
+        { Id = "CiRetryPassed", Name = "CI Passed?" };
+        ciRetryPassed.SetDisplayText("CI Passed?");
 
         // ================================================================
         // Step 10: Review Fix Check
@@ -616,9 +601,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // Step 8: Create PR
                 createPr, extractPr, prCreated,
 
-                // Step 9: Testing Pipeline + Debug
-                testingPipeline, testsPassed, ciRetryGuard,
-                incrementCiRetry, dispatchCiDebugging,
+                // Step 9: CI Pipeline (sub-workflow)
+                dispatchCiRetry, extractCiRetryCount, ciRetryPassed,
 
                 // Step 10: Review Fix
                 reviewFixCheck, hasReviewComments,
@@ -670,30 +654,25 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // --- Step 8: Create PR ---
                 Connect(createPr, extractPr),
                 Connect(extractPr, prCreated),
-                ConnectOutcome(prCreated, "True", testingPipeline),
+                ConnectOutcome(prCreated, "True", dispatchCiRetry),
                 ConnectOutcome(prCreated, "False", finishError),
 
-                // --- Step 9: Testing Pipeline ---
-                Connect(testingPipeline, testsPassed),
-                ConnectOutcome(testsPassed, "True", reviewFixCheck),
-                ConnectOutcome(testsPassed, "False", ciRetryGuard),
-
-                // CI Debug retry loop
-                ConnectOutcome(ciRetryGuard, "True", incrementCiRetry),
-                ConnectOutcome(ciRetryGuard, "False", finishCiFailed),
-                Connect(incrementCiRetry, dispatchCiDebugging),
-                Connect(dispatchCiDebugging, testingPipeline), // retry CI
+                // --- Step 9: CI Pipeline (sub-workflow) ---
+                Connect(dispatchCiRetry, extractCiRetryCount),
+                Connect(extractCiRetryCount, ciRetryPassed),
+                ConnectOutcome(ciRetryPassed, "True", reviewFixCheck),
+                ConnectOutcome(ciRetryPassed, "False", finishCiFailed),
 
                 // --- Step 10: Review Fix Check ---
                 Connect(reviewFixCheck, hasReviewComments),
-                ConnectOutcome(hasReviewComments, "True", testingPipeline), // re-run CI after fixes
+                ConnectOutcome(hasReviewComments, "True", dispatchCiRetry), // re-run CI after fixes
                 ConnectOutcome(hasReviewComments, "False", mergeApproval),
 
                 // --- Step 11: Merge Approval ---
                 Connect(mergeApproval, mergeDecision),
                 ConnectOutcome(mergeDecision, "True", mergePr),
                 ConnectOutcome(mergeDecision, "False", testDecision),
-                ConnectOutcome(testDecision, "True", testingPipeline), // re-run tests
+                ConnectOutcome(testDecision, "True", dispatchCiRetry), // re-run tests
                 ConnectOutcome(testDecision, "False", finishRejected), // rejected
 
                 // --- Step 12: Merge PR ---
@@ -723,10 +702,4 @@ public class SingleIssueCycleWorkflow : WorkflowBase
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 
-    private static string GetTestErrorOutput(IDictionary<string, object>? result)
-    {
-        if (result != null && result.TryGetValue("errorMessage", out var err))
-            return err?.ToString() ?? "Testing pipeline failed";
-        return "Testing pipeline failed with unknown error";
-    }
 }
