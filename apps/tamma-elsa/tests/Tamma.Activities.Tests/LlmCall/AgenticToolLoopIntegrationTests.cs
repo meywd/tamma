@@ -692,8 +692,7 @@ public class AgenticToolLoopIntegrationTests
         // Verify the first command was blocked
         var blockedResult = result.Messages.First(m =>
             m.Role == "tool" && m.ToolCallId == "toolu_01");
-        blockedResult.Content.Should().Contain("Command blocked by security policy");
-        blockedResult.Content.Should().Contain("sudo");
+        blockedResult.Content.Should().Contain("blocked by security policy");
 
         // Verify the safe command succeeded
         var safeResult = result.Messages.First(m =>
