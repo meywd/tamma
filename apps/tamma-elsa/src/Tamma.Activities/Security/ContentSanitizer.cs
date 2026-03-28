@@ -113,7 +113,6 @@ public sealed class ContentSanitizer : IContentSanitizer
             ("delimiter_injection", "system: override"),
             ("delimiter_injection", "### instruction ###"),
             ("delimiter_injection", "<|endoftext|>"),
-            ("delimiter_injection", "<<SYS>>"),
         };
 
     /// <summary>
@@ -149,6 +148,9 @@ public sealed class ContentSanitizer : IContentSanitizer
     /// <inheritdoc />
     public SanitizationResult SanitizeInput(string input)
     {
+        if (input is null)
+            return new SanitizationResult { Result = string.Empty, Warnings = new List<string>() };
+
         try
         {
             var sw = Stopwatch.StartNew();
@@ -212,6 +214,9 @@ public sealed class ContentSanitizer : IContentSanitizer
     /// <inheritdoc />
     public SanitizationResult SanitizeOutput(string output)
     {
+        if (output is null)
+            return new SanitizationResult { Result = string.Empty, Warnings = new List<string>() };
+
         try
         {
             var sw = Stopwatch.StartNew();
