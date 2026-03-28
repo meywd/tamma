@@ -81,11 +81,16 @@ services:
       Elsa__Identity__SigningKey: ${ELSA_SIGNING_KEY:-sufficiently-long-secret-signing-key-for-elsa-jwt-tokens}
       Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
       ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
+      OpenSearch__Url: http://opensearch:9200
+      OpenSearch__Enabled: "true"
+      OpenSearch__IndexPrefix: tamma-elsa
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      opensearch:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 15s
@@ -123,11 +128,16 @@ services:
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
+      OpenSearch__Url: http://opensearch:9200
+      OpenSearch__Enabled: "true"
+      OpenSearch__IndexPrefix: tamma-api-dotnet
     depends_on:
       elsa-server:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      opensearch:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 15s
@@ -156,11 +166,17 @@ services:
       JWT_SECRET: ${JWT_SECRET:-tamma-dev-jwt-secret}
       API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
       DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_ENABLED: "true"
+      LOG_INDEX_PREFIX: tamma-ts
+      SERVICE_NAME: tamma-api
     volumes:
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
+      opensearch:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3100/health"]
       interval: 15s
@@ -183,11 +199,17 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       TAMMA_API_URL: http://tamma-api:3100
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_ENABLED: "true"
+      LOG_INDEX_PREFIX: tamma-ts
+      SERVICE_NAME: tamma-engine
     volumes:
       - tamma-engine-workdir:/home/tamma/workdir
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       tamma-api:
+        condition: service_started
+      opensearch:
         condition: service_started
     networks:
       - tamma-net
@@ -206,18 +228,116 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Infrastructure: OpenSearch (log aggregation)
+  # ---------------------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      cluster.name: tamma-logs
+      node.name: tamma-os-node1
+      bootstrap.memory_lock: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - tamma-os-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: OpenSearch Dashboards (log visualization)
+  # ---------------------------------------------------------------------------
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      NODE_OPTIONS: "--max-old-space-size=1536"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q 'overall'"]
+      interval: 15s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Init: OpenSearch bootstrap (index template, ISM policy, saved objects)
+  # ---------------------------------------------------------------------------
+  opensearch-setup:
+    image: curlimages/curl:8.12.1
+    volumes:
+      - ./opensearch:/setup:ro
+    entrypoint: ["sh", "/setup/setup.sh"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      opensearch-dashboards:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # OAuth2 Proxy (unified GitHub OAuth for all dashboards)
+  # ---------------------------------------------------------------------------
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+    command:
+      - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
+    environment:
+      OAUTH2_PROXY_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID}
+      OAUTH2_PROXY_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:?OAUTH2_PROXY_COOKIE_SECRET is required}
+    volumes:
+      - ./oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4180/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      tamma-api:
+        condition: service_started
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nav-header:/etc/nginx/nav-header:ro
       - ../secrets/origin-cert.pem:/etc/nginx/certs/origin-cert.pem:ro
       - ../secrets/origin-key.pem:/etc/nginx/certs/origin-key.pem:ro
     depends_on:
       tamma-api:
         condition: service_started
       tamma-dashboard:
+        condition: service_started
+      oauth2-proxy:
+        condition: service_healthy
+      opensearch-dashboards:
         condition: service_started
     networks:
       - tamma-net
@@ -230,6 +350,7 @@ volumes:
   tamma-rmq-data:
   tamma-chroma-data:
   tamma-engine-workdir:
+  tamma-os-data:
 
 # =============================================================================
 # Networks

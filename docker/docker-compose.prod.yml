@@ -75,6 +75,36 @@ services:
           memory: 128M
     # No exposed ports — reachable via nginx-proxy only
 
+  oauth2-proxy:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  opensearch:
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 5G
+    # In production, do not expose port 9200 — internal only
+
+  opensearch-dashboards:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 2G
+    # In production, do not expose port 5601 — accessed via nginx
+
+  opensearch-setup:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
   nginx-proxy:
     deploy:
       resources:
