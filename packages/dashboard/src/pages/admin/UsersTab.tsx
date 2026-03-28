@@ -96,8 +96,12 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await invite({ email: email || undefined, role });
-      setInviteUrl(result.inviteUrl);
+      const inviteData: { role: string; email?: string } = { role };
+      if (email) {
+        inviteData.email = email;
+      }
+      const result = await invite(inviteData);
+      setInviteUrl(result.inviteLink);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create invite');
     } finally {
