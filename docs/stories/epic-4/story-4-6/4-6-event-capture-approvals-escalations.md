@@ -657,3 +657,14 @@ class ApprovalEventCapture {
 This story is critical for compliance and auditability of human intervention points. Every approval request, decision, and escalation must be captured with complete context to provide transparency into the governance process. The correlation ID linking enables complete reconstruction of approval chains for audit and analysis purposes.
 
 The synchronous persistence ensures no approval actions are lost, while the separate content storage allows for detailed documentation without bloating the main event store. This supports compliance requirements while maintaining system performance.
+
+## Logging Requirements
+
+Event store and capture modules are CRITICAL infrastructure — they must log their own operations distinctly from the events they store.
+
+- **INFO**: Event appended (event type, stream, tags summary), query executed (filter summary, result count), replay started/completed
+- **DEBUG**: Event payload size, serialization timing, query plan, batch sizes, stream position
+- **WARN**: Event append slow (>100ms), query returned large result set (>1000), replay gap detected, schema migration pending
+- **ERROR**: Event append failed (with retry status), query failed, deserialization error, stream corruption, schema validation failure
+- **Structured context**: Always include `{ eventType, streamId, eventId, tags }` — but NEVER log full event `data` payload at INFO level (may contain sensitive content)
+- **Distinction**: Operational logs (about the event store) use standard ILogger; domain events (about business actions) go into the event stream — do not conflate the two

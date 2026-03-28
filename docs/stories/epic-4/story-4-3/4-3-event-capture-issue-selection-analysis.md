@@ -365,3 +365,14 @@ const eventRetryPolicy = {
 This story is critical for compliance and auditability. Every issue selection and analysis action must be captured with complete context to provide transparency into the autonomous decision-making process. The correlation ID linking enables complete reconstruction of entire development cycles for debugging and audit purposes.
 
 The event capture must be synchronous to the workflow - events must be successfully persisted before the workflow can proceed to the next step. This ensures no actions are lost and provides a complete, ordered audit trail.
+
+## Logging Requirements
+
+Event store and capture modules are CRITICAL infrastructure — they must log their own operations distinctly from the events they store.
+
+- **INFO**: Event appended (event type, stream, tags summary), query executed (filter summary, result count), replay started/completed
+- **DEBUG**: Event payload size, serialization timing, query plan, batch sizes, stream position
+- **WARN**: Event append slow (>100ms), query returned large result set (>1000), replay gap detected, schema migration pending
+- **ERROR**: Event append failed (with retry status), query failed, deserialization error, stream corruption, schema validation failure
+- **Structured context**: Always include `{ eventType, streamId, eventId, tags }` — but NEVER log full event `data` payload at INFO level (may contain sensitive content)
+- **Distinction**: Operational logs (about the event store) use standard ILogger; domain events (about business actions) go into the event stream — do not conflate the two

@@ -208,3 +208,14 @@ class InProcessTransport {
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-26 | 1.0 | Initial story creation | Architecture Team |
+
+## Logging Requirements
+
+Engine core is the most critical path — logging must be comprehensive without being noisy.
+
+- **INFO**: Engine started/stopped, workflow dispatched (workflow ID, issue ID), step transition (from state -> to state), queue item enqueued/dequeued
+- **DEBUG**: State reconstruction details, event replay progress, queue deduplication decisions, ELSA workflow variable snapshots
+- **WARN**: Queue backpressure detected, state reconstruction took >5s, event gap in stream, workflow execution slow
+- **ERROR**: Engine crash (with full context for restart), state reconstruction failed, event store unreachable, workflow dispatch failed, queue corruption
+- **Structured context**: Always include `{ workflowInstanceId, issueId, engineState, queueDepth }`
+- **Idempotency**: Log enough context to verify idempotent replay (event IDs, sequence numbers, dedup keys)

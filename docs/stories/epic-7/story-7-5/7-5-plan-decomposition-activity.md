@@ -288,3 +288,14 @@ mentorship:
 - Adjustment convergence: >80% of plans approved within 2 adjustments
 - Task completion correlation: >85% of planned tasks are actually completed during implementation (not skipped or blocked)
 - Time estimate accuracy: actual task duration within 50% of estimated duration for >70% of tasks
+
+## Logging Requirements
+
+All ELSA activities MUST inject `ILogger<T>` and log at these levels:
+
+- **INFO**: Activity started (with session/issue ID), activity completed (with outcome), state transitions
+- **DEBUG**: Input parameters received, intermediate LLM/API call details, decision rationale
+- **WARN**: Retryable failures, timeout approaching, degraded quality gate result
+- **ERROR**: Unrecoverable failures (with exception), invalid state transition, missing required data
+- **Structured context**: Always include `{ sessionId, juniorId, storyId, currentState }` in all log entries
+- **Sensitive data**: NEVER log student PII, credentials, or full LLM response content — log token counts and summary only

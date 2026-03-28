@@ -524,3 +524,7 @@ class EventCapturingAIProvider implements IAIProvider {
 - [Data Privacy Best Practices](https://gdpr.eu/what-is-gdpr/)
 - [Blob Storage Patterns](https://docs.aws.amazon.com/AmazonS3/latest/dev/UsingObjects.html)
 - [Token Counting Algorithms](https://github.com/openai/tiktoken)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

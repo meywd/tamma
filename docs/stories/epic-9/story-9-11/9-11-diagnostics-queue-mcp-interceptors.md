@@ -527,3 +527,14 @@ async invokeTool(
 - Test: interceptor errors are caught per-interceptor and chain continues (fail-open) (F09)
 - Test: prototype pollution keys are stripped from interceptor return values (F16)
 - Test: interceptor warnings are logged via `this.logger?.warn()` in `invokeTool()` (F14)
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only

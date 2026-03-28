@@ -545,3 +545,14 @@ class AIEventCapture {
 This story is critical for AI governance and compliance. Every AI interaction must be captured with complete context including provider selection rationale, cost tracking, and performance metrics. The synchronous persistence ensures no AI interactions are lost, while the separate content storage allows for detailed analysis without bloating the main event store.
 
 The data masking and PII detection are essential for security and compliance, ensuring that sensitive information is not stored in plain text while still maintaining auditability of the AI decision-making process.
+
+## Logging Requirements
+
+Event store and capture modules are CRITICAL infrastructure — they must log their own operations distinctly from the events they store.
+
+- **INFO**: Event appended (event type, stream, tags summary), query executed (filter summary, result count), replay started/completed
+- **DEBUG**: Event payload size, serialization timing, query plan, batch sizes, stream position
+- **WARN**: Event append slow (>100ms), query returned large result set (>1000), replay gap detected, schema migration pending
+- **ERROR**: Event append failed (with retry status), query failed, deserialization error, stream corruption, schema validation failure
+- **Structured context**: Always include `{ eventType, streamId, eventId, tags }` — but NEVER log full event `data` payload at INFO level (may contain sensitive content)
+- **Distinction**: Operational logs (about the event store) use standard ILogger; domain events (about business actions) go into the event stream — do not conflate the two

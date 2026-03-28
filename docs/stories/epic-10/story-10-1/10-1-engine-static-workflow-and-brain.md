@@ -322,3 +322,14 @@ This story is the centerpiece of Epic 10. It replaces the current imperative eng
 |------|---------|---------|--------|
 | 2026-03-26 | 1.0 | Initial story creation | Architecture Team |
 | 2026-03-26 | 2.0 | Complete rewrite: removed fast paths, role is orchestrator, LLM-driven tool loop pattern based on industry research (Claude Code, OpenCode, Codex, Cline, Aider, Copilot) | Architecture Team |
+
+## Logging Requirements
+
+Engine core is the most critical path — logging must be comprehensive without being noisy.
+
+- **INFO**: Engine started/stopped, workflow dispatched (workflow ID, issue ID), step transition (from state -> to state), queue item enqueued/dequeued
+- **DEBUG**: State reconstruction details, event replay progress, queue deduplication decisions, ELSA workflow variable snapshots
+- **WARN**: Queue backpressure detected, state reconstruction took >5s, event gap in stream, workflow execution slow
+- **ERROR**: Engine crash (with full context for restart), state reconstruction failed, event store unreachable, workflow dispatch failed, queue corruption
+- **Structured context**: Always include `{ workflowInstanceId, issueId, engineState, queueDepth }`
+- **Idempotency**: Log enough context to verify idempotent replay (event IDs, sequence numbers, dedup keys)

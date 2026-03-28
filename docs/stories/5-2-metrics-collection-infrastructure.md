@@ -762,3 +762,7 @@ export class MetricsController {
 - [Metrics Naming Conventions](https://prometheus.io/docs/practices/naming/)
 - [OpenTelemetry Specification](https://opentelemetry.io/docs/reference/specification/)
 - [Systems Monitoring Patterns](https://www.oreilly.com/library/view/monitoring-distributed/9781492033431/)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

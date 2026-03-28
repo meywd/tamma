@@ -99,3 +99,12 @@ smoke-test:
 | `packages/cli/src/commands/init-fullstack.ts` | Create |
 | `packages/cli/src/index.tsx` | Modify (add `init --full-stack` flag) |
 | `docker/tamma-update.sh` | Create |
+
+## Logging Requirements
+
+Container and CI/CD components MUST log structured output for container orchestration observability.
+
+- **INFO**: Container started (image version, config), health check endpoints responding, CI pipeline stage completed
+- **WARN**: Container resource limits approaching, health check degraded, build cache miss
+- **ERROR**: Container failed to start, health check failed, CI pipeline step failed
+- **Format**: All container logs MUST output structured JSON (one JSON object per line) for log aggregation compatibility (ELK, Loki, CloudWatch)

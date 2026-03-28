@@ -138,3 +138,13 @@ Claude-3.5-Sonnet
 ### Completion Notes List
 
 ### File List
+
+## Logging Requirements
+
+All decomposition and sequencing modules MUST log via `ILogger`.
+
+- **INFO**: Task decomposed (issue ID, task count), dependency graph built, sequence generated
+- **DEBUG**: Decomposition heuristics applied, dependency edge details, complexity score breakdown
+- **WARN**: Circular dependency detected and broken, task too large for single provider, complexity threshold exceeded
+- **ERROR**: Decomposition failed, dependency resolution impossible, sequencing algorithm diverged
+- **Structured context**: Include `{ issueId, taskCount, complexityScore }` where applicable

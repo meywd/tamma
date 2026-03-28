@@ -276,3 +276,7 @@ interface EventStoreConfig {
 - [EventStoreDB Documentation](https://developers.eventstore.com/)
 - [Append-Only Storage Pattern](https://martinfowler.com/eaaDev/EventSourcing.html)
 - [Database Partitioning Guide](https://www.postgresql.org/docs/current/ddl-partitioning.html)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

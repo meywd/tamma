@@ -99,3 +99,12 @@ function readSecretFile(envVar: string): string | undefined {
 | `docker/init-db.sql` | Create (copy from ELSA) |
 | `packages/cli/src/config.ts` | Modify (add `_FILE` suffix support) |
 | `apps/tamma-elsa/src/Tamma.Api/appsettings.json` | Modify (parameterize TammaServer:Url) |
+
+## Logging Requirements
+
+Container and CI/CD components MUST log structured output for container orchestration observability.
+
+- **INFO**: Container started (image version, config), health check endpoints responding, CI pipeline stage completed
+- **WARN**: Container resource limits approaching, health check degraded, build cache miss
+- **ERROR**: Container failed to start, health check failed, CI pipeline step failed
+- **Format**: All container logs MUST output structured JSON (one JSON object per line) for log aggregation compatibility (ELK, Loki, CloudWatch)

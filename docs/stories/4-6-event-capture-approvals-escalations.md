@@ -760,3 +760,7 @@ class EventCapturingEscalationSystem {
 - [Escalation Management Best Practices](https://itsm.tools/escalation-management)
 - [Compliance Framework Requirements](https://www.coso.org/Pages/default.aspx)
 - [Multi-factor Authentication Guidelines](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63B.html)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

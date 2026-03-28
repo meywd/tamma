@@ -239,3 +239,14 @@ mentorship:
 - Latency: <5 seconds p95 for direct API, <10 seconds p95 for callback mode
 - Fallback rate: <5% of analyses require fallback to mock
 - Skill adaptation: responses at skill level 1 are measurably longer/simpler than at level 5
+
+## Logging Requirements
+
+All ELSA activities MUST inject `ILogger<T>` and log at these levels:
+
+- **INFO**: Activity started (with session/issue ID), activity completed (with outcome), state transitions
+- **DEBUG**: Input parameters received, intermediate LLM/API call details, decision rationale
+- **WARN**: Retryable failures, timeout approaching, degraded quality gate result
+- **ERROR**: Unrecoverable failures (with exception), invalid state transition, missing required data
+- **Structured context**: Always include `{ sessionId, juniorId, storyId, currentState }` in all log entries
+- **Sensitive data**: NEVER log student PII, credentials, or full LLM response content — log token counts and summary only

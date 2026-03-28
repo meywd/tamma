@@ -990,3 +990,14 @@ development_planning:
 
 - **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 - **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
+
+## Logging Requirements
+
+All ADL (Autonomous Development Loop) components MUST log via `ILogger` (C#) or `ILogger` from `@tamma/shared/contracts` (TypeScript).
+
+- **INFO**: Step started/completed (with issue ID and step name), approval requested/granted, branch created, PR opened/merged
+- **DEBUG**: Issue filter criteria, context assembly details, plan generation parameters, code diff summary
+- **WARN**: Step retry triggered, approval timeout approaching, CI check flaky, provider fallback
+- **ERROR**: Step failed permanently, Git operation failed, API rate limit exceeded, approval denied
+- **Structured context**: Always include `{ issueId, issueNumber, repository, stepName, workflowInstanceId }`
+- **Audit trail**: Every state transition must emit a corresponding DCB event (see Epic 4)

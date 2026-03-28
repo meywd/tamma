@@ -697,3 +697,7 @@ export class ReportGenerator {
 - [State Machine Replay Patterns](https://statecharts.dev/)
 - [HTML Report Generation Best Practices](https://web.dev/reporting-api/)
 - [Event Sourcing Debugging](https://eventstore.com/docs/debugging/)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

@@ -252,3 +252,14 @@ const shutdown = async (): Promise<void> => {
 - Test: each disposal call is wrapped in try/catch so a single failure does not prevent subsequent disposals
 - Test: `ContentSanitizer` creation logs an info message when sanitization is enabled
 - Test: `agentResolver` is typed as `IRoleBasedAgentResolver` when passed to TammaEngine
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only
