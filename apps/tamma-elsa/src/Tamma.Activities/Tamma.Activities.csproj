@@ -12,6 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Tamma.Activities.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Elsa" Version="3.5.3" />
     <PackageReference Include="Elsa.Agents.Core" Version="3.5.3" />
     <PackageReference Include="Elsa.Agents.Persistence" Version="3.5.3" />

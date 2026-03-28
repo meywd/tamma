@@ -81,6 +81,13 @@ public class LlmCallWorkflow : WorkflowBase
         var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "");
         var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
 
+        // Tool loop variables
+        var enableToolLoopVar = builder.WithVariable<bool>("EnableToolLoop", false);
+        var toolLoopConfigJsonVar = builder.WithVariable<string>("ToolLoopConfigJson", "");
+        var toolLoopTokensVar = builder.WithVariable<int>("ToolLoopTokens", 0);
+        var toolLoopTurnsVar = builder.WithVariable<int>("ToolLoopTurns", 0);
+        var toolLoopExhaustedVar = builder.WithVariable<bool>("ToolLoopExhausted", false);
+
         // ============================================================
         // Activities
         // ============================================================
@@ -100,6 +107,13 @@ public class LlmCallWorkflow : WorkflowBase
                     contextVar.Set(context, context.GetInput<string>("context") ?? "");
                     sessionIdVar.Set(context, context.GetInput<string>("sessionId") ?? "");
                     systemPromptOverrideVar.Set(context, context.GetInput<string>("systemPromptOverride") ?? "");
+
+                    // Tool loop config from typed inputs
+                    var enableLoop = context.GetInput<bool?>("enableToolLoop") ?? false;
+                    enableToolLoopVar.Set(context, enableLoop);
+                    var loopConfigJson = context.GetInput<string>("toolLoopConfig") ?? "";
+                    toolLoopConfigJsonVar.Set(context, loopConfigJson);
+
                     return role;
                 }
 
@@ -111,6 +125,11 @@ public class LlmCallWorkflow : WorkflowBase
                 contextVar.Set(context, "");
                 sessionIdVar.Set(context, input.CorrelationId ?? "");
                 systemPromptOverrideVar.Set(context, input.SystemPromptOverride ?? "");
+
+                // Tool loop config from legacy input
+                enableToolLoopVar.Set(context, input.EnableToolLoop);
+                if (input.ToolLoopConfig != null)
+                    toolLoopConfigJsonVar.Set(context, JsonSerializer.Serialize(input.ToolLoopConfig));
 
                 // Also check dict-style inputs (from BlockerDiagnosis etc.)
                 var dictRole = context.GetInput<string>("role");
@@ -345,7 +364,9 @@ public class LlmCallWorkflow : WorkflowBase
                                                             diagnosticsListVar,
                                                             circuitBreakerStatesVar,
                                                             budgetStateVar,
-                                                            workflowOutputVar)
+                                                            workflowOutputVar,
+                                                            enableToolLoopVar,
+                                                            toolLoopConfigJsonVar)
                                                     }
                                                 }, "Budget OK")
                                             }, "Budget Exhausted?")
@@ -456,7 +477,43 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.TotalTokens ?? 0);
                     })
-                }, "Output: tokensUsed")
+                }, "Output: tokensUsed"),
+                WithLabel(new SetOutput
+                {
+                    Id = "OutputToolLoopTokens",
+                    Name = "Output: toolLoopTokens",
+                    OutputName = new("toolLoopTokens"),
+                    OutputValue = new(context =>
+                    {
+                        var outputJson = workflowOutputVar.Get(context);
+                        var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
+                        return (object)(output?.ToolLoopTokens ?? 0);
+                    })
+                }, "Output: toolLoopTokens"),
+                WithLabel(new SetOutput
+                {
+                    Id = "OutputToolLoopTurns",
+                    Name = "Output: toolLoopTurns",
+                    OutputName = new("toolLoopTurns"),
+                    OutputValue = new(context =>
+                    {
+                        var outputJson = workflowOutputVar.Get(context);
+                        var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
+                        return (object)(output?.ToolLoopTurns ?? 0);
+                    })
+                }, "Output: toolLoopTurns"),
+                WithLabel(new SetOutput
+                {
+                    Id = "OutputToolLoopExhausted",
+                    Name = "Output: toolLoopExhausted",
+                    OutputName = new("toolLoopExhausted"),
+                    OutputValue = new(context =>
+                    {
+                        var outputJson = workflowOutputVar.Get(context);
+                        var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
+                        return (object)(output?.ToolLoopExhausted ?? false);
+                    })
+                }, "Output: toolLoopExhausted")
             }
         };
         setOutputs.SetDisplayText("Set Outputs");
@@ -518,7 +575,9 @@ public class LlmCallWorkflow : WorkflowBase
         Variable<string> diagnosticsListVar,
         Variable<string> circuitBreakerStatesVar,
         Variable<string> budgetStateVar,
-        Variable<string> workflowOutputVar)
+        Variable<string> workflowOutputVar,
+        Variable<bool> enableToolLoopVar,
+        Variable<string> toolLoopConfigJsonVar)
     {
         var whileLoop = new While((string?)null);
         whileLoop.Id = "RetryLoop";
@@ -604,6 +663,11 @@ public class LlmCallWorkflow : WorkflowBase
                             var budget = SafeDeserialize<BudgetState>(budgetJson2);
                             var allDiags = DeserializeList<ProviderAttemptDiagnostic>(diagnosticsListVar.Get(context));
 
+                            // Read tool loop output variables (set by CallLlmInlineActivity when EnableToolLoop=true)
+                            var toolLoopTokens = context.GetVariable<int?>("ToolLoopTokens") ?? 0;
+                            var toolLoopTurns = context.GetVariable<int?>("ToolLoopTurns") ?? 0;
+                            var toolLoopExhausted = context.GetVariable<bool?>("ToolLoopExhausted") ?? false;
+
                             var output = new LlmCallWorkflowOutput
                             {
                                 Success = true,
@@ -616,7 +680,10 @@ public class LlmCallWorkflow : WorkflowBase
                                 EstimatedCostUsd = budget?.SpentUsd ?? 0,
                                 TotalDurationMs = allDiags.Sum(d => d.DurationMs),
                                 Diagnostics = allDiags,
-                                ToolCalls = resp?.ToolCalls
+                                ToolCalls = resp?.ToolCalls,
+                                ToolLoopTokens = toolLoopTokens,
+                                ToolLoopTurns = toolLoopTurns,
+                                ToolLoopExhausted = toolLoopExhausted
                             };
                             return JsonSerializer.Serialize(output, SerializerOptions);
                         })
@@ -646,7 +713,9 @@ public class LlmCallWorkflow : WorkflowBase
                     ProviderNameProp = new(context => currentProviderVar.Get(context)),
                     SystemPromptProp = new(context => resolvedSystemPromptVar.Get(context)),
                     ToolsJsonProp = new(context => resolvedToolsJsonVar.Get(context)),
-                    AttemptNumberProp = new(context => attemptNumberVar.Get(context))
+                    AttemptNumberProp = new(context => attemptNumberVar.Get(context)),
+                    EnableToolLoopProp = new(context => enableToolLoopVar.Get(context)),
+                    ToolLoopConfigJsonProp = new(context => toolLoopConfigJsonVar.Get(context))
                 }, "Call LLM"),
                 WithLabel(new RecordDiagnosticsInlineActivity
                 {
