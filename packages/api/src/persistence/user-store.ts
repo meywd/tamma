@@ -23,6 +23,19 @@ export interface UserInstallation {
 /** Input type for upsertUser — settings is optional (defaults to empty). */
 export type UpsertUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'settings'> & { settings?: IProvidersConfig };
 
+/** Options for listing users with pagination. */
+export interface ListUsersOptions {
+  limit: number;
+  offset: number;
+  role?: 'owner' | 'admin' | 'member';
+}
+
+/** Paginated result for listUsers. */
+export interface ListUsersResult {
+  users: User[];
+  total: number;
+}
+
 /** Interface for user persistence. */
 export interface IUserStore {
   upsertUser(user: UpsertUserInput): Promise<User>;
@@ -32,6 +45,18 @@ export interface IUserStore {
   getUserInstallations(userId: string): Promise<UserInstallation[]>;
   getUserSettings(userId: string): Promise<IProvidersConfig>;
   updateUserSettings(userId: string, settings: IProvidersConfig): Promise<IProvidersConfig>;
+
+  /** List users with pagination, excluding soft-deleted. */
+  listUsers(options: ListUsersOptions): Promise<ListUsersResult>;
+
+  /** Update a user's role. */
+  updateUserRole(id: string, role: 'owner' | 'admin' | 'member'): Promise<User>;
+
+  /** Soft-delete a user by setting deleted_at. */
+  deleteUser(id: string): Promise<void>;
+
+  /** Update last_active_at timestamp. */
+  updateLastActive(id: string): Promise<void>;
 }
 
 /** Default empty provider settings. */
@@ -39,7 +64,7 @@ const DEFAULT_SETTINGS: IProvidersConfig = { providers: {} };
 
 /** In-memory implementation for testing and development. */
 export class InMemoryUserStore implements IUserStore {
-  private users = new Map<string, User>();
+  private users = new Map<string, User & { deletedAt?: string; lastActiveAt?: string }>();
   private userInstallations = new Map<string, UserInstallation[]>();
   private nextId = 1;
 
@@ -114,5 +139,40 @@ export class InMemoryUserStore implements IUserStore {
     user.settings = structuredClone(settings);
     user.updatedAt = new Date().toISOString();
     return structuredClone(user.settings);
+  }
+
+  async listUsers(options: ListUsersOptions): Promise<ListUsersResult> {
+    const allUsers = [...this.users.values()].filter((u) => !u.deletedAt);
+    const filtered = options.role
+      ? allUsers.filter((u) => u.role === options.role)
+      : allUsers;
+    const total = filtered.length;
+    const users = filtered.slice(options.offset, options.offset + options.limit);
+    return { users, total };
+  }
+
+  async updateUserRole(id: string, role: 'owner' | 'admin' | 'member'): Promise<User> {
+    const user = this.users.get(id);
+    if (!user || user.deletedAt) {
+      throw new Error(`User not found: ${id}`);
+    }
+    user.role = role;
+    user.updatedAt = new Date().toISOString();
+    return user;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    const user = this.users.get(id);
+    if (!user) {
+      throw new Error(`User not found: ${id}`);
+    }
+    user.deletedAt = new Date().toISOString();
+    user.updatedAt = new Date().toISOString();
+  }
+
+  async updateLastActive(id: string): Promise<void> {
+    const user = this.users.get(id);
+    if (!user || user.deletedAt) return;
+    user.lastActiveAt = new Date().toISOString();
   }
 }

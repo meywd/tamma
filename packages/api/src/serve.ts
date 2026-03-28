@@ -19,6 +19,10 @@ import {
   PgInstallationStore,
   InMemoryUserStore,
   PgUserStore,
+  InMemoryUserApiKeyStore,
+  PgUserApiKeyStore,
+  InMemoryInviteStore,
+  PgInviteStore,
   InstallationRouter,
   InMemoryTaskQueue,
 } from './index.js';
@@ -60,6 +64,12 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   const workflowStore = new InMemoryWorkflowStore();
   const taskQueue = new InMemoryTaskQueue();
   const installationRouter = new InstallationRouter(installationStore);
+  const apiKeyStore = pool
+    ? new PgUserApiKeyStore(pool)
+    : new InMemoryUserApiKeyStore();
+  const inviteStore = pool
+    ? new PgInviteStore(pool)
+    : new InMemoryInviteStore();
 
   // GitHub App config
   const appIdStr = process.env['GITHUB_APP_ID'];
@@ -81,9 +91,16 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
 
   // Build app options
   const logLevel = options.logLevel ?? process.env['LOG_LEVEL'] ?? 'info';
+  const dashUrl = process.env['DASHBOARD_URL'] ?? 'http://localhost:3001';
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
     logger: { level: logLevel },
+    userManagement: {
+      userStore,
+      apiKeyStore,
+      inviteStore,
+      dashboardUrl: dashUrl,
+    },
   };
 
   // Register GitHub App routes if configured
@@ -121,7 +138,6 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     const oauthClientSecret = process.env['GITHUB_OAUTH_CLIENT_SECRET'];
     const jwtSecret = process.env['JWT_SECRET'] ?? 'tamma-dev-jwt-secret';
     const apiBaseUrl = process.env['API_BASE_URL'] ?? `http://localhost:${port}`;
-    const dashUrl = process.env['DASHBOARD_URL'] ?? 'http://localhost:3001';
 
     if (oauthClientId && oauthClientSecret) {
       appOptions.githubOAuth = {

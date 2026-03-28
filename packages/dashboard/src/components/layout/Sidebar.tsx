@@ -1,12 +1,13 @@
 
 import { NavLink } from 'react-router-dom';
+import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 
 interface NavGroup {
   label: string;
   items: { to: string; label: string }[];
 }
 
-const NAV_GROUPS: NavGroup[] = [
+const BASE_NAV_GROUPS: NavGroup[] = [
   {
     label: 'Knowledge Base',
     items: [{ to: '/', label: 'Dashboard' }],
@@ -25,10 +26,22 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 export function Sidebar(): JSX.Element {
+  const { isAdmin } = useCurrentUser();
+
+  const navGroups: NavGroup[] = isAdmin
+    ? [
+        ...BASE_NAV_GROUPS,
+        {
+          label: 'Administration',
+          items: [{ to: '/admin', label: 'Admin Panel' }],
+        },
+      ]
+    : BASE_NAV_GROUPS;
+
   return (
     <nav className="w-60 shrink-0 bg-gray-800 text-gray-100 py-6 flex flex-col">
       <div className="px-5 mb-8 text-lg font-bold tracking-tight">Tamma</div>
-      {NAV_GROUPS.map((group) => (
+      {navGroups.map((group) => (
         <div key={group.label} className="mb-4">
           <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
             {group.label}

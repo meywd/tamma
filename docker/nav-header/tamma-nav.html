@@ -1,0 +1,207 @@
+<!--
+  Tamma Unified Navigation Bar — Self-contained HTML/CSS/JS snippet.
+
+  Injected via nginx sub_filter into third-party dashboards (OpenSearch, etc.)
+  or included directly in ELSA Studio's index.html.
+
+  Requirements:
+  - No external dependencies
+  - Scoped CSS (all selectors under #tamma-nav)
+  - Loads user data from /api/auth/me via cross-subdomain cookie
+  - Active link highlighting based on hostname
+  - Admin link visible only for admin/owner roles
+  - Works as static HTML fallback if JS fails (links still render)
+-->
+<div id="tamma-nav">
+  <style>
+    #tamma-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 99999;
+      height: 48px;
+      background: #7B61FF;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      box-sizing: border-box;
+    }
+    #tamma-nav * { box-sizing: border-box; }
+    #tamma-nav .tn-logo {
+      font-weight: 700;
+      font-size: 16px;
+      color: #fff;
+      margin-right: 24px;
+      text-decoration: none;
+      letter-spacing: -0.5px;
+    }
+    #tamma-nav .tn-links {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    #tamma-nav .tn-links a {
+      color: rgba(255,255,255,0.8);
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: background 0.15s, color 0.15s;
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    #tamma-nav .tn-links a:hover {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    #tamma-nav .tn-links a.tn-active {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      font-weight: 600;
+    }
+    #tamma-nav .tn-spacer { flex: 1; }
+    #tamma-nav .tn-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      position: relative;
+    }
+    #tamma-nav .tn-user:hover { background: rgba(255,255,255,0.15); }
+    #tamma-nav .tn-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.3);
+    }
+    #tamma-nav .tn-username {
+      color: #fff;
+      font-weight: 500;
+      font-size: 13px;
+    }
+    #tamma-nav .tn-menu {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 40px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      min-width: 160px;
+      overflow: hidden;
+      z-index: 100000;
+    }
+    #tamma-nav .tn-menu.tn-open { display: block; }
+    #tamma-nav .tn-menu a {
+      display: block;
+      padding: 10px 16px;
+      color: #333;
+      text-decoration: none;
+      font-size: 14px;
+      transition: background 0.15s;
+    }
+    #tamma-nav .tn-menu a:hover { background: #f3f0ff; }
+    #tamma-nav .tn-admin { display: none; }
+    /* Push host page content below nav bar */
+    body { padding-top: 48px !important; }
+    /* Mobile: hide labels, show condensed */
+    @media (max-width: 640px) {
+      #tamma-nav { padding: 0 8px; }
+      #tamma-nav .tn-links a { padding: 6px 8px; font-size: 13px; }
+      #tamma-nav .tn-username { display: none; }
+      #tamma-nav .tn-logo { margin-right: 12px; }
+    }
+  </style>
+
+  <a class="tn-logo" href="https://app.tamma.dev">Tamma</a>
+
+  <div class="tn-links">
+    <a href="https://app.tamma.dev" data-svc="app">Dashboard</a>
+    <a href="https://elsa.tamma.dev" data-svc="elsa">Workflows</a>
+    <a href="https://logs.tamma.dev" data-svc="logs">Logs</a>
+    <a href="https://app.tamma.dev/admin" data-svc="admin" class="tn-admin">Admin</a>
+  </div>
+
+  <div class="tn-spacer"></div>
+
+  <div class="tn-user" id="tamma-nav-user">
+    <img class="tn-avatar" id="tamma-nav-avatar" src="" alt="" style="display:none" />
+    <span class="tn-username" id="tamma-nav-username"></span>
+    <div class="tn-menu" id="tamma-nav-menu">
+      <a href="https://app.tamma.dev/settings">Settings</a>
+      <a href="https://app.tamma.dev/api/auth/logout" id="tamma-nav-signout">Sign Out</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var nav = document.getElementById('tamma-nav');
+  if (!nav) return;
+
+  // Detect active service from hostname
+  var host = window.location.hostname;
+  var svcMap = { 'app.tamma.dev': 'app', 'elsa.tamma.dev': 'elsa', 'logs.tamma.dev': 'logs' };
+  var active = svcMap[host] || '';
+  var links = nav.querySelectorAll('.tn-links a[data-svc]');
+  for (var i = 0; i < links.length; i++) {
+    if (links[i].getAttribute('data-svc') === active) {
+      links[i].classList.add('tn-active');
+    }
+  }
+
+  // Toggle user menu
+  var userEl = document.getElementById('tamma-nav-user');
+  var menuEl = document.getElementById('tamma-nav-menu');
+  if (userEl && menuEl) {
+    userEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      menuEl.classList.toggle('tn-open');
+    });
+    document.addEventListener('click', function() {
+      menuEl.classList.remove('tn-open');
+    });
+  }
+
+  // Sign out via POST then redirect
+  var signout = document.getElementById('tamma-nav-signout');
+  if (signout) {
+    signout.addEventListener('click', function(e) {
+      e.preventDefault();
+      fetch('https://app.tamma.dev/api/auth/logout', { method: 'POST', credentials: 'include' })
+        .finally(function() { window.location.href = 'https://app.tamma.dev'; });
+    });
+  }
+
+  // Fetch user identity from shared JWT cookie
+  fetch('https://app.tamma.dev/api/auth/me', { credentials: 'include' })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data || !data.user) return;
+      var u = data.user;
+      var avatar = document.getElementById('tamma-nav-avatar');
+      var name = document.getElementById('tamma-nav-username');
+      if (avatar) {
+        avatar.src = 'https://github.com/' + u.username + '.png?size=56';
+        avatar.alt = u.username;
+        avatar.style.display = '';
+      }
+      if (name) name.textContent = u.username;
+      // Show admin link for admin/owner
+      if (u.role === 'admin' || u.role === 'owner') {
+        var adminLink = nav.querySelector('.tn-admin');
+        if (adminLink) adminLink.style.display = '';
+      }
+    })
+    .catch(function() {
+      // Fallback — nav still works, just no user info
+    });
+})();
+</script>

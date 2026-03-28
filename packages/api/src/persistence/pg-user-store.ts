@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import type { IProvidersConfig } from '@tamma/shared';
-import type { IUserStore, User, UserInstallation, UpsertUserInput } from './user-store.js';
+import type { IUserStore, User, UserInstallation, UpsertUserInput, ListUsersOptions, ListUsersResult } from './user-store.js';
 
 /** PostgreSQL-backed user store. */
 export class PgUserStore implements IUserStore {
@@ -87,6 +87,62 @@ export class PgUserStore implements IUserStore {
       throw new Error(`User not found: ${userId}`);
     }
     return result.rows[0]!['settings'] as IProvidersConfig;
+  }
+
+  async listUsers(options: ListUsersOptions): Promise<ListUsersResult> {
+    const conditions = ['deleted_at IS NULL'];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (options.role !== undefined) {
+      conditions.push(`role = $${paramIndex}`);
+      params.push(options.role);
+      paramIndex++;
+    }
+
+    const where = conditions.join(' AND ');
+
+    const countResult = await this.pool.query<Record<string, unknown>>(
+      `SELECT COUNT(*)::int AS total FROM users WHERE ${where}`,
+      params,
+    );
+    const total = Number(countResult.rows[0]!['total']);
+
+    const dataResult = await this.pool.query<Record<string, unknown>>(
+      `SELECT * FROM users WHERE ${where} ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, options.limit, options.offset],
+    );
+
+    const users = dataResult.rows.map((r) => this.mapUser(r));
+    return { users, total };
+  }
+
+  async updateUserRole(id: string, role: 'owner' | 'admin' | 'member'): Promise<User> {
+    const result = await this.pool.query<Record<string, unknown>>(
+      'UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING *',
+      [role, id],
+    );
+    if (result.rows.length === 0) {
+      throw new Error(`User not found: ${id}`);
+    }
+    return this.mapUser(result.rows[0]!);
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    const result = await this.pool.query(
+      'UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [id],
+    );
+    if (result.rowCount === 0) {
+      throw new Error(`User not found: ${id}`);
+    }
+  }
+
+  async updateLastActive(id: string): Promise<void> {
+    await this.pool.query(
+      'UPDATE users SET last_active_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [id],
+    );
   }
 
   private mapUser(row: Record<string, unknown>): User {

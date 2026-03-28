@@ -8,6 +8,8 @@ import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { ProviderHealthPage } from './pages/settings/ProviderHealthPage.js';
 import { BudgetPage } from './pages/settings/BudgetPage.js';
 import { PromptsPage } from './pages/settings/PromptsPage.js';
+import { AdminGuard } from './guards/AdminGuard.js';
+import { AdminLayout } from './pages/admin/AdminLayout.js';
 
 export const router = createBrowserRouter([
   {
@@ -20,6 +22,14 @@ export const router = createBrowserRouter([
       { path: '/settings/health', element: <ProviderHealthPage /> },
       { path: '/settings/budget', element: <BudgetPage /> },
       { path: '/settings/prompts', element: <PromptsPage /> },
+      {
+        path: '/admin',
+        element: (
+          <AdminGuard>
+            <AdminLayout />
+          </AdminGuard>
+        ),
+      },
     ],
   },
 ]);

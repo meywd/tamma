@@ -43,6 +43,17 @@ import { registerApiKeyAuthPlugin } from './auth/api-key-auth.js';
 import type { InstallationContext, ApiKeyAuthConfig } from './auth/api-key-auth.js';
 import { registerGitHubOAuthRoutes } from './routes/auth/github-oauth.js';
 import type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
+import { registerAuthMeRoute } from './routes/auth/me-route.js';
+import type { AuthMeRouteOptions, AuthMeUser } from './routes/auth/me-route.js';
+import { registerRoleCheckRoute } from './routes/auth/role-check.js';
+import { registerUserManagementRoutes } from './routes/users/index.js';
+import type { UserManagementRouteOptions } from './routes/users/index.js';
+import { InMemoryUserApiKeyStore, PgUserApiKeyStore } from './persistence/user-api-key-store.js';
+import type { IUserApiKeyStore, UserApiKey, CreateApiKeyInput } from './persistence/user-api-key-store.js';
+import { InMemoryInviteStore, PgInviteStore } from './persistence/invite-store.js';
+import type { IInviteStore, UserInvite, CreateInviteInput } from './persistence/invite-store.js';
+import { requireRole, requireSelfOrRole } from './middleware/require-role.js';
+import type { AuthenticatedUser } from './middleware/require-role.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
 import { GitHubRepoConfigReader } from './services/settings/repo-config-reader.js';
 import type { RepoConfigReader } from './services/settings/repo-config-reader.js';
@@ -58,6 +69,8 @@ import type {
   DequeueOptions,
   ListTasksOptions,
 } from './services/task-queue.js';
+import { registerAdminRoutes } from './routes/admin/index.js';
+import type { AdminRouteOptions } from './routes/admin/index.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -86,11 +99,26 @@ export {
   InstallationRouter,
   InMemoryTaskQueue,
   registerGitHubOAuthRoutes,
+  registerAuthMeRoute,
+  registerRoleCheckRoute,
+  registerUserManagementRoutes,
+  InMemoryUserApiKeyStore,
+  PgUserApiKeyStore,
+  InMemoryInviteStore,
+  PgInviteStore,
+  requireRole,
+  requireSelfOrRole,
+  registerAdminRoutes,
 };
 
 export { startApiServer } from './serve.js';
 export type { ApiServerOptions } from './serve.js';
 export type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
+
+// RBAC
+export { hasPermission, getRolePermissions, isValidRole, PERMISSIONS } from './auth/permissions.js';
+export type { Role, Permission } from './auth/permissions.js';
+export { requirePermission } from './auth/require-permission.js';
 
 export type {
   KBServices,
@@ -125,6 +153,16 @@ export type {
   EnqueueTaskInput,
   DequeueOptions,
   ListTasksOptions,
+  UserManagementRouteOptions,
+  IUserApiKeyStore,
+  UserApiKey,
+  CreateApiKeyInput,
+  IInviteStore,
+  UserInvite,
+  CreateInviteInput,
+  AuthenticatedUser,
+  AuthMeRouteOptions,
+  AuthMeUser,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -149,6 +187,8 @@ export interface CreateAppOptions {
   saas?: SaaSRouteOptions;
   /** GitHub OAuth login options (optional; enables /api/auth/github). */
   githubOAuth?: GitHubOAuthOptions;
+  /** User management route options (optional; enables /api/admin/users/* routes). */
+  userManagement?: UserManagementRouteOptions;
   /** Enable Fastify logger (boolean or pino options object). */
   logger?: boolean | object;
 }
@@ -170,7 +210,15 @@ export async function createApp(options?: CreateAppOptions) {
     });
   });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: [
+      'https://app.tamma.dev',
+      'https://elsa.tamma.dev',
+      'https://logs.tamma.dev',
+      /^https?:\/\/localhost(:\d+)?$/,
+    ],
+    credentials: true,
+  });
   await app.register(helmet);
 
   // Health check
@@ -223,6 +271,8 @@ export async function createApp(options?: CreateAppOptions) {
   // GitHub OAuth login routes
   if (options?.githubOAuth !== undefined) {
     await registerGitHubOAuthRoutes(app, options.githubOAuth);
+    // Role check endpoint for nginx service gating (depends on JWT/cookie from OAuth)
+    await registerRoleCheckRoute(app);
   }
 
   // SaaS API routes (protected by API key auth)
@@ -233,6 +283,11 @@ export async function createApp(options?: CreateAppOptions) {
       },
       { prefix: '' },
     );
+  }
+
+  // User management routes (admin panel)
+  if (options?.userManagement !== undefined) {
+    await registerUserManagementRoutes(app, options.userManagement);
   }
 
   // Dashboard routes (requires both engine registry and workflow store)

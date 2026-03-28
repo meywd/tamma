@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using Serilog.Sinks.Elasticsearch;
 using Tamma.Api.Services;
 using Tamma.Core.Interfaces;
 using Tamma.Data;
@@ -7,13 +8,41 @@ using Tamma.Data.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-Log.Logger = new LoggerConfiguration()
+// Configure Serilog with Console + File + OpenSearch sinks
+var opensearchUrl = builder.Configuration["OpenSearch:Url"] ?? "http://opensearch:9200";
+var opensearchEnabled = builder.Configuration.GetValue<bool>("OpenSearch:Enabled", true);
+var logIndexPrefix = builder.Configuration["OpenSearch:IndexPrefix"] ?? "tamma-api-dotnet";
+
+var logConfig = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
+    .Enrich.WithProperty("service", "tamma-api-dotnet")
+    .Enrich.WithProperty("environment", builder.Environment.EnvironmentName)
+    .Enrich.WithMachineName()
     .WriteTo.Console()
-    .WriteTo.File("logs/tamma-api-.log", rollingInterval: RollingInterval.Day)
-    .CreateLogger();
+    .WriteTo.File("logs/tamma-api-.log", rollingInterval: RollingInterval.Day);
+
+if (opensearchEnabled)
+{
+    logConfig.WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(opensearchUrl))
+    {
+        AutoRegisterTemplate = false, // We manage templates externally via setup.sh
+        IndexFormat = $"{logIndexPrefix}-{{0:yyyy.MM.dd}}",
+        BatchAction = ElasticOpType.Create,
+        ModifyConnectionSettings = conn =>
+            conn.ServerCertificateValidationCallback((_, _, _, _) => true),
+        EmitEventFailure = EmitEventFailureHandling.WriteToSelfLog,
+        FailureCallback = e => Console.Error.WriteLine(
+            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate}"),
+        BufferBaseFilename = "./logs/opensearch-buffer",
+        BufferFileSizeLimitBytes = 50_000_000, // 50 MB buffer
+        Period = TimeSpan.FromSeconds(2),
+        BatchPostingLimit = 500,
+    });
+    Serilog.Debugging.SelfLog.Enable(Console.Error);
+}
+
+Log.Logger = logConfig.CreateLogger();
 
 builder.Host.UseSerilog();
 

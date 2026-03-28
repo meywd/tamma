@@ -1,0 +1,207 @@
+{
+  "index_patterns": ["tamma-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "index.refresh_interval": "5s",
+      "index.codec": "best_compression",
+      "index.mapping.total_fields.limit": 2000
+    },
+    "mappings": {
+      "dynamic": "true",
+      "dynamic_templates": [
+        {
+          "strings_as_keywords": {
+            "match_mapping_type": "string",
+            "mapping": {
+              "type": "keyword",
+              "ignore_above": 1024
+            }
+          }
+        }
+      ],
+      "properties": {
+        "@timestamp": {
+          "type": "date",
+          "format": "strict_date_optional_time||epoch_millis"
+        },
+        "level": {
+          "type": "keyword"
+        },
+        "levelNum": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 4096
+            }
+          }
+        },
+        "messageTemplate": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 2048
+            }
+          }
+        },
+        "service": {
+          "type": "keyword"
+        },
+        "environment": {
+          "type": "keyword"
+        },
+        "host": {
+          "type": "keyword"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "keyword"
+        },
+        "workflowInstanceId": {
+          "type": "keyword"
+        },
+        "workflowDefinitionId": {
+          "type": "keyword"
+        },
+        "workflowName": {
+          "type": "keyword"
+        },
+        "activityId": {
+          "type": "keyword"
+        },
+        "activityName": {
+          "type": "keyword"
+        },
+        "activityType": {
+          "type": "keyword"
+        },
+        "issueNumber": {
+          "type": "integer"
+        },
+        "issueId": {
+          "type": "keyword"
+        },
+        "sessionId": {
+          "type": "keyword"
+        },
+        "correlationId": {
+          "type": "keyword"
+        },
+        "provider": {
+          "type": "keyword"
+        },
+        "model": {
+          "type": "keyword"
+        },
+        "durationMs": {
+          "type": "long"
+        },
+        "tokenCount": {
+          "type": "integer"
+        },
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "costUsd": {
+          "type": "float"
+        },
+        "toolName": {
+          "type": "keyword"
+        },
+        "toolCallId": {
+          "type": "keyword"
+        },
+        "errorCode": {
+          "type": "keyword"
+        },
+        "errorMessage": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 2048
+            }
+          }
+        },
+        "stackTrace": {
+          "type": "text",
+          "index": false
+        },
+        "exception": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "keyword" },
+            "message": { "type": "text" },
+            "stackTrace": { "type": "text", "index": false },
+            "innerException": { "type": "text", "index": false }
+          }
+        },
+        "requestId": {
+          "type": "keyword"
+        },
+        "httpMethod": {
+          "type": "keyword"
+        },
+        "httpPath": {
+          "type": "keyword"
+        },
+        "httpStatusCode": {
+          "type": "integer"
+        },
+        "userAgent": {
+          "type": "keyword",
+          "ignore_above": 512
+        },
+        "clientIp": {
+          "type": "ip"
+        },
+        "repository": {
+          "type": "keyword"
+        },
+        "branch": {
+          "type": "keyword"
+        },
+        "commitSha": {
+          "type": "keyword"
+        },
+        "prNumber": {
+          "type": "integer"
+        },
+        "gitPlatform": {
+          "type": "keyword"
+        },
+        "retryAttempt": {
+          "type": "integer"
+        },
+        "circuitBreakerState": {
+          "type": "keyword"
+        },
+        "budgetRemainingUsd": {
+          "type": "float"
+        },
+        "fields": {
+          "type": "object",
+          "enabled": true
+        }
+      }
+    }
+  },
+  "priority": 200,
+  "composed_of": [],
+  "version": 1,
+  "_meta": {
+    "description": "Tamma platform structured log template",
+    "created_by": "tamma-opensearch-setup"
+  }
+}
