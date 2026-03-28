@@ -1,0 +1,120 @@
+# =============================================================================
+# E2E Tests — Post-Deploy Verification
+#
+# Runs Playwright E2E tests against the deployed Tamma services.
+# Triggers:
+#   - After docker-publish deploy succeeds (workflow_run)
+#   - Manual dispatch with configurable URLs
+# =============================================================================
+
+name: E2E Deploy Tests
+
+on:
+  workflow_run:
+    workflows: ["Build & Publish Docker Images"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: 'Dashboard URL (app.tamma.dev)'
+        default: 'https://app.tamma.dev'
+        type: string
+      api_url:
+        description: 'API URL (api.tamma.dev)'
+        default: 'https://api.tamma.dev'
+        type: string
+      elsa_url:
+        description: 'ELSA Studio URL (elsa.tamma.dev)'
+        default: 'https://elsa.tamma.dev'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Only run if the triggering workflow succeeded (or if manually dispatched)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # For workflow_run, check out the branch that triggered the deploy
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for services to stabilize
+        if: github.event_name == 'workflow_run'
+        run: |
+          echo "Waiting 30s for services to stabilize after deploy..."
+          sleep 30
+
+      - name: Run E2E smoke tests
+        env:
+          E2E_BASE_URL: ${{ inputs.app_url || 'https://app.tamma.dev' }}
+          E2E_API_URL: ${{ inputs.api_url || 'https://api.tamma.dev' }}
+          E2E_ELSA_URL: ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }}
+          CI: true
+        run: npx playwright test --config e2e/playwright.config.ts
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload trace files on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-traces
+          path: e2e/test-results/**/*.zip
+          retention-days: 14
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## E2E Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | ${{ inputs.app_url || 'https://app.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| API | ${{ inputs.api_url || 'https://api.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ELSA Studio | ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "All E2E tests passed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Some E2E tests failed. Check the uploaded artifacts for screenshots and traces." >> $GITHUB_STEP_SUMMARY
+          fi

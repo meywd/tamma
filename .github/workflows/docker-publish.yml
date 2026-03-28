@@ -615,6 +615,56 @@ jobs:
               exit 1
             "
 
+      - name: "Smoke test: all 3 domains reachable via proxy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              FAILED=0
+
+              echo '--- Checking api.tamma.dev /api/health ---'
+              API_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null || echo '000')
+              if [ \"\$API_STATUS\" = '200' ]; then
+                echo \"  api.tamma.dev: OK (HTTP \$API_STATUS)\"
+              else
+                echo \"  api.tamma.dev: FAIL (HTTP \$API_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking app.tamma.dev ---'
+              APP_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: app.tamma.dev' https://localhost/ 2>/dev/null || echo '000')
+              if [ \"\$APP_STATUS\" -lt 400 ] 2>/dev/null; then
+                echo \"  app.tamma.dev: OK (HTTP \$APP_STATUS)\"
+              else
+                echo \"  app.tamma.dev: FAIL (HTTP \$APP_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking elsa.tamma.dev ---'
+              ELSA_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/ 2>/dev/null || echo '000')
+              if [ \"\$ELSA_STATUS\" -lt 400 ] 2>/dev/null; then
+                echo \"  elsa.tamma.dev: OK (HTTP \$ELSA_STATUS)\"
+              else
+                echo \"  elsa.tamma.dev: FAIL (HTTP \$ELSA_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking elsa.tamma.dev /elsa/api ---'
+              ELSA_API_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/elsa/api/ 2>/dev/null || echo '000')
+              if [ \"\$ELSA_API_STATUS\" -lt 500 ] 2>/dev/null; then
+                echo \"  elsa.tamma.dev/elsa/api: OK (HTTP \$ELSA_API_STATUS)\"
+              else
+                echo \"  elsa.tamma.dev/elsa/api: FAIL (HTTP \$ELSA_API_STATUS)\"
+                FAILED=1
+              fi
+
+              if [ \"\$FAILED\" = '1' ]; then
+                echo '::error::One or more smoke tests failed — see above for details'
+                exit 1
+              fi
+              echo 'All smoke tests passed'
+            "
+
       - name: Dump container logs on failure
         if: failure()
         run: |
