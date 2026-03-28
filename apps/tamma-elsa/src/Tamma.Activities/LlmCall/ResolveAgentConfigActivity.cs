@@ -38,7 +38,7 @@ public class ResolveAgentConfigActivity : CodeActivity
     [Input(Description = "Agent role (e.g. 'analyst', 'implementer', 'reviewer')")]
     public Input<string> AgentRoleProp { get; set; } = default!;
 
-    [Input(Description = "Optional caller-provided system prompt override")]
+    [Input(Description = "Optional caller-provided system prompt override", UIHint = "multiline")]
     public Input<string?> SystemPromptOverrideProp { get; set; } = default!;
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)

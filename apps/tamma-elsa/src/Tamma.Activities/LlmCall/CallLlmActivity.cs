@@ -65,7 +65,7 @@ public class CallLlmActivity : Activity
     public Input<double> Temperature { get; set; } = new(0.7);
 
     /// <summary>Serialized tools JSON (list of ResolvedTool).</summary>
-    [Input(Description = "Serialized tools (JSON array of ResolvedTool)")]
+    [Input(Description = "Serialized tools (JSON array of ResolvedTool)", UIHint = "json-editor")]
     public Input<string?> ToolsJson { get; set; } = default!;
 
     /// <summary>Current attempt number (1-based, managed by the workflow's retry loop).</summary>

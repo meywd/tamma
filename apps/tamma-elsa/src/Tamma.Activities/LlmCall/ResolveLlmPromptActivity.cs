@@ -51,7 +51,7 @@ public class ResolveLlmPromptActivity : CodeActivity<ResolvedPrompt>
     public Input<string> UserPrompt { get; set; } = default!;
 
     /// <summary>Optional caller-provided system prompt override.</summary>
-    [Input(Description = "Explicit system prompt override (optional)")]
+    [Input(Description = "Explicit system prompt override (optional)", UIHint = "multiline")]
     public Input<string?> SystemPromptOverride { get; set; } = default!;
 
     [JsonConstructor]

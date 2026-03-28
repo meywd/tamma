@@ -15,6 +15,8 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Studio.Branding;
+using Tamma.Studio.Navigation;
+using Tamma.Studio.UIHints;
 
 // Build the host.
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -45,6 +47,13 @@ builder.Services.AddWorkflowsModule();
 builder.Services.AddScoped<IBrandingProvider, TammaBrandingProvider>();
 builder.Services.AddCore()
     .Replace(new(typeof(IBrandingProvider), typeof(TammaBrandingProvider), ServiceLifetime.Scoped));
+
+// Tamma custom navigation menu items.
+builder.Services.AddScoped<IMenuProvider, TammaMenuProvider>();
+
+// Tamma custom UI hint handlers.
+builder.Services.AddUIHintHandler<JsonEditorUIHintHandler>();
+builder.Services.AddUIHintHandler<ProviderSelectorUIHintHandler>();
 
 // Build the application.
 var app = builder.Build();

@@ -35,7 +35,7 @@ public class WaitForPlanApprovalActivity : Activity
     [Input(Description = "Issue number for bookmark identification")]
     public Input<int> IssueNumber { get; set; } = default!;
 
-    [Input(Description = "Generated plan JSON to present for approval")]
+    [Input(Description = "Generated plan JSON to present for approval", UIHint = "json-editor")]
     public Input<string> PlanJson { get; set; } = default!;
 
     [Output(Description = "Approval result with decision and feedback")]
