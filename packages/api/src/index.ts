@@ -46,8 +46,6 @@ import type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
 import { registerAuthMeRoute } from './routes/auth/me-route.js';
 import type { AuthMeRouteOptions, AuthMeUser } from './routes/auth/me-route.js';
 import { registerRoleCheckRoute } from './routes/auth/role-check.js';
-import { registerUserManagementRoutes } from './routes/users/index.js';
-import type { UserManagementRouteOptions } from './routes/users/index.js';
 import { InMemoryUserApiKeyStore, PgUserApiKeyStore } from './persistence/user-api-key-store.js';
 import type { IUserApiKeyStore, UserApiKey, CreateApiKeyInput } from './persistence/user-api-key-store.js';
 import { InMemoryInviteStore, PgInviteStore } from './persistence/invite-store.js';
@@ -101,7 +99,6 @@ export {
   registerGitHubOAuthRoutes,
   registerAuthMeRoute,
   registerRoleCheckRoute,
-  registerUserManagementRoutes,
   InMemoryUserApiKeyStore,
   PgUserApiKeyStore,
   InMemoryInviteStore,
@@ -153,7 +150,6 @@ export type {
   EnqueueTaskInput,
   DequeueOptions,
   ListTasksOptions,
-  UserManagementRouteOptions,
   IUserApiKeyStore,
   UserApiKey,
   CreateApiKeyInput,
@@ -188,9 +184,7 @@ export interface CreateAppOptions {
   saas?: SaaSRouteOptions;
   /** GitHub OAuth login options (optional; enables /api/auth/github). */
   githubOAuth?: GitHubOAuthOptions;
-  /** User management route options (optional; enables /api/admin/users/* routes). */
-  userManagement?: UserManagementRouteOptions;
-  /** Admin routes options (optional; enables /api/admin/health). */
+  /** Admin route options (optional; enables /api/admin/* routes: health, user management, API keys, invites). */
   admin?: AdminRouteOptions;
   /** Enable Fastify logger (boolean or pino options object). */
   logger?: boolean | object;
@@ -288,12 +282,7 @@ export async function createApp(options?: CreateAppOptions) {
     );
   }
 
-  // User management routes (admin panel)
-  if (options?.userManagement !== undefined) {
-    await registerUserManagementRoutes(app, options.userManagement);
-  }
-
-  // Admin routes (system health aggregation)
+  // Admin routes (health, user management, API keys, invites)
   if (options?.admin !== undefined) {
     await registerAdminRoutes(app, options.admin);
   }
