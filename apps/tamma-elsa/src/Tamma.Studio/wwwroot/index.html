@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Tamma Studio</title>
+    <base href="/" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- MudBlazor CSS -->
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+
+    <!-- MudBlazor Extensions -->
+    <link href="_content/CodeBeam.MudBlazor.Extensions/MudExtensions.min.css" rel="stylesheet" />
+
+    <!-- Radzen (used by ELSA Studio designer) -->
+    <link href="_content/Radzen.Blazor/css/material-base.css" rel="stylesheet" />
+
+    <!-- ELSA Studio Shell -->
+    <link href="_content/Elsa.Studio.Shell/css/shell.css" rel="stylesheet" />
+
+    <!-- Scoped CSS -->
+    <link href="Tamma.Studio.styles.css" rel="stylesheet" />
+
+    <!-- Tamma custom overrides (must be last) -->
+    <link href="css/tamma-overrides.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div id="app">
+        <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:'Inter',sans-serif;color:#7B61FF;">
+            <div style="text-align:center">
+                <h2 style="margin-bottom:0.5rem;">Tamma Studio</h2>
+                <p>Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui" style="display:none;position:fixed;bottom:0;width:100%;background:#cc0000;color:white;padding:0.5em;text-align:center;z-index:9999;">
+        An unhandled error has occurred.
+        <a href="" class="reload" style="color:white;text-decoration:underline;">Reload</a>
+        <a class="dismiss" style="cursor:pointer;margin-left:1em;color:white;">Dismiss</a>
+    </div>
+
+    <!-- Monaco Editor (used by ELSA Studio workflow designer) -->
+    <script src="_content/BlazorMonaco/jsInterop.js"></script>
+    <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/loader.js"></script>
+    <script src="_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.js"></script>
+
+    <!-- MudBlazor JS -->
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+
+    <!-- MudBlazor Extensions JS -->
+    <script src="_content/CodeBeam.MudBlazor.Extensions/MudExtensions.min.js"></script>
+
+    <!-- Radzen JS -->
+    <script src="_content/Radzen.Blazor/Radzen.Blazor.js"></script>
+
+    <!-- Blazor WASM framework -->
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+
+</html>

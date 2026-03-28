@@ -1,0 +1,70 @@
+/* =============================================================================
+   Tamma Studio — CSS Overrides
+   Applied AFTER MudBlazor and ELSA Studio shell styles.
+   ============================================================================= */
+
+/* --- Workflow Designer Canvas --- */
+.workflow-canvas,
+.x6-graph {
+    background-color: #f5f3ff !important; /* very light purple tint */
+}
+
+/* Dark mode canvas */
+.mud-theme-dark .workflow-canvas,
+.mud-theme-dark .x6-graph {
+    background-color: #1a1a2e !important;
+}
+
+/* --- Activity Node Headers --- */
+.activity-node .node-header,
+.x6-node .node-header {
+    background-color: #7B61FF !important;
+    color: #ffffff !important;
+}
+
+/* --- Sidebar / Drawer --- */
+.mud-drawer {
+    border-right: 2px solid #7B61FF;
+}
+
+/* --- Loading spinner color --- */
+.mud-progress-circular svg circle {
+    stroke: #7B61FF;
+}
+
+/* --- Login page branding --- */
+.login-page .mud-paper {
+    border-top: 4px solid #7B61FF;
+}
+
+/* --- Scrollbar styling (webkit) --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background-color: #7B61FF40;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background-color: #7B61FF80;
+}
+
+/* --- Tamma logo sizing in nav --- */
+.mud-drawer img.brand-logo {
+    max-height: 36px;
+    width: auto;
+}
+
+/* --- Primary button hover enhancement --- */
+.mud-button-filled.mud-button-filled-primary:hover {
+    background-color: #5A3FD6 !important;
+}
+
+/* --- Tab indicator --- */
+.mud-tab-active .mud-tab-indicator {
+    background-color: #7B61FF !important;
+}

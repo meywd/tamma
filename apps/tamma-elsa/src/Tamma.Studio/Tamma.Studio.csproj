@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Tamma.Studio</RootNamespace>
+    <AssemblyName>Tamma.Studio</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Tamma Team</Authors>
+    <Description>Custom ELSA Studio UI for Tamma — Blazor WASM with branding, theme, and custom UI hints</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ELSA Studio packages — ALL must match server version 3.5.3 exactly -->
+    <PackageReference Include="Elsa.Studio" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Core.BlazorWasm" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Shell" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Workflows" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Workflows.Designer" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Dashboard" Version="3.5.3" />
+    <PackageReference Include="Elsa.Studio.Login.BlazorWasm" Version="3.5.3" />
+
+    <!-- Blazor WASM runtime -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="8.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="wwwroot\appsettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
