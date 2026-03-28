@@ -13,6 +13,7 @@ using Tamma.Activities.LlmCall.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Activities.Security;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -178,17 +179,27 @@ public class LlmCallWorkflow : WorkflowBase
                 var raw = inputVar.Get(context);
                 var input = ParseInput(raw);
 
+                List<string> chain;
+
                 // Priority 1: Caller provided an explicit chain in input
                 if (input.ProviderChain.Count > 0)
-                    return (object)input.ProviderChain;
-
+                    chain = input.ProviderChain;
                 // Priority 2: Agent config from DB set a chain (via ResolveAgentConfigActivity)
-                var existing = providerChainVar.Get(context);
-                if (existing is ICollection<string> dbChain && dbChain.Count > 0)
-                    return (object)dbChain;
-
+                else if (providerChainVar.Get(context) is ICollection<string> dbChain && dbChain.Count > 0)
+                    chain = dbChain.ToList();
                 // Priority 3: Default chain
-                return (object)new List<string> { "anthropic", "openai", "openrouter" };
+                else
+                    chain = new List<string> { "anthropic", "openai", "openrouter" };
+
+                // Filter through provider allowlist
+                var filtered = ProviderAllowlist.FilterAllowedDefault(chain);
+                if (filtered.Count == 0)
+                {
+                    // All providers rejected — fall back to default allowed providers
+                    filtered = new List<string> { "anthropic", "openai", "openrouter" };
+                }
+
+                return (object)filtered;
             })
         };
         resolveChain.SetDisplayText("Resolve Provider Chain");
@@ -796,7 +807,9 @@ public class LlmCallWorkflow : WorkflowBase
         }
         catch
         {
-            return false;
+            // SECURITY FIX: Fail closed. If we can't check the circuit breaker,
+            // deny the request rather than allowing it through a broken safety check.
+            return true;
         }
     }
 
@@ -811,7 +824,9 @@ public class LlmCallWorkflow : WorkflowBase
         }
         catch
         {
-            return false;
+            // SECURITY FIX: Fail closed. If we can't check the budget,
+            // deny the request rather than allowing unchecked spending.
+            return true;
         }
     }
 

@@ -579,6 +579,13 @@ public class CallLlmActivity : Activity
 
     private LlmProviderConfig LoadProviderConfig(string providerName)
     {
+        // Validate provider name against allowlist
+        if (!ProviderAllowlist.IsAllowedDefault(providerName))
+        {
+            _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
+            return new LlmProviderConfig { Name = providerName, Enabled = false };
+        }
+
         var section = _configuration?.GetSection($"LlmProviders:{providerName}");
         var config = new LlmProviderConfig { Name = providerName };
 

@@ -114,6 +114,11 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegist
 builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
 builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 
+// Provider allowlist (Story 11.5 — fail-closed guards)
+builder.Services.Configure<ProviderAllowlistOptions>(
+    builder.Configuration.GetSection("Security:ProviderAllowlist"));
+builder.Services.AddSingleton<ProviderAllowlist>();
+
 // Tool call validation (Story 11.3 — allowlist enforcement, ActionGate)
 builder.Services.Configure<ActionGateOptions>(
     builder.Configuration.GetSection("Security:ActionGate"));

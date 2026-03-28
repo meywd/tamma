@@ -51,66 +51,82 @@ public class CheckCircuitBreakerActivity : Activity
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var providerName = ProviderName.Get(context);
-        var statesJson = CircuitBreakerStatesJson.Get(context);
-
-        var states = DeserializeStates(statesJson);
-
-        if (!states.TryGetValue(providerName, out var state))
+        try
         {
-            // No state tracked yet — treat as Closed
-            _logger?.LogDebug("No circuit breaker state for provider {Provider}, treating as Closed", providerName);
-            await context.CompleteActivityWithOutcomesAsync("Closed");
-            return;
-        }
+            var providerName = ProviderName.Get(context);
+            var statesJson = CircuitBreakerStatesJson.Get(context);
 
-        switch (state.Status)
-        {
-            case CircuitBreakerStatus.Closed:
-                _logger?.LogDebug("Circuit breaker for {Provider} is Closed", providerName);
+            var states = DeserializeStates(statesJson);
+
+            if (!states.TryGetValue(providerName, out var state))
+            {
+                // No state tracked yet — treat as Closed
+                _logger?.LogDebug(
+                    "Circuit breaker check succeeded: IsOpen={IsOpen}, Provider={Provider}, WorkflowInstanceId={WorkflowInstanceId}",
+                    false, providerName, context.WorkflowExecutionContext.Id);
                 await context.CompleteActivityWithOutcomesAsync("Closed");
-                break;
+                return;
+            }
 
-            case CircuitBreakerStatus.Open:
-                // Check if cooldown has elapsed
-                if (state.OpenedAtUtc.HasValue &&
-                    DateTime.UtcNow - state.OpenedAtUtc.Value >= state.CooldownPeriod)
-                {
+            switch (state.Status)
+            {
+                case CircuitBreakerStatus.Closed:
+                    _logger?.LogDebug(
+                        "Circuit breaker check succeeded: IsOpen={IsOpen}, Provider={Provider}, WorkflowInstanceId={WorkflowInstanceId}",
+                        false, providerName, context.WorkflowExecutionContext.Id);
+                    await context.CompleteActivityWithOutcomesAsync("Closed");
+                    break;
+
+                case CircuitBreakerStatus.Open:
+                    // Check if cooldown has elapsed
+                    if (state.OpenedAtUtc.HasValue &&
+                        DateTime.UtcNow - state.OpenedAtUtc.Value >= state.CooldownPeriod)
+                    {
+                        _logger?.LogInformation(
+                            "Circuit breaker for {Provider} cooldown elapsed, transitioning to HalfOpen",
+                            providerName);
+
+                        state.Status = CircuitBreakerStatus.HalfOpen;
+                        states[providerName] = state;
+
+                        // Write updated state back
+                        context.SetVariable("CircuitBreakerStatesJson", SerializeStates(states));
+                        await context.CompleteActivityWithOutcomesAsync("HalfOpen");
+                    }
+                    else
+                    {
+                        var remaining = state.OpenedAtUtc.HasValue
+                            ? state.CooldownPeriod - (DateTime.UtcNow - state.OpenedAtUtc.Value)
+                            : state.CooldownPeriod;
+
+                        _logger?.LogWarning(
+                            "Circuit breaker for {Provider} is Open, {Remaining}s remaining",
+                            providerName, remaining.TotalSeconds);
+
+                        await context.CompleteActivityWithOutcomesAsync("Open");
+                    }
+                    break;
+
+                case CircuitBreakerStatus.HalfOpen:
                     _logger?.LogInformation(
-                        "Circuit breaker for {Provider} cooldown elapsed, transitioning to HalfOpen",
+                        "Circuit breaker for {Provider} is HalfOpen, allowing probe request",
                         providerName);
-
-                    state.Status = CircuitBreakerStatus.HalfOpen;
-                    states[providerName] = state;
-
-                    // Write updated state back
-                    context.SetVariable("CircuitBreakerStatesJson", SerializeStates(states));
                     await context.CompleteActivityWithOutcomesAsync("HalfOpen");
-                }
-                else
-                {
-                    var remaining = state.OpenedAtUtc.HasValue
-                        ? state.CooldownPeriod - (DateTime.UtcNow - state.OpenedAtUtc.Value)
-                        : state.CooldownPeriod;
+                    break;
 
-                    _logger?.LogWarning(
-                        "Circuit breaker for {Provider} is Open, {Remaining}s remaining",
-                        providerName, remaining.TotalSeconds);
-
-                    await context.CompleteActivityWithOutcomesAsync("Open");
-                }
-                break;
-
-            case CircuitBreakerStatus.HalfOpen:
-                _logger?.LogInformation(
-                    "Circuit breaker for {Provider} is HalfOpen, allowing probe request",
-                    providerName);
-                await context.CompleteActivityWithOutcomesAsync("HalfOpen");
-                break;
-
-            default:
-                await context.CompleteActivityWithOutcomesAsync("Closed");
-                break;
+                default:
+                    await context.CompleteActivityWithOutcomesAsync("Closed");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            // SECURITY FIX: Fail closed. If any error occurs during the circuit breaker check,
+            // treat the circuit as Open (deny the request).
+            _logger?.LogWarning(
+                "Circuit breaker check failed, defaulting to OPEN (deny): ExceptionType={ExceptionType}, ExceptionMessage={ExceptionMessage}, WorkflowInstanceId={WorkflowInstanceId}",
+                ex.GetType().Name, ex.Message, context.WorkflowExecutionContext.Id);
+            await context.CompleteActivityWithOutcomesAsync("Open");
         }
     }
 

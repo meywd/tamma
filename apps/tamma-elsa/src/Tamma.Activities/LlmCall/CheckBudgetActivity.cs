@@ -47,33 +47,47 @@ public class CheckBudgetActivity : Activity
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        var budgetJson = BudgetStateJson.Get(context);
-        var providerName = ProviderName.Get(context);
-
-        var budget = DeserializeBudget(budgetJson);
-
-        if (budget.CapUsd <= 0)
+        try
         {
-            // No budget cap — always within budget
-            _logger?.LogDebug("No budget cap configured, proceeding with {Provider}", providerName);
+            var budgetJson = BudgetStateJson.Get(context);
+            var providerName = ProviderName.Get(context);
+
+            var budget = DeserializeBudget(budgetJson);
+
+            if (budget.CapUsd <= 0)
+            {
+                // No budget cap — always within budget
+                _logger?.LogDebug(
+                    "Budget check succeeded: IsExhausted={IsExhausted}, Provider={Provider}, WorkflowInstanceId={WorkflowInstanceId}",
+                    false, providerName, context.WorkflowExecutionContext.Id);
+                await context.CompleteActivityWithOutcomesAsync("WithinBudget");
+                return;
+            }
+
+            if (budget.IsExhausted)
+            {
+                _logger?.LogWarning(
+                    "Budget exhausted for LLM call: spent ${Spent:F4} of ${Cap:F4} cap. Skipping {Provider}",
+                    budget.SpentUsd, budget.CapUsd, providerName);
+                await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
+                return;
+            }
+
+            _logger?.LogDebug(
+                "Budget check succeeded: IsExhausted={IsExhausted}, Provider={Provider}, WorkflowInstanceId={WorkflowInstanceId}",
+                false, providerName, context.WorkflowExecutionContext.Id);
+
             await context.CompleteActivityWithOutcomesAsync("WithinBudget");
-            return;
         }
-
-        if (budget.IsExhausted)
+        catch (Exception ex)
         {
+            // SECURITY FIX: Fail closed. If any error occurs during the budget check,
+            // treat as budget exhausted (deny the request).
             _logger?.LogWarning(
-                "Budget exhausted for LLM call: spent ${Spent:F4} of ${Cap:F4} cap. Skipping {Provider}",
-                budget.SpentUsd, budget.CapUsd, providerName);
+                "Budget check failed, defaulting to EXHAUSTED (deny): ExceptionType={ExceptionType}, ExceptionMessage={ExceptionMessage}, WorkflowInstanceId={WorkflowInstanceId}",
+                ex.GetType().Name, ex.Message, context.WorkflowExecutionContext.Id);
             await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
-            return;
         }
-
-        _logger?.LogDebug(
-            "Budget check passed for {Provider}: ${Remaining:F4} remaining of ${Cap:F4}",
-            providerName, budget.RemainingUsd, budget.CapUsd);
-
-        await context.CompleteActivityWithOutcomesAsync("WithinBudget");
     }
 
     /// <summary>
