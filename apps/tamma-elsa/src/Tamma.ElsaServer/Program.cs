@@ -120,6 +120,9 @@ builder.Services.Configure<ActionGateOptions>(
 builder.Services.AddSingleton<ActionGate>();
 builder.Services.AddSingleton<IToolCallValidator, ToolCallValidator>();
 
+// Context compaction for long-running tool loops (Story 12.3)
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
+
 // Health checks
 builder.Services.AddHealthChecks();
 

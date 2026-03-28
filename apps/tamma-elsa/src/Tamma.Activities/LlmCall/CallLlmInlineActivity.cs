@@ -58,9 +58,10 @@ public class CallLlmInlineActivity : CodeActivity
     private readonly IContentSanitizer? _sanitizer;
     private readonly IToolExecutorRegistry? _toolRegistry;
     private readonly IToolCallValidator? _toolCallValidator;
+    private readonly ContextCompactor? _contextCompactor;
 
     [JsonConstructor]
-    public CallLlmInlineActivity() : this(null, null, null, null, null, null)
+    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null)
     {
     }
 
@@ -70,7 +71,8 @@ public class CallLlmInlineActivity : CodeActivity
         IConfiguration? configuration,
         IContentSanitizer? sanitizer,
         IToolExecutorRegistry? toolRegistry = null,
-        IToolCallValidator? toolCallValidator = null)
+        IToolCallValidator? toolCallValidator = null,
+        ContextCompactor? contextCompactor = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -78,6 +80,7 @@ public class CallLlmInlineActivity : CodeActivity
         _sanitizer = sanitizer;
         _toolRegistry = toolRegistry;
         _toolCallValidator = toolCallValidator;
+        _contextCompactor = contextCompactor;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -422,6 +425,36 @@ public class CallLlmInlineActivity : CodeActivity
             _logger?.LogInformation(
                 "Tool loop turn started: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, MessageCount={MessageCount}",
                 workflowInstanceId, step, messages.Count);
+
+            // ═══ Context compaction check (Story 12.3) ═══
+            if (_contextCompactor != null && step > 0)
+            {
+                var (compactedMessages, compactionTokens, wasCompacted) =
+                    await _contextCompactor.CompactIfNeeded(
+                        messages,
+                        loopConfig.ContextWindowTokens,
+                        loopConfig.CompactionThreshold,
+                        async (prompt, ct) =>
+                        {
+                            // Make a single-turn summarization LLM call using the same provider
+                            var summaryResponse = providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                                ? await CallAnthropicMessages(httpClient, providerConfig, model,
+                                    "You are a precise conversation summarizer.", prompt, 2048, 0.3, null)
+                                : await CallOpenAiCompatible(httpClient, providerConfig, model,
+                                    "You are a precise conversation summarizer.", prompt, 2048, 0.3, null);
+
+                            return summaryResponse.Success ? summaryResponse.ResponseText : null;
+                        },
+                        workflowInstanceId,
+                        step,
+                        cancellationToken: context.CancellationToken);
+
+                if (wasCompacted)
+                {
+                    messages = compactedMessages;
+                    totalPromptTokens += compactionTokens;
+                }
+            }
 
             // Call LLM with full conversation history
             var llmSw = System.Diagnostics.Stopwatch.StartNew();
@@ -1228,6 +1261,13 @@ public class CallLlmInlineActivity : CodeActivity
 
     private LlmProviderConfig LoadProviderConfig(string providerName)
     {
+        // Validate provider name against allowlist
+        if (!ProviderAllowlist.IsAllowedDefault(providerName))
+        {
+            _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
+            return new LlmProviderConfig { Name = providerName, Enabled = false };
+        }
+
         var section = _configuration?.GetSection($"LlmProviders:{providerName}");
         if (section != null && section.Exists())
         {
