@@ -114,6 +114,12 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegist
 builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
 builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 
+// Tool call validation (Story 11.3 — allowlist enforcement, ActionGate)
+builder.Services.Configure<ActionGateOptions>(
+    builder.Configuration.GetSection("Security:ActionGate"));
+builder.Services.AddSingleton<ActionGate>();
+builder.Services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+
 // Health checks
 builder.Services.AddHealthChecks();
 
