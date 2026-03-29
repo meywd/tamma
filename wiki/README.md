@@ -4,20 +4,45 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 
 ## Pages
 
+### General
+
 - **Home.md** - Wiki homepage with quick links, project overview, and status
 - **Roadmap.md** - Project roadmap with all 24 epics and timeline
 - **Architecture.md** - System architecture (dual TypeScript + C#/ELSA stack)
-- **Epic-1-Foundation.md** - Epic 1: Foundation & Core Infrastructure (15 stories)
-- **Epic-1.5-Infrastructure.md** - Epic 1.5: Infrastructure & Deployment (15 stories)
-- **Epic-6-Context-Knowledge.md** - Epic 6: Context & Knowledge Management (10 stories)
-- **Epic-7-Mentorship.md** - Epic 7: Autonomous Mentorship Workflow (19 stories)
-- **Epic-9-Agent-Management.md** - Epic 9: Config-driven multi-agent system (11 stories)
-- **Epic-10-Engine-Core.md** - Epic 10: Engine Core -- Workflow-Driven Architecture (8 stories)
-- **Epic-11-14-ELSA.md** - Epics 11-14: Security Hardening, Agentic Tool Loop, Workflow Decomposition, Custom Studio (15 stories)
-- **Epic-23-System-Monitoring.md** - Epic 23: System Monitoring & Observability Dashboard (12 stories, 26 task plans)
-- **Epic-24-Voice-Conversation.md** - Epic 24: Realtime Voice Conversation (7 stories, 24 task plans)
 - **Stories.md** - Index of all user stories across all 24 epics (~220 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
+
+### Epic Pages (All 24 Epics)
+
+| Epic | Page | Stories | Status |
+|------|------|---------|--------|
+| 1 | [Epic-1-Foundation.md](Epic-1-Foundation) | 15 | Done |
+| 1.5 | [Epic-1.5-Infrastructure.md](Epic-1.5-Infrastructure) | 15 | Done |
+| 2 | [Epic-2-Autonomous-Loop.md](Epic-2-Autonomous-Loop) | 16 | Planned |
+| 3 | [Epic-3-Quality-Gates.md](Epic-3-Quality-Gates) | 12 | Planned |
+| 4 | [Epic-4-Event-Sourcing.md](Epic-4-Event-Sourcing) | 8 | Planned |
+| 5 | [Epic-5-Observability.md](Epic-5-Observability) | 15 | Partial |
+| 6 | [Epic-6-Context-Knowledge.md](Epic-6-Context-Knowledge) | 10 | Done |
+| 7 | [Epic-7-Mentorship.md](Epic-7-Mentorship) | 19 | Done |
+| 8 | [Epic-8-Distribution.md](Epic-8-Distribution) | 8 | Planned |
+| 9 | [Epic-9-Agent-Management.md](Epic-9-Agent-Management) | 11 | Done |
+| 10 | [Epic-10-Engine-Core.md](Epic-10-Engine-Core) | 8 | Done |
+| 11 | [Epic-11-Security.md](Epic-11-Security) | 5 | Done |
+| 12 | [Epic-12-Tool-Loop.md](Epic-12-Tool-Loop) | 4 | Done |
+| 13 | [Epic-13-Workflow-Decomposition.md](Epic-13-Workflow-Decomposition) | 3 | Done |
+| 14 | [Epic-14-ELSA-Studio.md](Epic-14-ELSA-Studio) | 3 | Done |
+| 15 | [Epic-15-Log-Aggregation.md](Epic-15-Log-Aggregation) | 1 (done) + 2 (planned) | Done |
+| 16 | [Epic-16-Auth-Admin.md](Epic-16-Auth-Admin) | 6 | Done |
+| 17 | [Epic-17-Multi-Tenancy.md](Epic-17-Multi-Tenancy) | 5 | Planned |
+| 18 | [Epic-18-User-Auth.md](Epic-18-User-Auth) | 5 | Planned |
+| 19 | [Epic-19-Agent-Dispatch.md](Epic-19-Agent-Dispatch) | 5 | Planned |
+| 20 | [Epic-20-Billing.md](Epic-20-Billing) | 5 | Planned |
+| 21 | [Epic-21-Marketing-Dashboard.md](Epic-21-Marketing-Dashboard) | 5 | Partial |
+| 22 | [Epic-22-CLI-Standalone.md](Epic-22-CLI-Standalone) | 4 | Planned |
+| 23 | [Epic-23-System-Monitoring.md](Epic-23-System-Monitoring) | 12 | Planned |
+| 24 | [Epic-24-Voice-Conversation.md](Epic-24-Voice-Conversation) | 7 | Planned |
+
+**Combined page**: [Epic-11-14-ELSA.md](Epic-11-14-ELSA) covers Epics 11-14 together (15 stories total)
 
 ## How to Update the GitHub Wiki
 

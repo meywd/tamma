@@ -81,7 +81,7 @@ Each story includes:
 | 2-15 | Task Dependency Mapping | Planned |
 | 2-16 | Incremental Task Sequencing | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-2)
+[Detailed Breakdown](Epic-2-Autonomous-Loop) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-2)
 
 ---
 
@@ -102,7 +102,7 @@ Each story includes:
 | 3-11 | Cost-Aware AI Usage | Planned |
 | 3-12 | Task Complexity Assessment | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-3)
+[Detailed Breakdown](Epic-3-Quality-Gates) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-3)
 
 ---
 
@@ -119,7 +119,7 @@ Each story includes:
 | 4-7 | Event Query API for Time-Travel | Planned |
 | 4-8 | Black-Box Replay for Debugging | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-4)
+[Detailed Breakdown](Epic-4-Event-Sourcing) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-4)
 
 ---
 
@@ -144,7 +144,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 5-9e | Video Walkthrough | Planned |
 | 5-10 | Alpha Release Preparation | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-5)
+[Detailed Breakdown](Epic-5-Observability) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-5)
 
 ---
 
@@ -208,7 +208,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | Planned |
 | 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-8)
+[Detailed Breakdown](Epic-8-Distribution) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-8)
 
 ---
 
@@ -259,7 +259,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 11-4 | Output Sanitization & Prompt Hardening | Done |
 | 11-5 | Fail-Closed Guards & Provider Allowlist | Done |
 
-[Detailed Breakdown](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-11)
+[Detailed Breakdown](Epic-11-Security) | [Combined](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-11)
 
 ---
 
@@ -272,7 +272,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 12-3 | Context Compaction | Done |
 | 12-4 | Streaming & Parallel Tools | Done |
 
-[Detailed Breakdown](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-12)
+[Detailed Breakdown](Epic-12-Tool-Loop) | [Combined](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-12)
 
 ---
 
@@ -284,7 +284,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 13-2 | CI Debug Retry Sub-Workflow | Done |
 | 13-3 | Consolidate Finish Sequences | Done |
 
-[Detailed Breakdown](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-13)
+[Detailed Breakdown](Epic-13-Workflow-Decomposition) | [Combined](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-13)
 
 ---
 
@@ -296,7 +296,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 14-2 | Studio Docker & CI | Done |
 | 14-3 | Studio Custom UI Hints | Done |
 
-[Detailed Breakdown](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-14)
+[Detailed Breakdown](Epic-14-ELSA-Studio) | [Combined](Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-14)
 
 ---
 
@@ -305,8 +305,10 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | Story | Title | Status |
 |-------|-------|--------|
 | 15-1 | OpenSearch Log Aggregation | Done |
+| 15-2 | Structured Logging Gap Remediation | Planned |
+| 15-3 | Advanced Dashboards & Alerting Tuning | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-15)
+[Detailed Breakdown](Epic-15-Log-Aggregation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-15)
 
 ---
 
@@ -321,7 +323,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 16-5 | Role-Based Access Control | Done |
 | 16-6 | ELSA Studio Auto-Login | Done |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-16)
+[Detailed Breakdown](Epic-16-Auth-Admin) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-16)
 
 ---
 
@@ -335,7 +337,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 17-4 | Tenant-Scoped Workflow Instances | Planned |
 | 17-5 | API Tenant Context Middleware | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-17)
+[Detailed Breakdown](Epic-17-Multi-Tenancy) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-17)
 
 ---
 
@@ -349,7 +351,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 18-4 | GitHub App Installation Onboarding | Planned |
 | 18-5 | User-Facing Dashboard Shell | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-18)
+[Detailed Breakdown](Epic-18-User-Auth) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-18)
 
 ---
 
@@ -357,13 +359,13 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 19-1 | Agent Dispatch via workflow_dispatch | Planned |
-| 19-2 | Runner Monitoring | Planned |
-| 19-3 | Result Collection | Planned |
-| 19-4 | Execution Isolation | Planned |
-| 19-5 | Security & Audit | Planned |
+| 19-1 | Tamma Agent GitHub Actions Workflow Template | Planned |
+| 19-2 | Workflow Dispatch from ELSA | Planned |
+| 19-3 | Agent Execution Monitoring | Planned |
+| 19-4 | Result Collection | Planned |
+| 19-5 | CLI / SaaS Mode Abstraction (IAgentExecutor) | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-19)
+[Detailed Breakdown](Epic-19-Agent-Dispatch) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-19)
 
 ---
 
@@ -371,29 +373,29 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 20-1 | Stripe Integration & Subscription Management | Planned |
-| 20-2 | Usage Metering (Workflow Runs, Tokens, Repos) | Planned |
-| 20-3 | Limits Enforcement at Orchestrator | Planned |
-| 20-4 | Billing Dashboard | Planned |
-| 20-5 | Billing Admin & Reporting | Planned |
+| 20-1 | Stripe Integration & Plan Model | Planned |
+| 20-2 | Subscription Management | Planned |
+| 20-3 | Usage Metering | Planned |
+| 20-4 | Usage Limits Enforcement | Planned |
+| 20-5 | Billing Dashboard | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-20)
+[Detailed Breakdown](Epic-20-Billing) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-20)
 
 ---
 
 ## Epic 21: Marketing Site & User Dashboard (Partially Implemented)
 
-Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashboard partially implemented.
+Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashboard not yet implemented.
 
 | Story | Title | Status |
 |-------|-------|--------|
 | 21-1 | Marketing Landing Page | Done |
-| 21-2 | Pricing Page | Planned |
+| 21-2 | Pricing Page + Stripe Checkout | Planned |
 | 21-3 | Documentation Site | Planned |
-| 21-4 | User Dashboard - Repos & Runs | Planned |
-| 21-5 | User Dashboard - Settings & Billing | Planned |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | Planned |
+| 21-5 | User Dashboard -- Settings & Billing | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-21)
+[Detailed Breakdown](Epic-21-Marketing-Dashboard) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-21)
 
 ---
 
@@ -401,13 +403,12 @@ Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashb
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 22-1 | Agent Executor Abstraction | Planned |
+| 22-1 | IAgentExecutor Abstraction | Planned |
 | 22-2 | CLI Standalone Workflow Engine | Planned |
 | 22-3 | Optional Cloud Sync | Planned |
-| 22-4 | Feature Parity Matrix | Planned |
-| 22-5 | CLI Docker Installation | Planned |
+| 22-4 | CLI + SaaS Feature Parity Matrix | Planned |
 
-[Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-22)
+[Detailed Breakdown](Epic-22-CLI-Standalone) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-22)
 
 ---
 
