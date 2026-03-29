@@ -29,7 +29,7 @@ async function checkHttpService(name: string, url: string, headers?: Record<stri
     const response = await fetch(url, {
       method: 'GET',
       signal: controller.signal,
-      headers,
+      ...(headers ? { headers } : {}),
     });
 
     clearTimeout(timeout);

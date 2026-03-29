@@ -175,7 +175,7 @@ services:
       API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
       DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
-      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-false}
+      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-true}
       LOG_INDEX_PREFIX: tamma-ts
       SERVICE_NAME: tamma-api
     volumes:
@@ -207,7 +207,7 @@ services:
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       TAMMA_API_URL: http://tamma-api:3100
       OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
-      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-false}
+      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-true}
       LOG_INDEX_PREFIX: tamma-ts
       SERVICE_NAME: tamma-engine
     volumes:

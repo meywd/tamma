@@ -242,7 +242,10 @@ jobs:
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
                 up -d tamma-engine tamma-dashboard elsa-studio nginx-proxy && \
               sleep 5 && \
-              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps && \
+              echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
+                --profile observability run --rm opensearch-setup 2>/dev/null || echo 'OpenSearch setup skipped (observability not running)'
             "
 
       - name: "Health check: API via proxy (with retry)"
