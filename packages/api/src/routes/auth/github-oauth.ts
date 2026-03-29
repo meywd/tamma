@@ -70,7 +70,7 @@ export async function registerGitHubOAuthRoutes(
   app.get<{
     Querystring: { rd?: string };
   }>('/api/auth/github', async (request: FastifyRequest<{ Querystring: { rd?: string } }>, reply: FastifyReply) => {
-    const callbackUrl = `${apiBaseUrl}/api/auth/github/callback`;
+    const callbackUrl = `${dashboardUrl}/oauth2/callback`;
     const scope = 'read:user user:email';
 
     // Encode redirect destination in OAuth state param
