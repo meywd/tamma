@@ -31,7 +31,9 @@ const SERVICE_PERMISSION_MAP: Record<string, Permission> = {
 export async function registerRoleCheckRoute(app: FastifyInstance): Promise<void> {
   app.get<{
     Querystring: { service?: string };
-  }>('/api/auth/role-check', async (request: FastifyRequest<{ Querystring: { service?: string } }>, reply: FastifyReply) => {
+  }>('/api/auth/role-check', {
+    config: { rateLimit: false },
+  }, async (request: FastifyRequest<{ Querystring: { service?: string } }>, reply: FastifyReply) => {
     const service = request.query.service;
 
     if (!service) {
