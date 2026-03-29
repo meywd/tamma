@@ -18,6 +18,7 @@ interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
+  logout: () => void;
 }
 
 export function useAuth(): AuthState {
@@ -57,5 +58,12 @@ export function useAuth(): AuthState {
     };
   }, []);
 
-  return state;
+  function logout(): void {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+      .finally(() => {
+        window.location.href = '/login';
+      });
+  }
+
+  return { ...state, logout };
 }

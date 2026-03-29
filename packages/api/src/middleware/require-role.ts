@@ -1,9 +1,7 @@
 /**
  * Role-checking middleware for route guards.
  *
- * Extracts the authenticated user from:
- *   1. request.authUser (set by JWT / auth plugin)
- *   2. X-Auth-Request-User + X-Auth-Request-Role headers (from oauth2-proxy)
+ * Extracts the authenticated user from request.authUser (set by JWT auth plugin).
  *
  * Provides two helpers:
  *   - requireRole(minimumRole)      — enforces a minimum role level
@@ -27,23 +25,15 @@ export interface AuthenticatedUser {
 
 /**
  * Extract the authenticated user from the request.
- * Checks request.authUser first, then falls back to oauth2-proxy headers.
+ * Checks request.authUser set by JWT auth plugin.
  */
 function getAuthUser(request: FastifyRequest): AuthenticatedUser | null {
-  // Check authUser decoration (from JWT auth plugin)
   const reqWithAuth = request as FastifyRequest & { authUser?: { id: string; role: string } };
   if (reqWithAuth.authUser) {
     return {
       id: reqWithAuth.authUser.id,
       role: reqWithAuth.authUser.role as Role,
     };
-  }
-
-  // Fallback: oauth2-proxy forwards user info via headers
-  const userId = request.headers['x-auth-request-user'] as string | undefined;
-  const userRole = request.headers['x-auth-request-role'] as string | undefined;
-  if (userId && userRole) {
-    return { id: userId, role: userRole as Role };
   }
 
   return null;

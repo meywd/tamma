@@ -17,10 +17,9 @@
 #   tamma-engine:     1G
 #   tamma-dashboard:  256M
 #   elsa-studio:      128M
-#   oauth2-proxy:     128M
 #   nginx-proxy:      128M
 #   ─────────────────────
-#   Total:          ~7.2G  (leaves ~8.8G for OS, Docker, and headroom)
+#   Total:          ~7.1G  (leaves ~8.9G for OS, Docker, and headroom)
 #
 # With observability profile (+opensearch +dashboards):
 #   opensearch:       3G
@@ -105,14 +104,6 @@ services:
           cpus: "0.25"
           memory: 128M
     # No exposed ports — reachable via nginx-proxy only
-
-  oauth2-proxy:
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
 
   opensearch:
     restart: unless-stopped

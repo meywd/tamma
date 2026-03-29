@@ -309,38 +309,11 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # OAuth2 Proxy (unified GitHub OAuth for all dashboards)
-  # Optional: nginx will start and serve without it; auth_request will return
-  # 502 which triggers a fallback to allow unauthenticated access to dashboard.
-  # ---------------------------------------------------------------------------
-  oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
-    restart: unless-stopped
-    command:
-      - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
-    environment:
-      OAUTH2_PROXY_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-not-configured}
-      OAUTH2_PROXY_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-not-configured}
-      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-changeme-generate-with-openssl-rand-base64-32}
-    volumes:
-      - ./oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4180/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    depends_on:
-      tamma-api:
-        condition: service_started
-    networks:
-      - tamma-net
-
-  # ---------------------------------------------------------------------------
   # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
   #
   # Only hard-depends on tamma-api and tamma-dashboard (critical path).
-  # oauth2-proxy and opensearch-dashboards are soft dependencies — nginx
-  # resolves them at request time and returns 502 if they are unavailable.
+  # opensearch-dashboards is a soft dependency — nginx resolves it at
+  # request time and returns 502 if it is unavailable.
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine

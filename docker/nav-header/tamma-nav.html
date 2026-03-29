@@ -135,7 +135,7 @@
     <img class="tn-avatar" id="tamma-nav-avatar" src="" alt="" style="display:none" />
     <span class="tn-username" id="tamma-nav-username"></span>
     <div class="tn-menu" id="tamma-nav-menu">
-      <a href="https://app.tamma.dev/settings">Settings</a>
+      <a href="https://app.tamma.dev/account">Settings</a>
       <a href="https://app.tamma.dev/api/auth/logout" id="tamma-nav-signout">Sign Out</a>
     </div>
   </div>
@@ -176,7 +176,7 @@
     signout.addEventListener('click', function(e) {
       e.preventDefault();
       fetch('https://app.tamma.dev/api/auth/logout', { method: 'POST', credentials: 'include' })
-        .finally(function() { window.location.href = 'https://app.tamma.dev'; });
+        .finally(function() { window.location.href = 'https://app.tamma.dev/login'; });
     });
   }
 

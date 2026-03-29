@@ -65,11 +65,20 @@ export async function registerGitHubOAuthRoutes(
 
   // -------------------------------------------------------------------
   // GET /api/auth/github — redirect to GitHub authorization
+  // Accepts optional ?rd= param for post-login redirect (e.g. elsa.tamma.dev)
   // -------------------------------------------------------------------
-  app.get('/api/auth/github', async (_request: FastifyRequest, reply: FastifyReply) => {
+  app.get<{
+    Querystring: { rd?: string };
+  }>('/api/auth/github', async (request: FastifyRequest<{ Querystring: { rd?: string } }>, reply: FastifyReply) => {
     const callbackUrl = `${apiBaseUrl}/api/auth/github/callback`;
     const scope = 'read:user user:email';
-    const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}`;
+
+    // Encode redirect destination in OAuth state param
+    const rd = request.query.rd;
+    const statePayload = rd && isValidRedirect(rd) ? { rd } : {};
+    const state = Buffer.from(JSON.stringify(statePayload)).toString('base64url');
+
+    const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&state=${encodeURIComponent(state)}`;
     return reply.redirect(githubUrl);
   });
 
@@ -77,9 +86,9 @@ export async function registerGitHubOAuthRoutes(
   // GET /api/auth/github/callback — exchange code, create/update user, issue JWT
   // -------------------------------------------------------------------
   app.get<{
-    Querystring: { code?: string; error?: string };
+    Querystring: { code?: string; error?: string; state?: string };
   }>('/api/auth/github/callback', async (request, reply) => {
-    const { code, error } = request.query;
+    const { code, error, state } = request.query;
 
     if (error || !code) {
       return reply.redirect(`${dashboardUrl}/login?error=${encodeURIComponent(error ?? 'missing_code')}`);
@@ -148,7 +157,20 @@ export async function registerGitHubOAuthRoutes(
       role: user.role,
     });
 
-    // Set cookie and redirect to dashboard
+    // Determine redirect target from OAuth state param
+    let redirectTo = dashboardUrl;
+    if (state) {
+      try {
+        const parsed = JSON.parse(Buffer.from(state, 'base64url').toString()) as { rd?: string };
+        if (parsed.rd && isValidRedirect(parsed.rd)) {
+          redirectTo = parsed.rd;
+        }
+      } catch {
+        // Invalid state — fall back to default dashboard URL
+      }
+    }
+
+    // Set cookie and redirect
     return reply
       .setCookie('tamma_session', token, {
         path: '/',
@@ -158,7 +180,7 @@ export async function registerGitHubOAuthRoutes(
         maxAge: tokenExpiresIn,
         domain: '.tamma.dev', // Shared across subdomains
       })
-      .redirect(dashboardUrl);
+      .redirect(redirectTo);
   });
 
   // -------------------------------------------------------------------
@@ -189,4 +211,21 @@ export async function registerGitHubOAuthRoutes(
       })
       .send({ ok: true });
   });
+}
+
+/**
+ * Validate that a redirect URL is safe (on *.tamma.dev or a relative path).
+ * Prevents open-redirect attacks.
+ */
+function isValidRedirect(url: string): boolean {
+  // Allow relative paths
+  if (url.startsWith('/')) return true;
+
+  try {
+    const parsed = new URL(url);
+    // Must be HTTPS and on *.tamma.dev
+    return parsed.protocol === 'https:' && (parsed.hostname === 'tamma.dev' || parsed.hostname.endsWith('.tamma.dev'));
+  } catch {
+    return false;
+  }
 }

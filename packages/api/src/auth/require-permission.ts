@@ -7,7 +7,6 @@
  * Extracts the user from:
  *   1. request.authUser (set by the JWT auth plugin)
  *   2. JWT in tamma_session cookie (for nginx auth_request sub-requests)
- *   3. X-Auth-Request-User header (fallback for oauth2-proxy)
  *
  * Returns 401 if no user can be determined, 403 if the user's role
  * is insufficient for the requested permission.

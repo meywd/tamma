@@ -7,10 +7,21 @@ interface NavGroup {
   items: { to: string; label: string }[];
 }
 
-const BASE_NAV_GROUPS: NavGroup[] = [
+const MEMBER_NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'My Account',
+    items: [
+      { to: '/account', label: 'Account' },
+      { to: '/keys', label: 'API Keys' },
+    ],
+  },
+];
+
+const ADMIN_NAV_GROUPS: NavGroup[] = [
+  ...MEMBER_NAV_GROUPS,
   {
     label: 'Knowledge Base',
-    items: [{ to: '/', label: 'Dashboard' }],
+    items: [{ to: '/dashboard', label: 'Dashboard' }],
   },
   {
     label: 'Settings',
@@ -23,20 +34,16 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { to: '/settings/prompts', label: 'Prompt Templates' },
     ],
   },
+  {
+    label: 'Administration',
+    items: [{ to: '/admin', label: 'Admin Panel' }],
+  },
 ];
 
 export function Sidebar(): JSX.Element {
   const { isAdmin } = useCurrentUser();
 
-  const navGroups: NavGroup[] = isAdmin
-    ? [
-        ...BASE_NAV_GROUPS,
-        {
-          label: 'Administration',
-          items: [{ to: '/admin', label: 'Admin Panel' }],
-        },
-      ]
-    : BASE_NAV_GROUPS;
+  const navGroups = isAdmin ? ADMIN_NAV_GROUPS : MEMBER_NAV_GROUPS;
 
   return (
     <nav className="w-60 shrink-0 bg-gray-800 text-gray-100 py-6 flex flex-col">

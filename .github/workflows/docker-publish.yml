@@ -576,8 +576,6 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard elsa-studio && \
-              echo 'Starting oauth2-proxy (optional, non-blocking)...' && \
-              \$COMPOSE up -d --force-recreate oauth2-proxy 2>/dev/null || echo 'WARNING: oauth2-proxy failed to start (optional)' && \
               echo 'Starting nginx-proxy...' && \
               \$COMPOSE up -d --force-recreate nginx-proxy
             "
@@ -679,7 +677,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard oauth2-proxy nginx-proxy; do
+              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

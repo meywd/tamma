@@ -90,7 +90,7 @@ describe('requireRole', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('reads user from x-auth-request headers when authUser is not set', async () => {
+  it('ignores x-auth-request headers (oauth2-proxy removed)', async () => {
     const app = Fastify();
     app.decorateRequest('authUser', null);
 
@@ -105,7 +105,7 @@ describe('requireRole', () => {
         'x-auth-request-role': 'admin',
       },
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(401);
   });
 });
 

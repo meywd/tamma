@@ -40,10 +40,10 @@ export async function registerInviteRoutes(
       return reply.status(400).send({ error: 'Invalid role. Must be one of: owner, admin, member' });
     }
 
-    // Validate email format if provided
+    // Validate email format if provided (RFC 5321: max 254 chars)
+    // Uses a simple linear-time regex to avoid ReDoS (no nested quantifiers)
     if (email !== null && email !== undefined) {
-      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-      if (!emailRegex.test(email)) {
+      if (email.length > 254 || !/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
         return reply.status(400).send({ error: 'Invalid email format' });
       }
     }

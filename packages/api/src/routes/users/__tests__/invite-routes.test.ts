@@ -124,6 +124,26 @@ describe('Invite Routes', () => {
       expect(res.json().error).toContain('email');
     });
 
+    it('handles adversarial email input without hanging (ReDoS protection)', async () => {
+      const { app, inviteStore } = createTestApp({ id: 'admin-1', role: 'admin' });
+      await setupRoutes(app, inviteStore);
+
+      // This input causes catastrophic backtracking with polynomial/exponential regexes
+      const malicious = '!@' + '!.'.repeat(50);
+
+      const start = Date.now();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/admin/users/invite',
+        payload: { email: malicious },
+      });
+      const elapsed = Date.now() - start;
+
+      expect(res.statusCode).toBe(400);
+      // Must respond in under 100ms, not hang for seconds
+      expect(elapsed).toBeLessThan(100);
+    });
+
     it('member cannot create invites', async () => {
       const { app, inviteStore } = createTestApp({ id: 'member-1', role: 'member' });
       await setupRoutes(app, inviteStore);

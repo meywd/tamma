@@ -17,7 +17,7 @@ interface ServiceLink {
   url: string;
 }
 
-const SERVICES: ServiceLink[] = [
+const ALL_SERVICES: ServiceLink[] = [
   { key: 'app', label: 'Dashboard', url: 'https://app.tamma.dev' },
   { key: 'elsa', label: 'Workflows', url: 'https://elsa.tamma.dev' },
   { key: 'logs', label: 'Logs', url: 'https://logs.tamma.dev' },
@@ -49,11 +49,14 @@ export function NavHeader(): JSX.Element {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
+  // Filter services: members only see Dashboard; admins see all
+  const services = isAdmin(user) ? ALL_SERVICES : ALL_SERVICES.filter((s) => s.key === 'app');
+
   function handleSignOut(e: React.MouseEvent): void {
     e.preventDefault();
     fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
       .finally(() => {
-        window.location.href = '/';
+        window.location.href = '/login';
       });
   }
 
@@ -64,7 +67,7 @@ export function NavHeader(): JSX.Element {
       </a>
 
       <div className="tn-links">
-        {SERVICES.map((svc) => (
+        {services.map((svc) => (
           <a
             key={svc.key}
             href={svc.url}
@@ -95,7 +98,7 @@ export function NavHeader(): JSX.Element {
 
           {menuOpen && (
             <div className="tn-menu">
-              <a href="/settings">Settings</a>
+              <a href="/account">Settings</a>
               <a href="/" onClick={handleSignOut}>
                 Sign Out
               </a>

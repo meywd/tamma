@@ -27,7 +27,7 @@ export function AdminGuard({ children }: AdminGuardProps): JSX.Element {
   }
 
   if (!user || !isAdmin) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/account" replace />;
   }
 
   return <>{children}</>;
