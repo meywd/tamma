@@ -45,10 +45,10 @@ Epic 11 implements security hardening for the ELSA workflow engine, porting the 
 ## Related Epics
 
 This epic is part of the ELSA workflow engine group (Epics 11-14). See also:
-- [Epic 12: Agentic Tool Loop](Epic-12-Tool-Loop)
-- [Epic 13: Workflow Decomposition](Epic-13-Workflow-Decomposition)
-- [Epic 14: Custom ELSA Studio](Epic-14-ELSA-Studio)
-- [Combined page: Epics 11-14](Epic-11-14-ELSA)
+- [Epic 12: Agentic Tool Loop](Epics/Epic-12-Tool-Loop)
+- [Epic 13: Workflow Decomposition](Epics/Epic-13-Workflow-Decomposition)
+- [Epic 14: Custom ELSA Studio](Epics/Epic-14-ELSA-Studio)
+- [Combined page: Epics 11-14](Epics/Epic-11-14-ELSA)
 
 ## Story Files
 

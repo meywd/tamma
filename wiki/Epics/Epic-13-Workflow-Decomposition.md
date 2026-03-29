@@ -37,10 +37,10 @@ Epic 13 decomposes the monolithic ELSA mentorship workflow into reusable sub-wor
 ## Related Epics
 
 This epic is part of the ELSA workflow engine group (Epics 11-14). See also:
-- [Epic 11: Security Hardening](Epic-11-Security)
-- [Epic 12: Agentic Tool Loop](Epic-12-Tool-Loop)
-- [Epic 14: Custom ELSA Studio](Epic-14-ELSA-Studio)
-- [Combined page: Epics 11-14](Epic-11-14-ELSA)
+- [Epic 11: Security Hardening](Epics/Epic-11-Security)
+- [Epic 12: Agentic Tool Loop](Epics/Epic-12-Tool-Loop)
+- [Epic 14: Custom ELSA Studio](Epics/Epic-14-ELSA-Studio)
+- [Combined page: Epics 11-14](Epics/Epic-11-14-ELSA)
 
 ## Story Files
 

@@ -152,7 +152,7 @@ LLM providers are auto-wrapped via `wrapAsAgent()` to satisfy the `IAgentProvide
 
 #### Config-Driven Multi-Agent System (Epic 9)
 
-See [Epic 9 wiki page](Epic-9-Agent-Management) for full details. Key components:
+See [Epic 9 wiki page](Epics/Epic-9-Agent-Management) for full details. Key components:
 - `RoleBasedAgentResolver` -- maps workflow phases to agent roles to provider chains
 - `ProviderChain` -- ordered fallback with health and budget checks
 - `ProviderHealthTracker` -- three-state circuit breaker per provider+model
@@ -371,7 +371,7 @@ C# ELSA layer has its own security pipeline (Epic 11):
 ## For More Details
 
 - [Full Architecture Document](https://github.com/meywd/tamma/blob/main/docs/architecture.md)
-- [Epic 9: Agent Management](Epic-9-Agent-Management)
-- [Epic 10: Engine Core](Epic-10-Engine-Core)
+- [Epic 9: Agent Management](Epics/Epic-9-Agent-Management)
+- [Epic 10: Engine Core](Epics/Epic-10-Engine-Core)
 - [Stories Index](Stories)
 - [PRD](https://github.com/meywd/tamma/blob/main/docs/PRD.md)

@@ -38,10 +38,10 @@ Epic 14 builds a custom ELSA Studio interface using Blazor WebAssembly for visua
 ## Related Epics
 
 This epic is part of the ELSA workflow engine group (Epics 11-14). See also:
-- [Epic 11: Security Hardening](Epic-11-Security)
-- [Epic 12: Agentic Tool Loop](Epic-12-Tool-Loop)
-- [Epic 13: Workflow Decomposition](Epic-13-Workflow-Decomposition)
-- [Combined page: Epics 11-14](Epic-11-14-ELSA)
+- [Epic 11: Security Hardening](Epics/Epic-11-Security)
+- [Epic 12: Agentic Tool Loop](Epics/Epic-12-Tool-Loop)
+- [Epic 13: Workflow Decomposition](Epics/Epic-13-Workflow-Decomposition)
+- [Combined page: Epics 11-14](Epics/Epic-11-14-ELSA)
 
 ## Story Files
 

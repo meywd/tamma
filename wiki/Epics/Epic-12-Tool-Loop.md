@@ -41,10 +41,10 @@ Epic 12 implements the agentic tool loop in the ELSA workflow engine -- the mech
 ## Related Epics
 
 This epic is part of the ELSA workflow engine group (Epics 11-14). See also:
-- [Epic 11: Security Hardening](Epic-11-Security)
-- [Epic 13: Workflow Decomposition](Epic-13-Workflow-Decomposition)
-- [Epic 14: Custom ELSA Studio](Epic-14-ELSA-Studio)
-- [Combined page: Epics 11-14](Epic-11-14-ELSA)
+- [Epic 11: Security Hardening](Epics/Epic-11-Security)
+- [Epic 13: Workflow Decomposition](Epics/Epic-13-Workflow-Decomposition)
+- [Epic 14: Custom ELSA Studio](Epics/Epic-14-ELSA-Studio)
+- [Combined page: Epics 11-14](Epics/Epic-11-14-ELSA)
 
 ## Story Files
 

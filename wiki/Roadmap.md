@@ -50,7 +50,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 1-0 through 1-14 (15 stories)
 
-[Detailed Breakdown](Epic-1-Foundation)
+[Detailed Breakdown](Epics/Epic-1-Foundation)
 
 ---
 
@@ -69,7 +69,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 1.5-1 through 1.5-15 (15 stories)
 
-[Detailed Breakdown](Epic-1.5-Infrastructure)
+[Detailed Breakdown](Epics/Epic-1.5-Infrastructure)
 
 ---
 
@@ -91,7 +91,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 6-1 through 6-10 (10 stories)
 
-[Detailed Breakdown](Epic-6-Context-Knowledge)
+[Detailed Breakdown](Epics/Epic-6-Context-Knowledge)
 
 ---
 
@@ -107,7 +107,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 7-1 through 7-10, 7-1A through 7-1I (19 stories)
 
-[Detailed Breakdown](Epic-7-Mentorship)
+[Detailed Breakdown](Epics/Epic-7-Mentorship)
 
 ---
 
@@ -128,7 +128,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 9-1 through 9-11 (11 stories)
 
-[Detailed Breakdown](Epic-9-Agent-Management)
+[Detailed Breakdown](Epics/Epic-9-Agent-Management)
 
 ---
 
@@ -144,7 +144,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Stories:** 10-1 through 10-8 (8 stories)
 
-[Detailed Breakdown](Epic-10-Engine-Core)
+[Detailed Breakdown](Epics/Epic-10-Engine-Core)
 
 ---
 
@@ -406,7 +406,7 @@ Each of the 12 stories now has implementation-ready task plan breakdowns:
 - 23-11 Monitoring API Foundation (3 task plans)
 - 23-12 Dashboard Navigation & Layout (3 task plans)
 
-[Detailed Breakdown](Epic-23-System-Monitoring)
+[Detailed Breakdown](Epics/Epic-23-System-Monitoring)
 
 ---
 
@@ -426,7 +426,7 @@ Each implementation story now has task plan breakdowns:
 - 24-5 Dashboard Voice UI (4 task plans)
 - 24-6 Hardening + Production Readiness (4 task plans)
 
-[Detailed Breakdown](Epic-24-Voice-Conversation)
+[Detailed Breakdown](Epics/Epic-24-Voice-Conversation)
 
 ---
 

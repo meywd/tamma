@@ -6,15 +6,16 @@
 
 - [Project Roadmap](Roadmap) - All 24 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
-- [Epic 1: Foundation](Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
-- [Epic 1.5: Infrastructure & Deployment](Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
-- [Epic 6: Context & Knowledge Management](Epic-6-Context-Knowledge) - Vector DB, RAG, MCP, cost monitoring, permissions, knowledge base
-- [Epic 7: Mentorship Workflow](Epic-7-Mentorship) - ELSA workflow activities for autonomous mentorship
-- [Epic 9: Agent Management](Epic-9-Agent-Management) - Config-driven multi-agent system
-- [Epic 10: Engine Core](Epic-10-Engine-Core) - Workflow-driven architecture
-- [Epic 11-14: ELSA Hardening](Epic-11-14-ELSA) - Security, agentic tool loop, workflow decomposition, custom studio
-- [Epic 23: System Monitoring](Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
-- [Epic 24: Voice Conversation](Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
+- [Epics](Epics) - All 24 epics organized by phase
+- [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
+- [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
+- [Epic 6: Context & Knowledge Management](Epics/Epic-6-Context-Knowledge) - Vector DB, RAG, MCP, cost monitoring, permissions, knowledge base
+- [Epic 7: Mentorship Workflow](Epics/Epic-7-Mentorship) - ELSA workflow activities for autonomous mentorship
+- [Epic 9: Agent Management](Epics/Epic-9-Agent-Management) - Config-driven multi-agent system
+- [Epic 10: Engine Core](Epics/Epic-10-Engine-Core) - Workflow-driven architecture
+- [Epic 11-14: ELSA Hardening](Epics/Epic-11-14-ELSA) - Security, agentic tool loop, workflow decomposition, custom studio
+- [Epic 23: System Monitoring](Epics/Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
+- [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -104,8 +105,8 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 
 1. Read the [Architecture](Architecture) overview
 2. Review the [Roadmap](Roadmap) to understand the project timeline
-3. Check out [Epic 1](Epic-1-Foundation) to see foundational work
-4. See [Epic 9](Epic-9-Agent-Management) for the multi-agent system
+3. Check out [Epic 1](Epics/Epic-1-Foundation) to see foundational work
+4. See [Epic 9](Epics/Epic-9-Agent-Management) for the multi-agent system
 5. Visit [Contributing](Contributing) to learn how to help
 
 ## Documentation
