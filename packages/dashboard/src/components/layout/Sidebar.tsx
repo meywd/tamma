@@ -47,7 +47,10 @@ export function Sidebar(): JSX.Element {
 
   return (
     <nav className="w-60 shrink-0 bg-gray-800 text-gray-100 py-6 flex flex-col">
-      <div className="px-5 mb-8 text-lg font-bold tracking-tight">Tamma</div>
+      <div className="px-5 mb-8 flex items-center gap-2">
+        <img src="/logo.png" alt="Tamma" className="w-8 h-8 rounded" />
+        <span className="text-lg font-bold tracking-tight">Tamma</span>
+      </div>
       {navGroups.map((group) => (
         <div key={group.label} className="mb-4">
           <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">

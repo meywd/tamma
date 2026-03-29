@@ -62,7 +62,8 @@ export function NavHeader(): JSX.Element {
 
   return (
     <nav className="tamma-nav-bar">
-      <a className="tn-logo" href="https://app.tamma.dev">
+      <a className="tn-logo" href="https://app.tamma.dev" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <img src="/logo.png" alt="Tamma" style={{ width: '24px', height: '24px', borderRadius: '4px' }} />
         Tamma
       </a>
 

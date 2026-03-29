@@ -22,6 +22,7 @@ export function LoginPage(): JSX.Element {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm bg-white rounded-lg shadow-md p-8 text-center">
+        <img src="/logo.png" alt="Tamma" className="w-16 h-16 rounded-lg mx-auto mb-2" />
         <div className="text-2xl font-bold text-gray-900 mb-2">Tamma</div>
         <p className="text-sm text-gray-500 mb-6">Sign in to continue</p>
 
