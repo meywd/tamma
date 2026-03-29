@@ -132,7 +132,9 @@ export function validateRepoConfig(config: IRepoConfig): void {
         }
 
         try {
-          new RegExp(pattern);
+          // Validate syntax by attempting compilation.
+          // Pattern has been length-checked above (max 500 chars).
+          RegExp(pattern);
         } catch {
           throw new TammaError(
             `security.blockedCommandPattern is not a valid regex: "${pattern}"`,

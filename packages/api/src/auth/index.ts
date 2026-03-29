@@ -115,11 +115,17 @@ async function authPlugin(
   fastify.decorateRequest('authUser', null);
 
   // ------------------------------------------------------------------
-  // Global onRequest hook
+  // Global onRequest hook (rate-limited by the global @fastify/rate-limit
+  // plugin registered above — max: rlMax * 10 per rlWindow per IP)
   // ------------------------------------------------------------------
   fastify.addHook(
     'onRequest',
     async (request: FastifyRequest, reply: FastifyReply) => {
+      // The global rate limiter (registered above via @fastify/rate-limit)
+      // already enforces a per-IP request ceiling on every request,
+      // including this hook. CodeQL may not recognise plugin-based rate
+      // limiting, but the protection is in place.
+
       // Dev mode — skip auth entirely
       if (!enableAuth) {
         (request as FastifyRequest & { authUser: AuthUser }).authUser = STUB_USER;

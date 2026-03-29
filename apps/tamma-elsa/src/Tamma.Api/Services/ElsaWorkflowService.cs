@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Tamma.Api.Services;
@@ -9,7 +10,7 @@ namespace Tamma.Api.Services;
 /// Implementation of ELSA workflow service.
 /// Connects to ELSA v3 server via REST API to manage workflow instances.
 /// </summary>
-public class ElsaWorkflowService : IElsaWorkflowService
+public partial class ElsaWorkflowService : IElsaWorkflowService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<ElsaWorkflowService> _logger;
@@ -18,12 +19,21 @@ public class ElsaWorkflowService : IElsaWorkflowService
     private static readonly object _healthCheckLock = new();
 
     /// <summary>
-    /// Sanitize a string for safe logging by removing newlines and control characters.
+    /// Matches any control character (CR, LF, TAB, and all C0/C1 control chars).
+    /// Used to prevent log forging by stripping characters that could inject
+    /// fake log entries.
+    /// </summary>
+    [GeneratedRegex(@"[\x00-\x1F\x7F-\x9F]", RegexOptions.Compiled)]
+    private static partial Regex ControlCharsRegex();
+
+    /// <summary>
+    /// Sanitize a string for safe logging by removing all control characters
+    /// in a single atomic pass to prevent log forging.
     /// </summary>
     private static string SanitizeForLog(string? input)
     {
         if (string.IsNullOrEmpty(input)) return input ?? string.Empty;
-        return input.Replace("\n", "").Replace("\r", "").Replace("\t", "");
+        return ControlCharsRegex().Replace(input, "");
     }
 
     public ElsaWorkflowService(

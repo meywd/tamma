@@ -921,10 +921,17 @@ describe('createUrlValidationInterceptor', () => {
   });
 
   it('checks multiple arg values', async () => {
+    // Use an exact-match blocklist to avoid incomplete substring checks
+    // (CodeQL js/incomplete-url-substring-sanitization)
+    const blockedDomains = new Set(['evil.com']);
     const validateUrl = vi.fn(createMockValidateUrl((url: string) => {
       try {
         const parsed = new URL(url);
-        if (parsed.hostname === 'evil.com' || parsed.hostname.endsWith('.evil.com')) {
+        // Split hostname into labels and check if the registrable domain
+        // (last two labels) is in the blocklist
+        const labels = parsed.hostname.split('.');
+        const registrable = labels.slice(-2).join('.');
+        if (blockedDomains.has(parsed.hostname) || blockedDomains.has(registrable)) {
           return { valid: false, warnings: ['Suspicious domain'] };
         }
       } catch {
