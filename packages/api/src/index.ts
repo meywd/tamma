@@ -3,7 +3,7 @@
  * Fastify REST API + SSE for the Tamma platform
  */
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { registerKnowledgeBaseRoutes, createKBServices } from './routes/knowledge-base/index.js';
@@ -192,15 +192,21 @@ export interface CreateAppOptions {
   userManagement?: UserManagementRouteOptions;
   /** Admin route options (optional; enables /api/admin/health). */
   admin?: AdminRouteOptions;
-  /** Enable Fastify logger (boolean or pino options object). */
+  /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
+  /** Pre-built pino Logger instance (takes precedence over logger option). */
+  loggerInstance?: object;
 }
 
 /**
  * Create and configure the Fastify API server.
  */
 export async function createApp(options?: CreateAppOptions) {
-  const app = Fastify({ logger: options?.logger ?? false });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const logOpts: Record<string, unknown> = options?.loggerInstance
+    ? { loggerInstance: options.loggerInstance }
+    : { logger: options?.logger ?? false };
+  const app = Fastify(logOpts as any) as unknown as FastifyInstance;
 
   // Global error handler — return structured errors without leaking stack traces
   app.setErrorHandler((error, _request, reply) => {

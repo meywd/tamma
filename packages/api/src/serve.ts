@@ -101,7 +101,7 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
 
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
-    logger: pinoLogger,
+    loggerInstance: pinoLogger,
     userManagement: {
       userStore,
       apiKeyStore,
