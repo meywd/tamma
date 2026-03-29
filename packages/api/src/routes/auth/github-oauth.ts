@@ -43,7 +43,6 @@ export async function registerGitHubOAuthRoutes(
     userStore,
     installationStore,
     dashboardUrl,
-    apiBaseUrl,
     tokenExpiresIn = 86400,
   } = options;
 
