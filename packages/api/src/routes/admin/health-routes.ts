@@ -138,12 +138,15 @@ export function registerAdminHealthRoutes(
             : 'http://opensearch:9200/_cluster/health',
         ),
 
-        // RabbitMQ Management API
+        // RabbitMQ Management API (requires basic auth)
         checkHttpService(
           'RabbitMQ',
-          process.env['RABBITMQ_MANAGEMENT_URL']
-            ? `${process.env['RABBITMQ_MANAGEMENT_URL']}/api/health/checks/alarms`
-            : 'http://rabbitmq:15672/api/health/checks/alarms',
+          (() => {
+            const user = process.env['RABBITMQ_USER'] ?? 'tamma';
+            const pass = process.env['RABBITMQ_PASSWORD'] ?? 'tamma';
+            const base = process.env['RABBITMQ_MANAGEMENT_URL'] ?? `http://${user}:${pass}@rabbitmq:15672`;
+            return `${base}/api/health/checks/alarms`;
+          })(),
         ),
 
         // ChromaDB

@@ -164,6 +164,8 @@ services:
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
       CHROMADB_URL: http://chromadb:8000
+      RABBITMQ_USER: ${RABBITMQ_USER:-tamma}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-tamma}
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
