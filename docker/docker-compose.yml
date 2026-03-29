@@ -89,7 +89,7 @@ services:
       Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
       ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
-      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-false}
+      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
       OpenSearch__IndexPrefix: tamma-elsa
     depends_on:
       postgres:
@@ -136,7 +136,7 @@ services:
       TammaServer__Url: http://tamma-api:3100
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
-      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-false}
+      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
       OpenSearch__IndexPrefix: tamma-api-dotnet
     depends_on:
       elsa-server:
