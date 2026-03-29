@@ -28,7 +28,7 @@ internal static class WorkflowVersions
         {
             // Use first 8 hex chars → int, add base version offset
             var hashInt = int.Parse(embeddedHash[..8], System.Globalization.NumberStyles.HexNumber);
-            return 2 + Math.Abs(hashInt % 10000); // Range: 2–10001
+            return 3 + Math.Abs(hashInt % 10000); // Range: 3–10002 (bumped 2026-03-29)
         }
 
         // Fallback: use assembly build timestamp as version proxy
