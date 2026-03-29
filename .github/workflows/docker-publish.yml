@@ -632,7 +632,7 @@ jobs:
               fi
 
               echo '--- Checking app.tamma.dev ---'
-              APP_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: app.tamma.dev' https://localhost/ 2>/dev/null || echo '000')
+              APP_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: app.tamma.dev' https://localhost/ 2>/dev/null)
               if [ \"\$APP_STATUS\" -lt 500 ] 2>/dev/null; then
                 echo \"  app.tamma.dev: OK (HTTP \$APP_STATUS)\"
               else
@@ -641,7 +641,7 @@ jobs:
               fi
 
               echo '--- Checking elsa.tamma.dev ---'
-              ELSA_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/ 2>/dev/null || echo '000')
+              ELSA_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/ 2>/dev/null)
               if [ \"\$ELSA_STATUS\" -lt 500 ] 2>/dev/null; then
                 echo \"  elsa.tamma.dev: OK (HTTP \$ELSA_STATUS)\"
               else
@@ -650,7 +650,7 @@ jobs:
               fi
 
               echo '--- Checking elsa.tamma.dev /elsa/api ---'
-              ELSA_API_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/elsa/api/ 2>/dev/null || echo '000')
+              ELSA_API_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/elsa/api/ 2>/dev/null)
               if [ \"\$ELSA_API_STATUS\" -lt 500 ] 2>/dev/null; then
                 echo \"  elsa.tamma.dev/elsa/api: OK (HTTP \$ELSA_API_STATUS)\"
               else
@@ -659,7 +659,7 @@ jobs:
               fi
 
               echo '--- Checking logs.tamma.dev (optional — observability profile) ---'
-              LOGS_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: logs.tamma.dev' https://localhost/ 2>/dev/null || echo '000')
+              LOGS_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: logs.tamma.dev' https://localhost/ 2>/dev/null)
               echo \"  logs.tamma.dev: HTTP \$LOGS_STATUS (informational, not blocking)\"
 
               if [ \"\$FAILED\" = '1' ]; then
