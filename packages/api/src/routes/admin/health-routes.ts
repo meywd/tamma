@@ -20,7 +20,7 @@ interface HealthResult {
   checkedAt: string;
 }
 
-async function checkHttpService(name: string, url: string): Promise<ServiceCheck> {
+async function checkHttpService(name: string, url: string, headers?: Record<string, string>): Promise<ServiceCheck> {
   const start = Date.now();
   try {
     const controller = new AbortController();
@@ -29,6 +29,7 @@ async function checkHttpService(name: string, url: string): Promise<ServiceCheck
     const response = await fetch(url, {
       method: 'GET',
       signal: controller.signal,
+      headers,
     });
 
     clearTimeout(timeout);
@@ -141,12 +142,14 @@ export function registerAdminHealthRoutes(
         // RabbitMQ Management API (requires basic auth)
         checkHttpService(
           'RabbitMQ',
-          (() => {
-            const user = process.env['RABBITMQ_USER'] ?? 'tamma';
-            const pass = process.env['RABBITMQ_PASSWORD'] ?? 'tamma';
-            const base = process.env['RABBITMQ_MANAGEMENT_URL'] ?? `http://${user}:${pass}@rabbitmq:15672`;
-            return `${base}/api/health/checks/alarms`;
-          })(),
+          process.env['RABBITMQ_MANAGEMENT_URL']
+            ? `${process.env['RABBITMQ_MANAGEMENT_URL']}/api/health/checks/alarms`
+            : 'http://rabbitmq:15672/api/health/checks/alarms',
+          {
+            Authorization: `Basic ${Buffer.from(
+              `${process.env['RABBITMQ_USER'] ?? 'tamma'}:${process.env['RABBITMQ_PASSWORD'] ?? 'tamma'}`,
+            ).toString('base64')}`,
+          },
         ),
 
         // ChromaDB
