@@ -1,0 +1,51 @@
+name: Deploy Wiki Site
+
+on:
+  push:
+    paths:
+      - 'wiki/**'
+      - 'docs/stories/**'
+      - 'apps/wiki-site/**'
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build & Deploy Wiki
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --filter @tamma/wiki-site...
+
+      - name: Sync content from wiki/ and docs/stories/
+        run: pnpm --filter @tamma/wiki-site sync-content
+
+      - name: Build Astro site
+        run: pnpm --filter @tamma/wiki-site build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/wiki-site
+          command: deploy

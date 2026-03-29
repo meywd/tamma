@@ -1,0 +1,13 @@
+# Astro build output
+dist/
+
+# Synced content from wiki/ and docs/stories/ — generated at build time
+# Do not commit these; they are produced by scripts/sync-content.ts
+src/content/docs/
+
+# Node
+node_modules/
+
+# Wrangler
+.wrangler/
+.dev.vars
