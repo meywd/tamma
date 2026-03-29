@@ -68,3 +68,27 @@
 .mud-tab-active .mud-tab-indicator {
     background-color: #7B61FF !important;
 }
+
+/* --- Early dark mode (applied before Blazor loads) --- */
+html.dark body,
+html[data-tamma-dark="true"] body {
+    background-color: #0f172a;
+    color: #e0e0e0;
+}
+
+html.dark #app > div,
+html[data-tamma-dark="true"] #app > div {
+    color: #9B85FF;
+}
+
+/* --- Preferences drawer --- */
+.tamma-preferences-drawer .mud-drawer-header {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid rgba(123, 97, 255, 0.2);
+}
+
+.tamma-preferences-drawer .mud-slider {
+    padding-left: 4px;
+    padding-right: 4px;
+}

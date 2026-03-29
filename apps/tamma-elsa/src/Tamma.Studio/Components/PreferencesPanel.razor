@@ -1,0 +1,153 @@
+@using Elsa.Studio.Contracts
+@using Tamma.Studio.Services
+@using Tamma.Studio.Theming
+@inject UserPreferencesService PrefsService
+@inject IThemeService ThemeService
+
+<MudDrawer @bind-Open="_isOpen"
+           Anchor="Anchor.End"
+           Elevation="1"
+           Variant="DrawerVariant.Temporary"
+           Width="340px"
+           Class="tamma-preferences-drawer">
+
+    <MudDrawerHeader>
+        <MudText Typo="Typo.h6">Preferences</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Close"
+                       OnClick="Close"
+                       Size="Size.Small" />
+    </MudDrawerHeader>
+
+    <MudContainer Class="pa-4">
+        @if (_prefs is not null)
+        {
+            <!-- Dark Mode -->
+            <MudSwitch T="bool"
+                       Label="Dark mode"
+                       Value="_prefs.IsDarkMode"
+                       ValueChanged="OnDarkModeChanged"
+                       Color="Color.Primary"
+                       Class="mb-4" />
+
+            <MudDivider Class="mb-4" />
+
+            <!-- Grid Size -->
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Grid size: @_prefs.GridSize px</MudText>
+            <MudSlider T="int"
+                       Value="_prefs.GridSize"
+                       ValueChanged="OnGridSizeChanged"
+                       Min="10" Max="50" Step="5"
+                       Color="Color.Primary"
+                       Class="mb-4" />
+
+            <MudDivider Class="mb-4" />
+
+            <!-- Editor Font Size -->
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Editor font size: @(_prefs.EditorFontSize)px</MudText>
+            <MudSlider T="int"
+                       Value="_prefs.EditorFontSize"
+                       ValueChanged="OnEditorFontSizeChanged"
+                       Min="12" Max="20" Step="1"
+                       Color="Color.Primary"
+                       Class="mb-4" />
+
+            <MudDivider Class="mb-4" />
+
+            <!-- Sidebar Collapsed -->
+            <MudSwitch T="bool"
+                       Label="Sidebar collapsed"
+                       Value="_prefs.SidebarCollapsed"
+                       ValueChanged="OnSidebarCollapsedChanged"
+                       Color="Color.Primary"
+                       Class="mb-4" />
+
+            <MudDivider Class="mb-4" />
+
+            <!-- Activity Picker Mode -->
+            <MudSelect T="string"
+                       Label="Activity picker mode"
+                       Value="_prefs.ActivityPickerMode"
+                       ValueChanged="OnActivityPickerModeChanged"
+                       Variant="Variant.Outlined"
+                       Class="mb-4">
+                <MudSelectItem T="string" Value="@("accordion")">Accordion</MudSelectItem>
+                <MudSelectItem T="string" Value="@("treeview")">Tree View</MudSelectItem>
+            </MudSelect>
+
+            <!-- Zoom Level (read-only display) -->
+            <MudText Typo="Typo.subtitle2" Class="mb-1">Zoom level: @(_prefs.ZoomLevel.ToString("P0"))</MudText>
+            <MudSlider T="double"
+                       Value="_prefs.ZoomLevel"
+                       ValueChanged="OnZoomLevelChanged"
+                       Min="0.25" Max="3.0" Step="0.25"
+                       Color="Color.Primary"
+                       Class="mb-4" />
+        }
+        else
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mx-auto d-block mt-4" />
+        }
+    </MudContainer>
+</MudDrawer>
+
+@code {
+    private UserPreferences? _prefs;
+    private bool _isOpen;
+
+    /// <summary>
+    /// Opens the preferences drawer.
+    /// </summary>
+    public async Task OpenAsync()
+    {
+        _prefs = await PrefsService.GetAsync();
+        _isOpen = true;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Closes the preferences drawer.
+    /// </summary>
+    public void Close()
+    {
+        _isOpen = false;
+        StateHasChanged();
+    }
+
+    private async Task OnDarkModeChanged(bool value)
+    {
+        _prefs!.IsDarkMode = value;
+        ThemeService.IsDarkMode = value;
+        await PrefsService.SaveAsync();
+    }
+
+    private async Task OnGridSizeChanged(int value)
+    {
+        _prefs!.GridSize = value;
+        await PrefsService.SaveAsync();
+    }
+
+    private async Task OnEditorFontSizeChanged(int value)
+    {
+        _prefs!.EditorFontSize = value;
+        await PrefsService.SaveAsync();
+    }
+
+    private async Task OnSidebarCollapsedChanged(bool value)
+    {
+        _prefs!.SidebarCollapsed = value;
+        await PrefsService.SaveAsync();
+    }
+
+    private async Task OnActivityPickerModeChanged(string value)
+    {
+        _prefs!.ActivityPickerMode = value;
+        await PrefsService.SaveAsync();
+    }
+
+    private async Task OnZoomLevelChanged(double value)
+    {
+        _prefs!.ZoomLevel = value;
+        await PrefsService.SaveAsync();
+    }
+}

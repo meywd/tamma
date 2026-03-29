@@ -16,6 +16,8 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Studio.Branding;
 using Tamma.Studio.Navigation;
+using Tamma.Studio.Services;
+using Tamma.Studio.Theming;
 using Tamma.Studio.UIHints;
 
 // Build the host.
@@ -54,6 +56,15 @@ builder.Services.AddScoped<IMenuProvider, TammaMenuProvider>();
 // Tamma custom UI hint handlers.
 builder.Services.AddUIHintHandler<JsonEditorUIHintHandler>();
 builder.Services.AddUIHintHandler<ProviderSelectorUIHintHandler>();
+
+// Tamma localStorage-based user preferences.
+builder.Services.AddScoped<LocalStorageService>();
+builder.Services.AddScoped<UserPreferencesService>();
+
+// Tamma theme service — persists dark mode to localStorage.
+// Replaces the default IThemeService registered by AddCore().
+builder.Services.AddScoped<TammaThemeService>();
+builder.Services.Replace(new(typeof(IThemeService), typeof(TammaThemeService), ServiceLifetime.Scoped));
 
 // Build the application.
 var app = builder.Build();

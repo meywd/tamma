@@ -37,6 +37,25 @@
 
     <!-- Tamma unified navigation bar (Story 16.4) — self-injecting script -->
     <script src="https://app.tamma.dev/tamma-nav.js" defer></script>
+
+    <!--
+        Early dark-mode detection — reads localStorage BEFORE Blazor loads
+        to prevent a flash of the wrong theme (FOUC).
+    -->
+    <script>
+        (function () {
+            try {
+                var raw = localStorage.getItem('tamma-studio-preferences');
+                if (raw) {
+                    var prefs = JSON.parse(raw);
+                    if (prefs && prefs.IsDarkMode === true) {
+                        document.documentElement.classList.add('dark');
+                        document.documentElement.setAttribute('data-tamma-dark', 'true');
+                    }
+                }
+            } catch (e) { /* ignore parse errors */ }
+        })();
+    </script>
 </head>
 
 <body>
@@ -68,6 +87,9 @@
 
     <!-- Radzen JS -->
     <script src="_content/Radzen.Blazor/Radzen.Blazor.js"></script>
+
+    <!-- Tamma localStorage interop (must load before Blazor) -->
+    <script src="js/local-storage.js"></script>
 
     <!-- Blazor WASM framework -->
     <script src="_framework/blazor.webassembly.js"></script>
