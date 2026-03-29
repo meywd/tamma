@@ -4,12 +4,35 @@
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Adds resource limits. Traffic enters via nginx-proxy on port 80.
-# Cloudflare handles public TLS termination.
+# Adds resource limits and restart policies. Traffic enters via nginx-proxy
+# on ports 80/443. Cloudflare handles public TLS termination.
+#
+# Memory budget (without observability profile):
+#   PostgreSQL:       2G
+#   RabbitMQ:       512M
+#   ChromaDB:         1G
+#   elsa-server:      1G
+#   tamma-api-dotnet: 512M
+#   tamma-api:        512M
+#   tamma-engine:     1G
+#   tamma-dashboard:  256M
+#   elsa-studio:      128M
+#   oauth2-proxy:     128M
+#   nginx-proxy:      128M
+#   ─────────────────────
+#   Total:          ~7.2G  (leaves ~8.8G for OS, Docker, and headroom)
+#
+# With observability profile (+opensearch +dashboards):
+#   opensearch:       3G
+#   opensearch-dashboards: 1.5G
+#   opensearch-setup: 128M
+#   ─────────────────────
+#   Total:         ~11.8G  (leaves ~4.2G for OS and Docker)
 # =============================================================================
 
 services:
   postgres:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -17,20 +40,23 @@ services:
           memory: 2G
 
   rabbitmq:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  chromadb:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 1G
 
-  chromadb:
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 2G
-
   elsa-server:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -38,6 +64,7 @@ services:
           memory: 1G
 
   tamma-api-dotnet:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -45,6 +72,7 @@ services:
           memory: 512M
 
   tamma-api:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -53,6 +81,7 @@ services:
     # No exposed ports — reachable via nginx-proxy only
 
   tamma-engine:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -60,6 +89,7 @@ services:
           memory: 1G
 
   tamma-dashboard:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -68,6 +98,7 @@ services:
     # No exposed ports — reachable via nginx-proxy only
 
   elsa-studio:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -76,6 +107,7 @@ services:
     # No exposed ports — reachable via nginx-proxy only
 
   oauth2-proxy:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -83,19 +115,26 @@ services:
           memory: 128M
 
   opensearch:
+    restart: unless-stopped
+    environment:
+      # Override heap to fit 16GB VPS (2G heap + ~1G overhead = ~3G total)
+      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g"
     deploy:
       resources:
         limits:
           cpus: "2.0"
-          memory: 5G
+          memory: 3G
     # In production, do not expose port 9200 — internal only
 
   opensearch-dashboards:
+    restart: unless-stopped
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=1024"
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: 2G
+          memory: 1536M
     # In production, do not expose port 5601 — accessed via nginx
 
   opensearch-setup:
@@ -106,6 +145,7 @@ services:
           memory: 128M
 
   nginx-proxy:
+    restart: unless-stopped
     deploy:
       resources:
         limits:
