@@ -185,3 +185,4 @@ e2e/playwright-report/
 
 .bmad/
 playwright-report/
+.nano-banana-config.json
