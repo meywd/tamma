@@ -1,6 +1,6 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all 22 epics from foundation through SaaS platform.
+Comprehensive roadmap covering all 24 epics from foundation through SaaS platform.
 
 ## Epic Overview
 
@@ -22,13 +22,15 @@ Comprehensive roadmap covering all 22 epics from foundation through SaaS platfor
 | **Epic 13** | Workflow Decomposition | 3 | Completed |
 | **Epic 14** | Custom ELSA Studio | 3 | Completed |
 | **Epic 15** | Observability & Log Aggregation | 1 | Completed |
-| **Epic 16** | Unified Auth, User Management & Admin | 5 | Completed |
+| **Epic 16** | Unified Auth, User Management & Admin | 6 | Completed |
 | **Epic 17** | Multi-Tenancy Foundation | 5 | Planned |
 | **Epic 18** | End-User Auth & Registration | 5 | Planned |
 | **Epic 19** | GitHub App Agent Dispatch | 5 | Planned |
 | **Epic 20** | Billing & Payments | 5 | Planned |
 | **Epic 21** | Marketing Site & User Dashboard | 5 | Partially Implemented |
 | **Epic 22** | CLI Mode Preservation | 5 | Planned |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | Planned |
+| **Epic 24** | Realtime Voice Conversation | 7 | Partially Implemented |
 
 ---
 
@@ -222,13 +224,14 @@ Comprehensive roadmap covering all 22 epics from foundation through SaaS platfor
 **Goal:** Single GitHub OAuth flow across all services with user management and RBAC.
 
 **Key Deliverables:**
-- GitHub OAuth SSO via oauth2-proxy (Dashboard, ELSA Studio, OpenSearch Dashboards)
+- GitHub OAuth SSO (Dashboard, ELSA Studio, OpenSearch Dashboards)
 - User management API with invite flow and role assignment (`@tamma/api`)
 - Admin dashboard with system health, user management, API keys, quick links (`@tamma/dashboard`)
 - Cross-service navigation header
 - RBAC enforcement (member, admin, owner) at API and nginx levels
+- ELSA Studio auto-login (bypass internal ELSA Identity login page)
 
-**Stories:** 16-1 through 16-5 (5 stories)
+**Stories:** 16-1 through 16-6 (6 stories)
 
 ---
 
@@ -371,6 +374,46 @@ Comprehensive roadmap covering all 22 epics from foundation through SaaS platfor
 
 ---
 
+### Epic 23: System Monitoring & Observability Dashboard
+
+**Goal:** Production-grade monitoring, diagnostics, and observability for every service, provider, workflow, and infrastructure component.
+
+**Stories:** 23-1 through 23-12 (12 stories)
+- System health dashboard with service dependency graph
+- Real-time agent monitor with provider chain status
+- Event store explorer with search, filter, timeline, replay
+- Configuration audit with validation and change history
+- Workflow monitor with Gantt timeline and queue depth
+- Provider diagnostics with latency histograms and token analytics
+- Log explorer connected to OpenSearch with live tailing
+- Infrastructure monitor for PostgreSQL, RabbitMQ, ChromaDB, OpenSearch, Docker
+- Knowledge base monitor for vector DB, RAG health, MCP connections
+- Security and access audit with suspicious activity detection
+- Monitoring API foundation and dashboard navigation updates
+
+[Detailed Breakdown](Epic-23-System-Monitoring)
+
+---
+
+### Epic 24: Realtime Voice Conversation
+
+**Goal:** Voice as a first-class input/output mode for the orchestrator -- users talk to Tamma through their browser.
+
+**Status:** Research complete (Story 24-0 done). Implementation planned.
+
+**Stories:** 24-0 through 24-6 (7 stories)
+- Voice API research (done)
+- WebSocket foundation with JWT auth and session lifecycle
+- Speech-to-text integration (Deepgram primary, OpenAI Whisper fallback)
+- Text-to-speech integration (ElevenLabs primary, OpenAI TTS fallback)
+- Intent classification and engine integration
+- Dashboard voice UI with mode toggle
+- Hardening and production readiness
+
+[Detailed Breakdown](Epic-24-Voice-Conversation)
+
+---
+
 ## Timeline Visualization
 
 ```
@@ -405,6 +448,10 @@ Phase 5 (Planned - SaaS):
   Epic 20  (Billing)                 [Planned]
   Epic 21  (Marketing/Dashboard)     [Partially Implemented]
   Epic 22  (CLI Preservation)        [Planned]
+
+Phase 6 (Planned - Advanced):
+  Epic 23  (System Monitoring)       [Planned]
+  Epic 24  (Voice Conversation)      [Partially Implemented]
 ```
 
 ---

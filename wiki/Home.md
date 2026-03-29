@@ -4,7 +4,7 @@
 
 ## Quick Links
 
-- [Project Roadmap](Roadmap) - All 22 epics with timeline and status
+- [Project Roadmap](Roadmap) - All 24 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
 - [Epic 1: Foundation](Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
@@ -13,6 +13,8 @@
 - [Epic 9: Agent Management](Epic-9-Agent-Management) - Config-driven multi-agent system
 - [Epic 10: Engine Core](Epic-10-Engine-Core) - Workflow-driven architecture
 - [Epic 11-14: ELSA Hardening](Epic-11-14-ELSA) - Security, agentic tool loop, workflow decomposition, custom studio
+- [Epic 23: System Monitoring](Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
+- [Epic 24: Voice Conversation](Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -30,6 +32,8 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 - **Production-Ready Security** -- Content sanitization, URL validation, action gating, SSRF protection, LLM injection defense
 - **ELSA Workflow Engine** -- Visual, composable, pausable/resumable workflows with ELSA Studio
 - **Diagnostics Pipeline** -- Per-provider cost, token, latency, and error tracking
+- **System Monitoring** -- Comprehensive observability dashboard for all services, providers, workflows, and infrastructure
+- **Voice Interface** -- Realtime voice conversation with the orchestrator via browser
 - **Self-Maintenance** -- Tamma maintains its own codebase (MVP validation goal)
 
 ### Architecture Highlights
@@ -64,7 +68,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 13 | Workflow Decomposition | TDD/CI retry sub-workflows, consolidated finish sequences |
 | Epic 14 | Custom ELSA Studio | Custom Blazor WASM studio, Tamma branding, UI hints |
 | Epic 15 | Observability | OpenSearch log aggregation |
-| Epic 16 | Unified Auth & Admin | GitHub OAuth SSO, user management, admin panel, RBAC |
+| Epic 16 | Unified Auth & Admin | GitHub OAuth SSO, user management, admin panel, RBAC, ELSA Studio auto-login |
 
 ### In Progress / Planned
 
@@ -81,6 +85,8 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 20 | Billing & Payments | Planned (stories ready) |
 | Epic 21 | Marketing Site & User Dashboard | Partially implemented (marketing site exists) |
 | Epic 22 | CLI Mode Preservation | Planned (stories ready) |
+| Epic 23 | System Monitoring & Observability Dashboard | Planned (stories ready) |
+| Epic 24 | Realtime Voice Conversation | Partially implemented (research complete) |
 
 ## Getting Started
 
@@ -98,7 +104,7 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (22 epics, 200+ stories)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (24 epics, 220+ stories)
 
 ---
 

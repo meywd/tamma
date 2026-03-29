@@ -1,6 +1,6 @@
 # User Stories Index
 
-This page provides an index of all user stories across all 22 epics. Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 24 epics. Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -319,6 +319,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 16-3 | Admin Dashboard | Done |
 | 16-4 | Unified Navigation | Done |
 | 16-5 | Role-Based Access Control | Done |
+| 16-6 | ELSA Studio Auto-Login | Done |
 
 [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-16)
 
@@ -410,6 +411,45 @@ Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashb
 
 ---
 
+## Epic 23: System Monitoring & Observability Dashboard (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 23-1 | System Health Dashboard (Overview) | Planned |
+| 23-2 | Agent Monitor (Realtime) | Planned |
+| 23-3 | Event Store Explorer | Planned |
+| 23-4 | Configuration Audit | Planned |
+| 23-5 | Workflow Monitor | Planned |
+| 23-6 | Provider Diagnostics (Deep) | Planned |
+| 23-7 | Log Explorer (OpenSearch) | Planned |
+| 23-8 | Infrastructure Monitor | Planned |
+| 23-9 | Knowledge Base Monitor | Planned |
+| 23-10 | Security & Access Audit | Planned |
+| 23-11 | Monitoring API Foundation | Planned |
+| 23-12 | Dashboard Navigation & Layout | Planned |
+
+[Detailed Breakdown](Epic-23-System-Monitoring) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-23)
+
+---
+
+## Epic 24: Realtime Voice Conversation (Partially Implemented)
+
+Voice as a first-class input/output mode for the Tamma orchestrator. Research complete; implementation planned.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 24-0 | Voice API Research | Done |
+| 24-1 | WebSocket Foundation | Planned |
+| 24-2 | Speech-to-Text Integration | Planned |
+| 24-3 | Text-to-Speech Integration | Planned |
+| 24-4 | Intent Classification + Engine Integration | Planned |
+| 24-5 | Dashboard Voice UI | Planned |
+| 24-6 | Hardening + Production Readiness | Planned |
+
+[Detailed Breakdown](Epic-24-Voice-Conversation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-24)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -425,10 +465,10 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~200 |
+| Total stories across all epics | ~220 |
 | Epics completed | 12 |
-| Epics partially implemented | 2 |
-| Epics planned (stories ready) | 8 |
+| Epics partially implemented | 3 |
+| Epics planned (stories ready) | 9 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
 | ELSA code-first workflows | 20+ |
