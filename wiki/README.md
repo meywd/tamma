@@ -14,9 +14,9 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 - **Epic-9-Agent-Management.md** - Epic 9: Config-driven multi-agent system (11 stories)
 - **Epic-10-Engine-Core.md** - Epic 10: Engine Core -- Workflow-Driven Architecture (8 stories)
 - **Epic-11-14-ELSA.md** - Epics 11-14: Security Hardening, Agentic Tool Loop, Workflow Decomposition, Custom Studio (15 stories)
-- **Epic-23-System-Monitoring.md** - Epic 23: System Monitoring & Observability Dashboard (12 stories)
-- **Epic-24-Voice-Conversation.md** - Epic 24: Realtime Voice Conversation (7 stories)
-- **Stories.md** - Index of all user stories across all 24 epics (~220 stories)
+- **Epic-23-System-Monitoring.md** - Epic 23: System Monitoring & Observability Dashboard (12 stories, 26 task plans)
+- **Epic-24-Voice-Conversation.md** - Epic 24: Realtime Voice Conversation (7 stories, 24 task plans)
+- **Stories.md** - Index of all user stories across all 24 epics (~220 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 
 ## How to Update the GitHub Wiki

@@ -1,7 +1,8 @@
 # Epic 24: Realtime Voice Conversation with Orchestrator
 
-**Status:** Partially Implemented (research complete)
+**Status:** Partially Implemented (research complete, 24 task plans ready)
 **Stories:** 7 (24-0 through 24-6)
+**Task Plans:** 24 detailed implementation breakdowns
 **Packages:** `@tamma/api`, `@tamma/dashboard`
 
 ## Overview
@@ -21,15 +22,19 @@ Voice as a first-class input/output mode for the Tamma orchestrator. Users talk 
 
 ## Stories
 
-| # | Story | Status | Description |
-|---|-------|--------|-------------|
-| 24-0 | Voice API Research | Done | Research of 7 realtime audio/voice APIs for building a voice interface |
-| 24-1 | WebSocket Foundation | Planned | WebSocket endpoint at `/api/v1/voice` with JWT auth, session lifecycle, JSON message routing |
-| 24-2 | Speech-to-Text Integration | Planned | Deepgram streaming STT with OpenAI Whisper fallback; realtime transcription |
-| 24-3 | Text-to-Speech Integration | Planned | ElevenLabs streaming TTS with OpenAI TTS fallback; spoken responses |
-| 24-4 | Intent Classification + Engine Integration | Planned | Understand spoken commands and execute orchestrator actions via voice |
-| 24-5 | Dashboard Voice UI | Planned | Voice mode toggle in dashboard with visual feedback for text/voice switching |
-| 24-6 | Hardening + Production Readiness | Planned | Reliability, cost tracking, and recoverability for production voice sessions |
+All 6 implementation stories now have detailed task plan breakdowns.
+
+| # | Story | Task Plans | Status | Description |
+|---|-------|------------|--------|-------------|
+| 24-0 | Voice API Research | -- | Done | Research of 7 realtime audio/voice APIs for building a voice interface |
+| 24-1 | WebSocket Foundation | 5 | Planned | WebSocket endpoint at `/api/v1/voice` with JWT auth, session lifecycle, JSON message routing |
+| 24-2 | Speech-to-Text Integration | 4 | Planned | Deepgram streaming STT with OpenAI Whisper fallback; realtime transcription |
+| 24-3 | Text-to-Speech Integration | 4 | Planned | ElevenLabs streaming TTS with OpenAI TTS fallback; spoken responses |
+| 24-4 | Intent Classification + Engine Integration | 3 | Planned | Understand spoken commands and execute orchestrator actions via voice |
+| 24-5 | Dashboard Voice UI | 4 | Planned | Voice mode toggle in dashboard with visual feedback for text/voice switching |
+| 24-6 | Hardening + Production Readiness | 4 | Planned | Reliability, cost tracking, and recoverability for production voice sessions |
+
+**Total: 24 task plans across 6 implementation stories**
 
 [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-24)
 

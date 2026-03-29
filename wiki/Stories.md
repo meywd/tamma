@@ -314,7 +314,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 16-1 | OAuth2 Proxy Unified Auth | Done |
+| 16-1 | GitHub OAuth Unified Auth (oauth2-proxy removed) | Done |
 | 16-2 | User Management API | Done |
 | 16-3 | Admin Dashboard | Done |
 | 16-4 | Unified Navigation | Done |
@@ -411,40 +411,42 @@ Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashb
 
 ---
 
-## Epic 23: System Monitoring & Observability Dashboard (Planned)
+## Epic 23: System Monitoring & Observability Dashboard (26 Task Plans Ready)
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 23-1 | System Health Dashboard (Overview) | Planned |
-| 23-2 | Agent Monitor (Realtime) | Planned |
-| 23-3 | Event Store Explorer | Planned |
-| 23-4 | Configuration Audit | Planned |
-| 23-5 | Workflow Monitor | Planned |
-| 23-6 | Provider Diagnostics (Deep) | Planned |
-| 23-7 | Log Explorer (OpenSearch) | Planned |
-| 23-8 | Infrastructure Monitor | Planned |
-| 23-9 | Knowledge Base Monitor | Planned |
-| 23-10 | Security & Access Audit | Planned |
-| 23-11 | Monitoring API Foundation | Planned |
-| 23-12 | Dashboard Navigation & Layout | Planned |
+All 12 stories now have detailed implementation-ready task plan breakdowns.
+
+| Story | Title | Task Plans | Status |
+|-------|-------|------------|--------|
+| 23-1 | System Health Dashboard (Overview) | 2 | Planned |
+| 23-2 | Agent Monitor (Realtime) | 2 | Planned |
+| 23-3 | Event Store Explorer | 2 | Planned |
+| 23-4 | Configuration Audit | 2 | Planned |
+| 23-5 | Workflow Monitor | 2 | Planned |
+| 23-6 | Provider Diagnostics (Deep) | 2 | Planned |
+| 23-7 | Log Explorer (OpenSearch) | 2 | Planned |
+| 23-8 | Infrastructure Monitor | 2 | Planned |
+| 23-9 | Knowledge Base Monitor | 2 | Planned |
+| 23-10 | Security & Access Audit | 2 | Planned |
+| 23-11 | Monitoring API Foundation | 3 | Planned |
+| 23-12 | Dashboard Navigation & Layout | 3 | Planned |
 
 [Detailed Breakdown](Epic-23-System-Monitoring) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-23)
 
 ---
 
-## Epic 24: Realtime Voice Conversation (Partially Implemented)
+## Epic 24: Realtime Voice Conversation (24 Task Plans Ready)
 
-Voice as a first-class input/output mode for the Tamma orchestrator. Research complete; implementation planned.
+Voice as a first-class input/output mode for the Tamma orchestrator. Research complete; all implementation stories have detailed task plan breakdowns.
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 24-0 | Voice API Research | Done |
-| 24-1 | WebSocket Foundation | Planned |
-| 24-2 | Speech-to-Text Integration | Planned |
-| 24-3 | Text-to-Speech Integration | Planned |
-| 24-4 | Intent Classification + Engine Integration | Planned |
-| 24-5 | Dashboard Voice UI | Planned |
-| 24-6 | Hardening + Production Readiness | Planned |
+| Story | Title | Task Plans | Status |
+|-------|-------|------------|--------|
+| 24-0 | Voice API Research | -- | Done |
+| 24-1 | WebSocket Foundation | 5 | Planned |
+| 24-2 | Speech-to-Text Integration | 4 | Planned |
+| 24-3 | Text-to-Speech Integration | 4 | Planned |
+| 24-4 | Intent Classification + Engine Integration | 3 | Planned |
+| 24-5 | Dashboard Voice UI | 4 | Planned |
+| 24-6 | Hardening + Production Readiness | 4 | Planned |
 
 [Detailed Breakdown](Epic-24-Voice-Conversation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-24)
 
@@ -469,6 +471,9 @@ Stories progress through the following stages:
 | Epics completed | 12 |
 | Epics partially implemented | 3 |
 | Epics planned (stories ready) | 9 |
+| Detailed task plans (Epic 23) | 26 |
+| Detailed task plans (Epic 24) | 24 |
+| GitHub issues closed | 65 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
 | ELSA code-first workflows | 20+ |

@@ -52,6 +52,18 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
+**GitHub Issues:** 65 closed as completed
+
+### Recent Changes
+
+- **Epic 23** now has **26 detailed task plans** across 12 stories (implementation-ready breakdowns)
+- **Epic 24** now has **24 detailed task plans** across 6 stories (implementation-ready breakdowns)
+- **Story 16-6** (ELSA Studio Auto-Login) implemented -- bypass internal ELSA Identity login page
+- **OpenSearch log shipping** fixed (3 bugs: ESM `require` in Node.js, wrong Serilog sink version, Fastify logger instance mismatch)
+- **ELSA Studio Blazor WASM** static assets now skip auth (rate limit fix for `.dll`, `.wasm` requests)
+- **RabbitMQ health check** now uses basic `Authorization` header instead of URL-embedded credentials
+- **OAuth2-proxy fully removed** -- consolidated auth on app-level GitHub OAuth
+- **New logo/favicon** deployed across all sites (dashboard, studio, marketing)
 
 ### Completed Epics
 
@@ -67,8 +79,8 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 12 | Agentic Tool Loop | Multi-turn tool execution, context compaction, streaming |
 | Epic 13 | Workflow Decomposition | TDD/CI retry sub-workflows, consolidated finish sequences |
 | Epic 14 | Custom ELSA Studio | Custom Blazor WASM studio, Tamma branding, UI hints |
-| Epic 15 | Observability | OpenSearch log aggregation |
-| Epic 16 | Unified Auth & Admin | GitHub OAuth SSO, user management, admin panel, RBAC, ELSA Studio auto-login |
+| Epic 15 | Observability | OpenSearch log aggregation (3 bug fixes for ESM/Serilog/Fastify) |
+| Epic 16 | Unified Auth & Admin | GitHub OAuth SSO (oauth2-proxy removed), user management, admin panel, RBAC, ELSA Studio auto-login |
 
 ### In Progress / Planned
 
@@ -85,8 +97,8 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 20 | Billing & Payments | Planned (stories ready) |
 | Epic 21 | Marketing Site & User Dashboard | Partially implemented (marketing site exists) |
 | Epic 22 | CLI Mode Preservation | Planned (stories ready) |
-| Epic 23 | System Monitoring & Observability Dashboard | Planned (stories ready) |
-| Epic 24 | Realtime Voice Conversation | Partially implemented (research complete) |
+| Epic 23 | System Monitoring & Observability Dashboard | Planned (26 task plans ready) |
+| Epic 24 | Realtime Voice Conversation | Partially implemented (24 task plans ready) |
 
 ## Getting Started
 
@@ -104,7 +116,7 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (24 epics, 220+ stories)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (24 epics, 220+ stories, 50+ task plans)
 
 ---
 

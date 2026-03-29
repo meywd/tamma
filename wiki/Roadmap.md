@@ -21,16 +21,16 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 | **Epic 12** | Agentic Tool Loop | 4 | Completed |
 | **Epic 13** | Workflow Decomposition | 3 | Completed |
 | **Epic 14** | Custom ELSA Studio | 3 | Completed |
-| **Epic 15** | Observability & Log Aggregation | 1 | Completed |
-| **Epic 16** | Unified Auth, User Management & Admin | 6 | Completed |
+| **Epic 15** | Observability & Log Aggregation | 1 | Completed (3 bug fixes shipped) |
+| **Epic 16** | Unified Auth, User Management & Admin | 6 | Completed (oauth2-proxy removed, consolidated auth) |
 | **Epic 17** | Multi-Tenancy Foundation | 5 | Planned |
 | **Epic 18** | End-User Auth & Registration | 5 | Planned |
 | **Epic 19** | GitHub App Agent Dispatch | 5 | Planned |
 | **Epic 20** | Billing & Payments | 5 | Planned |
 | **Epic 21** | Marketing Site & User Dashboard | 5 | Partially Implemented |
 | **Epic 22** | CLI Mode Preservation | 5 | Planned |
-| **Epic 23** | System Monitoring & Observability Dashboard | 12 | Planned |
-| **Epic 24** | Realtime Voice Conversation | 7 | Partially Implemented |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | Planned (26 task plans ready) |
+| **Epic 24** | Realtime Voice Conversation | 7 | Partially Implemented (24 task plans ready) |
 
 ---
 
@@ -215,6 +215,11 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 - Pre-built dashboards for errors, workflow timelines, LLM call latency
 - ISM policies for 30-day retention
 
+**Post-completion fixes:**
+- Fixed ESM `require` error in Node.js OpenSearch client initialization
+- Bumped `Serilog.Sinks.File` to 6.0.0 for OpenSearch sink compatibility in .NET services
+- Fixed Fastify logger instance mismatch (`loggerInstance` instead of `logger` option) for Pino compatibility
+
 **Stories:** 15-1 (1 story)
 
 ---
@@ -230,6 +235,13 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 - Cross-service navigation header
 - RBAC enforcement (member, admin, owner) at API and nginx levels
 - ELSA Studio auto-login (bypass internal ELSA Identity login page)
+
+**Post-completion changes:**
+- OAuth2-proxy fully removed; auth consolidated on app-level GitHub OAuth
+- ELSA Studio Blazor WASM static assets (`.dll`, `.wasm`) now skip auth to prevent rate limiting
+- RabbitMQ health check updated to use basic `Authorization` header instead of URL-embedded credentials
+- Role-check endpoint exempted from rate limiting
+- New logo/favicon deployed across all sites
 
 **Stories:** 16-1 through 16-6 (6 stories)
 
@@ -378,18 +390,21 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Goal:** Production-grade monitoring, diagnostics, and observability for every service, provider, workflow, and infrastructure component.
 
-**Stories:** 23-1 through 23-12 (12 stories)
-- System health dashboard with service dependency graph
-- Real-time agent monitor with provider chain status
-- Event store explorer with search, filter, timeline, replay
-- Configuration audit with validation and change history
-- Workflow monitor with Gantt timeline and queue depth
-- Provider diagnostics with latency histograms and token analytics
-- Log explorer connected to OpenSearch with live tailing
-- Infrastructure monitor for PostgreSQL, RabbitMQ, ChromaDB, OpenSearch, Docker
-- Knowledge base monitor for vector DB, RAG health, MCP connections
-- Security and access audit with suspicious activity detection
-- Monitoring API foundation and dashboard navigation updates
+**Stories:** 23-1 through 23-12 (12 stories, **26 detailed task plans**)
+
+Each of the 12 stories now has implementation-ready task plan breakdowns:
+- 23-1 System Health Dashboard (2 task plans)
+- 23-2 Agent Monitor (2 task plans)
+- 23-3 Event Store Explorer (2 task plans)
+- 23-4 Configuration Audit (2 task plans)
+- 23-5 Workflow Monitor (2 task plans)
+- 23-6 Provider Diagnostics (2 task plans)
+- 23-7 Log Explorer (2 task plans)
+- 23-8 Infrastructure Monitor (2 task plans)
+- 23-9 Knowledge Base Monitor (2 task plans)
+- 23-10 Security & Access Audit (2 task plans)
+- 23-11 Monitoring API Foundation (3 task plans)
+- 23-12 Dashboard Navigation & Layout (3 task plans)
 
 [Detailed Breakdown](Epic-23-System-Monitoring)
 
@@ -399,16 +414,17 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 
 **Goal:** Voice as a first-class input/output mode for the orchestrator -- users talk to Tamma through their browser.
 
-**Status:** Research complete (Story 24-0 done). Implementation planned.
+**Status:** Research complete (Story 24-0 done). Implementation planned with **24 detailed task plans**.
 
-**Stories:** 24-0 through 24-6 (7 stories)
-- Voice API research (done)
-- WebSocket foundation with JWT auth and session lifecycle
-- Speech-to-text integration (Deepgram primary, OpenAI Whisper fallback)
-- Text-to-speech integration (ElevenLabs primary, OpenAI TTS fallback)
-- Intent classification and engine integration
-- Dashboard voice UI with mode toggle
-- Hardening and production readiness
+**Stories:** 24-0 through 24-6 (7 stories, **24 detailed task plans**)
+
+Each implementation story now has task plan breakdowns:
+- 24-1 WebSocket Foundation (5 task plans)
+- 24-2 Speech-to-Text Integration (4 task plans)
+- 24-3 Text-to-Speech Integration (4 task plans)
+- 24-4 Intent Classification + Engine Integration (3 task plans)
+- 24-5 Dashboard Voice UI (4 task plans)
+- 24-6 Hardening + Production Readiness (4 task plans)
 
 [Detailed Breakdown](Epic-24-Voice-Conversation)
 
@@ -450,8 +466,8 @@ Phase 5 (Planned - SaaS):
   Epic 22  (CLI Preservation)        [Planned]
 
 Phase 6 (Planned - Advanced):
-  Epic 23  (System Monitoring)       [Planned]
-  Epic 24  (Voice Conversation)      [Partially Implemented]
+  Epic 23  (System Monitoring)       [26 task plans ready]
+  Epic 24  (Voice Conversation)      [24 task plans ready]
 ```
 
 ---

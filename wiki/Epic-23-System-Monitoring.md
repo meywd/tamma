@@ -1,7 +1,8 @@
 # Epic 23: System Monitoring & Observability Dashboard
 
-**Status:** Planned
+**Status:** Planned (implementation-ready)
 **Stories:** 12 (23-1 through 23-12)
+**Task Plans:** 26 detailed implementation breakdowns
 **Packages:** `@tamma/api`, `@tamma/dashboard`
 
 ## Overview
@@ -21,20 +22,24 @@ Production-grade monitoring, diagnostics, and observability for every service, p
 
 ## Stories
 
-| # | Story | Status | Description |
-|---|-------|--------|-------------|
-| 23-1 | System Health Dashboard (Overview) | Planned | At-a-glance view of every service: health status, uptime, resource usage, response times, error rates, request rates, service dependency graph |
-| 23-2 | Agent Monitor (Realtime) | Planned | Real-time monitoring of agent roles, provider chains, operational status, cost tracking, rate limits, API key validation |
-| 23-3 | Event Store Explorer | Planned | Search, filter, visualize, and export all DCB engine events; primary debugging tool for workflow execution |
-| 23-4 | Configuration Audit | Planned | Config sources, setting validation, missing value highlights, diffs against defaults, change history |
-| 23-5 | Workflow Monitor | Planned | Active/historical workflow instances, current phase, duration, cost, Gantt timeline, queue depth |
-| 23-6 | Provider Diagnostics (Deep) | Planned | Per-provider latency histograms, error classification, token usage analytics, model availability, cost comparison, API call logs |
-| 23-7 | Log Explorer (OpenSearch) | Planned | Live log tailing, full-text search (Lucene syntax), service/level filtering, error drill-down, saved searches, alert rules |
-| 23-8 | Infrastructure Monitor | Planned | PostgreSQL, RabbitMQ, ChromaDB, OpenSearch, Docker container metrics |
-| 23-9 | Knowledge Base Monitor | Planned | Vector DB health, embedding coverage, index freshness, RAG pipeline health, MCP connections |
-| 23-10 | Security & Access Audit | Planned | Login attempts, active sessions, API key usage, role distribution, rate limit violations, suspicious activity detection |
-| 23-11 | Monitoring API Foundation | Planned | Route registration, SSE helpers, data aggregation services, monitoring middleware (foundation for all screens) |
-| 23-12 | Dashboard Navigation & Layout | Planned | Sidebar "Monitoring" section, shared layout components, tab navigation, time range selector, auto-refresh toggle |
+All 12 stories now have detailed task plan breakdowns with implementation-ready specifications.
+
+| # | Story | Task Plans | Status | Description |
+|---|-------|------------|--------|-------------|
+| 23-1 | System Health Dashboard (Overview) | 2 | Planned | At-a-glance view of every service: health status, uptime, resource usage, response times, error rates, request rates, service dependency graph |
+| 23-2 | Agent Monitor (Realtime) | 2 | Planned | Real-time monitoring of agent roles, provider chains, operational status, cost tracking, rate limits, API key validation |
+| 23-3 | Event Store Explorer | 2 | Planned | Search, filter, visualize, and export all DCB engine events; primary debugging tool for workflow execution |
+| 23-4 | Configuration Audit | 2 | Planned | Config sources, setting validation, missing value highlights, diffs against defaults, change history |
+| 23-5 | Workflow Monitor | 2 | Planned | Active/historical workflow instances, current phase, duration, cost, Gantt timeline, queue depth |
+| 23-6 | Provider Diagnostics (Deep) | 2 | Planned | Per-provider latency histograms, error classification, token usage analytics, model availability, cost comparison, API call logs |
+| 23-7 | Log Explorer (OpenSearch) | 2 | Planned | Live log tailing, full-text search (Lucene syntax), service/level filtering, error drill-down, saved searches, alert rules |
+| 23-8 | Infrastructure Monitor | 2 | Planned | PostgreSQL, RabbitMQ, ChromaDB, OpenSearch, Docker container metrics |
+| 23-9 | Knowledge Base Monitor | 2 | Planned | Vector DB health, embedding coverage, index freshness, RAG pipeline health, MCP connections |
+| 23-10 | Security & Access Audit | 2 | Planned | Login attempts, active sessions, API key usage, role distribution, rate limit violations, suspicious activity detection |
+| 23-11 | Monitoring API Foundation | 3 | Planned | Route registration, SSE helpers, data aggregation services, monitoring middleware (foundation for all screens) |
+| 23-12 | Dashboard Navigation & Layout | 3 | Planned | Sidebar "Monitoring" section, shared layout components, tab navigation, time range selector, auto-refresh toggle |
+
+**Total: 26 task plans across 12 stories**
 
 [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-23)
 
