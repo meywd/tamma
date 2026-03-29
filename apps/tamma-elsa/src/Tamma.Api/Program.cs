@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
-using Serilog.Sinks.Elasticsearch;
+using Serilog.Sinks.OpenSearch;
 using Tamma.Api.Services;
 using Tamma.Core.Interfaces;
 using Tamma.Data;
@@ -24,16 +24,16 @@ var logConfig = new LoggerConfiguration()
 
 if (opensearchEnabled)
 {
-    logConfig.WriteTo.Elasticsearch(new ElasticsearchSinkOptions(new Uri(opensearchUrl))
+    logConfig.WriteTo.OpenSearch(new OpenSearchSinkOptions(new Uri(opensearchUrl))
     {
         AutoRegisterTemplate = false, // We manage templates externally via setup.sh
         IndexFormat = $"{logIndexPrefix}-{{0:yyyy.MM.dd}}",
-        BatchAction = ElasticOpType.Create,
+        BatchAction = OpenOpType.Create,
         ModifyConnectionSettings = conn =>
             conn.ServerCertificateValidationCallback((_, _, _, _) => true),
         EmitEventFailure = EmitEventFailureHandling.WriteToSelfLog,
-        FailureCallback = (e, ex) => Console.Error.WriteLine(
-            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate} — {ex?.Message}"),
+        FailureCallback = e => Console.Error.WriteLine(
+            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate}"),
         BufferBaseFilename = "./logs/opensearch-buffer",
         BufferFileSizeLimitBytes = 50_000_000, // 50 MB buffer
         Period = TimeSpan.FromSeconds(2),

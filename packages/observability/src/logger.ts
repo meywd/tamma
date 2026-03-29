@@ -1,5 +1,9 @@
+import { createRequire } from 'node:module';
 import pino from 'pino';
 import type { ILogger } from '@tamma/shared';
+
+// createRequire enables loading CJS-only packages (pino-elasticsearch) from ESM
+const esmRequire = createRequire(import.meta.url);
 
 /**
  * Configuration for the OpenSearch transport.
@@ -70,19 +74,15 @@ function wrapPinoLogger(pinoLogger: pino.Logger): ILogger {
 }
 
 /**
- * Creates a logger that writes to stdout and (optionally) to OpenSearch.
+ * Build a pino.Logger that writes to stdout and (optionally) to OpenSearch.
  *
  * - In development (NODE_ENV !== 'production'), uses pino-pretty for stdout.
  * - In production, writes JSON to stdout + streams to OpenSearch via pino-elasticsearch.
  * - If OPENSEARCH_ENABLED=false, only stdout is used.
  * - If pino-elasticsearch is not installed or fails to connect, falls back to stdout-only
  *   with a warning on stderr. Application logs are never lost.
- *
- * @param name - Logger name (appears in `name` field in logs)
- * @param level - Minimum log level (default: LOG_LEVEL env var or 'info')
  */
-export function createLogger(name: string, level?: string): ILogger {
-  const resolvedLevel = level ?? process.env['LOG_LEVEL'] ?? 'info';
+function buildPinoLogger(name: string, resolvedLevel: string): pino.Logger {
   const osConfig = getOpenSearchConfig();
 
   const options: pino.LoggerOptions = {
@@ -96,14 +96,13 @@ export function createLogger(name: string, level?: string): ILogger {
     },
   };
 
-  let pinoLogger: pino.Logger;
-
   if (osConfig.enabled) {
     try {
-      // pino-elasticsearch is a peer dependency — dynamically require to avoid
-      // hard failure when running in environments without OpenSearch.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pinoElasticsearch = require('pino-elasticsearch');
+      // pino-elasticsearch is CJS-only — use createRequire to load it from ESM.
+      // Dynamic require avoids hard failure when running without OpenSearch.
+      const pinoElasticsearch = esmRequire('pino-elasticsearch') as (
+        opts: Record<string, unknown>,
+      ) => NodeJS.WritableStream & { on: (event: string, cb: (...args: unknown[]) => void) => void };
 
       const osStream = pinoElasticsearch({
         node: osConfig.node,
@@ -115,9 +114,10 @@ export function createLogger(name: string, level?: string): ILogger {
       });
 
       // Log OpenSearch transport errors to stderr (not to pino, to avoid loops)
-      osStream.on('error', (err: Error) => {
+      osStream.on('error', (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(
-          `[tamma-logger] OpenSearch transport error: ${err.message}\n`
+          `[tamma-logger] OpenSearch transport error: ${msg}\n`
         );
       });
 
@@ -132,22 +132,53 @@ export function createLogger(name: string, level?: string): ILogger {
         { stream: osStream },
       ]);
 
-      pinoLogger = pino(options, multistream);
-    } catch {
       process.stderr.write(
-        '[tamma-logger] pino-elasticsearch not available, falling back to stdout only\n'
+        `[tamma-logger] OpenSearch transport enabled → ${osConfig.node} (index: ${osConfig.index})\n`
+      );
+      return pino(options, multistream);
+    } catch (loadErr) {
+      const detail = loadErr instanceof Error ? loadErr.message : String(loadErr);
+      process.stderr.write(
+        `[tamma-logger] pino-elasticsearch not available (${detail}), falling back to stdout only\n`
       );
       if (process.env['NODE_ENV'] !== 'production') {
         options.transport = { target: 'pino-pretty', options: { colorize: true } };
       }
-      pinoLogger = pino(options);
+      return pino(options);
     }
-  } else if (process.env['NODE_ENV'] !== 'production') {
-    options.transport = { target: 'pino-pretty', options: { colorize: true } };
-    pinoLogger = pino(options);
-  } else {
-    pinoLogger = pino(options);
   }
 
-  return wrapPinoLogger(pinoLogger);
+  if (process.env['NODE_ENV'] !== 'production') {
+    options.transport = { target: 'pino-pretty', options: { colorize: true } };
+  }
+  return pino(options);
+}
+
+/**
+ * Creates a raw pino.Logger with OpenSearch transport (when enabled).
+ *
+ * Use this when you need the native pino instance — e.g. to pass as
+ * Fastify's `logger` option so that request/response logs also ship
+ * to OpenSearch.
+ *
+ * @param name - Logger name (appears in `name` field in logs)
+ * @param level - Minimum log level (default: LOG_LEVEL env var or 'info')
+ */
+export function createPinoLogger(name: string, level?: string): pino.Logger {
+  const resolvedLevel = level ?? process.env['LOG_LEVEL'] ?? 'info';
+  return buildPinoLogger(name, resolvedLevel);
+}
+
+/**
+ * Creates a logger that writes to stdout and (optionally) to OpenSearch.
+ *
+ * Returns an ILogger wrapper. For a raw pino.Logger (e.g. Fastify integration),
+ * use {@link createPinoLogger} instead.
+ *
+ * @param name - Logger name (appears in `name` field in logs)
+ * @param level - Minimum log level (default: LOG_LEVEL env var or 'info')
+ */
+export function createLogger(name: string, level?: string): ILogger {
+  const resolvedLevel = level ?? process.env['LOG_LEVEL'] ?? 'info';
+  return wrapPinoLogger(buildPinoLogger(name, resolvedLevel));
 }

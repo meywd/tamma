@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { Octokit } from '@octokit/rest';
 import { createAppAuth } from '@octokit/auth-app';
+import { createPinoLogger } from '@tamma/observability';
 import {
   createApp,
   InMemoryWorkflowStore,
@@ -92,9 +93,15 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   // Build app options
   const logLevel = options.logLevel ?? process.env['LOG_LEVEL'] ?? 'info';
   const dashUrl = process.env['DASHBOARD_URL'] ?? 'http://localhost:3001';
+
+  // Create pino logger with OpenSearch transport (when OPENSEARCH_ENABLED=true).
+  // Passing the raw pino instance to Fastify ensures that both application logs
+  // AND request/response logs are shipped to OpenSearch.
+  const pinoLogger = createPinoLogger('tamma-api', logLevel);
+
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
-    logger: { level: logLevel },
+    logger: pinoLogger,
     userManagement: {
       userStore,
       apiKeyStore,

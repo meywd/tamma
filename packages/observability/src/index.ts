@@ -1,2 +1,2 @@
-export { createLogger } from './logger.js';
+export { createLogger, createPinoLogger } from './logger.js';
 export { createSimpleLogger } from './simple-logger.js';
