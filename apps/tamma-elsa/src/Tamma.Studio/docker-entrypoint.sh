@@ -18,5 +18,17 @@ else
     echo "WARNING: ELSASERVER__URL not set. Studio will try to connect to http://localhost:13000/elsa/api"
 fi
 
+# ---------------------------------------------------------------------------
+# Inject ELSA admin password for auto-login
+#
+# ELSA Studio auto-login bypasses the login page by calling /elsa/api/identity/login
+# with admin credentials. The password is injected here at runtime.
+# ---------------------------------------------------------------------------
+if [ -n "$ELSA_ADMIN_PASSWORD" ]; then
+    echo "Injecting ELSA admin password for auto-login"
+    sed "s|\"Password\": \"password\"|\"Password\": \"${ELSA_ADMIN_PASSWORD}\"|g" "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp"
+    mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+fi
+
 echo "Starting nginx..."
 exec "$@"

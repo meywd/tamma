@@ -116,6 +116,8 @@ services:
     environment:
       # URL must be browser-accessible (Blazor WASM runs client-side)
       ELSASERVER__URL: https://elsa.tamma.dev/elsa/api
+      # Auto-login: injected into appsettings.json at startup
+      ELSA_ADMIN_PASSWORD: ${ELSA_ADMIN_PASSWORD:-password}
     depends_on:
       elsa-server:
         condition: service_healthy
