@@ -1,45 +1,36 @@
-**[[Home]]**
+[[Home]]
 
-**[[Roadmap]]**
-**[[Architecture]]**
-**[[Stories]]**
-**[[Contributing]]**
+[[Roadmap]]
 
----
+[[Architecture]]
 
-**[[Epics]]**
+[[Stories]]
 
-<details open><summary>Completed</summary>
+[[Contributing]]
 
-  - [[Epic 1: Foundation|Epics/Epic-1-Foundation]]
-  - [[Epic 1.5: Infrastructure|Epics/Epic-1.5-Infrastructure]]
-  - [[Epic 6: Context & Knowledge|Epics/Epic-6-Context-Knowledge]]
-  - [[Epic 7: Mentorship|Epics/Epic-7-Mentorship]]
-  - [[Epic 9: Agent Management|Epics/Epic-9-Agent-Management]]
-  - [[Epic 10: Engine Core|Epics/Epic-10-Engine-Core]]
-  - [[Epic 11: Security|Epics/Epic-11-Security]]
-  - [[Epic 12: Tool Loop|Epics/Epic-12-Tool-Loop]]
-  - [[Epic 13: Workflow Decomposition|Epics/Epic-13-Workflow-Decomposition]]
-  - [[Epic 14: ELSA Studio|Epics/Epic-14-ELSA-Studio]]
-  - [[Epic 15: Log Aggregation|Epics/Epic-15-Log-Aggregation]]
-  - [[Epic 16: Auth & Admin|Epics/Epic-16-Auth-Admin]]
-
-</details>
-
-<details><summary>Planned</summary>
-
-  - [[Epic 2: Autonomous Loop|Epics/Epic-2-Autonomous-Loop]]
-  - [[Epic 3: Quality Gates|Epics/Epic-3-Quality-Gates]]
-  - [[Epic 4: Event Sourcing|Epics/Epic-4-Event-Sourcing]]
-  - [[Epic 5: Observability|Epics/Epic-5-Observability]]
-  - [[Epic 8: Distribution|Epics/Epic-8-Distribution]]
-  - [[Epic 17: Multi-Tenancy|Epics/Epic-17-Multi-Tenancy]]
-  - [[Epic 18: User Auth|Epics/Epic-18-User-Auth]]
-  - [[Epic 19: Agent Dispatch|Epics/Epic-19-Agent-Dispatch]]
-  - [[Epic 20: Billing|Epics/Epic-20-Billing]]
-  - [[Epic 21: Marketing & Dashboard|Epics/Epic-21-Marketing-Dashboard]]
-  - [[Epic 22: CLI Standalone|Epics/Epic-22-CLI-Standalone]]
-  - [[Epic 23: System Monitoring|Epics/Epic-23-System-Monitoring]]
-  - [[Epic 24: Voice Conversation|Epics/Epic-24-Voice-Conversation]]
-
-</details>
+[[Epics]]
+  * [[1 Foundation|Epics/Epic-1-Foundation]]
+  * [[1.5 Infrastructure|Epics/Epic-1.5-Infrastructure]]
+  * [[2 Autonomous Loop|Epics/Epic-2-Autonomous-Loop]]
+  * [[3 Quality Gates|Epics/Epic-3-Quality-Gates]]
+  * [[4 Event Sourcing|Epics/Epic-4-Event-Sourcing]]
+  * [[5 Observability|Epics/Epic-5-Observability]]
+  * [[6 Context & Knowledge|Epics/Epic-6-Context-Knowledge]]
+  * [[7 Mentorship|Epics/Epic-7-Mentorship]]
+  * [[8 Distribution|Epics/Epic-8-Distribution]]
+  * [[9 Agent Management|Epics/Epic-9-Agent-Management]]
+  * [[10 Engine Core|Epics/Epic-10-Engine-Core]]
+  * [[11 Security|Epics/Epic-11-Security]]
+  * [[12 Tool Loop|Epics/Epic-12-Tool-Loop]]
+  * [[13 Workflow Decomposition|Epics/Epic-13-Workflow-Decomposition]]
+  * [[14 ELSA Studio|Epics/Epic-14-ELSA-Studio]]
+  * [[15 Log Aggregation|Epics/Epic-15-Log-Aggregation]]
+  * [[16 Auth & Admin|Epics/Epic-16-Auth-Admin]]
+  * [[17 Multi-Tenancy|Epics/Epic-17-Multi-Tenancy]]
+  * [[18 User Auth|Epics/Epic-18-User-Auth]]
+  * [[19 Agent Dispatch|Epics/Epic-19-Agent-Dispatch]]
+  * [[20 Billing|Epics/Epic-20-Billing]]
+  * [[21 Marketing & Dashboard|Epics/Epic-21-Marketing-Dashboard]]
+  * [[22 CLI Standalone|Epics/Epic-22-CLI-Standalone]]
+  * [[23 System Monitoring|Epics/Epic-23-System-Monitoring]]
+  * [[24 Voice Conversation|Epics/Epic-24-Voice-Conversation]]
