@@ -1,6 +1,6 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all 24 epics from foundation through SaaS platform.
+Comprehensive roadmap covering all 25 epics from foundation through SaaS platform.
 
 ## Epic Overview
 
@@ -31,6 +31,7 @@ Comprehensive roadmap covering all 24 epics from foundation through SaaS platfor
 | **Epic 22** | CLI Mode Preservation | 5 | Planned |
 | **Epic 23** | System Monitoring & Observability Dashboard | 12 | Planned (26 task plans ready) |
 | **Epic 24** | Realtime Voice Conversation | 7 | Partially Implemented (24 task plans ready) |
+| **Epic 25** | Documentation & Wiki Site | 1 | Planned (Astro Starlight on Cloudflare Workers) |
 
 ---
 
@@ -430,6 +431,26 @@ Each implementation story now has task plan breakdowns:
 
 ---
 
+### Epic 25: Documentation & Wiki Site
+
+**Goal:** Build and deploy a custom documentation/wiki site using Astro Starlight on Cloudflare Workers, accessible at wiki.tamma.dev and wiki.its-done.dev.
+
+**Status:** Planned. Wiki site scaffold created at `apps/wiki-site/` with Astro Starlight, content sync script, and Cloudflare Workers config. Deployment workflow pending.
+
+**Key Deliverables:**
+- Astro Starlight documentation site rendering ~475 markdown pages from `wiki/` and `docs/stories/`
+- Pagefind full-text search (client-side WASM, no backend)
+- Collapsible sidebar navigation grouped by epic
+- Dark/light mode with Tamma purple branding
+- Auto-deployment via GitHub Actions on content changes
+- Dual-domain: wiki.tamma.dev and wiki.its-done.dev
+
+**Stories:** 25-1 (1 story, 8 tasks)
+
+[Detailed Breakdown](Epics/Epic-25-Wiki-Site)
+
+---
+
 ## Timeline Visualization
 
 ```
@@ -468,6 +489,7 @@ Phase 5 (Planned - SaaS):
 Phase 6 (Planned - Advanced):
   Epic 23  (System Monitoring)       [26 task plans ready]
   Epic 24  (Voice Conversation)      [24 task plans ready]
+  Epic 25  (Wiki Site)               [Planned - Astro Starlight]
 ```
 
 ---

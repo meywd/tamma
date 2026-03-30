@@ -8,12 +8,12 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 
 - **Home.md** - Wiki homepage with quick links, project overview, and status
 - **Epics.md** - Index of all 24 epics with links
-- **Roadmap.md** - Project roadmap with all 24 epics and timeline
+- **Roadmap.md** - Project roadmap with all 25 epics and timeline
 - **Architecture.md** - System architecture (dual TypeScript + C#/ELSA stack)
-- **Stories.md** - Index of all user stories across all 24 epics (~220 stories, 50+ task plans)
+- **Stories.md** - Index of all user stories across all 25 epics (~221 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 
-### Epic Pages (All 24 Epics)
+### Epic Pages (All 25 Epics)
 
 Epic pages live in the `Epics/` subdirectory for better wiki sidebar navigation.
 
@@ -44,6 +44,7 @@ Epic pages live in the `Epics/` subdirectory for better wiki sidebar navigation.
 | 22 | [Epics/Epic-22-CLI-Standalone.md](Epics/Epic-22-CLI-Standalone) | 4 | Planned |
 | 23 | [Epics/Epic-23-System-Monitoring.md](Epics/Epic-23-System-Monitoring) | 12 | Planned |
 | 24 | [Epics/Epic-24-Voice-Conversation.md](Epics/Epic-24-Voice-Conversation) | 7 | Planned |
+| 25 | [Epics/Epic-25-Wiki-Site.md](Epics/Epic-25-Wiki-Site) | 1 | Planned |
 
 **Combined page**: [Epics/Epic-11-14-ELSA.md](Epics/Epic-11-14-ELSA) covers Epics 11-14 together (15 stories total)
 

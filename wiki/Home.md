@@ -4,9 +4,9 @@
 
 ## Quick Links
 
-- [Project Roadmap](Roadmap) - All 24 epics with timeline and status
+- [Project Roadmap](Roadmap) - All 25 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
-- [Epics](Epics) - All 24 epics organized by phase
+- [Epics](Epics) - All 25 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
 - [Epic 6: Context & Knowledge Management](Epics/Epic-6-Context-Knowledge) - Vector DB, RAG, MCP, cost monitoring, permissions, knowledge base
@@ -16,6 +16,7 @@
 - [Epic 11-14: ELSA Hardening](Epics/Epic-11-14-ELSA) - Security, agentic tool loop, workflow decomposition, custom studio
 - [Epic 23: System Monitoring](Epics/Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
 - [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
+- [Epic 25: Wiki Site](Epics/Epic-25-Wiki-Site) - Custom documentation site on Cloudflare Workers
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -53,18 +54,19 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
-**GitHub Issues:** 65 closed as completed
+**GitHub Issues:** 101 closed as completed
 
 ### Recent Changes
 
-- **Epic 23** now has **26 detailed task plans** across 12 stories (implementation-ready breakdowns)
-- **Epic 24** now has **24 detailed task plans** across 6 stories (implementation-ready breakdowns)
+- **Epic 25** added -- Custom Wiki Site on Cloudflare Workers (Astro Starlight, wiki.tamma.dev / wiki.its-done.dev)
+- **Video production plans** created for two explainer videos (ELI5 ~75s, Deep Dive ~4 min)
+- **All scene images generated** at 4K Pro (Gemini 3 Pro, 5504x3072 16:9) -- 79 images across 28 scenes
+- **ElevenLabs TTS narration** generated for ELI5 video
+- **Production plans finalized** with Runway 4.5 (via Freepik API) + ElevenLabs TTS pipeline
+- **CodeQL security alerts fixed** -- 9 files patched (log forging, incomplete URL sanitization, SQL wildcard escaping, API key validation)
+- **Leaked Gemini API key** removed and added to .gitignore
 - **Story 16-6** (ELSA Studio Auto-Login) implemented -- bypass internal ELSA Identity login page
 - **OpenSearch log shipping** fixed (3 bugs: ESM `require` in Node.js, wrong Serilog sink version, Fastify logger instance mismatch)
-- **ELSA Studio Blazor WASM** static assets now skip auth (rate limit fix for `.dll`, `.wasm` requests)
-- **RabbitMQ health check** now uses basic `Authorization` header instead of URL-embedded credentials
-- **OAuth2-proxy fully removed** -- consolidated auth on app-level GitHub OAuth
-- **New logo/favicon** deployed across all sites (dashboard, studio, marketing)
 
 ### Completed Epics
 
@@ -100,6 +102,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 22 | CLI Mode Preservation | Planned (stories ready) |
 | Epic 23 | System Monitoring & Observability Dashboard | Planned (26 task plans ready) |
 | Epic 24 | Realtime Voice Conversation | Partially implemented (24 task plans ready) |
+| Epic 25 | Documentation & Wiki Site | Planned (Astro Starlight on Cloudflare Workers) |
 
 ## Getting Started
 
@@ -117,8 +120,8 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (24 epics, 220+ stories, 50+ task plans)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (25 epics, 220+ stories, 50+ task plans)
 
 ---
 
-_Last updated: 2026-03-29 | Maintained by: meywd_
+_Last updated: 2026-03-30 | Maintained by: meywd_

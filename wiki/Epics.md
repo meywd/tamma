@@ -1,6 +1,6 @@
 # Epics Index
 
-All 24 epics for the Tamma project, organized by implementation phase.
+All 25 epics for the Tamma project, organized by implementation phase.
 
 ## Completed Epics
 
@@ -38,6 +38,7 @@ All 24 epics for the Tamma project, organized by implementation phase.
 | 22 | CLI Mode Preservation | 4 | [Epic-22-CLI-Standalone](Epics/Epic-22-CLI-Standalone) |
 | 23 | System Monitoring & Observability Dashboard | 12 | [Epic-23-System-Monitoring](Epics/Epic-23-System-Monitoring) |
 | 24 | Realtime Voice Conversation | 7 | [Epic-24-Voice-Conversation](Epics/Epic-24-Voice-Conversation) |
+| 25 | Documentation & Wiki Site | 1 | [Epic-25-Wiki-Site](Epics/Epic-25-Wiki-Site) |
 
 ## Related Pages
 

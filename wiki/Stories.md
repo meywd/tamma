@@ -1,6 +1,6 @@
 # User Stories Index
 
-This page provides an index of all user stories across all 24 epics. Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 25 epics. Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -453,6 +453,18 @@ Voice as a first-class input/output mode for the Tamma orchestrator. Research co
 
 ---
 
+## Epic 25: Documentation & Wiki Site (Planned)
+
+Custom documentation site on Cloudflare Workers using Astro Starlight. Renders ~475 pages from `wiki/` and `docs/stories/` with full-text search, collapsible sidebar, and dark/light mode.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 25-1 | Custom Wiki Site (Astro Starlight on Cloudflare Workers) | Planned |
+
+[Detailed Breakdown](Epics/Epic-25-Wiki-Site) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-25)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -468,16 +480,18 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~220 |
+| Total stories across all epics | ~221 |
 | Epics completed | 12 |
 | Epics partially implemented | 3 |
-| Epics planned (stories ready) | 9 |
+| Epics planned (stories ready) | 10 |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
-| GitHub issues closed | 65 |
+| GitHub issues closed | 101 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
 | ELSA code-first workflows | 20+ |
+| Video production plans | 2 (ELI5 + Deep Dive) |
+| Generated scene images (4K) | 79 |
 
 ---
 
