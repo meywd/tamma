@@ -25,15 +25,45 @@ apt install ffmpeg jq curl bc   # ffmpeg 6+, utilities for API scripting
 # Working directories
 mkdir -p docs/video/output/clips
 mkdir -p docs/video/output/audio
+mkdir -p docs/video/output/sfx
 mkdir -p docs/video/output/assembly
 
 # Environment variables
-export GEMINI_API_KEY="your-gemini-api-key"          # Veo 3.1 via Gemini API
-export ELEVENLABS_API_KEY="your-elevenlabs-api-key"  # Narration TTS
-export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"   # Male narrator voice
+export FREEPIK_API_KEY="your-freepik-api-key"              # Runway Gen4 Turbo via Freepik
+export ELEVENLABS_API_KEY="sk_09c1572e21af3e5b20fd3aee0c1628e8c23ce7d707e0da1d"  # Narration TTS + SFX
+export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"         # George - Warm, Captivating Storyteller
 ```
 
-**Output specs**: 1920x1080, 24fps, H.264, AAC audio, ~80 seconds total
+### API Reference
+
+**Video generation** -- Runway Gen4 Turbo via Freepik:
+- Generate: `POST https://api.freepik.com/v1/ai/image-to-video/runway-4-5`
+- Poll status: `GET https://api.freepik.com/v1/ai/image-to-video/runway-4-5/{task-id}`
+- Auth header: `x-freepik-api-key`
+- Price: ~$0.12/second of generated video
+- Output: video only (no audio track)
+- Durations: 5s or 10s
+- Aspect ratios: `1280:720`, `720:1280`, `1104:832`, `832:1104`, `960:960`, `1584:672`
+
+**Narration** -- ElevenLabs Text-to-Speech:
+- Endpoint: `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`
+- Auth header: `xi-api-key`
+- Voice: George (`JBFqnCBsd6RMkjVDRZzb`) -- warm, captivating storyteller, British, middle-aged male
+- Model: `eleven_multilingual_v2`
+- Returns: audio bytes (MP3) directly in response body
+
+**Sound effects** -- ElevenLabs Sound Generation:
+- Endpoint: `POST https://api.elevenlabs.io/v1/sound-generation`
+- Auth header: `xi-api-key`
+- Returns: audio bytes (MP3) directly in response body
+
+**Post-production** -- ffmpeg:
+- Stitch clips with xfade transitions
+- Mix narration audio timed to scene cuts
+- Layer sound effects at transition points
+- Final render to MP4
+
+**Output specs**: 1280x720, 24fps, H.264, AAC audio, ~80 seconds total
 
 ---
 
@@ -51,13 +81,29 @@ export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"   # Male narrator voice
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/01-the-pain.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/01B-the-pain.png`
-- **Duration**: 8 seconds
-- **Motion prompt**: "Cinematic slow dolly-out from the developer's hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays. Ambient office hum with faint digital notification pings."
-- **Camera**: Seconds 0-3: tight medium shot centered on developer, slow dolly backward. Seconds 3-6: continuing pullback, more screens enter frame from edges, developer figure shrinks. Seconds 6-8: wide shot, screens fill the frame, composition transitions toward the end-frame layout of five floating panels.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/01-the-pain.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic slow dolly-out from the developer's hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays."
+- **duration**: 10 (will trim to 8s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene01-the-pain.mp4`
+
+```bash
+# Generate video
+curl -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
+  -H "x-freepik-api-key: ${FREEPIK_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "'"$(base64 -w0 docs/video/scenes/eli5/01-the-pain.png)"'",
+    "prompt": "Cinematic slow dolly-out from the developer hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays.",
+    "duration": 10,
+    "ratio": "1280:720"
+  }' | jq -r '.data.task_id'
+# Save task_id, then poll:
+# curl -s "https://api.freepik.com/v1/ai/image-to-video/runway-4-5/${TASK_ID}" \
+#   -H "x-freepik-api-key: ${FREEPIK_API_KEY}" | jq '.data'
+# When status is COMPLETED, download from .data.generated[0]
+```
 
 ### NARRATION
 
@@ -91,7 +137,12 @@ export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"   # Male narrator voice
 
 ### SOUND
 
-Veo audio generation notes: Quiet ambient office hum. Faint mechanical keyboard tapping that slows and stops. Soft digital notification "ding" sounds, slightly distorted, layered -- creating an oppressive texture. A subtle low-frequency drone builds underneath, conveying mounting stress. No music in this scene -- the silence between sounds should feel heavy.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- Quiet ambient office hum (background layer)
+- Faint mechanical keyboard tapping that slows and stops
+- Soft digital notification "ding" sounds, slightly distorted, layered -- creating an oppressive texture
+- A subtle low-frequency drone building underneath, conveying mounting stress
+- No music in this scene -- the silence between sounds should feel heavy
 
 ---
 
@@ -108,12 +159,11 @@ Veo audio generation notes: Quiet ambient office hum. Faint mechanical keyboard 
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with single start frame)
-- **first_frame**: `docs/video/scenes/eli5/02-the-question.png`
-- **last_frame**: single frame
-- **Duration**: 5 seconds
-- **Motion prompt**: "Cinematic slow push-in toward the glowing purple question mark at center. The purple glow intensifies and pulses gently, radiating outward. The four surrounding development icons (Git branch, test tube, checkmark, merge arrow) drift very slightly inward toward the question mark as if drawn to it. Circuit-board traces in the background shimmer faintly. The overall light level increases subtly, as if dawn is breaking on a new idea. Soft ethereal ambient tone, a single rising note."
-- **Camera**: Seconds 0-2: slow steady push-in, question mark grows larger in frame. Seconds 2-4: continuing push-in, purple glow blooms brighter, icons drift inward 5-10%. Seconds 4-5: hold on tighter framing, glow reaches peak intensity, preparing for transition.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/02-the-question.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic slow push-in toward the glowing purple question mark at center. The purple glow intensifies and pulses gently, radiating outward. The four surrounding development icons (Git branch, test tube, checkmark, merge arrow) drift very slightly inward toward the question mark as if drawn to it. Circuit-board traces in the background shimmer faintly. The overall light level increases subtly, as if dawn is breaking on a new idea."
+- **duration**: 5
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene02-the-question.mp4`
 
 ### NARRATION
@@ -147,7 +197,10 @@ Veo audio generation notes: Quiet ambient office hum. Faint mechanical keyboard 
 
 ### SOUND
 
-Veo audio generation notes: A soft, shimmering synth pad fades in -- warm and ethereal, a single sustained chord that rises in pitch very slightly over 5 seconds. A gentle "whoosh" or breath-like sound at the start as the question mark's glow intensifies. No percussion, no rhythm. The sound should feel like a door opening. Silence between sounds creates space for the narration to breathe.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- A soft, shimmering synth pad -- warm and ethereal, a single sustained chord that rises in pitch very slightly over 5 seconds
+- A gentle "whoosh" or breath-like sound at the start as the question mark's glow intensifies
+- No percussion, no rhythm. The sound should feel like a door opening. Silence between sounds creates space for the narration to breathe.
 
 ---
 
@@ -165,12 +218,11 @@ Veo audio generation notes: A soft, shimmering synth pad fades in -- warm and et
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/03-meet-tamma.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/03B-meet-tamma.png`
-- **Duration**: 8 seconds
-- **Motion prompt**: "Cinematic logo reveal. The Tamma gold T logo and purple ring hold center frame as radial light beams rotate very slowly clockwise. At 3 seconds, the logo begins a slow dimensional rotation, gradually revealing Arabic calligraphy on its reverse side. The light beams transition from a starburst pattern to trailing streaks as if the logo is gathering momentum. By 6 seconds, concentric energy rings begin expanding outward from below the badge. Code symbols scatter gently from the center. The rotation settles at a three-quarter angle. Majestic orchestral swell with a gentle electronic undertone."
-- **Camera**: Seconds 0-3: static center frame, light beams rotate slowly, sparkles drift. The camera is locked, letting the logo command attention. Seconds 3-5: very subtle push-in (5%) as the logo begins its rotation. Seconds 5-8: slight pull-back as the energy rings expand, giving the expanding effect room to breathe. Camera remains centered throughout.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/03-meet-tamma.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic logo reveal. The Tamma gold T logo and purple ring hold center frame as radial light beams rotate very slowly clockwise. At 3 seconds, the logo begins a slow dimensional rotation, gradually revealing Arabic calligraphy on its reverse side. The light beams transition from a starburst pattern to trailing streaks as if the logo is gathering momentum. By 6 seconds, concentric energy rings begin expanding outward from below the badge. Code symbols scatter gently from the center. The rotation settles at a three-quarter angle."
+- **duration**: 10 (will trim to 8s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene03-meet-tamma.mp4`
 
 ### NARRATION
@@ -206,7 +258,12 @@ Veo audio generation notes: A soft, shimmering synth pad fades in -- warm and et
 
 ### SOUND
 
-Veo audio generation notes: A deep, resonant "boom" or gong hit at 0.0s as the logo appears -- not aggressive, but authoritative. A warm orchestral pad swells underneath (strings or synth-strings). At 3.0s when the rotation begins, a soft crystalline chime. At 5.5s when "it gets things done" begins, a subtle bass pulse kicks in, adding momentum. The overall sound should feel like a premium product launch -- confident, polished, aspirational.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- A deep, resonant "boom" or gong hit at 0.0s as the logo appears -- not aggressive, but authoritative
+- A warm orchestral pad swell underneath (strings or synth-strings)
+- At 3.0s when the rotation begins, a soft crystalline chime
+- At 5.5s when "it gets things done" begins, a subtle bass pulse kicks in, adding momentum
+- The overall sound should feel like a premium product launch -- confident, polished, aspirational
 
 ---
 
@@ -228,21 +285,19 @@ Veo audio generation notes: A deep, resonant "boom" or gong hit at 0.0s as the l
 ### VIDEO CLIPS
 
 **Clip 4a** (first half):
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/04-autonomous-loop.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/04B-autonomous-loop.png`
-- **Duration**: 5 seconds
-- **Motion prompt**: "Cinematic tracking shot along the horizontal pipeline from left to right. Starting wide on the full seven-node pipeline with the human figure pressing the button, the camera begins a smooth dolly right, following glowing purple energy pulses as they travel through the pipeline tubes from the issue node toward the code and test nodes. As the camera moves right, it gradually pushes in, transitioning from the wide overview to a close-up of the code-to-test junction. Code text streams flow between the two nodes. Green checkmarks erupt from the test beaker. Industrial pipeline ambiance with digital processing sounds."
-- **Camera**: Seconds 0-2: wide establishing shot, human presses button, energy pulse begins traveling right. Seconds 2-4: smooth dolly-right tracking the pulse, camera begins push-in. Seconds 4-5: tight on code-brackets and beaker junction, code streams flowing, checkmarks erupting.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/04-autonomous-loop.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic tracking shot along the horizontal pipeline from left to right. Starting wide on the full seven-node pipeline with the human figure pressing the button, the camera begins a smooth dolly right, following glowing purple energy pulses as they travel through the pipeline tubes from the issue node toward the code and test nodes. As the camera moves right, it gradually pushes in, transitioning from the wide overview to a close-up of the code-to-test junction. Code text streams flow between the two nodes. Green checkmarks erupt from the test beaker."
+- **duration**: 5
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene04a-autonomous-loop.mp4`
 
 **Clip 4b** (second half):
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/extra/04B-autonomous-loop.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/04C-autonomous-loop.png`
-- **Duration**: 5 seconds
-- **Motion prompt**: "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 3 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority. Triumphant digital completion sound with a satisfying 'achievement unlocked' tone."
-- **Camera**: Seconds 0-2: continuing dolly-right from the test junction, camera eases back to medium shot. Seconds 2-3: push-in accelerates toward the merge endpoint. Seconds 3-5: tight on MERGED badge, green particles explode outward, camera holds steady on the celebration.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/extra/04B-autonomous-loop.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 3 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority."
+- **duration**: 5
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene04b-autonomous-loop.mp4`
 
 ### NARRATION
@@ -280,7 +335,13 @@ Veo audio generation notes: A deep, resonant "boom" or gong hit at 0.0s as the l
 
 ### SOUND
 
-Veo audio generation notes: An upbeat electronic rhythm begins -- not a full song, but a rhythmic pulse that matches the pipeline's energy flow. Soft "whoosh" sounds as energy pulses travel between nodes. A gentle "ding" for each pipeline stage the pulse passes through. At the MERGED moment (second 5.5-6), a satisfying achievement sound -- a crystalline chime combined with a subtle bass drop. The confetti moment gets a gentle sparkle/shimmer sound. The rhythm slows and settles for the reassuring closing line.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- An upbeat electronic rhythm -- not a full song, but a rhythmic pulse that matches the pipeline's energy flow
+- Soft "whoosh" sounds as energy pulses travel between nodes
+- A gentle "ding" for each pipeline stage the pulse passes through
+- At the MERGED moment (second 5.5-6), a satisfying achievement sound -- a crystalline chime combined with a subtle bass drop
+- The confetti moment gets a gentle sparkle/shimmer sound
+- The rhythm slows and settles for the reassuring closing line
 
 ---
 
@@ -298,12 +359,11 @@ Veo audio generation notes: An upbeat electronic rhythm begins -- not a full son
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/05-pick-your-ai.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/05B-pick-your-ai.png`
-- **Duration**: 7 seconds
-- **Motion prompt**: "Cinematic slow zoom into the central AI hub. All eight provider circles initially glow and pulse with energy. Over 4 seconds, seven of the eight providers gracefully dim and fade to dark outlines while one provider (upper-left triangle) intensifies its glow dramatically. A bright cyan energy beam solidifies along the connection line from the selected provider to the central hub. An 'Active' badge with checkmark materializes next to the selected provider. A swap icon appears, suggesting easy switching. The central hub absorbs the energy and glows brighter. The composition simplifies from busy to focused. Gentle electronic selection sound effects."
-- **Camera**: Seconds 0-2: slight slow zoom toward center, all providers pulsing equally. Seconds 2-4: continuing zoom, providers begin dimming one by one in a clockwise sequence. Seconds 4-6: tight on the active connection, the cyan beam intensifies, Active badge appears. Seconds 6-7: hold on the simplified composition, swap icon materializes.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/05-pick-your-ai.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic slow zoom into the central AI hub. All eight provider circles initially glow and pulse with energy. Over 4 seconds, seven of the eight providers gracefully dim and fade to dark outlines while one provider (upper-left triangle) intensifies its glow dramatically. A bright cyan energy beam solidifies along the connection line from the selected provider to the central hub. An 'Active' badge with checkmark materializes next to the selected provider. A swap icon appears, suggesting easy switching. The central hub absorbs the energy and glows brighter. The composition simplifies from busy to focused."
+- **duration**: 10 (will trim to 7s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene05-pick-your-ai.mp4`
 
 ### NARRATION
@@ -339,7 +399,12 @@ Veo audio generation notes: An upbeat electronic rhythm begins -- not a full son
 
 ### SOUND
 
-Veo audio generation notes: Soft electronic ambient texture continues from Scene 4 but calmer. A gentle "select" sound (like a soft UI click) each time a provider dims. When the active provider lights up at 4s, a brighter chime with a subtle reverb tail. The "Active" badge appearance gets a soft confirmation tone. Overall mood is clean, modern, and reassuring -- like a well-designed settings screen.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- Soft electronic ambient texture continues from Scene 4 but calmer
+- A gentle "select" sound (like a soft UI click) each time a provider dims
+- When the active provider lights up at 4s, a brighter chime with a subtle reverb tail
+- The "Active" badge appearance gets a soft confirmation tone
+- Overall mood is clean, modern, and reassuring -- like a well-designed settings screen
 
 ---
 
@@ -357,12 +422,11 @@ Veo audio generation notes: Soft electronic ambient texture continues from Scene
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/06-works-everywhere.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/06B-works-everywhere.png`
-- **Duration**: 7 seconds
-- **Motion prompt**: "Cinematic overhead establishing shot looking down at the platform fan. The seven platform cards hover gently with a subtle floating animation. Green energy dots travel down the connection lines toward the central Tamma hub. Over 3 seconds, the abstract icons on the cards morph subtly into more recognizable platform silhouettes. At 4 seconds, two cards (left and right) light up brightly with green and blue glows while the others dim. Bright energy beams solidify along their connections. A bidirectional arrow materializes between the active connections. A tooltip card fades in at lower-right showing 'platforms: github-like, gitlab-like' with green checkmarks. The Tamma hub pulses with absorbed energy. Clean digital ambient sound with connection confirmation tones."
-- **Camera**: Seconds 0-2: slightly elevated angle looking down at the arc, gentle drift to the right. Seconds 2-4: subtle push-in toward center, cards gaining detail. Seconds 4-6: two cards light up, camera holds steady as energy beams establish. Seconds 6-7: slight pull-back to show full composition with tooltip.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/06-works-everywhere.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic overhead establishing shot looking down at the platform fan. The seven platform cards hover gently with a subtle floating animation. Green energy dots travel down the connection lines toward the central Tamma hub. Over 3 seconds, the abstract icons on the cards morph subtly into more recognizable platform silhouettes. At 4 seconds, two cards (left and right) light up brightly with green and blue glows while the others dim. Bright energy beams solidify along their connections. A bidirectional arrow materializes between the active connections. A tooltip card fades in at lower-right showing platform compatibility with green checkmarks. The Tamma hub pulses with absorbed energy."
+- **duration**: 10 (will trim to 7s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene06-works-everywhere.mp4`
 
 ### NARRATION
@@ -396,7 +460,12 @@ Veo audio generation notes: Soft electronic ambient texture continues from Scene
 
 ### SOUND
 
-Veo audio generation notes: Continuation of the clean electronic ambient from Scene 5. Soft "connection established" tones as energy dots reach the hub. When the two cards light up at 4s, a dual-tone confirmation sound (two notes in harmony). The tooltip appearance gets a subtle UI pop-in sound. Overall sonic texture is clean, organized, and professional -- like a well-designed dashboard.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- Continuation of the clean electronic ambient from Scene 5
+- Soft "connection established" tones as energy dots reach the hub
+- When the two cards light up at 4s, a dual-tone confirmation sound (two notes in harmony)
+- The tooltip appearance gets a subtle UI pop-in sound
+- Overall sonic texture is clean, organized, and professional -- like a well-designed dashboard
 
 ---
 
@@ -414,12 +483,11 @@ Veo audio generation notes: Continuation of the clean electronic ambient from Sc
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/07-quality-gates.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/07B-quality-gates.png`
-- **Duration**: 8 seconds
-- **Motion prompt**: "Cinematic tracking shot following a code block along the conveyor belt through three quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops briefly. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the X transforming to a checkmark. The code block, now corrected, passes through the Security gate. The first shield dims behind, the third shield (Review) waits ahead. The mood transitions from confidence through brief alarm to recovery. Mechanical conveyor sounds with digital gate verification tones."
-- **Camera**: Seconds 0-2: medium shot following code block left to right, first gate passes with green flash. Seconds 2-4: push-in toward Security shield as code block approaches, slight tension. Seconds 4-5.5: red X appears, camera holds tight on the failure moment. Seconds 5.5-7: slight pull-back as retry loop spins, wrench icon animates. Seconds 7-8: code block passes through, camera eases to show recovery complete.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/07-quality-gates.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic tracking shot following a code block along the conveyor belt through three quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops briefly. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the X transforming to a checkmark. The code block, now corrected, passes through the Security gate. The first shield dims behind, the third shield (Review) waits ahead. The mood transitions from confidence through brief alarm to recovery."
+- **duration**: 10 (will trim to 8s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene07-quality-gates.mp4`
 
 ### NARRATION
@@ -455,7 +523,13 @@ Veo audio generation notes: Continuation of the clean electronic ambient from Sc
 
 ### SOUND
 
-Veo audio generation notes: Mechanical conveyor belt hum underneath -- subtle, industrial. Gate passage sounds: a clean "verification confirmed" two-tone beep with each green checkmark. At the failure moment (3-4s): a sharp but not jarring alert tone -- more like a system notification than an alarm. Retry loop: a whirring mechanical sound like a machine recalibrating. Recovery passage: the confirmation beep returns, slightly more triumphant. Final "nothing ships broken" moment gets a deep, satisfying bass note of finality.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- Mechanical conveyor belt hum underneath -- subtle, industrial
+- Gate passage sounds: a clean "verification confirmed" two-tone beep with each green checkmark
+- At the failure moment (3-4s): a sharp but not jarring alert tone -- more like a system notification than an alarm
+- Retry loop: a whirring mechanical sound like a machine recalibrating
+- Recovery passage: the confirmation beep returns, slightly more triumphant
+- Final "nothing ships broken" moment gets a deep, satisfying bass note of finality
 
 ---
 
@@ -473,12 +547,11 @@ Veo audio generation notes: Mechanical conveyor belt hum underneath -- subtle, i
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/08-audit-trail.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/08B-audit-trail.png`
-- **Duration**: 7 seconds
-- **Motion prompt**: "Cinematic slow scroll down the vertical timeline, with event cards fading into view as the camera descends. The purple timeline glows and pulses. Gold timestamp gears rotate subtly. At 3 seconds, the rewind icon in the upper-right activates -- the camera reverses direction, scrolling back UP the timeline. At 4 seconds, a gold cursor appears and clicks on the 'CODE GENERATED' event. The event card expands dramatically into a detailed inspection panel showing the exact timestamp, code diff, and AI provider used. The other event cards shrink and slide to the periphery. The mood shifts from overview to forensic investigation. Time-travel whoosh sound with digital data retrieval tones."
-- **Camera**: Seconds 0-2: slow tilt/scroll downward along the timeline, each event card fading in as it enters frame. Seconds 2-3: reaching the bottom of the timeline, pause. Seconds 3-4: the camera reverses, scrolling upward with a faster, rewinding motion. Seconds 4-5.5: gold cursor clicks on CODE GENERATED, camera pushes in. Seconds 5.5-7: tight on the expanded detail panel, code diff visible, provider info shown.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/08-audit-trail.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic slow scroll down the vertical timeline, with event cards fading into view as the camera descends. The purple timeline glows and pulses. Gold timestamp gears rotate subtly. At 3 seconds, the rewind icon in the upper-right activates -- the camera reverses direction, scrolling back UP the timeline. At 4 seconds, a gold cursor appears and clicks on the CODE GENERATED event. The event card expands dramatically into a detailed inspection panel showing the exact timestamp, code diff, and AI provider used. The other event cards shrink and slide to the periphery. The mood shifts from overview to forensic investigation."
+- **duration**: 10 (will trim to 7s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene08-audit-trail.mp4`
 
 ### NARRATION
@@ -513,7 +586,13 @@ Veo audio generation notes: Mechanical conveyor belt hum underneath -- subtle, i
 
 ### SOUND
 
-Veo audio generation notes: A steady, precise ticking sound -- like a high-tech metronome -- underlies the scene, conveying the passage of recorded time. Each event card appearance gets a soft "log entry" chime. At the rewind moment (3s), a satisfying "whoosh-reverse" sound, like tape rewinding but digitized. The cursor click gets a crisp UI interaction sound. The detail panel expansion gets a gentle "data unfold" sound -- layers of information revealing themselves. The ticking continues throughout but slows at the end, landing on silence for "full trust."
+Sound effects to generate via ElevenLabs Sound Generation API:
+- A steady, precise ticking sound -- like a high-tech metronome -- underlies the scene, conveying the passage of recorded time
+- Each event card appearance gets a soft "log entry" chime
+- At the rewind moment (3s), a satisfying "whoosh-reverse" sound, like tape rewinding but digitized
+- The cursor click gets a crisp UI interaction sound
+- The detail panel expansion gets a gentle "data unfold" sound -- layers of information revealing themselves
+- The ticking continues throughout but slows at the end, landing on silence for "full trust"
 
 ---
 
@@ -531,12 +610,11 @@ Veo audio generation notes: A steady, precise ticking sound -- like a high-tech 
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/09-self-maintenance.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/09B-self-maintenance.png`
-- **Duration**: 8 seconds
-- **Motion prompt**: "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly. At 3 seconds, the abstract loop begins transforming: the top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left, a wrench/fix node at the top center with golden sparks, and a green resolved checkmark on the right. The Tamma logo descends to the bottom center. Directional arrows animate between the nodes, showing the flow: detect, fix, resolve. The bottom half of the arc completes in purple, forming the full self-repair cycle. Awe-inspiring ambient sound with a sense of perpetual motion."
-- **Camera**: Seconds 0-3: centered on the ouroboros, very slow clockwise drift matching the rotation. Green pulses travel along the path. Slight push-in. Seconds 3-5: the loop morphs, camera holds steady as the transformation occurs. Nodes materialize with brief flash effects. Seconds 5-7: directional arrows animate, sparks fly from the fix node. Camera eases back slightly to show the full SELF-REPAIR CYCLE composition. Seconds 7-8: hold on the complete cycle, Tamma logo glowing at center-bottom.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/09-self-maintenance.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly. At 3 seconds, the abstract loop begins transforming: the top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left, a wrench/fix node at the top center with golden sparks, and a green resolved checkmark on the right. The Tamma logo descends to the bottom center. Directional arrows animate between the nodes, showing the flow: detect, fix, resolve. The bottom half of the arc completes in purple, forming the full self-repair cycle."
+- **duration**: 10 (will trim to 8s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene09-self-maintenance.mp4`
 
 ### NARRATION
@@ -573,7 +651,14 @@ Veo audio generation notes: A steady, precise ticking sound -- like a high-tech 
 
 ### SOUND
 
-Veo audio generation notes: A deep, ambient drone begins -- spacious and awe-inspiring, like looking into deep space. A soft rhythmic pulse matches the clockwise rotation of energy pulses. At the transformation moment (3s), a crystalline "phase shift" sound -- like ice cracking in reverse. The bug node appearance gets a brief, contained alert tone. The fix node gets golden sparkle sounds and a mechanical "wrench turning" effect. The resolved checkmark gets a triumphant confirmation chime. The final "ready for yours" moment is backed by the deepest, warmest bass note in the video -- finality combined with invitation.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- A deep, ambient drone -- spacious and awe-inspiring, like looking into deep space
+- A soft rhythmic pulse matching the clockwise rotation of energy pulses
+- At the transformation moment (3s), a crystalline "phase shift" sound -- like ice cracking in reverse
+- The bug node appearance gets a brief, contained alert tone
+- The fix node gets golden sparkle sounds and a mechanical "wrench turning" effect
+- The resolved checkmark gets a triumphant confirmation chime
+- The final "ready for yours" moment is backed by the deepest, warmest bass note in the video -- finality combined with invitation
 
 ---
 
@@ -591,12 +676,11 @@ Veo audio generation notes: A deep, ambient drone begins -- spacious and awe-ins
 
 ### VIDEO CLIP
 
-- **API**: Veo 3.1 via Gemini API (image-to-video with start + end frame)
-- **first_frame**: `docs/video/scenes/eli5/10-cta.png`
-- **last_frame**: `docs/video/scenes/eli5/extra/10B-cta.png`
-- **Duration**: 7 seconds
-- **Motion prompt**: "Cinematic logo hold transitioning to call-to-action. The Tamma logo text glows with pulsing purple-gold light, radial rings slowly expanding. At 3 seconds, the composition gracefully rearranges: the centered logo text slides left, the tamma.dev URL transforms into a clickable browser bar with a cursor approaching, and a large GitHub star badge materializes from golden particles on the lower-left. 'GET STARTED TODAY' text types in letter by letter on the right side. Bokeh particles drift gently across the background. The overall motion is confident and inviting, not rushed. Premium brand outro sound with a gentle call-to-action chime."
-- **Camera**: Seconds 0-3: static center frame, logo glowing, rings expanding slowly. A very gentle push-in (3%). Seconds 3-5: elements rearrange, camera eases to a slightly wider frame to accommodate the new layout. Seconds 5-7: hold on the full CTA composition, cursor clicks, star badge radiates, text complete.
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/10-cta.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Cinematic logo hold transitioning to call-to-action. The Tamma logo text glows with pulsing purple-gold light, radial rings slowly expanding. At 3 seconds, the composition gracefully rearranges: the centered logo text slides left, the tamma.dev URL transforms into a clickable browser bar with a cursor approaching, and a large GitHub star badge materializes from golden particles on the lower-left. GET STARTED TODAY text types in letter by letter on the right side. Bokeh particles drift gently across the background. The overall motion is confident and inviting, not rushed."
+- **duration**: 10 (will trim to 7s in post)
+- **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene10-cta.mp4`
 
 ### NARRATION
@@ -632,7 +716,162 @@ Veo audio generation notes: A deep, ambient drone begins -- spacious and awe-ins
 
 ### SOUND
 
-Veo audio generation notes: A warm, resolving chord -- the musical resolution of the entire video. The same electronic ambient texture from throughout the video returns but now resolves to a major key. At the "Tamma" brand name moment, a subtle version of the gong/boom from Scene 3, softer this time -- a callback. The text typing effect gets soft keyboard clicks. The star badge radiating gets a gentle shimmer/sparkle. The final seconds feature the music gently fading, ending with a single sustained note that rings out into the fade-to-black. The silence after the note is intentional -- it leaves space for the viewer to act.
+Sound effects to generate via ElevenLabs Sound Generation API:
+- A warm, resolving chord -- the musical resolution of the entire video
+- The same electronic ambient texture from throughout the video returns but now resolves to a major key
+- At the "Tamma" brand name moment, a subtle version of the gong/boom from Scene 3, softer this time -- a callback
+- The text typing effect gets soft keyboard clicks
+- The star badge radiating gets a gentle shimmer/sparkle
+- The final seconds feature the music gently fading, ending with a single sustained note that rings out into the fade-to-black. The silence after the note is intentional -- it leaves space for the viewer to act.
+
+---
+
+## Video Generation Pipeline
+
+### Helper: Generate Video from Image via Freepik Runway Gen4 Turbo
+
+```bash
+#!/usr/bin/env bash
+# generate-video.sh <image_path> <prompt> <duration> <output_path>
+# Submits image-to-video job, polls until complete, downloads result.
+
+set -euo pipefail
+
+IMAGE_PATH="$1"
+PROMPT="$2"
+DURATION="${3:-10}"
+OUTPUT_PATH="$4"
+
+echo ">>> Submitting: $(basename "$IMAGE_PATH") (${DURATION}s)"
+
+# Base64-encode the image
+IMAGE_B64=$(base64 -w0 "$IMAGE_PATH")
+
+# Submit generation task
+RESPONSE=$(curl -s -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
+  -H "x-freepik-api-key: ${FREEPIK_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "'"${IMAGE_B64}"'",
+    "prompt": "'"$(echo "$PROMPT" | sed 's/"/\\"/g')"'",
+    "duration": '"${DURATION}"',
+    "ratio": "1280:720"
+  }')
+
+TASK_ID=$(echo "$RESPONSE" | jq -r '.data.task_id')
+STATUS=$(echo "$RESPONSE" | jq -r '.data.status')
+
+if [ -z "$TASK_ID" ] || [ "$TASK_ID" = "null" ]; then
+  echo "ERROR: Failed to submit task. Response: $RESPONSE"
+  exit 1
+fi
+
+echo "    Task ID: $TASK_ID (status: $STATUS)"
+
+# Poll until completed
+while true; do
+  sleep 10
+  POLL=$(curl -s "https://api.freepik.com/v1/ai/image-to-video/runway-4-5/${TASK_ID}" \
+    -H "x-freepik-api-key: ${FREEPIK_API_KEY}")
+  STATUS=$(echo "$POLL" | jq -r '.data.status')
+  echo "    Polling... status: $STATUS"
+
+  case "$STATUS" in
+    COMPLETED)
+      VIDEO_URL=$(echo "$POLL" | jq -r '.data.generated[0]')
+      echo "    Downloading: $VIDEO_URL"
+      curl -s -L -o "$OUTPUT_PATH" "$VIDEO_URL"
+      echo "    Saved: $OUTPUT_PATH"
+      break
+      ;;
+    FAILED)
+      echo "ERROR: Task failed. Response: $POLL"
+      exit 1
+      ;;
+    CREATED|IN_PROGRESS)
+      continue
+      ;;
+    *)
+      echo "WARNING: Unknown status '$STATUS'. Retrying..."
+      continue
+      ;;
+  esac
+done
+```
+
+### Generate All 11 Video Clips
+
+```bash
+CLIPS="docs/video/output/clips"
+
+# Scene 1 (8s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/01-the-pain.png" \
+  "Cinematic slow dolly-out from the developer hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays." \
+  10 "${CLIPS}/scene01-the-pain.mp4"
+
+# Scene 2 (5s)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/02-the-question.png" \
+  "Cinematic slow push-in toward the glowing purple question mark at center. The purple glow intensifies and pulses gently, radiating outward. The four surrounding development icons drift very slightly inward toward the question mark as if drawn to it. Circuit-board traces in the background shimmer faintly. The overall light level increases subtly, as if dawn is breaking on a new idea." \
+  5 "${CLIPS}/scene02-the-question.mp4"
+
+# Scene 3 (8s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/03-meet-tamma.png" \
+  "Cinematic logo reveal. The Tamma gold T logo and purple ring hold center frame as radial light beams rotate very slowly clockwise. At 3 seconds, the logo begins a slow dimensional rotation, gradually revealing Arabic calligraphy on its reverse side. The light beams transition from a starburst pattern to trailing streaks as if the logo is gathering momentum. By 6 seconds, concentric energy rings begin expanding outward from below the badge. Code symbols scatter gently from the center. The rotation settles at a three-quarter angle." \
+  10 "${CLIPS}/scene03-meet-tamma.mp4"
+
+# Scene 4a (5s)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/04-autonomous-loop.png" \
+  "Cinematic tracking shot along the horizontal pipeline from left to right. Starting wide on the full seven-node pipeline with the human figure pressing the button, the camera begins a smooth dolly right, following glowing purple energy pulses as they travel through the pipeline tubes from the issue node toward the code and test nodes. As the camera moves right, it gradually pushes in, transitioning from the wide overview to a close-up of the code-to-test junction. Code text streams flow between the two nodes. Green checkmarks erupt from the test beaker." \
+  5 "${CLIPS}/scene04a-autonomous-loop.mp4"
+
+# Scene 4b (5s)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/extra/04B-autonomous-loop.png" \
+  "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 3 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority." \
+  5 "${CLIPS}/scene04b-autonomous-loop.mp4"
+
+# Scene 5 (7s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/05-pick-your-ai.png" \
+  "Cinematic slow zoom into the central AI hub. All eight provider circles initially glow and pulse with energy. Over 4 seconds, seven of the eight providers gracefully dim and fade to dark outlines while one provider (upper-left triangle) intensifies its glow dramatically. A bright cyan energy beam solidifies along the connection line from the selected provider to the central hub. An Active badge with checkmark materializes next to the selected provider. A swap icon appears, suggesting easy switching. The central hub absorbs the energy and glows brighter. The composition simplifies from busy to focused." \
+  10 "${CLIPS}/scene05-pick-your-ai.mp4"
+
+# Scene 6 (7s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/06-works-everywhere.png" \
+  "Cinematic overhead establishing shot looking down at the platform fan. The seven platform cards hover gently with a subtle floating animation. Green energy dots travel down the connection lines toward the central Tamma hub. Over 3 seconds, the abstract icons on the cards morph subtly into more recognizable platform silhouettes. At 4 seconds, two cards light up brightly with green and blue glows while the others dim. Bright energy beams solidify along their connections. A bidirectional arrow materializes between the active connections. A tooltip card fades in showing platform compatibility with green checkmarks. The Tamma hub pulses with absorbed energy." \
+  10 "${CLIPS}/scene06-works-everywhere.mp4"
+
+# Scene 7 (8s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/07-quality-gates.png" \
+  "Cinematic tracking shot following a code block along the conveyor belt through three quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops briefly. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the X transforming to a checkmark. The code block, now corrected, passes through the Security gate. The first shield dims behind, the third shield waits ahead." \
+  10 "${CLIPS}/scene07-quality-gates.mp4"
+
+# Scene 8 (7s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/08-audit-trail.png" \
+  "Cinematic slow scroll down the vertical timeline, with event cards fading into view as the camera descends. The purple timeline glows and pulses. Gold timestamp gears rotate subtly. At 3 seconds, the rewind icon in the upper-right activates -- the camera reverses direction, scrolling back UP the timeline. At 4 seconds, a gold cursor appears and clicks on the CODE GENERATED event. The event card expands dramatically into a detailed inspection panel showing the exact timestamp, code diff, and AI provider used. The other event cards shrink and slide to the periphery." \
+  10 "${CLIPS}/scene08-audit-trail.mp4"
+
+# Scene 9 (8s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/09-self-maintenance.png" \
+  "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly. At 3 seconds, the abstract loop begins transforming: the top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left, a wrench/fix node at the top center with golden sparks, and a green resolved checkmark on the right. The Tamma logo descends to the bottom center. Directional arrows animate between the nodes, showing the flow: detect, fix, resolve. The bottom half of the arc completes in purple, forming the full self-repair cycle." \
+  10 "${CLIPS}/scene09-self-maintenance.mp4"
+
+# Scene 10 (7s scene, generate 10s, trim later)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/10-cta.png" \
+  "Cinematic logo hold transitioning to call-to-action. The Tamma logo text glows with pulsing purple-gold light, radial rings slowly expanding. At 3 seconds, the composition gracefully rearranges: the centered logo text slides left, the tamma.dev URL transforms into a clickable browser bar with a cursor approaching, and a large GitHub star badge materializes from golden particles on the lower-left. GET STARTED TODAY text types in letter by letter on the right side. Bokeh particles drift gently across the background. The overall motion is confident and inviting, not rushed." \
+  10 "${CLIPS}/scene10-cta.mp4"
+```
+
+**Cost estimate**: 11 clips at 5-10s each = ~85s total generated video. At $0.12/second = ~$10.20.
 
 ---
 
@@ -663,7 +902,7 @@ Generate all 10 narration audio files via ElevenLabs API before stitching:
 
 ```bash
 # ElevenLabs text-to-speech for each scene
-# Using voice ID: JBFqnCBsd6RMkjVDRZzb
+# Voice: George (JBFqnCBsd6RMkjVDRZzb) - Warm, Captivating Storyteller
 
 VOICE_ID="JBFqnCBsd6RMkjVDRZzb"
 OUTPUT_DIR="docs/video/output/audio"
@@ -769,16 +1008,105 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   }' --output "${OUTPUT_DIR}/narration-scene10.mp3"
 ```
 
+### Sound Effects Generation
+
+Generate transition swooshes and ambient layers via ElevenLabs Sound Generation API:
+
+```bash
+SFX_DIR="docs/video/output/sfx"
+
+# Transition swooshes (used between scenes)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A smooth digital whoosh transition sound, like a futuristic UI swipe, clean and modern, 1 second long",
+    "duration_seconds": 1.0
+  }' --output "${SFX_DIR}/transition-swoosh.mp3"
+
+# Purple glow wipe variant (more dramatic, for Scene 1->2, 8->9, 9->10)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A dramatic ethereal whoosh with a glowing energy sweep, like a magical portal opening, futuristic and warm, 1.5 seconds",
+    "duration_seconds": 1.5
+  }' --output "${SFX_DIR}/transition-purple-wipe.mp3"
+
+# Subtle ambient tech hum (loopable background layer)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A very subtle, low-frequency ambient technology hum, like the gentle resonance of a data center or quiet server room, barely audible, calming and continuous, 10 seconds",
+    "duration_seconds": 10.0
+  }' --output "${SFX_DIR}/ambient-tech-hum.mp3"
+
+# Achievement / success chime (for MERGED moment, Scene 4)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A satisfying digital achievement unlocked chime, crystalline and bright with a subtle bass undertone, like completing a quest in a futuristic game, 1 second",
+    "duration_seconds": 1.0
+  }' --output "${SFX_DIR}/achievement-chime.mp3"
+
+# Logo reveal gong (Scene 3 and callback in Scene 10)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A deep resonant gong hit, authoritative but not aggressive, warm and premium feeling, like a high-end brand reveal, with a long reverb tail, 2 seconds",
+    "duration_seconds": 2.0
+  }' --output "${SFX_DIR}/logo-gong.mp3"
+
+# Error/failure alert (Scene 7)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A brief, sharp but not jarring digital alert notification tone, like a system warning that is informative rather than alarming, clean and technical, 0.5 seconds",
+    "duration_seconds": 0.5
+  }' --output "${SFX_DIR}/alert-tone.mp3"
+
+# Rewind whoosh (Scene 8)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A digitized tape rewind sound effect, futuristic and satisfying, like scrolling backward through time in a holographic interface, 1 second",
+    "duration_seconds": 1.0
+  }' --output "${SFX_DIR}/rewind-whoosh.mp3"
+
+# UI click/select (reusable)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A soft, clean digital UI click or select sound, minimal and modern, like tapping a glass touchscreen, 0.3 seconds",
+    "duration_seconds": 0.3
+  }' --output "${SFX_DIR}/ui-click.mp3"
+
+# Confirmation beep (reusable for quality gates)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "A clean two-tone verification confirmed beep, like a security checkpoint approving access, professional and reassuring, 0.5 seconds",
+    "duration_seconds": 0.5
+  }' --output "${SFX_DIR}/confirmation-beep.mp3"
+```
+
 ### Step 1: Prepare Clips with Correct Duration
 
-Ensure each Veo-generated clip matches the target duration. Pad or trim as needed:
+Ensure each Runway-generated clip matches the target duration. Runway Gen4 Turbo only supports 5s or 10s durations, so we trim longer clips down:
 
 ```bash
 CLIPS="docs/video/output/clips"
 ASSEMBLY="docs/video/output/assembly"
 
-# Trim/pad each clip to exact duration (Veo may generate 5s or 8s clips)
-# Use -t for duration, -shortest to avoid overrun
+# Trim each clip to exact scene duration
+# Runway outputs at its native resolution; we will scale in a later step if needed
 
 ffmpeg -i "${CLIPS}/scene01-the-pain.mp4" -t 8 -c copy "${ASSEMBLY}/s01.mp4"
 ffmpeg -i "${CLIPS}/scene02-the-question.mp4" -t 5 -c copy "${ASSEMBLY}/s02.mp4"
@@ -814,6 +1142,9 @@ ffmpeg -f concat -safe 0 -i "${ASSEMBLY}/scene4-list.txt" \
 #
 # Scene durations: s01=8, s02=5, s03=8, s04=10, s05=7, s06=7, s07=8, s08=7, s09=8, s10=7
 # Transition types and durations from the table above.
+#
+# NOTE: Runway Gen4 Turbo produces silent video (no audio track).
+# All audio comes from ElevenLabs narration + sound effects, mixed in later steps.
 
 ASSEMBLY="docs/video/output/assembly"
 
@@ -896,29 +1227,77 @@ ffmpeg \
   "${ASSEMBLY}/narration-mixed.aac"
 ```
 
-### Step 5: Extract and Mix Veo Ambient Audio (Optional)
+### Step 5: Mix Sound Effects Layer
 
-If the Veo-generated clips include audio (ambient sounds), extract and mix them under the narration:
+Layer the ElevenLabs-generated sound effects at transition points and key moments:
 
 ```bash
-# Extract audio from each Veo clip
-for i in 01 02 03 04 05 06 07 08 09 10; do
-  ffmpeg -i "${ASSEMBLY}/s${i}.mp4" -vn -c:a aac "${ASSEMBLY}/veo-audio-s${i}.aac" 2>/dev/null || true
-done
+SFX_DIR="docs/video/output/sfx"
+ASSEMBLY="docs/video/output/assembly"
 
-# Mix Veo ambient audio at -12dB under narration
-# (Only if Veo clips actually have audio tracks)
+# Create ambient tech hum loop for full video duration (~70s)
+# Loop the 10s ambient hum to cover the whole video at -18dB (very subtle)
+ffmpeg -stream_loop 7 -i "${SFX_DIR}/ambient-tech-hum.mp3" \
+  -t 70 -af "volume=0.15" \
+  -c:a aac -b:a 128k \
+  "${ASSEMBLY}/ambient-loop.aac"
+
+# Mix sound effects at specific timestamps
+# Transition swooshes at each scene boundary, key moments for signature sounds
+ffmpeg \
+  -i "${SFX_DIR}/transition-purple-wipe.mp3" \
+  -i "${SFX_DIR}/transition-swoosh.mp3" \
+  -i "${SFX_DIR}/logo-gong.mp3" \
+  -i "${SFX_DIR}/achievement-chime.mp3" \
+  -i "${SFX_DIR}/alert-tone.mp3" \
+  -i "${SFX_DIR}/rewind-whoosh.mp3" \
+  -i "${SFX_DIR}/confirmation-beep.mp3" \
+  -i "${SFX_DIR}/ui-click.mp3" \
+  -filter_complex "
+    [0:a]adelay=7000|7000,volume=0.6[wipe1];
+    [1:a]adelay=11500|11500,volume=0.5[swoosh1];
+    [1:a]adelay=19000|19000,volume=0.5[swoosh2];
+    [2:a]adelay=11800|11800,volume=0.7[gong1];
+    [3:a]adelay=25000|25000,volume=0.7[achieve1];
+    [1:a]adelay=28500|28500,volume=0.5[swoosh3];
+    [1:a]adelay=35000|35000,volume=0.5[swoosh4];
+    [1:a]adelay=41500|41500,volume=0.5[swoosh5];
+    [6:a]adelay=42000|42000,volume=0.5[beep1];
+    [4:a]adelay=44500|44500,volume=0.6[alert1];
+    [6:a]adelay=47000|47000,volume=0.5[beep2];
+    [1:a]adelay=49000|49000,volume=0.5[swoosh6];
+    [5:a]adelay=52500|52500,volume=0.6[rewind1];
+    [7:a]adelay=54000|54000,volume=0.5[click1];
+    [0:a]adelay=55500|55500,volume=0.6[wipe2];
+    [0:a]adelay=62800|62800,volume=0.6[wipe3];
+    [2:a]adelay=63200|63200,volume=0.4[gong2];
+    [wipe1][swoosh1][swoosh2][gong1][achieve1][swoosh3][swoosh4][swoosh5][beep1][alert1][beep2][swoosh6][rewind1][click1][wipe2][wipe3][gong2]amix=inputs=17:duration=longest:normalize=0[sfxout]
+  " \
+  -map "[sfxout]" \
+  -c:a aac -b:a 192k \
+  "${ASSEMBLY}/sfx-mixed.aac"
+```
+
+### Step 6: Final Audio Mix
+
+Combine narration, sound effects, and ambient hum into one audio track:
+
+```bash
+ASSEMBLY="docs/video/output/assembly"
+
 ffmpeg \
   -i "${ASSEMBLY}/narration-mixed.aac" \
-  -i "${ASSEMBLY}/video-no-audio.mp4" \
+  -i "${ASSEMBLY}/sfx-mixed.aac" \
+  -i "${ASSEMBLY}/ambient-loop.aac" \
   -filter_complex "
     [0:a]volume=1.0[narration];
-    [1:a]volume=0.25[ambient];
-    [narration][ambient]amix=inputs=2:duration=first:normalize=0[aout]
+    [1:a]volume=0.5[sfx];
+    [2:a]volume=0.12[ambient];
+    [narration][sfx][ambient]amix=inputs=3:duration=first:normalize=0[aout]
   " \
-  -map "1:v" -map "[aout]" \
-  -c:v copy -c:a aac -b:a 192k \
-  "${ASSEMBLY}/video-with-narration.mp4"
+  -map "[aout]" \
+  -c:a aac -b:a 192k \
+  "${ASSEMBLY}/audio-final.aac"
 ```
 
 ---
@@ -931,10 +1310,10 @@ ffmpeg \
 ASSEMBLY="docs/video/output/assembly"
 OUTPUT="docs/video/output"
 
-# Final merge: video + mixed narration audio
+# Final merge: silent video + fully mixed audio
 ffmpeg \
   -i "${ASSEMBLY}/video-no-audio.mp4" \
-  -i "${ASSEMBLY}/narration-mixed.aac" \
+  -i "${ASSEMBLY}/audio-final.aac" \
   -c:v copy \
   -c:a aac -b:a 192k \
   -shortest \
@@ -963,16 +1342,16 @@ ffprobe -v quiet -print_format json -show_format -show_streams \
 
 # Expected output:
 # duration: ~70-75 seconds
-# resolution: 1920x1080 (or Veo native, may need scaling)
+# resolution: 1280x720 (Runway Gen4 Turbo native)
 # codec: h264 + aac
 ```
 
 ### Resolution Scaling (if needed)
 
-If Veo outputs at a different resolution than 1920x1080, add a scaling step before stitching:
+If a different output resolution is desired (e.g., 1920x1080 for YouTube), add a scaling step before stitching:
 
 ```bash
-# Scale all assembly clips to 1920x1080 before xfade
+# Scale all assembly clips to 1920x1080 before xfade (upscale from 1280x720)
 for f in "${ASSEMBLY}"/s*.mp4; do
   ffmpeg -i "$f" -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=0x0F0F1A" \
     -c:v libx264 -preset fast -crf 18 \
@@ -984,7 +1363,7 @@ done
 
 ```
 docs/video/output/
-  clips/                          # Raw Veo-generated clips (11 files)
+  clips/                          # Raw Runway Gen4 Turbo clips (11 files)
     scene01-the-pain.mp4
     scene02-the-question.mp4
     scene03-meet-tamma.mp4
@@ -1001,27 +1380,50 @@ docs/video/output/
     narration-scene02.mp3
     ...
     narration-scene10.mp3
+  sfx/                            # ElevenLabs sound effects (9 files)
+    transition-swoosh.mp3
+    transition-purple-wipe.mp3
+    ambient-tech-hum.mp3
+    achievement-chime.mp3
+    logo-gong.mp3
+    alert-tone.mp3
+    rewind-whoosh.mp3
+    ui-click.mp3
+    confirmation-beep.mp3
   assembly/                       # Intermediate processing
     s01.mp4 ... s10.mp4           # Trimmed clips
     scene4-list.txt               # Concat list for Scene 4
     s04.mp4                       # Merged Scene 4
-    video-no-audio.mp4            # Stitched video (no audio)
+    video-no-audio.mp4            # Stitched video (silent)
     narration-mixed.aac           # Mixed narration track
+    sfx-mixed.aac                 # Mixed sound effects track
+    ambient-loop.aac              # Looped ambient hum
+    audio-final.aac               # Final combined audio
   eli5-final.mp4                  # FINAL OUTPUT
 ```
+
+### Cost Estimate
+
+| Service | Items | Rate | Cost |
+|---------|-------|------|------|
+| Freepik Runway Gen4 Turbo | ~85s of video (11 clips) | $0.12/s | ~$10.20 |
+| ElevenLabs TTS | 10 narration clips (~80s total) | per-character | ~$1.50 |
+| ElevenLabs SFX | 9 sound effects | per-generation | ~$0.90 |
+| **Total** | | | **~$12.60** |
 
 ### Production Timeline
 
 | Phase | Task | Estimated Time |
 |-------|------|---------------|
-| 1 | Generate narration audio (10 ElevenLabs calls) | 5 minutes |
-| 2 | Generate video clips (11 Veo API calls) | 15-30 minutes |
-| 3 | Trim and scale clips | 5 minutes |
-| 4 | Stitch with transitions | 2 minutes |
-| 5 | Mix audio | 2 minutes |
-| 6 | Final render and QC | 3 minutes |
+| 1 | Generate narration audio (10 ElevenLabs TTS calls) | 2 minutes |
+| 2 | Generate sound effects (9 ElevenLabs SFX calls) | 2 minutes |
+| 3 | Generate video clips (11 Freepik Runway calls + polling) | 15-30 minutes |
+| 4 | Trim and scale clips | 5 minutes |
+| 5 | Stitch with transitions | 2 minutes |
+| 6 | Mix audio (narration + SFX + ambient) | 3 minutes |
+| 7 | Final render and QC | 3 minutes |
 | **Total** | | **~30-50 minutes** |
 
 ---
 
-*Production plan generated for the Tamma ELI5 Explainer Video. All 10 scenes specified with frame descriptions, motion prompts, narration timing, emotional arcs, transitions, and sound design. Ready for execution.*
+*Production plan generated for the Tamma ELI5 Explainer Video. All 10 scenes specified with frame descriptions, motion prompts, narration timing, emotional arcs, transitions, and sound design. Technical pipeline: Runway Gen4 Turbo (via Freepik) for video, ElevenLabs for narration and sound effects, ffmpeg for post-production assembly. Ready for execution.*

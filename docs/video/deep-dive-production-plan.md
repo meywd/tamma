@@ -24,6 +24,168 @@
 
 ---
 
+## Technical Pipeline Overview
+
+### Video Generation: Runway Gen4 Turbo via Freepik API
+
+All image-to-video clips are generated through Freepik's hosted Runway Gen4 Turbo model. Video only -- no audio is generated from the video model.
+
+- **Endpoint**: `POST https://api.freepik.com/v1/ai/image-to-video/runway-4-5`
+- **Auth Header**: `x-freepik-api-key: <API_KEY>`
+- **Request Body**:
+  - `image` (string, required): Base64-encoded image or publicly accessible HTTPS URL
+  - `prompt` (string, optional, max 1000 chars): Motion/camera description for the clip
+  - `duration` (integer, optional): `5` or `10` seconds (default: `10`)
+  - `ratio` (string, optional): Aspect ratio -- `1280:720`, `720:1280`, `1104:832`, `832:1104`, `960:960`, `1584:672` (default: `1280:720`)
+  - `seed` (integer, optional): `0`-`4294967295` for reproducibility
+  - `webhook_url` (string, optional): Callback URL on completion
+- **Response** (201):
+  ```json
+  { "data": { "task_id": "uuid", "status": "CREATED" } }
+  ```
+- **Polling**: `GET https://api.freepik.com/v1/ai/image-to-video/runway-4-5/<task_id>`
+  - Poll until `status` is `COMPLETED` or `FAILED`
+  - On completion, `data.generated` contains an array of video URLs
+- **Pricing**: ~$0.12/second of generated video
+- **Resolution**: All clips rendered at 1280x720 (`ratio: "1280:720"`) then upscaled to 1080p in post-production
+
+#### Per-Clip Generation Pattern
+
+```bash
+# Example: Scene 1, Clip 1 (5 seconds, Frame A -> Frame B)
+curl -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
+  -H "x-freepik-api-key: $FREEPIK_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": "https://raw.githubusercontent.com/meywd/tamma/main/docs/video/scenes/deep-dive/01-developer-burnout.png",
+    "prompt": "Slow cinematic zoom into the developer figure at the desk. The 60% waste panel pulses with a dim red glow as warning icons drift and rotate lazily. The camera pushes forward and slightly down. Subtle particle dust floats in the air. Dark ambient lighting.",
+    "duration": 5,
+    "ratio": "1280:720",
+    "seed": 42
+  }'
+
+# Poll for completion
+curl -X GET "https://api.freepik.com/v1/ai/image-to-video/runway-4-5/$TASK_ID" \
+  -H "x-freepik-api-key: $FREEPIK_API_KEY"
+
+# Download completed video
+curl -o clips/deep-dive/scene01-clip01.mp4 "$VIDEO_URL"
+```
+
+### Audio Narration: ElevenLabs Text-to-Speech API
+
+All narration is generated via ElevenLabs TTS. Each scene's narration is generated as a separate audio file with per-scene voice settings.
+
+- **Endpoint**: `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`
+- **Auth Header**: `xi-api-key: <API_KEY>`
+- **Voice**: George -- "Warm, Captivating Storyteller" (British, middle-aged, narrative)
+  - **Voice ID**: `JBFqnCBsd6RMkjVDRZzb`
+  - Selected for: warm authority, storytelling cadence, professional tech-narrator tone
+- **Request Body**:
+  - `text` (string, required): The narration text for the scene
+  - `model_id` (string): `"eleven_multilingual_v2"`
+  - `voice_settings` (object):
+    - `stability` (float): Per-scene value (see each scene's Voice Settings)
+    - `similarity_boost` (float): Per-scene value
+    - `style` (float): Per-scene value
+    - `speed` (float): Per-scene value
+- **Response**: Binary audio stream (`audio/mpeg`)
+- **Output Format**: `mp3_44100_128` (44.1kHz, 128kbps MP3)
+
+#### Per-Scene Generation Pattern
+
+```bash
+# Example: Scene 1 narration
+curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/scene01-narration.mp3 \
+  -d '{
+    "text": "Development teams spend 40 to 60 percent of their time on repetitive toil. Writing boilerplate tests. Fixing linting errors. Coordinating CI/CD pipelines. Addressing the same review comments week after week. It is a tax on every team that ships software.",
+    "model_id": "eleven_multilingual_v2",
+    "voice_settings": {
+      "stability": 0.72,
+      "similarity_boost": 0.78,
+      "style": 0.35,
+      "speed": 0.92
+    }
+  }'
+```
+
+### Sound Effects: ElevenLabs Sound Generation API
+
+Transition swooshes, ambient textures, and UI sounds are generated via ElevenLabs SFX.
+
+- **Endpoint**: `POST https://api.elevenlabs.io/v1/sound-generation`
+- **Auth Header**: `xi-api-key: <API_KEY>`
+- **Request Body**:
+  - `text` (string, required): Description of the desired sound effect
+  - `duration_seconds` (float, optional): Target duration
+- **Response**: Binary audio stream (`audio/mpeg`)
+
+#### Sound Effect Inventory
+
+```bash
+# Transition swooshes
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/swoosh-crossfade.mp3 \
+  -d '{"text": "Smooth digital crossfade swoosh, subtle and clean", "duration_seconds": 0.5}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/swoosh-wipeleft.mp3 \
+  -d '{"text": "Energetic left-to-right wipe swoosh with slight reverb", "duration_seconds": 0.7}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/swoosh-slideleft.mp3 \
+  -d '{"text": "Quick slide transition sound, digital interface movement", "duration_seconds": 0.4}'
+
+# Ambient textures (per-scene, generated from each scene's SFX Prompt below)
+# See individual scene SOUND sections for specific prompts
+
+# Common UI sounds
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/success-chime.mp3 \
+  -d '{"text": "Satisfying digital success chime, clean and bright", "duration_seconds": 1.0}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/error-buzz.mp3 \
+  -d '{"text": "Soft digital error buzz, not harsh, subtle warning tone", "duration_seconds": 0.8}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/merge-complete.mp3 \
+  -d '{"text": "Triumphant merge completion tone, warm and satisfying digital chime", "duration_seconds": 1.2}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -o audio/deep-dive/sfx/deep-resonant-tone.mp3 \
+  -d '{"text": "Deep resonant bass tone, regal and authoritative, warm golden feeling", "duration_seconds": 2.0}'
+```
+
+### Post-Production: ffmpeg
+
+All stitching, transitions, audio mixing, and final render use ffmpeg.
+
+- **Intra-scene clip concatenation**: `concat` filter (no transitions between clips within a scene)
+- **Inter-scene transitions**: `xfade` filter (crossfade, wipeleft, slideleft per transition map)
+- **Audio mixing**: Narration track + SFX layers mixed with `amix` / `adelay` filters
+- **Upscale**: `scale=1920:1080` (Runway outputs 1280x720, upscaled to 1080p)
+- **Final codec**: H.264 video (`libx264 -preset slow -crf 18`), AAC audio (`-c:a aac -b:a 192k`)
+
+---
+
 ## SECTION A: THE PROBLEM (Scenes 1-3, ~32s)
 
 ---
@@ -92,7 +254,7 @@
 #### SOUND
 
 - Ambient: Low electronic hum, subtle mechanical clicking (keyboard ambiance), faint warning chime on the "60%" reveal
-- Veo audio note: "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -160,7 +322,7 @@
 #### SOUND
 
 - Ambient: Digital glitch sounds on each X mark reveal, subtle electrical crackle in the gap, hollow wind in the chasm
-- Veo audio note: "Digital interface sounds, subtle electrical sparks, hollow ambient wind, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Digital interface sounds, subtle electrical sparks, hollow ambient wind, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -224,7 +386,7 @@
 #### SOUND
 
 - Ambient: Thunder rumble, rain on glass, distant warning klaxon (very subtle), electrical crackle on the cracked question mark
-- Veo audio note: "Distant thunder, light rain ambiance, faint electrical crackle, ominous low drone, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Distant thunder, light rain ambiance, faint electrical crackle, ominous low drone, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -297,7 +459,7 @@
 #### SOUND
 
 - Ambient: Deep resonant tone on logo reveal, subtle chime when "tamm" is spoken, satisfying merge/complete sound when "Done" lands
-- Veo audio note: "Deep resonant drone transitioning to warm golden tone, subtle crystalline chimes, regal atmosphere, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Deep resonant drone transitioning to warm golden tone, subtle crystalline chimes, regal atmosphere, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -376,7 +538,7 @@
 #### SOUND
 
 - Ambient: Mechanical clicking as each step activates, subtle gear sounds at build/test, satisfying "ding" at merge, soft whoosh on the loop completion
-- Veo audio note: "Mechanical precision sounds, soft clicks in rhythm, gear whir, satisfying completion chime, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical precision sounds, soft clicks in rhythm, gear whir, satisfying completion chime, no music", "duration_seconds": 15.0}`
 
 ---
 
@@ -440,7 +602,7 @@
 #### SOUND
 
 - Ambient: Satisfying click on the Approve button, gateway creak/hydraulic opening sound, flowing data whoosh through pipes, ambient city hum
-- Veo audio note: "Mechanical click, hydraulic door opening, flowing water/data whoosh, distant city ambiance, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical click, hydraulic door opening, flowing water/data whoosh, distant city ambiance, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -513,7 +675,7 @@
 #### SOUND
 
 - Ambient: Soft electronic activation tones as providers light up, data flow whoosh through pipes, sharp snap on circuit breaker trip, satisfying reconnection tone on fallback
-- Veo audio note: "Electronic activation sounds, data flow hum, sharp electrical snap, reconnection ping, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Electronic activation sounds, data flow hum, sharp electrical snap, reconnection ping, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -581,7 +743,7 @@
 #### SOUND
 
 - Ambient: Quick activation pings as each platform lights up, smooth data flow sounds, gentle keyboard click as config types, subtle chime on "Done"
-- Veo audio note: "Quick electronic pings, smooth data flow hum, keyboard typing sounds, subtle completion chime, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Quick electronic pings, smooth data flow hum, keyboard typing sounds, subtle completion chime, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -645,7 +807,7 @@
 #### SOUND
 
 - Ambient: Spinning/whirring on the retry cycle, error buzz on failure, satisfying ping on green pass, alarm-like tone on escalation (not harsh), deep resonant tone on "Nothing ships broken"
-- Veo audio note: "Mechanical spinning, soft error buzz, green success ping, subtle alarm tone, deep reassuring resonance, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical spinning, soft error buzz, green success ping, subtle alarm tone, deep reassuring resonance, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -719,7 +881,7 @@
 #### SOUND
 
 - Ambient: Subtle data stream hum, click/lock sound on the golden key, metallic gleam on each shield reveal, deep resonant bass on "Immutable Event Stream"
-- Veo audio note: "Subtle electronic data flow, metallic click-lock, crystalline shield gleam sounds, deep bass undertone, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Subtle electronic data flow, metallic click-lock, crystalline shield gleam sounds, deep bass undertone, no music", "duration_seconds": 14.0}`
 
 ---
 
@@ -783,7 +945,7 @@
 #### SOUND
 
 - Ambient: Soft UI sounds from the workflow designer, progress bar filling tone, 3D extrusion whoosh, industrial hum for the architecture, data flow particles
-- Veo audio note: "Soft interface clicks, progress tone, industrial architectural hum, data flow particles, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Soft interface clicks, progress tone, industrial architectural hum, data flow particles, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -847,7 +1009,7 @@
 #### SOUND
 
 - Ambient: Soft config-typing sounds, routing beam whoosh, dashboard materialization tones, real-time data tick sounds, subtle warning blip on amber
-- Veo audio note: "Soft keyboard clicks, electronic routing whoosh, dashboard data ticks, subtle amber warning blip, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Soft keyboard clicks, electronic routing whoosh, dashboard data ticks, subtle amber warning blip, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -916,7 +1078,7 @@
 #### SOUND
 
 - Ambient: Satisfying whoosh as bug card flows through the track, rapid test-tick sounds, triumphant merge tone, subtle awe-inspiring low drone on the 60% reveal
-- Veo audio note: "Flowing whoosh, rapid ticking, triumphant merge chime, awe-inspiring deep drone, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Flowing whoosh, rapid ticking, triumphant merge chime, awe-inspiring deep drone, no music", "duration_seconds": 12.0}`
 
 ---
 
@@ -990,7 +1152,7 @@
 #### SOUND
 
 - Ambient: Soft chat notification on Tamma's question, click sound on choice, rapid coding/typing sounds during TDD, sequential checkmark pings on pipeline, satisfying merge tone
-- Veo audio note: "Chat notification, button click, rapid typing, sequential success pings, satisfying merge chime, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Chat notification, button click, rapid typing, sequential success pings, satisfying merge chime, no music", "duration_seconds": 13.0}`
 
 ---
 
@@ -1054,7 +1216,7 @@
 #### SOUND
 
 - Ambient: Neural network pulse/synapse firing sounds, knowledge filing whoosh, metric counter ticking, subtle ascending tone on "better every cycle"
-- Veo audio note: "Neural synapse pulses, filing whoosh, soft counter ticking, ascending optimistic tone, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Neural synapse pulses, filing whoosh, soft counter ticking, ascending optimistic tone, no music", "duration_seconds": 10.0}`
 
 ---
 
@@ -1133,7 +1295,7 @@
 #### SOUND
 
 - Ambient: Lightning bolt electrical crack on Fastify, soft materialization sounds for each package, Docker container stacking thuds (subtle), heartbeat monitor beep on Production Live
-- Veo audio note: "Electrical crack, soft materialization tones, subtle container stacking, heartbeat beep, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Electrical crack, soft materialization tones, subtle container stacking, heartbeat beep, no music", "duration_seconds": 15.0}`
 
 ---
 
@@ -1207,7 +1369,7 @@
 #### SOUND
 
 - Ambient: Epic grid checkmark pings (quick sequence), dashboard data materialization tones, timeline whoosh as milestones appear, momentum arrow ascending tone
-- Veo audio note: "Quick checkmark pings, data materialization, timeline sweep, ascending momentum tone, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Quick checkmark pings, data materialization, timeline sweep, ascending momentum tone, no music", "duration_seconds": 15.0}`
 
 ---
 
@@ -1275,35 +1437,37 @@
 #### SOUND
 
 - Ambient: Warm community hum, subtle star twinkle sounds, golden chime on calligraphy reveal, deep resonant "completion" tone on the final word, gentle fade to silence
-- Veo audio note: "Warm community ambiance, star twinkles, golden crystalline chime, deep resonant completion tone, fading to silence, no music"
+- SFX Prompt (ElevenLabs): `{"text": "Warm community ambiance, star twinkles, golden crystalline chime, deep resonant completion tone, fading to silence, no music", "duration_seconds": 12.0}`
 
 ---
 
 
-## Stitching & Transitions
+## Stitching & Transitions (ffmpeg)
 
-### Clip Inventory (40 clips total)
+### Clip Inventory (40 clips via Runway Gen4 Turbo)
 
-| Scene | Clips | Filenames |
-|-------|-------|-----------|
-| 1 | 2 | scene01-clip01.mp4, scene01-clip02.mp4 |
-| 2 | 2 | scene02-clip01.mp4, scene02-clip02.mp4 |
-| 3 | 2 | scene03-clip01.mp4, scene03-clip02.mp4 |
-| 4 | 2 | scene04-clip01.mp4, scene04-clip02.mp4 |
-| 5 | 3 | scene05-clip01.mp4, scene05-clip02.mp4, scene05-clip03.mp4 |
-| 6 | 2 | scene06-clip01.mp4, scene06-clip02.mp4 |
-| 7 | 2 | scene07-clip01.mp4, scene07-clip02.mp4 |
-| 8 | 2 | scene08-clip01.mp4, scene08-clip02.mp4 |
-| 9 | 2 | scene09-clip01.mp4, scene09-clip02.mp4 |
-| 10 | 3 | scene10-clip01.mp4, scene10-clip02.mp4, scene10-clip03.mp4 |
-| 11 | 2 | scene11-clip01.mp4, scene11-clip02.mp4 |
-| 12 | 2 | scene12-clip01.mp4, scene12-clip02.mp4 |
-| 13 | 2 | scene13-clip01.mp4, scene13-clip02.mp4 |
-| 14 | 3 | scene14-clip01.mp4, scene14-clip02.mp4, scene14-clip03.mp4 |
-| 15 | 2 | scene15-clip01.mp4, scene15-clip02.mp4 |
-| 16 | 3 | scene16-clip01.mp4, scene16-clip02.mp4, scene16-clip03.mp4 |
-| 17 | 3 | scene17-clip01.mp4, scene17-clip02.mp4, scene17-clip03.mp4 |
-| 18 | 2 | scene18-clip01.mp4, scene18-clip02.mp4 |
+| Scene | Clips | Filenames | Runway Duration |
+|-------|-------|-----------|-----------------|
+| 1 | 2 | scene01-clip01.mp4, scene01-clip02.mp4 | 5s + 5s |
+| 2 | 2 | scene02-clip01.mp4, scene02-clip02.mp4 | 6s + 6s |
+| 3 | 2 | scene03-clip01.mp4, scene03-clip02.mp4 | 5s + 5s |
+| 4 | 2 | scene04-clip01.mp4, scene04-clip02.mp4 | 5s + 5s |
+| 5 | 3 | scene05-clip01.mp4, scene05-clip02.mp4, scene05-clip03.mp4 | 5s + 5s + 5s |
+| 6 | 2 | scene06-clip01.mp4, scene06-clip02.mp4 | 5s + 5s |
+| 7 | 2 | scene07-clip01.mp4, scene07-clip02.mp4 | 6s + 6s |
+| 8 | 2 | scene08-clip01.mp4, scene08-clip02.mp4 | 5s + 5s |
+| 9 | 2 | scene09-clip01.mp4, scene09-clip02.mp4 | 6s + 6s |
+| 10 | 3 | scene10-clip01.mp4, scene10-clip02.mp4, scene10-clip03.mp4 | 5s + 5s + 4s* |
+| 11 | 2 | scene11-clip01.mp4, scene11-clip02.mp4 | 6s + 6s |
+| 12 | 2 | scene12-clip01.mp4, scene12-clip02.mp4 | 6s + 6s |
+| 13 | 2 | scene13-clip01.mp4, scene13-clip02.mp4 | 6s + 6s |
+| 14 | 3 | scene14-clip01.mp4, scene14-clip02.mp4, scene14-clip03.mp4 | 4s* + 5s + 4s* |
+| 15 | 2 | scene15-clip01.mp4, scene15-clip02.mp4 | 5s + 5s |
+| 16 | 3 | scene16-clip01.mp4, scene16-clip02.mp4, scene16-clip03.mp4 | 5s + 5s + 5s |
+| 17 | 3 | scene17-clip01.mp4, scene17-clip02.mp4, scene17-clip03.mp4 | 5s + 5s + 5s |
+| 18 | 2 | scene18-clip01.mp4, scene18-clip02.mp4 | 5s + 7s* |
+
+*Clips marked with `*` need trimming in ffmpeg (`-t` flag) since Runway only supports 5s or 10s durations. Generate at 5s and trim to target.
 
 ### Transition Map
 
@@ -1328,6 +1492,21 @@
 | Scene 16 | Scene 17 | Crossfade | 0.5s |
 | Scene 17 | Scene 18 | Crossfade | 0.5s |
 | Scene 18 | Black | Fade to black | 1.5s |
+
+### Step 0: Upscale Runway clips from 720p to 1080p
+
+Runway Gen4 Turbo outputs at 1280x720. Upscale all clips before stitching.
+
+```bash
+CLIPS=docs/video/clips/deep-dive
+
+for f in $CLIPS/scene*.mp4; do
+  base=$(basename "$f" .mp4)
+  ffmpeg -i "$f" -vf "scale=1920:1080:flags=lanczos" \
+    -c:v libx264 -preset slow -crf 18 \
+    "$CLIPS/${base}-1080p.mp4"
+done
+```
 
 ### Step 1: Concatenate clips within each scene (no transition between intra-scene clips)
 
@@ -1537,17 +1716,37 @@ ffmpeg -i $OUTPUT/step-18.mp4 -f lavfi -i "color=c=black:s=1920x1080:d=1.5" \
 
 **Note**: The offset values above are estimates based on scene durations. Actual offsets must be calculated from the precise duration of each generated clip. Use `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 file.mp4` to get exact durations.
 
-### Step 3: Generate narration audio
+### Step 3: Generate narration audio (ElevenLabs TTS)
 
-Use ElevenLabs API for each scene's narration. Concatenate all audio files into a single narration track.
+Generate each scene's narration via ElevenLabs, then concatenate with silence gaps matching transitions.
+
+**Voice**: George (`JBFqnCBsd6RMkjVDRZzb`) -- Warm, Captivating Storyteller (British, middle-aged)
 
 ```bash
 AUDIO=docs/video/audio/deep-dive
+VOICE_ID="JBFqnCBsd6RMkjVDRZzb"
+API_KEY="$ELEVENLABS_API_KEY"
 
-# After generating all scene audio files (scene01-narration.mp3 through scene18-narration.mp3),
-# concatenate with appropriate silence gaps matching scene transitions:
+# Generate narration for each scene (example for Scene 1)
+# Repeat for scenes 01-18 with each scene's text and voice_settings from above
+curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/$VOICE_ID" \
+  -H "xi-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -o $AUDIO/scene01-narration.mp3 \
+  -d '{
+    "text": "Development teams spend 40 to 60 percent of their time on repetitive toil. Writing boilerplate tests. Fixing linting errors. Coordinating CI/CD pipelines. Addressing the same review comments week after week. It is a tax on every team that ships software.",
+    "model_id": "eleven_multilingual_v2",
+    "voice_settings": {
+      "stability": 0.72,
+      "similarity_boost": 0.78,
+      "style": 0.35,
+      "speed": 0.92
+    }
+  }'
 
-# Create a concat list
+# ... repeat for scenes 02-18 using each scene's narration text and voice settings ...
+
+# After all 18 narration files are generated, create concat list:
 cat > $AUDIO/concat-list.txt << 'EOF'
 file 'scene01-narration.mp3'
 file 'silence-0.5s.mp3'
@@ -1595,25 +1794,88 @@ ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 0.7 $AUDIO/silence-0.7s.mp3
 ffmpeg -f concat -safe 0 -i $AUDIO/concat-list.txt -c:a libmp3lame -q:a 2 $AUDIO/full-narration.mp3
 ```
 
+### Step 4: Generate sound effects (ElevenLabs SFX)
+
+Generate ambient SFX per scene using each scene's SFX Prompt, plus shared transition swooshes.
+
+```bash
+SFX=docs/video/audio/deep-dive/sfx
+API_KEY="$ELEVENLABS_API_KEY"
+
+# Transition swooshes (shared across scenes)
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $API_KEY" -H "Content-Type: application/json" \
+  -o $SFX/swoosh-crossfade.mp3 \
+  -d '{"text": "Smooth digital crossfade swoosh, subtle and clean", "duration_seconds": 0.5}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $API_KEY" -H "Content-Type: application/json" \
+  -o $SFX/swoosh-wipeleft.mp3 \
+  -d '{"text": "Energetic left-to-right wipe swoosh with slight reverb", "duration_seconds": 0.7}'
+
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $API_KEY" -H "Content-Type: application/json" \
+  -o $SFX/swoosh-slideleft.mp3 \
+  -d '{"text": "Quick slide transition sound, digital interface movement", "duration_seconds": 0.4}'
+
+# Per-scene ambient SFX (use each scene's SFX Prompt from above)
+# Example for Scene 1:
+curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
+  -H "xi-api-key: $API_KEY" -H "Content-Type: application/json" \
+  -o $SFX/scene01-ambient.mp3 \
+  -d '{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 10.0}'
+
+# ... repeat for scenes 02-18 using each scene's SFX Prompt and duration ...
+```
+
 ---
 
-## Final Render
+## Final Render (ffmpeg)
 
-### Step 4: Combine video and narration audio
+### Step 5: Mix narration + SFX onto video
 
 ```bash
 OUTPUT=docs/video/output
 AUDIO=docs/video/audio/deep-dive
+SFX=docs/video/audio/deep-dive/sfx
 
-# Merge video (no audio from Veo) with narration audio
-ffmpeg -i $OUTPUT/deep-dive-video-only.mp4 -i $AUDIO/full-narration.mp3 \
+# First, mix narration with per-scene ambient SFX
+# Narration at full volume, SFX at -18dB (subtle background layer)
+ffmpeg -i $AUDIO/full-narration.mp3 -i $SFX/full-sfx-mix.mp3 \
+  -filter_complex "[0:a]volume=1.0[narr];[1:a]volume=0.15[sfx];[narr][sfx]amix=inputs=2:duration=longest[mixed]" \
+  -map "[mixed]" -c:a libmp3lame -q:a 2 $AUDIO/full-audio-mix.mp3
+
+# Merge video (no audio from Runway) with mixed audio
+ffmpeg -i $OUTPUT/deep-dive-video-only.mp4 -i $AUDIO/full-audio-mix.mp3 \
   -c:v copy -c:a aac -b:a 192k \
   -map 0:v:0 -map 1:a:0 \
   -shortest \
   $OUTPUT/deep-dive-final.mp4
 ```
 
-### Step 5: Quality check
+**Note**: For precise SFX timing, use `adelay` filter to position each scene's ambient SFX and transition swooshes at exact timestamps matching scene cuts. Example:
+
+```bash
+# Position Scene 1 ambient at 0ms, Scene 2 ambient at 10500ms, swoosh at 10000ms, etc.
+ffmpeg \
+  -i $SFX/scene01-ambient.mp3 \
+  -i $SFX/swoosh-crossfade.mp3 \
+  -i $SFX/scene02-ambient.mp3 \
+  -i $SFX/swoosh-crossfade.mp3 \
+  -i $SFX/scene03-ambient.mp3 \
+  ... \
+  -filter_complex \
+    "[0:a]adelay=0|0,volume=0.15[s1]; \
+     [1:a]adelay=9750|9750,volume=0.3[t1]; \
+     [2:a]adelay=10500|10500,volume=0.15[s2]; \
+     [3:a]adelay=22000|22000,volume=0.3[t2]; \
+     [4:a]adelay=22500|22500,volume=0.15[s3]; \
+     ... \
+     [s1][t1][s2][t2][s3]...amix=inputs=N:duration=longest[out]" \
+  -map "[out]" -c:a libmp3lame -q:a 2 $SFX/full-sfx-mix.mp3
+```
+
+### Step 6: Quality check
 
 ```bash
 # Verify final output
@@ -1626,25 +1888,38 @@ ffprobe -v error -show_entries format=duration,size,bit_rate \
 ### Expected Output
 
 - **File**: `docs/video/output/deep-dive-final.mp4`
-- **Resolution**: 1920x1080 (1080p)
+- **Resolution**: 1920x1080 (1080p) -- upscaled from Runway's 1280x720
 - **Frame rate**: 24 fps
 - **Codec**: H.264 video, AAC audio
 - **Duration**: ~3 minutes 46 seconds (226 seconds)
-- **Audio**: Narration only (no background music)
-- **Transitions**: 17 inter-scene transitions + fade in/out
+- **Audio**: ElevenLabs narration (George voice) + ElevenLabs SFX ambient layers (no background music)
+- **Transitions**: 17 inter-scene xfade transitions + fade in/out (ffmpeg)
 
 ### Production Summary
 
 | Metric | Value |
 |--------|-------|
 | Total scenes | 18 |
-| Total clips (Veo 3.1) | 40 |
-| Total transitions | 19 (17 inter-scene + fade in + fade out) |
-| Narration segments | 18 |
+| Total video clips (Runway Gen4 Turbo via Freepik) | 40 |
+| Total transitions (ffmpeg xfade) | 19 (17 inter-scene + fade in + fade out) |
+| Narration segments (ElevenLabs TTS, George voice) | 18 |
+| Sound effect layers (ElevenLabs SFX) | 18 ambient + 19 transition swooshes |
 | Video duration | ~3:46 |
+| Estimated Runway cost (~226s @ $0.12/s) | ~$27.12 |
 | Section A (Problem) | Scenes 1-3, ~32s |
 | Section B (Intro) | Scenes 4-6, ~35s |
 | Section C (How It Works) | Scenes 7-12, ~72s |
 | Section D (Differentiator) | Scenes 13-15, ~35s |
 | Section E (Architecture) | Scenes 16-18, ~42s |
+
+### API Dependencies
+
+| Service | Provider | Endpoint | Auth Header |
+|---------|----------|----------|-------------|
+| Image-to-Video | Runway Gen4 Turbo via Freepik | `POST /v1/ai/image-to-video/runway-4-5` | `x-freepik-api-key` |
+| Task Status | Freepik | `GET /v1/ai/image-to-video/runway-4-5/{task_id}` | `x-freepik-api-key` |
+| Narration TTS | ElevenLabs | `POST /v1/text-to-speech/{voice_id}` | `xi-api-key` |
+| Sound Effects | ElevenLabs | `POST /v1/sound-generation` | `xi-api-key` |
+| Voice List | ElevenLabs | `GET /v1/voices` | `xi-api-key` |
+| Stitching/Mix | ffmpeg (local) | N/A | N/A |
 
