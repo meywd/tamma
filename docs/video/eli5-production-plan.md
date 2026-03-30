@@ -1,16 +1,16 @@
 # ELI5 Video Production Plan
 
 ## TODO
-- [x] Scene 1: The Developer's Day (8s)
-- [x] Scene 2: What If? (5s)
-- [x] Scene 3: Meet Tamma (8s)
-- [x] Scene 4: The Autonomous Loop (10s, 2 clips)
-- [x] Scene 5: Pick Your AI (7s)
-- [x] Scene 6: Works Everywhere (7s)
-- [x] Scene 7: Built-In Quality (8s)
-- [x] Scene 8: Complete Transparency (7s)
-- [x] Scene 9: It Maintains Itself (8s)
-- [x] Scene 10: Get Started (7s)
+- [x] Scene 1: The Developer's Day (10s)
+- [x] Scene 2: What If? (10s)
+- [x] Scene 3: Meet Tamma (10s)
+- [x] Scene 4: The Autonomous Loop (13s, 2 clips: 5s + 8s)
+- [x] Scene 5: Pick Your AI (10s)
+- [x] Scene 6: Works Everywhere (8s)
+- [x] Scene 7: Built-In Quality (13s, 2 clips: 5s + 8s)
+- [x] Scene 8: Complete Transparency (10s)
+- [x] Scene 9: It Maintains Itself (13s, 2 clips: 5s + 8s)
+- [x] Scene 10: Get Started (8s)
 - [x] Stitching & Transitions
 - [x] Final Render
 
@@ -42,7 +42,7 @@ export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"         # George - Warm, Capti
 - Auth header: `x-freepik-api-key`
 - Price: ~$0.12/second of generated video
 - Output: video only (no audio track)
-- Durations: 5s or 10s
+- Durations: 5s, 8s, or 10s
 - Aspect ratios: `1280:720`, `720:1280`, `1104:832`, `832:1104`, `960:960`, `1584:672`
 
 **Narration** -- ElevenLabs Text-to-Speech:
@@ -63,13 +63,13 @@ export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"         # George - Warm, Capti
 - Layer sound effects at transition points
 - Final render to MP4
 
-**Output specs**: 1280x720, 24fps, H.264, AAC audio, ~80 seconds total
+**Output specs**: 1280x720, 24fps, H.264, AAC audio, ~100 seconds total
 
 ---
 
 ## Scene 1: The Developer's Day
 
-**Duration**: 8 seconds | **Script reference**: Scene 1 "The Pain"
+**Duration**: 10 seconds | **Script reference**: Scene 1 "The Pain"
 
 ### IMAGES
 
@@ -84,7 +84,7 @@ export ELEVENLABS_VOICE_ID="JBFqnCBsd6RMkjVDRZzb"         # George - Warm, Capti
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/01-the-pain.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic slow dolly-out from the developer's hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays."
-- **duration**: 10 (will trim to 8s in post)
+- **duration**: 10
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene01-the-pain.mp4`
 
@@ -119,11 +119,11 @@ curl -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
 - speed: 0.92
 
 **Timing sync**:
-- 0.0s-2.5s: "Developers spend over half their day on work that isn't actually building features." (dolly-out reveals full desk)
-- 2.5s-3.0s: [breath pause] (more panels slide into view)
-- 3.0s-4.5s: "Writing boilerplate. Fixing lint errors." (error panels pulse red)
-- 4.5s-6.5s: "Waiting for CI." (loading spinner visible, camera still pulling back)
-- 6.5s-8.0s: "Reviewing the same patterns again and again." (screens fill frame, resignation)
+- 0.0s-3.0s: "Developers spend over half their day on work that isn't actually building features." (dolly-out reveals full desk)
+- 3.0s-3.8s: [breath pause] (more panels slide into view)
+- 3.8s-5.5s: "Writing boilerplate. Fixing lint errors." (error panels pulse red)
+- 5.5s-7.5s: "Waiting for CI." (loading spinner visible, camera still pulling back)
+- 7.5s-10.0s: "Reviewing the same patterns again and again." (screens fill frame, resignation)
 
 ### EMOTIONAL ARC
 
@@ -148,7 +148,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 2: What If?
 
-**Duration**: 5 seconds | **Script reference**: Scene 2 "The Question"
+**Duration**: 10 seconds | **Script reference**: Scene 2 "The Question"
 
 ### IMAGES
 
@@ -162,7 +162,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/02-the-question.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic slow push-in toward the glowing purple question mark at center. The purple glow intensifies and pulses gently, radiating outward. The four surrounding development icons (Git branch, test tube, checkmark, merge arrow) drift very slightly inward toward the question mark as if drawn to it. Circuit-board traces in the background shimmer faintly. The overall light level increases subtly, as if dawn is breaking on a new idea."
-- **duration**: 5
+- **duration**: 10
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene02-the-question.mp4`
 
@@ -180,10 +180,11 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - speed: 0.88
 
 **Timing sync**:
-- 0.0s-1.8s: "What if an AI could handle all of that for you --" (push-in begins, glow pulses)
-- 1.8s-2.3s: [beat pause] (icons drift inward)
-- 2.3s-3.8s: "from the moment an issue is assigned" (glow intensifying)
-- 3.8s-5.0s: "to the moment code is merged?" (peak glow, hold on tight frame)
+- 0.0s-0.8s: [beat -- purple glow builds, viewer settles in] (push-in begins)
+- 0.8s-3.5s: "What if an AI could handle all of that for you --" (glow pulses, icons drift)
+- 3.5s-4.5s: [beat pause] (icons drift inward, glow intensifying)
+- 4.5s-7.0s: "from the moment an issue is assigned" (glow intensifying steadily)
+- 7.0s-10.0s: "to the moment code is merged?" (peak glow, hold on tight frame)
 
 ### EMOTIONAL ARC
 
@@ -206,7 +207,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 3: Meet Tamma
 
-**Duration**: 8 seconds | **Script reference**: Scene 3 "Introducing Tamma"
+**Duration**: 10 seconds | **Script reference**: Scene 3 "Introducing Tamma"
 
 ### IMAGES
 
@@ -221,7 +222,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/03-meet-tamma.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic logo reveal. The Tamma gold T logo and purple ring hold center frame as radial light beams rotate very slowly clockwise. At 3 seconds, the logo begins a slow dimensional rotation, gradually revealing Arabic calligraphy on its reverse side. The light beams transition from a starburst pattern to trailing streaks as if the logo is gathering momentum. By 6 seconds, concentric energy rings begin expanding outward from below the badge. Code symbols scatter gently from the center. The rotation settles at a three-quarter angle."
-- **duration**: 10 (will trim to 8s in post)
+- **duration**: 10
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene03-meet-tamma.mp4`
 
@@ -240,11 +241,11 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 **Timing sync**:
 - 0.0s-1.5s: "Meet Tamma --" (logo holds center, light beams radiate, name appears)
-- 1.5s-3.0s: "an autonomous development platform." (beams rotate slowly)
-- 3.0s-4.5s: "The name comes from the Arabic word meaning" (logo begins rotation)
-- 4.5s-5.5s: "'it is done.'" (Arabic calligraphy becomes visible, beat pause)
-- 5.5s-6.5s: [pause] "And that is exactly what Tamma does." (energy rings begin)
-- 6.5s-8.0s: "It gets things done." (full kinetic energy, confident landing)
+- 1.5s-3.5s: "an autonomous development platform." (beams rotate slowly)
+- 3.5s-5.5s: "The name comes from the Arabic word meaning" (logo begins rotation)
+- 5.5s-6.5s: "'it is done.'" (Arabic calligraphy becomes visible, beat pause)
+- 6.5s-8.0s: [pause] "And that is exactly what Tamma does." (energy rings begin)
+- 8.0s-10.0s: "It gets things done." (full kinetic energy, confident landing)
 
 ### EMOTIONAL ARC
 
@@ -269,7 +270,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 4: The Autonomous Loop
 
-**Duration**: 10 seconds (2 clips: 5s + 5s) | **Script reference**: Scene 4 "How It Works"
+**Duration**: 13 seconds (2 clips: 5s + 8s) | **Script reference**: Scene 4 "How It Works"
 
 ### IMAGES
 
@@ -295,8 +296,8 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 **Clip 4b** (second half):
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/extra/04B-autonomous-loop.png` (base64-encoded or public HTTPS URL)
-- **prompt**: "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 3 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority."
-- **duration**: 5
+- **prompt**: "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 4 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority. Confetti settles as the scene holds on the triumphant green badge."
+- **duration**: 8
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene04b-autonomous-loop.mp4`
 
@@ -315,12 +316,12 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 **Timing sync**:
 - 0.0s-1.5s: "You assign an issue." (human figure presses button, energy pulse starts) [Clip 4a]
-- 1.5s-2.0s: [brief pause] "Tamma reads it, plans a solution," (pulse travels through first two nodes)
-- 2.0s-4.0s: "writes the code, runs the tests," (camera tracks to code/test junction, streams flow)
-- 4.0s-5.5s: "creates a pull request, fixes any problems," (transition between clips, continuing pipeline) [Clip 4a -> 4b]
-- 5.5s-7.0s: "and merges it." (MERGED badge materializes, green burst)
-- 7.0s-8.0s: [pause] "All automatically." (confetti settles, moment of satisfaction)
-- 8.0s-10.0s: "You stay in control of the big decisions." (camera holds on MERGED, tone warms)
+- 1.5s-2.5s: [brief pause] "Tamma reads it, plans a solution," (pulse travels through first two nodes)
+- 2.5s-4.5s: "writes the code, runs the tests," (camera tracks to code/test junction, streams flow)
+- 4.5s-6.5s: "creates a pull request, fixes any problems," (transition between clips, continuing pipeline) [Clip 4a -> 4b]
+- 6.5s-8.5s: "and merges it." (MERGED badge materializes, green burst)
+- 8.5s-10.5s: [pause] "All automatically." (confetti settles, moment of satisfaction)
+- 10.5s-13.0s: "You stay in control of the big decisions." (camera holds on MERGED, tone warms)
 
 ### EMOTIONAL ARC
 
@@ -347,7 +348,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 5: Pick Your AI
 
-**Duration**: 7 seconds | **Script reference**: Scene 5 "Your Choice of AI"
+**Duration**: 10 seconds | **Script reference**: Scene 5 "Your Choice of AI"
 
 ### IMAGES
 
@@ -362,7 +363,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/05-pick-your-ai.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic slow zoom into the central AI hub. All eight provider circles initially glow and pulse with energy. Over 4 seconds, seven of the eight providers gracefully dim and fade to dark outlines while one provider (upper-left triangle) intensifies its glow dramatically. A bright cyan energy beam solidifies along the connection line from the selected provider to the central hub. An 'Active' badge with checkmark materializes next to the selected provider. A swap icon appears, suggesting easy switching. The central hub absorbs the energy and glows brighter. The composition simplifies from busy to focused."
-- **duration**: 10 (will trim to 7s in post)
+- **duration**: 10
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene05-pick-your-ai.mp4`
 
@@ -380,12 +381,12 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - speed: 0.93
 
 **Timing sync**:
-- 0.0s-1.8s: "Tamma works with the AI you want." (all providers glowing equally)
-- 1.8s-2.3s: [beat] (providers begin dimming)
-- 2.3s-4.0s: "Claude, GPT, Gemini, open-source models --" (clockwise dimming sequence)
-- 4.0s-5.2s: "even local LLMs on your own machine." (single provider lights up brightly)
-- 5.2s-5.8s: "No vendor lock-in." (Active badge appears)
-- 5.8s-7.0s: [pause] "Your choice." (swap icon materializes, hold on clean composition)
+- 0.0s-2.5s: "Tamma works with the AI you want." (all providers glowing equally)
+- 2.5s-3.2s: [beat] (providers begin dimming)
+- 3.2s-5.5s: "Claude, GPT, Gemini, open-source models --" (clockwise dimming sequence)
+- 5.5s-7.2s: "even local LLMs on your own machine." (single provider lights up brightly)
+- 7.2s-8.2s: "No vendor lock-in." (Active badge appears)
+- 8.2s-10.0s: [pause] "Your choice." (swap icon materializes, hold on clean composition)
 
 ### EMOTIONAL ARC
 
@@ -410,7 +411,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 6: Works Everywhere
 
-**Duration**: 7 seconds | **Script reference**: Scene 6 "Your Choice of Platform"
+**Duration**: 8 seconds | **Script reference**: Scene 6 "Your Choice of Platform"
 
 ### IMAGES
 
@@ -425,7 +426,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/06-works-everywhere.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic overhead establishing shot looking down at the platform fan. The seven platform cards hover gently with a subtle floating animation. Green energy dots travel down the connection lines toward the central Tamma hub. Over 3 seconds, the abstract icons on the cards morph subtly into more recognizable platform silhouettes. At 4 seconds, two cards (left and right) light up brightly with green and blue glows while the others dim. Bright energy beams solidify along their connections. A bidirectional arrow materializes between the active connections. A tooltip card fades in at lower-right showing platform compatibility with green checkmarks. The Tamma hub pulses with absorbed energy."
-- **duration**: 10 (will trim to 7s in post)
+- **duration**: 8
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene06-works-everywhere.mp4`
 
@@ -444,9 +445,9 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 **Timing sync**:
 - 0.0s-3.5s: "It also works with GitHub, GitLab, Gitea, Forgejo, Bitbucket, Azure DevOps --" (cards float, icons become recognizable, energy flows)
-- 3.5s-4.5s: "wherever your code lives." (two cards light up with green/blue glow)
-- 4.5s-5.2s: [pause] (bidirectional arrow and tooltip appear)
-- 5.2s-7.0s: "One tool, every platform." (full composition visible, clean landing)
+- 3.5s-5.0s: "wherever your code lives." (two cards light up with green/blue glow)
+- 5.0s-6.0s: [pause] (bidirectional arrow and tooltip appear)
+- 6.0s-8.0s: "One tool, every platform." (full composition visible, clean landing)
 
 ### EMOTIONAL ARC
 
@@ -471,7 +472,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 7: Built-In Quality
 
-**Duration**: 8 seconds | **Script reference**: Scene 7 "Quality You Can Trust"
+**Duration**: 13 seconds (2 clips: 5s + 8s) | **Script reference**: Scene 7 "Quality You Can Trust"
 
 ### IMAGES
 
@@ -481,14 +482,23 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 **End frame (B)**: `docs/video/scenes/eli5/extra/07B-quality-gates.png`
 - A dramatic failure-and-recovery scene. Center: a large blue shield with a glowing circuit-pattern lock and a "CODE BLOCK" label on an orange element passing through. Above: a large red X mark with red glowing distortion, indicating a test failure. Upper-right: a circular retry loop icon showing a wrench tool, a red X transitioning to a green checkmark, and circular arrows -- representing Tamma's auto-fix cycle. Far left: a dimmed shield with a green checkmark above it (previous gate already passed). Far right: a dimmed shield (next gate waiting). The mood has shifted from "everything passes cleanly" to "a failure occurred, but Tamma catches and fixes it automatically." Red (#EF4444) accents for the failure, green for the recovery path.
 
-### VIDEO CLIP
+### VIDEO CLIPS
 
+**Clip 7a** (first half):
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/07-quality-gates.png` (base64-encoded or public HTTPS URL)
-- **prompt**: "Cinematic tracking shot following a code block along the conveyor belt through three quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops briefly. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the X transforming to a checkmark. The code block, now corrected, passes through the Security gate. The first shield dims behind, the third shield (Review) waits ahead. The mood transitions from confidence through brief alarm to recovery."
-- **duration**: 10 (will trim to 8s in post)
+- **prompt**: "Cinematic tracking shot following a code block along the conveyor belt through quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops. The mood transitions from confidence to brief alarm."
+- **duration**: 5
 - **ratio**: "1280:720"
-- **Output**: `docs/video/output/clips/scene07-quality-gates.mp4`
+- **Output**: `docs/video/output/clips/scene07a-quality-gates.mp4`
+
+**Clip 7b** (second half):
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/extra/07B-quality-gates.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "Continuing from the security gate failure. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the red X transforming to a green checkmark. The code block, now corrected, passes through the Security gate with a green flash. The first shield dims behind. The code block continues to the third shield (Review) and passes through cleanly. All three shields glow with confirmed checkmarks. The mood shifts from alarm through recovery to confident resolution. Nothing ships broken."
+- **duration**: 8
+- **ratio**: "1280:720"
+- **Output**: `docs/video/output/clips/scene07b-quality-gates.mp4`
 
 ### NARRATION
 
@@ -504,12 +514,12 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - speed: 0.90
 
 **Timing sync**:
-- 0.0s-2.5s: "Every change passes through quality gates -- automated tests, security scans, code review." (code block travels through first gate, checkmarks appear)
-- 2.5s-3.0s: [beat] (code block approaches security gate)
-- 3.0s-4.5s: "If something fails," (red X materializes, brief alarm)
-- 4.5s-6.0s: "Tamma fixes it and tries again." (retry loop spins, wrench works)
-- 6.0s-7.0s: "If it still cannot fix it, it asks you for help." (code block passes through, recovery)
-- 7.0s-8.0s: "Nothing ships broken." (clean landing, shields dim confidently)
+- 0.0s-3.0s: "Every change passes through quality gates -- automated tests, security scans, code review." (code block travels through first gate, checkmarks appear) [Clip 7a]
+- 3.0s-4.0s: [beat] (code block approaches security gate, red X materializes)
+- 4.0s-5.5s: "If something fails," (brief alarm, transition between clips) [Clip 7a -> 7b]
+- 5.5s-8.0s: "Tamma fixes it and tries again." (retry loop spins, wrench works, X becomes checkmark)
+- 8.0s-10.5s: "If it still cannot fix it, it asks you for help." (code block passes through review gate, recovery)
+- 10.5s-13.0s: "Nothing ships broken." (all shields confirmed, clean landing, hold)
 
 ### EMOTIONAL ARC
 
@@ -519,6 +529,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 ### TRANSITIONS
 
 - **Entry**: 0.5s smooth crossfade from Scene 6. The platform cards dissolve as the shield icons materialize, shifting from "where" to "how well."
+- **Between clips**: Seamless cut between Clip 7a and 7b at the security gate failure -- the end frame of 7a is the start frame of 7b, so no transition is needed.
 - **Exit**: 0.5s smooth crossfade into Scene 8. The shields dissolve as the timeline visualization emerges, shifting from protection to transparency.
 
 ### SOUND
@@ -535,7 +546,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 8: Complete Transparency
 
-**Duration**: 7 seconds | **Script reference**: Scene 8 "The Audit Trail"
+**Duration**: 10 seconds | **Script reference**: Scene 8 "The Audit Trail"
 
 ### IMAGES
 
@@ -550,7 +561,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/08-audit-trail.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic slow scroll down the vertical timeline, with event cards fading into view as the camera descends. The purple timeline glows and pulses. Gold timestamp gears rotate subtly. At 3 seconds, the rewind icon in the upper-right activates -- the camera reverses direction, scrolling back UP the timeline. At 4 seconds, a gold cursor appears and clicks on the CODE GENERATED event. The event card expands dramatically into a detailed inspection panel showing the exact timestamp, code diff, and AI provider used. The other event cards shrink and slide to the periphery. The mood shifts from overview to forensic investigation."
-- **duration**: 10 (will trim to 7s in post)
+- **duration**: 10
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene08-audit-trail.mp4`
 
@@ -568,11 +579,11 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - speed: 0.88
 
 **Timing sync**:
-- 0.0s-1.5s: "Everything Tamma does is recorded." (camera scrolls down timeline, cards appear)
-- 1.5s-3.0s: "Every decision, every line of code, every approval." (more cards fade in, timeline extends)
-- 3.0s-4.5s: "You can rewind to any moment" (rewind activates, camera scrolls back up, gold cursor appears)
-- 4.5s-5.5s: "and see exactly what happened." (cursor clicks, detail panel expands with code diff)
-- 5.5s-7.0s: "Full transparency, full trust." (hold on detail panel, provider info visible)
+- 0.0s-2.0s: "Everything Tamma does is recorded." (camera scrolls down timeline, cards appear)
+- 2.0s-4.5s: "Every decision, every line of code, every approval." (more cards fade in, timeline extends)
+- 4.5s-6.5s: "You can rewind to any moment" (rewind activates, camera scrolls back up, gold cursor appears)
+- 6.5s-8.0s: "and see exactly what happened." (cursor clicks, detail panel expands with code diff)
+- 8.0s-10.0s: "Full transparency, full trust." (hold on detail panel, provider info visible)
 
 ### EMOTIONAL ARC
 
@@ -598,7 +609,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 9: It Maintains Itself
 
-**Duration**: 8 seconds | **Script reference**: Scene 9 "Self-Maintenance"
+**Duration**: 13 seconds (2 clips: 5s + 8s) | **Script reference**: Scene 9 "Self-Maintenance"
 
 ### IMAGES
 
@@ -608,14 +619,23 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 **End frame (B)**: `docs/video/scenes/eli5/extra/09B-self-maintenance.png`
 - A "SELF-REPAIR CYCLE" visualization. A large semicircular arc (upper half) traces a path from left to right with three key nodes: Left node: a red circle containing a pixel-art bug icon (bug detected), with broken code fragments and error symbols scattering from behind it. Top node: a glowing energy sphere with code brackets `{}` and a wrench icon inside, labeled "Generating Fix" with golden sparks emanating. Right node: a green circle with a bold checkmark inside, labeled "RESOLVED", with clean document/file icons streaming to the right. Blue directional arrows connect the three nodes along the arc. Below the arc at center-bottom, the Tamma logo (a stylized infinity-knot in gold within a purple circle) anchors the composition, with "SELF-REPAIR CYCLE" text beneath. The bottom half shows the arc continuing in purple with directional arrows completing the full circle. The mood has shifted from abstract perpetual motion to a concrete self-repair narrative: detect bug, generate fix, resolve.
 
-### VIDEO CLIP
+### VIDEO CLIPS
 
+**Clip 9a** (first half):
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/09-self-maintenance.png` (base64-encoded or public HTTPS URL)
-- **prompt**: "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly. At 3 seconds, the abstract loop begins transforming: the top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left, a wrench/fix node at the top center with golden sparks, and a green resolved checkmark on the right. The Tamma logo descends to the bottom center. Directional arrows animate between the nodes, showing the flow: detect, fix, resolve. The bottom half of the arc completes in purple, forming the full self-repair cycle."
-- **duration**: 10 (will trim to 8s in post)
+- **prompt**: "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly, mesmerizing and elegant. The Tamma TM monogram glows at center. Concentric rings pulse with depth. The mood is perpetual and self-sustaining."
+- **duration**: 5
 - **ratio**: "1280:720"
-- **Output**: `docs/video/output/clips/scene09-self-maintenance.mp4`
+- **Output**: `docs/video/output/clips/scene09a-self-maintenance.mp4`
+
+**Clip 9b** (second half):
+- **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
+- **image**: `docs/video/scenes/eli5/extra/09B-self-maintenance.png` (base64-encoded or public HTTPS URL)
+- **prompt**: "The abstract ouroboros loop transforms into a concrete self-repair cycle. The top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left with error fragments scattering, a wrench/fix node at the top center with golden sparks emanating, and a green resolved checkmark on the right with clean documents streaming. Blue directional arrows animate between the nodes showing the flow: detect, fix, resolve. The Tamma logo anchors at bottom center. The bottom half of the arc completes in purple, forming the full SELF-REPAIR CYCLE."
+- **duration**: 8
+- **ratio**: "1280:720"
+- **Output**: `docs/video/output/clips/scene09b-self-maintenance.mp4`
 
 ### NARRATION
 
@@ -631,13 +651,13 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - speed: 0.86
 
 **Timing sync**:
-- 0.0s-2.0s: "Here is the most remarkable part." (ouroboros rotating, green pulses flowing, building anticipation)
-- 2.0s-2.5s: [pause -- let it land] (loop continues)
-- 2.5s-3.5s: "Tamma maintains its own codebase." (loop begins morphing)
-- 3.5s-4.5s: "It fixes its own bugs." (red bug node materializes on the left)
-- 4.5s-5.5s: "It builds its own features." (wrench/fix node sparks at top, green checkmark on right)
-- 5.5s-6.5s: [pause] "That is how we know" (directional arrows complete the cycle)
-- 6.5s-8.0s: "it is ready for yours." (full SELF-REPAIR CYCLE visible, Tamma logo glowing)
+- 0.0s-2.5s: "Here is the most remarkable part." (ouroboros rotating, green pulses flowing, building anticipation) [Clip 9a]
+- 2.5s-3.5s: [pause -- let it land] (loop continues)
+- 3.5s-5.5s: "Tamma maintains its own codebase." (loop begins morphing, transition between clips) [Clip 9a -> 9b]
+- 5.5s-7.5s: "It fixes its own bugs." (red bug node materializes on the left)
+- 7.5s-9.0s: "It builds its own features." (wrench/fix node sparks at top, green checkmark on right)
+- 9.0s-10.5s: [pause] "That is how we know" (directional arrows complete the cycle)
+- 10.5s-13.0s: "it is ready for yours." (full SELF-REPAIR CYCLE visible, Tamma logo glowing)
 
 ### EMOTIONAL ARC
 
@@ -647,6 +667,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 ### TRANSITIONS
 
 - **Entry**: 0.7s wipe with purple glow from Scene 8. The timeline dissolves into the ouroboros loop -- time-based history transforms into cyclical self-improvement.
+- **Between clips**: Seamless cut between Clip 9a and 9b at the ouroboros-to-arc transformation -- the end frame of 9a is the start frame of 9b, so no transition is needed.
 - **Exit**: 0.7s wipe with purple glow into Scene 10. The self-repair cycle contracts and transforms into the final Tamma logo in the CTA. This is a signature transition -- the two most dramatic scenes get the purple wipe treatment.
 
 ### SOUND
@@ -664,7 +685,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 
 ## Scene 10: Get Started
 
-**Duration**: 7 seconds | **Script reference**: Scene 10 "Call to Action"
+**Duration**: 8 seconds | **Script reference**: Scene 10 "Call to Action"
 
 ### IMAGES
 
@@ -679,7 +700,7 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 - **API**: Runway Gen4 Turbo via Freepik (`POST /v1/ai/image-to-video/runway-4-5`)
 - **image**: `docs/video/scenes/eli5/10-cta.png` (base64-encoded or public HTTPS URL)
 - **prompt**: "Cinematic logo hold transitioning to call-to-action. The Tamma logo text glows with pulsing purple-gold light, radial rings slowly expanding. At 3 seconds, the composition gracefully rearranges: the centered logo text slides left, the tamma.dev URL transforms into a clickable browser bar with a cursor approaching, and a large GitHub star badge materializes from golden particles on the lower-left. GET STARTED TODAY text types in letter by letter on the right side. Bokeh particles drift gently across the background. The overall motion is confident and inviting, not rushed."
-- **duration**: 10 (will trim to 7s in post)
+- **duration**: 8
 - **ratio**: "1280:720"
 - **Output**: `docs/video/output/clips/scene10-cta.mp4`
 
@@ -699,10 +720,10 @@ Sound effects to generate via ElevenLabs Sound Generation API:
 **Timing sync**:
 - 0.0s-1.5s: "Tamma." (logo glowing center frame, radial rings pulse)
 - 1.5s-2.0s: [pause -- brand name resonates]
-- 2.0s-4.0s: "Autonomous development that is actually done right." (composition begins rearranging)
-- 4.0s-4.5s: [beat]
-- 4.5s-5.5s: "Visit tamma.dev" (browser bar appears, cursor clicks)
-- 5.5s-7.0s: "or find us on GitHub." (star badge radiates, GET STARTED TODAY visible)
+- 2.0s-4.5s: "Autonomous development that is actually done right." (composition begins rearranging)
+- 4.5s-5.0s: [beat]
+- 5.0s-6.2s: "Visit tamma.dev" (browser bar appears, cursor clicks)
+- 6.2s-8.0s: "or find us on GitHub." (star badge radiates, GET STARTED TODAY visible)
 
 ### EMOTIONAL ARC
 
@@ -799,24 +820,24 @@ while true; do
 done
 ```
 
-### Generate All 11 Video Clips
+### Generate All 13 Video Clips
 
 ```bash
 CLIPS="docs/video/output/clips"
 
-# Scene 1 (8s scene, generate 10s, trim later)
+# Scene 1 (10s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/01-the-pain.png" \
   "Cinematic slow dolly-out from the developer hunched figure at the desk, gradually revealing more floating error panels and notification screens. The camera pulls back steadily, creating a sense of the developer being engulfed by the growing chaos. Error panels glow and pulse subtly. The loading spinner on the center monitor rotates. By the end, the human figure has receded and the screens dominate the frame, becoming an impersonal wall of system delays." \
   10 "${CLIPS}/scene01-the-pain.mp4"
 
-# Scene 2 (5s)
+# Scene 2 (10s, no B frame -- single clip with slow zoom and glow intensification)
 bash generate-video.sh \
   "docs/video/scenes/eli5/02-the-question.png" \
   "Cinematic slow push-in toward the glowing purple question mark at center. The purple glow intensifies and pulses gently, radiating outward. The four surrounding development icons drift very slightly inward toward the question mark as if drawn to it. Circuit-board traces in the background shimmer faintly. The overall light level increases subtly, as if dawn is breaking on a new idea." \
-  5 "${CLIPS}/scene02-the-question.mp4"
+  10 "${CLIPS}/scene02-the-question.mp4"
 
-# Scene 3 (8s scene, generate 10s, trim later)
+# Scene 3 (10s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/03-meet-tamma.png" \
   "Cinematic logo reveal. The Tamma gold T logo and purple ring hold center frame as radial light beams rotate very slowly clockwise. At 3 seconds, the logo begins a slow dimensional rotation, gradually revealing Arabic calligraphy on its reverse side. The light beams transition from a starburst pattern to trailing streaks as if the logo is gathering momentum. By 6 seconds, concentric energy rings begin expanding outward from below the badge. Code symbols scatter gently from the center. The rotation settles at a three-quarter angle." \
@@ -828,50 +849,62 @@ bash generate-video.sh \
   "Cinematic tracking shot along the horizontal pipeline from left to right. Starting wide on the full seven-node pipeline with the human figure pressing the button, the camera begins a smooth dolly right, following glowing purple energy pulses as they travel through the pipeline tubes from the issue node toward the code and test nodes. As the camera moves right, it gradually pushes in, transitioning from the wide overview to a close-up of the code-to-test junction. Code text streams flow between the two nodes. Green checkmarks erupt from the test beaker." \
   5 "${CLIPS}/scene04a-autonomous-loop.mp4"
 
-# Scene 4b (5s)
+# Scene 4b (8s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/extra/04B-autonomous-loop.png" \
-  "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 3 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority." \
-  5 "${CLIPS}/scene04b-autonomous-loop.mp4"
+  "Continuing the pipeline journey. From the close-up of code flowing into the test beaker with green checkmarks erupting, the camera pulls back slightly and continues its dolly-right movement, passing through the remaining pipeline stages. The energy pulse accelerates. At 4 seconds, the camera pushes in dramatically on the final MERGED badge as it materializes with a burst of green light and particle confetti. The checkmark icon glows intensely. The word MERGED appears with authority. Confetti settles as the scene holds on the triumphant green badge." \
+  8 "${CLIPS}/scene04b-autonomous-loop.mp4"
 
-# Scene 5 (7s scene, generate 10s, trim later)
+# Scene 5 (10s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/05-pick-your-ai.png" \
   "Cinematic slow zoom into the central AI hub. All eight provider circles initially glow and pulse with energy. Over 4 seconds, seven of the eight providers gracefully dim and fade to dark outlines while one provider (upper-left triangle) intensifies its glow dramatically. A bright cyan energy beam solidifies along the connection line from the selected provider to the central hub. An Active badge with checkmark materializes next to the selected provider. A swap icon appears, suggesting easy switching. The central hub absorbs the energy and glows brighter. The composition simplifies from busy to focused." \
   10 "${CLIPS}/scene05-pick-your-ai.mp4"
 
-# Scene 6 (7s scene, generate 10s, trim later)
+# Scene 6 (8s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/06-works-everywhere.png" \
   "Cinematic overhead establishing shot looking down at the platform fan. The seven platform cards hover gently with a subtle floating animation. Green energy dots travel down the connection lines toward the central Tamma hub. Over 3 seconds, the abstract icons on the cards morph subtly into more recognizable platform silhouettes. At 4 seconds, two cards light up brightly with green and blue glows while the others dim. Bright energy beams solidify along their connections. A bidirectional arrow materializes between the active connections. A tooltip card fades in showing platform compatibility with green checkmarks. The Tamma hub pulses with absorbed energy." \
-  10 "${CLIPS}/scene06-works-everywhere.mp4"
+  8 "${CLIPS}/scene06-works-everywhere.mp4"
 
-# Scene 7 (8s scene, generate 10s, trim later)
+# Scene 7a (5s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/07-quality-gates.png" \
-  "Cinematic tracking shot following a code block along the conveyor belt through three quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops briefly. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the X transforming to a checkmark. The code block, now corrected, passes through the Security gate. The first shield dims behind, the third shield waits ahead." \
-  10 "${CLIPS}/scene07-quality-gates.mp4"
+  "Cinematic tracking shot following a code block along the conveyor belt through quality gates. The code block approaches the first shield (Testing) and passes through with a green flash -- checkmark confirmed. It continues to the second shield (Security) where it hits a barrier -- a red X materializes with glowing distortion. The conveyor stops. The mood transitions from confidence to brief alarm." \
+  5 "${CLIPS}/scene07a-quality-gates.mp4"
 
-# Scene 8 (7s scene, generate 10s, trim later)
+# Scene 7b (8s)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/extra/07B-quality-gates.png" \
+  "Continuing from the security gate failure. A retry loop icon spins in the upper-right showing a wrench fixing the issue, the red X transforming to a green checkmark. The code block, now corrected, passes through the Security gate with a green flash. The first shield dims behind. The code block continues to the third shield (Review) and passes through cleanly. All three shields glow with confirmed checkmarks. The mood shifts from alarm through recovery to confident resolution. Nothing ships broken." \
+  8 "${CLIPS}/scene07b-quality-gates.mp4"
+
+# Scene 8 (10s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/08-audit-trail.png" \
   "Cinematic slow scroll down the vertical timeline, with event cards fading into view as the camera descends. The purple timeline glows and pulses. Gold timestamp gears rotate subtly. At 3 seconds, the rewind icon in the upper-right activates -- the camera reverses direction, scrolling back UP the timeline. At 4 seconds, a gold cursor appears and clicks on the CODE GENERATED event. The event card expands dramatically into a detailed inspection panel showing the exact timestamp, code diff, and AI provider used. The other event cards shrink and slide to the periphery." \
   10 "${CLIPS}/scene08-audit-trail.mp4"
 
-# Scene 9 (8s scene, generate 10s, trim later)
+# Scene 9a (5s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/09-self-maintenance.png" \
-  "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly. At 3 seconds, the abstract loop begins transforming: the top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left, a wrench/fix node at the top center with golden sparks, and a green resolved checkmark on the right. The Tamma logo descends to the bottom center. Directional arrows animate between the nodes, showing the flow: detect, fix, resolve. The bottom half of the arc completes in purple, forming the full self-repair cycle." \
-  10 "${CLIPS}/scene09-self-maintenance.mp4"
+  "Cinematic slow rotation of the ouroboros loop. Green energy pulses travel clockwise along the circular path, passing code symbols. The loop rotates very slowly, mesmerizing and elegant. The Tamma TM monogram glows at center. Concentric rings pulse with depth. The mood is perpetual and self-sustaining." \
+  5 "${CLIPS}/scene09a-self-maintenance.mp4"
 
-# Scene 10 (7s scene, generate 10s, trim later)
+# Scene 9b (8s)
+bash generate-video.sh \
+  "docs/video/scenes/eli5/extra/09B-self-maintenance.png" \
+  "The abstract ouroboros loop transforms into a concrete self-repair cycle. The top portion of the circle opens up and flattens into a semicircular arc. Three nodes crystallize along the arc -- a red bug node on the left with error fragments scattering, a wrench/fix node at the top center with golden sparks emanating, and a green resolved checkmark on the right with clean documents streaming. Blue directional arrows animate between the nodes showing the flow: detect, fix, resolve. The Tamma logo anchors at bottom center. The bottom half of the arc completes in purple, forming the full SELF-REPAIR CYCLE." \
+  8 "${CLIPS}/scene09b-self-maintenance.mp4"
+
+# Scene 10 (8s)
 bash generate-video.sh \
   "docs/video/scenes/eli5/10-cta.png" \
   "Cinematic logo hold transitioning to call-to-action. The Tamma logo text glows with pulsing purple-gold light, radial rings slowly expanding. At 3 seconds, the composition gracefully rearranges: the centered logo text slides left, the tamma.dev URL transforms into a clickable browser bar with a cursor approaching, and a large GitHub star badge materializes from golden particles on the lower-left. GET STARTED TODAY text types in letter by letter on the right side. Bokeh particles drift gently across the background. The overall motion is confident and inviting, not rushed." \
-  10 "${CLIPS}/scene10-cta.mp4"
+  8 "${CLIPS}/scene10-cta.mp4"
 ```
 
-**Cost estimate**: 11 clips at 5-10s each = ~85s total generated video. At $0.12/second = ~$10.20.
+**Cost estimate**: 13 clips at 5-10s each = ~105s total generated video. At $0.12/second = ~$12.60.
 
 ---
 
@@ -889,12 +922,14 @@ bash generate-video.sh \
 | Scene 4 | Scene 5 | Smooth crossfade | 0.5s | Green MERGED -> purple AI hub |
 | Scene 5 | Scene 6 | Smooth crossfade | 0.5s | Hub-spoke AI -> arc-hub platforms |
 | Scene 6 | Scene 7 | Smooth crossfade | 0.5s | Platform cards -> quality shields |
+| Scene 7a | Scene 7b | Seamless cut | 0.0s | Same end/start frame (07B) |
 | Scene 7 | Scene 8 | Smooth crossfade | 0.5s | Shields -> timeline |
 | Scene 8 | Scene 9 | Purple glow wipe | 0.7s | Timeline -> ouroboros (dramatic pair) |
+| Scene 9a | Scene 9b | Seamless cut | 0.0s | Same end/start frame (09B) |
 | Scene 9 | Scene 10 | Purple glow wipe | 0.7s | Self-repair -> logo CTA (dramatic pair) |
 | Scene 10 | Black | Fade to black | 1.0s | Luxurious lingering fade |
 
-**Total transition time**: ~5.5 seconds (overlapping with scene durations)
+**Total transition time**: ~5.0 seconds (overlapping with scene durations)
 
 ### Narration Audio Generation
 
@@ -907,7 +942,7 @@ Generate all 10 narration audio files via ElevenLabs API before stitching:
 VOICE_ID="JBFqnCBsd6RMkjVDRZzb"
 OUTPUT_DIR="docs/video/output/audio"
 
-# Scene 1 (8s)
+# Scene 1 (10s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -917,7 +952,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.55, "similarity_boost": 0.78, "style": 0.35, "speed": 0.92}
   }' --output "${OUTPUT_DIR}/narration-scene01.mp3"
 
-# Scene 2 (5s)
+# Scene 2 (10s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -927,7 +962,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.50, "similarity_boost": 0.80, "style": 0.40, "speed": 0.88}
   }' --output "${OUTPUT_DIR}/narration-scene02.mp3"
 
-# Scene 3 (8s)
+# Scene 3 (10s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -937,7 +972,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.60, "similarity_boost": 0.82, "style": 0.45, "speed": 0.90}
   }' --output "${OUTPUT_DIR}/narration-scene03.mp3"
 
-# Scene 4 (10s)
+# Scene 4 (13s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -947,7 +982,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.52, "similarity_boost": 0.80, "style": 0.40, "speed": 0.95}
   }' --output "${OUTPUT_DIR}/narration-scene04.mp3"
 
-# Scene 5 (7s)
+# Scene 5 (10s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -957,7 +992,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.55, "similarity_boost": 0.78, "style": 0.38, "speed": 0.93}
   }' --output "${OUTPUT_DIR}/narration-scene05.mp3"
 
-# Scene 6 (7s)
+# Scene 6 (8s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -967,7 +1002,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.55, "similarity_boost": 0.78, "style": 0.35, "speed": 0.94}
   }' --output "${OUTPUT_DIR}/narration-scene06.mp3"
 
-# Scene 7 (8s)
+# Scene 7 (13s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -977,7 +1012,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.60, "similarity_boost": 0.80, "style": 0.35, "speed": 0.90}
   }' --output "${OUTPUT_DIR}/narration-scene07.mp3"
 
-# Scene 8 (7s)
+# Scene 8 (10s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -987,7 +1022,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.62, "similarity_boost": 0.80, "style": 0.30, "speed": 0.88}
   }' --output "${OUTPUT_DIR}/narration-scene08.mp3"
 
-# Scene 9 (8s)
+# Scene 9 (13s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -997,7 +1032,7 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
     "voice_settings": {"stability": 0.50, "similarity_boost": 0.82, "style": 0.48, "speed": 0.86}
   }' --output "${OUTPUT_DIR}/narration-scene09.mp3"
 
-# Scene 10 (7s)
+# Scene 10 (8s)
 curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}" \
   -H "xi-api-key: ${ELEVENLABS_API_KEY}" \
   -H "Content-Type: application/json" \
@@ -1099,32 +1134,32 @@ curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
 
 ### Step 1: Prepare Clips with Correct Duration
 
-Ensure each Runway-generated clip matches the target duration. Runway Gen4 Turbo only supports 5s or 10s durations, so we trim longer clips down:
+All clips are generated at their exact target duration (5s, 8s, or 10s), so no trimming is needed. Copy clips to the assembly directory:
 
 ```bash
 CLIPS="docs/video/output/clips"
 ASSEMBLY="docs/video/output/assembly"
 
-# Trim each clip to exact scene duration
-# Runway outputs at its native resolution; we will scale in a later step if needed
-
-ffmpeg -i "${CLIPS}/scene01-the-pain.mp4" -t 8 -c copy "${ASSEMBLY}/s01.mp4"
-ffmpeg -i "${CLIPS}/scene02-the-question.mp4" -t 5 -c copy "${ASSEMBLY}/s02.mp4"
-ffmpeg -i "${CLIPS}/scene03-meet-tamma.mp4" -t 8 -c copy "${ASSEMBLY}/s03.mp4"
-ffmpeg -i "${CLIPS}/scene04a-autonomous-loop.mp4" -t 5 -c copy "${ASSEMBLY}/s04a.mp4"
-ffmpeg -i "${CLIPS}/scene04b-autonomous-loop.mp4" -t 5 -c copy "${ASSEMBLY}/s04b.mp4"
-ffmpeg -i "${CLIPS}/scene05-pick-your-ai.mp4" -t 7 -c copy "${ASSEMBLY}/s05.mp4"
-ffmpeg -i "${CLIPS}/scene06-works-everywhere.mp4" -t 7 -c copy "${ASSEMBLY}/s06.mp4"
-ffmpeg -i "${CLIPS}/scene07-quality-gates.mp4" -t 8 -c copy "${ASSEMBLY}/s07.mp4"
-ffmpeg -i "${CLIPS}/scene08-audit-trail.mp4" -t 7 -c copy "${ASSEMBLY}/s08.mp4"
-ffmpeg -i "${CLIPS}/scene09-self-maintenance.mp4" -t 8 -c copy "${ASSEMBLY}/s09.mp4"
-ffmpeg -i "${CLIPS}/scene10-cta.mp4" -t 7 -c copy "${ASSEMBLY}/s10.mp4"
+# Copy each clip to assembly (already at correct duration from generation)
+cp "${CLIPS}/scene01-the-pain.mp4" "${ASSEMBLY}/s01.mp4"              # 10s
+cp "${CLIPS}/scene02-the-question.mp4" "${ASSEMBLY}/s02.mp4"          # 10s
+cp "${CLIPS}/scene03-meet-tamma.mp4" "${ASSEMBLY}/s03.mp4"            # 10s
+cp "${CLIPS}/scene04a-autonomous-loop.mp4" "${ASSEMBLY}/s04a.mp4"     # 5s
+cp "${CLIPS}/scene04b-autonomous-loop.mp4" "${ASSEMBLY}/s04b.mp4"     # 8s
+cp "${CLIPS}/scene05-pick-your-ai.mp4" "${ASSEMBLY}/s05.mp4"          # 10s
+cp "${CLIPS}/scene06-works-everywhere.mp4" "${ASSEMBLY}/s06.mp4"      # 8s
+cp "${CLIPS}/scene07a-quality-gates.mp4" "${ASSEMBLY}/s07a.mp4"       # 5s
+cp "${CLIPS}/scene07b-quality-gates.mp4" "${ASSEMBLY}/s07b.mp4"       # 8s
+cp "${CLIPS}/scene08-audit-trail.mp4" "${ASSEMBLY}/s08.mp4"           # 10s
+cp "${CLIPS}/scene09a-self-maintenance.mp4" "${ASSEMBLY}/s09a.mp4"    # 5s
+cp "${CLIPS}/scene09b-self-maintenance.mp4" "${ASSEMBLY}/s09b.mp4"    # 8s
+cp "${CLIPS}/scene10-cta.mp4" "${ASSEMBLY}/s10.mp4"                   # 8s
 ```
 
-### Step 2: Concatenate Scene 4a + 4b (Seamless Cut)
+### Step 2: Concatenate Multi-Clip Scenes (Seamless Cuts)
 
 ```bash
-# Scene 4 has two clips with seamless join
+# Scene 4 has two clips with seamless join (5s + 8s = 13s)
 cat > "${ASSEMBLY}/scene4-list.txt" << 'EOF'
 file 's04a.mp4'
 file 's04b.mp4'
@@ -1132,6 +1167,24 @@ EOF
 
 ffmpeg -f concat -safe 0 -i "${ASSEMBLY}/scene4-list.txt" \
   -c copy "${ASSEMBLY}/s04.mp4"
+
+# Scene 7 has two clips with seamless join (5s + 8s = 13s)
+cat > "${ASSEMBLY}/scene7-list.txt" << 'EOF'
+file 's07a.mp4'
+file 's07b.mp4'
+EOF
+
+ffmpeg -f concat -safe 0 -i "${ASSEMBLY}/scene7-list.txt" \
+  -c copy "${ASSEMBLY}/s07.mp4"
+
+# Scene 9 has two clips with seamless join (5s + 8s = 13s)
+cat > "${ASSEMBLY}/scene9-list.txt" << 'EOF'
+file 's09a.mp4'
+file 's09b.mp4'
+EOF
+
+ffmpeg -f concat -safe 0 -i "${ASSEMBLY}/scene9-list.txt" \
+  -c copy "${ASSEMBLY}/s09.mp4"
 ```
 
 ### Step 3: Apply Transitions with xfade Filter
@@ -1140,7 +1193,7 @@ ffmpeg -f concat -safe 0 -i "${ASSEMBLY}/scene4-list.txt" \
 # Build the full video with crossfade/wipe transitions between scenes.
 # xfade filter: offset = cumulative_time - transition_duration
 #
-# Scene durations: s01=8, s02=5, s03=8, s04=10, s05=7, s06=7, s07=8, s08=7, s09=8, s10=7
+# Scene durations: s01=10, s02=10, s03=10, s04=13, s05=10, s06=8, s07=13, s08=10, s09=13, s10=8
 # Transition types and durations from the table above.
 #
 # NOTE: Runway Gen4 Turbo produces silent video (no audio track).
@@ -1160,16 +1213,16 @@ ffmpeg \
   -i "${ASSEMBLY}/s09.mp4" \
   -i "${ASSEMBLY}/s10.mp4" \
   -filter_complex "
-    [0:v][1:v]xfade=transition=wiperight:duration=0.7:offset=7.3[v01];
-    [v01][2:v]xfade=transition=fade:duration=0.5:offset=11.8[v02];
-    [v02][3:v]xfade=transition=slideleft:duration=0.4:offset=19.3[v03];
-    [v03][4:v]xfade=transition=fade:duration=0.5:offset=28.9[v04];
-    [v04][5:v]xfade=transition=fade:duration=0.5:offset=35.4[v05];
-    [v05][6:v]xfade=transition=fade:duration=0.5:offset=41.9[v06];
-    [v06][7:v]xfade=transition=fade:duration=0.5:offset=49.4[v07];
-    [v07][8:v]xfade=transition=wiperight:duration=0.7:offset=55.9[v08];
-    [v08][9:v]xfade=transition=wiperight:duration=0.7:offset=63.2[v09];
-    [v09]fade=t=out:st=6.0:d=1.0[vout]
+    [0:v][1:v]xfade=transition=wiperight:duration=0.7:offset=9.3[v01];
+    [v01][2:v]xfade=transition=fade:duration=0.5:offset=18.8[v02];
+    [v02][3:v]xfade=transition=slideleft:duration=0.4:offset=28.4[v03];
+    [v03][4:v]xfade=transition=fade:duration=0.5:offset=40.9[v04];
+    [v04][5:v]xfade=transition=fade:duration=0.5:offset=50.4[v05];
+    [v05][6:v]xfade=transition=fade:duration=0.5:offset=57.9[v06];
+    [v06][7:v]xfade=transition=fade:duration=0.5:offset=70.4[v07];
+    [v07][8:v]xfade=transition=wiperight:duration=0.7:offset=79.7[v08];
+    [v08][9:v]xfade=transition=wiperight:duration=0.7:offset=92.0[v09];
+    [v09]fade=t=out:st=7.0:d=1.0[vout]
   " \
   -map "[vout]" \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p \
@@ -1178,16 +1231,16 @@ ffmpeg \
 ```
 
 **Offset calculation notes** (cumulative duration minus transition overlap):
-- s01->s02: offset = 8 - 0.7 = 7.3
-- s02->s03: offset = 7.3 + 5 - 0.5 = 11.8
-- s03->s04: offset = 11.8 + 8 - 0.4 = 19.4 (rounded to 19.3 for safety)
-- s04->s05: offset = 19.4 + 10 - 0.5 = 28.9
-- s05->s06: offset = 28.9 + 7 - 0.5 = 35.4
-- s06->s07: offset = 35.4 + 7 - 0.5 = 41.9
-- s07->s08: offset = 41.9 + 8 - 0.5 = 49.4
-- s08->s09: offset = 49.4 + 7 - 0.7 = 55.7 (using 55.9 for slight padding)
-- s09->s10: offset = 55.9 + 8 - 0.7 = 63.2
-- Final fade-out at: 63.2 + 7 - 1.0 = 69.2 (st=6.0 relative to scene 10)
+- s01->s02: offset = 10 - 0.7 = 9.3
+- s02->s03: offset = 9.3 + 10 - 0.5 = 18.8
+- s03->s04: offset = 18.8 + 10 - 0.4 = 28.4
+- s04->s05: offset = 28.4 + 13 - 0.5 = 40.9
+- s05->s06: offset = 40.9 + 10 - 0.5 = 50.4
+- s06->s07: offset = 50.4 + 8 - 0.5 = 57.9
+- s07->s08: offset = 57.9 + 13 - 0.5 = 70.4
+- s08->s09: offset = 70.4 + 10 - 0.7 = 79.7
+- s09->s10: offset = 79.7 + 13 - 0.7 = 92.0
+- Final fade-out at: 92.0 + 8 - 1.0 = 99.0 (st=7.0 relative to scene 10)
 
 ### Step 4: Mix Narration Audio
 
@@ -1211,15 +1264,15 @@ ffmpeg \
   -i "${AUDIO}/narration-scene10.mp3" \
   -filter_complex "
     [0:a]adelay=0|0[a0];
-    [1:a]adelay=7300|7300[a1];
-    [2:a]adelay=11800|11800[a2];
-    [3:a]adelay=19300|19300[a3];
-    [4:a]adelay=28900|28900[a4];
-    [5:a]adelay=35400|35400[a5];
-    [6:a]adelay=41900|41900[a6];
-    [7:a]adelay=49400|49400[a7];
-    [8:a]adelay=55900|55900[a8];
-    [9:a]adelay=63200|63200[a9];
+    [1:a]adelay=9300|9300[a1];
+    [2:a]adelay=18800|18800[a2];
+    [3:a]adelay=28400|28400[a3];
+    [4:a]adelay=40900|40900[a4];
+    [5:a]adelay=50400|50400[a5];
+    [6:a]adelay=57900|57900[a6];
+    [7:a]adelay=70400|70400[a7];
+    [8:a]adelay=79700|79700[a8];
+    [9:a]adelay=92000|92000[a9];
     [a0][a1][a2][a3][a4][a5][a6][a7][a8][a9]amix=inputs=10:duration=longest:normalize=0[aout]
   " \
   -map "[aout]" \
@@ -1235,10 +1288,10 @@ Layer the ElevenLabs-generated sound effects at transition points and key moment
 SFX_DIR="docs/video/output/sfx"
 ASSEMBLY="docs/video/output/assembly"
 
-# Create ambient tech hum loop for full video duration (~70s)
+# Create ambient tech hum loop for full video duration (~100s)
 # Loop the 10s ambient hum to cover the whole video at -18dB (very subtle)
-ffmpeg -stream_loop 7 -i "${SFX_DIR}/ambient-tech-hum.mp3" \
-  -t 70 -af "volume=0.15" \
+ffmpeg -stream_loop 10 -i "${SFX_DIR}/ambient-tech-hum.mp3" \
+  -t 100 -af "volume=0.15" \
   -c:a aac -b:a 128k \
   "${ASSEMBLY}/ambient-loop.aac"
 
@@ -1254,23 +1307,23 @@ ffmpeg \
   -i "${SFX_DIR}/confirmation-beep.mp3" \
   -i "${SFX_DIR}/ui-click.mp3" \
   -filter_complex "
-    [0:a]adelay=7000|7000,volume=0.6[wipe1];
-    [1:a]adelay=11500|11500,volume=0.5[swoosh1];
-    [1:a]adelay=19000|19000,volume=0.5[swoosh2];
-    [2:a]adelay=11800|11800,volume=0.7[gong1];
-    [3:a]adelay=25000|25000,volume=0.7[achieve1];
-    [1:a]adelay=28500|28500,volume=0.5[swoosh3];
-    [1:a]adelay=35000|35000,volume=0.5[swoosh4];
-    [1:a]adelay=41500|41500,volume=0.5[swoosh5];
-    [6:a]adelay=42000|42000,volume=0.5[beep1];
-    [4:a]adelay=44500|44500,volume=0.6[alert1];
-    [6:a]adelay=47000|47000,volume=0.5[beep2];
-    [1:a]adelay=49000|49000,volume=0.5[swoosh6];
-    [5:a]adelay=52500|52500,volume=0.6[rewind1];
-    [7:a]adelay=54000|54000,volume=0.5[click1];
-    [0:a]adelay=55500|55500,volume=0.6[wipe2];
-    [0:a]adelay=62800|62800,volume=0.6[wipe3];
-    [2:a]adelay=63200|63200,volume=0.4[gong2];
+    [0:a]adelay=9000|9000,volume=0.6[wipe1];
+    [1:a]adelay=18500|18500,volume=0.5[swoosh1];
+    [2:a]adelay=18800|18800,volume=0.7[gong1];
+    [1:a]adelay=28000|28000,volume=0.5[swoosh2];
+    [3:a]adelay=34900|34900,volume=0.7[achieve1];
+    [1:a]adelay=40500|40500,volume=0.5[swoosh3];
+    [1:a]adelay=50000|50000,volume=0.5[swoosh4];
+    [1:a]adelay=57500|57500,volume=0.5[swoosh5];
+    [6:a]adelay=58900|58900,volume=0.5[beep1];
+    [4:a]adelay=61900|61900,volume=0.6[alert1];
+    [6:a]adelay=65900|65900,volume=0.5[beep2];
+    [1:a]adelay=70000|70000,volume=0.5[swoosh6];
+    [5:a]adelay=76900|76900,volume=0.6[rewind1];
+    [7:a]adelay=77400|77400,volume=0.5[click1];
+    [0:a]adelay=79400|79400,volume=0.6[wipe2];
+    [0:a]adelay=91700|91700,volume=0.6[wipe3];
+    [2:a]adelay=92000|92000,volume=0.4[gong2];
     [wipe1][swoosh1][swoosh2][gong1][achieve1][swoosh3][swoosh4][swoosh5][beep1][alert1][beep2][swoosh6][rewind1][click1][wipe2][wipe3][gong2]amix=inputs=17:duration=longest:normalize=0[sfxout]
   " \
   -map "[sfxout]" \
@@ -1341,7 +1394,7 @@ ffprobe -v quiet -print_format json -show_format -show_streams \
   }'
 
 # Expected output:
-# duration: ~70-75 seconds
+# duration: ~100 seconds
 # resolution: 1280x720 (Runway Gen4 Turbo native)
 # codec: h264 + aac
 ```
@@ -1363,7 +1416,7 @@ done
 
 ```
 docs/video/output/
-  clips/                          # Raw Runway Gen4 Turbo clips (11 files)
+  clips/                          # Raw Runway Gen4 Turbo clips (13 files)
     scene01-the-pain.mp4
     scene02-the-question.mp4
     scene03-meet-tamma.mp4
@@ -1371,9 +1424,11 @@ docs/video/output/
     scene04b-autonomous-loop.mp4
     scene05-pick-your-ai.mp4
     scene06-works-everywhere.mp4
-    scene07-quality-gates.mp4
+    scene07a-quality-gates.mp4
+    scene07b-quality-gates.mp4
     scene08-audit-trail.mp4
-    scene09-self-maintenance.mp4
+    scene09a-self-maintenance.mp4
+    scene09b-self-maintenance.mp4
     scene10-cta.mp4
   audio/                          # ElevenLabs narration (10 files)
     narration-scene01.mp3
@@ -1391,9 +1446,16 @@ docs/video/output/
     ui-click.mp3
     confirmation-beep.mp3
   assembly/                       # Intermediate processing
-    s01.mp4 ... s10.mp4           # Trimmed clips
+    s01.mp4 ... s10.mp4           # Clips at correct duration
+    s04a.mp4, s04b.mp4            # Scene 4 sub-clips
+    s07a.mp4, s07b.mp4            # Scene 7 sub-clips
+    s09a.mp4, s09b.mp4            # Scene 9 sub-clips
     scene4-list.txt               # Concat list for Scene 4
-    s04.mp4                       # Merged Scene 4
+    scene7-list.txt               # Concat list for Scene 7
+    scene9-list.txt               # Concat list for Scene 9
+    s04.mp4                       # Merged Scene 4 (13s)
+    s07.mp4                       # Merged Scene 7 (13s)
+    s09.mp4                       # Merged Scene 9 (13s)
     video-no-audio.mp4            # Stitched video (silent)
     narration-mixed.aac           # Mixed narration track
     sfx-mixed.aac                 # Mixed sound effects track
@@ -1406,10 +1468,10 @@ docs/video/output/
 
 | Service | Items | Rate | Cost |
 |---------|-------|------|------|
-| Freepik Runway Gen4 Turbo | ~85s of video (11 clips) | $0.12/s | ~$10.20 |
-| ElevenLabs TTS | 10 narration clips (~80s total) | per-character | ~$1.50 |
+| Freepik Runway Gen4 Turbo | ~105s of video (13 clips) | $0.12/s | ~$12.60 |
+| ElevenLabs TTS | 10 narration clips (~100s total) | per-character | ~$1.80 |
 | ElevenLabs SFX | 9 sound effects | per-generation | ~$0.90 |
-| **Total** | | | **~$12.60** |
+| **Total** | | | **~$15.30** |
 
 ### Production Timeline
 
@@ -1417,13 +1479,13 @@ docs/video/output/
 |-------|------|---------------|
 | 1 | Generate narration audio (10 ElevenLabs TTS calls) | 2 minutes |
 | 2 | Generate sound effects (9 ElevenLabs SFX calls) | 2 minutes |
-| 3 | Generate video clips (11 Freepik Runway calls + polling) | 15-30 minutes |
-| 4 | Trim and scale clips | 5 minutes |
+| 3 | Generate video clips (13 Freepik Runway calls + polling) | 20-40 minutes |
+| 4 | Copy and concatenate clips | 5 minutes |
 | 5 | Stitch with transitions | 2 minutes |
 | 6 | Mix audio (narration + SFX + ambient) | 3 minutes |
 | 7 | Final render and QC | 3 minutes |
-| **Total** | | **~30-50 minutes** |
+| **Total** | | **~35-55 minutes** |
 
 ---
 
-*Production plan generated for the Tamma ELI5 Explainer Video. All 10 scenes specified with frame descriptions, motion prompts, narration timing, emotional arcs, transitions, and sound design. Technical pipeline: Runway Gen4 Turbo (via Freepik) for video, ElevenLabs for narration and sound effects, ffmpeg for post-production assembly. Ready for execution.*
+*Production plan generated for the Tamma ELI5 Explainer Video. All 10 scenes (13 clips) specified with frame descriptions, motion prompts, narration timing, emotional arcs, transitions, and sound design. Technical pipeline: Runway Gen4 Turbo (via Freepik) for video, ElevenLabs for narration and sound effects, ffmpeg for post-production assembly. Ready for execution.*

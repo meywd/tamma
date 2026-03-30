@@ -1,24 +1,24 @@
 # Deep Dive Video Production Plan
 
 ## TODO
-- [x] Scene 1: The 60% Tax (10s, 2 clips)
-- [x] Scene 2: Autocomplete Is Not Autonomy (12s, 2 clips)
-- [x] Scene 3: Fear of Autonomy (10s, 2 clips)
-- [x] Scene 4: Tamma: It Is Done (8s)
-- [x] Scene 5: End-to-End Autonomy (15s, 3 clips)
-- [x] Scene 6: You Stay in Control (10s, 2 clips)
-- [x] Scene 7: Any AI, Your Choice (10s, 2 clips)
-- [x] Scene 8: Every Git Platform (10s, 2 clips)
-- [x] Scene 9: Mandatory Quality Gates (10s, 2 clips)
-- [x] Scene 10: Time-Travel Debugging (12s, 3 clips)
-- [x] Scene 11: Visual Workflow Orchestration (10s, 2 clips)
-- [x] Scene 12: Intelligent Agent Routing (10s, 2 clips)
-- [x] Scene 13: Tamma Maintains Itself (10s, 2 clips)
-- [x] Scene 14: Sarah's Story (12s, 3 clips)
-- [x] Scene 15: AI That Learns (10s, 2 clips)
-- [x] Scene 16: Built for Production (12s, 3 clips)
-- [x] Scene 17: Where We Are (12s, 3 clips)
-- [x] Scene 18: Join the Movement (10s, 2 clips)
+- [x] Scene 1: The 60% Tax (16s, 2 clips)
+- [x] Scene 2: Autocomplete Is Not Autonomy (24s, 3 clips)
+- [x] Scene 3: Fear of Autonomy (16s, 2 clips)
+- [x] Scene 4: Tamma: It Is Done (16s, 2 clips)
+- [x] Scene 5: End-to-End Autonomy (18s, 2 clips)
+- [x] Scene 6: You Stay in Control (16s, 2 clips)
+- [x] Scene 7: Any AI, Your Choice (20s, 2 clips)
+- [x] Scene 8: Every Git Platform (16s, 2 clips)
+- [x] Scene 9: Mandatory Quality Gates (18s, 2 clips)
+- [x] Scene 10: Time-Travel Debugging (24s, 3 clips)
+- [x] Scene 11: Visual Workflow Orchestration (20s, 2 clips)
+- [x] Scene 12: Intelligent Agent Routing (24s, 3 clips)
+- [x] Scene 13: Tamma Maintains Itself (24s, 3 clips)
+- [x] Scene 14: Sarah's Story (30s, 3 clips)
+- [x] Scene 15: AI That Learns (16s, 2 clips)
+- [x] Scene 16: Built for Production (24s, 3 clips)
+- [x] Scene 17: Where We Are (24s, 3 clips)
+- [x] Scene 18: Join the Movement (20s, 2 clips)
 - [x] Stitching & Transitions
 - [x] Final Render
 
@@ -35,7 +35,7 @@ All image-to-video clips are generated through Freepik's hosted Runway Gen4 Turb
 - **Request Body**:
   - `image` (string, required): Base64-encoded image or publicly accessible HTTPS URL
   - `prompt` (string, optional, max 1000 chars): Motion/camera description for the clip
-  - `duration` (integer, optional): `5` or `10` seconds (default: `10`)
+  - `duration` (integer, optional): `5`, `8`, or `10` seconds (default: `10`)
   - `ratio` (string, optional): Aspect ratio -- `1280:720`, `720:1280`, `1104:832`, `832:1104`, `960:960`, `1584:672` (default: `1280:720`)
   - `seed` (integer, optional): `0`-`4294967295` for reproducibility
   - `webhook_url` (string, optional): Callback URL on completion
@@ -52,14 +52,14 @@ All image-to-video clips are generated through Freepik's hosted Runway Gen4 Turb
 #### Per-Clip Generation Pattern
 
 ```bash
-# Example: Scene 1, Clip 1 (5 seconds, Frame A -> Frame B)
+# Example: Scene 1, Clip 1 (8 seconds, Frame A -> Frame B)
 curl -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
   -H "x-freepik-api-key: $FREEPIK_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "image": "https://raw.githubusercontent.com/meywd/tamma/main/docs/video/scenes/deep-dive/01-developer-burnout.png",
     "prompt": "Slow cinematic zoom into the developer figure at the desk. The 60% waste panel pulses with a dim red glow as warning icons drift and rotate lazily. The camera pushes forward and slightly down. Subtle particle dust floats in the air. Dark ambient lighting.",
-    "duration": 10,
+    "duration": 8,
     "ratio": "1280:720",
     "seed": 42
   }'
@@ -186,13 +186,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 
 ---
 
-## SECTION A: THE PROBLEM (Scenes 1-3, ~32s)
+## SECTION A: THE PROBLEM (Scenes 1-3, ~56s)
 
 ---
 
 ### Scene 1: The 60% Tax
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -211,13 +211,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "Slow cinematic zoom into the developer figure at the desk. The 60% waste panel pulses with a dim red glow as warning icons drift and rotate lazily. The camera pushes forward and slightly down, transitioning from the wide data-visualization view into a closer, more intimate tunnel perspective around the developer. Subtle particle dust floats in the air. Dark ambient lighting."
 - **Camera**: Slow push-in zoom, slight downward tilt, steady dolly
 - **Output**: `clips/deep-dive/scene01-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The spiraling icons around the developer compress and flatten, transforming into the heavy weight pressing down. The camera pulls back and rises, revealing the cost graph climbing upward. The green 'Features Shipped' panel shrinks as the 'Repetitive Toil' block expands. The mood shifts from claustrophobic to oppressive. Red glow intensifies."
 - **Camera**: Pull-back with slight upward crane, widening field of view
 - **Output**: `clips/deep-dive/scene01-clip02.mp4`
@@ -236,10 +236,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.92
 
 **Timing Sync**:
-- 0.0s-1.5s: "Development teams spend 40 to 60 percent..." -- camera begins zoom on the 60% panel
-- 1.5s-4.0s: "...Writing boilerplate tests. Fixing linting errors..." -- icons pulse in sync with each item mentioned
-- 4.0s-7.0s: "...Coordinating CI/CD pipelines..." -- transition to Frame B, developer surrounded by icons
-- 7.0s-10.0s: "...same review comments week after week. It is a tax..." -- weight crushes down in Frame C
+- 0.0s-3.0s: "Development teams spend 40 to 60 percent..." -- camera begins zoom on the 60% panel
+- 3.0s-7.0s: "...Writing boilerplate tests. Fixing linting errors..." -- icons pulse in sync with each item mentioned
+- 7.0s-11.0s: "...Coordinating CI/CD pipelines..." -- transition to Frame B, developer surrounded by icons
+- 11.0s-16.0s: "...same review comments week after week. It is a tax..." -- weight crushes down in Frame C
 
 #### EMOTIONAL ARC
 
@@ -254,13 +254,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Low electronic hum, subtle mechanical clicking (keyboard ambiance), faint warning chime on the "60%" reveal
-- SFX Prompt (ElevenLabs): `{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 16.0}`
 
 ---
 
 ### Scene 2: Autocomplete Is Not Autonomy
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -279,16 +279,22 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "Camera tracks along the broken pipeline from left to right, passing each disconnected step. As the camera passes ISSUE and PLAN, the X marks between them flash red briefly. The camera accelerates slightly and zooms into the gap between CODE and TEST, pushing through the dashed line into a dramatic close-up of the chasm. Sparks fly from the broken edges. The cursor icon on the Code side blinks helplessly. Dark cinematic lighting with neon accents."
 - **Camera**: Lateral tracking shot left-to-right, then push-in zoom into the CODE-TEST gap
 - **Output**: `clips/deep-dive/scene02-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 6 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "Camera pulls back and rises from the close-up gap view, rotating slightly to reveal the full isometric panorama of all seven broken nodes. Red electrical sparks cascade between the X marks. The purple dashed line attempts to connect nodes but keeps breaking apart. Holographic icons above each node flicker. The gold question mark at the end pulses with uncertainty. The camera settles into a wide establishing shot showing the complete fragmentation."
 - **Camera**: Pull-back crane rising to wide isometric overview, slight rotation
 - **Output**: `clips/deep-dive/scene02-clip02.mp4`
+
+**Clip 3**: Hold on Frame C with subtle motion
+- **Duration**: 8 seconds
+- **Motion Prompt**: "The full isometric panorama holds with all seven broken nodes visible. Red sparks continue cascading between the X marks. The purple dashed line makes one more attempt to connect the nodes, weaving chaotically before breaking apart again. The gold question mark at the far right pulses brighter with uncertainty. Each hexagonal node's holographic icon projection flickers independently. The camera drifts slowly inward, emphasizing the chaos and disconnection. The mood is one of frustrated incompleteness."
+- **Camera**: Slow drift-in on the panoramic view, emphasizing fragmentation
+- **Output**: `clips/deep-dive/scene02-clip03.mp4`
 
 #### NARRATION
 
@@ -304,10 +310,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.95
 
 **Timing Sync**:
-- 0.0s-3.0s: "Existing AI dev tools help with pieces..." -- camera tracks past the first few disconnected steps
-- 3.0s-6.0s: "...None of them can take an issue, plan the work, write the code..." -- rapid cascade as camera zooms into the gap
-- 6.0s-9.0s: "...run the tests, create the PR, fix the failures, and merge it -- end to end" -- pull-back reveals full broken panorama
-- 9.0s-12.0s: "That gap is where all the toil lives" -- hold on wide shot, question mark pulses
+- 0.0s-5.0s: "Existing AI dev tools help with pieces... Copilot autocompletes your code. ChatGPT answers questions." -- camera tracks past the first few disconnected steps
+- 5.0s-10.0s: "But none of them own the entire workflow. None of them can take an issue, plan the work, write the code..." -- rapid cascade as camera zooms into the gap
+- 10.0s-17.0s: "...run the tests, create the PR, fix the failures, and merge it -- end to end" -- pull-back reveals full broken panorama
+- 17.0s-24.0s: "That gap is where all the toil lives" -- hold on wide shot, question mark pulses
 
 #### EMOTIONAL ARC
 
@@ -322,13 +328,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Digital glitch sounds on each X mark reveal, subtle electrical crackle in the gap, hollow wind in the chasm
-- SFX Prompt (ElevenLabs): `{"text": "Digital interface sounds, subtle electrical sparks, hollow ambient wind, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Digital interface sounds, subtle electrical sparks, hollow ambient wind, no music", "duration_seconds": 24.0}`
 
 ---
 
 ### Scene 3: Fear of Autonomy
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -343,13 +349,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The cracked question mark pulses with purple lightning as the three fear cards (breaking changes, security vulnerability, no transparency) slowly rotate toward the viewer. The camera drifts forward through smoke, the silhouetted figure's arms lower as the scene transitions. Rain begins to fall. The environment shifts from abstract dark void to a cyberpunk cityscape. The question mark morphs from cracked neon into a shield shape. Ominous ambient lighting."
 - **Camera**: Slow forward drift through atmospheric smoke, environmental transition
 - **Output**: `clips/deep-dive/scene03-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "Rain falls steadily on the cyberpunk cityscape. The shield with the question mark pulses gently. The three unchecked boxes (Transparency, Control, Audit Trail) glow faintly, each one highlighting briefly in sequence. The developer figure shifts weight slightly, looking between the checkboxes. Threat cards above the shield drift and rotate slowly. Neon reflections shimmer on wet surfaces. Contemplative, searching mood."
 - **Camera**: Slow push-in on the developer and shield, very subtle dolly
 - **Output**: `clips/deep-dive/scene03-clip02.mp4`
@@ -368,10 +374,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.88
 
 **Timing Sync**:
-- 0.0s-2.0s: "And there is a deeper problem. Teams fear autonomous systems." -- cracked question mark pulses
-- 2.0s-4.5s: "What if it makes a breaking change?" -- red card highlights; "What if it ships a security vulnerability?" -- amber card highlights
-- 4.5s-7.0s: "What if no one knows what it did?" -- audit log card highlights, transition to cyberpunk scene
-- 7.0s-10.0s: "Without transparency and control, autonomy is just risk." -- checkboxes glow in sequence, hold on developer's contemplation
+- 0.0s-4.0s: "And there is a deeper problem. Teams fear autonomous systems." -- cracked question mark pulses
+- 4.0s-8.0s: "What if it makes a breaking change?" -- red card highlights; "What if it ships a security vulnerability?" -- amber card highlights
+- 8.0s-12.0s: "What if no one knows what it did?" -- audit log card highlights, transition to cyberpunk scene
+- 12.0s-16.0s: "Without transparency and control, autonomy is just risk." -- checkboxes glow in sequence, hold on developer's contemplation
 
 #### EMOTIONAL ARC
 
@@ -386,18 +392,18 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Thunder rumble, rain on glass, distant warning klaxon (very subtle), electrical crackle on the cracked question mark
-- SFX Prompt (ElevenLabs): `{"text": "Distant thunder, light rain ambiance, faint electrical crackle, ominous low drone, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Distant thunder, light rain ambiance, faint electrical crackle, ominous low drone, no music", "duration_seconds": 16.0}`
 
 ---
 
 
-## SECTION B: INTRODUCING TAMMA (Scenes 4-6, ~35s)
+## SECTION B: INTRODUCING TAMMA (Scenes 4-6, ~50s)
 
 ---
 
 ### Scene 4: Tamma: It Is Done
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -416,13 +422,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The Tamma logo pulses with golden light. Issue cards from the backlog on the left slide inward toward the glowing purple ring. As they pass through the logo, they transform -- the purple ring energy wraps around them. The camera pushes into the logo, which expands into an infinity loop shape. Purple sparkle particles emerge as issues transform into merged PRs on the other side. The mood shifts from dark problem space to confident solution energy. Regal, premium lighting."
 - **Camera**: Push-in zoom through the Tamma logo, expanding perspective
 - **Output**: `clips/deep-dive/scene04-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The infinity loop completes its cycle as merged PR cards stack up on the right side. The camera slowly pulls back and rotates slightly right, revealing the growing pile of completed work. The Tamma atom logo settles into the center. Golden Arabic calligraphy materializes above the merged PRs with a warm light bloom. The text 'it is done' fades in beneath. The mood is triumphant and assured. Gold and purple light fills the frame."
 - **Camera**: Slow pull-back with slight rightward pan, settling into wide composition
 - **Output**: `clips/deep-dive/scene04-clip02.mp4`
@@ -441,10 +447,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.90
 
 **Timing Sync**:
-- 0.0s-2.5s: "Tamma is an autonomous development platform..." -- logo pulses, issues begin flowing in
-- 2.5s-5.0s: "...The name comes from the Arabic word 'tamm'..." -- infinity loop forms, calligraphy begins to glow
-- 5.0s-8.0s: "...merged pull requests. Not suggestions. Not autocomplete." -- PRs stack up on right side
-- 8.0s-10.0s: "Done." -- gold calligraphy fully revealed, warm light bloom, hold
+- 0.0s-4.0s: "Tamma is an autonomous development platform that handles the complete workflow." -- logo pulses, issues begin flowing in
+- 4.0s-8.0s: "...The name comes from the Arabic word 'tamm' -- meaning 'it is done, it is complete.'" -- infinity loop forms, calligraphy begins to glow
+- 8.0s-13.0s: "Tamma takes issues from your backlog and delivers merged pull requests. Not suggestions. Not autocomplete." -- PRs stack up on right side
+- 13.0s-16.0s: "Done." -- gold calligraphy fully revealed, warm light bloom, hold
 
 #### EMOTIONAL ARC
 
@@ -459,13 +465,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Deep resonant tone on logo reveal, subtle chime when "tamm" is spoken, satisfying merge/complete sound when "Done" lands
-- SFX Prompt (ElevenLabs): `{"text": "Deep resonant drone transitioning to warm golden tone, subtle crystalline chimes, regal atmosphere, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Deep resonant drone transitioning to warm golden tone, subtle crystalline chimes, regal atmosphere, no music", "duration_seconds": 16.0}`
 
 ---
 
 ### Scene 5: End-to-End Autonomy
 
-**Duration**: 15 seconds | **Clips**: 3
+**Duration**: 18 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -487,23 +493,17 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 
 #### VIDEO CLIPS
 
-**Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
-- **Motion Prompt**: "The circular 14-step pipeline rotates slowly clockwise. The camera zooms into the upper-right arc (steps 1-5), and the nodes expand from simple numbered squares into detailed labeled stations. Each station lights up in sequence with a brief pulse as the camera passes it: ticket, analysis, lightbulb, blueprint, test specs. The arc unfolds from a circle into a curved track stretching across the frame. Purple energy trails behind the activation pulses. Clean, technical animation."
-- **Camera**: Clockwise rotation then zoom into upper arc, expanding detail level
+**Clip 1**: Frame A --> Frame C
+- **Duration**: 10 seconds
+- **Motion Prompt**: "The circular 14-step pipeline rotates slowly clockwise. The camera zooms into the upper-right arc (steps 1-5), and the nodes expand from simple numbered squares into detailed labeled stations. Each station lights up in sequence with a brief pulse: ticket, analysis, lightbulb, blueprint, test specs. The arc unfolds from a circle into a curved track. The camera continues tracking along the pipeline, moving into the execution steps (6-13). Gears begin turning at the build/test station. An eye icon opens for the review step. The verification card slides in with checkmarks. The merge icon at step 13 ignites with bright green light. Purple energy trails behind the activation pulses."
+- **Camera**: Clockwise rotation, zoom into upper arc, then lateral tracking through execution steps
 - **Output**: `clips/deep-dive/scene05-clip01.mp4`
 
-**Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
-- **Motion Prompt**: "The camera continues tracking along the pipeline arc, moving from the planning steps (1-5) into the execution steps (6-13). Gears begin turning at the build/test station. An eye icon opens for the review step. A code snippet popup materializes. The wrench fixes something with a spark. The verification card slides in with checkmarks appearing one by one. The merge icon at step 13 ignites with bright green light. The pace quickens slightly, showing acceleration through the workflow."
-- **Camera**: Lateral tracking along the arc from left to right, slight push-in at merge step
-- **Output**: `clips/deep-dive/scene05-clip02.mp4`
-
-**Clip 3**: Frame C --> Frame D
-- **Duration**: 5 seconds
+**Clip 2**: Frame C --> Frame D
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The camera pulls back from the merge step, and the pipeline closes into a complete ring. All 14 nodes light up green simultaneously. The center text '< 2 HOURS' pulses once. The 'CYCLE 2' badge materializes in the corner. The loop arrow from step 14 back to step 1 glows, showing the continuous nature. The ring rotates slowly, giving it a perpetual-motion machine feel. The mood is one of impressive completeness."
 - **Camera**: Pull-back to wide shot, ring settling into full view, slow rotation
-- **Output**: `clips/deep-dive/scene05-clip03.mp4`
+- **Output**: `clips/deep-dive/scene05-clip02.mp4`
 
 #### NARRATION
 
@@ -519,11 +519,11 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 1.02
 
 **Timing Sync**:
-- 0.0s-2.0s: "Tamma operates a 14-step autonomous loop. Issue assignment. Context analysis." -- circular view, zoom begins
-- 2.0s-5.0s: "Planning. Design. Code generation following TDD." -- steps 1-5 light up in sequence
-- 5.0s-10.0s: "Build. Test execution. Push. CI/CD checks. Automated code review. Address review comments." -- rapid fire through execution steps, gears turn, eye opens
-- 10.0s-12.0s: "Completion verification. Merge." -- green merge glow, verification card
-- 12.0s-15.0s: "And then it picks the next issue. Under two hours." -- full ring view, < 2 hours text pulses
+- 0.0s-3.0s: "Tamma operates a 14-step autonomous loop. Issue assignment. Context analysis." -- circular view, zoom begins
+- 3.0s-7.0s: "Planning. Design. Code generation following TDD." -- steps 1-5 light up in sequence
+- 7.0s-12.0s: "Build. Test execution. Push. CI/CD checks. Automated code review. Address review comments." -- rapid fire through execution steps, gears turn, eye opens
+- 12.0s-14.0s: "Completion verification. Merge." -- green merge glow, verification card
+- 14.0s-18.0s: "And then it picks the next issue. Under two hours." -- full ring view, < 2 hours text pulses
 
 #### EMOTIONAL ARC
 
@@ -538,13 +538,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Mechanical clicking as each step activates, subtle gear sounds at build/test, satisfying "ding" at merge, soft whoosh on the loop completion
-- SFX Prompt (ElevenLabs): `{"text": "Mechanical precision sounds, soft clicks in rhythm, gear whir, satisfying completion chime, no music", "duration_seconds": 15.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical precision sounds, soft clicks in rhythm, gear whir, satisfying completion chime, no music", "duration_seconds": 18.0}`
 
 ---
 
 ### Scene 6: You Stay in Control
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -559,13 +559,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The developer reaches toward the green 'Approve' button. As they press it, the button glows brightly and the pause icon in the workflow pipeline transforms into a play icon. A pulse of green energy radiates outward from the approval. The component design panel folds away. The camera pushes forward through the green energy wave, which transforms into the grand gateway opening. Light pours through the gateway doors as they swing open to reveal the deployment pipeline beyond. Empowering, decisive moment."
 - **Camera**: Push-in through the approval action, transitioning through green energy to the gateway reveal
 - **Output**: `clips/deep-dive/scene06-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The gateway doors stand fully open, green light streaming through. Data packets flow through the deployment pipeline beyond, racing along neon pipes toward the city skyline. Team silhouettes lower their arms and observe the flow. Subtle rain falls. The thumbs-up icon pulses gently. The pipeline hums with activity. The camera slowly rises, showing the scale of what was unlocked by a single human decision. Confident, controlled atmosphere."
 - **Camera**: Slow crane upward, widening to show the full deployment pipeline activity
 - **Output**: `clips/deep-dive/scene06-clip02.mp4`
@@ -584,10 +584,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.92
 
 **Timing Sync**:
-- 0.0s-2.5s: "But this is not a black box. Tamma keeps you in control..." -- developer stands before the design panel, pause icon visible
-- 2.5s-5.0s: "You approve the design. You review breaking changes." -- developer presses Approve, gateway begins opening
-- 5.0s-7.5s: "You decide when to deploy to production." -- gateway fully open, deployment pipeline revealed
-- 7.5s-10.0s: "Tamma handles the toil. You make the decisions that require human judgment." -- wide shot, pipeline active, team observes
+- 0.0s-4.0s: "But this is not a black box. Tamma keeps you in control where it matters." -- developer stands before the design panel, pause icon visible
+- 4.0s-8.0s: "You approve the design. You review breaking changes." -- developer presses Approve, gateway begins opening
+- 8.0s-12.0s: "You decide when to deploy to production." -- gateway fully open, deployment pipeline revealed
+- 12.0s-16.0s: "Tamma handles the toil. You make the decisions that require human judgment." -- wide shot, pipeline active, team observes
 
 #### EMOTIONAL ARC
 
@@ -602,18 +602,18 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Satisfying click on the Approve button, gateway creak/hydraulic opening sound, flowing data whoosh through pipes, ambient city hum
-- SFX Prompt (ElevenLabs): `{"text": "Mechanical click, hydraulic door opening, flowing water/data whoosh, distant city ambiance, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical click, hydraulic door opening, flowing water/data whoosh, distant city ambiance, no music", "duration_seconds": 16.0}`
 
 ---
 
 
-## SECTION C: HOW IT WORKS (Scenes 7-12, ~72s)
+## SECTION C: HOW IT WORKS (Scenes 7-12, ~122s)
 
 ---
 
 ### Scene 7: Any AI, Your Choice
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 20 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -632,13 +632,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "Eight provider circles at the top light up one by one from left to right, each with its distinct color. As they activate, routing lines shoot downward through the Abstraction Layer bar with a pulse of purple light. The camera slowly pushes in, and the view shifts to show five providers in more detail with thicker pipe connections. The 'Cost: -25%' badge fades in at center. Provider B's connection to Code Gen intensifies with a bright blue beam. Data particles flow along the colored pipes. Technical, impressive, flowing animation."
 - **Camera**: Slow push-in zoom, providers activating in sequence
 - **Output**: `clips/deep-dive/scene07-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 6 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "Provider B's circle flickers and turns red. A circuit breaker icon snaps shut with a spark. The 'BREAKER TRIPPED' label appears. The routing line from Provider B to Code Gen breaks apart with small particles. After a beat, a new dashed path reroutes around Provider B, flowing down to Provider C which brightens from dim to full cyan glow. The 'Fallback: Active' badge slides in. The latency monitor updates in real time showing stable performance. The camera shifts to an isometric angle showing the self-healing in action. The mood shifts from momentary concern to confident resilience."
 - **Camera**: Transition from front-on to isometric view, following the rerouting path
 - **Output**: `clips/deep-dive/scene07-clip02.mp4`
@@ -657,10 +657,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.95
 
 **Timing Sync**:
-- 0.0s-3.0s: "Tamma supports eight-plus AI providers through a unified abstraction layer." -- providers light up, abstraction bar glows
-- 3.0s-6.0s: "Anthropic Claude, OpenAI, Google Gemini, OpenRouter..." -- provider names as pipes activate
-- 6.0s-9.0s: "The system intelligently routes tasks..." -- routing lines diverge, Code Gen/Review highlighted
-- 9.0s-12.0s: "Cost optimization reduces spend by 20 to 30 percent." -- Cost badge appears, breaker trips and reroutes
+- 0.0s-5.0s: "Tamma supports eight-plus AI providers through a unified abstraction layer." -- providers light up, abstraction bar glows
+- 5.0s-10.0s: "Anthropic Claude, OpenAI, Google Gemini, OpenRouter, OpenCode, Zen MCP, local LLMs -- even your own fine-tuned models." -- provider names as pipes activate
+- 10.0s-15.0s: "The system intelligently routes tasks to the best provider for each step. Code generation might use Claude. Review might use GPT-4." -- routing lines diverge, Code Gen/Review highlighted
+- 15.0s-20.0s: "Cost optimization reduces spend by 20 to 30 percent." -- Cost badge appears, breaker trips and reroutes
 
 #### EMOTIONAL ARC
 
@@ -675,13 +675,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Soft electronic activation tones as providers light up, data flow whoosh through pipes, sharp snap on circuit breaker trip, satisfying reconnection tone on fallback
-- SFX Prompt (ElevenLabs): `{"text": "Electronic activation sounds, data flow hum, sharp electrical snap, reconnection ping, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Electronic activation sounds, data flow hum, sharp electrical snap, reconnection ping, no music", "duration_seconds": 20.0}`
 
 ---
 
 ### Scene 8: Every Git Platform
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -700,13 +700,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The seven platform cards light up in quick succession -- GitLab, GitHub, Bitbucket, Gitea, Azure DevOps, SourceForge, Gogs. Green connection lines pulse downward to the Tamma node. The camera pushes forward and the layout transforms from a flat grid into a dramatic 3D perspective view. The cards split into two groups: open source repos floating left, enterprise repos floating right. The IGitPlatform interface bar materializes between them. The 'Same Config' badge fades in below. Smooth, technical transformation."
 - **Camera**: Push-in zoom with perspective shift from flat to 3D depth
 - **Output**: `clips/deep-dive/scene08-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The Open Source and Enterprise panels merge toward the center, collapsing into a configuration file that expands to fill the frame. The YAML content types out line by line. The 'google-cloud' line highlights with a green glow and checkmark. Platform icons float out from each config line and orbit around the editor. A cursor moves to the active line. The Tamma logo appears at the bottom with the 'One Line Change' badge sliding in. The mood is one of simplicity -- all this complexity reduced to a config file."
 - **Camera**: Transition from 3D scene to flat config view, settling into center frame
 - **Output**: `clips/deep-dive/scene08-clip02.mp4`
@@ -725,10 +725,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.95
 
 **Timing Sync**:
-- 0.0s-3.0s: "Tamma is not locked to GitHub. It works with GitHub, GitLab, Gitea..." -- platform cards light up in sequence
-- 3.0s-5.0s: "One configuration, every platform." -- IGitPlatform interface bar appears, "Same Config" badge
-- 5.0s-7.5s: "Your team uses GitLab? Done." -- config file appears, lines type out
-- 7.5s-10.0s: "Your open-source project is on GitHub while your company uses Azure DevOps? Tamma handles both." -- "One Line Change" badge, platform icons orbit
+- 0.0s-4.0s: "Tamma is not locked to GitHub. It works with GitHub, GitLab, Gitea, Forgejo, Bitbucket, Azure DevOps, and plain Git." -- platform cards light up in sequence
+- 4.0s-8.0s: "One configuration, every platform." -- IGitPlatform interface bar appears, "Same Config" badge
+- 8.0s-12.0s: "Your team uses GitLab? Done." -- config file appears, lines type out
+- 12.0s-16.0s: "Your open-source project is on GitHub while your company uses Azure DevOps? Tamma handles both." -- "One Line Change" badge, platform icons orbit
 
 #### EMOTIONAL ARC
 
@@ -743,13 +743,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Quick activation pings as each platform lights up, smooth data flow sounds, gentle keyboard click as config types, subtle chime on "Done"
-- SFX Prompt (ElevenLabs): `{"text": "Quick electronic pings, smooth data flow hum, keyboard typing sounds, subtle completion chime, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Quick electronic pings, smooth data flow hum, keyboard typing sounds, subtle completion chime, no music", "duration_seconds": 16.0}`
 
 ---
 
 ### Scene 9: Mandatory Quality Gates
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 18 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -764,13 +764,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The red FAILED TEST circle spins rapidly with sparks. The broken code snippet flashes. After a beat, the red circle slows and transforms -- the error code morphs into corrected code with a green highlight. The circle transitions from red to green as the RETESTED: PASS checkmark appears with a satisfying glow. Then the camera pulls back, revealing a physical gate structure. The retry counter ticks from 3 down to 0. On hitting 0, an amber escalation line shoots upward toward a human figure. The gate pauses. The mood transitions from automated recovery to human escalation."
 - **Camera**: Hold on retry cycle, then pull-back to reveal gate and escalation path
 - **Output**: `clips/deep-dive/scene09-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 6 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The human figure examines the escalation card. The failing test code scrolls briefly. The 'Fix & Retry' and 'Abort' buttons glow, awaiting input. The pause icon pulses slowly. The 'Nothing Ships Broken' shield badge gleams. The workflow progress bar shows the pipeline paused at the Test gate. The camera slowly zooms into the 'Nothing Ships Broken' shield as the final statement. Confident, reassuring atmosphere. Circuit traces pulse softly in the background."
 - **Camera**: Slow push-in toward the shield badge, centering on the safety promise
 - **Output**: `clips/deep-dive/scene09-clip02.mp4`
@@ -789,10 +789,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.90
 
 **Timing Sync**:
-- 0.0s-3.0s: "Every change passes through mandatory quality gates. Build verification." -- failed test cycle spinning red
-- 3.0s-6.0s: "Test execution with smart retry logic -- up to three attempts with intelligent fixes..." -- red-to-green retry transformation
-- 6.0s-9.0s: "These gates cannot be bypassed. If something fails three times, Tamma escalates to a human." -- gate structure, escalation path lights up, human figure appears
-- 9.0s-12.0s: "Nothing ships broken." -- zoom to shield badge, pause icon pulses
+- 0.0s-5.0s: "Every change passes through mandatory quality gates. Build verification." -- failed test cycle spinning red
+- 5.0s-10.0s: "Test execution with smart retry logic -- up to three attempts with intelligent fixes before escalation. Security scanning for vulnerabilities. Automated code review." -- red-to-green retry transformation
+- 10.0s-15.0s: "These gates cannot be bypassed. If something fails three times, Tamma escalates to a human." -- gate structure, escalation path lights up, human figure appears
+- 15.0s-18.0s: "Nothing ships broken." -- zoom to shield badge, pause icon pulses
 
 #### EMOTIONAL ARC
 
@@ -807,13 +807,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Spinning/whirring on the retry cycle, error buzz on failure, satisfying ping on green pass, alarm-like tone on escalation (not harsh), deep resonant tone on "Nothing ships broken"
-- SFX Prompt (ElevenLabs): `{"text": "Mechanical spinning, soft error buzz, green success ping, subtle alarm tone, deep reassuring resonance, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Mechanical spinning, soft error buzz, green success ping, subtle alarm tone, deep reassuring resonance, no music", "duration_seconds": 18.0}`
 
 ---
 
 ### Scene 10: Time-Travel Debugging
 
-**Duration**: 14 seconds | **Clips**: 3
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -832,19 +832,19 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The detailed event card (TEST.FAILED) rotates slowly in 3D, showing its structured data. The camera pulls back from the event-detail zoom level, and the DNA timeline strands stretch outward. More event nodes appear along the timeline as the perspective widens. The view transitions from microscopic event detail to a macroscopic workflow timeline. The golden time-travel key icon materializes at center with a bright pulse. The state snapshot card slides in below it, showing the reconstructed state. The mood is one of powerful visibility."
 - **Camera**: Pull-back zoom from event detail to workflow overview, centering on time-travel icon
 - **Output**: `clips/deep-dive/scene10-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The golden time-travel key turns and locks with a satisfying click. The workflow timeline folds downward and transforms into circuit-board traces. The three compliance shields rise from below, each appearing in sequence with a gleam: SOC2 (gold), ISO 27001 (silver/blue), GDPR (green). Their labels fade in below each shield. The DNA helix continues behind them as a visual thread. The 'Immutable Event Stream' text materializes at the bottom with weight. The mood shifts from technical power to institutional trust."
 - **Camera**: Downward tilt transition, shields rising into frame in sequence
 - **Output**: `clips/deep-dive/scene10-clip02.mp4`
 
 **Clip 3**: Hold on Frame C with subtle motion
-- **Duration**: 4 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The three compliance shields gleam softly with light reflections moving across their surfaces. The DNA helix behind them rotates slowly. Circuit traces pulse with gentle light. The 'Immutable Event Stream' text glows. The camera very slowly pushes in on the three shields as the final establishing shot of this scene. Premium, trustworthy atmosphere. Subtle sparkle particles float."
 - **Camera**: Very slow push-in, shields gleaming, particles floating
 - **Output**: `clips/deep-dive/scene10-clip03.mp4`
@@ -863,10 +863,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.90
 
 **Timing Sync**:
-- 0.0s-3.5s: "Every action Tamma takes is recorded as an immutable event with millisecond precision." -- event card rotating, showing timestamp precision
-- 3.5s-7.0s: "Who assigned the issue. What code was generated. Which tests failed." -- pull-back to workflow timeline, events lighting up
-- 7.0s-10.0s: "This is not just logging. It is a complete audit trail. You can reconstruct the exact state..." -- golden key icon locks, state snapshot visible
-- 10.0s-14.0s: "SOC2, ISO 27001, GDPR -- the evidence is built in." -- compliance shields appear in sequence, hold on final composition
+- 0.0s-6.0s: "Every action Tamma takes is recorded as an immutable event with millisecond precision. Who assigned the issue. What code was generated. Which tests failed." -- event card rotating, pull-back to workflow timeline
+- 6.0s-12.0s: "Who approved the deployment. This is not just logging -- it is a complete audit trail." -- golden key icon materializes, state snapshot visible
+- 12.0s-18.0s: "You can reconstruct the exact state of any workflow at any point in time. Perfect for debugging. Essential for compliance." -- key locks, shields begin rising
+- 18.0s-24.0s: "SOC2, ISO 27001, GDPR -- the evidence is built in." -- compliance shields fully visible, hold on final composition
 
 #### EMOTIONAL ARC
 
@@ -881,13 +881,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Subtle data stream hum, click/lock sound on the golden key, metallic gleam on each shield reveal, deep resonant bass on "Immutable Event Stream"
-- SFX Prompt (ElevenLabs): `{"text": "Subtle electronic data flow, metallic click-lock, crystalline shield gleam sounds, deep bass undertone, no music", "duration_seconds": 14.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Subtle electronic data flow, metallic click-lock, crystalline shield gleam sounds, deep bass undertone, no music", "duration_seconds": 24.0}`
 
 ---
 
 ### Scene 11: Visual Workflow Orchestration
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 20 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -902,13 +902,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The ELSA workflow designer shows the 'Generate Plan' node's progress bar filling up. The pause icon blinks. Flow paths illuminate as data moves through the flowchart -- from Analyze Code to Generate Plan, branching to Run Tests. The decision diamond 'Code Approved?' rotates slightly. The camera slowly pulls back from the 2D designer interface, and the flat workflow begins to extrude into 3D. The nodes transform from flat rectangles into the stacked architectural blocks of the dual-stack system. The transition reveals the engineering depth behind the visual simplicity."
 - **Camera**: Pull-back from 2D interface view, transitioning to isometric 3D architecture
 - **Output**: `clips/deep-dive/scene11-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 6 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The isometric architecture hums with activity. Data particles flow from the TypeScript stack through the API Gateway to the ELSA Workflow Engine. The Event Bus pulses with message deliveries. Light traces flow along the connection arrows. The TypeScript stack layers glow in sequence from bottom to top. The ELSA engine workflows shuffle slightly as if being edited. The camera drifts slowly around the architecture, showing its depth and interconnection. Industrial, impressive, production-grade atmosphere."
 - **Camera**: Slow orbital drift around the isometric architecture, showcasing depth
 - **Output**: `clips/deep-dive/scene11-clip02.mp4`
@@ -927,10 +927,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.93
 
 **Timing Sync**:
-- 0.0s-3.0s: "Under the hood, Tamma uses a dual-stack architecture. TypeScript and Node.js..." -- workflow designer active, progress bar filling
-- 3.0s-6.0s: "Dotnet and the ELSA workflow engine handle orchestration..." -- 2D-to-3D transition, ELSA tower materializes
-- 6.0s-9.0s: "20-plus composable workflows that are visual, pausable, and resumable." -- data flows through architecture, Event Bus pulses
-- 9.0s-12.0s: "This is not a brittle script. It is a production-grade workflow engine." -- full architecture visible, camera orbiting, industrial mood
+- 0.0s-5.0s: "Under the hood, Tamma uses a dual-stack architecture. TypeScript and Node.js power the AI providers, CLI, and API." -- workflow designer active, progress bar filling
+- 5.0s-10.0s: "Dotnet and the ELSA workflow engine handle orchestration -- 20-plus composable workflows that are visual, pausable, and resumable." -- 2D-to-3D transition, ELSA tower materializes
+- 10.0s-15.0s: "You can even design custom workflows in the ELSA visual studio." -- data flows through architecture, Event Bus pulses
+- 15.0s-20.0s: "This is not a brittle script. It is a production-grade workflow engine." -- full architecture visible, camera orbiting, industrial mood
 
 #### EMOTIONAL ARC
 
@@ -945,13 +945,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Soft UI sounds from the workflow designer, progress bar filling tone, 3D extrusion whoosh, industrial hum for the architecture, data flow particles
-- SFX Prompt (ElevenLabs): `{"text": "Soft interface clicks, progress tone, industrial architectural hum, data flow particles, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Soft interface clicks, progress tone, industrial architectural hum, data flow particles, no music", "duration_seconds": 20.0}`
 
 ---
 
 ### Scene 12: Intelligent Agent Routing
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -966,16 +966,22 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The YAML configuration panel's cursor highlights the 'primary: claude-4' line. The Role Resolver hexagon pulses purple and sends a routing beam to claude-4. The security gate opens briefly. The routing succeeds. Then the camera slides right, and the configuration panel transforms into a diagnostics dashboard. The four metric panels materialize one by one: Cost bars rise, Token bars fill, Latency lines draw, Error gauges spin to their values. Data updates in real-time. The mood transitions from configuration to observability."
 - **Camera**: Slide-right transition from config view to dashboard view
 - **Output**: `clips/deep-dive/scene12-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 6 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The diagnostics dashboard is alive with real-time updates. Cost bars flicker slightly. Token usage bars creep upward. The latency line graph draws new data points, staying under the threshold. CyberCore's error rate gauge ticks from 1.4% to 1.5%, triggering an amber 'Warning' flash. The city skyline through the window shows flying vehicles and neon signs. The camera slowly zooms into the dashboard, emphasizing the level of observability. Professional, mission-control atmosphere."
 - **Camera**: Slow push-in on the dashboard, data updating in real-time
 - **Output**: `clips/deep-dive/scene12-clip02.mp4`
+
+**Clip 3**: Hold on Frame B with continued motion
+- **Duration**: 8 seconds
+- **Motion Prompt**: "The dashboard continues its real-time updates. The CyberCore warning triggers a brief amber pulse across the panel. The cost bars settle, showing the Provider Nexus-9 at highest cost. Token usage for CyberCore creeps closer to its limit. The latency graph remains steady and healthy. The camera drifts slowly across the four quadrants, giving each metric panel a moment of focus. City lights reflect on the dashboard glass. The mood is one of complete operational visibility and control."
+- **Camera**: Slow lateral drift across the dashboard quadrants
+- **Output**: `clips/deep-dive/scene12-clip03.mp4`
 
 #### NARRATION
 
@@ -991,10 +997,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.95
 
 **Timing Sync**:
-- 0.0s-3.0s: "Tamma uses a config-driven multi-agent system. Different workflow phases..." -- config panel visible, Role Resolver routes
-- 3.0s-6.0s: "Each role has an ordered provider chain with fallbacks and circuit breakers." -- routing paths light up, security gate opens
-- 6.0s-9.0s: "If Claude is down, it falls back to GPT-4. If that is slow, it routes to a local model." -- dashboard materializes, metrics loading
-- 9.0s-12.0s: "Diagnostics track cost, tokens, latency, and errors per provider in real time." -- full dashboard view, data updating live
+- 0.0s-6.0s: "Tamma uses a config-driven multi-agent system. Different workflow phases map to different agent roles -- planning, coding, reviewing, testing." -- config panel visible, Role Resolver routes
+- 6.0s-12.0s: "Each role has an ordered provider chain with fallbacks and circuit breakers. If Claude is down, it falls back to GPT-4. If that is slow, it routes to a local model." -- routing paths light up, security gate opens, dashboard materializes
+- 12.0s-18.0s: "Diagnostics track cost, tokens, latency, and errors per provider..." -- dashboard metrics loading and updating
+- 18.0s-24.0s: "...in real time." -- full dashboard view, data updating live, camera drifts across quadrants
 
 #### EMOTIONAL ARC
 
@@ -1009,18 +1015,18 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Soft config-typing sounds, routing beam whoosh, dashboard materialization tones, real-time data tick sounds, subtle warning blip on amber
-- SFX Prompt (ElevenLabs): `{"text": "Soft keyboard clicks, electronic routing whoosh, dashboard data ticks, subtle amber warning blip, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Soft keyboard clicks, electronic routing whoosh, dashboard data ticks, subtle amber warning blip, no music", "duration_seconds": 24.0}`
 
 ---
 
 
-## SECTION D: THE DIFFERENTIATOR (Scenes 13-15, ~35s)
+## SECTION D: THE DIFFERENTIATOR (Scenes 13-15, ~70s)
 
 ---
 
 ### Scene 13: Tamma Maintains Itself
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -1035,16 +1041,22 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 6 seconds
-- **Motion Prompt**: "The circular self-maintenance track rotates slowly. The red bug card #142 slides along the track, passing through the commit stage. The Tamma author badge glows purple. Tests run and the '14/14 tests passed' counter increments rapidly. The green #143 Merged card appears with a satisfying glow. The camera rises above the track and the circular view flattens into the statistics layout. The progress bar fills from left to right, stopping at 60%+. The timeline materializes below with milestone dots appearing in sequence. The mood is one of awe -- the tool maintains itself."
-- **Camera**: Rise above the ouroboros ring, transitioning to overhead statistical view
+- **Duration**: 8 seconds
+- **Motion Prompt**: "The circular self-maintenance track rotates slowly. The red bug card #142 slides along the track, passing through the commit stage. The Tamma author badge glows purple. Tests run and the '14/14 tests passed' counter increments rapidly. The green #143 Merged card appears with a satisfying glow. The camera rises above the track and the circular view begins flattening. The mood is one of awe -- the tool maintains itself."
+- **Camera**: Rise above the ouroboros ring, beginning transition to statistical view
 - **Output**: `clips/deep-dive/scene13-clip01.mp4`
 
-**Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 6 seconds
-- **Motion Prompt**: "The 60%+ progress bar pulses gently with green light. The timeline arrow extends slightly toward the right, suggesting ongoing progress. The milestone dots gleam in sequence: First Self-Fix, First Self-Feature, First Self-Epic. The 'Self-Implemented: ~60%+' text glows brighter than the 'Human-Written: ~40%' text. Subtle code-rain particles drift down in the background. The camera slowly pushes in on the progress bar and timeline, centering on the achievement. The mood is quietly impressive -- this IS the differentiator."
-- **Camera**: Slow push-in on the progress bar and timeline
+**Clip 2**: Frame A --> Frame B (continued transition)
+- **Duration**: 8 seconds
+- **Motion Prompt**: "The circular view completes its transformation into the statistics layout. The progress bar fills from left to right, stopping at 60%+. The timeline materializes below with milestone dots appearing in sequence: Bootstrap, First Self-Fix, First Self-Feature, First Self-Epic. The 'Self-Implemented: ~60%+' text glows brighter than the 'Human-Written: ~40%' text. Code-rain particles begin drifting in the background. The mood shifts from technical demonstration to measurable achievement."
+- **Camera**: Settling into overhead statistical view, elements materializing
 - **Output**: `clips/deep-dive/scene13-clip02.mp4`
+
+**Clip 3**: Hold on Frame B with subtle motion
+- **Duration**: 8 seconds
+- **Motion Prompt**: "The 60%+ progress bar pulses gently with green light. The timeline arrow extends slightly toward the right, suggesting ongoing progress. The milestone dots gleam in sequence: First Self-Fix, First Self-Feature, First Self-Epic. Subtle code-rain particles drift down in the background. The camera slowly pushes in on the progress bar and timeline, centering on the achievement. The mood is quietly impressive -- this IS the differentiator."
+- **Camera**: Slow push-in on the progress bar and timeline
+- **Output**: `clips/deep-dive/scene13-clip03.mp4`
 
 #### NARRATION
 
@@ -1060,10 +1072,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.88
 
 **Timing Sync**:
-- 0.0s-3.0s: "Here is what separates Tamma. Tamma maintains its own codebase." -- ouroboros track, bug card flowing
-- 3.0s-6.0s: "It fixes its own bugs. It implements its own features." -- tests passing, merge completing
-- 6.0s-9.0s: "Tamma completed over 60 percent of its own implementation autonomously." -- transition to stats, progress bar fills
-- 9.0s-12.0s: "If Tamma can safely maintain mission-critical software -- itself -- it can maintain yours." -- hold on progress bar, timeline glowing
+- 0.0s-6.0s: "Here is what separates Tamma from every other tool in this space. Tamma maintains its own codebase. It fixes its own bugs." -- ouroboros track, bug card flowing, tests passing
+- 6.0s-12.0s: "It implements its own features. It updates its own dependencies. After the initial bootstrap, Tamma completed over 60 percent of its own implementation autonomously." -- merge completing, transition to stats, progress bar fills
+- 12.0s-18.0s: "That is the ultimate proof of production readiness." -- progress bar settled, timeline milestones glowing
+- 18.0s-24.0s: "If Tamma can safely maintain mission-critical software -- itself -- it can maintain yours." -- slow push-in on progress bar and timeline
 
 #### EMOTIONAL ARC
 
@@ -1078,13 +1090,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Satisfying whoosh as bug card flows through the track, rapid test-tick sounds, triumphant merge tone, subtle awe-inspiring low drone on the 60% reveal
-- SFX Prompt (ElevenLabs): `{"text": "Flowing whoosh, rapid ticking, triumphant merge chime, awe-inspiring deep drone, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Flowing whoosh, rapid ticking, triumphant merge chime, awe-inspiring deep drone, no music", "duration_seconds": 24.0}`
 
 ---
 
 ### Scene 14: Sarah's Story
 
-**Duration**: 13 seconds | **Clips**: 3
+**Duration**: 30 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -1103,19 +1115,19 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 4 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The chat interface shows Tamma's question about refresh tokens vs sessions. The cursor moves to the 'Refresh Tokens' card and clicks it -- the card lights up bright purple. A confirmation pulse radiates outward. The chat interface slides left and transforms into a code editor. Test files appear on the left, implementation code on the right. The first test runs and shows a green checkmark. Then the second. The implementation progress bar begins filling. The mood shifts from a simple question to rapid autonomous coding."
 - **Camera**: Slide-left transition from chat to code editor, tests running in sequence
 - **Output**: `clips/deep-dive/scene14-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The third test turns green. The implementation progress bar hits 100%. The code editor folds away and a pipeline strip materializes at the top with icons lighting up green one by one: code, database, test, security, review, deploy. The '3 hours' text appears and gets struck through with a red line. '45 minutes' fades in large and bold with the '75% saved' badge. Sarah's silhouette appears with her speech bubble. The merged PR card slides in from the right. The mood is one of practical, measurable success."
 - **Camera**: Fold transition from code to results summary, elements appearing in sequence
 - **Output**: `clips/deep-dive/scene14-clip02.mp4`
 
 **Clip 3**: Hold on Frame C with subtle motion
-- **Duration**: 4 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The results summary holds. The pipeline checkmarks pulse gently. The '45 minutes' text glows. Sarah's speech bubble is prominent: 'I made 1 decision. Tamma handled the rest.' The merged PR card's green checkmark gleams. The 75% badge rotates slightly. The camera slowly pushes in on the merged PR card and Sarah's quote, centering the human-in-the-loop message. Satisfied, practical, relatable atmosphere."
 - **Camera**: Slow push-in centering on the PR card and Sarah's quote
 - **Output**: `clips/deep-dive/scene14-clip03.mp4`
@@ -1134,10 +1146,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.95
 
 **Timing Sync**:
-- 0.0s-3.0s: "Let us walk through a real scenario. Sarah assigns issue 247..." -- chat interface with ambiguity question
-- 3.0s-6.0s: "She picks refresh tokens. Tamma generates a design, she approves it..." -- click, transition to code editor, tests running
-- 6.0s-10.0s: "Tamma implements the feature with TDD, creates the PR, passes all quality gates..." -- pipeline checkmarks, PR merging
-- 10.0s-13.0s: "Total time: 45 minutes. Manually, over three hours. Sarah focused on the one decision that mattered." -- results summary, time savings, Sarah's quote
+- 0.0s-8.0s: "Let us walk through a real scenario. Sarah, a senior developer, assigns issue 247 -- add an OAuth2 authentication endpoint. Tamma analyzes the codebase, detects an ambiguity about refresh tokens versus sessions, and asks Sarah to choose." -- chat interface with ambiguity question
+- 8.0s-16.0s: "She picks refresh tokens. Tamma generates a design, she approves it, and Tamma implements the feature with TDD, creates the PR..." -- click, transition to code editor, tests running
+- 16.0s-22.0s: "...passes all quality gates, and merges. Total time: 45 minutes. Manually, it would have taken over three hours." -- pipeline checkmarks, PR merging, time comparison
+- 22.0s-30.0s: "Sarah focused on the one decision that mattered." -- results summary, Sarah's quote, slow push-in on merged PR
 
 #### EMOTIONAL ARC
 
@@ -1152,13 +1164,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Soft chat notification on Tamma's question, click sound on choice, rapid coding/typing sounds during TDD, sequential checkmark pings on pipeline, satisfying merge tone
-- SFX Prompt (ElevenLabs): `{"text": "Chat notification, button click, rapid typing, sequential success pings, satisfying merge chime, no music", "duration_seconds": 13.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Chat notification, button click, rapid typing, sequential success pings, satisfying merge chime, no music", "duration_seconds": 30.0}`
 
 ---
 
 ### Scene 15: AI That Learns
 
-**Duration**: 10 seconds | **Clips**: 2
+**Duration**: 16 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -1173,13 +1185,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The human code review speech bubble sends its feedback toward the Learning Engine brain chip. The brain processes the input with a neural network pulse effect -- synapses firing in blue and purple. A knowledge card materializes and files itself into the Knowledge Storage folder. The pattern counter increments. The camera pulls back and the learning pipeline compresses, transforming into three metric panels that expand to fill the frame. Numbers begin counting: review comments drop, completion time shrinks, approval rate climbs. The mood transitions from technical process to measurable results."
 - **Camera**: Pull-back from pipeline, panels expanding outward
 - **Output**: `clips/deep-dive/scene15-clip01.mp4`
 
 **Clip 2**: Hold on Frame B with subtle motion
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The three metric panels are alive with subtle animation. The review comment counter flickers between 2 and 3. The completion time display pulses at 45 min. The approval rate gauge fills to 87% with a satisfying green glow. The 'CONTINUOUS IMPROVEMENT' text glows, and the orbital lines beneath rotate slowly, suggesting perpetual learning. The camera slowly drifts inward, centering on the improvement metrics. The mood is one of proven, measurable growth."
 - **Camera**: Slow drift-in, centering on the metric panels
 - **Output**: `clips/deep-dive/scene15-clip02.mp4`
@@ -1198,10 +1210,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.93
 
 **Timing Sync**:
-- 0.0s-2.5s: "Tamma does not just execute -- it learns. The mentorship workflow captures every piece of human feedback." -- code review flows into learning engine
-- 2.5s-5.0s: "Code review comments. Design decisions. Quality preferences." -- knowledge cards filing, counter incrementing
-- 5.0s-7.5s: "Over time, Tamma adapts to your team's coding style, architectural patterns..." -- metric panels appearing, numbers counting
-- 7.5s-10.0s: "It gets better every cycle." -- all three metrics settled at impressive values, orbital lines rotating
+- 0.0s-4.0s: "Tamma does not just execute -- it learns. The mentorship workflow captures every piece of human feedback." -- code review flows into learning engine
+- 4.0s-8.0s: "Code review comments. Design decisions. Quality preferences." -- knowledge cards filing, counter incrementing
+- 8.0s-12.0s: "Over time, Tamma adapts to your team's coding style, architectural patterns, and quality standards." -- metric panels appearing, numbers counting
+- 12.0s-16.0s: "It gets better every cycle." -- all three metrics settled at impressive values, orbital lines rotating
 
 #### EMOTIONAL ARC
 
@@ -1216,18 +1228,18 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Neural network pulse/synapse firing sounds, knowledge filing whoosh, metric counter ticking, subtle ascending tone on "better every cycle"
-- SFX Prompt (ElevenLabs): `{"text": "Neural synapse pulses, filing whoosh, soft counter ticking, ascending optimistic tone, no music", "duration_seconds": 10.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Neural synapse pulses, filing whoosh, soft counter ticking, ascending optimistic tone, no music", "duration_seconds": 16.0}`
 
 ---
 
 
-## SECTION E: ARCHITECTURE AND VISION (Scenes 16-18, ~42s)
+## SECTION E: ARCHITECTURE AND VISION (Scenes 16-18, ~68s)
 
 ---
 
 ### Scene 16: Built for Production
 
-**Duration**: 15 seconds | **Clips**: 3
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -1246,19 +1258,19 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The Fastify API layer at the top pulses with a lightning bolt flash. The '100K req/s' badge glows. Data flows downward through ELSA workflows to PostgreSQL. The camera pulls back and the vertical stack compresses, transforming into a grid layout. Twelve package cards materialize one by one in a 4x3 grid, each with its distinct color and icon. Connection lines draw between them, showing the monorepo dependency graph. The 'Open Source' badge fades in at the corner. The mood is one of engineering thoroughness."
 - **Camera**: Pull-back from vertical stack, compressing into grid layout
 - **Output**: `clips/deep-dive/scene16-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The 12 package cards compact and stack on top of each other, transforming into Docker containers on the Docker whale's back. The Hetzner server rack materializes on the left. The container stack builds from bottom (PostgreSQL) to top (Nginx). The 'Production Live' label appears with a heartbeat pulse. The Cloudflare shield materializes on the right with domain arrows routing through it. The camera settles into a wide establishing shot showing the complete deployment architecture. The mood is one of it being real and running."
 - **Camera**: Packages compacting into containers, widening to show deployment chain
 - **Output**: `clips/deep-dive/scene16-clip02.mp4`
 
 **Clip 3**: Hold on Frame C with subtle motion
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The production deployment hums. The heartbeat on 'Production Live' pulses steadily. Container layers glow softly in sequence. The Cloudflare shield rotates slightly. Domain name arrows flow with data packets. The Docker whale sways gently. The server rack LEDs blink. The camera slowly pushes in toward the 'Production Live' label, emphasizing that this is real and running. Confident, operational atmosphere."
 - **Camera**: Slow push-in toward the center, production live pulse
 - **Output**: `clips/deep-dive/scene16-clip03.mp4`
@@ -1277,10 +1289,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 1.00
 
 **Timing Sync**:
-- 0.0s-4.0s: "TypeScript 5.7 with strict mode. Node.js 22 LTS. PostgreSQL 17..." -- architecture stack layers lighting up
-- 4.0s-8.0s: "Vitest for testing. Pino for logging. pnpm monorepo with 12 packages." -- grid of 12 packages appearing
-- 8.0s-12.0s: "Docker Compose for deployment." -- packages stacking into containers on Docker whale
-- 12.0s-15.0s: "Everything is open source under an open-core model." -- full deployment chain, Production Live pulse
+- 0.0s-6.0s: "Tamma is built on a production-grade stack. TypeScript 5.7 with strict mode. Node.js 22 LTS. PostgreSQL 17 for the event store. Fastify 5 for the API." -- architecture stack layers lighting up
+- 6.0s-12.0s: "ELSA Workflows on dotnet for orchestration. Vitest for testing -- 10 to 20x faster than Jest. Pino for logging -- 5x faster than Winston." -- grid of 12 packages appearing
+- 12.0s-18.0s: "pnpm monorepo with 12 packages. Docker Compose for deployment." -- packages stacking into containers on Docker whale
+- 18.0s-24.0s: "Everything is open source under an open-core model." -- full deployment chain, Production Live pulse
 
 #### EMOTIONAL ARC
 
@@ -1295,13 +1307,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Lightning bolt electrical crack on Fastify, soft materialization sounds for each package, Docker container stacking thuds (subtle), heartbeat monitor beep on Production Live
-- SFX Prompt (ElevenLabs): `{"text": "Electrical crack, soft materialization tones, subtle container stacking, heartbeat beep, no music", "duration_seconds": 15.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Electrical crack, soft materialization tones, subtle container stacking, heartbeat beep, no music", "duration_seconds": 24.0}`
 
 ---
 
 ### Scene 17: Where We Are
 
-**Duration**: 15 seconds | **Clips**: 3
+**Duration**: 24 seconds | **Clips**: 3
 
 #### IMAGES
 
@@ -1320,19 +1332,19 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The 5x5 epic grid rotates slightly. The 16 green tiles pulse with checkmark confirmations. The camera pushes forward and the grid transforms into a live dashboard. Metric panels materialize: uptime graph draws upward, workflow bar chart fills, the issues funnel animates from top to bottom, provider circles light up one by one. The 'Online' badge blinks. The dashboard feels alive with real production data. The mood shifts from progress report to operational reality."
 - **Camera**: Push-in through the grid, transforming into dashboard
 - **Output**: `clips/deep-dive/scene17-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The dashboard panels compress and slide upward, revealing a horizontal timeline below. Completed milestones appear from left to right with green checkmarks. The 'Current' portal pulses at the center. Upcoming milestones materialize with golden glow to the right. The 'Momentum' arrow sweeps upward with energy particles trailing behind it. The stat badges (16 epics, 220+ stories, 65 issues) fade in at the bottom. The camera settles into a wide view showing both the past achievements and future direction."
 - **Camera**: Upward slide transition, then wide establishing shot of timeline
 - **Output**: `clips/deep-dive/scene17-clip02.mp4`
 
 **Clip 3**: Hold on Frame C with subtle motion
-- **Duration**: 5 seconds
+- **Duration**: 8 seconds
 - **Motion Prompt**: "The momentum arrow gleams and pulses with energy. The city skyline shimmers behind it. Completed milestone checkmarks glow green in sequence. The 'Current' portal rotates slowly. Upcoming milestones cast a warm golden glow. The stat badges pulse: 16, 220+, 65. The camera slowly pushes toward the momentum arrow and the future milestones, conveying forward trajectory. Optimistic, energetic atmosphere."
 - **Camera**: Slow push-in toward the future milestones and momentum arrow
 - **Output**: `clips/deep-dive/scene17-clip03.mp4`
@@ -1351,10 +1363,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.98
 
 **Timing Sync**:
-- 0.0s-3.0s: "Tamma is in active development with 16 epics completed and deployed." -- green epic grid, checkmarks lighting up
-- 3.0s-7.0s: "The foundation is live: AI providers, Git platforms, CLI, API..." -- dashboard showing production metrics
-- 7.0s-11.0s: "All running on a production server. The remaining 8 epics cover..." -- transition to roadmap timeline, upcoming milestones
-- 11.0s-15.0s: "65 GitHub issues closed. 24 epics total. 220-plus stories documented." -- stat badges appearing, momentum arrow
+- 0.0s-6.0s: "Tamma is in active development with 16 epics completed and deployed. The foundation is live: AI providers, Git platforms, CLI, API, workflows, quality gates, security, authentication, and monitoring." -- green epic grid, checkmarks lighting up, dashboard emerging
+- 6.0s-12.0s: "All running on a production server with Docker Compose, Cloudflare DNS, and full SSL." -- dashboard showing production metrics
+- 12.0s-18.0s: "The remaining 8 epics cover the autonomous development loop, billing, multi-tenancy, and the SaaS platform." -- transition to roadmap timeline, upcoming milestones
+- 18.0s-24.0s: "65 GitHub issues closed. 24 epics total. 220-plus stories documented." -- stat badges appearing, momentum arrow
 
 #### EMOTIONAL ARC
 
@@ -1369,13 +1381,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Epic grid checkmark pings (quick sequence), dashboard data materialization tones, timeline whoosh as milestones appear, momentum arrow ascending tone
-- SFX Prompt (ElevenLabs): `{"text": "Quick checkmark pings, data materialization, timeline sweep, ascending momentum tone, no music", "duration_seconds": 15.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Quick checkmark pings, data materialization, timeline sweep, ascending momentum tone, no music", "duration_seconds": 24.0}`
 
 ---
 
 ### Scene 18: Join the Movement
 
-**Duration**: 12 seconds | **Clips**: 2
+**Duration**: 20 seconds | **Clips**: 2
 
 #### IMAGES
 
@@ -1394,13 +1406,13 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### VIDEO CLIPS
 
 **Clip 1**: Frame A --> Frame B
-- **Duration**: 5 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The GitHub contribution graph fills with green squares, building the thumbs-up shape. Stars accumulate on the star counter. The developer avatars pulse in sequence. The camera pushes forward through the open-source scene, and the contribution graph compresses into the Tamma logo. Developer silhouettes expand outward into the surrounding network of hooded figures. 'Join the Movement' text fades in below. The three CTA icons materialize. The mood shifts from project metrics to community invitation."
 - **Camera**: Push-in through contribution graph, expanding into community network
 - **Output**: `clips/deep-dive/scene18-clip01.mp4`
 
 **Clip 2**: Frame B --> Frame C
-- **Duration**: 7 seconds
+- **Duration**: 10 seconds
 - **Motion Prompt**: "The community network of developer figures contracts inward toward the center Tamma logo. As they merge with it, the logo transforms from the simple 'T' badge into the ornate golden Arabic calligraphy. Light rays burst outward from the calligraphy as it fully materializes. The purple ring around the logo glows intensely then settles into a steady warm glow. 'Autonomous Development Done Right' fades in above. 'tamma.dev' fades in below in large clean text. The GitHub icon appears beneath. Sparkle particles drift across the frame. The camera slowly zooms out to reveal the full grand composition. The mood is triumphant, warm, and final. Hold for 3 seconds on the completed composition before fade to black."
 - **Camera**: Inward contraction, then slow zoom-out revealing grand finale, hold
 - **Output**: `clips/deep-dive/scene18-clip02.mp4`
@@ -1419,10 +1431,10 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 - speed: 0.88
 
 **Timing Sync**:
-- 0.0s-3.0s: "Tamma is open source and in active development. We are building the future..." -- community scene, contribution graph
-- 3.0s-6.0s: "Star us on GitHub. Sign up for launch notifications at tamma.dev." -- CTA icons appear, community gathers
-- 6.0s-9.0s: "Or dive into the code and contribute." -- network merges into golden calligraphy
-- 9.0s-12.0s: "The Arabic word 'tamm' means 'it is done.' With Tamma, your development work will be too." -- grand finale composition, light rays, hold, begin fade
+- 0.0s-5.0s: "Tamma is open source and in active development. We are building the future of autonomous development -- transparent, multi-provider, self-maintaining, and yours to control." -- community scene, contribution graph
+- 5.0s-10.0s: "Star us on GitHub. Sign up for launch notifications at tamma.dev. Or dive into the code and contribute." -- CTA icons appear, community gathers
+- 10.0s-15.0s: "The Arabic word 'tamm' means 'it is done.'" -- network merges into golden calligraphy, light rays burst
+- 15.0s-20.0s: "With Tamma, your development work will be too." -- grand finale composition, hold, begin fade
 
 #### EMOTIONAL ARC
 
@@ -1437,37 +1449,37 @@ All stitching, transitions, audio mixing, and final render use ffmpeg.
 #### SOUND
 
 - Ambient: Warm community hum, subtle star twinkle sounds, golden chime on calligraphy reveal, deep resonant "completion" tone on the final word, gentle fade to silence
-- SFX Prompt (ElevenLabs): `{"text": "Warm community ambiance, star twinkles, golden crystalline chime, deep resonant completion tone, fading to silence, no music", "duration_seconds": 12.0}`
+- SFX Prompt (ElevenLabs): `{"text": "Warm community ambiance, star twinkles, golden crystalline chime, deep resonant completion tone, fading to silence, no music", "duration_seconds": 20.0}`
 
 ---
 
 
 ## Stitching & Transitions (ffmpeg)
 
-### Clip Inventory (40 clips via Runway Gen4 Turbo)
+### Clip Inventory (43 clips via Runway Gen4 Turbo)
 
 | Scene | Clips | Filenames | Runway Duration |
 |-------|-------|-----------|-----------------|
-| 1 | 2 | scene01-clip01.mp4, scene01-clip02.mp4 | 5s + 5s |
-| 2 | 2 | scene02-clip01.mp4, scene02-clip02.mp4 | 6s + 6s |
-| 3 | 2 | scene03-clip01.mp4, scene03-clip02.mp4 | 5s + 5s |
-| 4 | 2 | scene04-clip01.mp4, scene04-clip02.mp4 | 5s + 5s |
-| 5 | 3 | scene05-clip01.mp4, scene05-clip02.mp4, scene05-clip03.mp4 | 5s + 5s + 5s |
-| 6 | 2 | scene06-clip01.mp4, scene06-clip02.mp4 | 5s + 5s |
-| 7 | 2 | scene07-clip01.mp4, scene07-clip02.mp4 | 6s + 6s |
-| 8 | 2 | scene08-clip01.mp4, scene08-clip02.mp4 | 5s + 5s |
-| 9 | 2 | scene09-clip01.mp4, scene09-clip02.mp4 | 6s + 6s |
-| 10 | 3 | scene10-clip01.mp4, scene10-clip02.mp4, scene10-clip03.mp4 | 5s + 5s + 4s* |
-| 11 | 2 | scene11-clip01.mp4, scene11-clip02.mp4 | 6s + 6s |
-| 12 | 2 | scene12-clip01.mp4, scene12-clip02.mp4 | 6s + 6s |
-| 13 | 2 | scene13-clip01.mp4, scene13-clip02.mp4 | 6s + 6s |
-| 14 | 3 | scene14-clip01.mp4, scene14-clip02.mp4, scene14-clip03.mp4 | 4s* + 5s + 4s* |
-| 15 | 2 | scene15-clip01.mp4, scene15-clip02.mp4 | 5s + 5s |
-| 16 | 3 | scene16-clip01.mp4, scene16-clip02.mp4, scene16-clip03.mp4 | 5s + 5s + 5s |
-| 17 | 3 | scene17-clip01.mp4, scene17-clip02.mp4, scene17-clip03.mp4 | 5s + 5s + 5s |
-| 18 | 2 | scene18-clip01.mp4, scene18-clip02.mp4 | 5s + 7s* |
+| 1 | 2 | scene01-clip01.mp4, scene01-clip02.mp4 | 8s + 8s |
+| 2 | 3 | scene02-clip01.mp4, scene02-clip02.mp4, scene02-clip03.mp4 | 8s + 8s + 8s |
+| 3 | 2 | scene03-clip01.mp4, scene03-clip02.mp4 | 8s + 8s |
+| 4 | 2 | scene04-clip01.mp4, scene04-clip02.mp4 | 8s + 8s |
+| 5 | 2 | scene05-clip01.mp4, scene05-clip02.mp4 | 10s + 8s |
+| 6 | 2 | scene06-clip01.mp4, scene06-clip02.mp4 | 8s + 8s |
+| 7 | 2 | scene07-clip01.mp4, scene07-clip02.mp4 | 10s + 10s |
+| 8 | 2 | scene08-clip01.mp4, scene08-clip02.mp4 | 8s + 8s |
+| 9 | 2 | scene09-clip01.mp4, scene09-clip02.mp4 | 10s + 8s |
+| 10 | 3 | scene10-clip01.mp4, scene10-clip02.mp4, scene10-clip03.mp4 | 8s + 8s + 8s |
+| 11 | 2 | scene11-clip01.mp4, scene11-clip02.mp4 | 10s + 10s |
+| 12 | 3 | scene12-clip01.mp4, scene12-clip02.mp4, scene12-clip03.mp4 | 8s + 8s + 8s |
+| 13 | 3 | scene13-clip01.mp4, scene13-clip02.mp4, scene13-clip03.mp4 | 8s + 8s + 8s |
+| 14 | 3 | scene14-clip01.mp4, scene14-clip02.mp4, scene14-clip03.mp4 | 10s + 10s + 10s |
+| 15 | 2 | scene15-clip01.mp4, scene15-clip02.mp4 | 8s + 8s |
+| 16 | 3 | scene16-clip01.mp4, scene16-clip02.mp4, scene16-clip03.mp4 | 8s + 8s + 8s |
+| 17 | 3 | scene17-clip01.mp4, scene17-clip02.mp4, scene17-clip03.mp4 | 8s + 8s + 8s |
+| 18 | 2 | scene18-clip01.mp4, scene18-clip02.mp4 | 10s + 10s |
 
-*Clips marked with `*` need trimming in ffmpeg (`-t` flag) since Runway only supports 5s or 10s durations. Generate at 5s and trim to target.
+All clip durations use Runway Gen 4.5 supported values (5s, 8s, or 10s). No trimming required.
 
 ### Transition Map
 
@@ -1519,9 +1531,9 @@ ffmpeg -i $CLIPS/scene01-clip01.mp4 -i $CLIPS/scene01-clip02.mp4 \
   -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene01-merged.mp4
 
-# Scene 2 (2 clips)
-ffmpeg -i $CLIPS/scene02-clip01.mp4 -i $CLIPS/scene02-clip02.mp4 \
-  -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
+# Scene 2 (3 clips)
+ffmpeg -i $CLIPS/scene02-clip01.mp4 -i $CLIPS/scene02-clip02.mp4 -i $CLIPS/scene02-clip03.mp4 \
+  -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene02-merged.mp4
 
 # Scene 3 (2 clips)
@@ -1534,9 +1546,9 @@ ffmpeg -i $CLIPS/scene04-clip01.mp4 -i $CLIPS/scene04-clip02.mp4 \
   -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene04-merged.mp4
 
-# Scene 5 (3 clips)
-ffmpeg -i $CLIPS/scene05-clip01.mp4 -i $CLIPS/scene05-clip02.mp4 -i $CLIPS/scene05-clip03.mp4 \
-  -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
+# Scene 5 (2 clips)
+ffmpeg -i $CLIPS/scene05-clip01.mp4 -i $CLIPS/scene05-clip02.mp4 \
+  -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene05-merged.mp4
 
 # Scene 6 (2 clips)
@@ -1569,14 +1581,14 @@ ffmpeg -i $CLIPS/scene11-clip01.mp4 -i $CLIPS/scene11-clip02.mp4 \
   -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene11-merged.mp4
 
-# Scene 12 (2 clips)
-ffmpeg -i $CLIPS/scene12-clip01.mp4 -i $CLIPS/scene12-clip02.mp4 \
-  -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
+# Scene 12 (3 clips)
+ffmpeg -i $CLIPS/scene12-clip01.mp4 -i $CLIPS/scene12-clip02.mp4 -i $CLIPS/scene12-clip03.mp4 \
+  -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene12-merged.mp4
 
-# Scene 13 (2 clips)
-ffmpeg -i $CLIPS/scene13-clip01.mp4 -i $CLIPS/scene13-clip02.mp4 \
-  -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" \
+# Scene 13 (3 clips)
+ffmpeg -i $CLIPS/scene13-clip01.mp4 -i $CLIPS/scene13-clip02.mp4 -i $CLIPS/scene13-clip03.mp4 \
+  -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/scene13-merged.mp4
 
 # Scene 14 (3 clips)
@@ -1613,7 +1625,7 @@ Note: `xfade` filter requires knowing exact durations. Replace `DURATION_N` with
 OUTPUT=docs/video/output
 
 # Build the full xfade chain
-# Scene durations: 10, 12, 10, 10, 15, 10, 12, 10, 12, 14, 12, 12, 12, 13, 10, 15, 15, 12
+# Scene durations: 16, 24, 16, 16, 18, 16, 20, 16, 18, 24, 20, 24, 24, 30, 16, 24, 24, 20
 # Transition durations: 0.8(in), 0.5, 0.5, 0.7, 0.5, 0.5, 0.4, 0.5, 0.5, 0.5, 0.5, 0.5, 0.4, 0.5, 0.5, 0.7, 0.5, 0.5, 1.5(out)
 
 # Pairwise transitions (run sequentially, each takes previous output):
@@ -1625,92 +1637,92 @@ ffmpeg -f lavfi -i "color=c=black:s=1920x1080:d=0.8" -i $OUTPUT/scene01-merged.m
 
 # Scene 1 -> Scene 2 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-01.mp4 -i $OUTPUT/scene02-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=9.5[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=15.5[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-02.mp4
 
 # Scene 2 -> Scene 3 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-02.mp4 -i $OUTPUT/scene03-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=21.0[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=39.0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-03.mp4
 
 # Scene 3 -> Scene 4 (wipeleft 0.7s -- purple wipe approximated)
 ffmpeg -i $OUTPUT/step-03.mp4 -i $OUTPUT/scene04-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=wipeleft:duration=0.7:offset=30.3[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=wipeleft:duration=0.7:offset=54.3[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-04.mp4
 
 # Scene 4 -> Scene 5 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-04.mp4 -i $OUTPUT/scene05-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=39.6[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=69.8[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-05.mp4
 
 # Scene 5 -> Scene 6 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-05.mp4 -i $OUTPUT/scene06-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=54.1[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=87.3[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-06.mp4
 
 # Scene 6 -> Scene 7 (slideleft 0.4s)
 ffmpeg -i $OUTPUT/step-06.mp4 -i $OUTPUT/scene07-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=slideleft:duration=0.4:offset=63.6[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=slideleft:duration=0.4:offset=102.9[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-07.mp4
 
 # Scene 7 -> Scene 8 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-07.mp4 -i $OUTPUT/scene08-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=75.2[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=122.4[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-08.mp4
 
 # Scene 8 -> Scene 9 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-08.mp4 -i $OUTPUT/scene09-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=84.7[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=137.9[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-09.mp4
 
 # Scene 9 -> Scene 10 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-09.mp4 -i $OUTPUT/scene10-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=96.2[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=155.4[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-10.mp4
 
 # Scene 10 -> Scene 11 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-10.mp4 -i $OUTPUT/scene11-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=109.7[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=178.9[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-11.mp4
 
 # Scene 11 -> Scene 12 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-11.mp4 -i $OUTPUT/scene12-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=121.2[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=198.4[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-12.mp4
 
 # Scene 12 -> Scene 13 (slideleft 0.4s)
 ffmpeg -i $OUTPUT/step-12.mp4 -i $OUTPUT/scene13-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=slideleft:duration=0.4:offset=132.7[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=slideleft:duration=0.4:offset=222.0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-13.mp4
 
 # Scene 13 -> Scene 14 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-13.mp4 -i $OUTPUT/scene14-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=144.3[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=245.5[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-14.mp4
 
 # Scene 14 -> Scene 15 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-14.mp4 -i $OUTPUT/scene15-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=156.8[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=275.0[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-15.mp4
 
 # Scene 15 -> Scene 16 (wipeleft 0.7s -- purple glow wipe)
 ffmpeg -i $OUTPUT/step-15.mp4 -i $OUTPUT/scene16-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=wipeleft:duration=0.7:offset=166.3[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=wipeleft:duration=0.7:offset=290.3[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-16.mp4
 
 # Scene 16 -> Scene 17 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-16.mp4 -i $OUTPUT/scene17-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=180.6[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=313.8[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-17.mp4
 
 # Scene 17 -> Scene 18 (crossfade 0.5s)
 ffmpeg -i $OUTPUT/step-17.mp4 -i $OUTPUT/scene18-merged.mp4 \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=195.1[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=337.3[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/step-18.mp4
 
 # Fade to black at the end (1.5s)
 ffmpeg -i $OUTPUT/step-18.mp4 -f lavfi -i "color=c=black:s=1920x1080:d=1.5" \
-  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=1.5:offset=206.1[v]" \
+  -filter_complex "[0:v][1:v]xfade=transition=fade:duration=1.5:offset=355.8[v]" \
   -map "[v]" -c:v libx264 -preset slow -crf 18 $OUTPUT/deep-dive-video-only.mp4
 ```
 
@@ -1823,7 +1835,7 @@ curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
 curl -X POST "https://api.elevenlabs.io/v1/sound-generation" \
   -H "xi-api-key: $API_KEY" -H "Content-Type: application/json" \
   -o $SFX/scene01-ambient.mp3 \
-  -d '{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 10.0}'
+  -d '{"text": "Quiet office ambiance with soft electronic undertone, muted keyboard sounds, no music", "duration_seconds": 16.0}'
 
 # ... repeat for scenes 02-18 using each scene's SFX Prompt and duration ...
 ```
@@ -1856,7 +1868,7 @@ ffmpeg -i $OUTPUT/deep-dive-video-only.mp4 -i $AUDIO/full-audio-mix.mp3 \
 **Note**: For precise SFX timing, use `adelay` filter to position each scene's ambient SFX and transition swooshes at exact timestamps matching scene cuts. Example:
 
 ```bash
-# Position Scene 1 ambient at 0ms, Scene 2 ambient at 10500ms, swoosh at 10000ms, etc.
+# Position Scene 1 ambient at 0ms, Scene 2 ambient at 16250ms, swoosh at 15750ms, etc.
 ffmpeg \
   -i $SFX/scene01-ambient.mp3 \
   -i $SFX/swoosh-crossfade.mp3 \
@@ -1866,10 +1878,10 @@ ffmpeg \
   ... \
   -filter_complex \
     "[0:a]adelay=0|0,volume=0.15[s1]; \
-     [1:a]adelay=9750|9750,volume=0.3[t1]; \
-     [2:a]adelay=10500|10500,volume=0.15[s2]; \
-     [3:a]adelay=22000|22000,volume=0.3[t2]; \
-     [4:a]adelay=22500|22500,volume=0.15[s3]; \
+     [1:a]adelay=15750|15750,volume=0.3[t1]; \
+     [2:a]adelay=16250|16250,volume=0.15[s2]; \
+     [3:a]adelay=39250|39250,volume=0.3[t2]; \
+     [4:a]adelay=39750|39750,volume=0.15[s3]; \
      ... \
      [s1][t1][s2][t2][s3]...amix=inputs=N:duration=longest[out]" \
   -map "[out]" -c:a libmp3lame -q:a 2 $SFX/full-sfx-mix.mp3
@@ -1891,7 +1903,7 @@ ffprobe -v error -show_entries format=duration,size,bit_rate \
 - **Resolution**: 1920x1080 (1080p) -- upscaled from Runway's 1280x720
 - **Frame rate**: 24 fps
 - **Codec**: H.264 video, AAC audio
-- **Duration**: ~3 minutes 46 seconds (226 seconds)
+- **Duration**: ~5 minutes 57 seconds (357 seconds)
 - **Audio**: ElevenLabs narration (George voice) + ElevenLabs SFX ambient layers (no background music)
 - **Transitions**: 17 inter-scene xfade transitions + fade in/out (ffmpeg)
 
@@ -1900,17 +1912,17 @@ ffprobe -v error -show_entries format=duration,size,bit_rate \
 | Metric | Value |
 |--------|-------|
 | Total scenes | 18 |
-| Total video clips (Runway Gen4 Turbo via Freepik) | 40 |
+| Total video clips (Runway Gen4 Turbo via Freepik) | 43 |
 | Total transitions (ffmpeg xfade) | 19 (17 inter-scene + fade in + fade out) |
 | Narration segments (ElevenLabs TTS, George voice) | 18 |
 | Sound effect layers (ElevenLabs SFX) | 18 ambient + 19 transition swooshes |
-| Video duration | ~3:46 |
-| Estimated Runway cost (~226s @ $0.12/s) | ~$27.12 |
-| Section A (Problem) | Scenes 1-3, ~32s |
-| Section B (Intro) | Scenes 4-6, ~35s |
-| Section C (How It Works) | Scenes 7-12, ~72s |
-| Section D (Differentiator) | Scenes 13-15, ~35s |
-| Section E (Architecture) | Scenes 16-18, ~42s |
+| Video duration | ~5:57 |
+| Estimated Runway cost (~366s @ $0.12/s) | ~$43.92 |
+| Section A (Problem) | Scenes 1-3, ~56s |
+| Section B (Intro) | Scenes 4-6, ~50s |
+| Section C (How It Works) | Scenes 7-12, ~122s |
+| Section D (Differentiator) | Scenes 13-15, ~70s |
+| Section E (Architecture) | Scenes 16-18, ~68s |
 
 ### API Dependencies
 
