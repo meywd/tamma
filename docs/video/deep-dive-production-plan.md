@@ -59,7 +59,7 @@ curl -X POST "https://api.freepik.com/v1/ai/image-to-video/runway-4-5" \
   -d '{
     "image": "https://raw.githubusercontent.com/meywd/tamma/main/docs/video/scenes/deep-dive/01-developer-burnout.png",
     "prompt": "Slow cinematic zoom into the developer figure at the desk. The 60% waste panel pulses with a dim red glow as warning icons drift and rotate lazily. The camera pushes forward and slightly down. Subtle particle dust floats in the air. Dark ambient lighting.",
-    "duration": 8,
+    "duration": 10,
     "ratio": "1280:720",
     "seed": 42
   }'
