@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tamma — Design 3: Aurora Split</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Sora', sans-serif;
+            background: #0e1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Aurora background effect */
+        .aurora {
+            position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            overflow: hidden;
+        }
+
+        .aurora::before {
+            content: '';
+            position: absolute;
+            width: 150%; height: 150%;
+            top: -25%; left: -25%;
+            background:
+                conic-gradient(from 120deg at 50% 50%,
+                    rgba(16, 185, 129, 0.07) 0deg,
+                    rgba(59, 130, 246, 0.05) 60deg,
+                    rgba(168, 85, 247, 0.06) 120deg,
+                    rgba(236, 72, 153, 0.04) 180deg,
+                    rgba(16, 185, 129, 0.07) 240deg,
+                    rgba(59, 130, 246, 0.05) 300deg,
+                    rgba(16, 185, 129, 0.07) 360deg
+                );
+            animation: aurora-spin 30s linear infinite;
+        }
+
+        @keyframes aurora-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .page { position: relative; z-index: 1; }
+
+        /* Nav */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            padding: 0.75rem 2rem;
+            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(14, 17, 23, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+        }
+
+        .nav-logo {
+            display: flex; align-items: center; gap: 0.6rem;
+            text-decoration: none; color: #c9d1d9;
+        }
+        .nav-logo img { width: 32px; height: 32px; border-radius: 50%; }
+        .nav-logo span { font-size: 1.1rem; font-weight: 700; }
+
+        .nav-r { display: flex; align-items: center; gap: 1.25rem; }
+        .nav-r > a { color: #8b949e; text-decoration: none; font-size: 0.875rem; font-weight: 500; transition: color 0.2s; }
+        .nav-r > a:hover { color: #58a6ff; }
+
+        .gh-btn {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.45rem 1rem;
+            background: #21262d; border: 1px solid #30363d;
+            border-radius: 6px; color: #c9d1d9;
+            text-decoration: none; font-size: 0.8125rem; font-weight: 600;
+            transition: all 0.2s;
+        }
+        .gh-btn:hover { background: #30363d; border-color: #8b949e; }
+        .gh-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+        /* Hero — split layout */
+        .hero {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: 1fr 1.15fr;
+            align-items: center;
+            gap: 3rem;
+            padding: 6rem 3rem 4rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Left text */
+        .hero-left {}
+
+        .status-line {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.8rem; color: #3fb950; font-weight: 600;
+        }
+
+        .status-line .live {
+            width: 7px; height: 7px;
+            background: #3fb950; border-radius: 50%;
+            box-shadow: 0 0 8px rgba(63, 185, 80, 0.4);
+            animation: blink 2s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .hero h1 {
+            font-size: clamp(2.25rem, 4vw, 3.25rem);
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            line-height: 1.1;
+            margin-bottom: 1.25rem;
+            color: #f0f6fc;
+        }
+
+        .hero h1 .g1 {
+            background: linear-gradient(135deg, #3fb950, #58a6ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-desc {
+            font-size: 1rem;
+            color: #8b949e;
+            line-height: 1.75;
+            margin-bottom: 2rem;
+            max-width: 420px;
+        }
+
+        /* CTAs */
+        .hero-btns {
+            display: flex; gap: 0.6rem; flex-wrap: wrap;
+            margin-bottom: 2.5rem;
+        }
+
+        .btn-green {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.8rem 1.5rem;
+            background: #238636; color: #fff;
+            border: 1px solid #2ea043; border-radius: 6px;
+            font-size: 0.875rem; font-weight: 600;
+            text-decoration: none; cursor: pointer; transition: all 0.2s;
+            font-family: inherit;
+        }
+        .btn-green:hover { background: #2ea043; }
+        .btn-green svg { width: 16px; height: 16px; fill: currentColor; }
+
+        .btn-dim {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.8rem 1.5rem;
+            background: #21262d; color: #c9d1d9;
+            border: 1px solid #30363d; border-radius: 6px;
+            font-size: 0.875rem; font-weight: 600;
+            text-decoration: none; cursor: pointer; transition: all 0.2s;
+            font-family: inherit;
+        }
+        .btn-dim:hover { background: #30363d; border-color: #8b949e; }
+
+        /* Mini stats */
+        .mini-stats {
+            display: flex; gap: 2rem; flex-wrap: wrap;
+        }
+
+        .ms { }
+        .ms-v {
+            font-size: 1.375rem; font-weight: 800; color: #f0f6fc;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .ms-l { font-size: 0.7rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.06em; }
+
+        /* Right — video in GitHub-style container */
+        .hero-right { }
+
+        .gh-card {
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid #30363d;
+            background: #161b22;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.3);
+        }
+
+        .gh-card-header {
+            display: flex; align-items: center;
+            padding: 0.5rem 1rem;
+            background: #161b22;
+            border-bottom: 1px solid #21262d;
+            gap: 0.75rem;
+        }
+
+        .tab {
+            display: flex; align-items: center; gap: 0.35rem;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.75rem; color: #c9d1d9;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-bottom: 1px solid #0d1117;
+            border-radius: 6px 6px 0 0;
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: -1px;
+        }
+
+        .tab svg { width: 14px; height: 14px; fill: #8b949e; }
+
+        .gh-card .vid-aspect {
+            position: relative;
+            padding-bottom: 56.25%;
+            height: 0;
+        }
+
+        .gh-card iframe {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            border: none;
+        }
+
+        /* Coming Soon */
+        .cs-section {
+            padding: 5rem 2rem;
+            border-top: 1px solid #21262d;
+        }
+
+        .cs-box {
+            max-width: 480px; margin: 0 auto;
+            text-align: center;
+        }
+
+        .cs-box h2 {
+            font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;
+            color: #f0f6fc;
+        }
+
+        .cs-box p { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.9375rem; }
+
+        .cs-input-row {
+            display: flex; gap: 0.5rem;
+        }
+
+        .cs-input-row input {
+            flex: 1; padding: 0.7rem 0.875rem;
+            background: #0d1117;
+            border: 1px solid #30363d; border-radius: 6px;
+            color: #c9d1d9; font-size: 0.875rem;
+            font-family: inherit; outline: none;
+        }
+        .cs-input-row input::placeholder { color: #484f58; }
+        .cs-input-row input:focus { border-color: #58a6ff; box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1); }
+
+        .cs-input-row button {
+            padding: 0.7rem 1.25rem;
+            background: #238636; color: #fff;
+            border: 1px solid #2ea043; border-radius: 6px;
+            font-size: 0.8125rem; font-weight: 600;
+            cursor: pointer; white-space: nowrap; font-family: inherit;
+        }
+        .cs-input-row button:hover { background: #2ea043; }
+
+        footer {
+            padding: 2rem; text-align: center;
+            color: #484f58; font-size: 0.8rem;
+            border-top: 1px solid #21262d;
+        }
+        footer a { color: #8b949e; text-decoration: none; }
+        footer a:hover { color: #58a6ff; }
+
+        @media (max-width: 900px) {
+            .hero {
+                grid-template-columns: 1fr;
+                padding: 7rem 1.5rem 3rem;
+                min-height: auto; gap: 2.5rem;
+            }
+            .hero-left { text-align: center; }
+            .hero-desc { max-width: 100%; }
+            .hero-btns { justify-content: center; }
+            .mini-stats { justify-content: center; }
+            .cs-input-row { flex-direction: column; }
+        }
+
+        @media (max-width: 480px) {
+            .hero-btns { flex-direction: column; align-items: center; }
+            .hero-btns a { width: 100%; max-width: 280px; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="aurora"></div>
+
+    <div class="page">
+        <nav>
+            <a href="#" class="nav-logo">
+                <img src="/assets/logo_small.png" alt="Tamma">
+                <span>Tamma</span>
+            </a>
+            <div class="nav-r">
+                <a href="#notify">Coming Soon</a>
+                <a href="https://github.com/meywd/tamma" target="_blank" class="gh-btn">
+                    <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                    Star
+                </a>
+            </div>
+        </nav>
+
+        <section class="hero">
+            <div class="hero-left">
+                <div class="status-line">
+                    <span class="live"></span>
+                    Building in public
+                </div>
+
+                <h1>Tam, it's<br><span class="g1">Done.</span></h1>
+
+                <p class="hero-desc">The autonomous development platform that orchestrates AI agents, manages Git workflows, and maintains its own codebase. No vendor lock-in.</p>
+
+                <div class="hero-btns">
+                    <a href="https://github.com/meywd/tamma" target="_blank" class="btn-green">
+                        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                        Star on GitHub
+                    </a>
+                    <a href="#notify" class="btn-dim">Get Notified</a>
+                </div>
+
+                <div class="mini-stats">
+                    <div class="ms"><div class="ms-v">3x</div><div class="ms-l">Faster</div></div>
+                    <div class="ms"><div class="ms-v">70%+</div><div class="ms-l">Autonomous</div></div>
+                    <div class="ms"><div class="ms-v">8+</div><div class="ms-l">Providers</div></div>
+                    <div class="ms"><div class="ms-v">Zero</div><div class="ms-l">Lock-in</div></div>
+                </div>
+            </div>
+
+            <div class="hero-right">
+                <div class="gh-card">
+                    <div class="gh-card-header">
+                        <div class="tab">
+                            <svg viewBox="0 0 16 16"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg>
+                            explainer.mp4
+                        </div>
+                    </div>
+                    <div class="vid-aspect">
+                        <iframe
+                            src="https://iframe.mediadelivery.net/embed/628261/5b9d914d-bcc0-472d-bd77-56420cadcb5a?autoplay=false&loop=false&muted=false&preload=true"
+                            loading="lazy"
+                            allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
+                            allowfullscreen="true"
+                        ></iframe>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="cs-section" id="notify">
+            <div class="cs-box">
+                <h2>Coming Soon</h2>
+                <p>Tamma is in active development. Get notified at launch.</p>
+                <form class="cs-input-row" onsubmit="event.preventDefault(); this.querySelector('button').textContent='Done!'; this.querySelector('input').value='';">
+                    <input type="email" placeholder="you@email.com" required>
+                    <button type="submit">Subscribe</button>
+                </form>
+            </div>
+        </section>
+
+        <footer>
+            <p>&copy; 2025 Tamma &middot; <a href="https://github.com/meywd/tamma" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+</body>
+</html>
