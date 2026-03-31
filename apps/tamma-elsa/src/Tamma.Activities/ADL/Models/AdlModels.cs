@@ -139,4 +139,52 @@ public class ReviewFixItem
     public string Comment { get; set; } = string.Empty;
     public string? SuggestedFix { get; set; }
     public string Priority { get; set; } = "normal";
+    public string Category { get; set; } = "unknown";
+}
+
+/// <summary>
+/// Category of a review comment for prioritization
+/// </summary>
+public static class ReviewCommentCategory
+{
+    public const string Bug = "bug";
+    public const string Style = "style";
+    public const string Design = "design";
+    public const string Question = "question";
+    public const string Praise = "praise";
+    public const string Security = "security";
+    public const string Performance = "performance";
+    public const string Unknown = "unknown";
+
+    /// <summary>
+    /// Whether a category represents an actionable comment that needs a code fix
+    /// </summary>
+    public static bool IsActionable(string category) => category switch
+    {
+        Bug or Security or Performance or Design or Style => true,
+        _ => false
+    };
+}
+
+/// <summary>
+/// Result from applying review fixes via LLM
+/// </summary>
+public class ReviewFixResult
+{
+    public bool Success { get; set; }
+    public List<string> FilesFixed { get; set; } = new();
+    public List<ReviewFixDescription> FixDescriptions { get; set; } = new();
+    public string? FixedCode { get; set; }
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Description of a single fix applied to address a review comment
+/// </summary>
+public class ReviewFixDescription
+{
+    public string FilePath { get; set; } = string.Empty;
+    public string OriginalComment { get; set; } = string.Empty;
+    public string FixApplied { get; set; } = string.Empty;
+    public int? Line { get; set; }
 }
