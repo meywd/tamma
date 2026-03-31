@@ -1,21 +1,26 @@
 {
   // Tamma Documentation & Wiki Site
-  // Pure static Astro site served via Cloudflare Workers Static Assets
+  // Vite React SPA on Cloudflare Workers
   "name": "tamma-wiki-site",
+  "main": "src/worker.ts",
   "compatibility_date": "2025-01-01",
 
-  // Static assets — no Worker script needed for pure static sites
+  // Static assets from Vite build
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    "binding": "ASSETS"
   },
 
-  // Custom domain — wiki.tamma.dev
+  // Custom domain
   "routes": [
     {
       "pattern": "wiki.tamma.dev",
       "zone_name": "tamma.dev"
     }
   ],
+
+  "workers_dev": true,
+  "preview_urls": true,
 
   "observability": {
     "enabled": true
