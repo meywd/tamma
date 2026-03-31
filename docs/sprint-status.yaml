@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2026-03-31 (epic-1-status-audit-against-codebase)
+# updated: 2026-03-31 (full-codebase-audit-all-26-epics-deep-verified)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -88,224 +88,224 @@ development_status:
   epic-2-retrospective: completed
 
   epic-3: contexted
-  3-1-build-automation-gate-implementation: ready-for-dev
-  3-2-test-execution-gate-implementation: ready-for-dev
-  3-3-escalation-workflow-implementation: ready-for-dev
-  3-4-research-workflow-implementation: ready-for-dev
-  3-5-clarifying-questions-workflow-implementation: ready-for-dev
-  3-6-ambiguity-scoring-implementation: ready-for-dev
-  3-7-design-proposal-workflow-implementation: ready-for-dev
-  3-8-static-analysis-gate-implementation: ready-for-dev
-  3-9-security-scanning-gate-implementation: ready-for-dev
-   3-10-agent-performance-monitoring: ready-for-dev
-   3-11-cost-aware-ai-usage: ready-for-dev
-   3-12-task-complexity-assessment: ready-for-dev
-   epic-3-retrospective: optional
+  3-1-build-automation-gate-implementation: done        # TriggerCIActivity, WaitForCIResultsActivity in Tamma.Activities/Testing/; TestingWorkflow in Elsa
+  3-2-test-execution-gate-implementation: done          # CheckCoverageActivity, EvaluateResultsActivity, GenerateQualityReportActivity in Tamma.Activities/Testing/; TestingWorkflow
+  3-3-escalation-workflow-implementation: done          # EscalateToSeniorActivity, EscalateReviewActivity; escalation paths in MentorshipWorkflow, BlockerDiagnosis, CodeReview
+  3-4-research-workflow-implementation: drafted         # No standalone research workflow in Elsa or TS packages
+  3-5-clarifying-questions-workflow-implementation: drafted  # No clarifying questions workflow exists
+  3-6-ambiguity-scoring-implementation: drafted         # No ambiguity scoring code exists
+  3-7-design-proposal-workflow-implementation: drafted   # No design proposal workflow exists
+  3-8-static-analysis-gate-implementation: done         # CheckLintingActivity in Tamma.Activities/Testing/; wired into TestingWorkflow
+  3-9-security-scanning-gate-implementation: done       # CheckSecurityActivity in Tamma.Activities/Testing/; wired into TestingWorkflow
+  3-10-agent-performance-monitoring: done               # InstrumentedAgentProvider, InstrumentedLlmProvider track latency/tokens/errors; diagnostics-processor
+  3-11-cost-aware-ai-usage: done                        # @tamma/cost-monitor package: CostTracker, CostCalculator, LimitManager, AlertManager, ReportGenerator
+  3-12-task-complexity-assessment: done                 # @tamma/scrum-master approval-workflow uses complexity scoring; config.test validates risk assessment
+  epic-3-retrospective: optional
 
   epic-4: contexted
 
-  4-1-event-schema-design: ready-for-dev
-  4-2-event-store-backend-selection: ready-for-dev
-  4-3-event-capture-issue-selection-analysis: ready-for-dev
-  4-4-event-capture-ai-provider-interactions: ready-for-dev
-  4-5-event-capture-code-changes-git-operations: ready-for-dev
-  4-6-event-capture-approvals-escalations: ready-for-dev
-  4-7-event-query-api-for-time-travel: ready-for-dev
-  4-8-black-box-replay-for-debugging: ready-for-dev
+  4-1-event-schema-design: done                         # EngineEvent, EngineEventType in packages/shared/src/types/index.ts (20+ event types)
+  4-2-event-store-backend-selection: in-progress        # InMemoryEventStore in packages/shared/src/event-store.ts; PostgreSQL backend not yet implemented
+  4-3-event-capture-issue-selection-analysis: done      # Engine emits ISSUE_SELECTED, PLAN_GENERATED events via InMemoryEventStore
+  4-4-event-capture-ai-provider-interactions: done      # InstrumentedAgentProvider/LlmProvider emit diagnostics; DiagnosticsQueue captures AI interactions
+  4-5-event-capture-code-changes-git-operations: done   # Engine emits CODE_GENERATED, PR_CREATED, PR_MERGED events
+  4-6-event-capture-approvals-escalations: done         # Engine emits PLAN_APPROVED, PLAN_REJECTED events; escalation events in Elsa workflows
+  4-7-event-query-api-for-time-travel: done             # GET /api/engine/history (paginated), GET /api/engine/events/state (SSE), event store getEvents()
+  4-8-black-box-replay-for-debugging: drafted           # No replay mechanism implemented; only event capture and query exist
   epic-4-retrospective: optional
 
-   epic-5: contexted
-   5-1-structured-logging-implementation: ready-for-dev
-   5-2-metrics-collection-infrastructure: ready-for-dev
-   5-3-real-time-dashboard-system-health: ready-for-dev
-   5-4-real-time-dashboard-development-velocity: ready-for-dev
-   5-5-event-trail-exploration-ui: ready-for-dev
-   5-6-alert-system-for-critical-issues: ready-for-dev
-   5-7-feedback-collection-system: ready-for-dev
-   5-8-integration-testing-suite: drafted
-   5-9a-installation-setup-documentation: drafted
-   5-9b-usage-configuration-documentation: drafted
-   5-9c-api-reference-documentation: backlog
-   5-9d-full-documentation-website: backlog
-   5-9e-video-walkthrough: backlog
-   5-10-alpha-release-preparation: drafted
-   epic-5-retrospective: optional
+  epic-5: contexted
+  5-1-structured-logging-implementation: done           # Pino-based logger (184 lines) with OpenSearch transport in packages/observability/src/logger.ts
+  5-2-metrics-collection-infrastructure: drafted        # No standalone metrics collection (counters/histograms/gauges); only Pino logs
+  5-3-real-time-dashboard-system-health: done           # Admin HealthTab, useSystemHealth hook, dashboard summary API, SSE state streaming
+  5-4-real-time-dashboard-development-velocity: drafted  # No velocity-specific dashboard page or API exists
+  5-5-event-trail-exploration-ui: in-progress           # SSE event streaming exists (GET /api/engine/events/state, /events/logs); no dedicated trail exploration UI
+  5-6-alert-system-for-critical-issues: in-progress     # AlertManager in @tamma/cost-monitor for cost alerts; no general critical issue alert system
+  5-7-feedback-collection-system: in-progress           # RAG feedback module in packages/intelligence/src/rag/feedback.ts; no general user feedback UI
+  5-8-integration-testing-suite: done                   # e2e-deploy.yml, ci.yml, docker-smoke-test.yml; engine integration tests
+  5-9a-installation-setup-documentation: drafted
+  5-9b-usage-configuration-documentation: drafted
+  5-9c-api-reference-documentation: backlog
+  5-9d-full-documentation-website: backlog
+  5-9e-video-walkthrough: backlog
+  5-10-alpha-release-preparation: done                  # release.yml, prepare-package.mjs, smoke-test.mjs, package.json.publish all exist
+  epic-5-retrospective: optional
 
   epic-6: contexted
-  6-1-codebase-indexer: drafted
-  6-2-vector-database-integration: drafted
-  6-3-rag-pipeline: drafted
-  6-4-mcp-client-integration: drafted
-  6-5-context-aggregator: drafted
-  6-6-knowledge-base-ui: drafted
-  6-7-llm-cost-monitoring: drafted
-  6-8-agent-permissions: drafted
-  6-9-agent-knowledge-base: drafted
-  6-10-scrum-master-task-loop: drafted
+  6-1-codebase-indexer: done                            # CodebaseIndexer (943 lines), chunking, file-discovery, git-diff, embedding service, triggers in packages/intelligence/src/indexer/
+  6-2-vector-database-integration: in-progress           # ChromaDB + PgVector real (775+954 lines); Pinecone, Qdrant, Weaviate are pure stubs
+  6-3-rag-pipeline: done                                # RAGPipeline (387 lines), retriever, ranker, assembler, query-processor, sources, feedback in packages/intelligence/src/rag/
+  6-4-mcp-client-integration: done                      # Full MCP client (30 files): transports (stdio/SSE/websocket), interceptors, security, caching, pagination in packages/mcp-client/src/
+  6-5-context-aggregator: done                          # Aggregator (259 lines), assembler, budget-manager, ranker, deduplicator, 4 sources in packages/intelligence/src/context/
+  6-6-knowledge-base-ui: done                           # 31 React components, KnowledgeBaseDashboard page, 6 hooks, API client in packages/dashboard/src/
+  6-7-llm-cost-monitoring: done                         # @tamma/cost-monitor: CostTracker, CostCalculator, LimitManager, AlertManager, ReportGenerator, storage (12 source files)
+  6-8-agent-permissions: done                           # ActionGate, ContentSanitizer, SecureAgentProvider, ProviderAllowlist in packages/shared/src/security/ and Tamma.Activities/Security/
+  6-9-agent-knowledge-base: done                        # KnowledgeService (594 lines), learning capture, matchers, pre-task checker, prompt builder in packages/intelligence/src/knowledge-base/
+  6-10-scrum-master-task-loop: done                     # ScrumMasterService (1036 lines), AgentCoordinator, TaskSupervisor, ApprovalWorkflow in packages/scrum-master/src/
   epic-6-retrospective: optional
 
   epic-7: contexted
-  7-1-mentorship-workflow: drafted
-  7-2-llm-call-sub-workflow: drafted
-  7-3-testing-sub-workflow: drafted
-  7-4-code-review-sub-workflow: drafted
-  7-5-assessment-sub-workflow: drafted
-  7-6-context-gathering-sub-workflow: drafted
-  7-7-blocker-diagnosis-sub-workflow: drafted
-  7-8-tdd-sub-workflow: drafted
-  7-9-debugging-sub-workflow: drafted
+  7-1-mentorship-workflow: done                         # MentorshipWorkflow.cs (1140 lines), 8 activities, MentorshipController, MentorshipService in Elsa
+  7-2-llm-call-sub-workflow: done                       # LlmCallWorkflow.cs (862 lines), CallLlmActivity, tool executors, budget/circuit-breaker checks
+  7-3-testing-sub-workflow: done                        # TestingWorkflow.cs (551 lines), 8 testing activities with CI integration and auto-fix loops
+  7-4-code-review-sub-workflow: done                    # CodeReviewWorkflow.cs (342 lines), 8 review activities (PR, guidance, escalation, merge)
+  7-5-assessment-sub-workflow: done                     # AssessmentWorkflow.cs (488 lines), 6 assessment activities (questions, response analysis, skill profile)
+  7-6-context-gathering-sub-workflow: done              # ContextGatheringWorkflow.cs (432 lines), 8 context activities (files, commits, patterns, budget)
+  7-7-blocker-diagnosis-sub-workflow: done              # BlockerDiagnosisWorkflow.cs (819 lines), 8 blocker activities (CI, git, communication, escalation)
+  7-8-tdd-sub-workflow: in-progress                     # TddWorkflow.cs (516 lines) structure real but test execution is mocked (TODO: wire testing-pipeline)
+  7-9-debugging-sub-workflow: done                      # DebuggingWorkflow.cs (542 lines), 13 debug activities (collect, diagnose, hypothesize, fix)
   epic-7-retrospective: optional
 
   epic-8: contexted
-  8-1-esbuild-bundle: drafted
-  8-2-npm-publish-pipeline: drafted
-  8-3-standalone-binary: drafted
-  8-4-install-scripts-releases: drafted
-  8-5-auto-update-homebrew: drafted
-  8-6-typescript-dashboard-dockerfiles: drafted
-  8-7-docker-compose-full-stack: drafted
-  8-8-docker-ci-cd-cli-integration: drafted
+  8-1-esbuild-bundle: done                              # build.mjs using esbuild; inlines @tamma/* packages, externalizes third-party
+  8-2-npm-publish-pipeline: done                        # release.yml (295 lines), package.json.publish, prepare-package.mjs
+  8-3-standalone-binary: done                           # build-binary.mjs using bun compile; multi-platform targets
+  8-4-install-scripts-releases: done                    # release.yml creates GitHub releases with binaries; smoke-test.mjs
+  8-5-auto-update-homebrew: done                        # homebrew/tamma.rb.template with SHA256 placeholders for all platforms
+  8-6-typescript-dashboard-dockerfiles: done            # Dockerfile.ts (79 lines), Dockerfile.dashboard (39 lines) in docker/
+  8-7-docker-compose-full-stack: done                   # docker-compose.yml (353 lines), docker-compose.prod.yml, docker-compose.override.yml, docker-compose.test.yml
+  8-8-docker-ci-cd-cli-integration: done                # docker-publish.yml (691 lines), docker-smoke-test.yml; GHCR push + VPS deploy
   epic-8-retrospective: optional
 
   epic-9: contexted
-  9-1-configuration-schema: drafted
-  9-2-provider-diagnostics: drafted
-  9-3-provider-health-tracker: drafted
-  9-4-agent-provider-factory: drafted
-  9-5-provider-chain: drafted
-  9-6-agent-prompt-registry: drafted
-  9-7-content-sanitization: drafted
-  9-8-role-based-agent-resolver: drafted
-  9-9-engine-integration: drafted
-  9-10-cli-wiring: drafted
-  9-11-diagnostics-queue-mcp-interceptors: drafted
+  9-1-configuration-schema: done                        # agent-config.ts (336 lines) + tests in packages/shared/src/types/
+  9-2-provider-diagnostics: done                        # diagnostics-processor.ts (162 lines) + tests in packages/providers/src/
+  9-3-provider-health-tracker: done                     # provider-health.ts (273 lines) + tests in packages/providers/src/
+  9-4-agent-provider-factory: done                      # agent-provider-factory.ts (324 lines) + tests in packages/providers/src/
+  9-5-provider-chain: done                              # provider-chain.ts (258 lines) + tests in packages/providers/src/
+  9-6-agent-prompt-registry: done                       # agent-prompt-registry.ts (220 lines) + tests in packages/providers/src/
+  9-7-content-sanitization: done                        # secure-agent-provider.ts (99 lines) + tests; ContentSanitizer in packages/shared/src/security/
+  9-8-role-based-agent-resolver: done                   # role-based-agent-resolver.ts (454 lines) + tests in packages/providers/src/
+  9-9-engine-integration: done                          # engine.ts imports AgentProviderFactory, IRoleBasedAgentResolver; EngineContext accepts agent/agentResolver
+  9-10-cli-wiring: done                                 # process-issue.ts + server.ts wire AgentProviderFactory, DiagnosticsQueue, ContentSanitizer
+  9-11-diagnostics-queue-mcp-interceptors: done         # DiagnosticsQueue in packages/shared/src/telemetry/; interceptors.ts in packages/mcp-client/src/
   epic-9-retrospective: optional
 
   epic-10: contexted
-  10-1-engine-static-workflow-and-brain: drafted
-  10-2-comprehensive-event-catalog: drafted
-  10-3-event-store-postgresql-emmett: drafted
-  10-4-smart-queue-state-deduplication: drafted
-  10-5-workflow-provider-abstraction: drafted
-  10-6-input-channel-unification: drafted
-  10-7-event-store-security-sanitization: drafted
-  10-8-state-reconstruction-from-events: drafted
+  10-1-engine-static-workflow-and-brain: drafted        # Engine exists (packages/orchestrator/src/engine.ts) but is imperative state machine, NOT the agentic tool loop this story defines
+  10-2-comprehensive-event-catalog: drafted             # Only basic EngineEventType enum (20 events) in packages/shared/src/types/index.ts; story requires comprehensive catalog
+  10-3-event-store-postgresql-emmett: drafted            # Only InMemoryEventStore exists; no PostgreSQL/Emmett implementation
+  10-4-smart-queue-state-deduplication: drafted          # No SmartQueue code exists anywhere
+  10-5-workflow-provider-abstraction: drafted            # IWorkflowEngine + ElsaClient exist (Epic 1.5) but don't match story's IWorkflowProvider with health/circuit breaker/InProcessWorkflowProvider
+  10-6-input-channel-unification: drafted               # Engine callback exists but is simple task delegation, not unified input normalization
+  10-7-event-store-security-sanitization: drafted        # No event store security pipeline; raw/sanitized dual-write, blob storage not implemented
+  10-8-state-reconstruction-from-events: drafted         # No state reconstruction/projection code exists
   epic-10-retrospective: optional
 
   epic-11: contexted
-  11-1-content-sanitizer-csharp-port: drafted
-  11-2-llm-input-sanitization: drafted
-  11-3-tool-call-validation: drafted
-  11-4-output-sanitization-prompt-hardening: drafted
-  11-5-fail-closed-guards-provider-allowlist: drafted
+  11-1-content-sanitizer-csharp-port: done              # ContentSanitizer.cs, IContentSanitizer.cs in Tamma.Activities/Security/ with ContentSanitizerTests.cs
+  11-2-llm-input-sanitization: done                     # IContentSanitizer wired into CallLlmInlineActivity, CallLlmActivity, ResolveLlmPromptActivity, SecurityHelpers.SanitizeForPrompt()
+  11-3-tool-call-validation: done                       # ToolCallValidator.cs, IToolCallValidator.cs wired into CallLlmInlineActivity + CallLlmActivity; ToolCallValidatorTests.cs
+  11-4-output-sanitization-prompt-hardening: done        # PromptHardening.cs wired into ResolveLlmPromptActivity + ResolveAgentConfigActivity; ErrorRedactor.cs in diagnostics; OutputSanitizationTests.cs
+  11-5-fail-closed-guards-provider-allowlist: done       # ProviderAllowlist.cs, ActionGate.cs, fail-closed in CheckBudgetActivity + CheckCircuitBreakerActivity; FailClosedGuardTests.cs
   epic-11-retrospective: optional
 
   epic-12: contexted
-  12-1-tool-executor-interface-and-registry: drafted
-  12-2-agentic-tool-loop-in-call-llm: drafted
-  12-3-context-compaction: drafted
-  12-4-streaming-and-parallel-tools: drafted
+  12-1-tool-executor-interface-and-registry: done        # IToolExecutor, ToolExecutorRegistry, FileReadTool, FileWriteTool, SearchCodeTool, ShellExecuteTool, GitOperationsTool, RunTestsTool + tests
+  12-2-agentic-tool-loop-in-call-llm: done              # CallLlmInlineActivity.EnableToolLoop + AgenticToolLoop method; AgenticToolLoopTests.cs + IntegrationTests.cs
+  12-3-context-compaction: done                         # ContextCompactor.cs with LLM-based summarization; ContextCompactorTests.cs
+  12-4-streaming-and-parallel-tools: done                # ParallelToolExecutor, ToolLoopEventEmitter, IToolLoopEventSink; ParallelToolExecutorTests.cs + ToolLoopEventEmitterTests.cs
   epic-12-retrospective: optional
 
   epic-13: contexted
-  13-1-tdd-debug-retry-sub-workflow: drafted
-  13-2-ci-debug-retry-sub-workflow: drafted
-  13-3-consolidate-finish-sequences: drafted
+  13-1-tdd-debug-retry-sub-workflow: done               # TddWithDebugRetryWorkflow.cs extracted from SingleIssueCycleWorkflow; WorkflowStructureTests.cs
+  13-2-ci-debug-retry-sub-workflow: done                # CiWithDebugRetryWorkflow.cs extracted from SingleIssueCycleWorkflow; WorkflowStructureTests.cs
+  13-3-consolidate-finish-sequences: done               # SharedFinishSequence with ExitReason variable, finishReason output, 7 exit paths consolidated
   epic-13-retrospective: optional
 
   epic-14: contexted
-  14-1-studio-blazor-wasm-scaffold: drafted
-  14-2-studio-docker-and-ci: drafted
-  14-3-studio-custom-ui-hints: drafted
+  14-1-studio-blazor-wasm-scaffold: done                # Tamma.Studio.csproj, Program.cs, TammaBrandingProvider, TammaThemeProvider/Service at apps/tamma-elsa/src/Tamma.Studio/
+  14-2-studio-docker-and-ci: done                       # Dockerfile at Tamma.Studio/Dockerfile, docker-compose entry for elsa-studio service
+  14-3-studio-custom-ui-hints: done                     # JsonEditorUIHintHandler, ProviderSelectorUIHintHandler, TammaMenuProvider at Tamma.Studio/UIHints/ + Navigation/
   epic-14-retrospective: optional
 
   epic-15: contexted
-  15-1-opensearch-log-aggregation: drafted
+  15-1-opensearch-log-aggregation: done                 # OpenSearch 2.19 in docker-compose, Serilog+OpenSearch in C# services, pino+opensearch in TS, index template, ISM policy, dashboards
   epic-15-retrospective: optional
 
   epic-16: contexted
-  16-1-oauth2-proxy-unified-auth: drafted
-  16-2-user-management-api: drafted
-  16-3-admin-dashboard: drafted
-  16-4-unified-navigation: drafted
-  16-5-role-based-access-control: drafted
-  16-6-elsa-studio-auto-login: drafted
+  16-1-oauth2-proxy-unified-auth: done                  # Implemented via nginx auth_request + tamma-api JWT role-check (not oauth2-proxy); shared tamma_session cookie across *.tamma.dev
+  16-2-user-management-api: done                        # User CRUD at packages/api/src/routes/users/ (user-routes.ts, invite-routes.ts, api-key-routes.ts) with tests
+  16-3-admin-dashboard: done                            # AdminLayout with Users, API Keys, Health, Quick Links tabs at packages/dashboard/src/pages/admin/; AdminGuard
+  16-4-unified-navigation: done                         # NavHeader.tsx in dashboard, tamma-nav.html/js injected via nginx sub_filter into ELSA Studio + OpenSearch
+  16-5-role-based-access-control: done                  # permissions.ts RBAC matrix, require-role.ts middleware, role-check.ts endpoint, nginx auth_request enforcement
+  16-6-elsa-studio-auto-login: done                     # AutoLoginAuthorizationService.cs bypasses ELSA Identity login behind nginx auth gate
   epic-16-retrospective: optional
 
   epic-17: contexted
-  17-1-tenant-model-database-schema: drafted
-  17-2-row-level-security-tenant-isolation: drafted
-  17-3-tenant-scoped-event-store: drafted
-  17-4-tenant-scoped-workflow-instances: drafted
-  17-5-api-tenant-context-middleware: drafted
+  17-1-tenant-model-database-schema: drafted            # No tenants table, tenant_id column, or tenant model in database/migrations/
+  17-2-row-level-security-tenant-isolation: drafted      # No RLS policies in any migration
+  17-3-tenant-scoped-event-store: drafted                # No tenant scoping in event store
+  17-4-tenant-scoped-workflow-instances: drafted          # No tenant scoping in workflow instances
+  17-5-api-tenant-context-middleware: drafted             # No tenant context middleware in packages/api/src/middleware/
   epic-17-retrospective: optional
 
   epic-18: contexted
-  18-1-user-registration-email-verification: drafted
-  18-2-user-login-session-management: drafted
-  18-3-organization-tenant-creation: drafted
-  18-4-github-app-installation-onboarding: drafted
-  18-5-user-facing-dashboard-shell: drafted
+  18-1-user-registration-email-verification: drafted     # No email+password registration or email verification; only GitHub OAuth exists
+  18-2-user-login-session-management: in-progress        # GitHub OAuth login + JWT sessions + LoginPage.tsx exist; missing email+password (Argon2) dual auth
+  18-3-organization-tenant-creation: drafted             # No organization model or creation flow
+  18-4-github-app-installation-onboarding: done          # github-callback.ts handles App install, webhook routes, installation store, secrets provisioner
+  18-5-user-facing-dashboard-shell: in-progress          # Admin dashboard shell exists (AppLayout, Sidebar, NavHeader, auth guards); no separate dash.tamma.dev user views
   epic-18-retrospective: optional
 
   epic-19: contexted
-  19-1-tamma-agent-workflow-template: drafted
-  19-2-workflow-dispatch-from-elsa: drafted
-  19-3-agent-execution-monitoring: drafted
-  19-4-result-collection: drafted
-  19-5-agent-executor-abstraction: drafted
+  19-1-tamma-agent-workflow-template: done               # .github/workflows/tamma-worker.yml with workflow_dispatch, installation_id, issue_number, callback_url
+  19-2-workflow-dispatch-from-elsa: drafted              # No DispatchAgentActivity in Elsa activities; ElsaClient can start workflows but no dispatch activity
+  19-3-agent-execution-monitoring: drafted               # No MonitorAgentActivity in Elsa
+  19-4-result-collection: in-progress                    # engine-callback.ts + saas/workflow-result.ts + workflow-status.ts exist; no CollectResultsActivity in Elsa
+  19-5-agent-executor-abstraction: drafted               # No IAgentExecutor interface found anywhere
   epic-19-retrospective: optional
 
   epic-20: contexted
-  20-1-stripe-integration-plan-model: drafted
-  20-2-subscription-management: drafted
-  20-3-usage-metering: drafted
-  20-4-usage-limits-enforcement: drafted
-  20-5-billing-dashboard: drafted
+  20-1-stripe-integration-plan-model: drafted            # No Stripe SDK, no billing routes, no plan model
+  20-2-subscription-management: drafted                  # No subscription management code
+  20-3-usage-metering: drafted                           # No usage metering code
+  20-4-usage-limits-enforcement: drafted                 # No usage limits enforcement code
+  20-5-billing-dashboard: drafted                        # No billing dashboard components
   epic-20-retrospective: optional
 
   epic-21: contexted
-  21-1-marketing-landing-page: drafted
-  21-2-pricing-page: drafted
-  21-3-documentation-site: drafted
-  21-4-user-dashboard-repos-runs: drafted
-  21-5-user-dashboard-settings-billing: drafted
+  21-1-marketing-landing-page: done                      # Full static site at apps/marketing-site/ with HTML, CSS, CF Workers, robots.txt, sitemap.xml
+  21-2-pricing-page: drafted                             # No pricing page content in marketing site
+  21-3-documentation-site: in-progress                   # apps/wiki-site/ scaffold exists (Astro Starlight, sync script, wrangler.toml); content/docs/ empty
+  21-4-user-dashboard-repos-runs: drafted                # No user-facing repos/runs views in dashboard router
+  21-5-user-dashboard-settings-billing: drafted           # No user settings/billing views in dashboard
   epic-21-retrospective: optional
 
   epic-22: contexted
-  22-1-agent-executor-abstraction: drafted
-  22-2-cli-standalone-workflow-engine: drafted
-  22-3-optional-cloud-sync: drafted
-  22-4-feature-parity-matrix: drafted
-  22-5-cli-docker-installation: drafted
+  22-1-agent-executor-abstraction: drafted               # No IAgentExecutor interface found
+  22-2-cli-standalone-workflow-engine: drafted            # Engine + CLI commands exist but no local ELSA standalone integration
+  22-3-optional-cloud-sync: drafted                      # No CloudSyncTransport implementation
+  22-4-feature-parity-matrix: drafted                    # No feature parity matrix document
+  22-5-cli-docker-installation: drafted                  # Platform Docker files exist but no CLI-specific Docker installation flow
   epic-22-retrospective: optional
 
   epic-23: contexted
-  23-1-system-health-dashboard: drafted
-  23-2-agent-monitor: drafted
-  23-3-event-store-explorer: drafted
-  23-4-configuration-audit: drafted
-  23-5-workflow-monitor: drafted
-  23-6-provider-diagnostics: drafted
-  23-7-log-explorer: drafted
-  23-8-infrastructure-monitor: drafted
-  23-9-knowledge-base-monitor: drafted
-  23-10-security-access-audit: drafted
-  23-11-monitoring-api-foundation: drafted
-  23-12-dashboard-navigation: drafted
+  23-1-system-health-dashboard: in-progress              # HealthTab.tsx in admin exists; missing full monitoring page (uptime, error rates, dependency graph)
+  23-2-agent-monitor: drafted                            # AgentsPage is config-focused; no realtime agent monitoring page
+  23-3-event-store-explorer: drafted                     # No event store explorer page in dashboard
+  23-4-configuration-audit: drafted                      # No configuration audit page; settings pages are config-editors not auditors
+  23-5-workflow-monitor: drafted                         # Workflow API routes exist; no dashboard WorkflowMonitorPage
+  23-6-provider-diagnostics: in-progress                 # ProviderHealthPage.tsx + diagnostics routes exist; missing deep histograms, error classification
+  23-7-log-explorer: drafted                             # No log explorer page (needs OpenSearch integration)
+  23-8-infrastructure-monitor: drafted                   # No infrastructure monitor page
+  23-9-knowledge-base-monitor: in-progress               # KnowledgeBaseDashboard.tsx with vector DB, MCP, RAG components covers significant scope
+  23-10-security-access-audit: drafted                   # No security audit page
+  23-11-monitoring-api-foundation: in-progress           # Partial: health, diagnostics, dashboard, engine routes exist; no dedicated /api/monitoring/
+  23-12-dashboard-navigation: in-progress                # AppLayout, Sidebar, NavHeader exist; no "Monitoring" section, time range selector, auto-refresh
   epic-23-retrospective: optional
 
   epic-24: contexted
-  24-0-voice-api-research: drafted
-  24-1-websocket-foundation: drafted
-  24-2-speech-to-text: drafted
-  24-3-text-to-speech: drafted
-  24-4-intent-engine: drafted
-  24-5-dashboard-voice-ui: drafted
-  24-6-hardening: drafted
+  24-0-voice-api-research: done                          # Research document completed per wiki
+  24-1-websocket-foundation: drafted                     # No voice WebSocket endpoint; MCP websocket transport is unrelated
+  24-2-speech-to-text: drafted                           # No STT integration
+  24-3-text-to-speech: drafted                           # No TTS integration
+  24-4-intent-engine: drafted                            # No intent classification code
+  24-5-dashboard-voice-ui: drafted                       # No voice UI components in dashboard
+  24-6-hardening: drafted                                # No voice hardening code
   epic-24-retrospective: optional
 
   epic-25: contexted
-  25-1-custom-wiki-site: drafted
+  25-1-custom-wiki-site: done                            # apps/wiki-site/ with Astro Starlight, sync-content.ts (358 lines), wrangler.toml, CSS, logos, GH Actions deploy
   epic-25-retrospective: optional
 
