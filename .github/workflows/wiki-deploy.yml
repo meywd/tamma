@@ -34,16 +34,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @tamma/wiki-site...
 
-      - name: Sync content from wiki/ and docs/stories/
-        run: pnpm --filter @tamma/wiki-site sync-content
-
-      - name: Build Astro site
+      - name: Build (syncs content + builds Astro)
         run: pnpm --filter @tamma/wiki-site build
 
-      - name: Deploy to Cloudflare Workers
+      - name: Deploy to Cloudflare Workers (wiki.tamma.dev)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/wiki-site
-          command: deploy
+          command: deploy --config wrangler.jsonc

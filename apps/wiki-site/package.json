@@ -9,8 +9,8 @@
     "dev": "pnpm sync-content && astro dev",
     "build": "pnpm sync-content && astro build",
     "preview": "astro preview",
-    "deploy": "wrangler deploy",
-    "deploy:prod": "pnpm build && wrangler deploy",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "deploy:prod": "pnpm build && wrangler deploy --config wrangler.jsonc",
     "astro": "astro"
   },
   "keywords": [
