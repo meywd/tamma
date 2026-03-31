@@ -30,14 +30,15 @@ namespace Tamma.ElsaServer.Workflows;
 ///   1. ClassifyDebugContext -> route by mode
 ///   2. FlowFork: parallel context gathering (error messages, code, git, tests, repro steps)
 ///   3. FlowJoin (WaitAll)
-///   4. AIDiagnosis -> ranked hypotheses
-///   5. Debug loop (max 5 iterations):
+///   4. Serialize collector outputs to string variables
+///   5. AIDiagnosis -> ranked hypotheses
+///   6. Debug loop (max 5 iterations):
 ///      a. Select highest-confidence untried hypothesis
 ///      b. Apply fix (mode-specific: TDD/Runtime/Bug)
 ///      c. Run tests
 ///      d. Pass -> RecordResolution -> done
 ///      e. Fail -> RefineHypothesis -> loop
-///   6. Max iterations -> CompileDebugReport -> escalate
+///   7. Max iterations -> CompileDebugReport -> escalate
 ///
 /// Invoked as child workflow via RunWorkflow or standalone via ELSA REST API.
 /// </summary>
@@ -60,12 +61,24 @@ public class DebuggingWorkflow : WorkflowBase
         var branchName = builder.WithVariable<string>();
         var skillLevel = builder.WithVariable<int>();
 
-        // Gathered context variables
+        // Typed result variables for collector activity outputs (bound via Output<T>)
+        var collectErrorsResult = builder.WithVariable<ErrorMessages>();
+        var collectCodeResult = builder.WithVariable<RelevantCode>();
+        var collectGitResult = builder.WithVariable<GitHistoryContext>();
+        var collectTestsResult = builder.WithVariable<TestResultsContext>();
+        var collectReproResult = builder.WithVariable<ReproductionSteps>();
+
+        // Gathered context variables (string serializations consumed by AIDiagnosis)
         var errorMessages = builder.WithVariable<string>();
         var relevantCode = builder.WithVariable<string>();
         var gitHistory = builder.WithVariable<string>();
         var testResults = builder.WithVariable<string>();
         var reproductionSteps = builder.WithVariable<string>();
+
+        // Typed result variables for diagnosis/hypothesis activities
+        var diagnosisResultVar = builder.WithVariable<DiagnosisResult>();
+        var selectedHypothesisVar = builder.WithVariable<Hypothesis?>();
+        var refinedDiagnosisVar = builder.WithVariable<DiagnosisResult>();
 
         // Diagnosis & loop variables
         var hypothesesJson = builder.WithVariable<string>();
@@ -131,7 +144,7 @@ public class DebuggingWorkflow : WorkflowBase
         { Id = "bugEmphasis", Name = "Bug Emphasis" };
         bugEmphasis.SetDisplayText("Bug Emphasis");
 
-        // 4. Parallel context gathering activities
+        // 4. Parallel context gathering activities -- Result output wired to typed variables
         var collectErrors = new CollectErrorMessagesActivity
         {
             Id = "collectErrors",
@@ -139,7 +152,8 @@ public class DebuggingWorkflow : WorkflowBase
             ErrorOutput = new Input<string>(ctx => errorOutput.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
-            BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? "")
+            BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
+            Result = new Output<ErrorMessages>(collectErrorsResult)
         };
         collectErrors.SetDisplayText("Collect Error Messages");
 
@@ -156,7 +170,8 @@ public class DebuggingWorkflow : WorkflowBase
             }),
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
-            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
+            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
+            Result = new Output<RelevantCode>(collectCodeResult)
         };
         collectCode.SetDisplayText("Collect Relevant Code");
 
@@ -166,7 +181,8 @@ public class DebuggingWorkflow : WorkflowBase
             Name = "Collect Git History",
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
-            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
+            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
+            Result = new Output<GitHistoryContext>(collectGitResult)
         };
         collectGit.SetDisplayText("Collect Git History");
 
@@ -177,7 +193,8 @@ public class DebuggingWorkflow : WorkflowBase
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
-            ErrorOutput = new Input<string>(ctx => errorOutput.Get(ctx) ?? "")
+            ErrorOutput = new Input<string>(ctx => errorOutput.Get(ctx) ?? ""),
+            Result = new Output<TestResultsContext>(collectTestsResult)
         };
         collectTests.SetDisplayText("Collect Test Results");
 
@@ -186,7 +203,8 @@ public class DebuggingWorkflow : WorkflowBase
             Id = "collectRepro",
             Name = "Collect Reproduction Steps",
             IssueDescription = new Input<string>(ctx => issueDescription.Get(ctx) ?? ""),
-            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
+            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
+            Result = new Output<ReproductionSteps>(collectReproResult)
         };
         collectRepro.SetDisplayText("Collect Reproduction Steps");
 
@@ -215,11 +233,57 @@ public class DebuggingWorkflow : WorkflowBase
         };
         join.SetDisplayText("Context Join");
 
-        var joinLog = new WriteLine("All debug context gathered -- proceeding to AI diagnosis")
+        var joinLog = new WriteLine("All debug context gathered -- proceeding to serialization")
         { Id = "joinLog", Name = "Join Log" };
         joinLog.SetDisplayText("Join Log");
 
-        // 7. AI Diagnosis
+        // 6a. Serialize typed collector outputs to string variables for AIDiagnosis
+        var serializeErrors = new SetVariable<string>(errorMessages,
+            ctx =>
+            {
+                var result = collectErrorsResult.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "";
+            })
+        { Id = "serializeErrors", Name = "Serialize Error Messages" };
+        serializeErrors.SetDisplayText("Serialize Error Messages");
+
+        var serializeCode = new SetVariable<string>(relevantCode,
+            ctx =>
+            {
+                var result = collectCodeResult.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "";
+            })
+        { Id = "serializeCode", Name = "Serialize Relevant Code" };
+        serializeCode.SetDisplayText("Serialize Relevant Code");
+
+        var serializeGit = new SetVariable<string>(gitHistory,
+            ctx =>
+            {
+                var result = collectGitResult.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "";
+            })
+        { Id = "serializeGit", Name = "Serialize Git History" };
+        serializeGit.SetDisplayText("Serialize Git History");
+
+        var serializeTests = new SetVariable<string>(testResults,
+            ctx =>
+            {
+                var result = collectTestsResult.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "";
+            })
+        { Id = "serializeTests", Name = "Serialize Test Results" };
+        serializeTests.SetDisplayText("Serialize Test Results");
+
+        var serializeRepro = new SetVariable<string>(reproductionSteps,
+            ctx =>
+            {
+                var result = collectReproResult.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "";
+            })
+        { Id = "serializeRepro", Name = "Serialize Reproduction Steps" };
+        serializeRepro.SetDisplayText("Serialize Reproduction Steps");
+
+        // 7. AI Diagnosis -- reads from serialized string variables, outputs typed result
         var aiDiagnosis = new AIDiagnosisActivity
         {
             Id = "aiDiagnosis",
@@ -232,20 +296,44 @@ public class DebuggingWorkflow : WorkflowBase
             TestContext = new Input<string>(ctx => testResults.Get(ctx) ?? ""),
             ReproductionContext = new Input<string>(ctx => reproductionSteps.Get(ctx) ?? ""),
             PreviousContext = new Input<string?>(ctx => iterationContextJson.Get(ctx)),
-            SkillLevel = new Input<int>(ctx => skillLevel.Get(ctx))
+            SkillLevel = new Input<int>(ctx => skillLevel.Get(ctx)),
+            Result = new Output<DiagnosisResult>(diagnosisResultVar)
         };
         aiDiagnosis.SetDisplayText("AI Diagnosis");
 
-        // 8. Select hypothesis
+        // 7a. Serialize diagnosis result to hypothesesJson string variable
+        var serializeDiagnosis = new SetVariable<string>(hypothesesJson,
+            ctx =>
+            {
+                var result = diagnosisResultVar.Get(ctx);
+                return result?.Hypotheses != null
+                    ? JsonSerializer.Serialize(result.Hypotheses)
+                    : "[]";
+            })
+        { Id = "serializeDiagnosis", Name = "Serialize Diagnosis Hypotheses" };
+        serializeDiagnosis.SetDisplayText("Serialize Diagnosis Hypotheses");
+
+        // 8. Select hypothesis -- outputs typed Hypothesis?, wired to selectedHypothesisVar
         var selectHypothesis = new SelectHypothesisActivity
         {
             Id = "selectHypothesis",
             Name = "Select Hypothesis",
             HypothesesJson = new Input<string>(ctx => hypothesesJson.Get(ctx) ?? "[]"),
             CurrentIteration = new Input<int>(ctx => currentIteration.Get(ctx)),
-            MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx))
+            MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx)),
+            Result = new Output<Hypothesis?>(selectedHypothesisVar)
         };
         selectHypothesis.SetDisplayText("Select Hypothesis");
+
+        // 8a. Serialize selected hypothesis to selectedHypothesisJson string variable
+        var serializeSelectedHypothesis = new SetVariable<string>(selectedHypothesisJson,
+            ctx =>
+            {
+                var result = selectedHypothesisVar.Get(ctx);
+                return result != null ? JsonSerializer.Serialize(result) : "null";
+            })
+        { Id = "serializeSelectedHypothesis", Name = "Serialize Selected Hypothesis" };
+        serializeSelectedHypothesis.SetDisplayText("Serialize Selected Hypothesis");
 
         // 9. Check if hypothesis was selected (not null/exhausted)
         var hasHypothesis = new FlowDecision(ctx =>
@@ -380,7 +468,7 @@ public class DebuggingWorkflow : WorkflowBase
         };
         setResolvedOutputs.SetDisplayText("Set Resolved Outputs");
 
-        // 15. Refine hypothesis (tests failed)
+        // 15. Refine hypothesis (tests failed) -- outputs typed DiagnosisResult
         var refineHypothesis = new RefineHypothesisActivity
         {
             Id = "refineHypothesis",
@@ -389,9 +477,37 @@ public class DebuggingWorkflow : WorkflowBase
             TriedHypothesisJson = new Input<string>(ctx => selectedHypothesisJson.Get(ctx) ?? "{}"),
             TestResults = new Input<string>(ctx => testResults.Get(ctx) ?? ""),
             UpdatedErrors = new Input<string>(ctx => errorMessages.Get(ctx) ?? ""),
-            IterationContextJson = new Input<string>(ctx => iterationContextJson.Get(ctx) ?? "{}")
+            IterationContextJson = new Input<string>(ctx => iterationContextJson.Get(ctx) ?? "{}"),
+            Result = new Output<DiagnosisResult>(refinedDiagnosisVar)
         };
         refineHypothesis.SetDisplayText("Refine Hypothesis");
+
+        // 15a. Serialize refined diagnosis to hypothesesJson and update iterationContextJson
+        var serializeRefinedHypotheses = new SetVariable<string>(hypothesesJson,
+            ctx =>
+            {
+                var result = refinedDiagnosisVar.Get(ctx);
+                return result?.Hypotheses != null
+                    ? JsonSerializer.Serialize(result.Hypotheses)
+                    : "[]";
+            })
+        { Id = "serializeRefinedHypotheses", Name = "Serialize Refined Hypotheses" };
+        serializeRefinedHypotheses.SetDisplayText("Serialize Refined Hypotheses");
+
+        var updateIterationContext = new SetVariable<string>(iterationContextJson,
+            ctx =>
+            {
+                var iterCtx = new DebugIterationContext
+                {
+                    CurrentIteration = currentIteration.Get(ctx),
+                    Hypotheses = refinedDiagnosisVar.Get(ctx)?.Hypotheses ?? new List<Hypothesis>(),
+                    LatestTestResults = testResults.Get(ctx) ?? "",
+                    LatestErrors = errorMessages.Get(ctx) ?? ""
+                };
+                return JsonSerializer.Serialize(iterCtx);
+            })
+        { Id = "updateIterationContext", Name = "Update Iteration Context" };
+        updateIterationContext.SetDisplayText("Update Iteration Context");
 
         // 16. Increment iteration
         var incrementIteration = new SetVariable<int>(currentIteration,
@@ -447,12 +563,14 @@ public class DebuggingWorkflow : WorkflowBase
                 fork,
                 collectErrors, collectCode, collectGit, collectTests, collectRepro,
                 join, joinLog,
-                aiDiagnosis,
-                selectHypothesis, hasHypothesis,
+                serializeErrors, serializeCode, serializeGit, serializeTests, serializeRepro,
+                aiDiagnosis, serializeDiagnosis,
+                selectHypothesis, serializeSelectedHypothesis, hasHypothesis,
                 isBugMode, writeRegressionTest, markRegressionTestWritten,
                 applyFix, runTests, testsPass,
                 recordResolution, updateCodeIndex, setResolvedOutputs,
-                refineHypothesis, incrementIteration,
+                refineHypothesis, serializeRefinedHypotheses, updateIterationContext,
+                incrementIteration,
                 compileReport, setEscalatedOutputs,
                 finish
             },
@@ -490,15 +608,24 @@ public class DebuggingWorkflow : WorkflowBase
                 new(collectTests, join),
                 new(collectRepro, join),
 
-                // Join -> log -> AI Diagnosis
+                // Join -> log -> serialize collector outputs
                 new(join, joinLog),
-                new(joinLog, aiDiagnosis),
+                new(joinLog, serializeErrors),
+                new(serializeErrors, serializeCode),
+                new(serializeCode, serializeGit),
+                new(serializeGit, serializeTests),
+                new(serializeTests, serializeRepro),
 
-                // AI Diagnosis -> Select Hypothesis
-                new(aiDiagnosis, selectHypothesis),
+                // Serialization -> AI Diagnosis -> serialize diagnosis
+                new(serializeRepro, aiDiagnosis),
+                new(aiDiagnosis, serializeDiagnosis),
 
-                // Select -> check if we have a hypothesis
-                new(selectHypothesis, hasHypothesis),
+                // Serialize diagnosis -> Select Hypothesis -> serialize selected
+                new(serializeDiagnosis, selectHypothesis),
+                new(selectHypothesis, serializeSelectedHypothesis),
+
+                // Serialize selected -> check if we have a hypothesis
+                new(serializeSelectedHypothesis, hasHypothesis),
 
                 // Has hypothesis? Yes -> check if bug mode needs regression test
                 new(new Endpoint(hasHypothesis, "True"), new Endpoint(isBugMode)),
@@ -526,9 +653,11 @@ public class DebuggingWorkflow : WorkflowBase
                 new(updateCodeIndex, setResolvedOutputs),
                 new(setResolvedOutputs, finish),
 
-                // Tests pass? No -> refine hypothesis
+                // Tests pass? No -> refine hypothesis -> serialize -> update context -> increment -> loop
                 new(new Endpoint(testsPass, "False"), new Endpoint(refineHypothesis)),
-                new(refineHypothesis, incrementIteration),
+                new(refineHypothesis, serializeRefinedHypotheses),
+                new(serializeRefinedHypotheses, updateIterationContext),
+                new(updateIterationContext, incrementIteration),
 
                 // Loop back: increment -> select next hypothesis
                 new(incrementIteration, selectHypothesis),
