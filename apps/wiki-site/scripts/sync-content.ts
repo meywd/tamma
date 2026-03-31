@@ -68,9 +68,9 @@ function deriveTitle(content: string, filename: string): string {
  * Build frontmatter string for a Starlight page.
  */
 function buildFrontmatter(title: string, opts: { order?: number; description?: string } = {}): string {
-  const lines = ['---', `title: "${title.replace(/"/g, '\\"')}"`];
+  const lines = ['---', `title: "${title.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`];
   if (opts.description) {
-    lines.push(`description: "${opts.description.replace(/"/g, '\\"')}"`);
+    lines.push(`description: "${opts.description.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   }
   if (opts.order !== undefined) {
     lines.push(`sidebar:`);

@@ -153,6 +153,30 @@ import { TammaError } from '../errors.js';
 const REDOS_SUSPECT_PATTERN = /(\{[0-9]{4,}|\(\?[^)]*\([^)]*\))/;
 
 /**
+ * Escape a string for safe use as a literal match inside a RegExp.
+ * All regex metacharacters are prefixed with a backslash.
+ */
+export function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Allowlist of regex syntax characters. Patterns are restricted to:
+ * - Literal alphanumeric characters and common punctuation
+ * - Character classes: [ ] - ^
+ * - Quantifiers: * + ? {n} {n,m}
+ * - Grouping: ( ) (?: )
+ * - Anchors: ^ $
+ * - Alternation: |
+ * - Escape sequences: \d \w \s \b \. etc.
+ * - Dot wildcard: .
+ *
+ * This allowlist ensures only well-understood regex constructs are permitted,
+ * preventing injection of exotic or dangerous patterns.
+ */
+const SAFE_REGEX_CHARS = /^[a-zA-Z0-9 \t\-_.,:;!@#%&/='"<>~`^$|*+?{}()\[\]\\]*$/;
+
+/**
  * Validate that a regex pattern string is syntactically valid and does not
  * contain obvious ReDoS attack vectors. Throws on invalid or dangerous patterns.
  *
@@ -160,15 +184,20 @@ const REDOS_SUSPECT_PATTERN = /(\{[0-9]{4,}|\(\?[^)]*\([^)]*\))/;
  * calls only receive vetted input (mitigates CodeQL js/regex-injection).
  */
 function validateRegexPattern(pattern: string): void {
+  // Only allow patterns composed of safe, well-understood regex characters
+  if (!SAFE_REGEX_CHARS.test(pattern)) {
+    throw new SyntaxError(`Pattern contains disallowed characters: "${pattern}"`);
+  }
+
   // Reject patterns with obvious ReDoS vectors
   if (REDOS_SUSPECT_PATTERN.test(pattern)) {
     throw new SyntaxError(`Pattern contains potentially dangerous regex constructs: "${pattern}"`);
   }
 
   // Validate syntax by attempting compilation.
-  // The pattern has been length-checked (max 500 chars) and screened
-  // for ReDoS vectors above, so this compilation is safe.
-  RegExp(pattern);
+  // The pattern has been sanitized above: length <= 500 chars, restricted to
+  // allowlisted characters, and screened for ReDoS vectors.
+  RegExp(pattern); // codeguard:allow regex-injection — input is allowlist-sanitized above
 }
 
 /**

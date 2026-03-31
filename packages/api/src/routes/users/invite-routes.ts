@@ -41,9 +41,10 @@ export async function registerInviteRoutes(
     }
 
     // Validate email format if provided (RFC 5321: max 254 chars)
-    // Uses a simple linear-time regex to avoid ReDoS (no nested quantifiers)
+    // Uses a linear-time regex: domain labels are [a-zA-Z0-9-]+ separated by literal dots,
+    // so the character class never overlaps with the dot separator (avoids ReDoS).
     if (email !== null && email !== undefined) {
-      if (email.length > 254 || !/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
+      if (email.length > 254 || !/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/.test(email)) {
         return reply.status(400).send({ error: 'Invalid email format' });
       }
     }
