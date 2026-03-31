@@ -18,6 +18,10 @@ export * from './agent-config.js';
 // Re-export security configuration types
 export * from './security-config.js';
 
+// Re-export layered config types
+export type { IProvidersConfig, IProviderDefinition } from './providers-config.js';
+export type { IRepoConfig, IRepoRoleConfig } from './repo-config.js';
+
 // --- AI Provider Types ---
 
 /** Supported AI/LLM provider types */

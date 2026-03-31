@@ -5,6 +5,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { TriggerIndexRequest } from '@tamma/shared';
 import type { IndexManagementService } from '../../services/knowledge-base/IndexManagementService.js';
 
 export function registerIndexRoutes(
@@ -20,7 +21,23 @@ export function registerIndexRoutes(
   // POST /index/trigger - Trigger manual re-index
   app.post('/index/trigger', async (request, reply) => {
     try {
-      const body = request.body as { fullReindex?: boolean } | undefined;
+      const body = request.body as TriggerIndexRequest | undefined;
+
+      // Validate path fields against directory traversal
+      if (body?.repositoryPath && body.repositoryPath.includes('..')) {
+        return reply.status(400).send({ error: 'Invalid repositoryPath: path traversal not allowed' });
+      }
+      if (body?.changedFiles) {
+        if (!Array.isArray(body.changedFiles)) {
+          return reply.status(400).send({ error: 'changedFiles must be an array of strings' });
+        }
+        for (const filePath of body.changedFiles) {
+          if (typeof filePath !== 'string' || filePath.includes('..')) {
+            return reply.status(400).send({ error: 'Invalid changedFiles entry: path traversal not allowed' });
+          }
+        }
+      }
+
       await service.triggerIndex(body);
       return reply.status(202).send({ message: 'Indexing triggered' });
     } catch (error) {

@@ -283,3 +283,14 @@ export class RoleBasedAgentResolver implements IRoleBasedAgentResolver {
 - Test: `dispose()` clears the chains Map
 - Test: `getRoleForPhase()` returns role synchronously without creating a provider
 - Test: class implements `IRoleBasedAgentResolver` interface
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only

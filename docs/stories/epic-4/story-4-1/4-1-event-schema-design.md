@@ -275,3 +275,14 @@ interface EventMetadata {
 This story establishes the foundational event schema for the entire event sourcing system. All subsequent stories will depend on the event schema defined here. The schema must be designed to support the full lifecycle of autonomous development workflows while maintaining auditability and debuggability requirements.
 
 The event schema directly supports compliance requirements (SOC2, ISO27001, GDPR) by providing a complete, structured audit trail of all system actions with proper correlation and causation tracking.
+
+## Logging Requirements
+
+Event store and capture modules are CRITICAL infrastructure — they must log their own operations distinctly from the events they store.
+
+- **INFO**: Event appended (event type, stream, tags summary), query executed (filter summary, result count), replay started/completed
+- **DEBUG**: Event payload size, serialization timing, query plan, batch sizes, stream position
+- **WARN**: Event append slow (>100ms), query returned large result set (>1000), replay gap detected, schema migration pending
+- **ERROR**: Event append failed (with retry status), query failed, deserialization error, stream corruption, schema validation failure
+- **Structured context**: Always include `{ eventType, streamId, eventId, tags }` — but NEVER log full event `data` payload at INFO level (may contain sensitive content)
+- **Distinction**: Operational logs (about the event store) use standard ILogger; domain events (about business actions) go into the event stream — do not conflate the two

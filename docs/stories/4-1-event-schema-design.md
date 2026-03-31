@@ -205,3 +205,7 @@ interface BaseEvent {
 - [UUID v7 Specification](https://datatracker.ietf.org/doc/html/draft-peabody-dispatch-new-uuid-format-04)
 - [Event Sourcing Pattern](https://martinfowler.com/eaaDev/EventSourcing.html)
 - [DCB Pattern Documentation](https://github.com/tamma/tamma/wiki/DCB-Pattern)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

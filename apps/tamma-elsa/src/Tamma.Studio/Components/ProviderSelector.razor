@@ -1,0 +1,79 @@
+@using MudBlazor
+
+<div class="tamma-provider-selector">
+    <MudSelect T="string"
+               MultiSelection="true"
+               SelectedValues="_selectedProviders"
+               SelectedValuesChanged="OnSelectionChanged"
+               Label="LLM Providers"
+               Variant="Variant.Outlined"
+               AnchorOrigin="Origin.BottomCenter"
+               FullWidth="true"
+               Clearable="true"
+               ReadOnly="@IsReadOnly">
+        @foreach (var provider in AvailableProviders)
+        {
+            <MudSelectItem T="string" Value="@provider.Key">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Small" />
+                    <span>@provider.Value</span>
+                </div>
+            </MudSelectItem>
+        }
+    </MudSelect>
+</div>
+
+@code {
+    private IEnumerable<string> _selectedProviders = new List<string>();
+
+    /// <summary>
+    /// Comma-separated list of selected provider keys.
+    /// </summary>
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public bool IsReadOnly { get; set; }
+
+    /// <summary>
+    /// Known AI provider identifiers and display names.
+    /// Matches the provider keys used in Tamma's IAIProvider registry.
+    /// </summary>
+    public static readonly Dictionary<string, string> AvailableProviders = new()
+    {
+        { "anthropic", "Anthropic Claude" },
+        { "openai", "OpenAI" },
+        { "openrouter", "OpenRouter" },
+        { "google", "Google Gemini" },
+        { "github-copilot", "GitHub Copilot" },
+        { "local-llm", "Local LLM" },
+        { "opencode", "OpenCode" },
+        { "z-ai", "z.ai" },
+        { "zen-mcp", "Zen MCP" },
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(Value))
+        {
+            _selectedProviders = Value
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(v => AvailableProviders.ContainsKey(v))
+                .ToList();
+        }
+        else
+        {
+            _selectedProviders = new List<string>();
+        }
+    }
+
+    private async Task OnSelectionChanged(IEnumerable<string> selectedValues)
+    {
+        _selectedProviders = selectedValues;
+        var csv = string.Join(",", _selectedProviders);
+        await ValueChanged.InvokeAsync(csv);
+    }
+}

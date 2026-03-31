@@ -1,0 +1,136 @@
+/* NavHeader — Unified cross-service navigation bar (Story 16.4) */
+
+.tamma-nav-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99999;
+  height: 48px;
+  background: #7B61FF;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+}
+
+.tamma-nav-bar * {
+  box-sizing: border-box;
+}
+
+.tamma-nav-bar .tn-logo {
+  font-weight: 700;
+  font-size: 16px;
+  color: #fff;
+  margin-right: 24px;
+  text-decoration: none;
+  letter-spacing: -0.5px;
+}
+
+.tamma-nav-bar .tn-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tamma-nav-bar .tn-links a {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tamma-nav-bar .tn-links a:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.tamma-nav-bar .tn-links a.tn-active {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-weight: 600;
+}
+
+.tamma-nav-bar .tn-spacer {
+  flex: 1;
+}
+
+.tamma-nav-bar .tn-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  position: relative;
+}
+
+.tamma-nav-bar .tn-user:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.tamma-nav-bar .tn-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.tamma-nav-bar .tn-username {
+  color: #fff;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.tamma-nav-bar .tn-menu {
+  position: absolute;
+  right: 0;
+  top: 40px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  overflow: hidden;
+  z-index: 100000;
+}
+
+.tamma-nav-bar .tn-menu a {
+  display: block;
+  padding: 10px 16px;
+  color: #333;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+
+.tamma-nav-bar .tn-menu a:hover {
+  background: #f3f0ff;
+}
+
+/* Mobile: condensed layout */
+@media (max-width: 640px) {
+  .tamma-nav-bar {
+    padding: 0 8px;
+  }
+
+  .tamma-nav-bar .tn-links a {
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+
+  .tamma-nav-bar .tn-username {
+    display: none;
+  }
+
+  .tamma-nav-bar .tn-logo {
+    margin-right: 12px;
+  }
+}

@@ -6,6 +6,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -34,9 +35,16 @@ public class RecordDiagnosticsInlineActivity : CodeActivity
     [Input(Description = "Budget state JSON")]
     public Input<string> BudgetStateJsonProp { get; set; } = default!;
 
+    private readonly IErrorRedactor? _errorRedactor;
+
     [JsonConstructor]
-    public RecordDiagnosticsInlineActivity()
+    public RecordDiagnosticsInlineActivity() : this(null)
     {
+    }
+
+    public RecordDiagnosticsInlineActivity(IErrorRedactor? errorRedactor)
+    {
+        _errorRedactor = errorRedactor;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -52,6 +60,12 @@ public class RecordDiagnosticsInlineActivity : CodeActivity
         try { diagnostic = JsonSerializer.Deserialize<ProviderAttemptDiagnostic>(diagJson); }
         catch { diagnostic = new ProviderAttemptDiagnostic { ProviderName = providerName }; }
         diagnostic ??= new ProviderAttemptDiagnostic { ProviderName = providerName };
+
+        // Redact sensitive information from error messages before storage
+        if (_errorRedactor != null && !string.IsNullOrEmpty(diagnostic.ErrorMessage))
+        {
+            diagnostic.ErrorMessage = _errorRedactor.Redact(diagnostic.ErrorMessage);
+        }
 
         // 1. Append diagnostic
         List<ProviderAttemptDiagnostic> list;

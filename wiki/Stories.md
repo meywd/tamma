@@ -1,272 +1,467 @@
 # User Stories Index
 
-This page provides an index of all user stories across all epics. Each story links to its GitHub issue and detailed story documentation.
+This page provides an index of all user stories across all 25 epics. Each story links to its documentation in the repository.
 
 ## Story Structure
 
 Each story includes:
-- **Status:** ready-for-dev, in-progress, review, done
+- **Status:** planned, in-progress, done
 - **Acceptance Criteria:** Measurable success conditions
 - **Tasks/Subtasks:** Detailed checklist of work items
 - **Dev Notes:** Context, architecture patterns, references
-- **GitHub Issues:** Linked tasks in GitHub project
 
 ---
 
-## Epic 1: Foundation & Core Infrastructure
+## Epic 1: Foundation & Core Infrastructure (Completed)
 
-### Story 1-0: AI Provider Strategy Research
-**Status:** done | **Tasks:** 6
+| Story | Title | Status |
+|-------|-------|--------|
+| 1-0 | AI Provider Strategy Research | Done |
+| 1-1 | AI Provider Interface Definition | Done |
+| 1-2 | Claude Code Provider Implementation | Done |
+| 1-3 | Provider Configuration Management | Done |
+| 1-4 | Git Platform Interface Definition | Done |
+| 1-5 | GitHub Platform Implementation | Done |
+| 1-6 | GitLab Platform Implementation | Story ready |
+| 1-7 | Git Platform Configuration Management | Done |
+| 1-8 | Hybrid Orchestrator/Worker Architecture Design | Done |
+| 1-9 | Basic CLI Scaffolding with Mode Selection | Done |
+| 1-10 | Additional AI Provider Implementations | Done |
+| 1-11 | Additional Git Platform Implementations | Story ready |
+| 1-12 | Initial Marketing Website | Done |
+| 1-13 | Agent Customization System | Story ready |
+| 1-14 | Performance Impact Analysis | Story ready |
 
-Research AI provider options across cost models, capabilities, and workflow fit.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-0-ai-provider-strategy-research.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-0)
-
----
-
-### Story 1-1: AI Provider Interface Definition
-**Status:** done | **Tasks:** 5
-
-Define abstract interface contracts for AI provider operations.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-1-ai-provider-interface-definition.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-1)
-
----
-
-### Story 1-2: Claude Code Provider Implementation
-**Status:** done | **Tasks:** 6
-
-Implement Anthropic Claude API as the first AI provider (reference implementation).
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-2-claude-code-provider-implementation.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-2)
+[Detailed Breakdown](Epics/Epic-1-Foundation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1)
 
 ---
 
-### Story 1-3: Provider Configuration Management
-**Status:** done | **Tasks:** 7
+## Epic 1.5: Infrastructure & Deployment (Completed)
 
-Centralized configuration for AI provider settings.
+| Story | Title | Status |
+|-------|-------|--------|
+| 1.5-1 | Core Engine Separation | Done |
+| 1.5-2 | CLI Mode Enhancement | Done |
+| 1.5-3 | Service Mode Implementation | Done |
+| 1.5-4 | Web Server & API | Done |
+| 1.5-5 | Docker Packaging | Done |
+| 1.5-6 | Webhook Integration | Done |
+| 1.5-7 | System Configuration Management | Done |
+| 1.5-8 | NPM Package Publishing | Story ready |
+| 1.5-9 | Binary Releases & Installers | Story ready |
+| 1.5-10 | Kubernetes Deployment | MVP Optional |
+| 1.5-11 | GitHub App Authentication | Done |
+| 1.5-12 | SaaS Coordinator | Done |
+| 1.5-13 | GitHub Actions Worker Mode | Done |
+| 1.5-14 | Multi-Tenant Task Queue & Webhook Routing | Done |
+| 1.5-15 | SaaS API Key Provisioning | Done |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-3-provider-configuration-management.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-3)
-
----
-
-### Story 1-4: Git Platform Interface Definition
-**Status:** done | **Tasks:** 6
-
-Define abstract interface contracts for Git platform operations.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-4-git-platform-interface-definition.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-4)
-
----
-
-### Story 1-5: GitHub Platform Implementation
-**Status:** done | **Tasks:** 8
-
-Implement GitHub as the first Git platform (reference implementation).
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-5-github-platform-implementation.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-5)
+[Detailed Breakdown](Epics/Epic-1.5-Infrastructure) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1.5)
 
 ---
 
-### Story 1-6: GitLab Platform Implementation
-**Status:** done | **Tasks:** 6
+## Epic 2: Autonomous Development Loop (Planned)
 
-Implement GitLab as second Git platform.
+| Story | Title | Status |
+|-------|-------|--------|
+| 2-1 | Issue Selection with Filtering | Planned |
+| 2-2 | Issue Context Analysis | Planned |
+| 2-3 | Development Plan Generation with Approval Checkpoint | Planned |
+| 2-4 | Git Branch Creation | Planned |
+| 2-5 | Test-First Development - Write Failing Tests | Planned |
+| 2-6 | Implementation Code Generation | Planned |
+| 2-7 | Code Refactoring Pass | Planned |
+| 2-8 | Pull Request Creation | Planned |
+| 2-9 | PR Status Monitoring | Planned |
+| 2-10 | PR Merge with Completion Checkpoint | Planned |
+| 2-11 | Auto-Next Issue Selection | Planned |
+| 2-12 | Intelligent Provider Selection | Planned |
+| 2-13 | Prompt Engineering Optimization | Planned |
+| 2-14 | Issue Decomposition Engine | Planned |
+| 2-15 | Task Dependency Mapping | Planned |
+| 2-16 | Incremental Task Sequencing | Planned |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-6-gitlab-platform-implementation.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-6)
-
----
-
-### Story 1-7: Git Platform Configuration Management
-**Status:** done | **Tasks:** 5
-
-Centralized configuration for Git platform settings.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-7-git-platform-configuration-management.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-7)
-
----
-
-### Story 1-8: Hybrid Orchestrator/Worker Architecture Design
-**Status:** done | **Tasks:** 7
-
-Document architecture for orchestrator mode and worker mode.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-8-hybrid-orchestrator-worker-architecture-design.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-8)
+[Detailed Breakdown](Epics/Epic-2-Autonomous-Loop) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-2)
 
 ---
 
-### Story 1-9: Basic CLI Scaffolding with Mode Selection
-**Status:** done | **Tasks:** 5
+## Epic 3: Quality Gates & Intelligence (Planned)
 
-Build basic CLI entry point supporting orchestrator and worker modes.
+| Story | Title | Status |
+|-------|-------|--------|
+| 3-1 | Build Automation with Retry Logic | Planned |
+| 3-2 | Test Execution with Retry Logic | Planned |
+| 3-3 | Mandatory Escalation Workflow | Planned |
+| 3-4 | Research Capability for Unfamiliar Concepts | Planned |
+| 3-5 | Clarifying Questions for Ambiguous Requirements | Planned |
+| 3-6 | Ambiguity Detection Scoring | Planned |
+| 3-7 | Multi-Option Design Proposals | Planned |
+| 3-8 | Static Analysis Integration | Planned |
+| 3-9 | Security Scanning Integration | Planned |
+| 3-10 | Agent Performance Monitoring | Planned |
+| 3-11 | Cost-Aware AI Usage | Planned |
+| 3-12 | Task Complexity Assessment | Planned |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-9-basic-cli-scaffolding-with-mode-selection.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-9)
-
----
-
-### Story 1-10: Additional AI Provider Implementations
-**Status:** done | **Tasks:** 10
-
-Support for multiple AI providers (OpenAI, GitHub Copilot, Google Gemini, OpenRouter, OpenCode, Zen MCP, local LLMs).
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-10-additional-ai-provider-implementations.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-10)
-
----
-
-### Story 1-11: Additional Git Platform Implementations
-**Status:** done | **Tasks:** 7
-
-Support for multiple Git platforms (Gitea, Forgejo, Bitbucket, Azure DevOps, Plain Git).
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-11-additional-git-platform-implementations.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-11)
+[Detailed Breakdown](Epics/Epic-3-Quality-Gates) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-3)
 
 ---
 
-### Story 1-12: Initial Marketing Website
-**Status:** done | **Tasks:** 8
+## Epic 4: Event Sourcing & Audit Trail (Planned)
 
-Deploy initial marketing website on Cloudflare Workers.
+| Story | Title | Status |
+|-------|-------|--------|
+| 4-1 | Event Schema Design | Planned |
+| 4-2 | Event Store Backend Selection | Planned |
+| 4-3 | Event Capture - Issue Selection & Analysis | Planned |
+| 4-4 | Event Capture - AI Provider Interactions | Planned |
+| 4-5 | Event Capture - Code Changes & Git Operations | Planned |
+| 4-6 | Event Capture - Approvals & Escalations | Planned |
+| 4-7 | Event Query API for Time-Travel | Planned |
+| 4-8 | Black-Box Replay for Debugging | Planned |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/1-12-initial-marketing-website.md)
-- [GitHub Issues](https://github.com/meywd/tamma/issues?q=is%3Aissue+label%3Astory-1-12)
-
----
-
-## Epic 9: Config-Driven Multi-Agent Management
-
-### Story 9-1: Configuration Schema
-**Status:** done | **Tasks:** 5 | **Priority:** P0 | **Package:** `@tamma/shared`, `@tamma/cli`
-
-Define `IAgentsConfig`, `IAgentRoleConfig`, `IProviderChainEntry`, and `WorkflowPhase` types. Implement `validateAgentsConfig()`, `validateSecurityConfig()`, and `validateProviderName()`. Define `SecurityConfig` type for content sanitization, URL validation, and action gating settings.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-1/9-1-configuration-schema.md)
+[Detailed Breakdown](Epics/Epic-4-Event-Sourcing) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-4)
 
 ---
 
-### Story 9-2: Provider Diagnostics
-**Status:** done | **Tasks:** 5 | **Priority:** P0 | **Package:** `@tamma/shared`, `@tamma/providers`
+## Epic 5: Observability Dashboard & Documentation (Partially Implemented)
 
-Define `DiagnosticsEvent` types (`provider:call`, `provider:complete`, `provider:error`) with typed `DiagnosticsErrorCode`. Implement `sanitizeErrorMessage()` to strip API keys from error messages before they reach diagnostics. Wire diagnostics events into the provider layer.
+Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base pages. Not all stories are fully implemented.
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-2/9-2-provider-diagnostics.md)
+| Story | Title | Status |
+|-------|-------|--------|
+| 5-1 | Dashboard Scaffolding and Routing | Partially done |
+| 5-2 | Event Trail Visualization | Planned |
+| 5-3 | Real-Time Dashboard - System Health | Planned |
+| 5-4 | Real-Time Dashboard - Development Velocity | Planned |
+| 5-5 | Event Trail Exploration UI | Planned |
+| 5-6 | Alert System for Critical Issues | Planned |
+| 5-7 | Feedback Collection System | Planned |
+| 5-8 | Integration Testing Suite | Planned |
+| 5-9a | Installation & Setup Documentation | Planned |
+| 5-9b | Usage & Configuration Documentation | Planned |
+| 5-9c | API Reference Documentation | Planned |
+| 5-9d | Full Documentation Website | Planned |
+| 5-9e | Video Walkthrough | Planned |
+| 5-10 | Alpha Release Preparation | Planned |
 
----
-
-### Story 9-3: Provider Health Tracker
-**Status:** done | **Tasks:** 4 | **Priority:** P0 | **Package:** `@tamma/providers`
-
-Implement `ProviderHealthTracker` with three-state circuit breaker (CLOSED, OPEN, HALF-OPEN) per provider+model key. Sliding window failure counting, half-open probe with timeout, `onCircuitChange` callback for diagnostics integration. `ProviderHealthTracker.buildKey(provider, model)` produces canonical keys.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-3/9-3-provider-health-tracker.md)
-
----
-
-### Story 9-4: Agent Provider Factory
-**Status:** done | **Tasks:** 3 | **Priority:** P0 | **Package:** `@tamma/providers`
-
-Implement `AgentProviderFactory` with built-in registrations for `claude-code`, `opencode`, `openrouter`, and `zen-mcp`. Implement `wrapAsAgent()` to adapt `IAIProvider` into `IAgentProvider`. Implement `resolveApiKey()` for secure API key lookup from environment variables. Provider name validation and prototype pollution guard.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-4/9-4-agent-provider-factory.md)
+[Detailed Breakdown](Epics/Epic-5-Observability) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-5)
 
 ---
 
-### Story 9-5: Provider Chain
-**Status:** done | **Tasks:** 4 | **Priority:** P0 | **Package:** `@tamma/providers`
+## Epic 6: Context & Knowledge Management (Completed)
 
-Implement `ProviderChain` with ordered fallback: health check, budget check (fail-closed), factory creation, availability check. Wraps every successfully obtained provider with `InstrumentedAgentProvider`. Throws `EMPTY_PROVIDER_CHAIN` or `NO_AVAILABLE_PROVIDER` when appropriate. Budget check is fail-closed: exceptions from `ICostTracker.checkLimit()` are treated as "budget exceeded".
+| Story | Title | Package | Status |
+|-------|-------|---------|--------|
+| 6-1 | Codebase Indexer Implementation | intelligence | Done |
+| 6-2 | Vector Database Integration | intelligence | Done |
+| 6-3 | RAG Pipeline Implementation | intelligence | Done |
+| 6-4 | MCP Client Integration | mcp-client | Done |
+| 6-5 | Context Aggregator Service | intelligence | Done |
+| 6-6 | Knowledge Base Management UI | dashboard, api | Done |
+| 6-7 | LLM Cost Monitoring & Reporting | cost-monitor | Done |
+| 6-8 | Agent Permissions System | gates | Done |
+| 6-9 | Agent Knowledge Base | intelligence | Done |
+| 6-10 | Scrum Master Task Loop | scrum-master | Done |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-5/9-5-provider-chain.md)
-
----
-
-### Story 9-6: Agent Prompt Registry
-**Status:** done | **Tasks:** 3 | **Priority:** P1 | **Package:** `@tamma/providers`
-
-Implement `AgentPromptRegistry` with 6-level resolution chain and `{{variable}}` template interpolation. Single-pass substitution to prevent recursive template injection. Built-in preambles for 9 agent roles. `registerBuiltin()` with immutable role protection. Template and variable length limits with warnings.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-6/9-6-agent-prompt-registry.md)
-
----
-
-### Story 9-7: Content Sanitization
-**Status:** done | **Tasks:** 5 | **Priority:** P1 | **Package:** `@tamma/shared`
-
-Implement `ContentSanitizer` with HTML stripping (quote-aware state machine), zero-width character removal (20+ code points including CVE-2021-42574 bidi overrides), and prompt injection detection (4 categories, NFKD normalization for encoding evasion). Implement `validateUrl()` with numeric octet parsing for RFC 1918 ranges, IPv6 support. Implement `evaluateAction()` for shell command gating. Implement `secureFetch()` with SSRF protection, redirect re-validation, size limits, and timeout.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-7/9-7-content-sanitization.md)
+[Detailed Breakdown](Epics/Epic-6-Context-Knowledge) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-6)
 
 ---
 
-### Story 9-8: Role-Based Agent Resolver
-**Status:** done | **Tasks:** 5 | **Priority:** P0 | **Package:** `@tamma/providers`
+## Epic 7: Autonomous Mentorship Workflow (Completed)
 
-Implement `RoleBasedAgentResolver` integrating ProviderChain, PromptRegistry, ContentSanitizer, health tracker, cost tracker, and diagnostics queue. Implements `IRoleBasedAgentResolver` interface. Three-level config merge with clamping for `getTaskConfig()`. Template injection prevention in `getPrompt()`. Per-role ProviderChain caching.
+| Story | Title | Status |
+|-------|-------|--------|
+| 7-1 | Mentorship State Machine Core | Done |
+| 7-2 | Skill Assessment Activity | Done |
+| 7-3 | Context Gathering Activity | Done |
+| 7-4 | Claude Analysis Activity | Done |
+| 7-5 | Plan Decomposition Activity | Done |
+| 7-6 | Progress Monitoring & Pattern Detection | Done |
+| 7-7 | Blocker Diagnosis & Resolution | Done |
+| 7-8 | Quality Gate & Auto-Fix Pipeline | Done |
+| 7-9 | Code Review & Merge Workflow | Done |
+| 7-10 | TypeScript Engine Bridge & Session API | Done |
+| 7-1A | Main Mentorship Workflow (Code-First) | Done |
+| 7-1B | LLM Call Sub-Workflow | Done |
+| 7-1C | Testing Sub-Workflow | Done |
+| 7-1D | Code Review Sub-Workflow | Done |
+| 7-1E | Assessment Sub-Workflow | Done |
+| 7-1F | Context Gathering Sub-Workflow | Done |
+| 7-1G | Blocker Diagnosis Sub-Workflow | Done |
+| 7-1H | TDD Sub-Workflow | Done |
+| 7-1I | Debugging Sub-Workflow | Done |
 
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-8/9-8-role-based-agent-resolver.md)
-
----
-
-### Story 9-9: Engine Integration
-**Status:** done | **Tasks:** 5 | **Priority:** P0 | **Package:** `@tamma/orchestrator`
-
-Wire `RoleBasedAgentResolver` into the autonomous engine. Engine calls `getAgentForPhase()` at each loop step. Maps `EngineState` values to `WorkflowPhase` via `ENGINE_STATE_TO_PHASE`. Integrates diagnostics queue and cost tracker. Engine calls `getTaskConfig()` and `getPrompt()` before executing tasks. Graceful dispose on shutdown.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-9/9-9-engine-integration.md)
-
----
-
-### Story 9-10: CLI Wiring
-**Status:** done | **Tasks:** 4 | **Priority:** P0 | **Package:** `@tamma/cli`
-
-Load and validate `agents` config section from the CLI config file. Validate `security` config section. Construct and wire `ContentSanitizer`, `ProviderHealthTracker`, `AgentProviderFactory`, `AgentPromptRegistry`, `DiagnosticsQueue`, and `RoleBasedAgentResolver`. Pass resolver to engine. Surface validation errors and provider chain warnings to the user via Ink UI.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-10/9-10-cli-wiring.md)
-
----
-
-### Story 9-11: Diagnostics Queue and MCP Interceptors
-**Status:** done | **Tasks:** 6 | **Priority:** P0 | **Package:** `@tamma/shared`, `@tamma/mcp-client`
-
-Implement `DiagnosticsQueue` with synchronous `emit()`, timer-based batch drain, overflow dropping (oldest first), and `dispose()` with flush loop. Implement `ToolInterceptorChain` with pre/post interceptor pipeline. Implement `createSanitizationInterceptor()` and `createUrlValidationInterceptor()` built-in interceptors. Prototype pollution key stripping from interceptor outputs.
-
-- [Story Document](https://github.com/meywd/tamma/blob/main/docs/stories/epic-9/story-9-11/9-11-diagnostics-queue-mcp-interceptors.md)
+[Detailed Breakdown](Epics/Epic-7-Mentorship) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-7)
 
 ---
 
-## Epic 2: Autonomous Development Loop
+## Epic 8: Distribution & Installation (Planned)
 
-_Coming soon - Epic 2 stories will be created after foundational epics complete._
+| Story | Title | Tier | Status |
+|-------|-------|------|--------|
+| 8-1 | esbuild Bundle & Package Structure | Tier 1 (npm) | Planned |
+| 8-2 | npm Publish CI/CD Pipeline | Tier 1 (npm) | Planned |
+| 8-3 | Standalone Binary Compilation | Tier 2 (binary) | Planned |
+| 8-4 | Install Scripts & GitHub Releases | Tier 2 (binary) | Planned |
+| 8-5 | Auto-Update & Package Manager Distribution | Tier 2 (binary) | Planned |
+| 8-6 | TypeScript & Dashboard Dockerfiles | Tier 3 (Docker) | Planned |
+| 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | Planned |
+| 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | Planned |
+
+[Detailed Breakdown](Epics/Epic-8-Distribution) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-8)
 
 ---
 
-## Epic 3: Quality Gates & Intelligence
+## Epic 9: Config-Driven Multi-Agent Management (Completed)
 
-_Coming soon - Epic 3 stories will be created after Epic 2 completion._
+| Story | Title | Package(s) | Status |
+|-------|-------|-----------|--------|
+| 9-1 | Configuration Schema | shared, cli | Done |
+| 9-2 | Provider Diagnostics | shared, providers | Done |
+| 9-3 | Provider Health Tracker | providers | Done |
+| 9-4 | Agent Provider Factory | providers | Done |
+| 9-5 | Provider Chain | providers | Done |
+| 9-6 | Agent Prompt Registry | providers | Done |
+| 9-7 | Content Sanitization | shared | Done |
+| 9-8 | Role-Based Agent Resolver | providers | Done |
+| 9-9 | Engine Integration | orchestrator | Done |
+| 9-10 | CLI Wiring | cli | Done |
+| 9-11 | Diagnostics Queue & MCP Interceptors | shared, mcp-client | Done |
+
+[Detailed Breakdown](Epics/Epic-9-Agent-Management) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-9)
 
 ---
 
-## Epic 4: Event Sourcing & Audit Trail
+## Epic 10: Engine Core -- Workflow-Driven Architecture (Completed)
 
-_Coming soon - Epic 4 stories will be created after Epic 3 completion._
+| Story | Title | Status |
+|-------|-------|--------|
+| 10-1 | Engine Static Workflow & Brain | Done |
+| 10-2 | Comprehensive Event Catalog & Typed Schema | Done |
+| 10-3 | Event Store -- PostgreSQL/Emmett Implementation | Done |
+| 10-4 | Smart Queue with State-Based Deduplication | Done |
+| 10-5 | Workflow Provider Abstraction & ELSA Integration | Done |
+| 10-6 | Input Channel Unification | Done |
+| 10-7 | Event Store Security & Sanitization Pipeline | Done |
+| 10-8 | State Reconstruction from Event Stream | Done |
+
+[Detailed Breakdown](Epics/Epic-10-Engine-Core) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-10)
 
 ---
 
-## Epic 5: Observability & Production Readiness
+## Epic 11: Security Hardening (Completed)
 
-_Coming soon - Epic 5 stories will be created after Epic 4 completion._
+| Story | Title | Status |
+|-------|-------|--------|
+| 11-1 | ContentSanitizer C# Port | Done |
+| 11-2 | LLM Input Sanitization | Done |
+| 11-3 | Tool Call Validation | Done |
+| 11-4 | Output Sanitization & Prompt Hardening | Done |
+| 11-5 | Fail-Closed Guards & Provider Allowlist | Done |
+
+[Detailed Breakdown](Epics/Epic-11-Security) | [Combined](Epics/Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-11)
+
+---
+
+## Epic 12: Agentic Tool Loop (Completed)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 12-1 | Tool Executor Interface & Registry | Done |
+| 12-2 | Agentic Tool Loop in CallLlm | Done |
+| 12-3 | Context Compaction | Done |
+| 12-4 | Streaming & Parallel Tools | Done |
+
+[Detailed Breakdown](Epics/Epic-12-Tool-Loop) | [Combined](Epics/Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-12)
+
+---
+
+## Epic 13: Workflow Decomposition (Completed)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 13-1 | TDD Debug Retry Sub-Workflow | Done |
+| 13-2 | CI Debug Retry Sub-Workflow | Done |
+| 13-3 | Consolidate Finish Sequences | Done |
+
+[Detailed Breakdown](Epics/Epic-13-Workflow-Decomposition) | [Combined](Epics/Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-13)
+
+---
+
+## Epic 14: Custom ELSA Studio (Completed)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 14-1 | Studio Blazor WASM Scaffold | Done |
+| 14-2 | Studio Docker & CI | Done |
+| 14-3 | Studio Custom UI Hints | Done |
+
+[Detailed Breakdown](Epics/Epic-14-ELSA-Studio) | [Combined](Epics/Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-14)
+
+---
+
+## Epic 15: Observability & Log Aggregation (Completed)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 15-1 | OpenSearch Log Aggregation | Done |
+| 15-2 | Structured Logging Gap Remediation | Planned |
+| 15-3 | Advanced Dashboards & Alerting Tuning | Planned |
+
+[Detailed Breakdown](Epics/Epic-15-Log-Aggregation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-15)
+
+---
+
+## Epic 16: Unified Auth, User Management & Admin (Completed)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 16-1 | GitHub OAuth Unified Auth (oauth2-proxy removed) | Done |
+| 16-2 | User Management API | Done |
+| 16-3 | Admin Dashboard | Done |
+| 16-4 | Unified Navigation | Done |
+| 16-5 | Role-Based Access Control | Done |
+| 16-6 | ELSA Studio Auto-Login | Done |
+
+[Detailed Breakdown](Epics/Epic-16-Auth-Admin) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-16)
+
+---
+
+## Epic 17: Multi-Tenancy Foundation (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 17-1 | Tenant Model & Database Schema | Planned |
+| 17-2 | Row-Level Security & Tenant Isolation | Planned |
+| 17-3 | Tenant-Scoped Event Store | Planned |
+| 17-4 | Tenant-Scoped Workflow Instances | Planned |
+| 17-5 | API Tenant Context Middleware | Planned |
+
+[Detailed Breakdown](Epics/Epic-17-Multi-Tenancy) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-17)
+
+---
+
+## Epic 18: End-User Auth & Registration (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 18-1 | User Registration & Email Verification | Planned |
+| 18-2 | User Login & Session Management | Planned |
+| 18-3 | Organization/Tenant Creation | Planned |
+| 18-4 | GitHub App Installation Onboarding | Planned |
+| 18-5 | User-Facing Dashboard Shell | Planned |
+
+[Detailed Breakdown](Epics/Epic-18-User-Auth) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-18)
+
+---
+
+## Epic 19: GitHub App Agent Dispatch (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 19-1 | Tamma Agent GitHub Actions Workflow Template | Planned |
+| 19-2 | Workflow Dispatch from ELSA | Planned |
+| 19-3 | Agent Execution Monitoring | Planned |
+| 19-4 | Result Collection | Planned |
+| 19-5 | CLI / SaaS Mode Abstraction (IAgentExecutor) | Planned |
+
+[Detailed Breakdown](Epics/Epic-19-Agent-Dispatch) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-19)
+
+---
+
+## Epic 20: Billing & Payments (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 20-1 | Stripe Integration & Plan Model | Planned |
+| 20-2 | Subscription Management | Planned |
+| 20-3 | Usage Metering | Planned |
+| 20-4 | Usage Limits Enforcement | Planned |
+| 20-5 | Billing Dashboard | Planned |
+
+[Detailed Breakdown](Epics/Epic-20-Billing) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-20)
+
+---
+
+## Epic 21: Marketing Site & User Dashboard (Partially Implemented)
+
+Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashboard not yet implemented.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 21-1 | Marketing Landing Page | Done |
+| 21-2 | Pricing Page + Stripe Checkout | Planned |
+| 21-3 | Documentation Site | Planned |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | Planned |
+| 21-5 | User Dashboard -- Settings & Billing | Planned |
+
+[Detailed Breakdown](Epics/Epic-21-Marketing-Dashboard) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-21)
+
+---
+
+## Epic 22: CLI Mode Preservation (Planned)
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 22-1 | IAgentExecutor Abstraction | Planned |
+| 22-2 | CLI Standalone Workflow Engine | Planned |
+| 22-3 | Optional Cloud Sync | Planned |
+| 22-4 | CLI + SaaS Feature Parity Matrix | Planned |
+
+[Detailed Breakdown](Epics/Epic-22-CLI-Standalone) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-22)
+
+---
+
+## Epic 23: System Monitoring & Observability Dashboard (26 Task Plans Ready)
+
+All 12 stories now have detailed implementation-ready task plan breakdowns.
+
+| Story | Title | Task Plans | Status |
+|-------|-------|------------|--------|
+| 23-1 | System Health Dashboard (Overview) | 2 | Planned |
+| 23-2 | Agent Monitor (Realtime) | 2 | Planned |
+| 23-3 | Event Store Explorer | 2 | Planned |
+| 23-4 | Configuration Audit | 2 | Planned |
+| 23-5 | Workflow Monitor | 2 | Planned |
+| 23-6 | Provider Diagnostics (Deep) | 2 | Planned |
+| 23-7 | Log Explorer (OpenSearch) | 2 | Planned |
+| 23-8 | Infrastructure Monitor | 2 | Planned |
+| 23-9 | Knowledge Base Monitor | 2 | Planned |
+| 23-10 | Security & Access Audit | 2 | Planned |
+| 23-11 | Monitoring API Foundation | 3 | Planned |
+| 23-12 | Dashboard Navigation & Layout | 3 | Planned |
+
+[Detailed Breakdown](Epics/Epic-23-System-Monitoring) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-23)
+
+---
+
+## Epic 24: Realtime Voice Conversation (24 Task Plans Ready)
+
+Voice as a first-class input/output mode for the Tamma orchestrator. Research complete; all implementation stories have detailed task plan breakdowns.
+
+| Story | Title | Task Plans | Status |
+|-------|-------|------------|--------|
+| 24-0 | Voice API Research | -- | Done |
+| 24-1 | WebSocket Foundation | 5 | Planned |
+| 24-2 | Speech-to-Text Integration | 4 | Planned |
+| 24-3 | Text-to-Speech Integration | 4 | Planned |
+| 24-4 | Intent Classification + Engine Integration | 3 | Planned |
+| 24-5 | Dashboard Voice UI | 4 | Planned |
+| 24-6 | Hardening + Production Readiness | 4 | Planned |
+
+[Detailed Breakdown](Epics/Epic-24-Voice-Conversation) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-24)
+
+---
+
+## Epic 25: Documentation & Wiki Site (Planned)
+
+Custom documentation site on Cloudflare Workers using Astro Starlight. Renders ~475 pages from `wiki/` and `docs/stories/` with full-text search, collapsible sidebar, and dark/light mode.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 25-1 | Custom Wiki Site (Astro Starlight on Cloudflare Workers) | Planned |
+
+[Detailed Breakdown](Epics/Epic-25-Wiki-Site) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-25)
 
 ---
 
@@ -274,22 +469,30 @@ _Coming soon - Epic 5 stories will be created after Epic 4 completion._
 
 Stories progress through the following stages:
 
-1. **drafted** - Story created, not yet ready for development
-2. **ready-for-dev** - Story refined, ready to be picked up
-3. **in-progress** - Developer actively working on story
-4. **review** - Code review in progress
-5. **done** - All acceptance criteria met, merged to main
+1. **planned** -- Story documented with acceptance criteria, ready for development
+2. **in-progress** -- Developer actively working on story
+3. **review** -- Code review in progress
+4. **done** -- All acceptance criteria met, merged to main
 
 ---
 
-## Creating New Stories
+## Story Statistics
 
-Stories are created following the BMAD (Bob's Managed Agile Development) methodology:
+| Category | Count |
+|----------|-------|
+| Total stories across all epics | ~221 |
+| Epics completed | 12 |
+| Epics partially implemented | 3 |
+| Epics planned (stories ready) | 10 |
+| Detailed task plans (Epic 23) | 26 |
+| Detailed task plans (Epic 24) | 24 |
+| GitHub issues closed | 101 |
+| TypeScript packages with code | 14 |
+| C# ELSA activities | 70+ |
+| ELSA code-first workflows | 20+ |
+| Video production plans | 2 (ELI5 + Deep Dive) |
+| Generated scene images (4K) | 79 |
 
-1. Product Manager defines user story with acceptance criteria
-2. Scrum Master (Bob) breaks down into tasks/subtasks
-3. Team estimates and prioritizes stories
-4. Stories added to sprint backlog
-5. Developers implement following TDD workflow
+---
 
 For more details, see [Contributing Guidelines](Contributing).

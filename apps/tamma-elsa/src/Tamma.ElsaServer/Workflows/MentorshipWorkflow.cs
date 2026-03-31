@@ -1,3 +1,4 @@
+using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
@@ -43,7 +44,7 @@ public class MentorshipWorkflow : WorkflowBase
         builder.DefinitionId = "mentorship";
         builder.Description = "Orchestrates the complete mentorship session lifecycle with 28 states, " +
                               "outcome-based routing, guard conditions, and sub-workflow invocations.";
-        builder.Version = 1;
+        builder.Version = WorkflowVersions.ComputedVersion;
 
         // =====================================================================
         // Workflow Variables
@@ -64,14 +65,16 @@ public class MentorshipWorkflow : WorkflowBase
         var initStoryProcessing = new InitStoryProcessingActivity
         {
             Id = "InitStoryProcessing",
-            Name = "INIT_STORY_PROCESSING"
+            Name = "Initialize Story Processing"
         };
+        initStoryProcessing.SetDisplayText("Initialize Story Processing");
 
         var validateStory = new ValidateStoryActivity
         {
             Id = "ValidateStory",
-            Name = "VALIDATE_STORY"
+            Name = "Validate Story"
         };
+        validateStory.SetDisplayText("Validate Story");
 
         // =====================================================================
         // 2. ASSESSMENT ACTIVITIES
@@ -80,20 +83,23 @@ public class MentorshipWorkflow : WorkflowBase
         var assessJunior = new AssessJuniorFlowActivity
         {
             Id = "AssessJuniorCapability",
-            Name = "ASSESS_JUNIOR_CAPABILITY"
+            Name = "Assess Junior Capability"
         };
+        assessJunior.SetDisplayText("Assess Junior Capability");
 
         var clarifyRequirements = new ClarifyRequirementsActivity
         {
             Id = "ClarifyRequirements",
-            Name = "CLARIFY_REQUIREMENTS"
+            Name = "Clarify Requirements"
         };
+        clarifyRequirements.SetDisplayText("Clarify Requirements");
 
         var reExplainStory = new ReExplainStoryActivity
         {
             Id = "ReExplainStory",
-            Name = "RE_EXPLAIN_STORY"
+            Name = "Re-Explain Story"
         };
+        reExplainStory.SetDisplayText("Re-Explain Story");
 
         // =====================================================================
         // 3. PLANNING ACTIVITIES
@@ -102,20 +108,23 @@ public class MentorshipWorkflow : WorkflowBase
         var planDecomposition = new PlanDecompositionActivity
         {
             Id = "PlanDecomposition",
-            Name = "PLAN_DECOMPOSITION"
+            Name = "Plan Decomposition"
         };
+        planDecomposition.SetDisplayText("Plan Decomposition");
 
         var reviewPlan = new ReviewPlanActivity
         {
             Id = "ReviewPlan",
-            Name = "REVIEW_PLAN"
+            Name = "Review Plan"
         };
+        reviewPlan.SetDisplayText("Review Plan");
 
         var adjustPlan = new AdjustPlanActivity
         {
             Id = "AdjustPlan",
-            Name = "ADJUST_PLAN"
+            Name = "Adjust Plan"
         };
+        adjustPlan.SetDisplayText("Adjust Plan");
 
         // =====================================================================
         // 4. IMPLEMENTATION ACTIVITIES
@@ -124,20 +133,23 @@ public class MentorshipWorkflow : WorkflowBase
         var startImplementation = new StartImplementationActivity
         {
             Id = "StartImplementation",
-            Name = "START_IMPLEMENTATION"
+            Name = "Start Implementation"
         };
+        startImplementation.SetDisplayText("Start Implementation");
 
         var monitorProgress = new MonitorProgressFlowActivity
         {
             Id = "MonitorProgress",
-            Name = "MONITOR_PROGRESS"
+            Name = "Monitor Progress"
         };
+        monitorProgress.SetDisplayText("Monitor Progress");
 
         var detectPattern = new DetectPatternActivity
         {
             Id = "DetectPattern",
-            Name = "DETECT_PATTERN"
+            Name = "Detect Circular Pattern"
         };
+        detectPattern.SetDisplayText("Detect Circular Pattern");
 
         // =====================================================================
         // 5. BLOCKER ACTIVITIES
@@ -146,32 +158,37 @@ public class MentorshipWorkflow : WorkflowBase
         var diagnoseBlocker = new DiagnoseBlockerFlowActivity
         {
             Id = "DiagnoseBlocker",
-            Name = "DIAGNOSE_BLOCKER"
+            Name = "Diagnose Blocker"
         };
+        diagnoseBlocker.SetDisplayText("Diagnose Blocker");
 
         var provideHint = new ProvideHintFlowActivity
         {
             Id = "ProvideHint",
-            Name = "PROVIDE_HINT"
+            Name = "Provide Hint (Socratic)"
         };
+        provideHint.SetDisplayText("Provide Hint (Socratic)");
 
         var provideGuidance = new ProvideGuidanceFlowActivity
         {
             Id = "ProvideGuidance",
-            Name = "PROVIDE_GUIDANCE"
+            Name = "Provide Direct Guidance"
         };
+        provideGuidance.SetDisplayText("Provide Direct Guidance");
 
         var provideAssistance = new ProvideAssistanceFlowActivity
         {
             Id = "ProvideAssistance",
-            Name = "PROVIDE_ASSISTANCE"
+            Name = "Provide Code Assistance"
         };
+        provideAssistance.SetDisplayText("Provide Code Assistance");
 
         var escalateToSenior = new EscalateToSeniorActivity
         {
             Id = "EscalateToSenior",
-            Name = "ESCALATE_TO_SENIOR"
+            Name = "Escalate to Senior Developer"
         };
+        escalateToSenior.SetDisplayText("Escalate to Senior Developer");
 
         // =====================================================================
         // 6. QUALITY ACTIVITIES
@@ -180,20 +197,23 @@ public class MentorshipWorkflow : WorkflowBase
         var qualityGateCheck = new QualityGateFlowActivity
         {
             Id = "QualityGateCheck",
-            Name = "QUALITY_GATE_CHECK"
+            Name = "Quality Gate Check"
         };
+        qualityGateCheck.SetDisplayText("Quality Gate Check");
 
         var autoFixIssues = new AutoFixIssuesActivity
         {
             Id = "AutoFixIssues",
-            Name = "AUTO_FIX_ISSUES"
+            Name = "Auto-Fix Quality Issues"
         };
+        autoFixIssues.SetDisplayText("Auto-Fix Quality Issues");
 
         var manualFixRequired = new ManualFixRequiredActivity
         {
             Id = "ManualFixRequired",
-            Name = "MANUAL_FIX_REQUIRED"
+            Name = "Manual Fix Required"
         };
+        manualFixRequired.SetDisplayText("Manual Fix Required");
 
         // =====================================================================
         // 7. REVIEW ACTIVITIES
@@ -202,26 +222,30 @@ public class MentorshipWorkflow : WorkflowBase
         var prepareCodeReview = new PrepareCodeReviewFlowActivity
         {
             Id = "PrepareCodeReview",
-            Name = "PREPARE_CODE_REVIEW"
+            Name = "Prepare Code Review"
         };
+        prepareCodeReview.SetDisplayText("Prepare Code Review");
 
         var monitorReview = new MonitorReviewFlowActivity
         {
             Id = "MonitorReview",
-            Name = "MONITOR_REVIEW"
+            Name = "Monitor Review Status"
         };
+        monitorReview.SetDisplayText("Monitor Review Status");
 
         var guideFixes = new GuideFixesFlowActivity
         {
             Id = "GuideFixes",
-            Name = "GUIDE_FIXES"
+            Name = "Guide Review Fixes"
         };
+        guideFixes.SetDisplayText("Guide Review Fixes");
 
         var reRequestReview = new ReRequestReviewActivity
         {
             Id = "ReRequestReview",
-            Name = "RE_REQUEST_REVIEW"
+            Name = "Re-Request Review"
         };
+        reRequestReview.SetDisplayText("Re-Request Review");
 
         // =====================================================================
         // 8. COMPLETION ACTIVITIES
@@ -230,26 +254,30 @@ public class MentorshipWorkflow : WorkflowBase
         var mergeAndComplete = new MergeAndCompleteFlowActivity
         {
             Id = "MergeAndComplete",
-            Name = "MERGE_AND_COMPLETE"
+            Name = "Merge and Complete"
         };
+        mergeAndComplete.SetDisplayText("Merge and Complete");
 
         var generateReport = new GenerateReportFlowActivity
         {
             Id = "GenerateReport",
-            Name = "GENERATE_REPORT"
+            Name = "Generate Session Report"
         };
+        generateReport.SetDisplayText("Generate Session Report");
 
         var updateSkillProfile = new UpdateSkillProfileFlowActivity
         {
             Id = "UpdateSkillProfile",
-            Name = "UPDATE_SKILL_PROFILE"
+            Name = "Update Skill Profile"
         };
+        updateSkillProfile.SetDisplayText("Update Skill Profile");
 
         var completed = new CompletedActivity
         {
             Id = "Completed",
-            Name = "COMPLETED"
+            Name = "Session Completed"
         };
+        completed.SetDisplayText("Session Completed");
 
         // =====================================================================
         // 9. EXCEPTION STATE ACTIVITIES
@@ -258,26 +286,30 @@ public class MentorshipWorkflow : WorkflowBase
         var paused = new PauseSessionActivity
         {
             Id = "Paused",
-            Name = "PAUSED"
+            Name = "Session Paused"
         };
+        paused.SetDisplayText("Session Paused");
 
         var cancelled = new CancelSessionActivity
         {
             Id = "Cancelled",
-            Name = "CANCELLED"
+            Name = "Session Cancelled"
         };
+        cancelled.SetDisplayText("Session Cancelled");
 
         var failed = new FailSessionActivity
         {
             Id = "Failed",
-            Name = "FAILED"
+            Name = "Session Failed"
         };
+        failed.SetDisplayText("Session Failed");
 
         var timeout = new TimeoutSessionActivity
         {
             Id = "Timeout",
-            Name = "TIMEOUT"
+            Name = "Session Timed Out"
         };
+        timeout.SetDisplayText("Session Timed Out");
 
         // =====================================================================
         // 10. SUB-WORKFLOW INVOCATIONS (DispatchWorkflow)
@@ -297,6 +329,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        llmCallWorkflow.SetDisplayText("Dispatch LLM Call (7-1B)");
 
         // 7-1F: Context Gathering Workflow — used during init
         var contextGatheringWorkflow = new DispatchWorkflow
@@ -313,6 +346,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        contextGatheringWorkflow.SetDisplayText("Dispatch Context Gathering (7-1F)");
 
         // 7-1C: Testing Workflow — used during quality gate
         var testingWorkflow = new DispatchWorkflow
@@ -327,6 +361,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        testingWorkflow.SetDisplayText("Dispatch Testing (7-1C)");
 
         // 7-1D: Code Review Workflow — used during review phase
         var codeReviewWorkflow = new DispatchWorkflow
@@ -342,6 +377,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        codeReviewWorkflow.SetDisplayText("Dispatch Code Review (7-1D)");
 
         // 7-1E: Assessment Workflow — used during assessment phase
         var assessmentWorkflow = new DispatchWorkflow
@@ -358,6 +394,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        assessmentWorkflow.SetDisplayText("Dispatch Assessment (7-1E)");
 
         // 7-1G: Blocker Diagnosis Workflow — used during blocker diagnosis
         var blockerDiagnosisWorkflow = new DispatchWorkflow
@@ -376,6 +413,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        blockerDiagnosisWorkflow.SetDisplayText("Dispatch Blocker Diagnosis (7-1G)");
 
         // 7-1H: TDD Workflow — used during implementation (invoked from START_IMPLEMENTATION)
         var tddWorkflow = new DispatchWorkflow
@@ -392,6 +430,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        tddWorkflow.SetDisplayText("Dispatch TDD (7-1H)");
 
         // 7-1I: Debugging Workflow — used for bug fast path
         var debuggingWorkflow = new DispatchWorkflow
@@ -408,6 +447,7 @@ public class MentorshipWorkflow : WorkflowBase
             }),
             WaitForCompletion = new(true)
         };
+        debuggingWorkflow.SetDisplayText("Dispatch Debugging (7-1I)");
 
         // =====================================================================
         // 11. GUARD CONDITION ACTIVITIES (FlowDecision)
@@ -420,6 +460,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "GuardAssessmentRetries",
             Name = "Assessment Retries < 3?"
         };
+        guardAssessmentRetries.SetDisplayText("Assessment Retries < 3?");
 
         // Guard: Max plan iterations not exceeded (max 2)
         var guardPlanIterations = new FlowDecision(
@@ -428,6 +469,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "GuardPlanIterations",
             Name = "Plan Iterations < 2?"
         };
+        guardPlanIterations.SetDisplayText("Plan Iterations < 2?");
 
         // Guard: Max quality retries not exceeded (max 3)
         var guardQualityRetries = new FlowDecision(
@@ -436,6 +478,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "GuardQualityRetries",
             Name = "Quality Retries < 3?"
         };
+        guardQualityRetries.SetDisplayText("Quality Retries < 3?");
 
         // Guard: Max review iterations not exceeded (max 5)
         var guardReviewIterations = new FlowDecision(
@@ -444,6 +487,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "GuardReviewIterations",
             Name = "Review Iterations < 5?"
         };
+        guardReviewIterations.SetDisplayText("Review Iterations < 5?");
 
         // Guard: Blocker escalation level check
         var guardBlockerEscalation = new FlowDecision(
@@ -452,6 +496,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "GuardBlockerEscalation",
             Name = "Blocker Escalation < 4?"
         };
+        guardBlockerEscalation.SetDisplayText("Blocker Escalation < 4?");
 
         // =====================================================================
         // 12. COUNTER INCREMENT ACTIVITIES (SetVariable<int>)
@@ -464,6 +509,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "IncrAssessmentAttempt",
             Name = "Increment Assessment Attempt"
         };
+        incrementAssessmentAttempt.SetDisplayText("Increment Assessment Attempt");
 
         var incrementPlanIteration = new SetVariable<int>(
             planIteration,
@@ -472,6 +518,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "IncrPlanIteration",
             Name = "Increment Plan Iteration"
         };
+        incrementPlanIteration.SetDisplayText("Increment Plan Iteration");
 
         var incrementQualityRetry = new SetVariable<int>(
             qualityRetryCount,
@@ -480,6 +527,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "IncrQualityRetry",
             Name = "Increment Quality Retry"
         };
+        incrementQualityRetry.SetDisplayText("Increment Quality Retry");
 
         var incrementReviewIteration = new SetVariable<int>(
             reviewIteration,
@@ -488,6 +536,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "IncrReviewIteration",
             Name = "Increment Review Iteration"
         };
+        incrementReviewIteration.SetDisplayText("Increment Review Iteration");
 
         var incrementBlockerLevel = new SetVariable<int>(
             blockerEscalationLevel,
@@ -496,6 +545,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "IncrBlockerLevel",
             Name = "Increment Blocker Level"
         };
+        incrementBlockerLevel.SetDisplayText("Increment Blocker Level");
 
         var resetQualityRetry = new SetVariable<int>(
             qualityRetryCount, 0)
@@ -503,6 +553,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "ResetQualityRetry",
             Name = "Reset Quality Retry Counter"
         };
+        resetQualityRetry.SetDisplayText("Reset Quality Retry Counter");
 
         var resetReviewIteration = new SetVariable<int>(
             reviewIteration, 0)
@@ -510,6 +561,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "ResetReviewIteration",
             Name = "Reset Review Iteration Counter"
         };
+        resetReviewIteration.SetDisplayText("Reset Review Iteration Counter");
 
         var resetBlockerLevel = new SetVariable<int>(
             blockerEscalationLevel, 0)
@@ -517,6 +569,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "ResetBlockerLevel",
             Name = "Reset Blocker Level"
         };
+        resetBlockerLevel.SetDisplayText("Reset Blocker Level");
 
         // Second reset for guidance Done path
         var resetBlockerLevelForGuidance = new SetVariable<int>(
@@ -525,6 +578,7 @@ public class MentorshipWorkflow : WorkflowBase
             Id = "ResetBlockerLevelGuidance",
             Name = "Reset Blocker Level (Guidance)"
         };
+        resetBlockerLevelForGuidance.SetDisplayText("Reset Blocker Level (Guidance)");
 
         // =====================================================================
         // FLOWCHART DEFINITION

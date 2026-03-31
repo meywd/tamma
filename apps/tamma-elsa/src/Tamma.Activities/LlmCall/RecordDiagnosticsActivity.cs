@@ -7,6 +7,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -31,6 +32,7 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
 {
     private readonly ILogger<RecordDiagnosticsActivity> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IErrorRedactor? _errorRedactor;
 
     /// <summary>Serialized ProviderAttemptDiagnostic JSON from CallLlmActivity.</summary>
     [Input(Description = "Serialized diagnostic from the last call attempt")]
@@ -57,16 +59,18 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
     public Input<string> ProviderName { get; set; } = default!;
 
     [JsonConstructor]
-    public RecordDiagnosticsActivity() : this(null!, null!)
+    public RecordDiagnosticsActivity() : this(null!, null!, null)
     {
     }
 
     public RecordDiagnosticsActivity(
         ILogger<RecordDiagnosticsActivity> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IErrorRedactor? errorRedactor)
     {
         _logger = logger;
         _configuration = configuration;
+        _errorRedactor = errorRedactor;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -81,6 +85,12 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
         // Deserialize inputs
         var diagnostic = Deserialize<ProviderAttemptDiagnostic>(diagnosticJson) ?? new ProviderAttemptDiagnostic();
         var response = Deserialize<NormalizedLlmResponse>(responseJson) ?? new NormalizedLlmResponse();
+
+        // Redact sensitive information from error messages before storage
+        if (_errorRedactor != null && !string.IsNullOrEmpty(diagnostic.ErrorMessage))
+        {
+            diagnostic.ErrorMessage = _errorRedactor.Redact(diagnostic.ErrorMessage);
+        }
         var diagnosticsList = Deserialize<List<ProviderAttemptDiagnostic>>(diagnosticsListJson) ?? new();
         var cbStates = Deserialize<Dictionary<string, CircuitBreakerState>>(cbStatesJson) ?? new();
         var budget = Deserialize<BudgetState>(budgetJson) ?? new BudgetState();

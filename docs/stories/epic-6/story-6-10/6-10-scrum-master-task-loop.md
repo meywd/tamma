@@ -644,3 +644,15 @@ scrum_master:
 - Average retries < 1.5
 - Learning capture rate > 90%
 - User satisfaction with updates > 4/5
+
+## Logging Requirements
+
+All intelligence modules MUST accept `ILogger` from `@tamma/shared/contracts` via constructor injection.
+
+- **INFO**: Index scan started/completed (file count, duration), vector search executed (query, result count), RAG pipeline invoked, knowledge base query matched
+- **DEBUG**: Chunk boundaries, embedding dimensions, similarity scores, cache hit/miss, budget allocation
+- **WARN**: Embedding API rate limited, vector store connection degraded, stale index detected, budget threshold approaching
+- **ERROR**: Embedding generation failed, vector store unreachable, index corruption detected, MCP tool call failed
+- **Structured context**: Always include `{ repository, indexId, queryId, sourceType }` where applicable
+- **Performance**: Log duration for all external API calls (embedding, vector search, MCP tool invocations)
+- **Cost tracking**: Log token counts for embedding operations to support LLM cost monitoring (Story 6-7)

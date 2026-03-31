@@ -11,6 +11,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.Security;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -36,6 +37,8 @@ public class CallLlmActivity : Activity
     private readonly ILogger<CallLlmActivity> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
+    private readonly IContentSanitizer? _sanitizer;
+    private readonly IToolCallValidator? _toolCallValidator;
 
     /// <summary>Provider key (e.g. "anthropic", "openai").</summary>
     [Input(Description = "Provider key")]
@@ -62,7 +65,7 @@ public class CallLlmActivity : Activity
     public Input<double> Temperature { get; set; } = new(0.7);
 
     /// <summary>Serialized tools JSON (list of ResolvedTool).</summary>
-    [Input(Description = "Serialized tools (JSON array of ResolvedTool)")]
+    [Input(Description = "Serialized tools (JSON array of ResolvedTool)", UIHint = "json-editor")]
     public Input<string?> ToolsJson { get; set; } = default!;
 
     /// <summary>Current attempt number (1-based, managed by the workflow's retry loop).</summary>
@@ -70,26 +73,68 @@ public class CallLlmActivity : Activity
     public Input<int> AttemptNumber { get; set; } = new(1);
 
     [JsonConstructor]
-    public CallLlmActivity() : this(null!, null!, null!)
+    public CallLlmActivity() : this(null!, null!, null!, null, null)
     {
     }
 
     public CallLlmActivity(
         ILogger<CallLlmActivity> logger,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IContentSanitizer? sanitizer,
+        IToolCallValidator? toolCallValidator = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+        _sanitizer = sanitizer;
+        _toolCallValidator = toolCallValidator;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var providerName = ProviderName.Get(context);
-        var systemPrompt = SystemPrompt.Get(context);
-        var userPrompt = UserPrompt.Get(context);
+        var systemPromptRaw = SystemPrompt.Get(context);
+        var userPromptRaw = UserPrompt.Get(context);
         var modelOverride = ModelOverride.Get(context);
+
+        // Sanitize prompts before LLM call (defense-in-depth against prompt injection)
+        string systemPrompt;
+        string userPrompt;
+        if (_sanitizer != null)
+        {
+            var totalPatterns = 0;
+
+            var systemResult = _sanitizer.SanitizeInput(systemPromptRaw);
+            systemPrompt = systemResult.Result;
+            if (systemResult.Warnings.Count > 0)
+            {
+                totalPatterns += systemResult.Warnings.Count;
+                _logger?.LogWarning(
+                    "Injection pattern detected in SystemPrompt for CallLlmActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
+                    systemResult.Warnings.Count, context.WorkflowExecutionContext.Id);
+            }
+
+            var userResult = _sanitizer.SanitizeInput(userPromptRaw);
+            userPrompt = userResult.Result;
+            if (userResult.Warnings.Count > 0)
+            {
+                totalPatterns += userResult.Warnings.Count;
+                _logger?.LogWarning(
+                    "Injection pattern detected in UserPrompt for CallLlmActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
+                    userResult.Warnings.Count, context.WorkflowExecutionContext.Id);
+            }
+
+            if (totalPatterns > 0)
+                _logger?.LogInformation(
+                    "Total injection patterns detected per LLM call: {TotalPatternsMatched}, activity=CallLlmActivity, provider={Provider}, workflow: {WorkflowInstanceId}",
+                    totalPatterns, providerName, context.WorkflowExecutionContext.Id);
+        }
+        else
+        {
+            systemPrompt = systemPromptRaw;
+            userPrompt = userPromptRaw;
+        }
         var maxTokens = MaxTokens.Get(context);
         var temperature = Temperature.Get(context);
         var toolsJson = ToolsJson.Get(context);
@@ -115,6 +160,37 @@ public class CallLlmActivity : Activity
             var response = await ExecuteProviderCall(
                 providerName, providerConfig, model, systemPrompt, userPrompt,
                 maxTokens, temperature, tools);
+
+            // Output sanitization: strip HTML/zero-width from LLM response before storage
+            if (_sanitizer != null && response.ResponseText != null)
+            {
+                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
+                response.ResponseText = outputResult.Result;
+            }
+
+            // Tool call validation (Story 11.3): validate tool calls before returning
+            if (_toolCallValidator != null && response.ToolCalls != null && response.ToolCalls.Count > 0)
+            {
+                var allowedToolNames = tools?.Select(t => t.Name).ToList()
+                    ?? new List<string>();
+                foreach (var tc in response.ToolCalls)
+                {
+                    var vr = _toolCallValidator.Validate(tc, allowedToolNames);
+                    if (vr.IsValid)
+                    {
+                        tc.ArgumentsJson = vr.SanitizedArgumentsJson ?? tc.ArgumentsJson;
+                    }
+                    else
+                    {
+                        _logger?.LogWarning(
+                            "Tool call '{ToolName}' rejected in CallLlmActivity: {Error}",
+                            tc.ToolName, vr.ErrorMessage);
+                        response.Success = false;
+                        response.ErrorMessage = $"Tool validation failed: {vr.ErrorMessage}";
+                        break;
+                    }
+                }
+            }
 
             sw.Stop();
 
@@ -503,6 +579,13 @@ public class CallLlmActivity : Activity
 
     private LlmProviderConfig LoadProviderConfig(string providerName)
     {
+        // Validate provider name against allowlist
+        if (!ProviderAllowlist.IsAllowedDefault(providerName))
+        {
+            _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
+            return new LlmProviderConfig { Name = providerName, Enabled = false };
+        }
+
         var section = _configuration?.GetSection($"LlmProviders:{providerName}");
         var config = new LlmProviderConfig { Name = providerName };
 

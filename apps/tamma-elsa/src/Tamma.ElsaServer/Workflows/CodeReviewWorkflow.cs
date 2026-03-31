@@ -9,6 +9,8 @@ using Tamma.Activities.Review;
 using Tamma.Activities.Review.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -37,6 +39,7 @@ public class CodeReviewWorkflow : WorkflowBase
     {
         builder.Name = "Code Review Sub-Workflow";
         builder.DefinitionId = "code-review";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Manages the full PR lifecycle from creation through review, " +
                               "fix guidance, and merge with bookmark-based waiting.";
 
@@ -65,14 +68,15 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
-            Name = "CreatePR"
+            Name = "Create Pull Request"
         };
+        createPR.SetDisplayText("Create Pull Request");
 
         // 2. Check if PR creation succeeded — use workflow variable to track
         var storePRResult = new SetVariable
         {
             Id = "StorePRResult",
-            Name = "StorePRResult",
+            Name = "Store PR Result",
             Variable = prNumber,
             Value = Expr<object?>(ctx =>
             {
@@ -85,9 +89,11 @@ public class CodeReviewWorkflow : WorkflowBase
                 return 0;
             })
         };
+        storePRResult.SetDisplayText("Store PR Result");
 
         var prCreatedCheck = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
-        { Id = "PRCreatedCheck", Name = "PRCreatedCheck" };
+        { Id = "PRCreatedCheck", Name = "PR Created?" };
+        prCreatedCheck.SetDisplayText("PR Created?");
 
         // 3. Request review
         var requestReview = new RequestReviewActivity
@@ -97,8 +103,9 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
-            Name = "RequestReview"
+            Name = "Request Code Review"
         };
+        requestReview.SetDisplayText("Request Code Review");
 
         // 4. Monitor review (bookmark-based)
         var monitorReview = new MonitorReviewActivity
@@ -107,14 +114,15 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             TimeoutHours = new(24),
-            Name = "MonitorReview"
+            Name = "Monitor Review Status"
         };
+        monitorReview.SetDisplayText("Monitor Review Status");
 
         // 5. Store review comments when changes are requested
         var storeReviewComments = new SetVariable
         {
             Id = "StoreReviewComments",
-            Name = "StoreReviewComments",
+            Name = "Store Review Comments",
             Variable = reviewCommentsJson,
             Value = Expr<object?>(ctx =>
             {
@@ -126,15 +134,17 @@ public class CodeReviewWorkflow : WorkflowBase
                 return "[]";
             })
         };
+        storeReviewComments.SetDisplayText("Store Review Comments");
 
         // 6. Increment iteration counter
         var incrementIteration = new SetVariable
         {
             Id = "IncrementIteration",
-            Name = "IncrementIteration",
+            Name = "Increment Review Iteration",
             Variable = iteration,
             Value = Expr<object?>(ctx => (object)(iteration.Get(ctx) + 1))
         };
+        incrementIteration.SetDisplayText("Increment Review Iteration");
 
         // 7. Deliver fix guidance
         var deliverGuidance = new DeliverGuidanceActivity
@@ -145,8 +155,9 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             ReviewCommentsJson = Expr<string>(ctx => reviewCommentsJson.Get(ctx)),
-            Name = "DeliverGuidance"
+            Name = "Deliver Fix Guidance"
         };
+        deliverGuidance.SetDisplayText("Deliver Fix Guidance");
 
         // 8. Wait for fixes (bookmark-based)
         var waitForFixes = new WaitForFixesActivity
@@ -156,8 +167,9 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             TimeoutHours = new(24),
-            Name = "WaitForFixes"
+            Name = "Wait for Fix Submission"
         };
+        waitForFixes.SetDisplayText("Wait for Fix Submission");
 
         // 9. Re-request review
         var reRequestReview = new ReRequestReviewActivity
@@ -169,12 +181,14 @@ public class CodeReviewWorkflow : WorkflowBase
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             MaxIterations = Expr<int>(ctx => maxIterations.Get(ctx)),
-            Name = "ReRequestReview"
+            Name = "Re-Request Code Review"
         };
+        reRequestReview.SetDisplayText("Re-Request Code Review");
 
         // 10. Check if max iterations reached
         var maxIterationsCheck = new FlowDecision(ctx => iteration.Get(ctx) >= maxIterations.Get(ctx))
-        { Id = "MaxIterationsCheck", Name = "MaxIterationsCheck" };
+        { Id = "MaxIterationsCheck", Name = "Max Iterations Reached?" };
+        maxIterationsCheck.SetDisplayText("Max Iterations Reached?");
 
         // 11. Merge and complete
         var mergeAndComplete = new MergeAndCompleteReviewActivity
@@ -186,8 +200,9 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Strategy = Expr<MergeStrategy>(ctx => mergeStrategy.Get(ctx)),
             TotalIterations = Expr<int>(ctx => iteration.Get(ctx)),
-            Name = "MergeAndComplete"
+            Name = "Merge and Complete Review"
         };
+        mergeAndComplete.SetDisplayText("Merge and Complete Review");
 
         // 12. Escalate review (max iterations)
         var escalateReview = new EscalateReviewActivity
@@ -199,8 +214,9 @@ public class CodeReviewWorkflow : WorkflowBase
             Reason = new(EscalationReason.MaxIterationsReached),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Maximum fix iterations reached during code review."),
-            Name = "EscalateReview"
+            Name = "Escalate: Max Iterations"
         };
+        escalateReview.SetDisplayText("Escalate: Max Iterations");
 
         // 13. Escalate due to timeout
         var escalateTimeout = new EscalateReviewActivity
@@ -212,32 +228,35 @@ public class CodeReviewWorkflow : WorkflowBase
             Reason = new(EscalationReason.ReviewTimeout),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Review or fix submission timed out."),
-            Name = "EscalateTimeout"
+            Name = "Escalate: Review Timeout"
         };
+        escalateTimeout.SetDisplayText("Escalate: Review Timeout");
 
         // 14. Terminal nodes (SetOutput sequences)
         var failedEnd = new Sequence
         {
             Id = "FailedEnd",
-            Name = "FailedEnd",
+            Name = "Emit Failure Outputs",
             Activities =
             {
-                new SetOutput { Id = "OutputFailedSuccess", Name = "Output Failed Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
-                new SetOutput { Id = "OutputErrorMessage", Name = "Output Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)"Code review failed") }
+                WithLabel(new SetOutput { Id = "OutputFailedSuccess", Name = "Output Failed Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) }, "Output Failed Success"),
+                WithLabel(new SetOutput { Id = "OutputErrorMessage", Name = "Output Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)"Code review failed") }, "Output Error Message")
             }
         };
+        failedEnd.SetDisplayText("Emit Failure Outputs");
 
         var successEnd = new Sequence
         {
             Id = "SuccessEnd",
-            Name = "SuccessEnd",
+            Name = "Emit Success Outputs",
             Activities =
             {
-                new SetOutput { Id = "OutputSuccessFlag", Name = "Output Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)true) },
-                new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrl.Get(ctx) ?? "")) },
-                new SetOutput { Id = "OutputIterations", Name = "Output Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)iteration.Get(ctx)) }
+                WithLabel(new SetOutput { Id = "OutputSuccessFlag", Name = "Output Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)true) }, "Output Success Flag"),
+                WithLabel(new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrl.Get(ctx) ?? "")) }, "Output PR URL"),
+                WithLabel(new SetOutput { Id = "OutputIterations", Name = "Output Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)iteration.Get(ctx)) }, "Output Iterations")
             }
         };
+        successEnd.SetDisplayText("Emit Success Outputs");
 
         // ============================================
         // Flowchart with connections

@@ -5,6 +5,9 @@
 #   Development (auto-loads override):  docker compose up -d
 #   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
+# Observability stack (OpenSearch + Dashboards) is opt-in:
+#   docker compose --profile observability up -d
+#
 # Required environment:
 #   See .env.example for the full list.
 # =============================================================================
@@ -15,6 +18,7 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tamma}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -35,6 +39,7 @@ services:
   # ---------------------------------------------------------------------------
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-tamma}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-tamma}
@@ -53,6 +58,7 @@ services:
   # ---------------------------------------------------------------------------
   chromadb:
     image: chromadb/chroma:0.6.3
+    restart: unless-stopped
     volumes:
       - tamma-chroma-data:/chroma/chroma
     environment:
@@ -73,6 +79,7 @@ services:
     build:
       context: ../apps/tamma-elsa
       dockerfile: src/Tamma.ElsaServer/Dockerfile
+    restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       RabbitMq__HostName: rabbitmq
@@ -81,6 +88,9 @@ services:
       Elsa__Identity__SigningKey: ${ELSA_SIGNING_KEY:-sufficiently-long-secret-signing-key-for-elsa-jwt-tokens}
       Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
       ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
+      OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
+      OpenSearch__IndexPrefix: tamma-elsa
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,14 +106,18 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # ELSA Studio (Blazor WASM UI)
+  # ELSA Studio (Custom Tamma Blazor WASM UI via nginx)
   # ---------------------------------------------------------------------------
   elsa-studio:
-    image: elsaworkflows/elsa-studio-v3-4-0:latest
+    build:
+      context: ../apps/tamma-elsa/src
+      dockerfile: Tamma.Studio/Dockerfile
+    restart: unless-stopped
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
       # URL must be browser-accessible (Blazor WASM runs client-side)
       ELSASERVER__URL: https://elsa.tamma.dev/elsa/api
+      # Auto-login: injected into appsettings.json at startup
+      ELSA_ADMIN_PASSWORD: ${ELSA_ADMIN_PASSWORD:-password}
     depends_on:
       elsa-server:
         condition: service_healthy
@@ -117,11 +131,15 @@ services:
     build:
       context: ../apps/tamma-elsa/src
       dockerfile: Tamma.Api/Dockerfile
+    restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
+      OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
+      OpenSearch__IndexPrefix: tamma-api-dotnet
     depends_on:
       elsa-server:
         condition: service_healthy
@@ -144,9 +162,12 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.ts
       target: tamma-api
+    restart: unless-stopped
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
       CHROMADB_URL: http://chromadb:8000
+      RABBITMQ_USER: ${RABBITMQ_USER:-tamma}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-tamma}
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
@@ -155,6 +176,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-tamma-dev-jwt-secret}
       API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
       DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-true}
+      LOG_INDEX_PREFIX: tamma-ts
+      SERVICE_NAME: tamma-api
     volumes:
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
@@ -177,11 +202,16 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.ts
       target: tamma-engine
+    restart: unless-stopped
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
       GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
       TAMMA_API_URL: http://tamma-api:3100
+      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
+      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-true}
+      LOG_INDEX_PREFIX: tamma-ts
+      SERVICE_NAME: tamma-engine
     volumes:
       - tamma-engine-workdir:/home/tamma/workdir
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
@@ -198,6 +228,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.dashboard
+    restart: unless-stopped
     depends_on:
       tamma-api:
         condition: service_started
@@ -205,12 +236,95 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Infrastructure: OpenSearch (log aggregation)
+  # Opt-in via: docker compose --profile observability up -d
+  # ---------------------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: "-Xms2g -Xmx2g"
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      cluster.name: tamma-logs
+      node.name: tamma-os-node1
+      bootstrap.memory_lock: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - tamma-os-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 15s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: OpenSearch Dashboards (log visualization)
+  # Opt-in via: docker compose --profile observability up -d
+  # ---------------------------------------------------------------------------
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q 'overall'"]
+      interval: 15s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Init: OpenSearch bootstrap (index template, ISM policy, saved objects)
+  # Opt-in via: docker compose --profile observability up -d
+  # ---------------------------------------------------------------------------
+  opensearch-setup:
+    image: curlimages/curl:8.12.1
+    profiles: ["observability"]
+    volumes:
+      - ./opensearch:/setup:ro
+    entrypoint: ["sh", "/setup/setup.sh"]
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      opensearch-dashboards:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
+  #
+  # Only hard-depends on tamma-api and tamma-dashboard (critical path).
+  # opensearch-dashboards is a soft dependency — nginx resolves it at
+  # request time and returns 502 if it is unavailable.
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine
+    restart: unless-stopped
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nav-header:/etc/nginx/nav-header:ro
       - ../secrets/origin-cert.pem:/etc/nginx/certs/origin-cert.pem:ro
       - ../secrets/origin-key.pem:/etc/nginx/certs/origin-key.pem:ro
     depends_on:
@@ -229,6 +343,7 @@ volumes:
   tamma-rmq-data:
   tamma-chroma-data:
   tamma-engine-workdir:
+  tamma-os-data:
 
 # =============================================================================
 # Networks

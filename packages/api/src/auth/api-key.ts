@@ -4,7 +4,7 @@
  * Keys follow the format: tamma_sk_ + 32 random bytes encoded as base64url.
  */
 
-import { randomBytes, createHmac } from 'node:crypto';
+import { randomBytes, scryptSync } from 'node:crypto';
 
 /** Prefix prepended to all generated API keys. */
 const API_KEY_PREFIX = 'tamma_sk_';
@@ -16,11 +16,17 @@ const KEY_BYTES = 32;
 const DISPLAY_PREFIX_LENGTH = 12;
 
 /**
- * HMAC key used for API key hashing. This is NOT a secret — it simply
- * ensures CodeQL recognises the operation as HMAC rather than bare SHA-256.
- * The security comes from the 256-bit random API key itself, not the hash.
+ * Fixed salt for API key hashing. Uses scrypt (memory-hard KDF) to satisfy
+ * CodeQL's password-hashing requirements while keeping lookups deterministic.
+ * The security comes from the 256-bit random API key itself.
  */
-const HMAC_KEY = 'tamma-api-key-hash-v1';
+const HASH_SALT = 'tamma-api-key-hash-v1';
+
+/** scrypt cost parameter (N=16384, r=8, p=1 — OWASP minimum recommendation). */
+const SCRYPT_COST = 16384;
+const SCRYPT_BLOCK_SIZE = 8;
+const SCRYPT_PARALLELIZATION = 1;
+const SCRYPT_KEY_LENGTH = 32;
 
 /**
  * Generate a new API key.
@@ -34,11 +40,17 @@ export function generateApiKey(): string {
 }
 
 /**
- * Compute the HMAC-SHA256 hex digest of an API key.
+ * Compute the scrypt hash (hex) of an API key.
+ * Uses memory-hard KDF for resistance against brute-force attacks.
  * Used for storage and lookup (never store the raw key).
  */
 export function hashApiKey(key: string): string {
-  return createHmac('sha256', HMAC_KEY).update(key).digest('hex');
+  const derived = scryptSync(key, HASH_SALT, SCRYPT_KEY_LENGTH, {
+    N: SCRYPT_COST,
+    r: SCRYPT_BLOCK_SIZE,
+    p: SCRYPT_PARALLELIZATION,
+  });
+  return derived.toString('hex');
 }
 
 /**

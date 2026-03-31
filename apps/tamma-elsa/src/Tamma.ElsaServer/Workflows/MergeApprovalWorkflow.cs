@@ -17,6 +17,7 @@ public class MergeApprovalWorkflow : WorkflowBase
     {
         builder.Name = "Merge Approval";
         builder.DefinitionId = "merge-approval";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Wait for human merge/test/reject decision";
 
         var decisionVar = builder.WithVariable<string>("Decision", "");
@@ -31,9 +32,12 @@ public class MergeApprovalWorkflow : WorkflowBase
             Decision = new Output<string?>(decisionVar),
             Feedback = new Output<string?>(feedbackVar)
         };
+        waitMerge.SetDisplayText("Wait Merge Approval");
 
         var outputDecision = new SetOutput { Id = "OutputDecision", Name = "Output Decision", OutputName = new("decision"), OutputValue = new(ctx => (object)(decisionVar.Get(ctx) ?? "reject")) };
+        outputDecision.SetDisplayText("Output Decision");
         var outputFeedback = new SetOutput { Id = "OutputFeedback", Name = "Output Feedback", OutputName = new("feedback"), OutputValue = new(ctx => (object)(feedbackVar.Get(ctx) ?? "")) };
+        outputFeedback.SetDisplayText("Output Feedback");
 
         builder.Root = new Flowchart
         {

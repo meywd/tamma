@@ -345,3 +345,14 @@ Claude-3.5-Sonnet
 ### Completion Notes List
 
 ### File List
+
+## Logging Requirements
+
+All provider and platform implementations MUST accept `ILogger` and log consistently.
+
+- **INFO**: Provider/platform initialized, API call completed (endpoint, duration), connection established/closed
+- **DEBUG**: Request parameters (redact secrets), response status and headers, retry attempt details, rate limit remaining
+- **WARN**: API rate limited (with retry-after), connection degraded, fallback to secondary endpoint, deprecated API version used
+- **ERROR**: API call failed after all retries, authentication failed (do NOT log credentials), connection refused, invalid response schema
+- **Structured context**: Include `{ provider, platform, repository, operation, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, webhook secrets, or private key material — log masked identifiers only (e.g., `key=sk-...xyz`)

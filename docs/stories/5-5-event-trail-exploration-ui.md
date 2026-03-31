@@ -2039,3 +2039,7 @@ describe('EventSearchInterface', () => {
 **Implementation Priority**: Optional (Post-MVP Enhancement)  
 **Target Completion**: Sprint 6 (Post-MVP)  
 **Dependencies**: Epic 4.1, Epic 4.7, Epic 5.1, Epic 5.3
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

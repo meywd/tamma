@@ -300,3 +300,14 @@ export class SecureAgentProvider implements IAgentProvider {
 - Test: `secureFetch` reads body via ReadableStream with running byte counter, aborts via AbortController on size exceed
 - Test: `secureFetch` checks Content-Type allowlist before reading body
 - Test: redirect-to-private-IP blocked in `secureFetch`
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only

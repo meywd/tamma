@@ -122,3 +122,14 @@ Claude-3.5-Sonnet
 ### Completion Notes List
 
 ### File List
+
+## Logging Requirements
+
+Event store and capture modules are CRITICAL infrastructure — they must log their own operations distinctly from the events they store.
+
+- **INFO**: Event appended (event type, stream, tags summary), query executed (filter summary, result count), replay started/completed
+- **DEBUG**: Event payload size, serialization timing, query plan, batch sizes, stream position
+- **WARN**: Event append slow (>100ms), query returned large result set (>1000), replay gap detected, schema migration pending
+- **ERROR**: Event append failed (with retry status), query failed, deserialization error, stream corruption, schema validation failure
+- **Structured context**: Always include `{ eventType, streamId, eventId, tags }` — but NEVER log full event `data` payload at INFO level (may contain sensitive content)
+- **Distinction**: Operational logs (about the event store) use standard ILogger; domain events (about business actions) go into the event stream — do not conflate the two

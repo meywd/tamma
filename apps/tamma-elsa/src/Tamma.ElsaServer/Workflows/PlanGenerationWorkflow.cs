@@ -10,6 +10,9 @@ using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Activities.Security;
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -24,6 +27,7 @@ public class PlanGenerationWorkflow : WorkflowBase
     {
         builder.Name = "Plan Generation";
         builder.DefinitionId = "plan-generation";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Generate AI plan and wait for human approval";
 
         var issueNumberVar = builder.WithVariable<int>("IssueNumber", 0);
@@ -50,16 +54,17 @@ public class PlanGenerationWorkflow : WorkflowBase
                 return (object)ctx.GetInput<int>("issueNumber");
             })
         };
+        initVars.SetDisplayText("Init Variables");
 
         var planLoop = new While(ctx => planLoopVar.Get(ctx))
         {
             Id = "PlanApprovalLoop", Name = "Plan Approval Loop",
-            Body = new Sequence
+            Body = WithLabel(new Sequence
             {
                 Id = "PlanLoopBody", Name = "Plan Loop Body",
                 Activities =
                 {
-                    new DispatchWorkflow
+                    WithLabel(new DispatchWorkflow
                     {
                         Id = "DispatchPlanGeneration", Name = "Generate Plan via LLM",
                         WorkflowDefinitionId = new("llm-call"),
@@ -71,8 +76,8 @@ public class PlanGenerationWorkflow : WorkflowBase
                         }),
                         WaitForCompletion = new(true),
                         Result = new(llmResultVar)
-                    },
-                    new SetVariable
+                    }, "Generate Plan via LLM"),
+                    WithLabel(new SetVariable
                     {
                         Id = "ExtractPlan", Name = "Extract Plan",
                         Variable = planJsonVar,
@@ -83,16 +88,16 @@ public class PlanGenerationWorkflow : WorkflowBase
                                 return resp?.ToString() ?? "{}";
                             return "{}";
                         })
-                    },
-                    new WaitForPlanApprovalActivity
+                    }, "Extract Plan"),
+                    WithLabel(new WaitForPlanApprovalActivity
                     {
                         Id = "WaitPlanApproval", Name = "Wait for Plan Approval",
                         IssueNumber = new Input<int>(ctx => issueNumberVar.Get(ctx)),
                         PlanJson = new Input<string>(ctx => planJsonVar.Get(ctx)),
                         ApprovalResultJson = new Output<string?>(new Variable<string>()),
                         EditedPlanJson = new Output<string?>(editedPlanJsonVar)
-                    },
-                    new SetVariable
+                    }, "Wait for Plan Approval"),
+                    WithLabel(new SetVariable
                     {
                         Id = "CheckApprovalDecision", Name = "Check Approval Decision",
                         Variable = planLoopVar,
@@ -107,13 +112,16 @@ public class PlanGenerationWorkflow : WorkflowBase
                             planLoopVar.Set(ctx, false);
                             return (object)false;
                         })
-                    }
+                    }, "Check Approval Decision")
                 }
-            }
+            }, "Plan Loop Body")
         };
+        planLoop.SetDisplayText("Plan Approval Loop");
 
         var outputApproved = new SetOutput { Id = "OutputApproved", Name = "Output Approved", OutputName = new("approved"), OutputValue = new(ctx => (object)(!string.IsNullOrEmpty(planJsonVar.Get(ctx)))) };
+        outputApproved.SetDisplayText("Output Approved");
         var outputPlanJson = new SetOutput { Id = "OutputPlanJson", Name = "Output Plan JSON", OutputName = new("planJson"), OutputValue = new(ctx => (object)(planJsonVar.Get(ctx) ?? "{}")) };
+        outputPlanJson.SetDisplayText("Output Plan JSON");
 
         builder.Root = new Flowchart
         {
@@ -134,13 +142,19 @@ public class PlanGenerationWorkflow : WorkflowBase
 
     private static string BuildPlanPrompt(string title, string body, string context, string feedback)
     {
+        // Sanitize all dynamic inputs (untrusted: from GitHub issue body, user feedback)
+        var safeTitle = SecurityHelpers.SanitizeForPrompt(title);
+        var safeBody = SecurityHelpers.SanitizeForPrompt(body);
+        var safeContext = SecurityHelpers.SanitizeForPrompt(context);
+        var safeFeedback = SecurityHelpers.SanitizeForPrompt(feedback);
+
         var prompt = $"Generate a detailed implementation plan for the following GitHub issue:\n\n" +
-                     $"**Title:** {title}\n" +
-                     $"**Description:** {body}\n\n";
-        if (!string.IsNullOrEmpty(context))
-            prompt += $"**Context:** {context}\n\n";
-        if (!string.IsNullOrEmpty(feedback))
-            prompt += $"**Previous Feedback:** {feedback}\n\n";
+                     $"**Title:** {safeTitle}\n" +
+                     $"**Description:** {safeBody}\n\n";
+        if (!string.IsNullOrEmpty(safeContext))
+            prompt += $"**Context:** {safeContext}\n\n";
+        if (!string.IsNullOrEmpty(safeFeedback))
+            prompt += $"**Previous Feedback:** {safeFeedback}\n\n";
         prompt += "Respond with a JSON object containing: summary, steps (array), " +
                   "filesToModify (array), filesToCreate (array), testStrategy, estimatedComplexity.";
         return prompt;

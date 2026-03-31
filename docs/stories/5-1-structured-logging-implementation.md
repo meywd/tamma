@@ -574,3 +574,7 @@ class LogVolumeController {
 - [Pino Logging Library](https://getpino.io/)
 - [Log Aggregation Patterns](https://www.elastic.co/guide/en/elasticsearch/reference/current/logs.html)
 - [Sensitive Data Protection](https://owasp.org/www-project-cheat-sheets/cheatsheets/Logging_Cheat_Sheet.html)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

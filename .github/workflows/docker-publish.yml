@@ -5,6 +5,8 @@
 # - main: tagged as :main and :sha-<commit>
 # - tags: tagged as :v1.2.3 and :latest
 # - PRs: tagged as :pr-<number>
+#
+# All Docker steps retry up to 3 times to handle Docker Hub rate limits.
 # =============================================================================
 
 name: Build & Publish Docker Images
@@ -37,7 +39,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        id: buildx2
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure' && steps.buildx2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 3)
+        if: steps.buildx1.outcome == 'failure' && steps.buildx2.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -57,7 +80,46 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/Dockerfile.ts
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        id: build2
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/Dockerfile.ts
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure' && steps.build2.outcome == 'failure'
+        run: sleep 60
+
+      - name: Build and push (attempt 3)
+        if: steps.build1.outcome == 'failure' && steps.build2.outcome == 'failure'
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.ts
@@ -77,7 +139,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -97,7 +170,26 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/Dockerfile.dashboard
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.dashboard
@@ -122,10 +214,24 @@ jobs:
           - name: tamma-api-dotnet
             context: apps/tamma-elsa/src
             dockerfile: apps/tamma-elsa/src/Tamma.Api/Dockerfile
+          - name: tamma-studio
+            context: apps/tamma-elsa/src
+            dockerfile: apps/tamma-elsa/src/Tamma.Studio/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
         with:
@@ -145,7 +251,26 @@ jobs:
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -281,6 +406,9 @@ jobs:
               build: !reset null
             tamma-api-dotnet:
               image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
+              build: !reset null
+            elsa-studio:
+              image: ghcr.io/${OWNER}/tamma-studio:${IMAGE_TAG}
               build: !reset null
           YAML
 
@@ -440,21 +568,21 @@ jobs:
               exit 1
             "
 
-      - name: "Start layer 4: tamma-engine + tamma-dashboard + nginx-proxy"
+      - name: "Start layer 4: remaining services + nginx-proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                up -d --force-recreate tamma-engine tamma-dashboard elsa-studio nginx-proxy
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard elsa-studio && \
+              echo 'Starting nginx-proxy...' && \
+              \$COMPOSE up -d --force-recreate nginx-proxy && \
+              echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
+              \$COMPOSE --profile observability run --rm opensearch-setup 2>/dev/null || echo 'OpenSearch setup skipped (observability not running)'
             "
 
-      - name: "Verify: all services running"
+      - name: "Verify: all core services running"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -469,12 +597,77 @@ jobs:
                 ps
             "
 
-      - name: "Health check: API via proxy"
+      - name: "Health check: API via proxy (with retry)"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health && echo ' API OK' || curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health && echo ' API OK (http)' || (echo '::error::API health check via proxy failed' && exit 1)"
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              for i in \$(seq 1 15); do
+                if curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null; then
+                  echo ' API OK (https)' && exit 0
+                elif curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health 2>/dev/null; then
+                  echo ' API OK (http)' && exit 0
+                fi
+                echo \"Health check attempt \$i/15 failed, retrying in 5s...\"
+                sleep 5
+              done
+              echo '::error::API health check via proxy failed after 15 attempts (75s)'
+              exit 1
+            "
+
+      - name: "Smoke test: critical domains reachable via proxy"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              FAILED=0
+
+              echo '--- Checking api.tamma.dev /api/health ---'
+              API_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null || echo '000')
+              if [ \"\$API_STATUS\" = '200' ]; then
+                echo \"  api.tamma.dev: OK (HTTP \$API_STATUS)\"
+              else
+                echo \"  api.tamma.dev: FAIL (HTTP \$API_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking app.tamma.dev ---'
+              APP_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: app.tamma.dev' https://localhost/ 2>/dev/null)
+              if [ \"\$APP_STATUS\" -lt 500 ] 2>/dev/null; then
+                echo \"  app.tamma.dev: OK (HTTP \$APP_STATUS)\"
+              else
+                echo \"  app.tamma.dev: FAIL (HTTP \$APP_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking elsa.tamma.dev ---'
+              ELSA_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/ 2>/dev/null)
+              if [ \"\$ELSA_STATUS\" -lt 500 ] 2>/dev/null; then
+                echo \"  elsa.tamma.dev: OK (HTTP \$ELSA_STATUS)\"
+              else
+                echo \"  elsa.tamma.dev: FAIL (HTTP \$ELSA_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking elsa.tamma.dev /elsa/api ---'
+              ELSA_API_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/elsa/api/ 2>/dev/null)
+              if [ \"\$ELSA_API_STATUS\" -lt 500 ] 2>/dev/null; then
+                echo \"  elsa.tamma.dev/elsa/api: OK (HTTP \$ELSA_API_STATUS)\"
+              else
+                echo \"  elsa.tamma.dev/elsa/api: FAIL (HTTP \$ELSA_API_STATUS)\"
+                FAILED=1
+              fi
+
+              echo '--- Checking logs.tamma.dev (optional — observability profile) ---'
+              LOGS_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: logs.tamma.dev' https://localhost/ 2>/dev/null)
+              echo \"  logs.tamma.dev: HTTP \$LOGS_STATUS (informational, not blocking)\"
+
+              if [ \"\$FAILED\" = '1' ]; then
+                echo '::error::One or more smoke tests failed — see above for details'
+                exit 1
+              fi
+              echo 'All critical smoke tests passed'
+            "
 
       - name: Dump container logs on failure
         if: failure()
@@ -486,7 +679,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
+              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

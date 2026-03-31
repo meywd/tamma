@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
@@ -9,10 +10,18 @@ namespace Tamma.Api.Services;
 /// <summary>
 /// Implementation of mentorship service
 /// </summary>
-public class MentorshipService : IMentorshipService
+public partial class MentorshipService : IMentorshipService
 {
     private readonly IMentorshipSessionRepository _repository;
     private readonly ILogger<MentorshipService> _logger;
+
+    /// <summary>
+    /// Matches any control character (CR, LF, TAB, and all C0/C1 control chars).
+    /// Used to prevent log forging by stripping characters that could inject
+    /// fake log entries.
+    /// </summary>
+    [GeneratedRegex(@"[\x00-\x1F\x7F-\x9F]", RegexOptions.Compiled)]
+    private static partial Regex ControlCharsRegex();
 
     public MentorshipService(
         IMentorshipSessionRepository repository,
@@ -23,12 +32,14 @@ public class MentorshipService : IMentorshipService
     }
 
     /// <summary>
-    /// Sanitize a string for safe logging by removing newlines and control characters.
+    /// Sanitize a string for safe logging by removing all control characters
+    /// (newlines, tabs, carriage returns, and other C0/C1 control characters)
+    /// in a single atomic pass to prevent log forging.
     /// </summary>
     private static string SanitizeForLog(string? input)
     {
         if (string.IsNullOrEmpty(input)) return input ?? string.Empty;
-        return input.Replace("\n", "").Replace("\r", "").Replace("\t", "");
+        return ControlCharsRegex().Replace(input, "");
     }
 
     public async Task<MentorshipSession> CreateSessionAsync(string storyId, string juniorId)

@@ -1,20 +1,51 @@
+using Elsa.Agents;
 using Elsa.EntityFrameworkCore.Extensions;
 using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.EntityFrameworkCore.Modules.Runtime;
 using Elsa.Extensions;
 using Serilog;
+using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
+using Tamma.Activities.Security;
 using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
-Log.Logger = new LoggerConfiguration()
+// Configure Serilog with Console + File + OpenSearch sinks
+var opensearchUrl = builder.Configuration["OpenSearch:Url"] ?? "http://opensearch:9200";
+var opensearchEnabled = builder.Configuration.GetValue<bool>("OpenSearch:Enabled", true);
+var logIndexPrefix = builder.Configuration["OpenSearch:IndexPrefix"] ?? "tamma-elsa";
+
+var logConfig = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
+    .Enrich.WithProperty("service", "tamma-elsa")
+    .Enrich.WithProperty("environment", builder.Environment.EnvironmentName)
+    .Enrich.WithMachineName()
     .WriteTo.Console()
-    .WriteTo.File("logs/tamma-elsa-.log", rollingInterval: RollingInterval.Day)
-    .CreateLogger();
+    .WriteTo.File("logs/tamma-elsa-.log", rollingInterval: RollingInterval.Day);
+
+if (opensearchEnabled)
+{
+    logConfig.WriteTo.OpenSearch(new OpenSearchSinkOptions(new Uri(opensearchUrl))
+    {
+        AutoRegisterTemplate = false, // We manage templates externally via setup.sh
+        IndexFormat = $"{logIndexPrefix}-{{0:yyyy.MM.dd}}",
+        BatchAction = OpenOpType.Create,
+        ModifyConnectionSettings = conn =>
+            conn.ServerCertificateValidationCallback((_, _, _, _) => true),
+        EmitEventFailure = EmitEventFailureHandling.WriteToSelfLog,
+        FailureCallback = e => Console.Error.WriteLine(
+            $"[Serilog-OpenSearch] Failed to submit: {e.MessageTemplate}"),
+        BufferBaseFilename = "./logs/opensearch-buffer",
+        BufferFileSizeLimitBytes = 50_000_000, // 50 MB buffer
+        Period = TimeSpan.FromSeconds(2),
+        BatchPostingLimit = 500,
+    });
+    Serilog.Debugging.SelfLog.Enable(Console.Error);
+}
+
+Log.Logger = logConfig.CreateLogger();
 
 builder.Host.UseSerilog();
 
@@ -53,6 +84,15 @@ builder.Services.AddElsa(elsa =>
             ef.RunMigrations = true;
         }));
 
+    // Agents module — DB-backed agent config store with Studio UI and REST API.
+    // Auto-creates AgentDefinitions, ApiKeysDefinitions, ServicesDefinitions tables.
+    // We intentionally omit UseAgentActivities() to avoid registering Semantic Kernel's
+    // AgentActivity — our llm-call workflow is the execution engine.
+    elsa.UseAgentPersistence(p =>
+        p.UseEntityFrameworkCore(ef => ef.UsePostgreSql(connectionString)));
+    elsa.UseAgents();
+    elsa.UseAgentsApi();
+
     // Scheduling (timer/cron activities)
     elsa.UseScheduling();
 
@@ -85,11 +125,46 @@ builder.Services.AddCors(options =>
             .WithExposedHeaders("x-elsa-workflow-instance-id"));
 });
 
+// HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
+builder.Services.AddHttpClient();
+
+// Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
+// All tools are stateless singletons. The registry (also Singleton) captures them via
+// IEnumerable<IToolExecutor>, so they must share the same lifetime to avoid a captive dependency.
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileReadTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileWriteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry, Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
+
+// Security services (Epic 11 — LLM injection hardening)
+builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
+builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
+
+// Provider allowlist (Story 11.5 — fail-closed guards)
+builder.Services.Configure<ProviderAllowlistOptions>(
+    builder.Configuration.GetSection("Security:ProviderAllowlist"));
+builder.Services.AddSingleton<ProviderAllowlist>();
+
+// Tool call validation (Story 11.3 — allowlist enforcement, ActionGate)
+builder.Services.Configure<ActionGateOptions>(
+    builder.Configuration.GetSection("Security:ActionGate"));
+builder.Services.AddSingleton<ActionGate>();
+builder.Services.AddSingleton<IToolCallValidator, ToolCallValidator>();
+
+// Context compaction for long-running tool loops (Story 12.3)
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
+
 // Health checks
 builder.Services.AddHealthChecks();
 
 // Seed workflow definitions from JSON files at startup
 builder.Services.AddHostedService<Tamma.ElsaServer.WorkflowSeeder>();
+
+// Seed default agent definitions (prompts, settings) into ELSA Agents store
+builder.Services.AddHostedService<Tamma.ElsaServer.AgentSeeder>();
 
 var app = builder.Build();
 

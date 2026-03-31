@@ -1936,3 +1936,14 @@ This consolidated implementation provides a comprehensive quality assurance fram
 - **🔴 MANDATORY PROCESS:** [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 - **Knowledge Base:** [.dev/README.md](../../.dev/README.md) - Search spikes, bugs, findings, decisions
 - **Architecture:** [tech-spec-epic-3.md](../../tech-spec-epic-3.md) - Quality gates technical specifications
+
+## Logging Requirements
+
+Quality gate components MUST log all gate decisions for audit trail compliance.
+
+- **INFO**: Gate evaluation started (gate type, issue ID), gate passed/failed (with result summary), escalation triggered
+- **DEBUG**: Gate input parameters, individual check results, threshold comparisons, score breakdowns
+- **WARN**: Gate marginally passed (close to threshold), flaky test detected, scan timeout, partial results used
+- **ERROR**: Gate evaluation crashed, external tool unreachable (CI, linter, scanner), invalid gate configuration
+- **Structured context**: Always include `{ issueId, gateType, gateResult, score, threshold }`
+- **Security**: Log security scan findings at WARN level (vulnerability severity, affected file) but NEVER log vulnerability details that could aid exploitation

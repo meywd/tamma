@@ -698,3 +698,7 @@ export class ProjectionService {
 - [PostgreSQL Query Optimization](https://www.postgresql.org/docs/current/performance-tips.html)
 - [Event Sourcing Query Patterns](https://eventstore.com/docs/server/projections/)
 - [API Authentication Best Practices](https://oauth.net/2/)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

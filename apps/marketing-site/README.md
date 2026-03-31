@@ -8,10 +8,20 @@ This is the marketing website for Tamma, hosted on Cloudflare Pages with serverl
 
 This marketing site serves as the initial web presence for Tamma during the pre-launch phase. It provides:
 
-- Information about Tamma's autonomous development capabilities
-- Development roadmap and timeline
+- Explainer video (hosted on Bunny.net Stream)
 - Email signup for launch notifications
-- Links to the GitHub repository for early access
+- Links to the GitHub repository
+- "Coming Soon" landing page with key stats
+
+### Redesign Prototypes
+
+Three redesign prototypes are available for comparison:
+
+- `redesign-1-dark-cinema.html` — **Midnight Ocean**: Deep navy with blue/orange ambient glows, centered video layout
+- `redesign-2-clean-light.html` — **Warm Sand**: Dark stone tones with amber accents, macOS-style window frame on video
+- `redesign-3-gradient-split.html` — **Aurora Split**: GitHub-inspired dark with rotating aurora background, split layout (text left, video right)
+
+All prototypes embed the Bunny.net Stream video and include GitHub links, stats, and email signup.
 
 **Related Story:** [docs/stories/1-12-initial-marketing-website.md](../docs/stories/1-12-initial-marketing-website.md)
 
@@ -33,17 +43,20 @@ This marketing site serves as the initial web presence for Tamma during the pre-
 
 ```
 marketing-site/
-├── public/               # Static assets
-│   ├── index.html       # Homepage (AC 2, 4, 5, 6)
-│   ├── privacy.html     # Privacy policy (AC 9)
-│   ├── terms.html       # Terms of service (AC 9)
-│   ├── styles.css       # Responsive stylesheet (AC 7)
-│   └── assets/          # Logo and images (placeholder)
-├── functions/           # Cloudflare Pages Functions
-│   └── signup.ts        # Email signup handler (AC 3)
-├── wrangler.toml        # Cloudflare configuration (AC 1)
-├── package.json         # Dependencies
-└── README.md            # This file
+├── public/                              # Static assets
+│   ├── index.html                      # Current homepage
+│   ├── redesign-1-dark-cinema.html     # Redesign: Midnight Ocean
+│   ├── redesign-2-clean-light.html     # Redesign: Warm Sand
+│   ├── redesign-3-gradient-split.html  # Redesign: Aurora Split
+│   ├── styles.css                      # Current stylesheet
+│   └── assets/                         # Logo, badges, images
+├── functions/                           # Cloudflare Pages Functions
+│   └── signup.ts                       # Email signup handler
+├── src/
+│   └── index.ts                        # Worker entry point
+├── wrangler.toml                        # Cloudflare configuration
+├── package.json                         # Dependencies
+└── README.md                            # This file
 ```
 
 ## 🚀 Deployment
@@ -153,33 +166,46 @@ The signup function implements basic anti-spam protection:
 - **Limit:** 5 signups per hour per IP address
 - **Implementation:** Rate limit counters stored in KV with 1-hour expiration
 
+## 🎬 Video Hosting
+
+The explainer video is hosted on **Bunny.net Stream** and embedded via iframe:
+
+- **Embed URL:** `https://iframe.mediadelivery.net/embed/628261/5b9d914d-bcc0-472d-bd77-56420cadcb5a`
+- **Player page:** `https://player.mediadelivery.net/play/628261/5b9d914d-bcc0-472d-bd77-56420cadcb5a`
+- **Video:** ELI5 explainer (~2 min), scenes generated with Runway 4.5, narration with ElevenLabs TTS
+
+### Embedding Pattern
+
+Use the `padding-bottom` aspect ratio trick for responsive iframes:
+
+```html
+<div style="position:relative; padding-bottom:56.25%; overflow:hidden;">
+  <iframe
+    src="https://iframe.mediadelivery.net/embed/628261/5b9d914d-bcc0-472d-bd77-56420cadcb5a?autoplay=false&loop=false&muted=false&preload=true"
+    style="position:absolute; top:0; left:0; width:100%; height:100%; border:none;"
+    allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
+    allowfullscreen="true"
+  ></iframe>
+</div>
+```
+
+**Important:** Do not use `display: grid` on the iframe's parent container — it breaks iframe sizing.
+
 ## 🎨 Design System
 
-### Color Palette
+### Redesign Palettes
 
-- **Primary Blue:** `#2563eb` - Trust, technology
-- **Primary Dark:** `#1d4ed8` - Hover states
-- **Accent Green:** `#10b981` - Success, automation
-- **Accent Dark:** `#059669` - Hover states
-- **Background:** `#f9fafb` - Light sections
-- **White:** `#ffffff` - Cards, contrast
-- **Text:** `#1f2937` - Primary text
-- **Text Light:** `#6b7280` - Secondary text
-- **Border:** `#e5e7eb` - Dividers
-
-### Typography
-
-- **Font Stack:** System font stack for performance
-  ```
-  -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-  'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif
-  ```
+| Design | Background | Accent | Font |
+|--------|-----------|--------|------|
+| Midnight Ocean | `#0f1729` (deep navy) | `#38bdf8` (sky blue), `#fb923c` (orange) | Space Grotesk |
+| Warm Sand | `#1c1917` (dark stone) | `#d97706` (amber) | DM Sans |
+| Aurora Split | `#0e1117` (GitHub dark) | `#3fb950` (green), `#58a6ff` (blue) | Sora |
 
 ### Responsive Breakpoints
 
-- **Mobile:** 320px - 767px (default)
-- **Tablet:** 768px - 1023px
-- **Desktop:** 1024px+
+- **Mobile:** < 640px (stacked layout)
+- **Tablet:** 640px - 900px
+- **Desktop:** 900px+ (split layout for Design 3)
 
 ## ✅ Acceptance Criteria Checklist
 

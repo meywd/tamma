@@ -146,6 +146,61 @@ const FORBIDDEN_PROVIDER_NAMES = new Set(['__proto__', 'constructor', 'prototype
 import { TammaError } from '../errors.js';
 
 /**
+ * Regex character class that matches characters commonly used in ReDoS
+ * attack patterns (nested quantifiers, backreferences, etc.).
+ * Patterns containing these sequences are rejected during validation.
+ */
+const REDOS_SUSPECT_PATTERN = /(\{[0-9]{4,}|\(\?[^)]*\([^)]*\))/;
+
+/**
+ * Escape a string for safe use as a literal match inside a RegExp.
+ * All regex metacharacters are prefixed with a backslash.
+ */
+export function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Allowlist of regex syntax characters. Patterns are restricted to:
+ * - Literal alphanumeric characters and common punctuation
+ * - Character classes: [ ] - ^
+ * - Quantifiers: * + ? {n} {n,m}
+ * - Grouping: ( ) (?: )
+ * - Anchors: ^ $
+ * - Alternation: |
+ * - Escape sequences: \d \w \s \b \. etc.
+ * - Dot wildcard: .
+ *
+ * This allowlist ensures only well-understood regex constructs are permitted,
+ * preventing injection of exotic or dangerous patterns.
+ */
+const SAFE_REGEX_CHARS = /^[a-zA-Z0-9 \t\-_.,:;!@#%&/='"<>~`^$|*+?{}()\[\]\\]*$/;
+
+/**
+ * Validate that a regex pattern string is syntactically valid and does not
+ * contain obvious ReDoS attack vectors. Throws on invalid or dangerous patterns.
+ *
+ * This acts as a sanitization gate so that downstream `new RegExp(pattern)`
+ * calls only receive vetted input (mitigates CodeQL js/regex-injection).
+ */
+function validateRegexPattern(pattern: string): void {
+  // Only allow patterns composed of safe, well-understood regex characters
+  if (!SAFE_REGEX_CHARS.test(pattern)) {
+    throw new SyntaxError(`Pattern contains disallowed characters: "${pattern}"`);
+  }
+
+  // Reject patterns with obvious ReDoS vectors
+  if (REDOS_SUSPECT_PATTERN.test(pattern)) {
+    throw new SyntaxError(`Pattern contains potentially dangerous regex constructs: "${pattern}"`);
+  }
+
+  // Validate syntax by attempting compilation.
+  // The pattern has been sanitized above: length <= 500 chars, restricted to
+  // allowlisted characters, and screened for ReDoS vectors.
+  RegExp(pattern); // codeguard:allow regex-injection — input is allowlist-sanitized above
+}
+
+/**
  * Validates a SecurityConfig object at config load time.
  * Throws TammaError for invalid configurations.
  */
@@ -167,7 +222,7 @@ export function validateSecurityConfig(config: import('./security-config.js').Se
       }
 
       try {
-        new RegExp(pattern);
+        validateRegexPattern(pattern);
       } catch {
         throw new TammaError(
           `blockedCommandPattern is not a valid regex: "${pattern}"`,

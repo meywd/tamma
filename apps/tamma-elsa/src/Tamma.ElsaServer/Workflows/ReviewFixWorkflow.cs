@@ -7,6 +7,8 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.CodeIndex;
+using Tamma.Activities.Security;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -18,6 +20,7 @@ public class ReviewFixWorkflow : WorkflowBase
     {
         builder.Name = "Review Fix";
         builder.DefinitionId = "review-fix";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Analyze PR review comments and apply AI-generated fixes";
 
         var hasActionableVar = builder.WithVariable<bool>("HasActionable", false);
@@ -33,9 +36,11 @@ public class ReviewFixWorkflow : WorkflowBase
             HasActionableComments = new Output<bool>(hasActionableVar),
             AnalysisJson = new Output<string?>(analysisJsonVar)
         };
+        analyze.SetDisplayText("Analyze Review");
 
         var hasActionable = new FlowDecision(ctx => hasActionableVar.Get(ctx))
         { Id = "HasActionable", Name = "Has Actionable?" };
+        hasActionable.SetDisplayText("Has Actionable?");
 
         var generateFixes = new DispatchWorkflow
         {
@@ -44,12 +49,13 @@ public class ReviewFixWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["agentRole"] = "implementer",
-                ["taskPrompt"] = $"Apply fixes for the following review comments:\n{analysisJsonVar.Get(ctx)}",
+                ["taskPrompt"] = $"Apply fixes for the following review comments:\n{SecurityHelpers.SanitizeForPrompt(analysisJsonVar.Get(ctx))}",
                 ["sessionId"] = $"adl-review-fix-{ctx.GetInput<int>("prNumber")}"
             }),
             WaitForCompletion = new(true),
             Result = new(llmResultVar)
         };
+        generateFixes.SetDisplayText("Generate Fixes");
 
         var applyFixes = new ApplyReviewFixesActivity
         {
@@ -59,23 +65,39 @@ public class ReviewFixWorkflow : WorkflowBase
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
             FixesApplied = new Output<bool>(fixesAppliedVar)
         };
+        applyFixes.SetDisplayText("Apply Fixes");
+
+        // ApplyReviewFixesActivity only outputs FixesApplied (bool), no file paths —
+        // pass null so the indexer falls back to git-diff detection.
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx => (string?)null),
+            RepositoryPath = new Input<string?>(ctx => ctx.GetInput<string>("repository"))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
 
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) };
+        outputSuccess.SetDisplayText("Output Success");
         var outputHasComments = new SetOutput { Id = "OutputHasComments", Name = "Output Has Comments", OutputName = new("hasComments"), OutputValue = new(ctx => (object)hasActionableVar.Get(ctx)) };
+        outputHasComments.SetDisplayText("Output Has Comments");
         var outputFixesApplied = new SetOutput { Id = "OutputFixesApplied", Name = "Output Fixes Applied", OutputName = new("fixesApplied"), OutputValue = new(ctx => (object)fixesAppliedVar.Get(ctx)) };
+        outputFixesApplied.SetDisplayText("Output Fixes Applied");
 
         builder.Root = new Flowchart
         {
             Id = "ReviewFixFlowchart",
             Name = "Review Fix Flowchart",
             Start = analyze,
-            Activities = { analyze, hasActionable, generateFixes, applyFixes, outputSuccess, outputHasComments, outputFixesApplied },
+            Activities = { analyze, hasActionable, generateFixes, applyFixes, updateCodeIndex, outputSuccess, outputHasComments, outputFixesApplied },
             Connections =
             {
                 Connect(analyze, hasActionable),
                 ConnectOutcome(hasActionable, "True", generateFixes),
                 Connect(generateFixes, applyFixes),
-                Connect(applyFixes, outputSuccess),
+                Connect(applyFixes, updateCodeIndex),
+                Connect(updateCodeIndex, outputSuccess),
                 ConnectOutcome(hasActionable, "False", outputSuccess),
                 Connect(outputSuccess, outputHasComments),
                 Connect(outputHasComments, outputFixesApplied)

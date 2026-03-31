@@ -2171,3 +2171,7 @@ describe('AlertManagementInterface', () => {
 **Implementation Priority**: Partial (Core for MVP, Enhanced for Post-MVP)  
 **Target Completion**: Sprint 5 (MVP Core) + Sprint 6 (Enhanced Features)  
 **Dependencies**: Epic 5.1, Epic 5.2, Epic 5.3, Epic 4
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

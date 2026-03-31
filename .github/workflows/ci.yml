@@ -56,25 +56,41 @@ jobs:
     permissions:
       contents: read
 
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: tamma_test
-          POSTGRES_PASSWORD: tamma_test
-          POSTGRES_DB: tamma_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U tamma_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-          --tmpfs /var/lib/postgresql/data
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Pull Postgres image (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: docker pull postgres:16-alpine
+
+      - name: Start Postgres
+        run: |
+          docker run -d --name postgres-test \
+            -e POSTGRES_USER=tamma_test \
+            -e POSTGRES_PASSWORD=tamma_test \
+            -e POSTGRES_DB=tamma_test \
+            -p 5433:5432 \
+            --tmpfs /var/lib/postgresql/data \
+            --health-cmd "pg_isready -U tamma_test" \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 5 \
+            postgres:16-alpine
+
+      - name: Wait for Postgres healthy
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format '{{.State.Health.Status}}' postgres-test 2>/dev/null || echo 'starting')
+            echo "Check $i/30: $STATUS"
+            [ "$STATUS" = "healthy" ] && exit 0
+            sleep 2
+          done
+          echo "Postgres failed to become healthy" && docker logs postgres-test && exit 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

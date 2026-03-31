@@ -3,10 +3,17 @@
  *
  * Reads and writes TammaConfig for agent and security settings.
  * In-memory store with validation via shared validateAgentsConfig/validateSecurityConfig.
+ *
+ * On prompt template updates, syncs to the ELSA Agents store if an ElsaAgentsClient
+ * is configured. The ELSA Agents DB is the single source of truth for the llm-call
+ * workflow — edits via ELSA Studio take effect immediately without API sync.
  */
 
-import type { IAgentsConfig, SecurityConfig, AgentType } from '@tamma/shared';
-import { validateAgentsConfig, validateSecurityConfig } from '@tamma/shared';
+import type { IAgentsConfig, SecurityConfig, AgentType, IProvidersConfig, IRepoConfig, TammaConfig } from '@tamma/shared';
+import { validateAgentsConfig, validateSecurityConfig, validateProvidersConfig, resolveConfig } from '@tamma/shared';
+import type { ElsaAgentsClient } from './ElsaAgentsClient.js';
+import type { IUserStore } from '../../persistence/user-store.js';
+import type { RepoConfigReader } from './repo-config-reader.js';
 
 const DEFAULT_CONFIG: IAgentsConfig = {
   defaults: {
@@ -25,10 +32,16 @@ const DEFAULT_SECURITY: SecurityConfig = {
 export class ConfigService {
   private agentsConfig: IAgentsConfig;
   private securityConfig: SecurityConfig;
+  private elsaClient: ElsaAgentsClient | null;
+  private userStore: IUserStore | null;
+  private repoConfigReader: RepoConfigReader | null;
 
   constructor(
     initialAgents?: IAgentsConfig,
     initialSecurity?: SecurityConfig,
+    elsaAgentsClient?: ElsaAgentsClient | null,
+    userStore?: IUserStore | null,
+    repoConfigReader?: RepoConfigReader | null,
   ) {
     this.agentsConfig = initialAgents
       ? structuredClone(initialAgents)
@@ -36,6 +49,9 @@ export class ConfigService {
     this.securityConfig = initialSecurity
       ? structuredClone(initialSecurity)
       : structuredClone(DEFAULT_SECURITY);
+    this.elsaClient = elsaAgentsClient ?? null;
+    this.userStore = userStore ?? null;
+    this.repoConfigReader = repoConfigReader ?? null;
   }
 
   async getAgentsConfig(): Promise<IAgentsConfig> {
@@ -144,5 +160,85 @@ export class ConfigService {
     }
     updated.roles[role as AgentType] = existing;
     this.agentsConfig = updated;
+
+    // Sync to ELSA Agents store (best-effort — failure is logged, not thrown)
+    if (normalizedPrompt !== undefined) {
+      await this.syncPromptToElsa(role, normalizedPrompt);
+    }
+  }
+
+  // --- User-scoped provider settings (SaaS mode) ---
+
+  /**
+   * Get a user's provider settings.
+   * Returns empty config if user store is not configured or user not found.
+   */
+  async getUserProviders(userId: string): Promise<IProvidersConfig> {
+    if (!this.userStore) {
+      return { providers: {} };
+    }
+    return this.userStore.getUserSettings(userId);
+  }
+
+  /**
+   * Update a user's provider settings.
+   * Validates before persisting.
+   */
+  async updateUserProviders(userId: string, config: IProvidersConfig): Promise<IProvidersConfig> {
+    if (!this.userStore) {
+      throw new Error('User store not configured — cannot update user providers in this mode');
+    }
+    validateProvidersConfig(config);
+    return this.userStore.updateUserSettings(userId, config);
+  }
+
+  /**
+   * Resolve a full TammaConfig for a specific repo in SaaS mode.
+   * Merges: user providers → repo config (from git) → resolved TammaConfig.
+   */
+  async resolveForRepo(
+    userId: string,
+    owner: string,
+    repo: string,
+    branch: string,
+  ): Promise<{ config: TammaConfig; warnings: string[] }> {
+    // Get user provider settings
+    const providers = await this.getUserProviders(userId);
+
+    // Get repo config from git
+    let repoConfig: IRepoConfig = {};
+    if (this.repoConfigReader) {
+      repoConfig = await this.repoConfigReader.readRepoConfig(owner, repo, branch);
+    }
+
+    return resolveConfig(providers, repoConfig);
+  }
+
+  /**
+   * Best-effort sync of a prompt template to the ELSA Agents store.
+   * The llm-call workflow reads prompts from the ELSA Agents DB directly,
+   * so this ensures edits via the Tamma Dashboard are reflected immediately.
+   * Failures are swallowed — the in-memory update still succeeds.
+   */
+  private async syncPromptToElsa(role: string, promptTemplate: string): Promise<void> {
+    if (!this.elsaClient) return;
+
+    try {
+      const agentName = `tamma-${role}`;
+      const agent = await this.elsaClient.findAgentByName(agentName);
+      if (!agent) return;
+
+      await this.elsaClient.updateAgent(agent.id, {
+        name: agent.name,
+        description: agent.description,
+        agentConfig: {
+          ...agent.agentConfig,
+          promptTemplate,
+        },
+      });
+    } catch {
+      // ELSA sync failure is non-fatal — the llm-call workflow will pick up
+      // the change on next startup via AgentSeeder, or via direct ELSA Studio edit.
+    }
   }
 }

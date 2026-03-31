@@ -345,3 +345,14 @@ export function wrapAsAgent(llm: IAIProvider, model: string): IAgentProvider {
 - Test: mock `OpenCodeProvider.initialize()` throwing -- verify wrapped error propagates to caller
 - Test: `factory.dispose()` clears creators map
 - Test: `BUILTIN_PROVIDER_NAMES` has correct values for all four built-in providers
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only

@@ -549,3 +549,7 @@ claude-3-5-sonnet-20241022
 ### Completion Notes List
 
 ### File List
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

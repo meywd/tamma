@@ -661,3 +661,7 @@ class EventCapturingGitOperations {
 - [File System Monitoring](https://nodejs.org/api/fs.html)
 - [Event Sourcing for Code Changes](https://martinfowler.com/eaaDev/EventSourcing.html)
 - [Blob Storage Patterns](https://docs.aws.amazon.com/AmazonS3/latest/dev/UsingObjects.html)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

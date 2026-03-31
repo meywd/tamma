@@ -403,10 +403,13 @@ export const sanitization = {
   },
 
   /**
-   * Escape SQL wildcards for LIKE queries
+   * Escape SQL wildcards for LIKE queries.
+   * Backslashes are escaped first to prevent double-escaping issues,
+   * then SQL wildcard characters (% and _) are escaped.
    */
   escapeSqlWildcards(str: string): string {
-    return str.replace(/[\\%_]/g, '\\$&');
+    // Escape backslashes first, then wildcards (order matters)
+    return str.replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
   },
 
   /**

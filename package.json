@@ -24,9 +24,13 @@
     "typecheck": "tsc --build packages/shared packages/platforms packages/providers packages/orchestrator packages/api packages/cli",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "migrate:latest": "pnpm --filter @tamma/orchestrator run migrate:latest",
-    "migrate:rollback": "pnpm --filter @tamma/orchestrator run migrate:rollback"
+    "migrate:rollback": "pnpm --filter @tamma/orchestrator run migrate:rollback",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed",
+    "e2e:report": "playwright show-report e2e/playwright-report"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@types/node": "^22.10.2",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",

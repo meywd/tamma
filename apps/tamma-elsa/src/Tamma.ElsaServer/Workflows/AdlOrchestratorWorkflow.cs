@@ -13,6 +13,8 @@ using Tamma.Activities.ADL.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -34,6 +36,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
     {
         builder.Name = "ADL Orchestrator";
         builder.DefinitionId = "adl-orchestrator";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Top-level loop that picks issues and dispatches autonomous development cycles";
 
         // ================================================================
@@ -90,6 +93,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 return (object)repo;
             })
         };
+        initConfig.SetDisplayText("Load Config");
 
         // 2. Check operational limits
         var checkLimits = new CheckLimitsActivity
@@ -100,6 +104,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             ConfigJson = new Input<string?>(ctx => configJson.Get(ctx)),
             StopReason = new Output<string?>(stopReason)
         };
+        checkLimits.SetDisplayText("Check Limits");
 
         // 3. Guard: limits OK?
         var limitsOk = new FlowDecision(ctx => string.IsNullOrEmpty(stopReason.Get(ctx)))
@@ -107,6 +112,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Id = "LimitsOk",
             Name = "Within Limits?"
         };
+        limitsOk.SetDisplayText("Within Limits?");
 
         // 4. Dispatch single-issue-cycle
         var dispatchCycle = new DispatchWorkflow
@@ -124,6 +130,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(cycleResult)
         };
+        dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
 
         // 5. Parse cycle result
         var parseResult = new SetVariable
@@ -144,6 +151,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 return (object)reason;
             })
         };
+        parseResult.SetDisplayText("Parse Result");
 
         // 6. Guard: should continue looping?
         var shouldContinue = new FlowDecision(ctx =>
@@ -155,6 +163,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Id = "ShouldContinue",
             Name = "More Issues?"
         };
+        shouldContinue.SetDisplayText("More Issues?");
 
         // 7. Cooldown delay
         var cooldown = new Delay
@@ -164,6 +173,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             TimeSpan = new Input<TimeSpan>(ctx =>
                 System.TimeSpan.FromSeconds(cooldownSeconds.Get(ctx)))
         };
+        cooldown.SetDisplayText("Cooldown");
 
         // 8. Set final outputs (limits reached path)
         var setOutputsLimits = new Sequence
@@ -172,10 +182,11 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Name = "Output (Limits)",
             Activities =
             {
-                new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total Completed (Limits)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
-                new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Exit Reason (Limits)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }
+                WithLabel(new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total Completed (Limits)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (Limits)"),
+                WithLabel(new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Exit Reason (Limits)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }, "Set Exit Reason (Limits)")
             }
         };
+        setOutputsLimits.SetDisplayText("Output (Limits)");
 
         // 9. Set final outputs (no issues path)
         var setOutputsNoIssues = new Sequence
@@ -184,12 +195,14 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Name = "Output (No Issues)",
             Activities =
             {
-                new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total Completed (No Issues)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) },
-                new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Exit Reason (No Issues)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }
+                WithLabel(new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total Completed (No Issues)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (No Issues)"),
+                WithLabel(new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Exit Reason (No Issues)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }, "Set Exit Reason (No Issues)")
             }
         };
+        setOutputsNoIssues.SetDisplayText("Output (No Issues)");
 
-        var finish = new Finish { Id = "Finish", Name = "Finish" };
+        var finish = new Finish { Id = "Finish", Name = "Complete: Orchestrator Done" };
+        finish.SetDisplayText("Complete: Orchestrator Done");
 
         // ================================================================
         // Flowchart

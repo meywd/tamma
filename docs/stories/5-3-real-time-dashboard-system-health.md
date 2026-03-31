@@ -1458,3 +1458,7 @@ spec:
 **Implementation Priority**: Optional (Post-MVP Enhancement)  
 **Target Completion**: Sprint 6 (Post-MVP)  
 **Dependencies**: Epic 5.1, Epic 5.2, Epic 4 (Event Sourcing)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-5/` for detailed logging requirements. Observability components must log their own operational health with structured context.

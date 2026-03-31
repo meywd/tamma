@@ -1,18 +1,22 @@
 import type pg from 'pg';
-import type { IUserStore, User, UserInstallation } from './user-store.js';
+import type { IProvidersConfig } from '@tamma/shared';
+import type { IUserStore, User, UserInstallation, UpsertUserInput, ListUsersOptions, ListUsersResult } from './user-store.js';
 
 /** PostgreSQL-backed user store. */
 export class PgUserStore implements IUserStore {
   constructor(private readonly pool: pg.Pool) {}
 
-  async upsertUser(user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
+  async upsertUser(user: UpsertUserInput): Promise<User> {
+    // Note: settings is only set on INSERT (new user). On conflict (existing user),
+    // settings are preserved — use updateUserSettings() to change them.
+    const settings = user.settings ?? { providers: {} };
     const result = await this.pool.query<Record<string, unknown>>(
-      `INSERT INTO users (github_id, github_login, email, role)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (github_id, github_login, email, role, settings)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (github_id)
        DO UPDATE SET github_login = $2, email = COALESCE($3, users.email), updated_at = NOW()
        RETURNING *`,
-      [user.githubId, user.githubLogin, user.email, user.role],
+      [user.githubId, user.githubLogin, user.email, user.role, JSON.stringify(settings)],
     );
     return this.mapUser(result.rows[0]!);
   }
@@ -58,13 +62,102 @@ export class PgUserStore implements IUserStore {
     }));
   }
 
+  async getUserSettings(userId: string): Promise<IProvidersConfig> {
+    const result = await this.pool.query<Record<string, unknown>>(
+      'SELECT settings FROM users WHERE id = $1',
+      [userId],
+    );
+    if (result.rows.length === 0) {
+      return { providers: {} };
+    }
+    const settings = result.rows[0]!['settings'];
+    if (settings && typeof settings === 'object') {
+      return settings as IProvidersConfig;
+    }
+    return { providers: {} };
+  }
+
+  async updateUserSettings(userId: string, settings: IProvidersConfig): Promise<IProvidersConfig> {
+    // Validation is owned by ConfigService — the store trusts its caller.
+    const result = await this.pool.query<Record<string, unknown>>(
+      'UPDATE users SET settings = $1, updated_at = NOW() WHERE id = $2 RETURNING settings',
+      [JSON.stringify(settings), userId],
+    );
+    if (result.rows.length === 0) {
+      throw new Error(`User not found: ${userId}`);
+    }
+    return result.rows[0]!['settings'] as IProvidersConfig;
+  }
+
+  async listUsers(options: ListUsersOptions): Promise<ListUsersResult> {
+    const conditions = ['deleted_at IS NULL'];
+    const params: unknown[] = [];
+    let paramIndex = 1;
+
+    if (options.role !== undefined) {
+      conditions.push(`role = $${paramIndex}`);
+      params.push(options.role);
+      paramIndex++;
+    }
+
+    const where = conditions.join(' AND ');
+
+    const countResult = await this.pool.query<Record<string, unknown>>(
+      `SELECT COUNT(*)::int AS total FROM users WHERE ${where}`,
+      params,
+    );
+    const total = Number(countResult.rows[0]!['total']);
+
+    const dataResult = await this.pool.query<Record<string, unknown>>(
+      `SELECT * FROM users WHERE ${where} ORDER BY created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, options.limit, options.offset],
+    );
+
+    const users = dataResult.rows.map((r) => this.mapUser(r));
+    return { users, total };
+  }
+
+  async updateUserRole(id: string, role: 'owner' | 'admin' | 'member'): Promise<User> {
+    const result = await this.pool.query<Record<string, unknown>>(
+      'UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL RETURNING *',
+      [role, id],
+    );
+    if (result.rows.length === 0) {
+      throw new Error(`User not found: ${id}`);
+    }
+    return this.mapUser(result.rows[0]!);
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    const result = await this.pool.query(
+      'UPDATE users SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [id],
+    );
+    if (result.rowCount === 0) {
+      throw new Error(`User not found: ${id}`);
+    }
+  }
+
+  async updateLastActive(id: string): Promise<void> {
+    await this.pool.query(
+      'UPDATE users SET last_active_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [id],
+    );
+  }
+
   private mapUser(row: Record<string, unknown>): User {
+    const rawSettings = row['settings'];
+    const settings: IProvidersConfig = rawSettings && typeof rawSettings === 'object'
+      ? rawSettings as IProvidersConfig
+      : { providers: {} };
+
     return {
       id: String(row['id']),
       githubId: Number(row['github_id']),
       githubLogin: String(row['github_login']),
       email: row['email'] !== null && row['email'] !== undefined ? String(row['email']) : null,
       role: String(row['role']) as 'owner' | 'admin' | 'member',
+      settings,
       createdAt: String(row['created_at']),
       updatedAt: String(row['updated_at']),
     };

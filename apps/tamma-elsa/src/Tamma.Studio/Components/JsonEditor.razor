@@ -1,0 +1,128 @@
+@using System.Text.Json
+@using MudBlazor
+
+<div class="tamma-json-editor">
+    <MudTextField @bind-Value="_text"
+                  Variant="Variant.Outlined"
+                  Lines="12"
+                  FullWidth="true"
+                  Placeholder="{}"
+                  Error="@_hasError"
+                  ErrorText="@_errorText"
+                  Immediate="false"
+                  DebounceInterval="500"
+                  TextChanged="OnTextChanged"
+                  Class="json-editor-field"
+                  Style="font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; font-size: 13px;" />
+
+    <div class="json-editor-toolbar" style="margin-top: 4px; display: flex; gap: 8px;">
+        <MudButton Variant="Variant.Text"
+                   Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.FormatAlignLeft"
+                   OnClick="FormatJson"
+                   Disabled="@_hasError">
+            Format
+        </MudButton>
+        <MudButton Variant="Variant.Text"
+                   Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Compress"
+                   OnClick="MinifyJson">
+            Minify
+        </MudButton>
+        @if (_hasError)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error" Class="mt-1">@_errorText</MudText>
+        }
+        else
+        {
+            <MudText Typo="Typo.caption" Color="Color.Success" Class="mt-1">Valid JSON</MudText>
+        }
+    </div>
+</div>
+
+@code {
+    private string _text = "{}";
+    private bool _hasError;
+    private string _errorText = string.Empty;
+
+    [Parameter]
+    public string Value { get; set; } = "{}";
+
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    [Parameter]
+    public bool IsReadOnly { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (Value != _text)
+        {
+            _text = Value ?? "{}";
+            ValidateJson();
+        }
+    }
+
+    private async Task OnTextChanged(string newValue)
+    {
+        _text = newValue;
+        ValidateJson();
+        if (!_hasError)
+        {
+            await ValueChanged.InvokeAsync(_text);
+        }
+    }
+
+    private void ValidateJson()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_text))
+            {
+                _hasError = false;
+                _errorText = string.Empty;
+                return;
+            }
+            JsonDocument.Parse(_text);
+            _hasError = false;
+            _errorText = string.Empty;
+        }
+        catch (JsonException ex)
+        {
+            _hasError = true;
+            _errorText = $"JSON error: {ex.Message}";
+        }
+    }
+
+    private async Task FormatJson()
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(_text);
+            _text = JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+            _hasError = false;
+            _errorText = string.Empty;
+            await ValueChanged.InvokeAsync(_text);
+        }
+        catch (JsonException)
+        {
+            // Leave as-is if invalid
+        }
+    }
+
+    private async Task MinifyJson()
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(_text);
+            _text = JsonSerializer.Serialize(doc);
+            _hasError = false;
+            _errorText = string.Empty;
+            await ValueChanged.InvokeAsync(_text);
+        }
+        catch (JsonException)
+        {
+            // Leave as-is if invalid
+        }
+    }
+}

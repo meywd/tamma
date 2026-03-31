@@ -44,6 +44,12 @@ public class LlmCallWorkflowInput
 
     /// <summary>Correlation / trace ID for linking back to the parent workflow.</summary>
     public string? CorrelationId { get; set; }
+
+    /// <summary>Whether to enable the agentic tool loop. Default: false (single-turn, backward compatible).</summary>
+    public bool EnableToolLoop { get; set; } = false;
+
+    /// <summary>Configuration for the agentic tool loop (only used when EnableToolLoop = true).</summary>
+    public ToolLoopConfig? ToolLoopConfig { get; set; }
 }
 
 /// <summary>
@@ -86,6 +92,15 @@ public class LlmCallWorkflowOutput
 
     /// <summary>Tool calls returned by the LLM, if any.</summary>
     public List<LlmToolCall>? ToolCalls { get; set; }
+
+    /// <summary>Cumulative token usage across all tool loop turns (0 if tool loop was not enabled).</summary>
+    public int ToolLoopTokens { get; set; }
+
+    /// <summary>Number of tool loop iterations (0 if tool loop was not enabled).</summary>
+    public int ToolLoopTurns { get; set; }
+
+    /// <summary>Whether the tool loop exhausted maxSteps without the LLM producing a final response.</summary>
+    public bool ToolLoopExhausted { get; set; }
 }
 
 // ============================================================
@@ -292,6 +307,23 @@ public class BudgetState
 }
 
 // ============================================================
+// Agent Custom Settings (stored in ExecutionSettings.ResponseFormat)
+// ============================================================
+
+/// <summary>
+/// Custom settings stored as JSON in the ELSA Agent's ExecutionSettings.ResponseFormat field.
+/// Contains Tamma-specific configuration that doesn't map to standard Semantic Kernel settings.
+/// </summary>
+public class AgentCustomSettings
+{
+    /// <summary>Ordered provider chain for this agent (e.g. ["anthropic", "openai", "openrouter"]).</summary>
+    public List<string>? ProviderChain { get; set; }
+
+    /// <summary>Maximum budget in USD for a single LLM call by this agent.</summary>
+    public decimal MaxBudgetUsd { get; set; }
+}
+
+// ============================================================
 // Provider Configuration (read from IConfiguration)
 // ============================================================
 
@@ -371,4 +403,129 @@ public class NormalizedLlmResponse
     public int HttpStatusCode { get; set; }
     public string? ErrorMessage { get; set; }
     public List<LlmToolCall>? ToolCalls { get; set; }
+
+    /// <summary>Normalized stop reason from the provider response.</summary>
+    public StopReason StopReason { get; set; } = StopReason.EndTurn;
 }
+
+// ============================================================
+// Tool Execution
+// ============================================================
+
+/// <summary>
+/// Normalized stop reason across providers.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum StopReason
+{
+    /// <summary>LLM finished naturally (Anthropic: end_turn, OpenAI: stop).</summary>
+    EndTurn,
+
+    /// <summary>LLM wants to call tools (Anthropic: tool_use, OpenAI: tool_calls).</summary>
+    ToolUse,
+
+    /// <summary>Hit max_tokens limit.</summary>
+    MaxTokens,
+
+    /// <summary>Unknown or unmapped stop reason.</summary>
+    Unknown
+}
+
+/// <summary>
+/// Result of a single tool execution within the agentic loop.
+/// </summary>
+public record ToolExecutionResult(
+    string ToolCallId,
+    string ToolName,
+    bool Success,
+    string Output,
+    long DurationMs
+)
+{
+    /// <summary>Error message when Success is false (convenience alias for Output in error cases).</summary>
+    public string? ErrorMessage => Success ? null : Output;
+}
+
+/// <summary>
+/// Configuration for the agentic tool loop.
+/// </summary>
+public record ToolLoopConfig
+{
+    /// <summary>Maximum number of LLM round-trips before forcing termination.</summary>
+    public int MaxSteps { get; init; } = 20;
+
+    /// <summary>Allowlist of tool names the LLM may invoke. Null or empty = all tools allowed.</summary>
+    public string[]? AllowedTools { get; init; }
+
+    /// <summary>Total context window size in tokens for the model being used.</summary>
+    public int ContextWindowTokens { get; init; } = 200_000;
+
+    /// <summary>Fraction of context window at which compaction is triggered (0.0-1.0).</summary>
+    public double CompactionThreshold { get; init; } = 0.8;
+
+    /// <summary>Timeout in milliseconds for individual tool executions. Default: 60000 (60s).</summary>
+    public int ToolTimeoutMs { get; init; } = 60_000;
+
+    /// <summary>Whether to enable SSE streaming for tool loop progress events.</summary>
+    public bool EnableStreaming { get; init; } = false;
+
+    /// <summary>Whether to enable parallel tool execution when multiple tools are called in a single turn. Default: false.</summary>
+    public bool EnableParallelTools { get; init; } = false;
+}
+
+/// <summary>
+/// Cumulative per-turn token tracker for the tool loop.
+/// </summary>
+public class ToolLoopTokenTracker
+{
+    /// <summary>Total prompt tokens consumed across all turns.</summary>
+    public int TotalPromptTokens { get; set; }
+
+    /// <summary>Total completion tokens consumed across all turns.</summary>
+    public int TotalCompletionTokens { get; set; }
+
+    /// <summary>Total tokens (prompt + completion) across all turns.</summary>
+    public int TotalTokens => TotalPromptTokens + TotalCompletionTokens;
+
+    /// <summary>Number of completed turns.</summary>
+    public int TurnCount { get; set; }
+
+    /// <summary>Record a turn's token usage.</summary>
+    public void RecordTurn(int promptTokens, int completionTokens)
+    {
+        TotalPromptTokens += promptTokens;
+        TotalCompletionTokens += completionTokens;
+        TurnCount++;
+    }
+}
+
+/// <summary>
+/// Provider-agnostic conversation message for multi-turn tool use.
+/// Serialized to Anthropic or OpenAI format at the HTTP call layer.
+/// </summary>
+public record ConversationMessage
+{
+    /// <summary>Message role: "system", "user", "assistant", or "tool".</summary>
+    public string Role { get; init; } = string.Empty;
+
+    /// <summary>Text content (may be null for assistant messages that only contain tool calls).</summary>
+    public string? Content { get; init; }
+
+    /// <summary>Tool calls requested by the assistant (only present when Role = "assistant").</summary>
+    public ToolCallInfo[]? ToolCalls { get; init; }
+
+    /// <summary>Tool call ID this message is a result for (only present when Role = "tool").</summary>
+    public string? ToolCallId { get; init; }
+
+    /// <summary>Tool name this result is for (only present when Role = "tool", used for Anthropic format).</summary>
+    public string? ToolName { get; init; }
+}
+
+/// <summary>
+/// Information about a single tool call from the LLM response.
+/// </summary>
+public record ToolCallInfo(
+    string Id,
+    string Name,
+    string ArgumentsJson
+);

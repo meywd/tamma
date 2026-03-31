@@ -270,3 +270,14 @@ if (agentProvider === 'anthropic' || agentProvider === 'openai' || agentProvider
 - `DEFAULT_PHASE_ROLE_MAP` and `LEGACY_PROVIDER_MAP` are frozen with `Object.freeze()`
 - Config validation: `blockedCommandPatterns` regex compilation checked at load time, `maxFetchSizeBytes` in range [0, 1 GiB], `maxBudgetUsd` in range [0, 100], `providerChain` non-empty in defaults, `provider` string matches `/^[a-z0-9][a-z0-9_-]{0,63}$/` and rejects `__proto__`/`constructor`/`prototype`, `bypassPermissions` emits WARN and requires `TAMMA_ALLOW_BYPASS_PERMISSIONS=true`
 - `apiKeyRef` (not `apiKey`) is used in `ProviderChainEntry` -- references env var name, resolved at runtime
+
+## Logging Requirements
+
+All provider-layer modules MUST use `ILogger` from `@tamma/shared/contracts` (not `console.log`).
+
+- **INFO**: Provider initialization, config loaded, provider selected, chain fallback triggered
+- **DEBUG**: Request parameters (redact API keys), response metadata, cache hits
+- **WARN**: Provider degraded, rate limited, circuit breaker tripped, fallback to next provider
+- **ERROR**: Provider call failed, config validation error, all providers exhausted
+- **Structured context**: Always include `{ provider, model, issueId, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, or secrets — log provider name and endpoint only

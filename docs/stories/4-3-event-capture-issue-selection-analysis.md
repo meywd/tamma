@@ -365,3 +365,7 @@ class EventCaptureService {
 - [Retry Pattern Implementation](https://docs.microsoft.com/en-us/azure/architecture/patterns/retry)
 - [Circuit Breaker Pattern](https://martinfowler.com/bliki/CircuitBreaker.html)
 - [Correlation ID Best Practices](https://microservices.io/patterns/observability/correlation-id.html)
+
+## Logging Requirements
+
+See the new-format story in `docs/stories/epic-4/` for detailed logging requirements. Event store operations must log append/query/replay operations with structured context including `{ eventType, streamId, eventId }`.

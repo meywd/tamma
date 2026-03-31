@@ -17,6 +17,7 @@ public class IssueSelectionWorkflow : WorkflowBase
     {
         builder.Name = "Issue Selection";
         builder.DefinitionId = "issue-selection";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Select and assign the next GitHub issue for autonomous development";
 
         var repositoryVar = builder.WithVariable<string>("Repository", "");
@@ -36,11 +37,16 @@ public class IssueSelectionWorkflow : WorkflowBase
             IssueNumber = new Output<int>(issueNumberVar),
             IssueTitle = new Output<string?>(issueTitleVar)
         };
+        selectIssue.SetDisplayText("Select Issue");
 
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)(issueNumberVar.Get(ctx) > 0)) };
+        outputSuccess.SetDisplayText("Output Success");
         var outputIssueJson = new SetOutput { Id = "OutputIssueJson", Name = "Output Issue JSON", OutputName = new("issueJson"), OutputValue = new(ctx => (object)(issueJsonVar.Get(ctx) ?? "")) };
+        outputIssueJson.SetDisplayText("Output Issue JSON");
         var outputIssueNumber = new SetOutput { Id = "OutputIssueNumber", Name = "Output Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumberVar.Get(ctx)) };
+        outputIssueNumber.SetDisplayText("Output Issue Number");
         var outputIssueTitle = new SetOutput { Id = "OutputIssueTitle", Name = "Output Issue Title", OutputName = new("issueTitle"), OutputValue = new(ctx => (object)(issueTitleVar.Get(ctx) ?? "")) };
+        outputIssueTitle.SetDisplayText("Output Issue Title");
 
         builder.Root = new Flowchart
         {

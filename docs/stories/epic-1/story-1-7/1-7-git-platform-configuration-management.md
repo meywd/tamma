@@ -167,3 +167,14 @@ so that I can easily specify which platform to use and configure platform-specif
 **File**: `1-7-git-platform-configuration-management-task-5.md`
 **Status**: ✅ Complete
 **Description**: Implement comprehensive testing for Git platform configuration management, including unit tests for all configuration components, integration tests for platform connections, performance tests for configuration loading, security tests for credential handling, and end-to-end tests for complete workflows.
+
+## Logging Requirements
+
+All provider and platform implementations MUST accept `ILogger` and log consistently.
+
+- **INFO**: Provider/platform initialized, API call completed (endpoint, duration), connection established/closed
+- **DEBUG**: Request parameters (redact secrets), response status and headers, retry attempt details, rate limit remaining
+- **WARN**: API rate limited (with retry-after), connection degraded, fallback to secondary endpoint, deprecated API version used
+- **ERROR**: API call failed after all retries, authentication failed (do NOT log credentials), connection refused, invalid response schema
+- **Structured context**: Include `{ provider, platform, repository, operation, duration }` where applicable
+- **Credential safety**: NEVER log API keys, tokens, webhook secrets, or private key material — log masked identifiers only (e.g., `key=sk-...xyz`)

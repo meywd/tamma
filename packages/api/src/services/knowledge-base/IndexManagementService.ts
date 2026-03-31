@@ -9,6 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import type {
   IndexStatus,
   IndexHistoryEntry,
@@ -99,8 +100,22 @@ export class IndexManagementService {
       throw new Error('Indexing is already in progress');
     }
 
-    if (!this.indexer || !this.projectPath) {
+    let effectivePath = _request?.repositoryPath ?? this.projectPath;
+
+    if (!this.indexer || !effectivePath) {
       throw new Error('No indexer or project path configured');
+    }
+
+    // If a custom repositoryPath was provided and it's a local path (not a URL),
+    // ensure it resolves within the configured project path to prevent directory traversal.
+    const isUrl = /^https?:\/\//i.test(effectivePath);
+    if (_request?.repositoryPath && !isUrl && this.projectPath) {
+      const resolved = resolve(effectivePath);
+      const base = resolve(this.projectPath);
+      if (!resolved.startsWith(base)) {
+        throw new Error('repositoryPath must be within the configured project directory');
+      }
+      effectivePath = resolved;
     }
 
     const startTime = new Date().toISOString();
@@ -154,9 +169,10 @@ export class IndexManagementService {
 
     // Run indexing asynchronously (fire-and-forget for the caller)
     const isFullReindex = _request?.fullReindex === true;
+    const changedFiles = _request?.changedFiles;
     const indexPromise = (isFullReindex || !this.indexer.updateIndex)
-      ? this.indexer.indexProject(this.projectPath, { fullReindex: isFullReindex })
-      : this.indexer.updateIndex(this.projectPath);
+      ? this.indexer.indexProject(effectivePath, { fullReindex: isFullReindex })
+      : this.indexer.updateIndex(effectivePath, changedFiles);
 
     indexPromise
       .then(async () => {

@@ -3,7 +3,7 @@
  * Fastify REST API + SSE for the Tamma platform
  */
 
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { registerKnowledgeBaseRoutes, createKBServices } from './routes/knowledge-base/index.js';
@@ -36,14 +36,27 @@ import { InMemoryInstallationStore } from './persistence/installation-store.js';
 import type { IGitHubInstallationStore, GitHubInstallation, GitHubInstallationRepo } from './persistence/installation-store.js';
 import { PgInstallationStore } from './persistence/pg-installation-store.js';
 import { InMemoryUserStore } from './persistence/user-store.js';
-import type { IUserStore, User, UserInstallation } from './persistence/user-store.js';
+import type { IUserStore, User, UserInstallation, UpsertUserInput } from './persistence/user-store.js';
 import { PgUserStore } from './persistence/pg-user-store.js';
 import { generateApiKey, hashApiKey, getApiKeyPrefix } from './auth/api-key.js';
 import { registerApiKeyAuthPlugin } from './auth/api-key-auth.js';
 import type { InstallationContext, ApiKeyAuthConfig } from './auth/api-key-auth.js';
 import { registerGitHubOAuthRoutes } from './routes/auth/github-oauth.js';
 import type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
+import { registerAuthMeRoute } from './routes/auth/me-route.js';
+import type { AuthMeRouteOptions, AuthMeUser } from './routes/auth/me-route.js';
+import { registerRoleCheckRoute } from './routes/auth/role-check.js';
+import { registerUserManagementRoutes } from './routes/users/index.js';
+import type { UserManagementRouteOptions } from './routes/users/index.js';
+import { InMemoryUserApiKeyStore, PgUserApiKeyStore } from './persistence/user-api-key-store.js';
+import type { IUserApiKeyStore, UserApiKey, CreateApiKeyInput } from './persistence/user-api-key-store.js';
+import { InMemoryInviteStore, PgInviteStore } from './persistence/invite-store.js';
+import type { IInviteStore, UserInvite, CreateInviteInput } from './persistence/invite-store.js';
+import { requireRole, requireSelfOrRole } from './middleware/require-role.js';
+import type { AuthenticatedUser } from './middleware/require-role.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
+import { GitHubRepoConfigReader } from './services/settings/repo-config-reader.js';
+import type { RepoConfigReader } from './services/settings/repo-config-reader.js';
 import type { ProvisionResult } from './services/github-secrets-provisioner.js';
 import { InstallationRouter } from './services/installation-router.js';
 import type { InstallationResolveResult, InstallationRouterOptions } from './services/installation-router.js';
@@ -56,6 +69,8 @@ import type {
   DequeueOptions,
   ListTasksOptions,
 } from './services/task-queue.js';
+import { registerAdminRoutes } from './routes/admin/index.js';
+import type { AdminRouteOptions } from './routes/admin/index.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -80,14 +95,30 @@ export {
   getApiKeyPrefix,
   registerApiKeyAuthPlugin,
   GitHubSecretsProvisioner,
+  GitHubRepoConfigReader,
   InstallationRouter,
   InMemoryTaskQueue,
   registerGitHubOAuthRoutes,
+  registerAuthMeRoute,
+  registerRoleCheckRoute,
+  InMemoryUserApiKeyStore,
+  PgUserApiKeyStore,
+  InMemoryInviteStore,
+  PgInviteStore,
+  requireRole,
+  requireSelfOrRole,
+  registerAdminRoutes,
+  registerUserManagementRoutes,
 };
 
 export { startApiServer } from './serve.js';
 export type { ApiServerOptions } from './serve.js';
 export type { GitHubOAuthOptions } from './routes/auth/github-oauth.js';
+
+// RBAC
+export { hasPermission, getRolePermissions, isValidRole, PERMISSIONS } from './auth/permissions.js';
+export type { Role, Permission } from './auth/permissions.js';
+export { requirePermission } from './auth/require-permission.js';
 
 export type {
   KBServices,
@@ -109,17 +140,30 @@ export type {
   IUserStore,
   User,
   UserInstallation,
+  UpsertUserInput,
   InstallationContext,
   ApiKeyAuthConfig,
   ProvisionResult,
   InstallationResolveResult,
   InstallationRouterOptions,
+  RepoConfigReader,
   InMemoryTaskQueueOptions,
   ITask,
   ITaskQueue,
   EnqueueTaskInput,
   DequeueOptions,
   ListTasksOptions,
+  IUserApiKeyStore,
+  UserApiKey,
+  CreateApiKeyInput,
+  IInviteStore,
+  UserInvite,
+  CreateInviteInput,
+  AuthenticatedUser,
+  AuthMeRouteOptions,
+  AuthMeUser,
+  AdminRouteOptions,
+  UserManagementRouteOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -144,15 +188,25 @@ export interface CreateAppOptions {
   saas?: SaaSRouteOptions;
   /** GitHub OAuth login options (optional; enables /api/auth/github). */
   githubOAuth?: GitHubOAuthOptions;
-  /** Enable Fastify logger (boolean or pino options object). */
+  /** User management route options (optional; enables /api/admin/users/* routes). */
+  userManagement?: UserManagementRouteOptions;
+  /** Admin route options (optional; enables /api/admin/health). */
+  admin?: AdminRouteOptions;
+  /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
+  /** Pre-built pino Logger instance (takes precedence over logger option). */
+  loggerInstance?: object;
 }
 
 /**
  * Create and configure the Fastify API server.
  */
 export async function createApp(options?: CreateAppOptions) {
-  const app = Fastify({ logger: options?.logger ?? false });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const logOpts: Record<string, unknown> = options?.loggerInstance
+    ? { loggerInstance: options.loggerInstance }
+    : { logger: options?.logger ?? false };
+  const app = Fastify(logOpts as any) as unknown as FastifyInstance;
 
   // Global error handler — return structured errors without leaking stack traces
   app.setErrorHandler((error, _request, reply) => {
@@ -165,7 +219,15 @@ export async function createApp(options?: CreateAppOptions) {
     });
   });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: [
+      'https://app.tamma.dev',
+      'https://elsa.tamma.dev',
+      'https://logs.tamma.dev',
+      /^https?:\/\/localhost(:\d+)?$/,
+    ],
+    credentials: true,
+  });
   await app.register(helmet);
 
   // Health check
@@ -218,6 +280,8 @@ export async function createApp(options?: CreateAppOptions) {
   // GitHub OAuth login routes
   if (options?.githubOAuth !== undefined) {
     await registerGitHubOAuthRoutes(app, options.githubOAuth);
+    // Role check endpoint for nginx service gating (depends on JWT/cookie from OAuth)
+    await registerRoleCheckRoute(app);
   }
 
   // SaaS API routes (protected by API key auth)
@@ -228,6 +292,16 @@ export async function createApp(options?: CreateAppOptions) {
       },
       { prefix: '' },
     );
+  }
+
+  // User management routes (admin panel)
+  if (options?.userManagement !== undefined) {
+    await registerUserManagementRoutes(app, options.userManagement);
+  }
+
+  // Admin routes (system health)
+  if (options?.admin !== undefined) {
+    await registerAdminRoutes(app, options.admin);
   }
 
   // Dashboard routes (requires both engine registry and workflow store)

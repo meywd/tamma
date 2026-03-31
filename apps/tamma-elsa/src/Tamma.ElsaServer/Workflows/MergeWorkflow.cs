@@ -17,6 +17,7 @@ public class MergeWorkflow : WorkflowBase
     {
         builder.Name = "Merge Complete";
         builder.DefinitionId = "merge-complete";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Squash-merge PR, close issue, and delete branch";
 
         var mergeShaVar = builder.WithVariable<string>("MergeSha", "");
@@ -31,10 +32,14 @@ public class MergeWorkflow : WorkflowBase
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
             MergeSha = new Output<string?>(mergeShaVar)
         };
+        mergePr.SetDisplayText("Merge PR");
 
         var setSuccess = new SetVariable { Id = "SetMergeSuccess", Name = "Set Success", Variable = successVar, Value = new Input<object?>(ctx => (object)!string.IsNullOrEmpty(mergeShaVar.Get(ctx))) };
+        setSuccess.SetDisplayText("Set Success");
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)successVar.Get(ctx)) };
+        outputSuccess.SetDisplayText("Output Success");
         var outputMergeSha = new SetOutput { Id = "OutputMergeSha", Name = "Output Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx => (object)(mergeShaVar.Get(ctx) ?? "")) };
+        outputMergeSha.SetDisplayText("Output Merge SHA");
 
         builder.Root = new Flowchart
         {

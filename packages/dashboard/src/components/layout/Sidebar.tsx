@@ -1,15 +1,27 @@
 
 import { NavLink } from 'react-router-dom';
+import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 
 interface NavGroup {
   label: string;
   items: { to: string; label: string }[];
 }
 
-const NAV_GROUPS: NavGroup[] = [
+const MEMBER_NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'My Account',
+    items: [
+      { to: '/account', label: 'Account' },
+      { to: '/keys', label: 'API Keys' },
+    ],
+  },
+];
+
+const ADMIN_NAV_GROUPS: NavGroup[] = [
+  ...MEMBER_NAV_GROUPS,
   {
     label: 'Knowledge Base',
-    items: [{ to: '/', label: 'Dashboard' }],
+    items: [{ to: '/dashboard', label: 'Dashboard' }],
   },
   {
     label: 'Settings',
@@ -22,13 +34,24 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/settings/prompts', label: 'Prompt Templates' },
     ],
   },
+  {
+    label: 'Administration',
+    items: [{ to: '/admin', label: 'Admin Panel' }],
+  },
 ];
 
 export function Sidebar(): JSX.Element {
+  const { isAdmin } = useCurrentUser();
+
+  const navGroups = isAdmin ? ADMIN_NAV_GROUPS : MEMBER_NAV_GROUPS;
+
   return (
     <nav className="w-60 shrink-0 bg-gray-800 text-gray-100 py-6 flex flex-col">
-      <div className="px-5 mb-8 text-lg font-bold tracking-tight">Tamma</div>
-      {NAV_GROUPS.map((group) => (
+      <div className="px-5 mb-8 flex items-center gap-2">
+        <img src="/logo.png" alt="Tamma" className="w-8 h-8 rounded" />
+        <span className="text-lg font-bold tracking-tight">Tamma</span>
+      </div>
+      {navGroups.map((group) => (
         <div key={group.label} className="mb-4">
           <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
             {group.label}

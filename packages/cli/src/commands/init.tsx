@@ -4,10 +4,11 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import Spinner from 'ink-spinner';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import dotenv from 'dotenv';
-import { generateConfigFile, generateEnvFile, mergeIntoEnvFile } from '../config.js';
+import { generateEnvFile, mergeIntoEnvFile, generateRepoConfigFile, generateProvidersFile } from '../config.js';
 import { runPreflight } from '../preflight.js';
 import type { PreflightResults } from '../preflight.js';
 import { colorProp } from '../colors.js';
@@ -322,13 +323,31 @@ function InitApp(): React.JSX.Element {
   }, []);
 
   const handleWizardComplete = useCallback((answers: Answers) => {
-    // Write config file (no token — credentials live in .env)
-    const configContent = generateConfigFile(answers);
-    const dest = path.resolve('tamma.config.json');
-    fs.writeFileSync(dest, configContent, 'utf-8');
-    setConfigPath(dest);
+    // Phase 1: Write ~/.tamma/providers.json (user-level credentials)
+    const tammaHome = path.join(os.homedir(), '.tamma');
+    if (!fs.existsSync(tammaHome)) {
+      fs.mkdirSync(tammaHome, { recursive: true });
+    }
+    const providersContent = generateProvidersFile([
+      { name: 'anthropic', apiKey: answers.anthropicKey, defaultModel: answers.model },
+    ]);
+    const providersDest = path.join(tammaHome, 'providers.json');
+    fs.writeFileSync(providersDest, providersContent, { encoding: 'utf-8', mode: 0o600 });
 
-    // Write .env with credentials (restrictive permissions)
+    // Phase 2: Write .tamma/config.json (repo-level project settings)
+    const repoTammaDir = path.resolve('.tamma');
+    if (!fs.existsSync(repoTammaDir)) {
+      fs.mkdirSync(repoTammaDir, { recursive: true });
+    }
+    const repoConfigContent = generateRepoConfigFile({
+      ...answers,
+      providerName: 'anthropic',
+    });
+    const repoConfigDest = path.join(repoTammaDir, 'config.json');
+    fs.writeFileSync(repoConfigDest, repoConfigContent, 'utf-8');
+    setConfigPath(repoConfigDest);
+
+    // Phase 3: Write .env with credentials (backward compat)
     const envDest = path.resolve('.env');
     let envContent: string;
     if (fs.existsSync(envDest)) {
@@ -485,10 +504,20 @@ function InitApp(): React.JSX.Element {
 }
 
 export async function initCommand(): Promise<void> {
-  const dest = path.resolve('tamma.config.json');
-  if (fs.existsSync(dest)) {
-    console.log(`Config file already exists at ${dest}`);
+  // Check for new-format config
+  const newDest = path.resolve('.tamma', 'config.json');
+  if (fs.existsSync(newDest)) {
+    console.log(`Config file already exists at ${newDest}`);
     console.log('Delete it first if you want to regenerate.');
+    return;
+  }
+
+  // Also check legacy config
+  const legacyDest = path.resolve('tamma.config.json');
+  if (fs.existsSync(legacyDest)) {
+    console.log(`Legacy config file found at ${legacyDest}`);
+    console.log('Consider migrating to .tamma/config.json (new layered format).');
+    console.log('Delete the legacy file first if you want to regenerate.');
     return;
   }
 

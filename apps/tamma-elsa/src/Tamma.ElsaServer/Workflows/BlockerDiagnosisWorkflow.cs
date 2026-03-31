@@ -11,6 +11,9 @@ using Elsa.Workflows.Memory;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Activities.Security;
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
+
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
@@ -39,6 +42,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     {
         builder.Name = "Blocker Diagnosis";
         builder.DefinitionId = "blocker-diagnosis";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Diagnoses blocker type and applies progressive resolution (hint -> guidance -> assistance -> escalation)";
 
         // ============================================
@@ -95,6 +99,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 return sid;
             })
         };
+        captureInputs.SetDisplayText("Capture Inputs");
 
         // 2. Parallel Signal Collection
         var parallelSignals = new Elsa.Workflows.Activities.Parallel
@@ -103,39 +108,40 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             Name = "Collect Signals",
             Activities =
             {
-                new CollectGitActivityActivity
+                WithLabel(new CollectGitActivityActivity
                 {
                     Id = "CollectGit",
                     Name = "Collect Git Activity",
                     Repository = new(context => repository.Get(context) ?? ""),
                     BranchName = new(context => branchName.Get(context) ?? ""),
                     Result = new(gitSignal)
-                },
-                new CollectCIStatusActivity
+                }, "Collect Git Activity"),
+                WithLabel(new CollectCIStatusActivity
                 {
                     Id = "CollectCI",
                     Name = "Collect CI Status",
                     Repository = new(context => repository.Get(context) ?? ""),
                     BranchName = new(context => branchName.Get(context) ?? ""),
                     Result = new(ciSignal)
-                },
-                new CollectInactivityActivity
+                }, "Collect CI Status"),
+                WithLabel(new CollectInactivityActivity
                 {
                     Id = "CollectInactivity",
                     Name = "Collect Inactivity",
                     Repository = new(context => repository.Get(context) ?? ""),
                     BranchName = new(context => branchName.Get(context) ?? ""),
                     Result = new(inactivitySignal)
-                },
-                new CollectCommunicationActivity
+                }, "Collect Inactivity"),
+                WithLabel(new CollectCommunicationActivity
                 {
                     Id = "CollectComms",
                     Name = "Collect Communication",
                     JuniorId = new(context => juniorId.Get(context) ?? ""),
                     Result = new(communicationSignal)
-                }
+                }, "Collect Communication")
             }
         };
+        parallelSignals.SetDisplayText("Collect Signals");
 
         // 3. Aggregate Signals
         var aggregateSignals = new SetVariable
@@ -168,6 +174,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 };
             })
         };
+        aggregateSignals.SetDisplayText("Aggregate Signals");
 
         // 4. AI Diagnosis via LLM Call
         var aiDiagnosis = new DispatchWorkflow
@@ -189,6 +196,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(llmDiagnosisOutput)
         };
+        aiDiagnosis.SetDisplayText("AI Diagnosis");
 
         // 5. Classify Blocker
         var classifyBlocker = new ClassifyBlockerActivity
@@ -206,6 +214,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             BlockerContext = new(context => blockerContext.Get(context)),
             Result = new(diagnosisResult)
         };
+        classifyBlocker.SetDisplayText("Classify Blocker");
 
         // 6. Determine Starting Level (Skill Adaptation)
         var determineStartLevel = new SetVariable
@@ -220,6 +229,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 return sl <= 2 ? "Guidance" : "Hint";
             })
         };
+        determineStartLevel.SetDisplayText("Determine Start Level");
 
         // 7a. Progressive Resolution — Level 1: Hint (wrapped in named Sequence)
         var hintLevel = new Sequence
@@ -232,6 +242,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                     currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
             }
         };
+        hintLevel.SetDisplayText("Level 1: Hint");
 
         // 7b. Progressive Resolution — Level 2: Guidance
         var guidanceLevel = new Sequence
@@ -244,6 +255,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                     currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
             }
         };
+        guidanceLevel.SetDisplayText("Level 2: Guidance");
 
         // 7c. Progressive Resolution — Level 3: Assistance
         var assistanceLevel = new Sequence
@@ -256,6 +268,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                     currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
             }
         };
+        assistanceLevel.SetDisplayText("Level 3: Assistance");
 
         // 7d. Progressive Resolution — Level 4: Escalation
         var escalationLevel = new Sequence
@@ -268,12 +281,13 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                     aggregatedSignals, currentLevel, attempts, feedbackProvided, isResolved)
             }
         };
+        escalationLevel.SetDisplayText("Level 4: Escalation");
 
         // 8. Set Output
         var setOutput = new SetOutput
         {
             Id = "SetBlockerOutput",
-            Name = "Set Output",
+            Name = "Output: Blocker Resolution",
             OutputName = new("BlockerResolution"),
             OutputValue = new(context =>
             {
@@ -299,6 +313,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 };
             })
         };
+        setOutput.SetDisplayText("Output: Blocker Resolution");
 
         // ============================================
         // Flowchart
@@ -375,21 +390,14 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var hintBody = WithLabel(new Sequence
         {
-            Id = "HintCondition",
-            Name = "Hint Applicable?",
-            // Only execute if current level is Hint (not skipped) and not yet resolved
-            Condition = new(context =>
-                currentLevel.Get(context) == "Hint" && !isResolved.Get(context)),
-            Then = new Sequence
+            Id = "HintBody",
+            Name = "Hint Body",
+            Activities =
             {
-                Id = "HintBody",
-                Name = "Hint Body",
-                Activities =
-                {
                     // Dispatch LLM for Socratic hints
-                    new DispatchWorkflow
+                    WithLabel(new DispatchWorkflow
                     {
                         Id = "HintLlmCall",
                         Name = "Hint LLM Call",
@@ -398,17 +406,17 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "analyst",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide Socratic hints for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide Socratic hints for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Use guiding questions, not direct answers. Employ the Socratic method.",
                             ["sessionId"] = sessionId.Get(context),
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
-                    },
+                    }, "Hint LLM Call"),
 
                     // Record feedback
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "HintRecordFeedback",
                         Name = "Record Hint Feedback",
@@ -420,10 +428,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                             attempts.Set(context, attempts.Get(context) + 1);
                             return newList;
                         })
-                    },
+                    }, "Record Hint Feedback"),
 
                     // Wait for progress (bookmark) — output wired to progressDetected variable
-                    new DetectProgressActivity
+                    WithLabel(new DetectProgressActivity
                     {
                         Id = "HintDetectProgress",
                         Name = "Hint: Detect Progress",
@@ -433,10 +441,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         CurrentLevel = new("Hint"),
                         WaitTimeMinutes = new(context => skillLevel.Get(context) >= 4 ? 30 : 15),
                         ProgressDetected = new(progressDetected)
-                    },
+                    }, "Hint: Detect Progress"),
 
                     // Check if progress was detected via the progressDetected variable
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "HintCheckProgress",
                         Name = "Hint: Check Progress",
@@ -448,10 +456,20 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Guidance");
                             return detected;
                         })
-                    }
+                    }, "Hint: Check Progress")
                 }
-            }
+            }, "Hint Body");
+
+        var hintIf = new If
+        {
+            Id = "HintCondition",
+            Name = "Hint Applicable?",
+            Condition = new(context =>
+                currentLevel.Get(context) == "Hint" && !isResolved.Get(context)),
+            Then = hintBody
         };
+        hintIf.SetDisplayText("Hint Applicable?");
+        return hintIf;
     }
 
     /// <summary>
@@ -469,28 +487,23 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var guidanceBody = WithLabel(new Sequence
         {
-            Id = "GuidanceCondition",
-            Name = "Guidance Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "GuidanceBody",
-                Name = "Guidance Body",
+            Id = "GuidanceBody",
+            Name = "Guidance Body",
                 Activities =
                 {
                     // Update current level
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "SetLevelGuidance",
                         Name = "Set Level: Guidance",
                         Variable = currentLevel,
                         Value = new(context => "Guidance")
-                    },
+                    }, "Set Level: Guidance"),
 
                     // Dispatch LLM for direct guidance
-                    new DispatchWorkflow
+                    WithLabel(new DispatchWorkflow
                     {
                         Id = "GuidanceLlmCall",
                         Name = "Guidance LLM Call",
@@ -499,17 +512,17 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "analyst",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide direct guidance for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide direct guidance for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Give clear, step-by-step instructions. Be specific and actionable.",
                             ["sessionId"] = sessionId.Get(context),
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
-                    },
+                    }, "Guidance LLM Call"),
 
                     // Record feedback
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "GuidanceRecordFeedback",
                         Name = "Record Guidance Feedback",
@@ -521,10 +534,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                             attempts.Set(context, attempts.Get(context) + 1);
                             return newList;
                         })
-                    },
+                    }, "Record Guidance Feedback"),
 
                     // Wait for progress (bookmark) — output wired to progressDetected variable
-                    new DetectProgressActivity
+                    WithLabel(new DetectProgressActivity
                     {
                         Id = "GuidanceDetectProgress",
                         Name = "Guidance: Detect Progress",
@@ -534,10 +547,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         CurrentLevel = new("Guidance"),
                         WaitTimeMinutes = new(30),
                         ProgressDetected = new(progressDetected)
-                    },
+                    }, "Guidance: Detect Progress"),
 
                     // Check if progress was detected via the progressDetected variable
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "GuidanceCheckProgress",
                         Name = "Guidance: Check Progress",
@@ -549,10 +562,19 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Assistance");
                             return detected;
                         })
-                    }
+                    }, "Guidance: Check Progress")
                 }
-            }
+            }, "Guidance Body");
+
+        var guidanceIf = new If
+        {
+            Id = "GuidanceCondition",
+            Name = "Guidance Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = guidanceBody
         };
+        guidanceIf.SetDisplayText("Guidance Applicable?");
+        return guidanceIf;
     }
 
     /// <summary>
@@ -570,28 +592,23 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<bool> isResolved,
         Variable<bool> progressDetected)
     {
-        return new If
+        var assistanceBody = WithLabel(new Sequence
         {
-            Id = "AssistanceCondition",
-            Name = "Assistance Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "AssistanceBody",
-                Name = "Assistance Body",
+            Id = "AssistanceBody",
+            Name = "Assistance Body",
                 Activities =
                 {
                     // Update current level
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "SetLevelAssistance",
                         Name = "Set Level: Assistance",
                         Variable = currentLevel,
                         Value = new(context => "Assistance")
-                    },
+                    }, "Set Level: Assistance"),
 
                     // Dispatch LLM for code assistance (uses implementer role)
-                    new DispatchWorkflow
+                    WithLabel(new DispatchWorkflow
                     {
                         Id = "AssistanceLlmCall",
                         Name = "Assistance LLM Call",
@@ -600,7 +617,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         {
                             ["role"] = "implementer",
                             ["analysisType"] = "GuidanceGeneration",
-                            ["content"] = $"Provide code example for: {diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker"}. " +
+                            ["content"] = $"Provide code example for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Include a working code example with detailed explanation. " +
                                           "Show the solution step by step.",
@@ -608,10 +625,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
-                    },
+                    }, "Assistance LLM Call"),
 
                     // Record feedback
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "AssistanceRecordFeedback",
                         Name = "Record Assistance Feedback",
@@ -623,10 +640,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                             attempts.Set(context, attempts.Get(context) + 1);
                             return newList;
                         })
-                    },
+                    }, "Record Assistance Feedback"),
 
                     // Wait for progress (bookmark) — output wired to progressDetected variable
-                    new DetectProgressActivity
+                    WithLabel(new DetectProgressActivity
                     {
                         Id = "AssistanceDetectProgress",
                         Name = "Assistance: Detect Progress",
@@ -636,10 +653,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         CurrentLevel = new("Assistance"),
                         WaitTimeMinutes = new(45),
                         ProgressDetected = new(progressDetected)
-                    },
+                    }, "Assistance: Detect Progress"),
 
                     // Check if progress was detected via the progressDetected variable
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "AssistanceCheckProgress",
                         Name = "Assistance: Check Progress",
@@ -651,10 +668,19 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Escalation");
                             return detected;
                         })
-                    }
+                    }, "Assistance: Check Progress")
                 }
-            }
+            }, "Assistance Body");
+
+        var assistanceIf = new If
+        {
+            Id = "AssistanceCondition",
+            Name = "Assistance Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = assistanceBody
         };
+        assistanceIf.SetDisplayText("Assistance Applicable?");
+        return assistanceIf;
     }
 
     /// <summary>
@@ -671,28 +697,23 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         Variable<List<string>> feedbackProvided,
         Variable<bool> isResolved)
     {
-        return new If
+        var escalationBody = WithLabel(new Sequence
         {
-            Id = "EscalationCondition",
-            Name = "Escalation Applicable?",
-            Condition = new(context => !isResolved.Get(context)),
-            Then = new Sequence
-            {
-                Id = "EscalationBody",
-                Name = "Escalation Body",
+            Id = "EscalationBody",
+            Name = "Escalation Body",
                 Activities =
                 {
                     // Update current level
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "SetLevelEscalation",
                         Name = "Set Level: Escalation",
                         Variable = currentLevel,
                         Value = new(context => "Escalation")
-                    },
+                    }, "Set Level: Escalation"),
 
                     // Escalate to senior (bookmark-based wait)
-                    new EscalateToSeniorActivity
+                    WithLabel(new EscalateToSeniorActivity
                     {
                         Id = "EscalateToSenior",
                         Name = "Escalate to Senior",
@@ -704,10 +725,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         DiagnosisDetails = new(context => diagnosisResult.Get(context)?.RootCauseHypothesis ?? ""),
                         PreviousAttempts = new(context => feedbackProvided.Get(context) ?? new List<string>()),
                         Signals = new(context => aggregatedSignals.Get(context))
-                    },
+                    }, "Escalate to Senior"),
 
                     // Record escalation feedback
-                    new SetVariable
+                    WithLabel(new SetVariable
                     {
                         Id = "EscalationRecordFeedback",
                         Name = "Record Escalation Feedback",
@@ -719,10 +740,19 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                             attempts.Set(context, attempts.Get(context) + 1);
                             return newList;
                         })
-                    }
+                    }, "Record Escalation Feedback")
                 }
-            }
+            }, "Escalation Body");
+
+        var escalationIf = new If
+        {
+            Id = "EscalationCondition",
+            Name = "Escalation Applicable?",
+            Condition = new(context => !isResolved.Get(context)),
+            Then = escalationBody
         };
+        escalationIf.SetDisplayText("Escalation Applicable?");
+        return escalationIf;
     }
 
     /// <summary>
@@ -753,9 +783,9 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             parts.Add($"CI Status: Build={ci.BuildStatus}, Tests={ci.PassedTests}/{ci.TotalTests} passed, " +
                        $"{ci.FailedTests} failed");
             if (!string.IsNullOrEmpty(ci.BuildError))
-                parts.Add($"Build Error: {ci.BuildError}");
+                parts.Add($"Build Error: {SecurityHelpers.SanitizeForPrompt(ci.BuildError)}");
             if (ci.FailingTestNames.Count > 0)
-                parts.Add($"Failing Tests: {string.Join(", ", ci.FailingTestNames.Take(5))}");
+                parts.Add($"Failing Tests: {SecurityHelpers.SanitizeForPrompt(string.Join(", ", ci.FailingTestNames.Take(5)))}");
         }
 
         if (signals?.Inactivity?.CollectionSucceeded == true)
@@ -775,7 +805,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         if (!string.IsNullOrEmpty(blockerContext))
         {
             parts.Add("");
-            parts.Add($"Additional Context: {blockerContext}");
+            parts.Add($"Additional Context: {SecurityHelpers.SanitizeForPrompt(blockerContext)}");
         }
 
         parts.Add("");

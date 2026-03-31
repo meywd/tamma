@@ -14,6 +14,7 @@ Stories are organized into epic-specific subdirectories:
 - **`epic-6/`** - Context & Knowledge Management (10 stories)
 - **`epic-7/`** - Autonomous Mentorship Workflow (10 stories)
 - **`epic-8/`** - Distribution & Installation (8 stories)
+- **`epic-20/`** - Billing & Payments (5 stories)
 
 ## File Types
 
@@ -68,6 +69,10 @@ All stories across all epics are **ready for implementation** with:
 
 - **Epic 8**: Distribution & Installation (npm, binary, Docker)
 
+### Phase 7 (May 2026)
+
+- **Epic 20**: Billing & Payments (Stripe subscriptions, usage metering, limits enforcement)
+
 ## Navigation
 
 - See individual epic README files for detailed story breakdowns
@@ -77,6 +82,6 @@ All stories across all epics are **ready for implementation** with:
 
 ---
 
-**Last Updated**: 2026-02-05
-**Total Stories**: 92 stories across 8 epics
+**Last Updated**: 2026-03-28
+**Total Stories**: 97 stories across 9 epics
 **Implementation Start**: November 2025

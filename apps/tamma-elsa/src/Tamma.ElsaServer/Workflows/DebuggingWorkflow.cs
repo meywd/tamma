@@ -1,3 +1,4 @@
+using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
@@ -7,9 +8,13 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
+using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Debug;
+using Tamma.Activities.Security;
 using Tamma.Activities.Debug.Models;
 using Endpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+
+using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
@@ -42,6 +47,7 @@ public class DebuggingWorkflow : WorkflowBase
     {
         builder.Name = "Debugging";
         builder.DefinitionId = "debugging";
+        builder.Version = WorkflowVersions.ComputedVersion;
 
         // ---- Workflow variables ----
         var sessionId = builder.WithVariable<Guid>();
@@ -79,22 +85,28 @@ public class DebuggingWorkflow : WorkflowBase
         var initialize = new SetVariable<string>(debugStartTime,
             _ => DateTime.UtcNow.ToString("o"))
         { Id = "initialize", Name = "Initialize Start Time" };
+        initialize.SetDisplayText("Initialize Start Time");
 
         var initIteration = new SetVariable<int>(currentIteration, _ => 1)
         { Id = "initIteration", Name = "Initialize Iteration" };
+        initIteration.SetDisplayText("Initialize Iteration");
 
         var initMaxIterations = new SetVariable<int>(maxIterations, _ => 5)
         { Id = "initMaxIterations", Name = "Initialize Max Iterations" };
+        initMaxIterations.SetDisplayText("Initialize Max Iterations");
 
         var initFilesModified = new SetVariable<string>(allFilesModified, _ => "[]")
         { Id = "initFilesModified", Name = "Initialize Files Modified" };
+        initFilesModified.SetDisplayText("Initialize Files Modified");
 
         var initRegressionTest = new SetVariable<bool>(regressionTestWritten, _ => false)
         { Id = "initRegressionTest", Name = "Initialize Regression Test Flag" };
+        initRegressionTest.SetDisplayText("Initialize Regression Test Flag");
 
         var initIterationContext = new SetVariable<string>(iterationContextJson,
             _ => "{\"currentIteration\":0,\"hypotheses\":[],\"previousAttempts\":[]}")
         { Id = "initIterationContext", Name = "Initialize Iteration Context" };
+        initIterationContext.SetDisplayText("Initialize Iteration Context");
 
         // 2. Classify debug context
         var classify = new ClassifyDebugContextActivity
@@ -104,16 +116,20 @@ public class DebuggingWorkflow : WorkflowBase
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             SessionId = new Input<Guid>(ctx => sessionId.Get(ctx))
         };
+        classify.SetDisplayText("Classify Debug Context");
 
         // 3. Context-specific emphasis logging (one per branch, all converge)
         var tddEmphasis = new WriteLine("Debug mode: TDD Failure -- emphasizing test output and implementation code")
         { Id = "tddEmphasis", Name = "TDD Emphasis" };
+        tddEmphasis.SetDisplayText("TDD Emphasis");
 
         var runtimeEmphasis = new WriteLine("Debug mode: Runtime Error -- emphasizing stack traces and recent changes")
         { Id = "runtimeEmphasis", Name = "Runtime Emphasis" };
+        runtimeEmphasis.SetDisplayText("Runtime Emphasis");
 
         var bugEmphasis = new WriteLine("Debug mode: Bug Investigation -- emphasizing issue description and reproduction steps")
         { Id = "bugEmphasis", Name = "Bug Emphasis" };
+        bugEmphasis.SetDisplayText("Bug Emphasis");
 
         // 4. Parallel context gathering activities
         var collectErrors = new CollectErrorMessagesActivity
@@ -125,6 +141,7 @@ public class DebuggingWorkflow : WorkflowBase
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? "")
         };
+        collectErrors.SetDisplayText("Collect Error Messages");
 
         var collectCode = new CollectRelevantCodeActivity
         {
@@ -141,6 +158,7 @@ public class DebuggingWorkflow : WorkflowBase
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
         };
+        collectCode.SetDisplayText("Collect Relevant Code");
 
         var collectGit = new CollectGitHistoryActivity
         {
@@ -150,6 +168,7 @@ public class DebuggingWorkflow : WorkflowBase
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
         };
+        collectGit.SetDisplayText("Collect Git History");
 
         var collectTests = new CollectTestResultsActivity
         {
@@ -160,6 +179,7 @@ public class DebuggingWorkflow : WorkflowBase
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
             ErrorOutput = new Input<string>(ctx => errorOutput.Get(ctx) ?? "")
         };
+        collectTests.SetDisplayText("Collect Test Results");
 
         var collectRepro = new CollectReproductionStepsActivity
         {
@@ -168,6 +188,7 @@ public class DebuggingWorkflow : WorkflowBase
             IssueDescription = new Input<string>(ctx => issueDescription.Get(ctx) ?? ""),
             DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError")
         };
+        collectRepro.SetDisplayText("Collect Reproduction Steps");
 
         // 5. FlowFork for parallel context gathering (branch names used in connections)
         var fork = new FlowFork
@@ -183,6 +204,7 @@ public class DebuggingWorkflow : WorkflowBase
                 "CollectRepro"
             })
         };
+        fork.SetDisplayText("Context Fork");
 
         // 6. FlowJoin -- waits for all parallel branches to complete
         var join = new FlowJoin
@@ -191,9 +213,11 @@ public class DebuggingWorkflow : WorkflowBase
             Name = "Context Join",
             Mode = new Input<FlowJoinMode>(FlowJoinMode.WaitAll)
         };
+        join.SetDisplayText("Context Join");
 
         var joinLog = new WriteLine("All debug context gathered -- proceeding to AI diagnosis")
         { Id = "joinLog", Name = "Join Log" };
+        joinLog.SetDisplayText("Join Log");
 
         // 7. AI Diagnosis
         var aiDiagnosis = new AIDiagnosisActivity
@@ -210,6 +234,7 @@ public class DebuggingWorkflow : WorkflowBase
             PreviousContext = new Input<string?>(ctx => iterationContextJson.Get(ctx)),
             SkillLevel = new Input<int>(ctx => skillLevel.Get(ctx))
         };
+        aiDiagnosis.SetDisplayText("AI Diagnosis");
 
         // 8. Select hypothesis
         var selectHypothesis = new SelectHypothesisActivity
@@ -220,6 +245,7 @@ public class DebuggingWorkflow : WorkflowBase
             CurrentIteration = new Input<int>(ctx => currentIteration.Get(ctx)),
             MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx))
         };
+        selectHypothesis.SetDisplayText("Select Hypothesis");
 
         // 9. Check if hypothesis was selected (not null/exhausted)
         var hasHypothesis = new FlowDecision(ctx =>
@@ -228,11 +254,13 @@ public class DebuggingWorkflow : WorkflowBase
             return !string.IsNullOrEmpty(json) && json != "null";
         })
         { Id = "hasHypothesis", Name = "Has Hypothesis?" };
+        hasHypothesis.SetDisplayText("Has Hypothesis?");
 
         // 10. BugInvestigation guard: write regression test if needed
         var isBugMode = new FlowDecision(ctx =>
             debugContextMode.Get(ctx) == "BugInvestigation" && !regressionTestWritten.Get(ctx))
         { Id = "isBugMode", Name = "Is Bug Mode?" };
+        isBugMode.SetDisplayText("Is Bug Mode?");
 
         var writeRegressionTest = new WriteRegressionTestActivity
         {
@@ -246,9 +274,11 @@ public class DebuggingWorkflow : WorkflowBase
             RepositoryUrl = new Input<string>(ctx => repositoryUrl.Get(ctx) ?? ""),
             BranchName = new Input<string>(ctx => branchName.Get(ctx) ?? "")
         };
+        writeRegressionTest.SetDisplayText("Write Regression Test");
 
         var markRegressionTestWritten = new SetVariable<bool>(regressionTestWritten, _ => true)
         { Id = "markRegressionTestWritten", Name = "Mark Regression Test Written" };
+        markRegressionTestWritten.SetDisplayText("Mark Regression Test Written");
 
         // 11. Apply fix via LLM call sub-workflow
         var applyFix = new DispatchWorkflow
@@ -259,11 +289,12 @@ public class DebuggingWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["agentRole"] = "implementer",
-                ["taskPrompt"] = $"Apply fix for hypothesis: {selectedHypothesisJson.Get(ctx) ?? "unknown"} (mode: {debugContextMode.Get(ctx)}, iteration: {currentIteration.Get(ctx)})",
+                ["taskPrompt"] = $"Apply fix for hypothesis: {SecurityHelpers.SanitizeForPrompt(selectedHypothesisJson.Get(ctx) ?? "unknown")} (mode: {debugContextMode.Get(ctx)}, iteration: {currentIteration.Get(ctx)})",
                 ["sessionId"] = sessionId.Get(ctx).ToString()
             }),
             WaitForCompletion = new(true)
         };
+        applyFix.SetDisplayText("Apply Fix");
 
         // 12. Run tests via testing-pipeline sub-workflow
         var runTests = new DispatchWorkflow
@@ -281,6 +312,7 @@ public class DebuggingWorkflow : WorkflowBase
             WaitForCompletion = new(true),
             Result = new(runTestsOutput)
         };
+        runTests.SetDisplayText("Run Tests");
 
         // 13. Check test results from DispatchWorkflow output
         var testsPass = new FlowDecision(ctx =>
@@ -291,6 +323,7 @@ public class DebuggingWorkflow : WorkflowBase
             return false;
         })
         { Id = "testsPass", Name = "Tests Pass?" };
+        testsPass.SetDisplayText("Tests Pass?");
 
         // 14. Record resolution (tests passed)
         var recordResolution = new RecordResolutionActivity
@@ -322,6 +355,16 @@ public class DebuggingWorkflow : WorkflowBase
             Attempts = new Input<int>(ctx => currentIteration.Get(ctx)),
             StartTime = new Input<string>(ctx => debugStartTime.Get(ctx) ?? DateTime.UtcNow.ToString("o"))
         };
+        recordResolution.SetDisplayText("Record Resolution");
+
+        var updateCodeIndex = new UpdateCodeIndexActivity
+        {
+            Id = "UpdateCodeIndex",
+            Name = "Update Code Index",
+            ChangedFilesJson = new Input<string?>(ctx => allFilesModified.Get(ctx)),
+            RepositoryPath = new Input<string?>(ctx => repositoryUrl.Get(ctx))
+        };
+        updateCodeIndex.SetDisplayText("Update Code Index");
 
         var setResolvedOutputs = new Sequence
         {
@@ -329,12 +372,13 @@ public class DebuggingWorkflow : WorkflowBase
             Name = "Set Resolved Outputs",
             Activities =
             {
-                new WriteLine("Debug resolved -- fix verified by tests") { Id = "setResolved", Name = "Log Resolved" },
-                new SetOutput { Id = "outputResolvedSuccess", Name = "Output Resolved Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) },
-                new SetOutput { Id = "outputResolution", Name = "Output Resolution", OutputName = new("resolution"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { Id = "outputResolvedIterations", Name = "Output Resolved Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
+                WithLabel(new WriteLine("Debug resolved -- fix verified by tests") { Id = "setResolved", Name = "Log Resolved" }, "Log Resolved"),
+                WithLabel(new SetOutput { Id = "outputResolvedSuccess", Name = "Output Resolved Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) }, "Output Resolved Success"),
+                WithLabel(new SetOutput { Id = "outputResolution", Name = "Output Resolution", OutputName = new("resolution"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) }, "Output Resolution"),
+                WithLabel(new SetOutput { Id = "outputResolvedIterations", Name = "Output Resolved Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Resolved Iterations")
             }
         };
+        setResolvedOutputs.SetDisplayText("Set Resolved Outputs");
 
         // 15. Refine hypothesis (tests failed)
         var refineHypothesis = new RefineHypothesisActivity
@@ -347,11 +391,13 @@ public class DebuggingWorkflow : WorkflowBase
             UpdatedErrors = new Input<string>(ctx => errorMessages.Get(ctx) ?? ""),
             IterationContextJson = new Input<string>(ctx => iterationContextJson.Get(ctx) ?? "{}")
         };
+        refineHypothesis.SetDisplayText("Refine Hypothesis");
 
         // 16. Increment iteration
         var incrementIteration = new SetVariable<int>(currentIteration,
             ctx => currentIteration.Get(ctx) + 1)
         { Id = "incrementIteration", Name = "Increment Iteration" };
+        incrementIteration.SetDisplayText("Increment Iteration");
 
         // 17. Compile debug report (escalation)
         var compileReport = new CompileDebugReportActivity
@@ -367,6 +413,7 @@ public class DebuggingWorkflow : WorkflowBase
             FilesInvestigated = new Input<string>(ctx => allFilesModified.Get(ctx) ?? "[]"),
             StartTime = new Input<string>(ctx => debugStartTime.Get(ctx) ?? DateTime.UtcNow.ToString("o"))
         };
+        compileReport.SetDisplayText("Compile Debug Report");
 
         var setEscalatedOutputs = new Sequence
         {
@@ -374,15 +421,17 @@ public class DebuggingWorkflow : WorkflowBase
             Name = "Set Escalated Outputs",
             Activities =
             {
-                new WriteLine("Debug ESCALATED -- max iterations reached, report compiled") { Id = "setEscalated", Name = "Log Escalated" },
-                new SetOutput { Id = "outputEscalatedSuccess", Name = "Output Escalated Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) },
-                new SetOutput { Id = "outputDebugReport", Name = "Output Debug Report", OutputName = new("debugReport"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) },
-                new SetOutput { Id = "outputEscalatedIterations", Name = "Output Escalated Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }
+                WithLabel(new WriteLine("Debug ESCALATED -- max iterations reached, report compiled") { Id = "setEscalated", Name = "Log Escalated" }, "Log Escalated"),
+                WithLabel(new SetOutput { Id = "outputEscalatedSuccess", Name = "Output Escalated Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) }, "Output Escalated Success"),
+                WithLabel(new SetOutput { Id = "outputDebugReport", Name = "Output Debug Report", OutputName = new("debugReport"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) }, "Output Debug Report"),
+                WithLabel(new SetOutput { Id = "outputEscalatedIterations", Name = "Output Escalated Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Escalated Iterations")
             }
         };
+        setEscalatedOutputs.SetDisplayText("Set Escalated Outputs");
 
         // 18. Final finish
-        var finish = new Finish { Id = "finish", Name = "Finish" };
+        var finish = new Finish { Id = "finish", Name = "Complete: Debugging Done" };
+        finish.SetDisplayText("Complete: Debugging Done");
 
         // ---- Build Flowchart ----
         builder.Root = new Flowchart
@@ -402,7 +451,7 @@ public class DebuggingWorkflow : WorkflowBase
                 selectHypothesis, hasHypothesis,
                 isBugMode, writeRegressionTest, markRegressionTestWritten,
                 applyFix, runTests, testsPass,
-                recordResolution, setResolvedOutputs,
+                recordResolution, updateCodeIndex, setResolvedOutputs,
                 refineHypothesis, incrementIteration,
                 compileReport, setEscalatedOutputs,
                 finish
@@ -473,7 +522,8 @@ public class DebuggingWorkflow : WorkflowBase
 
                 // Tests pass? Yes -> record resolution
                 new(new Endpoint(testsPass, "True"), new Endpoint(recordResolution)),
-                new(recordResolution, setResolvedOutputs),
+                new(recordResolution, updateCodeIndex),
+                new(updateCodeIndex, setResolvedOutputs),
                 new(setResolvedOutputs, finish),
 
                 // Tests pass? No -> refine hypothesis

@@ -17,6 +17,7 @@ public class PullRequestWorkflow : WorkflowBase
     {
         builder.Name = "Pull Request";
         builder.DefinitionId = "pull-request";
+        builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Create a pull request with plan and test summary";
 
         var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
@@ -34,10 +35,14 @@ public class PullRequestWorkflow : WorkflowBase
             PrNumber = new Output<int>(prNumberVar),
             PrUrl = new Output<string?>(prUrlVar)
         };
+        createPr.SetDisplayText("Create PR");
 
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)(prNumberVar.Get(ctx) > 0)) };
+        outputSuccess.SetDisplayText("Output Success");
         var outputPrNumber = new SetOutput { Id = "OutputPrNumber", Name = "Output PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumberVar.Get(ctx)) };
+        outputPrNumber.SetDisplayText("Output PR Number");
         var outputPrUrl = new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrlVar.Get(ctx) ?? "")) };
+        outputPrUrl.SetDisplayText("Output PR URL");
 
         builder.Root = new Flowchart
         {

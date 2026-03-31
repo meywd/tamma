@@ -1,0 +1,45 @@
+/*
+ * Tamma Wiki Site — Custom Starlight Theme
+ *
+ * Overrides Starlight's CSS custom properties to match Tamma branding.
+ * See: https://starlight.astro.build/guides/css-and-tailwind/
+ */
+
+/* Light mode */
+:root {
+  /* Accent colors — Tamma purple */
+  --sl-color-accent-low: #ede9fe;
+  --sl-color-accent: #7c3aed;
+  --sl-color-accent-high: #4c1d95;
+
+  /* Typography */
+  --sl-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, Cantarell, sans-serif;
+  --sl-font-system-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code',
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Slightly tighter content width for readability */
+  --sl-content-width: 75ch;
+}
+
+/* Dark mode */
+:root[data-theme='dark'] {
+  --sl-color-accent-low: #2d1b69;
+  --sl-color-accent: #a78bfa;
+  --sl-color-accent-high: #ddd6fe;
+}
+
+/* Site title styling */
+.site-title {
+  font-weight: 700;
+}
+
+/* Smooth scroll for anchor links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Better code block styling */
+.expressive-code {
+  border-radius: 0.5rem;
+}

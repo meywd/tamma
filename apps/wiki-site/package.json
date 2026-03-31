@@ -1,0 +1,39 @@
+{
+  "name": "@tamma/wiki-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tamma documentation and wiki site — Astro Starlight on Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "sync-content": "tsx scripts/sync-content.ts",
+    "dev": "pnpm sync-content && astro dev",
+    "build": "pnpm sync-content && astro build",
+    "preview": "astro preview",
+    "deploy": "wrangler deploy",
+    "deploy:prod": "pnpm build && wrangler deploy",
+    "astro": "astro"
+  },
+  "keywords": [
+    "tamma",
+    "documentation",
+    "wiki",
+    "astro",
+    "starlight",
+    "cloudflare-workers"
+  ],
+  "author": "Tamma Project",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "dependencies": {
+    "@astrojs/cloudflare": "^12.0.0",
+    "@astrojs/starlight": "^0.33.0",
+    "astro": "^5.5.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.45.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
