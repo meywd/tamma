@@ -1,13 +1,303 @@
 [
   {
-    "path": "/stories/epic-1/1-6-gitlab-platform-implementation-task-6",
-    "title": ".github/workflows/integration-tests.yml",
-    "section": "Epic 1"
+    "path": "/contributing",
+    "title": "Contributing to Tamma",
+    "section": "Pages"
   },
   {
-    "path": "/stories/epic-1/1-0-ai-provider-strategy-research-task-6",
-    "title": "AI Provider Strategy Research - Executive Summary",
-    "section": "Epic 1"
+    "path": "/stories/4-1-event-schema-design",
+    "title": "Story 4.1: Event Schema Design",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-2-event-store-backend-selection",
+    "title": "Story 4.2: Event Store Backend Selection",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-3-event-capture-issue-selection-analysis",
+    "title": "Story 4.3: Event Capture - Issue Selection & Analysis",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-4-event-capture-ai-provider-interactions",
+    "title": "Story 4.4: Event Capture - AI Provider Interactions",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-5-event-capture-code-changes-git-operations",
+    "title": "Story 4.5: Event Capture - Code Changes & Git Operations",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-6-event-capture-approvals-escalations",
+    "title": "Story 4.6: Event Capture - Approvals & Escalations",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-7-event-query-api-for-time-travel",
+    "title": "Story 4.7: Event Query API for Time-Travel",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/4-8-black-box-replay-for-debugging",
+    "title": "Story 4.8: Black-Box Replay for Debugging",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-1-structured-logging-implementation",
+    "title": "Story 5.1: Structured Logging Implementation",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-10-alpha-release-preparation",
+    "title": "Story 5.10: Alpha Release Preparation",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-2-metrics-collection-infrastructure",
+    "title": "Story 5.2: Metrics Collection Infrastructure",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-3-real-time-dashboard-system-health",
+    "title": "Story 5.3: Real-Time Dashboard - System Health",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-4-real-time-dashboard-development-velocity",
+    "title": "Story 5.4: Real-Time Dashboard - Development Velocity",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-5-event-trail-exploration-ui",
+    "title": "Story 5.5: Event Trail Exploration UI",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-6-alert-system-for-critical-issues",
+    "title": "Story 5.6: Alert System for Critical Issues",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-7-feedback-collection-system",
+    "title": "Story 5.7: Feedback Collection System",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-8-integration-testing-suite",
+    "title": "Story 5.8: Integration Testing Suite",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-9a-installation-setup-documentation",
+    "title": "Story 5.9a: Installation & Setup Documentation",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/5-9b-usage-configuration-documentation",
+    "title": "Story 5.9b: Usage & Configuration Documentation",
+    "section": "Pages"
+  },
+  {
+    "path": "/architecture",
+    "title": "Tamma Architecture Overview",
+    "section": "Pages"
+  },
+  {
+    "path": "/roadmap",
+    "title": "Tamma Project Roadmap",
+    "section": "Pages"
+  },
+  {
+    "path": "/stories/README",
+    "title": "Tamma Stories",
+    "section": "Pages"
+  },
+  {
+    "path": "/epics/1-foundation",
+    "title": "Epic 1: Foundation & Core Infrastructure",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/1-5-infrastructure",
+    "title": "Epic 1.5: Infrastructure & Deployment",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/10-engine-core",
+    "title": "Epic 10: Engine Core -- Workflow-Driven Architecture",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/11-security",
+    "title": "Epic 11: Security Hardening",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/12-tool-loop",
+    "title": "Epic 12: Agentic Tool Loop",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/13-workflow-decomposition",
+    "title": "Epic 13: Workflow Decomposition",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/14-elsa-studio",
+    "title": "Epic 14: Custom ELSA Studio",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/15-log-aggregation",
+    "title": "Epic 15: Observability & Log Aggregation",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/16-auth-admin",
+    "title": "Epic 16: Unified Auth, User Management & Admin",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/17-multi-tenancy",
+    "title": "Epic 17: Multi-Tenancy Foundation",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/18-user-auth",
+    "title": "Epic 18: End-User Auth & Registration",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/19-agent-dispatch",
+    "title": "Epic 19: GitHub App Agent Dispatch",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/2-autonomous-loop",
+    "title": "Epic 2: Autonomous Development Loop",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/20-billing",
+    "title": "Epic 20: Billing & Payments",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/21-marketing-dashboard",
+    "title": "Epic 21: Marketing Site & User Dashboard",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/22-cli-standalone",
+    "title": "Epic 22: CLI Mode Preservation",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/23-system-monitoring",
+    "title": "Epic 23: System Monitoring & Observability Dashboard",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/24-voice-conversation",
+    "title": "Epic 24: Realtime Voice Conversation with Orchestrator",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/25-wiki-site",
+    "title": "Epic 25: Documentation & Wiki Site",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/3-quality-gates",
+    "title": "Epic 3: Quality Gates & Intelligence Layer",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/4-event-sourcing",
+    "title": "Epic 4: Event Sourcing & Audit Trail",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/5-observability",
+    "title": "Epic 5: Observability Dashboard & Documentation",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/6-context-knowledge",
+    "title": "Epic 6: Context & Knowledge Management",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/7-mentorship",
+    "title": "Epic 7: Autonomous Mentorship Workflow",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/8-distribution",
+    "title": "Epic 8: Distribution & Installation",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/9-agent-management",
+    "title": "Epic 9: Config-Driven Multi-Agent Management",
+    "section": "Epics"
+  },
+  {
+    "path": "/epics/11-14-elsa",
+    "title": "Epics 11-14: ELSA Hardening & Enhancement",
+    "section": "Epics"
+  },
+  {
+    "path": "/workflows/adl-orchestrator",
+    "title": "Workflow: ADL Orchestrator",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/blocker-diagnosis",
+    "title": "Workflow: Blocker Diagnosis",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/code-review",
+    "title": "Workflow: Code Review",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/context-gathering",
+    "title": "Workflow: Context Gathering",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/debugging",
+    "title": "Workflow: Debugging",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/llm-call",
+    "title": "Workflow: LLM Call",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/mentorship",
+    "title": "Workflow: Mentorship",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/single-issue-cycle",
+    "title": "Workflow: Single Issue Cycle",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/tdd-cycle",
+    "title": "Workflow: TDD Cycle",
+    "section": "Workflows"
+  },
+  {
+    "path": "/workflows/testing",
+    "title": "Workflow: Testing Pipeline",
+    "section": "Workflows"
   },
   {
     "path": "/stories/epic-1",
@@ -17,21 +307,6 @@
   {
     "path": "/stories/epic-1/tech-spec-epic-1",
     "title": "Epic Technical Specification: Foundation & Core Infrastructure",
-    "section": "Epic 1"
-  },
-  {
-    "path": "/stories/epic-1/1-4-git-platform-interface-definition-task-5",
-    "title": "Git Platform Integration Guide",
-    "section": "Epic 1"
-  },
-  {
-    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-1",
-    "title": "Orchestrator Mode Responsibilities and Scope",
-    "section": "Epic 1"
-  },
-  {
-    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-4",
-    "title": "Orchestrator Startup Workflow",
     "section": "Epic 1"
   },
   {
@@ -100,6 +375,11 @@
     "section": "Epic 1"
   },
   {
+    "path": "/stories/epic-1/1-6-gitlab-platform-implementation-task-6",
+    "title": "Story 1.6 Task 6: Implement Integration Testing",
+    "section": "Epic 1"
+  },
+  {
     "path": "/stories/epic-1/1-13-agent-customization-system",
     "title": "Story 1.6: Agent Customization System",
     "section": "Epic 1"
@@ -135,8 +415,23 @@
     "section": "Epic 1"
   },
   {
+    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-1",
+    "title": "Story 1.8 Task 1: Define Orchestrator Mode Architecture",
+    "section": "Epic 1"
+  },
+  {
+    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-2",
+    "title": "Story 1.8 Task 2: Define Worker Mode Architecture",
+    "section": "Epic 1"
+  },
+  {
     "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-3",
     "title": "Story 1.8 Task 3: Design Shared Components and Interfaces",
+    "section": "Epic 1"
+  },
+  {
+    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-4",
+    "title": "Story 1.8 Task 4: Create Sequence Diagrams and Workflows",
     "section": "Epic 1"
   },
   {
@@ -305,6 +600,11 @@
     "section": "Epic 1"
   },
   {
+    "path": "/stories/epic-1/1-4-git-platform-interface-definition-task-5",
+    "title": "Task 5: Create Integration Documentation",
+    "section": "Epic 1"
+  },
+  {
     "path": "/stories/epic-1/1-3-provider-configuration-management-task-5",
     "title": "Task 5: Create provider discovery and selection logic",
     "section": "Epic 1"
@@ -337,6 +637,11 @@
   {
     "path": "/stories/epic-1/1-2-claude-code-provider-implementation-task-6",
     "title": "Task 6: Create comprehensive test suite",
+    "section": "Epic 1"
+  },
+  {
+    "path": "/stories/epic-1/1-0-ai-provider-strategy-research-task-6",
+    "title": "Task 6: Document Findings and Recommendations",
     "section": "Epic 1"
   },
   {
@@ -375,63 +680,23 @@
     "section": "Epic 1"
   },
   {
-    "path": "/stories/epic-1/1-8-hybrid-orchestrator-worker-architecture-design-task-2",
-    "title": "Worker Mode Responsibilities and Scope",
-    "section": "Epic 1"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-3-environment-specific-deployments",
-    "title": ".github/workflows/deploy.yml",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-8-npm-package-publishing",
-    "title": ".github/workflows/release.yml",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-7-system-configuration-management",
-    "title": "@tamma/config/templates/config.yaml.template",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/tech-spec-epic-1.5",
-    "title": "Build stage",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-4-secret-management-integration",
-    "title": "config.yaml",
-    "section": "Epic 1-5"
-  },
-  {
     "path": "/stories/epic-1-5",
     "title": "Epic 1.5: Infrastructure & Deployment",
     "section": "Epic 1-5"
   },
   {
-    "path": "/stories/epic-1-5/1.5-4-web-server-api",
-    "title": "HELP tamma_requests_total Total number of HTTP requests",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-9-binary-releases-installers",
-    "title": "installers/macos/create-dmg.sh",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-10-kubernetes-deployment",
-    "title": "k8s/namespace.yaml",
-    "section": "Epic 1-5"
-  },
-  {
-    "path": "/stories/epic-1-5/1.5-5-docker-packaging",
-    "title": "Multi-stage Dockerfile for Tamma",
+    "path": "/stories/epic-1-5/tech-spec-epic-1.5",
+    "title": "Epic Technical Specification: Deployment, Packaging & Operations",
     "section": "Epic 1-5"
   },
   {
     "path": "/stories/epic-1-5/1.5-1-core-engine-separation",
     "title": "Story 1.5-1: Core Engine Separation",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-10-kubernetes-deployment",
+    "title": "Story 1.5-10: Kubernetes Deployment (Optional)",
     "section": "Epic 1-5"
   },
   {
@@ -470,8 +735,28 @@
     "section": "Epic 1-5"
   },
   {
+    "path": "/stories/epic-1-5/1.5-3-environment-specific-deployments",
+    "title": "Story 1.5-3: Environment-Specific Deployments",
+    "section": "Epic 1-5"
+  },
+  {
     "path": "/stories/epic-1-5/1.5-3-service-mode-implementation",
     "title": "Story 1.5-3: Service Mode Implementation",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-4-secret-management-integration",
+    "title": "Story 1.5-4: Secret Management Integration",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-4-web-server-api",
+    "title": "Story 1.5-4: Web Server & API",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-5-docker-packaging",
+    "title": "Story 1.5-5: Docker Packaging",
     "section": "Epic 1-5"
   },
   {
@@ -490,9 +775,1009 @@
     "section": "Epic 1-5"
   },
   {
-    "path": "/stories/epic-1-5/1.5-8-documentation-and-templates",
-    "title": "templates/configurations/basic-setup.yaml",
+    "path": "/stories/epic-1-5/1.5-7-system-configuration-management",
+    "title": "Story 1.5-7: System Configuration Management",
     "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-8-documentation-and-templates",
+    "title": "Story 1.5-8: Documentation and Templates",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-8-npm-package-publishing",
+    "title": "Story 1.5-8: NPM Package Publishing",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-1-5/1.5-9-binary-releases-installers",
+    "title": "Story 1.5-9: Binary Releases & Installers",
+    "section": "Epic 1-5"
+  },
+  {
+    "path": "/stories/epic-2",
+    "title": "Epic 2: Autonomous Development Loop - Core",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/tech-spec-epic-2",
+    "title": "Epic Technical Specification: Autonomous Development Loop - Core",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-19-intelligent-issue-orchestration-impl-plan",
+    "title": "Implementation Plan: Story 2.19 - Intelligent Issue Orchestration",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-17-workflow-prompt-engineering-impl-plan",
+    "title": "Story 2-17: Implementation Plan -- Workflow Prompt Engineering Overhaul",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-17-workflow-prompt-engineering",
+    "title": "Story 2-17: Workflow Prompt Engineering Overhaul",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-1-issue-selection-with-filtering",
+    "title": "Story 2.1: Issue Selection with Filtering",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-10-pr-merge-with-completion-checkpoint",
+    "title": "Story 2.10: PR Merge with Completion Checkpoint",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-11-auto-next-issue-selection",
+    "title": "Story 2.11: Auto Next Issue Selection",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-12-intelligent-provider-selection",
+    "title": "Story 2.12: Intelligent Provider Selection",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-13-prompt-engineering-optimization",
+    "title": "Story 2.13: Prompt Engineering Optimization",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-14-issue-decomposition-engine",
+    "title": "Story 2.14: Issue Decomposition Engine",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-15-task-dependency-mapping",
+    "title": "Story 2.15: Task Dependency Mapping",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-16-incremental-task-sequencing",
+    "title": "Story 2.16: Incremental Task Sequencing",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-18-git-workflow-prompt-overhaul",
+    "title": "Story 2.18: Git Workflow Prompt Overhaul",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-18-git-workflow-prompt-overhaul-impl-plan",
+    "title": "Story 2.18: Git Workflow Prompt Overhaul -- Implementation Plan",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-19-intelligent-issue-orchestration",
+    "title": "Story 2.19: Intelligent Issue Orchestration",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-2-issue-context-analysis",
+    "title": "Story 2.2: Issue Context Analysis",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-3-development-plan-generation-with-approval-checkpoint",
+    "title": "Story 2.3: Development Plan Generation with Approval Checkpoint",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-4-git-branch-creation",
+    "title": "Story 2.4: Git Branch Creation",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-5-test-first-development-write-failing-tests",
+    "title": "Story 2.5: Test-First Development - Write Failing Tests",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-6-implementation-code-generation",
+    "title": "Story 2.6: Implementation Code Generation",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-7-code-refactoring-pass",
+    "title": "Story 2.7: Code Refactoring Pass",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-8-pull-request-creation",
+    "title": "Story 2.8: Pull Request Creation",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-9-pr-status-monitoring",
+    "title": "Story 2.9: PR Status Monitoring",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/task-11-ux-issue-selection-dashboard",
+    "title": "Task 11: UX Implementation - Issue Selection Dashboard",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/task-12-ux-development-plan-review-ui",
+    "title": "Task 12: UX Implementation - Development Plan Review & Approval UI",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/task-13-ux-pr-monitoring-dashboard",
+    "title": "Task 13: UX Implementation - PR Monitoring Dashboard",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-3",
+    "title": "Epic 3: Quality Gates & Intelligence Layer",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/tech-spec-epic-3",
+    "title": "Epic Technical Specification: Quality Gates & Intelligence Layer",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-1-build-automation-gate-implementation",
+    "title": "Story 3.1: Build Automation Gate Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/implementation-plan",
+    "title": "Story 3.1: Build Automation Gate Implementation - Implementation Plan",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-10-agent-performance-monitoring",
+    "title": "Story 3.10: Agent Performance Monitoring",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-11-cost-aware-ai-usage",
+    "title": "Story 3.11: Cost-Aware AI Usage",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-12-task-complexity-assessment",
+    "title": "Story 3.12: Task Complexity Assessment",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-13-intelligent-test-execution-pipeline",
+    "title": "Story 3.13: Intelligent Test Execution Pipeline",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-13-intelligent-test-execution-impl-plan",
+    "title": "Story 3.13: Intelligent Test Execution Pipeline - Implementation Plan",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-2-test-execution-gate-implementation",
+    "title": "Story 3.2: Test Execution Gate Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-3-escalation-workflow-implementation",
+    "title": "Story 3.3: Escalation Workflow Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-4-research-workflow-implementation",
+    "title": "Story 3.4: Research Workflow, Performance Testing & Test Bank Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-5-clarifying-questions-workflow-implementation",
+    "title": "Story 3.5: Clarifying Questions Workflow & Code Quality Gates Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-6-ambiguity-scoring-implementation",
+    "title": "Story 3.6: Ambiguity Scoring Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-7-design-proposal-workflow-implementation",
+    "title": "Story 3.7: Design Proposal Workflow Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-8-static-analysis-gate-implementation",
+    "title": "Story 3.8: Static Analysis Gate Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-9-security-scanning-gate-implementation",
+    "title": "Story 3.9: Security Scanning Gate Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/1-ci-cd-build-trigger",
+    "title": "Task 1: CI/CD Build Trigger Implementation",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/10-build-tool-version-management",
+    "title": "Task 10: Build Tool Version Management",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/2-build-status-polling",
+    "title": "Task 2: Build Status Polling System",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/3-build-failure-analysis",
+    "title": "Task 3: Build Failure Analysis System",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/4-ai-fix-suggestions",
+    "title": "Task 4: AI-Powered Fix Suggestions",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/5-fix-application-commit",
+    "title": "Task 5: Fix Application and Commit System",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/6-retry-logic-backoff",
+    "title": "Task 6: Retry Logic with Exponential Backoff",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/7-multi-build-system-support",
+    "title": "Task 7: Multi-Build System Support",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/8-language-detection-support",
+    "title": "Task 8: Language Detection and Support",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-3/9-build-configuration-detection",
+    "title": "Task 9: Build Configuration Detection",
+    "section": "Epic 3"
+  },
+  {
+    "path": "/stories/epic-4",
+    "title": "Epic 4: Event Sourcing & Audit Trail",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/tech-spec-epic-4",
+    "title": "Epic Technical Specification: Event Sourcing & Audit Trail",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-1-event-schema-design",
+    "title": "Story 4.1: Event Schema Design",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-2-event-store-backend-selection",
+    "title": "Story 4.2: Event Store Backend Selection",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-3-event-capture-issue-selection-analysis",
+    "title": "Story 4.3: Event Capture - Issue Selection & Analysis",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-4-event-capture-ai-provider-interactions",
+    "title": "Story 4.4: Event Capture - AI Provider Interactions",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-5-event-capture-code-changes-git-operations",
+    "title": "Story 4.5: Event Capture - Code Changes & Git Operations",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-6-event-capture-approvals-escalations",
+    "title": "Story 4.6: Event Capture - Approvals & Escalations",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-7-event-query-api-time-travel",
+    "title": "Story 4.7: Event Query API for Time-Travel",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-4/4-8-black-box-replay-debugging",
+    "title": "Story 4.8: Black-Box Replay for Debugging",
+    "section": "Epic 4"
+  },
+  {
+    "path": "/stories/epic-5",
+    "title": "Epic 5: Observability Dashboard & Documentation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/tech-spec-epic-5",
+    "title": "Epic Technical Specification: Observability & Production Readiness",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.1-structured-logging-implementation",
+    "title": "Story 5.1: Structured Logging Implementation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.10-alpha-release-preparation",
+    "title": "Story 5.10: Alpha Release Preparation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.2-metrics-collection-infrastructure",
+    "title": "Story 5.2: Metrics Collection Infrastructure",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.3-real-time-dashboard-system-health",
+    "title": "Story 5.3: Real-Time Dashboard - System Health",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.4-real-time-dashboard-development-velocity",
+    "title": "Story 5.4: Real-Time Dashboard - Development Velocity",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.5-event-trail-exploration-ui",
+    "title": "Story 5.5: Event Trail Exploration UI",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.6-alert-system-critical-issues",
+    "title": "Story 5.6: Alert System for Critical Issues",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.7-feedback-collection-system",
+    "title": "Story 5.7: Feedback Collection System",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.8-integration-testing-suite",
+    "title": "Story 5.8: Integration Testing Suite",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.9a-installation-setup-documentation",
+    "title": "Story 5.9a: Installation & Setup Documentation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.9b-usage-configuration-documentation",
+    "title": "Story 5.9b: Usage & Configuration Documentation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.9c-api-reference-documentation",
+    "title": "Story 5.9c: API Reference Documentation",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.9d-full-documentation-website",
+    "title": "Story 5.9d: Full Documentation Website",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-5/5.9e-video-walkthrough",
+    "title": "Story 5.9e: Video Walkthrough",
+    "section": "Epic 5"
+  },
+  {
+    "path": "/stories/epic-6",
+    "title": "Epic 6: Context & Knowledge Management",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-1-implementation-plan",
+    "title": "Story 6-1: Codebase Indexer - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-1-codebase-indexer",
+    "title": "Story 6-1: Codebase Indexer Implementation",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-10-scrum-master-task-loop",
+    "title": "Story 6-10: Scrum Master Task Loop",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-10-implementation-plan",
+    "title": "Story 6-10: Scrum Master Task Loop - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-2-vector-database-integration",
+    "title": "Story 6-2: Vector Database Integration",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-2-implementation-plan",
+    "title": "Story 6-2: Vector Database Integration - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-3-rag-pipeline",
+    "title": "Story 6-3: RAG Pipeline Implementation",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-3-implementation-plan",
+    "title": "Story 6-3: RAG Pipeline Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-4-mcp-client-integration",
+    "title": "Story 6-4: MCP Client Integration",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-4-implementation-plan",
+    "title": "Story 6-4: MCP Client Integration - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-5-context-aggregator",
+    "title": "Story 6-5: Context Aggregator Service",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-5-implementation-plan",
+    "title": "Story 6-5: Context Aggregator Service - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-6-knowledge-base-ui",
+    "title": "Story 6-6: Knowledge Base Management UI",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-6-implementation-plan",
+    "title": "Story 6-6: Knowledge Base Management UI - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-7-llm-cost-monitoring",
+    "title": "Story 6-7: LLM Cost Monitoring & Reporting",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-7-implementation-plan",
+    "title": "Story 6-7: LLM Cost Monitoring & Reporting - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-8-agent-permissions",
+    "title": "Story 6-8: Agent Permissions System",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-8-implementation-plan",
+    "title": "Story 6-8: Agent Permissions System - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-9-implementation-plan",
+    "title": "Story 6-9: Agent Knowledge Base - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-9-agent-knowledge-base",
+    "title": "Story 6-9: Agent Knowledge Base (Recommendations, Prohibited Actions, Learnings)",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-7",
+    "title": "Epic 7: Autonomous Mentorship Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1-mentorship-state-machine",
+    "title": "Story 7-1: Mentorship State Machine Core",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-10-mentorship-dashboard",
+    "title": "Story 7-10: Mentorship Dashboard & Reporting",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-11-blocker-diagnosis-improvements",
+    "title": "Story 7-11: Blocker Diagnosis Context Enrichment and Resolution Intelligence",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-12-debugging-workflow-prompt-improvements",
+    "title": "Story 7-12: Debugging Workflow Prompt Improvements",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1A-main-workflow-code-first",
+    "title": "Story 7-1A: Main Mentorship Workflow (Code-First Flowchart)",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1B-llm-call-sub-workflow",
+    "title": "Story 7-1B: LLM Call Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1C-testing-sub-workflow",
+    "title": "Story 7-1C: Testing Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1D-code-review-sub-workflow",
+    "title": "Story 7-1D: Code Review Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1E-assessment-sub-workflow",
+    "title": "Story 7-1E: Assessment Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1F-context-gathering-sub-workflow",
+    "title": "Story 7-1F: Context Gathering Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1G-blocker-diagnosis-sub-workflow",
+    "title": "Story 7-1G: Blocker Diagnosis Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1H-tdd-sub-workflow",
+    "title": "Story 7-1H: TDD Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-1I-debugging-sub-workflow",
+    "title": "Story 7-1I: Debugging Sub-Workflow",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-2-skill-assessment-activity",
+    "title": "Story 7-2: Skill Assessment Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-3-context-gathering-activity",
+    "title": "Story 7-3: Context Gathering Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-4-claude-analysis-activity",
+    "title": "Story 7-4: Claude Analysis Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-5-plan-decomposition-activity",
+    "title": "Story 7-5: Plan Decomposition Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-6-blocker-diagnosis-activity",
+    "title": "Story 7-6: Blocker Diagnosis & Resolution Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-7-quality-gate-activity",
+    "title": "Story 7-7: Mentorship Quality Gate Activity",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-8-progress-tracking",
+    "title": "Story 7-8: Skill Progress Tracking & Analytics",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-8-tdd-prompt-overhaul-impl-plan",
+    "title": "Story 7-8B: TDD Prompt Overhaul — Implementation Plan",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-8-tdd-workflow-prompt-overhaul",
+    "title": "Story 7-8B: TDD Workflow Prompt Overhaul",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-7/7-9-mentorship-session-management",
+    "title": "Story 7-9: Mentorship Session Management",
+    "section": "Epic 7"
+  },
+  {
+    "path": "/stories/epic-8",
+    "title": "Epic 8: Distribution & Installation",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-1-esbuild-bundle",
+    "title": "Story 8-1: esbuild Bundle & Package Structure",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-2-npm-publish-pipeline",
+    "title": "Story 8-2: npm Publish CI/CD Pipeline",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-3-standalone-binary",
+    "title": "Story 8-3: Standalone Binary Compilation",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-4-install-scripts-releases",
+    "title": "Story 8-4: Install Scripts & GitHub Releases",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-5-auto-update-homebrew",
+    "title": "Story 8-5: Auto-Update & Package Manager Distribution",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-6-ts-dashboard-dockerfiles",
+    "title": "Story 8-6: TypeScript & Dashboard Dockerfiles",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-7-docker-compose-full-stack",
+    "title": "Story 8-7: Docker Compose Full Stack",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-8/8-8-docker-cicd-cli-integration",
+    "title": "Story 8-8: Docker CI/CD & CLI Integration",
+    "section": "Epic 8"
+  },
+  {
+    "path": "/stories/epic-9/9-0-overview",
+    "title": "Config-Driven Agent Management — Overview",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9",
+    "title": "Epic 9: Config-Driven Agent Management & Diagnostics",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema",
+    "title": "Story 1: Multi-Agent Configuration Schema",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-10-cli-wiring",
+    "title": "Story 10: CLI Wiring",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors",
+    "title": "Story 11: Diagnostics Queue & MCP Tool Interceptors",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics",
+    "title": "Story 2: Provider Diagnostics Collector",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-3-provider-health-tracker",
+    "title": "Story 3: Provider Health Tracker",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-4-agent-provider-factory",
+    "title": "Story 4: Agent Provider Factory",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-5-provider-chain",
+    "title": "Story 5: Provider Chain with Fallback & Diagnostics",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-6-agent-prompt-registry",
+    "title": "Story 6: Agent Prompt Registry",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization",
+    "title": "Story 7: Content Sanitization",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver",
+    "title": "Story 8: Role-Based Agent Resolver",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration",
+    "title": "Story 9: Engine Integration",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics-task-1",
+    "title": "Task 1: Create DiagnosticsEvent Type, Sanitization, Validation, and DiagnosticsQueue in Shared Telemetry Package",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-1",
+    "title": "Task 1: Create DiagnosticsEvent Types and DiagnosticsQueue Class",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema-task-1",
+    "title": "Task 1: Define Agent Configuration Types",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-1",
+    "title": "Task 1: Define Built-in Role Prompt Templates, Constants, and Interfaces",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-3-provider-health-tracker-task-1",
+    "title": "Task 1: Extract Shared Error Factory",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-4-agent-provider-factory-task-1",
+    "title": "Task 1: Implement AgentProviderFactory with provider registration and apiKeyRef resolution",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization-task-1",
+    "title": "Task 1: Implement IContentSanitizer Interface and ContentSanitizer Class",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-5-provider-chain-task-1",
+    "title": "Task 1: Implement ProviderChain core iteration with health checks",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-1",
+    "title": "Task 1: Implement RoleBasedAgentResolver Core (Constructor, Phase-to-Role Mapping)",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration-task-1",
+    "title": "Task 1: Make EngineContext.agent Optional and Add agentResolver",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-10-cli-wiring-task-1",
+    "title": "Task 1: Wire Config-Driven Agent Setup in start.tsx",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-5-provider-chain-task-2",
+    "title": "Task 2: Add budget checking via ICostTracker",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-2",
+    "title": "Task 2: Create DiagnosticsProcessor Mapping Events to Cost Tracker",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics-task-2",
+    "title": "Task 2: Create InstrumentedAgentProvider Decorator",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema-task-2",
+    "title": "Task 2: Extend TammaConfig with New Optional Fields",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-2",
+    "title": "Task 2: Implement getAgentForRole with Chain Creation and Security Wrapping",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-2",
+    "title": "Task 2: Implement Template Resolution Chain (6 Levels) with Security Guards",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization-task-2",
+    "title": "Task 2: Implement URL Validator with Numeric Octet Parsing and IPv6 Support",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-4-agent-provider-factory-task-2",
+    "title": "Task 2: Implement wrapAsAgent() LLM-to-Agent adapter",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-3-provider-health-tracker-task-2",
+    "title": "Task 2: Update Existing Providers to Use Shared Error Factory",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration-task-2",
+    "title": "Task 2: Update initialize() and dispose() Guards",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-10-cli-wiring-task-2",
+    "title": "Task 2: Wire Config-Driven Agent Setup in server.ts",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-5-provider-chain-task-3",
+    "title": "Task 3: Add instrumentation wrapping and error handling",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics-task-3",
+    "title": "Task 3: Create InstrumentedLLMProvider Decorator (Full IAIProvider)",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-3",
+    "title": "Task 3: Create ToolInterceptorChain with Pre/Post Interceptors",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema-task-3",
+    "title": "Task 3: Fix mergeConfig() to Propagate Optional Fields",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-10-cli-wiring-task-3",
+    "title": "Task 3: Fix Shutdown Lifecycle (diagnosticsQueue + costTracker Disposal)",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization-task-3",
+    "title": "Task 3: Implement Action Gating with Shell Metacharacter Normalization",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration-task-3",
+    "title": "Task 3: Implement getAgentForPhase() and getEngineTaskOverrides()",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-3",
+    "title": "Task 3: Implement getTaskConfig with 3-Level Merge Precedence",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-3-provider-health-tracker-task-3",
+    "title": "Task 3: Implement ProviderHealthTracker with Circuit Breaker",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-3",
+    "title": "Task 3: Implement render() with {{variable}} Interpolation and Size Limits",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-4-agent-provider-factory-task-3",
+    "title": "Task 3: Wire built-in provider registrations, exports, and tests",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-10-cli-wiring-task-4",
+    "title": "Task 4: Add cost-monitor Dependency and Ensure normalizeAgentsConfig Is Exported",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-4",
+    "title": "Task 4: Create Built-in Interceptor Factories",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-5-provider-chain-task-4",
+    "title": "Task 4: Handle edge cases, disposal, and comprehensive tests",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-4",
+    "title": "Task 4: Implement getPrompt Delegation and Provider Chain Management",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-3-provider-health-tracker-task-4",
+    "title": "Task 4: Implement getStatus() Reporting and Finalize Exports",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema-task-4",
+    "title": "Task 4: Implement normalizeAgentsConfig() with Legacy Provider Mapping",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization-task-4",
+    "title": "Task 4: Implement Secure Fetch with Streaming Body Read and Manual Redirect Handling",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics-task-4",
+    "title": "Task 4: Update Cost-Monitor Types and Create Provider Name Mapping",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration-task-4",
+    "title": "Task 4: Update generatePlan() and implementCode() for Resolver Mode",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-9-engine-integration-task-5",
+    "title": "Task 5: Add Backward Compatibility Tests",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-1-configuration-schema-task-5",
+    "title": "Task 5: Add Environment Variable Support for Security Config",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-2-provider-diagnostics-task-5",
+    "title": "Task 5: Create Diagnostics Processor for Cost Tracking",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-5",
+    "title": "Task 5: Export All New Modules from Providers Index",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-7-content-sanitization-task-5",
+    "title": "Task 5: Implement SecureAgentProvider Decorator with IContentSanitizer and Barrel Exports",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-5",
+    "title": "Task 5: Modify MCPClient.invokeTool() for Interceptor Chain Support",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-6",
+    "title": "Task 6: Bridge MCPClient Events to DiagnosticsQueue and Write Tests",
+    "section": "Epic 9"
+  },
+  {
+    "path": "/stories/epic-10/tech-spec-epic-10",
+    "title": "Epic 10 Technical Specification: Engine Core — Workflow-Driven Architecture",
+    "section": "Epic 10"
   },
   {
     "path": "/stories/epic-10",
@@ -501,22 +1786,17 @@
   },
   {
     "path": "/stories/epic-10/10-1-engine-static-workflow-and-brain",
-    "title": "loop exits when LLM produces text-only response",
-    "section": "Epic 10"
-  },
-  {
-    "path": "/stories/epic-10/tech-spec-epic-10",
-    "title": "loop exits when LLM produces text-only response",
-    "section": "Epic 10"
-  },
-  {
-    "path": "/stories/epic-10/10-3-event-store-postgresql-emmett",
-    "title": "Required for event store performance",
+    "title": "Story 10.1: Engine Static Workflow — Orchestrator Tool Loop",
     "section": "Epic 10"
   },
   {
     "path": "/stories/epic-10/10-2-comprehensive-event-catalog-and-typed-schema",
     "title": "Story 10.2: Comprehensive Event Catalog & Typed Schema",
+    "section": "Epic 10"
+  },
+  {
+    "path": "/stories/epic-10/10-3-event-store-postgresql-emmett",
+    "title": "Story 10.3: Event Store — PostgreSQL/Emmett Implementation",
     "section": "Epic 10"
   },
   {
@@ -710,18 +1990,8 @@
     "section": "Epic 13"
   },
   {
-    "path": "/stories/epic-14/14-2-studio-docker-and-ci",
-    "title": "Build stage",
-    "section": "Epic 14"
-  },
-  {
     "path": "/stories/epic-14",
     "title": "Epic 14: Custom ELSA Studio",
-    "section": "Epic 14"
-  },
-  {
-    "path": "/stories/epic-14/14-3-studio-custom-ui-hints-impl-plan",
-    "title": "Search restored NuGet packages for menu interfaces",
     "section": "Epic 14"
   },
   {
@@ -730,24 +2000,29 @@
     "section": "Epic 14"
   },
   {
+    "path": "/stories/epic-14/14-1-studio-blazor-wasm-scaffold-impl-plan",
+    "title": "Story 14.1: Studio Blazor WASM Scaffold — Implementation Plan",
+    "section": "Epic 14"
+  },
+  {
+    "path": "/stories/epic-14/14-2-studio-docker-and-ci",
+    "title": "Story 14.2: Studio Docker & CI",
+    "section": "Epic 14"
+  },
+  {
+    "path": "/stories/epic-14/14-2-studio-docker-and-ci-impl-plan",
+    "title": "Story 14.2: Studio Docker & CI — Implementation Plan",
+    "section": "Epic 14"
+  },
+  {
     "path": "/stories/epic-14/14-3-studio-custom-ui-hints",
     "title": "Story 14.3: Studio Custom UI Hints",
     "section": "Epic 14"
   },
   {
-    "path": "/stories/epic-14/14-2-studio-docker-and-ci-impl-plan",
-    "title": "Tamma Studio — nginx configuration",
+    "path": "/stories/epic-14/14-3-studio-custom-ui-hints-impl-plan",
+    "title": "Story 14.3: Studio Custom UI Hints — Implementation Plan",
     "section": "Epic 14"
-  },
-  {
-    "path": "/stories/epic-14/14-1-studio-blazor-wasm-scaffold-impl-plan",
-    "title": "Then inspect with: dotnet tool run ilspy ... or search .cs in the ELSA Studio GitHub repo",
-    "section": "Epic 14"
-  },
-  {
-    "path": "/stories/epic-15/15-1-opensearch-log-aggregation-impl-plan",
-    "title": "=============================================================================",
-    "section": "Epic 15"
   },
   {
     "path": "/stories/epic-15",
@@ -756,13 +2031,13 @@
   },
   {
     "path": "/stories/epic-15/15-1-opensearch-log-aggregation",
-    "title": "In docker/docker-compose.yml — add under services:",
+    "title": "Story 15.1: OpenSearch Log Aggregation",
     "section": "Epic 15"
   },
   {
-    "path": "/stories/epic-16/16-5-role-based-access-control",
-    "title": "elsa.tamma.dev — ELSA Studio (admin/owner only)",
-    "section": "Epic 16"
+    "path": "/stories/epic-15/15-1-opensearch-log-aggregation-impl-plan",
+    "title": "Story 15.1: OpenSearch Log Aggregation — Implementation Plan",
+    "section": "Epic 15"
   },
   {
     "path": "/stories/epic-16",
@@ -770,13 +2045,8 @@
     "section": "Epic 16"
   },
   {
-    "path": "/stories/epic-16/16-4-unified-navigation",
-    "title": "In the logs.tamma.dev server block",
-    "section": "Epic 16"
-  },
-  {
     "path": "/stories/epic-16/16-1-oauth2-proxy-unified-auth",
-    "title": "Provider",
+    "title": "Story 16.1: OAuth2 Proxy Unified Authentication",
     "section": "Epic 16"
   },
   {
@@ -787,6 +2057,16 @@
   {
     "path": "/stories/epic-16/16-3-admin-dashboard",
     "title": "Story 16.3: Admin Dashboard Panel",
+    "section": "Epic 16"
+  },
+  {
+    "path": "/stories/epic-16/16-4-unified-navigation",
+    "title": "Story 16.4: Cross-Service Unified Navigation Header",
+    "section": "Epic 16"
+  },
+  {
+    "path": "/stories/epic-16/16-5-role-based-access-control",
+    "title": "Story 16.5: Role-Based Access Control Enforcement",
     "section": "Epic 16"
   },
   {
@@ -861,7 +2141,7 @@
   },
   {
     "path": "/stories/epic-19/19-1-tamma-agent-workflow-template",
-    "title": "Install Claude Code CLI",
+    "title": "Story 19-1: Tamma Agent GitHub Actions Workflow Template",
     "section": "Epic 19"
   },
   {
@@ -885,153 +2165,18 @@
     "section": "Epic 19"
   },
   {
-    "path": "/stories/epic-2/2-19-intelligent-issue-orchestration-impl-plan",
-    "title": "Body length signal",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2",
-    "title": "Epic 2: Autonomous Development Loop - Core",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/tech-spec-epic-2",
-    "title": "Epic Technical Specification: Autonomous Development Loop - Core",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-17-workflow-prompt-engineering-impl-plan",
-    "title": "Story 2-17: Implementation Plan -- Workflow Prompt Engineering Overhaul",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-17-workflow-prompt-engineering",
-    "title": "Story 2-17: Workflow Prompt Engineering Overhaul",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-1-issue-selection-with-filtering",
-    "title": "Story 2.1: Issue Selection with Filtering",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-10-pr-merge-with-completion-checkpoint",
-    "title": "Story 2.10: PR Merge with Completion Checkpoint",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-11-auto-next-issue-selection",
-    "title": "Story 2.11: Auto Next Issue Selection",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-12-intelligent-provider-selection",
-    "title": "Story 2.12: Intelligent Provider Selection",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-13-prompt-engineering-optimization",
-    "title": "Story 2.13: Prompt Engineering Optimization",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-14-issue-decomposition-engine",
-    "title": "Story 2.14: Issue Decomposition Engine",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-15-task-dependency-mapping",
-    "title": "Story 2.15: Task Dependency Mapping",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-16-incremental-task-sequencing",
-    "title": "Story 2.16: Incremental Task Sequencing",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-18-git-workflow-prompt-overhaul",
-    "title": "Story 2.18: Git Workflow Prompt Overhaul",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-18-git-workflow-prompt-overhaul-impl-plan",
-    "title": "Story 2.18: Git Workflow Prompt Overhaul -- Implementation Plan",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-19-intelligent-issue-orchestration",
-    "title": "Story 2.19: Intelligent Issue Orchestration",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-2-issue-context-analysis",
-    "title": "Story 2.2: Issue Context Analysis",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-3-development-plan-generation-with-approval-checkpoint",
-    "title": "Story 2.3: Development Plan Generation with Approval Checkpoint",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-4-git-branch-creation",
-    "title": "Story 2.4: Git Branch Creation",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-5-test-first-development-write-failing-tests",
-    "title": "Story 2.5: Test-First Development - Write Failing Tests",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-6-implementation-code-generation",
-    "title": "Story 2.6: Implementation Code Generation",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-7-code-refactoring-pass",
-    "title": "Story 2.7: Code Refactoring Pass",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-8-pull-request-creation",
-    "title": "Story 2.8: Pull Request Creation",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/2-9-pr-status-monitoring",
-    "title": "Story 2.9: PR Status Monitoring",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/task-11-ux-issue-selection-dashboard",
-    "title": "Task 11: UX Implementation - Issue Selection Dashboard",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/task-12-ux-development-plan-review-ui",
-    "title": "Task 12: UX Implementation - Development Plan Review & Approval UI",
-    "section": "Epic 2"
-  },
-  {
-    "path": "/stories/epic-2/task-13-ux-pr-monitoring-dashboard",
-    "title": "Task 13: UX Implementation - PR Monitoring Dashboard",
-    "section": "Epic 2"
-  },
-  {
     "path": "/stories/epic-20",
     "title": "Epic 20: Billing & Payments for Tamma SaaS",
     "section": "Epic 20"
   },
   {
-    "path": "/stories/epic-20/20-2-subscription-management",
-    "title": "Install Stripe CLI",
+    "path": "/stories/epic-20/20-1-stripe-integration-plan-model",
+    "title": "Story 20-1: Stripe Integration & Plan Model",
     "section": "Epic 20"
   },
   {
-    "path": "/stories/epic-20/20-1-stripe-integration-plan-model",
-    "title": "Story 20-1: Stripe Integration & Plan Model",
+    "path": "/stories/epic-20/20-2-subscription-management",
+    "title": "Story 20-2: Subscription Management",
     "section": "Epic 20"
   },
   {
@@ -1050,11 +2195,6 @@
     "section": "Epic 20"
   },
   {
-    "path": "/stories/epic-21/21-3-documentation-site",
-    "title": "Added to build step",
-    "section": "Epic 21"
-  },
-  {
     "path": "/stories/epic-21",
     "title": "Epic 21: Marketing Site & User Dashboard",
     "section": "Epic 21"
@@ -1067,6 +2207,11 @@
   {
     "path": "/stories/epic-21/21-2-pricing-page",
     "title": "Story 21.2: Pricing Page + Stripe Checkout Integration",
+    "section": "Epic 21"
+  },
+  {
+    "path": "/stories/epic-21/21-3-documentation-site",
+    "title": "Story 21.3: Documentation Site",
     "section": "Epic 21"
   },
   {
@@ -1465,1178 +2610,13 @@
     "section": "Epic 24"
   },
   {
-    "path": "/stories/epic-25/25-1-custom-wiki-site",
-    "title": ".github/workflows/wiki-deploy.yml",
-    "section": "Epic 25"
-  },
-  {
     "path": "/stories/epic-25",
     "title": "Epic 25: Documentation & Wiki Site",
     "section": "Epic 25"
   },
   {
-    "path": "/stories/epic-3/4-ai-fix-suggestions",
-    "title": "AI provider configuration",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-build-failure-analysis",
-    "title": "Analysis configuration",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/tech-spec-epic-3",
-    "title": "Epic 3 package installation (from project root)",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3",
-    "title": "Epic 3: Quality Gates & Intelligence Layer",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-4-research-workflow-implementation",
-    "title": "epic-3-quality-gates.config.yaml",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/5-fix-application-commit",
-    "title": "Fix application configuration",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/1-ci-cd-build-trigger",
-    "title": "GitHub",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/2-build-status-polling",
-    "title": "Polling configuration",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/6-retry-logic-backoff",
-    "title": "Retry configuration",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-1-build-automation-gate-implementation",
-    "title": "Story 3.1: Build Automation Gate Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/implementation-plan",
-    "title": "Story 3.1: Build Automation Gate Implementation - Implementation Plan",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-10-agent-performance-monitoring",
-    "title": "Story 3.10: Agent Performance Monitoring",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-11-cost-aware-ai-usage",
-    "title": "Story 3.11: Cost-Aware AI Usage",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-12-task-complexity-assessment",
-    "title": "Story 3.12: Task Complexity Assessment",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-13-intelligent-test-execution-pipeline",
-    "title": "Story 3.13: Intelligent Test Execution Pipeline",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-13-intelligent-test-execution-impl-plan",
-    "title": "Story 3.13: Intelligent Test Execution Pipeline - Implementation Plan",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-2-test-execution-gate-implementation",
-    "title": "Story 3.2: Test Execution Gate Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-3-escalation-workflow-implementation",
-    "title": "Story 3.3: Escalation Workflow Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-5-clarifying-questions-workflow-implementation",
-    "title": "Story 3.5: Clarifying Questions Workflow & Code Quality Gates Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-6-ambiguity-scoring-implementation",
-    "title": "Story 3.6: Ambiguity Scoring Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-7-design-proposal-workflow-implementation",
-    "title": "Story 3.7: Design Proposal Workflow Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-8-static-analysis-gate-implementation",
-    "title": "Story 3.8: Static Analysis Gate Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/3-9-security-scanning-gate-implementation",
-    "title": "Story 3.9: Security Scanning Gate Implementation",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/10-build-tool-version-management",
-    "title": "Task 10: Build Tool Version Management",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/7-multi-build-system-support",
-    "title": "Task 7: Multi-Build System Support",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/8-language-detection-support",
-    "title": "Task 8: Language Detection and Support",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-3/9-build-configuration-detection",
-    "title": "Task 9: Build Configuration Detection",
-    "section": "Epic 3"
-  },
-  {
-    "path": "/stories/epic-4",
-    "title": "Epic 4: Event Sourcing & Audit Trail",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/tech-spec-epic-4",
-    "title": "Replay events by correlation ID",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-1-event-schema-design",
-    "title": "Story 4.1: Event Schema Design",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-2-event-store-backend-selection",
-    "title": "Story 4.2: Event Store Backend Selection",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-3-event-capture-issue-selection-analysis",
-    "title": "Story 4.3: Event Capture - Issue Selection & Analysis",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-4-event-capture-ai-provider-interactions",
-    "title": "Story 4.4: Event Capture - AI Provider Interactions",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-5-event-capture-code-changes-git-operations",
-    "title": "Story 4.5: Event Capture - Code Changes & Git Operations",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-6-event-capture-approvals-escalations",
-    "title": "Story 4.6: Event Capture - Approvals & Escalations",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-7-event-query-api-time-travel",
-    "title": "Story 4.7: Event Query API for Time-Travel",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-4/4-8-black-box-replay-debugging",
-    "title": "Story 4.8: Black-Box Replay for Debugging",
-    "section": "Epic 4"
-  },
-  {
-    "path": "/stories/epic-5/5.9d-full-documentation-website",
-    "title": "Documentation Structure",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5",
-    "title": "Epic 5: Observability Dashboard & Documentation",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/tech-spec-epic-5",
-    "title": "Epic Technical Specification: Observability & Production Readiness",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.9b-usage-configuration-documentation",
-    "title": "Global Options",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.9a-installation-setup-documentation",
-    "title": "Installation Guide",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.9c-api-reference-documentation",
-    "title": "Main API Categories",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.1-structured-logging-implementation",
-    "title": "Story 5.1: Structured Logging Implementation",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.10-alpha-release-preparation",
-    "title": "Story 5.10: Alpha Release Preparation",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.2-metrics-collection-infrastructure",
-    "title": "Story 5.2: Metrics Collection Infrastructure",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.3-real-time-dashboard-system-health",
-    "title": "Story 5.3: Real-Time Dashboard - System Health",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.4-real-time-dashboard-development-velocity",
-    "title": "Story 5.4: Real-Time Dashboard - Development Velocity",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.5-event-trail-exploration-ui",
-    "title": "Story 5.5: Event Trail Exploration UI",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.6-alert-system-critical-issues",
-    "title": "Story 5.6: Alert System for Critical Issues",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.7-feedback-collection-system",
-    "title": "Story 5.7: Feedback Collection System",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.8-integration-testing-suite",
-    "title": "Story 5.8: Integration Testing Suite",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-5/5.9e-video-walkthrough",
-    "title": "Video Content Structure",
-    "section": "Epic 5"
-  },
-  {
-    "path": "/stories/epic-6/6-9-implementation-plan",
-    "title": "/config/knowledge.yaml",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-3-implementation-plan",
-    "title": "/packages/intelligence/config/rag-defaults.yaml",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-6-implementation-plan",
-    "title": "API Configuration",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-2-implementation-plan",
-    "title": "ChromaDB",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-5-implementation-plan",
-    "title": "config/context-aggregator.yaml",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-8-implementation-plan",
-    "title": "config/permissions.yaml",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-7-implementation-plan",
-    "title": "Database",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6",
-    "title": "Epic 6: Context & Knowledge Management",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-10-implementation-plan",
-    "title": "Run all tests",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-1-codebase-indexer",
-    "title": "Story 6-1: Codebase Indexer Implementation",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-10-scrum-master-task-loop",
-    "title": "Story 6-10: Scrum Master Task Loop",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-2-vector-database-integration",
-    "title": "Story 6-2: Vector Database Integration",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-3-rag-pipeline",
-    "title": "Story 6-3: RAG Pipeline Implementation",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-4-mcp-client-integration",
-    "title": "Story 6-4: MCP Client Integration",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-5-context-aggregator",
-    "title": "Story 6-5: Context Aggregator Service",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-6-knowledge-base-ui",
-    "title": "Story 6-6: Knowledge Base Management UI",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-7-llm-cost-monitoring",
-    "title": "Story 6-7: LLM Cost Monitoring & Reporting",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-8-agent-permissions",
-    "title": "Story 6-8: Agent Permissions System",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-9-agent-knowledge-base",
-    "title": "Story 6-9: Agent Knowledge Base (Recommendations, Prohibited Actions, Learnings)",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-1-implementation-plan",
-    "title": "tamma.config.yaml - indexer section",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-6/6-4-implementation-plan",
-    "title": "tamma.yaml - MCP section",
-    "section": "Epic 6"
-  },
-  {
-    "path": "/stories/epic-7/7-1B-llm-call-sub-workflow",
-    "title": "appsettings.yaml equivalent",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7",
-    "title": "Epic 7: Autonomous Mentorship Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1-mentorship-state-machine",
-    "title": "Story 7-1: Mentorship State Machine Core",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-10-mentorship-dashboard",
-    "title": "Story 7-10: Mentorship Dashboard & Reporting",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-11-blocker-diagnosis-improvements",
-    "title": "Story 7-11: Blocker Diagnosis Context Enrichment and Resolution Intelligence",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-12-debugging-workflow-prompt-improvements",
-    "title": "Story 7-12: Debugging Workflow Prompt Improvements",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1A-main-workflow-code-first",
-    "title": "Story 7-1A: Main Mentorship Workflow (Code-First Flowchart)",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1C-testing-sub-workflow",
-    "title": "Story 7-1C: Testing Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1D-code-review-sub-workflow",
-    "title": "Story 7-1D: Code Review Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1E-assessment-sub-workflow",
-    "title": "Story 7-1E: Assessment Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1F-context-gathering-sub-workflow",
-    "title": "Story 7-1F: Context Gathering Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1G-blocker-diagnosis-sub-workflow",
-    "title": "Story 7-1G: Blocker Diagnosis Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1H-tdd-sub-workflow",
-    "title": "Story 7-1H: TDD Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-1I-debugging-sub-workflow",
-    "title": "Story 7-1I: Debugging Sub-Workflow",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-2-skill-assessment-activity",
-    "title": "Story 7-2: Skill Assessment Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-3-context-gathering-activity",
-    "title": "Story 7-3: Context Gathering Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-4-claude-analysis-activity",
-    "title": "Story 7-4: Claude Analysis Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-5-plan-decomposition-activity",
-    "title": "Story 7-5: Plan Decomposition Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-6-blocker-diagnosis-activity",
-    "title": "Story 7-6: Blocker Diagnosis & Resolution Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-7-quality-gate-activity",
-    "title": "Story 7-7: Mentorship Quality Gate Activity",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-8-progress-tracking",
-    "title": "Story 7-8: Skill Progress Tracking & Analytics",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-8-tdd-prompt-overhaul-impl-plan",
-    "title": "Story 7-8B: TDD Prompt Overhaul — Implementation Plan",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-9-mentorship-session-management",
-    "title": "Story 7-9: Mentorship Session Management",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-7/7-8-tdd-workflow-prompt-overhaul",
-    "title": "Task",
-    "section": "Epic 7"
-  },
-  {
-    "path": "/stories/epic-8/8-2-npm-publish-pipeline",
-    "title": "1. Update version",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-3-standalone-binary",
-    "title": "Build script generates before compilation:",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8",
-    "title": "Epic 8: Distribution & Installation",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-1-esbuild-bundle",
-    "title": "Story 8-1: esbuild Bundle & Package Structure",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-4-install-scripts-releases",
-    "title": "Story 8-4: Install Scripts & GitHub Releases",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-5-auto-update-homebrew",
-    "title": "Story 8-5: Auto-Update & Package Manager Distribution",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-6-ts-dashboard-dockerfiles",
-    "title": "Story 8-6: TypeScript & Dashboard Dockerfiles",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-7-docker-compose-full-stack",
-    "title": "Story 8-7: Docker Compose Full Stack",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-8/8-8-docker-cicd-cli-integration",
-    "title": "Story 8-8: Docker CI/CD & CLI Integration",
-    "section": "Epic 8"
-  },
-  {
-    "path": "/stories/epic-9/9-0-overview",
-    "title": "Config-Driven Agent Management — Overview",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9",
-    "title": "Epic 9: Config-Driven Agent Management & Diagnostics",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema",
-    "title": "Story 1: Multi-Agent Configuration Schema",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-10-cli-wiring",
-    "title": "Story 10: CLI Wiring",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors",
-    "title": "Story 11: Diagnostics Queue & MCP Tool Interceptors",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics",
-    "title": "Story 2: Provider Diagnostics Collector",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-3-provider-health-tracker",
-    "title": "Story 3: Provider Health Tracker",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-4-agent-provider-factory",
-    "title": "Story 4: Agent Provider Factory",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-5-provider-chain",
-    "title": "Story 5: Provider Chain with Fallback & Diagnostics",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-6-agent-prompt-registry",
-    "title": "Story 6: Agent Prompt Registry",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization",
-    "title": "Story 7: Content Sanitization",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver",
-    "title": "Story 8: Role-Based Agent Resolver",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration",
-    "title": "Story 9: Engine Integration",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics-task-1",
-    "title": "Task 1: Create DiagnosticsEvent Type, Sanitization, Validation, and DiagnosticsQueue in Shared Telemetry Package",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-1",
-    "title": "Task 1: Create DiagnosticsEvent Types and DiagnosticsQueue Class",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema-task-1",
-    "title": "Task 1: Define Agent Configuration Types",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-1",
-    "title": "Task 1: Define Built-in Role Prompt Templates, Constants, and Interfaces",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-3-provider-health-tracker-task-1",
-    "title": "Task 1: Extract Shared Error Factory",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-4-agent-provider-factory-task-1",
-    "title": "Task 1: Implement AgentProviderFactory with provider registration and apiKeyRef resolution",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization-task-1",
-    "title": "Task 1: Implement IContentSanitizer Interface and ContentSanitizer Class",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-5-provider-chain-task-1",
-    "title": "Task 1: Implement ProviderChain core iteration with health checks",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-1",
-    "title": "Task 1: Implement RoleBasedAgentResolver Core (Constructor, Phase-to-Role Mapping)",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration-task-1",
-    "title": "Task 1: Make EngineContext.agent Optional and Add agentResolver",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-10-cli-wiring-task-1",
-    "title": "Task 1: Wire Config-Driven Agent Setup in start.tsx",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-5-provider-chain-task-2",
-    "title": "Task 2: Add budget checking via ICostTracker",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-2",
-    "title": "Task 2: Create DiagnosticsProcessor Mapping Events to Cost Tracker",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics-task-2",
-    "title": "Task 2: Create InstrumentedAgentProvider Decorator",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema-task-2",
-    "title": "Task 2: Extend TammaConfig with New Optional Fields",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-2",
-    "title": "Task 2: Implement getAgentForRole with Chain Creation and Security Wrapping",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-2",
-    "title": "Task 2: Implement Template Resolution Chain (6 Levels) with Security Guards",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization-task-2",
-    "title": "Task 2: Implement URL Validator with Numeric Octet Parsing and IPv6 Support",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-4-agent-provider-factory-task-2",
-    "title": "Task 2: Implement wrapAsAgent() LLM-to-Agent adapter",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-3-provider-health-tracker-task-2",
-    "title": "Task 2: Update Existing Providers to Use Shared Error Factory",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration-task-2",
-    "title": "Task 2: Update initialize() and dispose() Guards",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-10-cli-wiring-task-2",
-    "title": "Task 2: Wire Config-Driven Agent Setup in server.ts",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-5-provider-chain-task-3",
-    "title": "Task 3: Add instrumentation wrapping and error handling",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics-task-3",
-    "title": "Task 3: Create InstrumentedLLMProvider Decorator (Full IAIProvider)",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-3",
-    "title": "Task 3: Create ToolInterceptorChain with Pre/Post Interceptors",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema-task-3",
-    "title": "Task 3: Fix mergeConfig() to Propagate Optional Fields",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-10-cli-wiring-task-3",
-    "title": "Task 3: Fix Shutdown Lifecycle (diagnosticsQueue + costTracker Disposal)",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization-task-3",
-    "title": "Task 3: Implement Action Gating with Shell Metacharacter Normalization",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration-task-3",
-    "title": "Task 3: Implement getAgentForPhase() and getEngineTaskOverrides()",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-3",
-    "title": "Task 3: Implement getTaskConfig with 3-Level Merge Precedence",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-3-provider-health-tracker-task-3",
-    "title": "Task 3: Implement ProviderHealthTracker with Circuit Breaker",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-6-agent-prompt-registry-task-3",
-    "title": "Task 3: Implement render() with {{variable}} Interpolation and Size Limits",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-4-agent-provider-factory-task-3",
-    "title": "Task 3: Wire built-in provider registrations, exports, and tests",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-10-cli-wiring-task-4",
-    "title": "Task 4: Add cost-monitor Dependency and Ensure normalizeAgentsConfig Is Exported",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-4",
-    "title": "Task 4: Create Built-in Interceptor Factories",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-5-provider-chain-task-4",
-    "title": "Task 4: Handle edge cases, disposal, and comprehensive tests",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-4",
-    "title": "Task 4: Implement getPrompt Delegation and Provider Chain Management",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-3-provider-health-tracker-task-4",
-    "title": "Task 4: Implement getStatus() Reporting and Finalize Exports",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema-task-4",
-    "title": "Task 4: Implement normalizeAgentsConfig() with Legacy Provider Mapping",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization-task-4",
-    "title": "Task 4: Implement Secure Fetch with Streaming Body Read and Manual Redirect Handling",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics-task-4",
-    "title": "Task 4: Update Cost-Monitor Types and Create Provider Name Mapping",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration-task-4",
-    "title": "Task 4: Update generatePlan() and implementCode() for Resolver Mode",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-9-engine-integration-task-5",
-    "title": "Task 5: Add Backward Compatibility Tests",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-1-configuration-schema-task-5",
-    "title": "Task 5: Add Environment Variable Support for Security Config",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-2-provider-diagnostics-task-5",
-    "title": "Task 5: Create Diagnostics Processor for Cost Tracking",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-8-role-based-agent-resolver-task-5",
-    "title": "Task 5: Export All New Modules from Providers Index",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-7-content-sanitization-task-5",
-    "title": "Task 5: Implement SecureAgentProvider Decorator with IContentSanitizer and Barrel Exports",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-5",
-    "title": "Task 5: Modify MCPClient.invokeTool() for Interceptor Chain Support",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/epic-9/9-11-diagnostics-queue-mcp-interceptors-task-6",
-    "title": "Task 6: Bridge MCPClient Events to DiagnosticsQueue and Write Tests",
-    "section": "Epic 9"
-  },
-  {
-    "path": "/stories/5-10-alpha-release-preparation",
-    "title": "Alpha Release Architecture",
-    "section": "Pages"
-  },
-  {
-    "path": "/contributing",
-    "title": "Clone the repository",
-    "section": "Pages"
-  },
-  {
-    "path": "/architecture",
-    "title": "Entrypoint: packages/api/src/serve.ts",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/1-foundation",
-    "title": "Epic 1: Foundation & Core Infrastructure",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/1-5-infrastructure",
-    "title": "Epic 1.5: Infrastructure & Deployment",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/10-engine-core",
-    "title": "Epic 10: Engine Core -- Workflow-Driven Architecture",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/11-security",
-    "title": "Epic 11: Security Hardening",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/12-tool-loop",
-    "title": "Epic 12: Agentic Tool Loop",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/13-workflow-decomposition",
-    "title": "Epic 13: Workflow Decomposition",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/14-elsa-studio",
-    "title": "Epic 14: Custom ELSA Studio",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/15-log-aggregation",
-    "title": "Epic 15: Observability & Log Aggregation",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/16-auth-admin",
-    "title": "Epic 16: Unified Auth, User Management & Admin",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/17-multi-tenancy",
-    "title": "Epic 17: Multi-Tenancy Foundation",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/18-user-auth",
-    "title": "Epic 18: End-User Auth & Registration",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/19-agent-dispatch",
-    "title": "Epic 19: GitHub App Agent Dispatch",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/2-autonomous-loop",
-    "title": "Epic 2: Autonomous Development Loop",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/20-billing",
-    "title": "Epic 20: Billing & Payments",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/21-marketing-dashboard",
-    "title": "Epic 21: Marketing Site & User Dashboard",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/22-cli-standalone",
-    "title": "Epic 22: CLI Mode Preservation",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/23-system-monitoring",
-    "title": "Epic 23: System Monitoring & Observability Dashboard",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/24-voice-conversation",
-    "title": "Epic 24: Realtime Voice Conversation with Orchestrator",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/25-wiki-site",
-    "title": "Epic 25: Documentation & Wiki Site",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/3-quality-gates",
-    "title": "Epic 3: Quality Gates & Intelligence Layer",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/4-event-sourcing",
-    "title": "Epic 4: Event Sourcing & Audit Trail",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/5-observability",
-    "title": "Epic 5: Observability Dashboard & Documentation",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/6-context-knowledge",
-    "title": "Epic 6: Context & Knowledge Management",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/7-mentorship",
-    "title": "Epic 7: Autonomous Mentorship Workflow",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/8-distribution",
-    "title": "Epic 8: Distribution & Installation",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/9-agent-management",
-    "title": "Epic 9: Config-Driven Multi-Agent Management",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics/11-14-elsa",
-    "title": "Epics 11-14: ELSA Hardening & Enhancement",
-    "section": "Pages"
-  },
-  {
-    "path": "/epics",
-    "title": "Epics Index",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-9a-installation-setup-documentation",
-    "title": "Installation & Setup Guide",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-3-real-time-dashboard-system-health",
-    "title": "packages/dashboard/Dockerfile",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-1-event-schema-design",
-    "title": "Story 4.1: Event Schema Design",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-2-event-store-backend-selection",
-    "title": "Story 4.2: Event Store Backend Selection",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-3-event-capture-issue-selection-analysis",
-    "title": "Story 4.3: Event Capture - Issue Selection & Analysis",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-4-event-capture-ai-provider-interactions",
-    "title": "Story 4.4: Event Capture - AI Provider Interactions",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-5-event-capture-code-changes-git-operations",
-    "title": "Story 4.5: Event Capture - Code Changes & Git Operations",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-6-event-capture-approvals-escalations",
-    "title": "Story 4.6: Event Capture - Approvals & Escalations",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-7-event-query-api-for-time-travel",
-    "title": "Story 4.7: Event Query API for Time-Travel",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/4-8-black-box-replay-for-debugging",
-    "title": "Story 4.8: Black-Box Replay for Debugging",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-1-structured-logging-implementation",
-    "title": "Story 5.1: Structured Logging Implementation",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-2-metrics-collection-infrastructure",
-    "title": "Story 5.2: Metrics Collection Infrastructure",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-4-real-time-dashboard-development-velocity",
-    "title": "Story 5.4: Real-Time Dashboard - Development Velocity",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-5-event-trail-exploration-ui",
-    "title": "Story 5.5: Event Trail Exploration UI",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-6-alert-system-for-critical-issues",
-    "title": "Story 5.6: Alert System for Critical Issues",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-7-feedback-collection-system",
-    "title": "Story 5.7: Feedback Collection System",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-8-integration-testing-suite",
-    "title": "Story 5.8: Integration Testing Suite",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows",
-    "title": "Tamma ELSA Workflows",
-    "section": "Pages"
-  },
-  {
-    "path": "/roadmap",
-    "title": "Tamma Project Roadmap",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/README",
-    "title": "Tamma Stories",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories/5-9b-usage-configuration-documentation",
-    "title": "Usage & Configuration Guide",
-    "section": "Pages"
-  },
-  {
-    "path": "/stories",
-    "title": "User Stories Index",
-    "section": "Pages"
-  },
-  {
-    "path": "/",
-    "title": "Welcome to the Tamma Wiki",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/adl-orchestrator",
-    "title": "Workflow: ADL Orchestrator",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/blocker-diagnosis",
-    "title": "Workflow: Blocker Diagnosis",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/code-review",
-    "title": "Workflow: Code Review",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/context-gathering",
-    "title": "Workflow: Context Gathering",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/debugging",
-    "title": "Workflow: Debugging",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/llm-call",
-    "title": "Workflow: LLM Call",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/mentorship",
-    "title": "Workflow: Mentorship",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/single-issue-cycle",
-    "title": "Workflow: Single Issue Cycle",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/tdd-cycle",
-    "title": "Workflow: TDD Cycle",
-    "section": "Pages"
-  },
-  {
-    "path": "/workflows/testing",
-    "title": "Workflow: Testing Pipeline",
-    "section": "Pages"
+    "path": "/stories/epic-25/25-1-custom-wiki-site",
+    "title": "Story 25-1: Custom Wiki Site",
+    "section": "Epic 25"
   }
 ]

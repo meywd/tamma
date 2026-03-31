@@ -392,27 +392,47 @@ function main(): void {
 
   // Generate manifest.json for sidebar navigation
   const manifest: { path: string; title: string; section: string }[] = [];
+  function detectSection(dir: string, parentSection: string, dirName: string): string {
+    if (dirName === 'workflows') return 'Workflows';
+    if (dirName === 'epics') return 'Epics';
+    if (dirName.startsWith('epic-')) return `Epic ${dirName.replace('epic-', '')}`;
+    if (dirName === 'stories') return parentSection; // stories root stays in parent
+    return parentSection;
+  }
   function scanManifest(dir: string, section: string): void {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
-        scanManifest(fullPath, entry.name.startsWith('epic-') ? `Epic ${entry.name.replace('epic-', '')}` : section);
+        const childSection = detectSection(dir, section, entry.name);
+        scanManifest(fullPath, childSection);
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         const relPath = relative(OUTPUT_DIR, fullPath).replace(/\.md$/, '');
         const content = readFileSync(fullPath, 'utf-8');
-        const titleMatch = content.match(/^#\s+(.+)$/m) || content.match(/title:\s*"?([^"\n]+)"?/);
+        const titleMatch = content.match(/title:\s*"?([^"\n]+)"?/) || content.match(/^#\s+(.+)$/m);
         const title = titleMatch?.[1]?.trim() || entry.name.replace(/\.md$/, '');
 
-        // Build route path
         let routePath = '/' + relPath.replace(/\/index$/, '').replace(/^index$/, '');
         if (!routePath || routePath === '/') routePath = '/';
+
+        // Skip index pages from manifest (they're handled as top-level nav)
+        if (routePath === '/' || routePath === '/epics' || routePath === '/stories' || routePath === '/workflows') continue;
 
         manifest.push({ path: routePath, title, section });
       }
     }
   }
   scanManifest(OUTPUT_DIR, 'Pages');
-  manifest.sort((a, b) => a.section.localeCompare(b.section) || a.title.localeCompare(b.title));
+
+  // Sort: Pages first, then Epics, then Workflows, then Epic N (numerically)
+  const sectionOrder = (s: string): number => {
+    if (s === 'Pages') return 0;
+    if (s === 'Epics') return 1;
+    if (s === 'Workflows') return 2;
+    const m = s.match(/^Epic (\d+(?:[.-]\d+)?)$/);
+    if (m) return 100 + parseFloat(m[1].replace('-', '.'));
+    return 50;
+  };
+  manifest.sort((a, b) => sectionOrder(a.section) - sectionOrder(b.section) || a.title.localeCompare(b.title));
   writeFileSync(join(OUTPUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
   console.log(`\nDone. ${count} files synced + manifest.json to ${relative(process.cwd(), OUTPUT_DIR)}/`);

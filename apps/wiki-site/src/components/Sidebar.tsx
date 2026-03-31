@@ -18,7 +18,7 @@ export default function Sidebar() {
       .then((r) => r.json())
       .then((data: ManifestEntry[]) => {
         setManifest(data);
-        // Auto-expand the current section
+        // Auto-expand current section
         const current = data.find((e) => e.path === location.pathname);
         if (current?.section) {
           setExpanded((prev) => ({ ...prev, [current.section]: true }));
@@ -28,18 +28,29 @@ export default function Sidebar() {
   }, []);
 
   // Group by section
-  const sections = new Map<string, ManifestEntry[]>();
-  const topPages: ManifestEntry[] = [];
+  const epicPages: ManifestEntry[] = [];
+  const workflowPages: ManifestEntry[] = [];
+  const storyEpics = new Map<string, ManifestEntry[]>();
 
   for (const entry of manifest) {
     if (search && !entry.title.toLowerCase().includes(search.toLowerCase())) continue;
-    if (entry.section === 'Pages') {
-      topPages.push(entry);
-    } else {
-      if (!sections.has(entry.section)) sections.set(entry.section, []);
-      sections.get(entry.section)!.push(entry);
+
+    if (entry.section === 'Epics') {
+      epicPages.push(entry);
+    } else if (entry.section === 'Workflows') {
+      workflowPages.push(entry);
+    } else if (entry.section.startsWith('Epic ')) {
+      if (!storyEpics.has(entry.section)) storyEpics.set(entry.section, []);
+      storyEpics.get(entry.section)!.push(entry);
     }
   }
+
+  // Sort story epics numerically
+  const sortedStoryEpics = [...storyEpics.entries()].sort((a, b) => {
+    const numA = parseFloat(a[0].replace('Epic ', '').replace('-', '.'));
+    const numB = parseFloat(b[0].replace('Epic ', '').replace('-', '.'));
+    return numA - numB;
+  });
 
   const toggle = (s: string) => setExpanded((prev) => ({ ...prev, [s]: !prev[s] }));
 
@@ -50,12 +61,33 @@ export default function Sidebar() {
         : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
     }`;
 
-  // Sort epics numerically
-  const sortedSections = [...sections.entries()].sort((a, b) => {
-    const numA = parseFloat(a[0].replace(/[^0-9.]/g, '')) || 999;
-    const numB = parseFloat(b[0].replace(/[^0-9.]/g, '')) || 999;
-    return numA - numB;
-  });
+  const sectionHeader = (label: string, key: string, count?: number) => (
+    <button
+      onClick={() => toggle(key)}
+      className="flex items-center justify-between w-full px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-zinc-500 hover:text-zinc-400 transition-colors"
+    >
+      <span className="truncate">{label}{count ? ` (${count})` : ''}</span>
+      <svg
+        className={`w-3 h-3 shrink-0 transition-transform ${expanded[key] ? 'rotate-90' : ''}`}
+        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
+    </button>
+  );
+
+  const renderItems = (items: ManifestEntry[], max = 50) => (
+    <div className="flex flex-col gap-0.5 mb-1">
+      {items.slice(0, max).map((item) => (
+        <NavLink key={item.path} to={item.path} className={navClass}>
+          {item.title.length > 45 ? item.title.slice(0, 45) + '...' : item.title}
+        </NavLink>
+      ))}
+      {items.length > max && (
+        <span className="px-3 py-1 text-[11px] text-zinc-600">+{items.length - max} more</span>
+      )}
+    </div>
+  );
 
   return (
     <aside className="w-[260px] shrink-0 h-screen overflow-y-auto bg-[#111113] border-r border-zinc-800/60 flex flex-col">
@@ -80,49 +112,70 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-4 flex flex-col gap-0.5">
-        {/* Top-level pages */}
-        <div className="mb-2">
+        {/* Top pages */}
+        <div className="mb-1">
           <NavLink to="/" className={navClass}>Home</NavLink>
           <NavLink to="/roadmap" className={navClass}>Roadmap</NavLink>
           <NavLink to="/architecture" className={navClass}>Architecture</NavLink>
-          <NavLink to="/epics" className={navClass}>Epics Overview</NavLink>
-          <NavLink to="/workflows" className={navClass}>Workflows</NavLink>
-          <NavLink to="/stories" className={navClass}>Stories</NavLink>
         </div>
 
         <div className="h-px bg-zinc-800/60 mx-2 my-1" />
 
-        {/* Sections */}
-        {sortedSections.map(([section, items]) => (
-          <div key={section}>
-            <button
-              onClick={() => toggle(section)}
-              className="flex items-center justify-between w-full px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-zinc-500 hover:text-zinc-400 transition-colors"
-            >
-              <span className="truncate">{section}</span>
-              <svg
-                className={`w-3 h-3 shrink-0 transition-transform ${expanded[section] ? 'rotate-90' : ''}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-            {expanded[section] && (
-              <div className="flex flex-col gap-0.5 mb-1">
-                {items.slice(0, 30).map((item) => (
-                  <NavLink key={item.path} to={item.path} className={navClass}>
-                    {item.title.length > 40 ? item.title.slice(0, 40) + '...' : item.title}
-                  </NavLink>
-                ))}
-                {items.length > 30 && (
-                  <span className="px-3 py-1 text-[11px] text-zinc-600">
-                    +{items.length - 30} more
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
+        {/* Epics section */}
+        <div>
+          {sectionHeader('Epics', 'epics-section', epicPages.length)}
+          {expanded['epics-section'] && (
+            <div className="flex flex-col gap-0.5 mb-1">
+              <NavLink to="/epics" className={navClass}>Overview</NavLink>
+              {epicPages.map((item) => (
+                <NavLink key={item.path} to={item.path} className={navClass}>
+                  {item.title.length > 45 ? item.title.slice(0, 45) + '...' : item.title}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Workflows section */}
+        <div>
+          {sectionHeader('Workflows', 'workflows-section', workflowPages.length)}
+          {expanded['workflows-section'] && (
+            <div className="flex flex-col gap-0.5 mb-1">
+              <NavLink to="/workflows" className={navClass}>Overview</NavLink>
+              {workflowPages.map((item) => (
+                <NavLink key={item.path} to={item.path} className={navClass}>
+                  {item.title.replace(/^Tamma\s+/, '').length > 45
+                    ? item.title.replace(/^Tamma\s+/, '').slice(0, 45) + '...'
+                    : item.title.replace(/^Tamma\s+/, '')}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="h-px bg-zinc-800/60 mx-2 my-1" />
+
+        {/* Stories by Epic */}
+        <div>
+          {sectionHeader('Stories', 'stories-section', manifest.filter(e => e.section.startsWith('Epic ')).length)}
+          {expanded['stories-section'] && (
+            <div className="ml-1">
+              <NavLink to="/stories" className={navClass}>Overview</NavLink>
+              {sortedStoryEpics.map(([section, items]) => (
+                <div key={section}>
+                  <button
+                    onClick={() => toggle(section)}
+                    className="flex items-center justify-between w-full px-3 py-1.5 text-[12px] text-zinc-500 hover:text-zinc-400 transition-colors"
+                  >
+                    <span className="truncate">{section}</span>
+                    <span className="text-[10px] text-zinc-600">{items.length}</span>
+                  </button>
+                  {expanded[section] && renderItems(items, 20)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </nav>
 
       {/* Footer */}
