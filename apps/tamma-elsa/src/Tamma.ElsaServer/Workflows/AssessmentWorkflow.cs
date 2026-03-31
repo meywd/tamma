@@ -72,6 +72,7 @@ public class AssessmentWorkflow : WorkflowBase
         var outputResultJson = builder.WithVariable<string>();
         var outputNextState = builder.WithVariable<string>();
         var outputStatus = builder.WithVariable<string>();
+        var outputSkillLevel = builder.WithVariable<int>();
 
         // ── Step 1: Read inputs into variables ─────────────────────────
         var readInputs = new SetVariable
@@ -347,6 +348,10 @@ public class AssessmentWorkflow : WorkflowBase
                 };
                 outputNextState.Set(context, nextState.Get(context).ToString());
                 outputStatus.Set(context, assessmentStatus.Get(context).ToString());
+                // Map confidence to skill level 1-5
+                var conf = confidence.Get(context);
+                int assessed = conf >= 0.8m ? 5 : conf >= 0.6m ? 4 : conf >= 0.4m ? 3 : conf >= 0.2m ? 2 : 1;
+                outputSkillLevel.Set(context, assessed);
                 return JsonSerializer.Serialize(result);
             })
         };
@@ -373,6 +378,7 @@ public class AssessmentWorkflow : WorkflowBase
                 };
                 outputNextState.Set(context, MentorshipState.DIAGNOSE_BLOCKER.ToString());
                 outputStatus.Set(context, AssessmentOutcomeStatus.Timeout.ToString());
+                outputSkillLevel.Set(context, 1); // Timeout implies lowest skill level
                 return JsonSerializer.Serialize(result);
             })
         };
@@ -387,7 +393,8 @@ public class AssessmentWorkflow : WorkflowBase
             {
                 WithLabel(new SetOutput { Id = "OutputAssessmentResult", Name = "Output Assessment Result", OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) }, "Output Assessment Result"),
                 WithLabel(new SetOutput { Id = "OutputNextState", Name = "Output Next State", OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) }, "Output Next State"),
-                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status")
+                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
+                WithLabel(new SetOutput { Id = "OutputSkillLevel", Name = "Output Skill Level", OutputName = new("skillLevel"), OutputValue = new(ctx => (object)outputSkillLevel.Get(ctx)) }, "Output Skill Level")
             }
         };
         exposeOutputResponse.SetDisplayText("Expose Output Response");
@@ -399,7 +406,8 @@ public class AssessmentWorkflow : WorkflowBase
             {
                 WithLabel(new SetOutput { Id = "OutputAssessmentResultTimeout", Name = "Output Assessment Result (Timeout)", OutputName = new("assessmentResult"), OutputValue = new(ctx => (object)(outputResultJson.Get(ctx) ?? "{}")) }, "Output Assessment Result (Timeout)"),
                 WithLabel(new SetOutput { Id = "OutputNextStateTimeout", Name = "Output Next State (Timeout)", OutputName = new("nextState"), OutputValue = new(ctx => (object)(outputNextState.Get(ctx) ?? "")) }, "Output Next State (Timeout)"),
-                WithLabel(new SetOutput { Id = "OutputStatusTimeout", Name = "Output Status (Timeout)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Timeout)")
+                WithLabel(new SetOutput { Id = "OutputStatusTimeout", Name = "Output Status (Timeout)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Timeout)"),
+                WithLabel(new SetOutput { Id = "OutputSkillLevelTimeout", Name = "Output Skill Level (Timeout)", OutputName = new("skillLevel"), OutputValue = new(ctx => (object)outputSkillLevel.Get(ctx)) }, "Output Skill Level (Timeout)")
             }
         };
         exposeOutputTimeout.SetDisplayText("Expose Output Timeout");
