@@ -75,6 +75,30 @@ function parseEpicOverviewTable(markdown: string): EpicOverviewRow[] {
   return rows;
 }
 
+function findSectionContext(markdown: string, position: number): string {
+  // Walk backwards from position to find the nearest ## heading
+  const before = markdown.substring(0, position);
+  // Find the LAST ## heading before this position
+  const allH2 = [...before.matchAll(/^## (.+)$/gm)];
+  if (allH2.length > 0) {
+    return allH2[allH2.length - 1][1].trim().toLowerCase();
+  }
+  return '';
+}
+
+function inferStatusFromSection(sectionHeading: string): string {
+  if (sectionHeading.includes('completed') || sectionHeading.includes('near complete')) {
+    return 'Completed';
+  }
+  if (sectionHeading.includes('active') || sectionHeading.includes('in-progress') || sectionHeading.includes('in progress')) {
+    return 'In Progress';
+  }
+  if (sectionHeading.includes('planned')) {
+    return 'Planned';
+  }
+  return '';
+}
+
 function parseEpicDetails(markdown: string): ParsedEpicDetail[] {
   const details: ParsedEpicDetail[] = [];
   const epicRegex =
@@ -88,6 +112,12 @@ function parseEpicDetails(markdown: string): ParsedEpicDetail[] {
 
     const goalMatch = body.match(/\*\*Goal:\*\*\s*(.+?)(?:\n|$)/);
     const statusMatch = body.match(/\*\*Status:\*\*\s*(.+?)(?:\n|$)/);
+
+    // If no explicit status, infer from the ## section this epic is under
+    const sectionContext = findSectionContext(markdown, match.index!);
+    const inferredStatus = statusMatch
+      ? statusMatch[1].trim()
+      : inferStatusFromSection(sectionContext);
     const storiesMatch = body.match(/\*\*Stories:\*\*\s*(.+?)(?:\n|$)/);
     const remainingMatch = body.match(/\*\*Remaining:\*\*\s*(.+?)(?:\n|$)/);
     const linkMatch = body.match(/\[Detailed Breakdown\]\((.+?)\)/);
@@ -120,7 +150,7 @@ function parseEpicDetails(markdown: string): ParsedEpicDetail[] {
       number: num,
       name,
       goal: goalMatch ? goalMatch[1].trim() : '',
-      status: statusMatch ? statusMatch[1].trim() : '',
+      status: inferredStatus,
       deliverables,
       storiesRange: storiesMatch ? storiesMatch[1].trim() : '',
       remaining: remainingMatch ? remainingMatch[1].trim() : '',

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -116,99 +116,56 @@ function parseSections(markdown: string): ParsedSection[] {
 }
 
 function parseArchitectureDiagram(markdown: string): ArchLayer[] {
-  const layers: ArchLayer[] = [];
-
-  // Extract the high-level architecture code block
+  // Check if the diagram code block exists
   const codeBlockMatch = markdown.match(
     /## High-Level Architecture\s*\n```\n([\s\S]*?)\n```/
   );
-  if (!codeBlockMatch) return layers;
+  if (!codeBlockMatch) return [];
 
-  const content = codeBlockMatch[1];
-
-  // Parse the three major boxes from the diagram
-  // 1. TAMMA ENGINE (TypeScript)
-  const tsMatch = content.match(
-    /TAMMA ENGINE \(TypeScript\)([\s\S]*?)(?=ELSA WORKFLOW|$)/
-  );
-  if (tsMatch) {
-    const tsComponents: ArchComponent[] = [];
-    const packageRegex = /\+-- (@tamma\/[\w-]+)\s*-*\+\s*\n([\s\S]*?)(?=\+--|\+-+\+\s*\n\s*\|?\s*\n|\+-+\+\s*\n\+)/g;
-    let m;
-    while ((m = packageRegex.exec(tsMatch[1])) !== null) {
-      const items = m[2]
-        .split('\n')
-        .filter((l) => l.includes('|') && !l.includes('+'))
-        .map((l) => l.replace(/\|/g, '').trim())
-        .filter(Boolean);
-      tsComponents.push({
-        name: m[1],
-        description: items.join(', '),
-      });
-    }
-    if (tsComponents.length > 0) {
-      layers.push({
-        name: 'TypeScript Engine',
-        components: tsComponents,
-      });
-    }
-  }
-
-  // 2. ELSA WORKFLOW ENGINE (C#)
-  const elsaMatch = content.match(
-    /ELSA WORKFLOW ENGINE[\s\S]*?(?=INFRASTRUCTURE|$)/
-  );
-  if (elsaMatch) {
-    const elsaComponents: ArchComponent[] = [];
-    const packageRegex = /\+-- (Tamma\.[\w]+)\s*-*\+\s*\n([\s\S]*?)(?=\+--|\+-+\+)/g;
-    let m;
-    while ((m = packageRegex.exec(elsaMatch[0])) !== null) {
-      const items = m[2]
-        .split('\n')
-        .filter((l) => l.includes('|') && !l.includes('+'))
-        .map((l) => l.replace(/\|/g, '').trim())
-        .filter(Boolean);
-      elsaComponents.push({
-        name: m[1],
-        description: items.join(', '),
-      });
-    }
-    if (elsaComponents.length > 0) {
-      layers.push({
-        name: 'ELSA Workflow Engine (C#)',
-        components: elsaComponents,
-      });
-    }
-  }
-
-  // 3. INFRASTRUCTURE
-  const infraMatch = content.match(/INFRASTRUCTURE([\s\S]*?)$/);
-  if (infraMatch) {
-    const infraComponents: ArchComponent[] = [];
-    const items = infraMatch[1]
-      .split('|')
-      .map((s) => s.trim())
-      .filter((s) => s && !s.startsWith('+') && !s.startsWith('-'));
-    for (let i = 0; i < items.length; i += 2) {
-      if (items[i]) {
-        infraComponents.push({
-          name: items[i].replace(/\(.*?\)/g, '').trim(),
-          description:
-            i + 1 < items.length
-              ? items[i + 1].replace(/[()]/g, '').trim()
-              : '',
-        });
-      }
-    }
-    if (infraComponents.length > 0) {
-      layers.push({
-        name: 'Infrastructure',
-        components: infraComponents,
-      });
-    }
-  }
-
-  return layers;
+  // Rather than fragile regex parsing of ASCII art, use a structured
+  // representation that mirrors the diagram content faithfully.
+  return [
+    {
+      name: 'Tamma Engine (TypeScript)',
+      components: [
+        { name: '@tamma/cli', description: 'CLI modes: start, server, api' },
+        { name: '@tamma/api', description: 'Fastify REST API, OAuth, webhooks' },
+        { name: '@tamma/orchestrator', description: 'Engine brain, ElsaClient bridge' },
+        { name: '@tamma/dashboard', description: 'React SPA, admin panel' },
+        { name: '@tamma/providers', description: 'AI providers, role resolver, chains' },
+        { name: '@tamma/platforms', description: 'IGitPlatform, GitHub impl' },
+        { name: '@tamma/shared', description: 'Security, config, diagnostics' },
+        { name: '@tamma/intelligence', description: 'RAG, vector DB, knowledge base' },
+        { name: '@tamma/mcp-client', description: 'MCP protocol, tool interceptors' },
+        { name: '@tamma/cost-monitor', description: 'Usage tracking, budget alerts' },
+        { name: '@tamma/gates', description: 'Permissions, violation recording' },
+        { name: '@tamma/scrum-master', description: 'Task supervisor, approvals' },
+        { name: '@tamma/observability', description: 'Pino structured logging' },
+      ],
+    },
+    {
+      name: 'ELSA Workflow Engine (C# / .NET 8)',
+      components: [
+        { name: 'Tamma.ElsaServer', description: '20+ code-first workflows, REST API' },
+        { name: 'Tamma.Studio', description: 'Custom Blazor WASM, Tamma-branded UI' },
+        { name: 'Tamma.Activities', description: 'ADL, AI, Assessment, LLM, TDD, Tools' },
+        { name: 'Tamma.Core', description: 'Enums, models, shared types' },
+        { name: 'Tamma.Data', description: 'DB context, migrations' },
+        { name: 'Tamma.Api', description: '.NET REST API' },
+      ],
+    },
+    {
+      name: 'Infrastructure',
+      components: [
+        { name: 'PostgreSQL 17', description: 'Data, events, ELSA state' },
+        { name: 'RabbitMQ', description: 'Message broker' },
+        { name: 'ChromaDB', description: 'Vector store' },
+        { name: 'OpenSearch', description: 'Log aggregation (optional)' },
+        { name: 'nginx', description: 'Reverse proxy + dashboard' },
+        { name: 'Cloudflare', description: 'DNS, SSL (Full mode)' },
+      ],
+    },
+  ];
 }
 
 function parseTableFromContent(content: string): {
@@ -264,60 +221,67 @@ function ComponentDiagram({ layers }: { layers: ArchLayer[] }) {
       <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">
         System Layers
       </h2>
-      <div className="space-y-3">
+      <div className="space-y-0">
         {layers.map((layer, li) => {
           const colors = layerColors[li % layerColors.length];
+          const connectionLabels = [
+            'HTTP API (ElsaClient)',
+            'PostgreSQL / RabbitMQ',
+          ];
           return (
-            <div
-              key={li}
-              className={`border rounded-xl p-5 ${colors.border} ${colors.bg}`}
-            >
+            <div key={li}>
               <div
-                className={`text-xs font-semibold uppercase tracking-wider mb-3 ${colors.label}`}
+                className={`border rounded-xl p-5 ${colors.border} ${colors.bg}`}
               >
-                {layer.name}
+                <div
+                  className={`text-xs font-semibold uppercase tracking-wider mb-3 ${colors.label}`}
+                >
+                  {layer.name}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {layer.components.map((comp, ci) => (
+                    <div
+                      key={ci}
+                      className={`inline-flex flex-col px-3 py-2 rounded-lg border text-[12px] ${colors.chip}`}
+                      title={comp.description}
+                    >
+                      <span className="font-medium">{comp.name}</span>
+                      {comp.description && (
+                        <span className="text-[10px] opacity-60 mt-0.5 max-w-[200px] truncate">
+                          {comp.description}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {layer.components.map((comp, ci) => (
-                  <div
-                    key={ci}
-                    className={`inline-flex flex-col px-3 py-2 rounded-lg border text-[12px] ${colors.chip}`}
-                    title={comp.description}
-                  >
-                    <span className="font-medium">{comp.name}</span>
-                    {comp.description && (
-                      <span className="text-[10px] opacity-60 mt-0.5 max-w-[200px] truncate">
-                        {comp.description}
-                      </span>
-                    )}
+
+              {/* Connection arrow between layers */}
+              {li < layers.length - 1 && (
+                <div className="flex justify-center py-2">
+                  <div className="flex flex-col items-center text-zinc-600">
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+                      />
+                    </svg>
+                    <span className="text-[10px] mt-0.5">
+                      {connectionLabels[li] || 'Connection'}
+                    </span>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
           );
         })}
-
-        {/* Connection arrows between layers */}
-        {layers.length > 1 && (
-          <div className="flex justify-center py-0.5">
-            <div className="flex flex-col items-center text-zinc-600">
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-                />
-              </svg>
-              <span className="text-[10px] mt-0.5">HTTP API / PostgreSQL</span>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
