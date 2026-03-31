@@ -479,7 +479,7 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["taskDescription"] = "",
-                ["skillLevel"] = 3
+                ["skillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true)
         };
@@ -496,7 +496,7 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["debugContextMode"] = "BugInvestigation",
-                ["skillLevel"] = 3
+                ["skillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true)
         };
@@ -700,12 +700,13 @@ public class MentorshipWorkflow : WorkflowBase
                 failed,
                 timeout,
 
-                // Sub-Workflow Dispatches (8)
+                // Sub-Workflow Dispatches (8) + skill level extraction
                 llmCallWorkflow,
                 contextGatheringWorkflow,
                 testingWorkflow,
                 codeReviewWorkflow,
                 assessmentWorkflow,
+                extractSkillLevel,
                 blockerDiagnosisWorkflow,
                 tddWorkflow,
                 debuggingWorkflow,
@@ -761,8 +762,9 @@ public class MentorshipWorkflow : WorkflowBase
                 new(new FlowEndpoint(validateStory, "Valid"),
                     new FlowEndpoint(assessJunior)),
 
-                // 5. Assessment sub-workflow -> ASSESS (invoked when needed from ASSESS phase)
-                new(assessmentWorkflow, assessJunior),
+                // 5. Assessment sub-workflow -> Extract Skill Level -> ASSESS
+                new(assessmentWorkflow, extractSkillLevel),
+                new(extractSkillLevel, assessJunior),
 
                 // 6. VALIDATE -> Debugging sub-workflow (Bug fast path)
                 new(new FlowEndpoint(validateStory, "BugIssue"),

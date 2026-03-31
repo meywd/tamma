@@ -1,8 +1,12 @@
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Context.Models;
 using Tamma.Core.Interfaces;
@@ -27,6 +31,8 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
 {
     private readonly ILogger<FetchFileContentsActivity>? _logger;
     private readonly IIntegrationService? _integrationService;
+    private readonly IHttpClientFactory? _httpClientFactory;
+    private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL (e.g., owner/repo)</summary>
     [Input(Description = "Repository URL or identifier")]
@@ -59,10 +65,14 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
 
     public FetchFileContentsActivity(
         ILogger<FetchFileContentsActivity> logger,
-        IIntegrationService integrationService)
+        IIntegrationService integrationService,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
         _logger = logger;
         _integrationService = integrationService;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -103,20 +113,24 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
                 filePaths = fileChanges.Select(f => f.FilePath).Take(maxFiles).ToList();
             }
 
+            var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+
             var files = new List<FileEntry>();
             var totalSize = 0;
 
             foreach (var filePath in filePaths.Take(maxFiles))
             {
-                var entry = new FileEntry
+                FileEntry entry;
+
+                if (useMock)
                 {
-                    FilePath = filePath,
-                    Content = $"// Content of {filePath}\n// (In production, actual file content would be retrieved via API)",
-                    Language = DetectLanguage(filePath),
-                    LineCount = 50, // Simulated
-                    RelevanceScore = CalculateRelevanceScore(
-                        filePath, storyDescription, commitFiles)
-                };
+                    entry = CreateMockFileEntry(filePath, storyDescription, commitFiles);
+                }
+                else
+                {
+                    entry = await FetchRealFileContentAsync(
+                        repositoryUrl, filePath, storyDescription, commitFiles);
+                }
 
                 files.Add(entry);
                 totalSize += entry.Content?.Length ?? 0;
@@ -147,6 +161,120 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
                 ErrorMessage = $"Failed to fetch files: {ex.Message}"
             });
         }
+    }
+
+    /// <summary>
+    /// Fetch real file content from the GitHub Contents API.
+    /// Uses GET /repos/{owner}/{repo}/contents/{path} which returns base64-encoded content.
+    /// </summary>
+    private async Task<FileEntry> FetchRealFileContentAsync(
+        string repositoryUrl,
+        string filePath,
+        string? storyDescription,
+        List<string>? commitFiles)
+    {
+        if (_httpClientFactory == null)
+        {
+            _logger?.LogWarning("HttpClientFactory not available, returning mock for {FilePath}", filePath);
+            return CreateMockFileEntry(filePath, storyDescription, commitFiles);
+        }
+
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            // GitHub Contents API: GET /repos/{owner}/{repo}/contents/{path}
+            var encodedPath = filePath.TrimStart('/');
+            var response = await httpClient.GetAsync(
+                $"/repos/{repositoryUrl}/contents/{encodedPath}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.LogWarning(
+                    "Failed to fetch content for {FilePath} (HTTP {Status})",
+                    filePath, response.StatusCode);
+
+                return new FileEntry
+                {
+                    FilePath = filePath,
+                    Content = $"// Failed to retrieve content (HTTP {response.StatusCode})",
+                    Language = DetectLanguage(filePath),
+                    LineCount = 0,
+                    RelevanceScore = CalculateRelevanceScore(filePath, storyDescription, commitFiles)
+                };
+            }
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+            string? content = null;
+            int lineCount = 0;
+
+            // The Contents API returns base64-encoded content for files
+            if (data.TryGetProperty("content", out var contentProp) &&
+                contentProp.ValueKind == JsonValueKind.String)
+            {
+                var base64Content = contentProp.GetString() ?? "";
+                // GitHub returns base64 with line breaks, strip them
+                base64Content = base64Content.Replace("\n", "").Replace("\r", "");
+
+                try
+                {
+                    var bytes = Convert.FromBase64String(base64Content);
+                    content = Encoding.UTF8.GetString(bytes);
+                    lineCount = content.Split('\n').Length;
+                }
+                catch (FormatException)
+                {
+                    _logger?.LogWarning("Failed to decode base64 content for {FilePath}", filePath);
+                    content = $"// Failed to decode content for {filePath}";
+                }
+            }
+            else if (data.TryGetProperty("message", out var msgProp))
+            {
+                // Could be a "too large" response — file > 1MB
+                content = $"// File too large to retrieve via Contents API: {msgProp.GetString()}";
+            }
+
+            return new FileEntry
+            {
+                FilePath = filePath,
+                Content = content ?? $"// No content available for {filePath}",
+                Language = DetectLanguage(filePath),
+                LineCount = lineCount,
+                RelevanceScore = CalculateRelevanceScore(filePath, storyDescription, commitFiles)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Error fetching content for {FilePath}", filePath);
+            return new FileEntry
+            {
+                FilePath = filePath,
+                Content = $"// Error retrieving content: {ex.Message}",
+                Language = DetectLanguage(filePath),
+                LineCount = 0,
+                RelevanceScore = CalculateRelevanceScore(filePath, storyDescription, commitFiles)
+            };
+        }
+    }
+
+    /// <summary>
+    /// Create a mock file entry with placeholder content.
+    /// Used when UseMock=true or as a fallback.
+    /// </summary>
+    private static FileEntry CreateMockFileEntry(
+        string filePath,
+        string? storyDescription,
+        List<string>? commitFiles)
+    {
+        return new FileEntry
+        {
+            FilePath = filePath,
+            Content = $"// [MOCK] Content of {filePath}\n// (Mock mode — real file content retrieval disabled)",
+            Language = DetectLanguage(filePath),
+            LineCount = 2,
+            RelevanceScore = CalculateRelevanceScore(filePath, storyDescription, commitFiles)
+        };
     }
 
     /// <summary>
