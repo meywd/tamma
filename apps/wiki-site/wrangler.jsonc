@@ -1,7 +1,23 @@
 {
   // Tamma Documentation & Wiki Site
-  // Deploys Astro Starlight static site to Cloudflare Pages
+  // Pure static Astro site served via Cloudflare Workers Static Assets
   "name": "tamma-wiki-site",
-  "pages_build_output_dir": "./dist",
-  "compatibility_date": "2025-01-01"
+  "compatibility_date": "2025-01-01",
+
+  // Static assets — no Worker script needed for pure static sites
+  "assets": {
+    "directory": "./dist"
+  },
+
+  // Custom domain — wiki.tamma.dev
+  "routes": [
+    {
+      "pattern": "wiki.tamma.dev",
+      "zone_name": "tamma.dev"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
 }
