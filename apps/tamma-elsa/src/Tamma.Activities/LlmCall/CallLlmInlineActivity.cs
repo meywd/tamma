@@ -589,6 +589,7 @@ public class CallLlmInlineActivity : CodeActivity
                         var sanitized = _sanitizer.SanitizeInput(rejOutput);
                         rejOutput = sanitized.Result;
                     }
+                    rejOutput = ToolOutputHelper.RedactSecrets(rejOutput ?? string.Empty);
 
                     messages.Add(new ConversationMessage
                     {
@@ -631,6 +632,7 @@ public class CallLlmInlineActivity : CodeActivity
                             var sanitized = _sanitizer.SanitizeInput(naOutput);
                             naOutput = sanitized.Result;
                         }
+                        naOutput = ToolOutputHelper.RedactSecrets(naOutput ?? string.Empty);
                         messages.Add(new ConversationMessage
                         {
                             Role = "tool", Content = naOutput,
@@ -664,6 +666,7 @@ public class CallLlmInlineActivity : CodeActivity
                             var sanitized = _sanitizer.SanitizeInput(toolOutput);
                             toolOutput = sanitized.Result;
                         }
+                        toolOutput = ToolOutputHelper.RedactSecrets(toolOutput ?? string.Empty);
 
                         messages.Add(new ConversationMessage
                         {
@@ -780,6 +783,7 @@ public class CallLlmInlineActivity : CodeActivity
                         var sanitized = _sanitizer.SanitizeInput(toolOutput);
                         toolOutput = sanitized.Result;
                     }
+                    toolOutput = ToolOutputHelper.RedactSecrets(toolOutput ?? string.Empty);
 
                     // Append tool result to conversation history
                     messages.Add(new ConversationMessage
