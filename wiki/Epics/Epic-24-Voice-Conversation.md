@@ -1,6 +1,6 @@
 # Epic 24: Realtime Voice Conversation with Orchestrator
 
-**Status:** Partially Implemented (research complete, 24 task plans ready)
+**Status:** Drafted (research complete, 24 task plans ready)
 **Stories:** 7 (24-0 through 24-6)
 **Task Plans:** 24 detailed implementation breakdowns
 **Packages:** `@tamma/api`, `@tamma/dashboard`

@@ -1,6 +1,6 @@
 # Epic 20: Billing & Payments
 
-**Status:** Planned
+**Status:** Drafted
 **Stories:** 5 (20-1 through 20-5)
 **Estimated Effort:** 17-22 days
 

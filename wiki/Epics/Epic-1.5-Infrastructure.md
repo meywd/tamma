@@ -135,23 +135,23 @@ Configuration resolution with support for config files and environment variable 
 ---
 
 ### Story 1.5-8: NPM Package Publishing
-**Status:** Story ready
+**Status:** Done
 
-CI/CD pipeline for npm publishing documented but not yet active.
+CI/CD pipeline for npm publishing implemented.
 
 ---
 
 ### Story 1.5-9: Binary Releases & Installers
-**Status:** Story ready
+**Status:** Done
 
-Standalone binary compilation plan documented.
+Standalone binary compilation and release pipeline implemented.
 
 ---
 
 ### Story 1.5-10: Kubernetes Deployment
-**Status:** MVP Optional
+**Status:** In Progress
 
-Kubernetes/Helm deployment deferred to post-MVP.
+Kubernetes/Helm deployment implementation in progress.
 
 ---
 

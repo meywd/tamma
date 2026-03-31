@@ -4,11 +4,12 @@
 
 ## Quick Links
 
-- [Project Roadmap](Roadmap) - All 25 epics with timeline and status
+- [Project Roadmap](Roadmap) - All 26 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
-- [Epics](Epics) - All 25 epics organized by phase
+- [Epics](Epics) - All 26 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
+- [Epic 2: Autonomous Loop](Epics/Epic-2-Autonomous-Loop) - 14-step autonomous development loop (13/16 done)
 - [Epic 6: Context & Knowledge Management](Epics/Epic-6-Context-Knowledge) - Vector DB, RAG, MCP, cost monitoring, permissions, knowledge base
 - [Epic 7: Mentorship Workflow](Epics/Epic-7-Mentorship) - ELSA workflow activities for autonomous mentorship
 - [Epic 9: Agent Management](Epics/Epic-9-Agent-Management) - Config-driven multi-agent system
@@ -17,6 +18,7 @@
 - [Epic 23: System Monitoring](Epics/Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
 - [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
 - [Epic 25: Wiki Site](Epics/Epic-25-Wiki-Site) - Custom documentation site on Cloudflare Workers
+- [Workflows](Workflows) - All 20 ELSA workflows with flow diagrams and dependency map
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -54,26 +56,23 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
-**GitHub Issues:** 101 closed as completed
+**Last Audit:** 2026-03-31 (sprint-status.yaml audited against codebase for all 26 epics)
 
-### Recent Changes
+### Recent Progress
 
+- **Epic 2 near complete** -- 13/16 autonomous loop stories done (issue selection through prompt optimization); retrospective completed
+- **Sprint status audit** -- all 26 epics audited against codebase, story statuses corrected
+- **Epic 1.5** -- NPM publishing (1.5-8) and binary releases (1.5-9) now done; Kubernetes deployment (1.5-10) in progress
+- **Epic 1** -- additional AI providers (1-10) and agent customization (1-13) in progress
+- **Landing page prototypes** -- 3 redesign variants with video integration
 - **Epic 25** added -- Custom Wiki Site on Cloudflare Workers (Astro Starlight, wiki.tamma.dev / wiki.its-done.dev)
-- **Video production plans** created for two explainer videos (ELI5 ~75s, Deep Dive ~4 min)
-- **All scene images generated** at 4K Pro (Gemini 3 Pro, 5504x3072 16:9) -- 79 images across 28 scenes
-- **ElevenLabs TTS narration** generated for ELI5 video
-- **Production plans finalized** with Runway 4.5 (via Freepik API) + ElevenLabs TTS pipeline
+- **Video production plans** finalized -- ELI5 ~75s + Deep Dive ~4 min, 79 scene images at 4K Pro
 - **CodeQL security alerts fixed** -- 9 files patched (log forging, incomplete URL sanitization, SQL wildcard escaping, API key validation)
-- **Leaked Gemini API key** removed and added to .gitignore
-- **Story 16-6** (ELSA Studio Auto-Login) implemented -- bypass internal ELSA Identity login page
-- **OpenSearch log shipping** fixed (3 bugs: ESM `require` in Node.js, wrong Serilog sink version, Fastify logger instance mismatch)
 
-### Completed Epics
+### Completed Epics (12)
 
 | Epic | Name | Key Deliverables |
 |------|------|------------------|
-| Epic 1 | Foundation & Core Infrastructure | AI providers (Claude, OpenCode, OpenRouter, Zen MCP), GitHub platform, CLI |
-| Epic 1.5 | Infrastructure & Deployment | Docker Compose stack, CI/CD pipelines, GitHub App, SaaS coordinator |
 | Epic 6 | Context & Knowledge Management | Codebase indexer, vector DB, RAG pipeline, MCP client, cost monitor, permissions, knowledge base, scrum master |
 | Epic 7 | Mentorship Workflow | 28-state mentorship workflow, 12+ ELSA activities, TypeScript bridge |
 | Epic 9 | Agent Management | Config-driven multi-agent, circuit breakers, diagnostics, security layer |
@@ -85,24 +84,31 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 15 | Observability | OpenSearch log aggregation (3 bug fixes for ESM/Serilog/Fastify) |
 | Epic 16 | Unified Auth & Admin | GitHub OAuth SSO (oauth2-proxy removed), user management, admin panel, RBAC, ELSA Studio auto-login |
 
-### In Progress / Planned
+### Near Complete (3)
 
-| Epic | Name | Status |
-|------|------|--------|
-| Epic 2 | Autonomous Development Loop | Planned (stories ready) |
-| Epic 3 | Quality Gates & Intelligence | Planned (stories ready) |
-| Epic 4 | Event Sourcing & Audit Trail | Planned (stories ready) |
-| Epic 5 | Observability Dashboard & Docs | Partially implemented (dashboard exists) |
-| Epic 8 | Distribution & Installation | Planned (stories ready) |
-| Epic 17 | Multi-Tenancy Foundation | Planned (stories ready) |
-| Epic 18 | End-User Auth & Registration | Planned (stories ready) |
-| Epic 19 | GitHub App Agent Dispatch | Planned (stories ready) |
-| Epic 20 | Billing & Payments | Planned (stories ready) |
-| Epic 21 | Marketing Site & User Dashboard | Partially implemented (marketing site exists) |
-| Epic 22 | CLI Mode Preservation | Planned (stories ready) |
-| Epic 23 | System Monitoring & Observability Dashboard | Planned (26 task plans ready) |
-| Epic 24 | Realtime Voice Conversation | Partially implemented (24 task plans ready) |
-| Epic 25 | Documentation & Wiki Site | Planned (Astro Starlight on Cloudflare Workers) |
+| Epic | Name | Done | Remaining |
+|------|------|------|-----------|
+| Epic 1 | Foundation & Core Infrastructure | 10/15 | 2 in progress (AI providers, agent customization), 3 ready |
+| Epic 1.5 | Infrastructure & Deployment | 9/10 | Kubernetes deployment in progress |
+| Epic 2 | Autonomous Development Loop | 13/16 | Issue decomposition, task dependencies, sequencing (ready for dev) |
+
+### Planned / Drafted
+
+| Epic | Name | Stories | Status |
+|------|------|---------|--------|
+| Epic 3 | Quality Gates & Intelligence | 12 | Ready for Dev |
+| Epic 4 | Event Sourcing & Audit Trail | 8 | Ready for Dev |
+| Epic 5 | Observability Dashboard & Docs | 12 | Partially Implemented |
+| Epic 8 | Distribution & Installation | 8 | Drafted |
+| Epic 17 | Multi-Tenancy Foundation | 5 | Drafted |
+| Epic 18 | End-User Auth & Registration | 5 | Drafted |
+| Epic 19 | GitHub App Agent Dispatch | 5 | Drafted |
+| Epic 20 | Billing & Payments | 5 | Drafted |
+| Epic 21 | Marketing Site & User Dashboard | 5 | Drafted |
+| Epic 22 | CLI Mode Preservation | 5 | Drafted |
+| Epic 23 | System Monitoring & Observability Dashboard | 12 | Drafted (26 task plans) |
+| Epic 24 | Realtime Voice Conversation | 7 | Drafted (24 task plans) |
+| Epic 25 | Documentation & Wiki Site | 1 | Drafted |
 
 ## Getting Started
 
@@ -120,8 +126,8 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (25 epics, 220+ stories, 50+ task plans)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (26 epics, 220+ stories, 50+ task plans)
 
 ---
 
-_Last updated: 2026-03-30 | Maintained by: meywd_
+_Last updated: 2026-03-31 | Maintained by: meywd_

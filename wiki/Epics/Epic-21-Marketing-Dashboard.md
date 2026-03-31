@@ -1,6 +1,6 @@
 # Epic 21: Marketing Site & User Dashboard
 
-**Status:** Partially Implemented
+**Status:** Drafted (marketing site exists at apps/marketing-site/)
 **Stories:** 5 (21-1 through 21-5)
 **Estimated Effort:** 128 hours
 

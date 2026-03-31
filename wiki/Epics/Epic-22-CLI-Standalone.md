@@ -1,7 +1,7 @@
 # Epic 22: CLI Mode Preservation
 
-**Status:** Planned
-**Stories:** 4 (22-1 through 22-4)
+**Status:** Drafted
+**Stories:** 5 (22-1 through 22-5)
 **Estimated Effort:** 44 hours
 
 ## Overview

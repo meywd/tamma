@@ -1,45 +1,48 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all 25 epics from foundation through SaaS platform.
+Comprehensive roadmap covering all 26 epics from foundation through SaaS platform.
+
+_Last audited: 2026-03-31_
 
 ## Epic Overview
 
-| Epic | Name | Stories | Status |
-|------|------|---------|--------|
-| **Epic 1** | Foundation & Core Infrastructure | 15 | Completed |
-| **Epic 1.5** | Infrastructure & Deployment | 15 | Completed |
-| **Epic 2** | Autonomous Development Loop | 16 | Planned |
-| **Epic 3** | Quality Gates & Intelligence | 12 | Planned |
-| **Epic 4** | Event Sourcing & Audit Trail | 8 | Planned |
-| **Epic 5** | Observability Dashboard & Docs | 14 | Partially Implemented |
-| **Epic 6** | Context & Knowledge Management | 10 | Completed |
-| **Epic 7** | Autonomous Mentorship Workflow | 19 | Completed |
-| **Epic 8** | Distribution & Installation | 8 | Planned |
-| **Epic 9** | Config-Driven Multi-Agent Management | 11 | Completed |
-| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 8 | Completed |
-| **Epic 11** | Security Hardening (ELSA) | 5 | Completed |
-| **Epic 12** | Agentic Tool Loop | 4 | Completed |
-| **Epic 13** | Workflow Decomposition | 3 | Completed |
-| **Epic 14** | Custom ELSA Studio | 3 | Completed |
-| **Epic 15** | Observability & Log Aggregation | 1 | Completed (3 bug fixes shipped) |
-| **Epic 16** | Unified Auth, User Management & Admin | 6 | Completed (oauth2-proxy removed, consolidated auth) |
-| **Epic 17** | Multi-Tenancy Foundation | 5 | Planned |
-| **Epic 18** | End-User Auth & Registration | 5 | Planned |
-| **Epic 19** | GitHub App Agent Dispatch | 5 | Planned |
-| **Epic 20** | Billing & Payments | 5 | Planned |
-| **Epic 21** | Marketing Site & User Dashboard | 5 | Partially Implemented |
-| **Epic 22** | CLI Mode Preservation | 5 | Planned |
-| **Epic 23** | System Monitoring & Observability Dashboard | 12 | Planned (26 task plans ready) |
-| **Epic 24** | Realtime Voice Conversation | 7 | Partially Implemented (24 task plans ready) |
-| **Epic 25** | Documentation & Wiki Site | 1 | Planned (Astro Starlight on Cloudflare Workers) |
+| Epic | Name | Stories | Done | Status |
+|------|------|---------|------|--------|
+| **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete (2 in progress, 3 ready) |
+| **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (1 in progress) |
+| **Epic 2** | Autonomous Development Loop | 16 | 13 | Near Complete (3 ready for dev) |
+| **Epic 3** | Quality Gates & Intelligence | 12 | 0 | Ready for Dev (all 12 stories ready) |
+| **Epic 4** | Event Sourcing & Audit Trail | 8 | 0 | Ready for Dev (all 8 stories ready) |
+| **Epic 5** | Observability Dashboard & Docs | 12 | 0 | Partially Implemented |
+| **Epic 6** | Context & Knowledge Management | 10 | -- | Completed |
+| **Epic 7** | Autonomous Mentorship Workflow | 9 | -- | Completed |
+| **Epic 8** | Distribution & Installation | 8 | 0 | Drafted |
+| **Epic 9** | Config-Driven Multi-Agent Management | 11 | -- | Completed |
+| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 8 | -- | Completed |
+| **Epic 11** | Security Hardening (ELSA) | 5 | -- | Completed |
+| **Epic 12** | Agentic Tool Loop | 4 | -- | Completed |
+| **Epic 13** | Workflow Decomposition | 3 | -- | Completed |
+| **Epic 14** | Custom ELSA Studio | 3 | -- | Completed |
+| **Epic 15** | Observability & Log Aggregation | 1 | -- | Completed (3 bug fixes shipped) |
+| **Epic 16** | Unified Auth, User Management & Admin | 6 | -- | Completed |
+| **Epic 17** | Multi-Tenancy Foundation | 5 | 0 | Drafted |
+| **Epic 18** | End-User Auth & Registration | 5 | 0 | Drafted |
+| **Epic 19** | GitHub App Agent Dispatch | 5 | 0 | Drafted |
+| **Epic 20** | Billing & Payments | 5 | 0 | Drafted |
+| **Epic 21** | Marketing Site & User Dashboard | 5 | 0 | Drafted |
+| **Epic 22** | CLI Mode Preservation | 5 | 0 | Drafted |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans) |
+| **Epic 24** | Realtime Voice Conversation | 7 | 0 | Drafted (24 task plans) |
+| **Epic 25** | Documentation & Wiki Site | 1 | 0 | Drafted |
 
 ---
 
-## Completed Epics
+## Completed / Near Complete Epics
 
 ### Epic 1: Foundation & Core Infrastructure
 
 **Goal:** Establish multi-provider AI abstraction, multi-platform Git integration, and hybrid orchestrator/worker architecture.
+**Status:** Near Complete -- 10/15 stories done, 2 in progress (additional AI providers, agent customization), 3 ready for dev.
 
 **Key Deliverables:**
 - `IAIProvider` and `IAgentProvider` interfaces in `@tamma/providers`
@@ -48,6 +51,8 @@ Comprehensive roadmap covering all 25 epics from foundation through SaaS platfor
 - Basic CLI scaffolding with mode selection (`@tamma/cli`)
 - Provider configuration management
 - Marketing website (Cloudflare Workers)
+
+**Remaining:** GitLab platform (1-6), additional Git platforms (1-11), performance impact analysis (1-14); additional AI providers (1-10) and agent customization (1-13) in progress.
 
 **Stories:** 1-0 through 1-14 (15 stories)
 
@@ -58,6 +63,7 @@ Comprehensive roadmap covering all 25 epics from foundation through SaaS platfor
 ### Epic 1.5: Infrastructure & Deployment
 
 **Goal:** Production-ready deployment, Docker packaging, CI/CD, GitHub App auth, SaaS coordinator.
+**Status:** Near Complete -- 9/10 stories done, Kubernetes deployment (1.5-10) in progress.
 
 **Key Deliverables:**
 - Docker Compose stack (PostgreSQL, RabbitMQ, ChromaDB, ELSA server, Tamma API, dashboard, nginx)
@@ -67,8 +73,10 @@ Comprehensive roadmap covering all 25 epics from foundation through SaaS platfor
 - GitHub Actions worker mode
 - Multi-tenant task queue and webhook routing
 - API key provisioning and GitHub Secrets setup
+- NPM package publishing pipeline
+- Binary releases and installers
 
-**Stories:** 1.5-1 through 1.5-15 (15 stories)
+**Stories:** 1.5-1 through 1.5-10 (10 stories)
 
 [Detailed Breakdown](Epics/Epic-1.5-Infrastructure)
 
@@ -248,17 +256,22 @@ Comprehensive roadmap covering all 25 epics from foundation through SaaS platfor
 
 ---
 
-## Planned / In-Progress Epics
+## Near Complete Epics
 
 ### Epic 2: Autonomous Development Loop
 
 **Goal:** Implement the 14-step autonomous development loop.
+**Status:** Near Complete -- 13 of 16 stories done, retrospective completed.
 
 **Stories:** 2-1 through 2-16 (16 stories)
-- Core loop: Issue selection, context analysis, plan generation, branch creation, TDD, code generation, refactoring, PR creation, status monitoring, merge, auto-next
-- Advanced: Intelligent provider selection, prompt engineering, issue decomposition, task dependency mapping, incremental sequencing
+- Core loop (2-1 through 2-11): All done -- issue selection, context analysis, plan generation, branch creation, TDD, code generation, refactoring, PR creation, status monitoring, merge, auto-next
+- Intelligent provider selection (2-12): Done
+- Prompt engineering optimization (2-13): Done
+- Remaining: Issue decomposition engine (2-14), task dependency mapping (2-15), incremental task sequencing (2-16) -- ready for dev
 
 ---
+
+## Planned / In-Progress Epics
 
 ### Epic 3: Quality Gates & Intelligence
 
@@ -455,8 +468,8 @@ Each implementation story now has task plan breakdowns:
 
 ```
 Phase 1 (Completed):
-  Epic 1   (Foundation)              [COMPLETED]
-  Epic 1.5 (Infrastructure)         [COMPLETED]
+  Epic 1   (Foundation)              [NEAR COMPLETE - 10/15 done, 2 in progress]
+  Epic 1.5 (Infrastructure)         [NEAR COMPLETE - 9/10 done, 1 in progress]
   Epic 9   (Multi-Agent Management)  [COMPLETED]
 
 Phase 2 (Completed):
@@ -472,24 +485,25 @@ Phase 3 (Completed):
   Epic 15  (Log Aggregation)         [COMPLETED]
   Epic 16  (Unified Auth & Admin)    [COMPLETED]
 
-Phase 4 (Planned):
-  Epic 2   (Autonomous Loop)         [Planned]
-  Epic 3   (Quality Gates)           [Planned]
-  Epic 4   (Event Sourcing)          [Planned]
+Phase 4 (Active):
+  Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 13/16 done]
+  Epic 3   (Quality Gates)           [READY FOR DEV - 12 stories]
+  Epic 4   (Event Sourcing)          [READY FOR DEV - 8 stories]
   Epic 5   (Observability/Docs)      [Partially Implemented]
 
 Phase 5 (Planned - SaaS):
-  Epic 17  (Multi-Tenancy)           [Planned]
-  Epic 18  (End-User Auth)           [Planned]
-  Epic 19  (Agent Dispatch)          [Planned]
-  Epic 20  (Billing)                 [Planned]
-  Epic 21  (Marketing/Dashboard)     [Partially Implemented]
-  Epic 22  (CLI Preservation)        [Planned]
+  Epic 17  (Multi-Tenancy)           [Drafted]
+  Epic 18  (End-User Auth)           [Drafted]
+  Epic 19  (Agent Dispatch)          [Drafted]
+  Epic 20  (Billing)                 [Drafted]
+  Epic 21  (Marketing/Dashboard)     [Drafted]
+  Epic 22  (CLI Preservation)        [Drafted]
 
 Phase 6 (Planned - Advanced):
-  Epic 23  (System Monitoring)       [26 task plans ready]
-  Epic 24  (Voice Conversation)      [24 task plans ready]
-  Epic 25  (Wiki Site)               [Planned - Astro Starlight]
+  Epic 8   (Distribution)            [Drafted - 8 stories]
+  Epic 23  (System Monitoring)       [Drafted - 26 task plans]
+  Epic 24  (Voice Conversation)      [Drafted - 24 task plans]
+  Epic 25  (Wiki Site)               [Drafted - Astro Starlight]
 ```
 
 ---

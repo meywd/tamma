@@ -1,6 +1,6 @@
 # Epic 23: System Monitoring & Observability Dashboard
 
-**Status:** Planned (implementation-ready)
+**Status:** Drafted (implementation-ready, 26 task plans)
 **Stories:** 12 (23-1 through 23-12)
 **Task Plans:** 26 detailed implementation breakdowns
 **Packages:** `@tamma/api`, `@tamma/dashboard`

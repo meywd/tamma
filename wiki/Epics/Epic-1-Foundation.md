@@ -152,9 +152,9 @@ CLI modes implemented:
 ---
 
 ### Story 1-10: Additional AI Provider Implementations
-**Status:** Done | **Tasks:** 10
+**Status:** In Progress | **Tasks:** 10
 
-OpenCode, OpenRouter, and Zen MCP providers implemented with 108+ tests passing.
+OpenCode, OpenRouter, and Zen MCP providers implemented with 108+ tests passing. OpenAI, Copilot, Gemini, z.ai, and local LLMs still in progress.
 
 - [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-10)
 
@@ -181,18 +181,18 @@ Location: `apps/marketing-site/`
 ---
 
 ### Story 1-13: Agent Customization System
-**Status:** Story ready | **Tasks:** 8
+**Status:** In Progress | **Tasks:** 8
 
-Agent configuration management with benchmark-driven optimization.
+AgentPromptRegistry, RoleBasedAgentResolver, and agent configs exist. A/B testing, benchmarks, and learning not yet done.
 
 - [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-13)
 
 ---
 
 ### Story 1-14: Performance Impact Analysis
-**Status:** Story ready | **Tasks:** 8
+**Status:** Ready for Dev | **Tasks:** 8
 
-Performance impact analysis for agent customizations.
+Performance impact analysis for agent customizations. Context XML exists, no implementation yet.
 
 - [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-14)
 

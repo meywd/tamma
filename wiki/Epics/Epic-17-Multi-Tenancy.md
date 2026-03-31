@@ -1,6 +1,6 @@
 # Epic 17: Multi-Tenancy Foundation
 
-**Status:** Planned
+**Status:** Drafted
 **Stories:** 5 (17-1 through 17-5)
 **Estimated Effort:** 62 hours
 

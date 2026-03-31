@@ -1,6 +1,6 @@
 # Epic 4: Event Sourcing & Audit Trail
 
-**Status:** Planned
+**Status:** Ready for Dev (all 8 stories ready)
 **Stories:** 8 (4-1 through 4-8)
 **Task Plans:** 0
 **Tech Spec:** [tech-spec-epic-4.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-4/tech-spec-epic-4.md)
@@ -29,14 +29,14 @@ Epic 4 implements CQRS event sourcing for complete transparency and audit compli
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 4-1 | Event Schema Design | Planned |
-| 4-2 | Event Store Backend Selection | Planned |
-| 4-3 | Event Capture -- Issue Selection & Analysis | Planned |
-| 4-4 | Event Capture -- AI Provider Interactions | Planned |
-| 4-5 | Event Capture -- Code Changes & Git Operations | Planned |
-| 4-6 | Event Capture -- Approvals & Escalations | Planned |
-| 4-7 | Event Query API for Time-Travel | Planned |
-| 4-8 | Black-Box Replay for Debugging | Planned |
+| 4-1 | Event Schema Design | Ready for Dev |
+| 4-2 | Event Store Backend Selection | Ready for Dev |
+| 4-3 | Event Capture -- Issue Selection & Analysis | Ready for Dev |
+| 4-4 | Event Capture -- AI Provider Interactions | Ready for Dev |
+| 4-5 | Event Capture -- Code Changes & Git Operations | Ready for Dev |
+| 4-6 | Event Capture -- Approvals & Escalations | Ready for Dev |
+| 4-7 | Event Query API for Time-Travel | Ready for Dev |
+| 4-8 | Black-Box Replay for Debugging | Ready for Dev |
 
 ## Key Technical Details
 

@@ -1,6 +1,6 @@
 # Epic 18: End-User Auth & Registration
 
-**Status:** Planned
+**Status:** Drafted
 **Stories:** 5 (18-1 through 18-5)
 **Estimated Effort:** ~23 days (single developer)
 

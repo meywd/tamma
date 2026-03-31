@@ -1,6 +1,6 @@
 # Epic 19: GitHub App Agent Dispatch
 
-**Status:** Planned
+**Status:** Drafted
 **Stories:** 5 (19-1 through 19-5)
 
 ## Overview

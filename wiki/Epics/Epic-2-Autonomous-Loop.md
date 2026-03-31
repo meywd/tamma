@@ -1,9 +1,10 @@
 # Epic 2: Autonomous Development Loop
 
-**Status:** Planned
+**Status:** Near Complete (13/16 done)
 **Stories:** 16 (2-1 through 2-16)
 **Task Plans:** 3
 **Tech Spec:** [tech-spec-epic-2.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-2/tech-spec-epic-2.md)
+**Retrospective:** Completed
 
 ## Overview
 
@@ -26,27 +27,27 @@ Epic 2 implements the fundamental 14-step autonomous development loop with basic
 
 | Story | Title | Task Plans | Status |
 |-------|-------|------------|--------|
-| 2-1 | Issue Selection with Filtering | 1 | Planned |
-| 2-2 | Issue Context Analysis | 0 | Planned |
-| 2-3 | Development Plan Generation with Approval Checkpoint | 1 | Planned |
-| 2-4 | Git Branch Creation | 0 | Planned |
-| 2-5 | Test-First Development -- Write Failing Tests | 0 | Planned |
-| 2-6 | Implementation Code Generation | 0 | Planned |
-| 2-7 | Code Refactoring Pass | 0 | Planned |
-| 2-8 | Pull Request Creation | 0 | Planned |
-| 2-9 | PR Status Monitoring | 1 | Planned |
-| 2-10 | PR Merge with Completion Checkpoint | 0 | Planned |
-| 2-11 | Auto-Next Issue Selection | 0 | Planned |
+| 2-1 | Issue Selection with Filtering | 1 | Done |
+| 2-2 | Issue Context Analysis | 0 | Done |
+| 2-3 | Development Plan Generation with Approval Checkpoint | 1 | Done |
+| 2-4 | Git Branch Creation | 0 | Done |
+| 2-5 | Test-First Development -- Write Failing Tests | 0 | Done |
+| 2-6 | Implementation Code Generation | 0 | Done |
+| 2-7 | Code Refactoring Pass | 0 | Done |
+| 2-8 | Pull Request Creation | 0 | Done |
+| 2-9 | PR Status Monitoring | 1 | Done |
+| 2-10 | PR Merge with Completion Checkpoint | 0 | Done |
+| 2-11 | Auto-Next Issue Selection | 0 | Done |
 
 ### Advanced Intelligence (2-12 through 2-16)
 
 | Story | Title | Task Plans | Status |
 |-------|-------|------------|--------|
-| 2-12 | Intelligent Provider Selection | 0 | Planned |
-| 2-13 | Prompt Engineering Optimization | 0 | Planned |
-| 2-14 | Issue Decomposition Engine | 0 | Planned |
-| 2-15 | Task Dependency Mapping | 0 | Planned |
-| 2-16 | Incremental Task Sequencing | 0 | Planned |
+| 2-12 | Intelligent Provider Selection | 0 | Done |
+| 2-13 | Prompt Engineering Optimization | 0 | Done |
+| 2-14 | Issue Decomposition Engine | 0 | Ready for Dev |
+| 2-15 | Task Dependency Mapping | 0 | Ready for Dev |
+| 2-16 | Incremental Task Sequencing | 0 | Ready for Dev |
 
 ## Key Technical Details
 

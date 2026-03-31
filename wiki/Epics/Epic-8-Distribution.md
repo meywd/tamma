@@ -1,6 +1,6 @@
 # Epic 8: Distribution & Installation
 
-**Status:** Planned
+**Status:** Drafted
 **Stories:** 8 (8-1 through 8-8)
 **Task Plans:** 0
 

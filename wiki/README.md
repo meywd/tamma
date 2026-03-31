@@ -7,10 +7,10 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 ### General
 
 - **Home.md** - Wiki homepage with quick links, project overview, and status
-- **Epics.md** - Index of all 24 epics with links
-- **Roadmap.md** - Project roadmap with all 25 epics and timeline
+- **Epics.md** - Index of all 26 epics with links
+- **Roadmap.md** - Project roadmap with all 26 epics and timeline
 - **Architecture.md** - System architecture (dual TypeScript + C#/ELSA stack)
-- **Stories.md** - Index of all user stories across all 25 epics (~221 stories, 50+ task plans)
+- **Stories.md** - Index of all user stories across all 26 epics (~221 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 
 ### Epic Pages (All 25 Epics)
