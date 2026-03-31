@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2025-11-07 (story-renaming-1-6-1-7-to-1-13-1-14-completed)
+# updated: 2026-03-31 (epic-1-status-audit-against-codebase)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -38,55 +38,54 @@ story_location: "{project-root}/docs/stories"
 
 development_status:
   epic-1: contexted
-  1-0-ai-provider-strategy-research: done
-  1-1-ai-provider-interface-definition: ready-for-dev
-  1-2-claude-code-provider-implementation: ready-for-dev
-  1-3-provider-configuration-management: ready-for-dev
-  1-4-git-platform-interface-definition: ready-for-dev
-  1-5-github-platform-implementation: ready-for-dev
-  1-6-gitlab-platform-implementation: ready-for-dev
-  1-7-git-platform-configuration-management: ready-for-dev
-  1-8-hybrid-orchestrator-worker-architecture-design: ready-for-dev
-  1-9-basic-cli-scaffolding-with-mode-selection: ready-for-dev
-  1-10-additional-ai-provider-implementations: ready-for-dev
-  1-11-additional-git-platform-implementations: ready-for-dev
-  1-12-initial-marketing-website: ready-for-dev
-  1-13-agent-customization-system: ready-for-dev
-  1-14-performance-impact-analysis: ready-for-dev
+  1-0-ai-provider-strategy-research: done          # Research doc at docs/architecture/provider-research.md
+  1-1-ai-provider-interface-definition: done        # IAIProvider, ILLMProvider, ICLIAgentProvider in packages/providers/src/types.ts
+  1-2-claude-code-provider-implementation: done     # ClaudeAgentProvider in packages/providers/src/claude-agent-provider.ts
+  1-3-provider-configuration-management: done       # ProviderRegistry, ProviderFactory, IProvidersConfig, validation, resolveConfig
+  1-4-git-platform-interface-definition: done       # IGitPlatform in packages/platforms/src/types/git-platform.interface.ts
+  1-5-github-platform-implementation: done          # GitHubPlatform in packages/platforms/src/github/ with tests
+  1-6-gitlab-platform-implementation: ready-for-dev # No GitLab code exists in packages/platforms/src/
+  1-7-git-platform-configuration-management: done   # GitPlatformConfig types, repo-config, validation
+  1-8-hybrid-orchestrator-worker-architecture-design: done  # Architecture docs + engine, CLI modes, transports
+  1-9-basic-cli-scaffolding-with-mode-selection: done       # Full CLI with Commander, Ink, modes, commands
+  1-10-additional-ai-provider-implementations: in-progress  # OpenRouter, OpenCode, ZenMCP done; OpenAI, Copilot, Gemini, z.ai, local LLMs still placeholders
+  1-11-additional-git-platform-implementations: ready-for-dev  # No Gitea, Forgejo, Bitbucket, Azure DevOps, or plain Git code
+  1-12-initial-marketing-website: done              # Full site at apps/marketing-site/ deployed on Cloudflare Workers
+  1-13-agent-customization-system: in-progress      # AgentPromptRegistry, RoleBasedAgentResolver, agent configs exist; A/B testing, benchmarks, learning not done
+  1-14-performance-impact-analysis: ready-for-dev   # Only context XML exists, no implementation
   epic-1-retrospective: done
 
   epic-1.5: contexted
-  1.5-1-core-engine-separation: ready-for-dev
-  1.5-2-cli-mode-enhancement: ready-for-dev
-  1.5-3-service-mode-implementation: ready-for-dev
-  1.5-4-web-server-api: ready-for-dev
-  1.5-5-docker-packaging: ready-for-dev
-  1.5-6-webhook-integration: ready-for-dev
-  1.5-7-system-configuration-management: ready-for-dev
-  1.5-8-npm-package-publishing: ready-for-dev
-  1.5-9-binary-releases-installers: ready-for-dev
-  1.5-10-kubernetes-deployment: ready-for-dev
+  1.5-1-core-engine-separation: done
+  1.5-2-cli-mode-enhancement: done
+  1.5-3-service-mode-implementation: done
+  1.5-4-web-server-api: done
+  1.5-5-docker-packaging: done
+  1.5-6-webhook-integration: done
+  1.5-7-system-configuration-management: done
+  1.5-8-npm-package-publishing: done
+  1.5-9-binary-releases-installers: done
+  1.5-10-kubernetes-deployment: in-progress
   epic-1.5-retrospective: optional
 
   epic-2: contexted
-  2-1-issue-selection-with-filtering: ready-for-dev
-  2-2-issue-context-analysis: ready-for-dev
-  2-2-anthropic-claude-provider-implementation: ready-for-dev
-  2-3-development-plan-generation-with-approval-checkpoint: ready-for-dev
-  2-4-git-branch-creation: ready-for-dev
-  2-5-test-first-development-write-failing-tests: ready-for-dev
-  2-6-implementation-code-generation: ready-for-dev
-  2-7-code-refactoring-pass: ready-for-dev
-  2-8-pull-request-creation: ready-for-dev
-  2-9-pr-status-monitoring: ready-for-dev
-  2-10-pr-merge-with-completion-checkpoint: ready-for-dev
-   2-11-auto-next-issue-selection: ready-for-dev
-   2-12-intelligent-provider-selection: ready-for-dev
-   2-13-prompt-engineering-optimization: ready-for-dev
-   2-14-issue-decomposition-engine: ready-for-dev
-   2-15-task-dependency-mapping: ready-for-dev
-   2-16-incremental-task-sequencing: ready-for-dev
-   epic-2-retrospective: completed
+  2-1-issue-selection-with-filtering: done
+  2-2-issue-context-analysis: done
+  2-3-development-plan-generation-with-approval-checkpoint: done
+  2-4-git-branch-creation: done
+  2-5-test-first-development-write-failing-tests: done
+  2-6-implementation-code-generation: done
+  2-7-code-refactoring-pass: done
+  2-8-pull-request-creation: done
+  2-9-pr-status-monitoring: done
+  2-10-pr-merge-with-completion-checkpoint: done
+  2-11-auto-next-issue-selection: done
+  2-12-intelligent-provider-selection: done
+  2-13-prompt-engineering-optimization: done
+  2-14-issue-decomposition-engine: ready-for-dev
+  2-15-task-dependency-mapping: ready-for-dev
+  2-16-incremental-task-sequencing: ready-for-dev
+  epic-2-retrospective: completed
 
   epic-3: contexted
   3-1-build-automation-gate-implementation: ready-for-dev
@@ -131,4 +130,182 @@ development_status:
    5-9e-video-walkthrough: backlog
    5-10-alpha-release-preparation: drafted
    epic-5-retrospective: optional
+
+  epic-6: contexted
+  6-1-codebase-indexer: drafted
+  6-2-vector-database-integration: drafted
+  6-3-rag-pipeline: drafted
+  6-4-mcp-client-integration: drafted
+  6-5-context-aggregator: drafted
+  6-6-knowledge-base-ui: drafted
+  6-7-llm-cost-monitoring: drafted
+  6-8-agent-permissions: drafted
+  6-9-agent-knowledge-base: drafted
+  6-10-scrum-master-task-loop: drafted
+  epic-6-retrospective: optional
+
+  epic-7: contexted
+  7-1-mentorship-workflow: drafted
+  7-2-llm-call-sub-workflow: drafted
+  7-3-testing-sub-workflow: drafted
+  7-4-code-review-sub-workflow: drafted
+  7-5-assessment-sub-workflow: drafted
+  7-6-context-gathering-sub-workflow: drafted
+  7-7-blocker-diagnosis-sub-workflow: drafted
+  7-8-tdd-sub-workflow: drafted
+  7-9-debugging-sub-workflow: drafted
+  epic-7-retrospective: optional
+
+  epic-8: contexted
+  8-1-esbuild-bundle: drafted
+  8-2-npm-publish-pipeline: drafted
+  8-3-standalone-binary: drafted
+  8-4-install-scripts-releases: drafted
+  8-5-auto-update-homebrew: drafted
+  8-6-typescript-dashboard-dockerfiles: drafted
+  8-7-docker-compose-full-stack: drafted
+  8-8-docker-ci-cd-cli-integration: drafted
+  epic-8-retrospective: optional
+
+  epic-9: contexted
+  9-1-configuration-schema: drafted
+  9-2-provider-diagnostics: drafted
+  9-3-provider-health-tracker: drafted
+  9-4-agent-provider-factory: drafted
+  9-5-provider-chain: drafted
+  9-6-agent-prompt-registry: drafted
+  9-7-content-sanitization: drafted
+  9-8-role-based-agent-resolver: drafted
+  9-9-engine-integration: drafted
+  9-10-cli-wiring: drafted
+  9-11-diagnostics-queue-mcp-interceptors: drafted
+  epic-9-retrospective: optional
+
+  epic-10: contexted
+  10-1-engine-static-workflow-and-brain: drafted
+  10-2-comprehensive-event-catalog: drafted
+  10-3-event-store-postgresql-emmett: drafted
+  10-4-smart-queue-state-deduplication: drafted
+  10-5-workflow-provider-abstraction: drafted
+  10-6-input-channel-unification: drafted
+  10-7-event-store-security-sanitization: drafted
+  10-8-state-reconstruction-from-events: drafted
+  epic-10-retrospective: optional
+
+  epic-11: contexted
+  11-1-content-sanitizer-csharp-port: drafted
+  11-2-llm-input-sanitization: drafted
+  11-3-tool-call-validation: drafted
+  11-4-output-sanitization-prompt-hardening: drafted
+  11-5-fail-closed-guards-provider-allowlist: drafted
+  epic-11-retrospective: optional
+
+  epic-12: contexted
+  12-1-tool-executor-interface-and-registry: drafted
+  12-2-agentic-tool-loop-in-call-llm: drafted
+  12-3-context-compaction: drafted
+  12-4-streaming-and-parallel-tools: drafted
+  epic-12-retrospective: optional
+
+  epic-13: contexted
+  13-1-tdd-debug-retry-sub-workflow: drafted
+  13-2-ci-debug-retry-sub-workflow: drafted
+  13-3-consolidate-finish-sequences: drafted
+  epic-13-retrospective: optional
+
+  epic-14: contexted
+  14-1-studio-blazor-wasm-scaffold: drafted
+  14-2-studio-docker-and-ci: drafted
+  14-3-studio-custom-ui-hints: drafted
+  epic-14-retrospective: optional
+
+  epic-15: contexted
+  15-1-opensearch-log-aggregation: drafted
+  epic-15-retrospective: optional
+
+  epic-16: contexted
+  16-1-oauth2-proxy-unified-auth: drafted
+  16-2-user-management-api: drafted
+  16-3-admin-dashboard: drafted
+  16-4-unified-navigation: drafted
+  16-5-role-based-access-control: drafted
+  16-6-elsa-studio-auto-login: drafted
+  epic-16-retrospective: optional
+
+  epic-17: contexted
+  17-1-tenant-model-database-schema: drafted
+  17-2-row-level-security-tenant-isolation: drafted
+  17-3-tenant-scoped-event-store: drafted
+  17-4-tenant-scoped-workflow-instances: drafted
+  17-5-api-tenant-context-middleware: drafted
+  epic-17-retrospective: optional
+
+  epic-18: contexted
+  18-1-user-registration-email-verification: drafted
+  18-2-user-login-session-management: drafted
+  18-3-organization-tenant-creation: drafted
+  18-4-github-app-installation-onboarding: drafted
+  18-5-user-facing-dashboard-shell: drafted
+  epic-18-retrospective: optional
+
+  epic-19: contexted
+  19-1-tamma-agent-workflow-template: drafted
+  19-2-workflow-dispatch-from-elsa: drafted
+  19-3-agent-execution-monitoring: drafted
+  19-4-result-collection: drafted
+  19-5-agent-executor-abstraction: drafted
+  epic-19-retrospective: optional
+
+  epic-20: contexted
+  20-1-stripe-integration-plan-model: drafted
+  20-2-subscription-management: drafted
+  20-3-usage-metering: drafted
+  20-4-usage-limits-enforcement: drafted
+  20-5-billing-dashboard: drafted
+  epic-20-retrospective: optional
+
+  epic-21: contexted
+  21-1-marketing-landing-page: drafted
+  21-2-pricing-page: drafted
+  21-3-documentation-site: drafted
+  21-4-user-dashboard-repos-runs: drafted
+  21-5-user-dashboard-settings-billing: drafted
+  epic-21-retrospective: optional
+
+  epic-22: contexted
+  22-1-agent-executor-abstraction: drafted
+  22-2-cli-standalone-workflow-engine: drafted
+  22-3-optional-cloud-sync: drafted
+  22-4-feature-parity-matrix: drafted
+  22-5-cli-docker-installation: drafted
+  epic-22-retrospective: optional
+
+  epic-23: contexted
+  23-1-system-health-dashboard: drafted
+  23-2-agent-monitor: drafted
+  23-3-event-store-explorer: drafted
+  23-4-configuration-audit: drafted
+  23-5-workflow-monitor: drafted
+  23-6-provider-diagnostics: drafted
+  23-7-log-explorer: drafted
+  23-8-infrastructure-monitor: drafted
+  23-9-knowledge-base-monitor: drafted
+  23-10-security-access-audit: drafted
+  23-11-monitoring-api-foundation: drafted
+  23-12-dashboard-navigation: drafted
+  epic-23-retrospective: optional
+
+  epic-24: contexted
+  24-0-voice-api-research: drafted
+  24-1-websocket-foundation: drafted
+  24-2-speech-to-text: drafted
+  24-3-text-to-speech: drafted
+  24-4-intent-engine: drafted
+  24-5-dashboard-voice-ui: drafted
+  24-6-hardening: drafted
+  epic-24-retrospective: optional
+
+  epic-25: contexted
+  25-1-custom-wiki-site: drafted
+  epic-25-retrospective: optional
 
