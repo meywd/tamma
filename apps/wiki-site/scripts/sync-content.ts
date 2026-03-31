@@ -228,10 +228,14 @@ function syncWikiEpics(): void {
     const order = epicNumMatch ? parseFloat(epicNumMatch[1]!) : 99;
 
     // Output filename: Epic-1-Foundation.md -> 1-foundation.md
-    const outName = file
+    // Replace dots in the stem with dashes to avoid slug collisions (e.g., 1.5 vs 15)
+    const ext = extname(file); // .md
+    const stem = file.slice(0, -ext.length);
+    const outName = stem
       .replace(/^Epic-/, '')
       .toLowerCase()
-      .replace(/\s+/g, '-');
+      .replace(/\./g, '-')
+      .replace(/\s+/g, '-') + ext;
 
     const frontmatter = buildFrontmatter(title, { order });
     writeFileSync(join(outDir, outName), `${frontmatter}\n\n${transformed}`);
@@ -264,7 +268,10 @@ function syncStories(): void {
 
     // Epic directories (e.g., epic-1/, epic-6/)
     if (entry.isDirectory() && entry.name.startsWith('epic-')) {
-      syncEpicStoryDir(srcPath, entry.name);
+      // Rename epic-1.5 -> epic-1-5 to avoid slug collision with epic-15
+      // (Astro's glob loader strips dots from directory names when generating IDs)
+      const outDirName = entry.name.replace(/\./g, '-');
+      syncEpicStoryDir(srcPath, outDirName);
     }
   }
 }

@@ -1,6 +1,5 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import cloudflare from '@astrojs/cloudflare';
 import { readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -15,15 +14,21 @@ function generateStorySidebarGroups() {
   const epicDirs = readdirSync(storiesDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && d.name.startsWith('epic-'))
     .sort((a, b) => {
-      // Sort by epic number: epic-1, epic-1.5, epic-2, ..., epic-24
-      const numA = parseFloat(a.name.replace('epic-', ''));
-      const numB = parseFloat(b.name.replace('epic-', ''));
-      return numA - numB;
+      // Sort by epic number: epic-1, epic-1-5, epic-2, ..., epic-24
+      // Handle epic-1-5 as 1.5 by replacing first hyphen-digit-hyphen pattern
+      const parseEpicNum = (name) => {
+        const num = name.replace('epic-', '');
+        // epic-1-5 -> 1.5, epic-10 -> 10
+        const match = num.match(/^(\d+)-(\d+)$/);
+        if (match) return parseFloat(`${match[1]}.${match[2]}`);
+        return parseFloat(num);
+      };
+      return parseEpicNum(a.name) - parseEpicNum(b.name);
     });
 
   const epicLabels = {
     'epic-1': 'Epic 1: Foundation',
-    'epic-1.5': 'Epic 1.5: Infrastructure',
+    'epic-1-5': 'Epic 1.5: Infrastructure',
     'epic-2': 'Epic 2: Autonomous Loop',
     'epic-3': 'Epic 3: Quality Gates',
     'epic-4': 'Epic 4: Event Sourcing',
@@ -62,7 +67,6 @@ function generateStorySidebarGroups() {
 export default defineConfig({
   site: 'https://wiki.tamma.dev',
   output: 'static',
-  adapter: cloudflare(),
   integrations: [
     starlight({
       title: 'Tamma Docs',
