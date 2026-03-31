@@ -6,7 +6,7 @@ export default function Layout() {
     <div className="flex h-screen bg-[#0e0e10] text-zinc-300">
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-8 py-10">
+        <div className="max-w-5xl mx-auto px-8 py-10">
           <Outlet />
         </div>
       </main>
