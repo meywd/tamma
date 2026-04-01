@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import MermaidDiagram from './MermaidDiagram';
+import WorkflowDiagram from './WorkflowDiagram';
 
 interface ManifestEntry {
   path: string;
@@ -418,53 +418,8 @@ export default function WorkflowDetailPage() {
             {flowSection.heading}
           </h2>
 
-          {/* Styled flow steps */}
-          {flowSteps.length > 2 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              {flowSteps.map((step, i) => {
-                const styles = stepTypeStyles[step.type];
-                return (
-                  <div key={i} className="flex items-center gap-2">
-                    <div
-                      className={`flex items-center gap-2 ${styles.bg} border ${styles.border} rounded-lg px-3 py-2`}
-                    >
-                      <svg className={`w-3.5 h-3.5 ${styles.text} shrink-0`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d={styles.icon} />
-                      </svg>
-                      <span className={`text-[12px] font-medium ${styles.text}`}>
-                        {step.label.replace(/\(.*?\)/g, '').trim()}
-                      </span>
-                    </div>
-                    {i < flowSteps.length - 1 && (
-                      <svg className="w-3.5 h-3.5 text-zinc-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Flow diagram — Mermaid if steps available, ASCII fallback */}
-          {flowSteps.length > 1 && (
-            <MermaidDiagram
-              chart={`flowchart TD\n${flowSteps.map((s, i) => {
-                const id = `S${i}`;
-                const nextId = `S${i + 1}`;
-                const label = s.label.replace(/"/g, "'");
-                if (i === 0) return `  ${id}["${label}"]`;
-                return `  ${id}["${label}"]\n  S${i - 1} --> ${id}`;
-              }).join('\n')}`}
-            />
-          )}
-          {flowDiagram && !flowSteps.length && (
-            <div className="bg-[#18181b] border border-zinc-800 rounded-lg overflow-x-auto">
-              <pre className="p-4 text-[12px] leading-relaxed font-mono text-zinc-400 whitespace-pre">
-                {flowDiagram}
-              </pre>
-            </div>
-          )}
+          {/* Mermaid flow diagram */}
+          <WorkflowDiagram slug={slug} flowSteps={flowSteps} />
         </div>
       )}
 
