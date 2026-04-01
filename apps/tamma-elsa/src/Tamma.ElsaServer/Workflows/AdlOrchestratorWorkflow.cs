@@ -45,13 +45,10 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
         var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
-        var maxPerRun = builder.WithVariable<int>("MaxPerRun", 10);
+        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1);
 
-        var issuesDispatched = builder.WithVariable<int>("IssuesDispatched", 0);
-        var consecutiveEmpty = builder.WithVariable<int>("ConsecutiveEmpty", 0);
-
-        // Selected issue data
-        var selectedIssueJson = builder.WithVariable<string?>("SelectedIssueJson", null);
+        // Selected work item data
+        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null);
         var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0);
 
         // ================================================================
@@ -71,7 +68,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             ResolvedBotAssignee = new Output<string>(botAssignee),
             ResolvedBaseBranch = new Output<string>(baseBranch),
             ResolvedCooldownSeconds = new Output<int>(cooldownSeconds),
-            ResolvedMaxIssuesPerRun = new Output<int>(maxPerRun),
+            ResolvedMaxIssuesPerRun = new Output<int>(maxConcurrent),
             ResolvedConfigJson = new Output<string>(configJson),
         };
         initConfig.SetDisplayText("Load Config");
@@ -86,7 +83,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Repository = new Input<string>(ctx => repository.Get(ctx)),
             AutoLabels = new Input<string[]>(ctx => issueLabels.Get(ctx)),
             BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
-            WorkItemJson = new Output<string?>(selectedIssueJson),
+            WorkItemJson = new Output<string?>(selectedItemJson),
             IssueNumber = new Output<int>(selectedIssueNumber),
         };
         selectWorkItem.SetDisplayText("Select Work Item");
@@ -114,11 +111,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         {
             Id = "CheckLimits",
             Name = "Check Limits",
-            IssuesCompleted = new Input<int>(ctx => issuesDispatched.Get(ctx)),
-            ConsecutiveFailures = new Input<int>(0), // failures tracked by engine callbacks
-            DailyQuota = new Input<int>(20),
-            MaxPerRun = new Input<int>(ctx => maxPerRun.Get(ctx)),
-            MaxConsecutiveFailures = new Input<int>(100), // effectively disabled — engine handles this
+            MaxConcurrent = new Input<int>(ctx => maxConcurrent.Get(ctx)),
         };
         checkLimits.SetDisplayText("Check Limits");
 
@@ -133,7 +126,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
-                ["issueJson"] = selectedIssueJson.Get(ctx) ?? "",
+                ["workItemJson"] = selectedItemJson.Get(ctx) ?? "",
                 ["issueNumber"] = selectedIssueNumber.Get(ctx),
                 ["botAssignee"] = botAssignee.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
@@ -141,22 +134,6 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             WaitForCompletion = new(false), // fire & forget
         };
         dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
-
-        // ================================================================
-        // 6. Increment dispatched count
-        // ================================================================
-        var incrementCount = new SetVariable
-        {
-            Id = "IncrementDispatched",
-            Name = "Track Dispatch",
-            Variable = issuesDispatched,
-            Value = new Input<object?>(ctx =>
-            {
-                consecutiveEmpty.Set(ctx, 0); // reset empty counter on successful dispatch
-                return (object)(issuesDispatched.Get(ctx) + 1);
-            })
-        };
-        incrementCount.SetDisplayText("Track Dispatch");
 
         // ================================================================
         // 7. Cooldown
@@ -173,27 +150,21 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // ================================================================
         // Output & Finish
         // ================================================================
-        var setOutputsDone = new Sequence
+        var setOutputsDone = new SetOutput
         {
             Id = "SetOutputsDone",
             Name = "Output (No Issues)",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutTotal", OutputName = new("totalDispatched"), OutputValue = new(ctx => (object)issuesDispatched.Get(ctx)) }, "Set Total"),
-                WithLabel(new SetOutput { Id = "OutReason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }, "Set Reason"),
-            }
+            OutputName = new("exitReason"),
+            OutputValue = new(ctx => (object)"noIssues"),
         };
         setOutputsDone.SetDisplayText("Output (No Issues)");
 
-        var setOutputsLimits = new Sequence
+        var setOutputsLimits = new SetOutput
         {
             Id = "SetOutputsLimits",
             Name = "Output (Limits)",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutLimTotal", OutputName = new("totalDispatched"), OutputValue = new(ctx => (object)issuesDispatched.Get(ctx)) }, "Set Total"),
-                WithLabel(new SetOutput { Id = "OutLimReason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"limitsReached") }, "Set Reason"),
-            }
+            OutputName = new("exitReason"),
+            OutputValue = new(ctx => (object)"limitsReached"),
         };
         setOutputsLimits.SetDisplayText("Output (Limits)");
 
@@ -210,7 +181,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Activities =
             {
                 initConfig, selectWorkItem, dispatchTriage,
-                checkLimits, dispatchCycle, incrementCount, cooldown,
+                checkLimits, dispatchCycle, cooldown,
                 setOutputsDone, setOutputsLimits, finish
             },
             Connections =
@@ -233,10 +204,9 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 ConnectOutcome(checkLimits, "Stop", setOutputsLimits),
                 Connect(setOutputsLimits, finish),
 
-                // Within limits → Dispatch (fire & forget) → Track → Cooldown → Loop
+                // Within limits → Dispatch (fire & forget) → Cooldown → Loop
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
-                Connect(dispatchCycle, incrementCount),
-                Connect(incrementCount, cooldown),
+                Connect(dispatchCycle, cooldown),
                 Connect(cooldown, selectWorkItem), // loop back to select next
             }
         };
