@@ -45,6 +45,12 @@ public class CheckLimitsActivity : TammaOutcomeActivity
     [Input(Description = "Max consecutive failures before stopping")]
     public Input<int> MaxConsecutiveFailures { get; set; } = new(3);
 
+    [Input(Description = "Number of currently active (dispatched) cycles")]
+    public Input<int> ActiveCycles { get; set; } = new(0);
+
+    [Input(Description = "Max concurrent cycles")]
+    public Input<int> MaxConcurrent { get; set; } = new(1);
+
     [Input(Description = "Emergency stop flag")]
     public Input<bool> EmergencyStop { get; set; } = new(false);
 
@@ -65,9 +71,11 @@ public class CheckLimitsActivity : TammaOutcomeActivity
     {
         var completed = IssuesCompleted.Get(context);
         var failures = ConsecutiveFailures.Get(context);
+        var active = ActiveCycles.Get(context);
         var dailyQuota = DailyQuota.Get(context);
         var maxPerRun = MaxPerRun.Get(context);
         var maxFailures = MaxConsecutiveFailures.Get(context);
+        var maxConcurrent = MaxConcurrent.Get(context);
         var emergencyStop = EmergencyStop.Get(context);
 
         // Check emergency stop
