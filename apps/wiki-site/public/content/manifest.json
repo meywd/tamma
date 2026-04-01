@@ -210,6 +210,11 @@
     "section": "Epics"
   },
   {
+    "path": "/epics/26-project-management",
+    "title": "Epic 26: Project Management & Triage",
+    "section": "Epics"
+  },
+  {
     "path": "/epics/3-quality-gates",
     "title": "Epic 3: Quality Gates & Intelligence Layer",
     "section": "Epics"
@@ -817,6 +822,11 @@
   {
     "path": "/stories/epic-2/2-17-workflow-prompt-engineering",
     "title": "Story 2-17: Workflow Prompt Engineering Overhaul",
+    "section": "Epic 2"
+  },
+  {
+    "path": "/stories/epic-2/2-20-priority-based-work-item-selection",
+    "title": "Story 2-20: Priority-Based Work Item Selection",
     "section": "Epic 2"
   },
   {
@@ -1785,6 +1795,11 @@
     "section": "Epic 10"
   },
   {
+    "path": "/stories/epic-10/10-9-workflow-activity-base-class-and-events",
+    "title": "Story 10-9: TammaActivity Base Class and Workflow Event Emission",
+    "section": "Epic 10"
+  },
+  {
     "path": "/stories/epic-10/10-1-engine-static-workflow-and-brain",
     "title": "Story 10.1: Engine Static Workflow — Orchestrator Tool Loop",
     "section": "Epic 10"
@@ -2618,5 +2633,30 @@
     "path": "/stories/epic-25/25-1-custom-wiki-site",
     "title": "Story 25-1: Custom Wiki Site",
     "section": "Epic 25"
+  },
+  {
+    "path": "/stories/epic-26",
+    "title": "Epic 26: Project Management & Triage",
+    "section": "Epic 26"
+  },
+  {
+    "path": "/stories/epic-26/26-1-issue-triage-workflow",
+    "title": "Story 26-1: Issue Triage Workflow",
+    "section": "Epic 26"
+  },
+  {
+    "path": "/stories/epic-26/26-2-scrum-management-workflow",
+    "title": "Story 26-2: Scrum Management Workflow",
+    "section": "Epic 26"
+  },
+  {
+    "path": "/stories/epic-26/26-3-release-management-workflow",
+    "title": "Story 26-3: Release Management Workflow",
+    "section": "Epic 26"
+  },
+  {
+    "path": "/stories/epic-26/26-4-priority-configuration-system",
+    "title": "Story 26-4: Priority Configuration System",
+    "section": "Epic 26"
   }
 ]

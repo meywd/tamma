@@ -4,7 +4,7 @@
 
 ## Quick Links
 
-- [Project Roadmap](Roadmap) - All 26 epics with timeline and status
+- [Project Roadmap](Roadmap) - All 27 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
 - [Epics](Epics) - All 26 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
@@ -18,7 +18,8 @@
 - [Epic 23: System Monitoring](Epics/Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
 - [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
 - [Epic 25: Wiki Site](Epics/Epic-25-Wiki-Site) - Custom documentation site on Cloudflare Workers
-- [Workflows](Workflows) - All 20 ELSA workflows with flow diagrams and dependency map
+- [Epic 26: Project Management & Triage](Epics/Epic-26-Project-Management) - Issue triage, scrum management, release management
+- [Workflows](Workflows) - All 21 ELSA workflows with flow diagrams and dependency map
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -56,15 +57,17 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
-**Last Audit:** 2026-04-01 (sprint-status.yaml audited against codebase for all 26 epics)
+**Last Audit:** 2026-04-01 (sprint-status.yaml audited against codebase for all 27 epics)
 **Audit Results:** 115 done, 20 in-progress, 56 drafted
 
 ### Recent Progress
 
+- **ADL Orchestrator redesigned** -- Priority-based work item selection, fire-and-forget cycle dispatch, triage integration, concurrency-based limits, full event emission on every step
+- **Epic 26 created** -- Project Management & Triage (issue triage workflow, scrum management, release management, priority configuration)
 - **PR #325 merged** -- Workflow enhancements, 10 bug fixes, wiki site rewrite as Vite+React SPA, Midnight Ocean marketing redesign
 - **PR #326 created** -- CodeQL ReDoS fix in EpicDetailPage regex
 - **New stories added** -- 2-17, 2-18, 2-19, 3-13, 7-8 overhaul, 7-11, 7-12, 11-6, 12-5, 12-6
-- **Deep audit completed** -- all 26 epics verified against codebase; Epic 3, 4, 5, 8 statuses significantly corrected
+- **Deep audit completed** -- all 27 epics verified against codebase; Epic 3, 4, 5, 8 statuses significantly corrected
 - **Epic 8 completed** -- All 8 distribution stories done (esbuild, npm publish, binary, Docker, Homebrew)
 - **Epic 3 near complete** -- 8/12 quality gate stories done (build, test, escalation, static analysis, security, monitoring, cost, complexity)
 - **Epic 4 near complete** -- 6/8 event sourcing stories done; PostgreSQL backend in progress
@@ -117,6 +120,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 22 | CLI Mode Preservation | 5 | Drafted |
 | Epic 23 | System Monitoring & Observability Dashboard | 12 | Drafted (26 task plans) |
 | Epic 24 | Realtime Voice Conversation | 7 | Drafted (24 task plans) |
+| Epic 26 | Project Management & Triage | 4 | Drafted (issue triage, scrum, release, priority config) |
 
 ## Getting Started
 
@@ -134,7 +138,7 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (26 epics, 220+ stories, 50+ task plans)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (27 epics, 220+ stories, 50+ task plans)
 
 ---
 

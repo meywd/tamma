@@ -1,6 +1,6 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all 26 epics from foundation through SaaS platform.
+Comprehensive roadmap covering all 27 epics from foundation through SaaS platform.
 
 _Last audited: 2026-04-01_
 
@@ -34,6 +34,7 @@ _Last audited: 2026-04-01_
 | **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans, some in progress) |
 | **Epic 24** | Realtime Voice Conversation | 7 | 1 | Drafted (24 task plans) |
 | **Epic 25** | Documentation & Wiki Site | 1 | 1 | Completed |
+| **Epic 26** | Project Management & Triage | 4 | 0 | Drafted |
 
 ---
 
@@ -440,6 +441,22 @@ Each implementation story now has task plan breakdowns:
 
 ---
 
+### Epic 26: Project Management & Triage
+
+**Goal:** Automated project management workflows -- issue triage, scrum management, release management, and priority configuration.
+
+**Status:** Drafted -- created as part of the ADL Orchestrator redesign to support the new triage integration.
+
+**Stories:** 26-1 through 26-4 (4 stories)
+- 26-1 Issue Triage Workflow -- LLM-powered classification and labeling of untriaged issues
+- 26-2 Scrum Management Workflow -- Sprint planning, standups, retrospectives
+- 26-3 Release Management Workflow -- Changelog generation, deployment orchestration
+- 26-4 Priority Configuration System -- Configurable priority rules for work item selection
+
+[Detailed Breakdown](Epics/Epic-26-Project-Management)
+
+---
+
 ### Epic 25: Documentation & Wiki Site
 
 **Goal:** Build and deploy a custom documentation/wiki site on Cloudflare Workers, accessible at wiki.tamma.dev.
@@ -499,6 +516,7 @@ Phase 5 (Planned - SaaS):
 Phase 6 (Planned - Advanced):
   Epic 23  (System Monitoring)       [Drafted - 26 task plans]
   Epic 24  (Voice Conversation)      [Drafted - 24 task plans]
+  Epic 26  (Project Mgmt & Triage)   [Drafted - 4 stories]
 ```
 
 ---
