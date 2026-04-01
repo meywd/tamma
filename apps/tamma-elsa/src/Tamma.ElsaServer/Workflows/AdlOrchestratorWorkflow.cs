@@ -89,23 +89,18 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         selectWorkItem.SetDisplayText("Select Work Item");
 
         // ================================================================
-        // 2b. Dispatch Triage (when untriaged issues found but nothing ready)
+        // 2b. Dispatch Triage
         // ================================================================
-        var dispatchTriage = new DispatchWorkflow
+        var dispatchTriage = new DispatchTriageActivity
         {
             Id = "DispatchTriage",
             Name = "Dispatch Triage",
-            WorkflowDefinitionId = new("issue-triage"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-            }),
-            WaitForCompletion = new(true), // wait for triage to finish, then re-select
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
         };
         dispatchTriage.SetDisplayText("Dispatch Triage");
 
         // ================================================================
-        // 4. Check Limits
+        // 3. Check Limits
         // ================================================================
         var checkLimits = new CheckLimitsActivity
         {
@@ -116,57 +111,49 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         checkLimits.SetDisplayText("Check Limits");
 
         // ================================================================
-        // 5. Dispatch Cycle (fire & forget)
+        // 4. Dispatch Cycle (fire & forget)
         // ================================================================
-        var dispatchCycle = new DispatchWorkflow
+        var dispatchCycle = new DispatchCycleActivity
         {
             Id = "DispatchIssueCycle",
             Name = "Dispatch Issue Cycle",
-            WorkflowDefinitionId = new("single-issue-cycle"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["workItemJson"] = selectedItemJson.Get(ctx) ?? "",
-                ["issueNumber"] = selectedIssueNumber.Get(ctx),
-                ["botAssignee"] = botAssignee.Get(ctx),
-                ["baseBranch"] = baseBranch.Get(ctx),
-            }),
-            WaitForCompletion = new(false), // fire & forget
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => selectedItemJson.Get(ctx) ?? ""),
+            IssueNumber = new Input<int>(ctx => selectedIssueNumber.Get(ctx)),
+            BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
+            BaseBranch = new Input<string>(ctx => baseBranch.Get(ctx)),
         };
         dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
 
         // ================================================================
-        // 7. Cooldown
+        // 5. Cooldown
         // ================================================================
-        var cooldown = new Delay
+        var cooldown = new CooldownActivity
         {
             Id = "CooldownDelay",
             Name = "Cooldown",
-            TimeSpan = new Input<TimeSpan>(ctx =>
-                System.TimeSpan.FromSeconds(cooldownSeconds.Get(ctx)))
+            Seconds = new Input<int>(ctx => cooldownSeconds.Get(ctx)),
         };
         cooldown.SetDisplayText("Cooldown");
 
         // ================================================================
-        // Output & Finish
+        // Exit paths
         // ================================================================
-        var setOutputsDone = new SetOutput
+        var exitNoIssues = new SetExitReasonActivity
         {
-            Id = "SetOutputsDone",
-            Name = "Output (No Issues)",
-            OutputName = new("exitReason"),
-            OutputValue = new(ctx => (object)"noIssues"),
+            Id = "ExitNoIssues",
+            Name = "Exit (No Issues)",
+            Reason = new Input<string>("noIssues"),
         };
-        setOutputsDone.SetDisplayText("Output (No Issues)");
+        exitNoIssues.SetDisplayText("Exit (No Issues)");
 
-        var setOutputsLimits = new SetOutput
+        var exitLimits = new SetExitReasonActivity
         {
-            Id = "SetOutputsLimits",
-            Name = "Output (Limits)",
-            OutputName = new("exitReason"),
-            OutputValue = new(ctx => (object)"limitsReached"),
+            Id = "ExitLimits",
+            Name = "Exit (Limits)",
+            Reason = new Input<string>("limitsReached"),
         };
-        setOutputsLimits.SetDisplayText("Output (Limits)");
+        exitLimits.SetDisplayText("Exit (Limits)");
 
         var finish = new Finish { Id = "Finish", Name = "Complete" };
         finish.SetDisplayText("Complete");
@@ -182,32 +169,32 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             {
                 initConfig, selectWorkItem, dispatchTriage,
                 checkLimits, dispatchCycle, cooldown,
-                setOutputsDone, setOutputsLimits, finish
+                exitNoIssues, exitLimits, finish
             },
             Connections =
             {
                 // Load Config → Select Work Item
                 Connect(initConfig, selectWorkItem),
 
-                // Nothing found → repo is clean → Finish
-                ConnectOutcome(selectWorkItem, "NothingFound", setOutputsDone),
-                Connect(setOutputsDone, finish),
+                // Nothing found → repo is clean → Exit → Finish
+                ConnectOutcome(selectWorkItem, "NothingFound", exitNoIssues),
+                Connect(exitNoIssues, finish),
 
                 // Needs triage → dispatch triage → re-select
                 ConnectOutcome(selectWorkItem, "NeedsTriage", dispatchTriage),
-                Connect(dispatchTriage, selectWorkItem), // loop back after triage
+                Connect(dispatchTriage, selectWorkItem),
 
                 // Selected → Check Limits
                 ConnectOutcome(selectWorkItem, "Selected", checkLimits),
 
-                // Limits reached → Finish
-                ConnectOutcome(checkLimits, "Stop", setOutputsLimits),
-                Connect(setOutputsLimits, finish),
+                // Limits reached → Exit → Finish
+                ConnectOutcome(checkLimits, "Stop", exitLimits),
+                Connect(exitLimits, finish),
 
                 // Within limits → Dispatch (fire & forget) → Cooldown → Loop
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, cooldown),
-                Connect(cooldown, selectWorkItem), // loop back to select next
+                Connect(cooldown, selectWorkItem),
             }
         };
     }
