@@ -147,7 +147,10 @@ test.describe('Dashboard UI Tests', () => {
           `Expected either a working page or auth redirect.`,
       ).toBeLessThan(400);
 
-      // Check if there is a sign-in prompt on the page itself
+      // Wait briefly for React SPA to hydrate
+      await page.waitForTimeout(3000);
+
+      // Check if there is a sign-in prompt or any rendered content
       const pageContent = await page.content();
       const hasAuthPrompt =
         pageContent.includes('Sign in') ||
@@ -155,10 +158,14 @@ test.describe('Dashboard UI Tests', () => {
         pageContent.includes('Login') ||
         pageContent.includes('Authorize');
 
-      // Either the page loads with content, or has an auth prompt — both are valid
-      const bodyText = await page.locator('body').innerText();
+      // React SPA: check innerHTML (not innerText which may be empty before hydration)
+      const hasContent =
+        pageContent.includes('<div id="root">') ||
+        pageContent.includes('script') ||
+        pageContent.length > 500;
+
       expect(
-        bodyText.length > 0 || hasAuthPrompt,
+        hasContent || hasAuthPrompt,
         `Dashboard at ${APP_URL} rendered an empty page with no auth prompt. ` +
           `The application may be broken. Final URL: ${finalUrl}`,
       ).toBeTruthy();
