@@ -1,15 +1,20 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ReactFlow,
   Background,
+  Controls,
+  MiniMap,
   type Node,
   type Edge,
   type NodeTypes,
   Position,
   Handle,
   BackgroundVariant,
+  useNodesState,
+  useEdgesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import Dagre from '@dagrejs/dagre';
 
 // --- Custom Node Types ---
 
@@ -366,6 +371,59 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('phase2', 'assemble'), e('assemble', 'budget'), e('budget', 'done'),
     ],
   },
+  'architecture-flow': {
+    nodes: [
+      n('gh', 'GitHub Webhook', 0, 0, 'start'),
+      n('cli', 'CLI Command', 0, 0, 'start'),
+      n('api', 'REST API', 0, 0, 'start'),
+      n('adl', 'ADL Orchestrator', 0, 0, 'subworkflow'),
+      n('sic', 'Single Issue Cycle', 0, 0, 'subworkflow'),
+      n('is', 'Issue Selection', 0, 0),
+      n('pg', 'Plan Generation', 0, 0),
+      n('tdd', 'TDD Cycle', 0, 0, 'subworkflow'),
+      n('cr', 'Code Review', 0, 0, 'subworkflow'),
+      n('merge', 'Merge', 0, 0),
+      n('chain', 'Provider Chain', 0, 0, 'parallel', { items: ['Claude', 'OpenAI', 'OpenRouter', 'Local'] }),
+      n('cb', 'Circuit Breaker', 0, 0, 'decision'),
+      n('resolver', 'Role-Based Resolver', 0, 0),
+      n('github', 'GitHub API', 0, 0),
+      n('gitlab', 'GitLab API', 0, 0),
+      n('pg_db', 'PostgreSQL', 0, 0),
+      n('rmq', 'RabbitMQ', 0, 0),
+      n('chroma', 'ChromaDB', 0, 0),
+    ],
+    edges: [
+      e('gh', 'adl'), e('cli', 'adl'), e('api', 'adl'),
+      e('adl', 'sic'), e('sic', 'is'), e('is', 'pg'), e('pg', 'tdd'),
+      e('tdd', 'cr'), e('cr', 'merge'),
+      e('is', 'chain'), e('pg', 'chain'), e('tdd', 'chain'),
+      e('chain', 'cb'), e('cb', 'resolver'),
+      e('merge', 'github'), e('merge', 'gitlab'),
+      e('adl', 'pg_db'), e('adl', 'rmq'),
+      e('tdd', 'chroma'),
+    ],
+  },
+  'security-pipeline': {
+    nodes: [
+      n('input', 'User/LLM Input', 0, 0, 'start'),
+      n('sanitize', 'Content Sanitizer', 0, 0, 'process', { description: 'HTML strip, zero-width removal' }),
+      n('harden', 'Prompt Hardening', 0, 0, 'process', { description: 'Anti-extraction preamble' }),
+      n('llm', 'LLM Call', 0, 0, 'subworkflow'),
+      n('validate', 'Tool Validator', 0, 0, 'process', { description: 'Allowlist + schema check' }),
+      n('gate', 'Action Gate', 0, 0, 'decision'),
+      n('exec', 'Tool Executor', 0, 0),
+      n('redact', 'RedactSecrets', 0, 0, 'process', { description: '10 secret patterns' }),
+      n('output', 'Output Validator', 0, 0),
+      n('clean', 'Clean Output', 0, 0, 'end'),
+      n('block', 'Blocked', 0, 0, 'end'),
+    ],
+    edges: [
+      e('input', 'sanitize'), e('sanitize', 'harden'), e('harden', 'llm'),
+      e('llm', 'validate'), e('validate', 'gate'),
+      e('gate', 'exec', 'Allowed'), e('gate', 'block', 'Denied', 'right'),
+      e('exec', 'redact'), e('redact', 'output'), e('output', 'clean'),
+    ],
+  },
 };
 
 // Fallback: generate a simple linear diagram from flow steps
@@ -394,40 +452,108 @@ interface FlowStep {
   type: 'process' | 'decision' | 'terminal' | 'start';
 }
 
+// --- Auto-layout with Dagre ---
+
+function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB'): { nodes: Node[]; edges: Edge[] } {
+  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
+  g.setGraph({
+    rankdir: direction,
+    nodesep: 60,
+    ranksep: 80,
+    marginx: 40,
+    marginy: 40,
+  });
+
+  for (const node of nodes) {
+    const width = node.type === 'parallel' ? 220 : node.type === 'decision' ? 140 : 170;
+    const height = node.type === 'parallel' ? 100 : node.type === 'decision' ? 80 : 60;
+    g.setNode(node.id, { width, height });
+  }
+
+  for (const edge of edges) {
+    g.setEdge(edge.source, edge.target);
+  }
+
+  Dagre.layout(g);
+
+  const layoutedNodes = nodes.map((node) => {
+    const pos = g.node(node.id);
+    const width = node.type === 'parallel' ? 220 : node.type === 'decision' ? 140 : 170;
+    const height = node.type === 'parallel' ? 100 : node.type === 'decision' ? 80 : 60;
+    return {
+      ...node,
+      position: {
+        x: pos.x - width / 2,
+        y: pos.y - height / 2,
+      },
+    };
+  });
+
+  return { nodes: layoutedNodes, edges };
+}
+
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
-  const diagram = useMemo(() => {
+  const rawDiagram = useMemo(() => {
     if (WORKFLOW_DIAGRAMS[slug]) return WORKFLOW_DIAGRAMS[slug];
     if (flowSteps && flowSteps.length > 2) return generateFallback(flowSteps);
     return null;
   }, [slug, flowSteps]);
 
-  if (!diagram) return null;
+  const layouted = useMemo(() => {
+    if (!rawDiagram) return null;
+    return autoLayout(rawDiagram.nodes, rawDiagram.edges);
+  }, [rawDiagram]);
 
-  const maxY = Math.max(...diagram.nodes.map(n => n.position.y));
-  const height = Math.min(maxY + 120, 900);
+  const [nodes, setNodes, onNodesChange] = useNodesState(layouted?.nodes ?? []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layouted?.edges ?? []);
+
+  // Re-layout when diagram changes
+  useMemo(() => {
+    if (layouted) {
+      setNodes(layouted.nodes);
+      setEdges(layouted.edges);
+    }
+  }, [layouted]);
+
+  if (!layouted) return null;
 
   return (
     <div className="my-6">
       <div
         className="bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden"
-        style={{ height: `${height}px` }}
+        style={{ height: '600px' }}
       >
         <ReactFlow
-          nodes={diagram.nodes}
-          edges={diagram.edges}
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
-          minZoom={0.3}
-          maxZoom={1.5}
+          fitViewOptions={{ padding: 0.3 }}
+          minZoom={0.2}
+          maxZoom={2}
           panOnDrag
           zoomOnScroll
-          nodesDraggable={false}
+          nodesDraggable={true}
           nodesConnectable={false}
           proOptions={{ hideAttribution: true }}
           defaultEdgeOptions={{ type: 'smoothstep', ...edgeDefaults }}
         >
           <Background color="#27272a" gap={20} variant={BackgroundVariant.Dots} />
+          <Controls className="!bg-zinc-800 !border-zinc-700 !rounded-lg [&_button]:!bg-zinc-800 [&_button]:!border-zinc-700 [&_button]:!text-zinc-400 [&_button:hover]:!bg-zinc-700" />
+          <MiniMap
+            className="!bg-zinc-900 !border-zinc-800 !rounded-lg"
+            nodeColor={(n) => {
+              if (n.type === 'start') return '#22c55e';
+              if (n.type === 'end') return '#ef4444';
+              if (n.type === 'decision') return '#f59e0b';
+              if (n.type === 'subworkflow') return '#3b82f6';
+              if (n.type === 'parallel') return '#a855f7';
+              return '#52525b';
+            }}
+            maskColor="rgba(0,0,0,0.7)"
+          />
         </ReactFlow>
       </div>
     </div>

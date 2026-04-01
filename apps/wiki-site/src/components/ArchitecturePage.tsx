@@ -3,7 +3,8 @@ import { Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import MermaidDiagram from './MermaidDiagram';
+import WorkflowDiagram from './WorkflowDiagram';
+import type { WorkflowDef } from './WorkflowDiagram';
 
 // --- Types ---
 
@@ -759,89 +760,17 @@ export default function ArchitecturePage() {
       {/* Component Diagram */}
       <ComponentDiagram layers={architectureLayers} />
 
-      {/* Architecture Flow Diagram */}
-      <MermaidDiagram
-        title="Autonomous Development Flow"
-        chart={`flowchart TB
-  subgraph Input["Input Layer"]
-    GH["GitHub/GitLab Webhook"]
-    CLI["CLI Command"]
-    API["REST API"]
-  end
+      {/* Architecture Flow — React Flow */}
+      <div>
+        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-3">Autonomous Development Flow</h2>
+        <WorkflowDiagram slug="architecture-flow" />
+      </div>
 
-  subgraph Orchestrator["ELSA Workflow Engine"]
-    ADL["ADL Orchestrator"]
-    SIC["Single Issue Cycle"]
-
-    subgraph Workflows["Sub-Workflows"]
-      IS["Issue Selection"]
-      PG["Plan Generation"]
-      TDD["TDD Cycle"]
-      CR["Code Review"]
-      MG["Merge"]
-    end
-  end
-
-  subgraph Providers["AI Provider Layer"]
-    PC["Provider Chain"]
-    CB["Circuit Breaker"]
-    RP["Role-Based Resolver"]
-
-    subgraph AI["Providers"]
-      Claude["Claude"]
-      GPT["OpenAI"]
-      OR["OpenRouter"]
-      Local["Local LLMs"]
-    end
-  end
-
-  subgraph Platform["Git Platform Layer"]
-    GitHub["GitHub API"]
-    GitLab["GitLab API"]
-    Gitea["Gitea/Forgejo"]
-  end
-
-  subgraph Infra["Infrastructure"]
-    PG_DB["PostgreSQL"]
-    RMQ["RabbitMQ"]
-    Chroma["ChromaDB"]
-    OS["OpenSearch"]
-  end
-
-  GH --> ADL
-  CLI --> ADL
-  API --> ADL
-  ADL --> SIC
-  SIC --> IS & PG & TDD & CR & MG
-  IS & PG & TDD & CR --> PC
-  PC --> CB --> RP
-  RP --> Claude & GPT & OR & Local
-  MG --> GitHub & GitLab & Gitea
-  ADL --> PG_DB & RMQ
-  TDD --> Chroma
-  ADL --> OS`}
-      />
-
-      <MermaidDiagram
-        title="Security Pipeline"
-        chart={`flowchart LR
-  Input["User/LLM Input"] --> CS["Content Sanitizer"]
-  CS --> |"HTML strip, zero-width removal"| PH["Prompt Hardening"]
-  PH --> |"Anti-extraction preamble"| LLM["LLM Call"]
-  LLM --> |"Tool requests"| TV["Tool Validator"]
-  TV --> |"Allowlist + schema check"| AG["Action Gate"]
-  AG --> |"Dangerous op check"| TE["Tool Executor"]
-  TE --> |"Output"| RS["RedactSecrets"]
-  RS --> |"10 patterns"| OV["Output Validator"]
-  OV --> |"Clean output"| LLM
-
-  style CS fill:#1e3a5f,stroke:#3b82f6
-  style PH fill:#1e3a5f,stroke:#3b82f6
-  style TV fill:#3b1e1e,stroke:#ef4444
-  style AG fill:#3b1e1e,stroke:#ef4444
-  style RS fill:#1e3b1e,stroke:#22c55e
-  style OV fill:#1e3b1e,stroke:#22c55e`}
-      />
+      {/* Security Pipeline — React Flow */}
+      <div>
+        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-3">Security Pipeline</h2>
+        <WorkflowDiagram slug="security-pipeline" />
+      </div>
 
       {/* Collapsible Sections */}
       {topLevelSections
