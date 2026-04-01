@@ -59,39 +59,22 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // Activities
         // ================================================================
 
-        // 1. Init config from inputs
-        var initConfig = new SetVariable
+        // 1. Init config from inputs (proper activity with explicit I/O)
+        var initConfig = new InitAdlConfigActivity
         {
             Id = "InitAdlConfig",
             Name = "Load Config",
-            Variable = repository,
-            Value = new Input<object?>(ctx =>
-            {
-                var repo = ctx.GetInput<string>("repository") ?? "";
-                var config = ctx.GetInput<string>("configJson");
-                if (!string.IsNullOrEmpty(config))
-                {
-                    configJson.Set(ctx, config);
-                    var parsed = SafeDeserialize<AdlConfig>(config);
-                    if (parsed != null)
-                    {
-                        repo = string.IsNullOrEmpty(repo) ? parsed.Repository : repo;
-                        issueLabels.Set(ctx, parsed.IssueLabels);
-                        botAssignee.Set(ctx, parsed.BotAssignee);
-                        baseBranch.Set(ctx, parsed.BaseBranch);
-                        cooldownSeconds.Set(ctx, parsed.CooldownSeconds);
-                    }
-                }
-
-                var directLabels = ctx.GetInput<string[]>("issueLabels");
-                if (directLabels != null) issueLabels.Set(ctx, directLabels);
-                var directBot = ctx.GetInput<string>("botAssignee");
-                if (!string.IsNullOrEmpty(directBot)) botAssignee.Set(ctx, directBot);
-                var directBase = ctx.GetInput<string>("baseBranch");
-                if (!string.IsNullOrEmpty(directBase)) baseBranch.Set(ctx, directBase);
-
-                return (object)repo;
-            })
+            Repository = new Input<string?>(ctx => ctx.GetInput<string>("repository")),
+            ConfigJson = new Input<string?>(ctx => ctx.GetInput<string>("configJson")),
+            IssueLabels = new Input<string[]?>(ctx => ctx.GetInput<string[]>("issueLabels")),
+            BotAssignee = new Input<string?>(ctx => ctx.GetInput<string>("botAssignee")),
+            BaseBranch = new Input<string?>(ctx => ctx.GetInput<string>("baseBranch")),
+            ResolvedRepository = new Output<string>(repository),
+            ResolvedIssueLabels = new Output<string[]>(issueLabels),
+            ResolvedBotAssignee = new Output<string>(botAssignee),
+            ResolvedBaseBranch = new Output<string>(baseBranch),
+            ResolvedCooldownSeconds = new Output<int>(cooldownSeconds),
+            ResolvedConfigJson = new Output<string>(configJson),
         };
         initConfig.SetDisplayText("Load Config");
 
@@ -256,10 +239,4 @@ public class AdlOrchestratorWorkflow : WorkflowBase
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 
-    private static T? SafeDeserialize<T>(string? json) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try { return JsonSerializer.Deserialize<T>(json); }
-        catch { return null; }
-    }
 }
