@@ -94,7 +94,7 @@ export default function Sidebar() {
       {/* Header */}
       <div className="px-4 pt-5 pb-3">
         <NavLink to="/" className="flex items-center gap-2.5 text-white font-semibold text-[15px] tracking-tight">
-          <div className="w-6 h-6 rounded bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center text-[11px] font-bold">T</div>
+          <img src="/logo.png" alt="Tamma" className="w-7 h-7 rounded-full" />
           Tamma Docs
         </NavLink>
       </div>
