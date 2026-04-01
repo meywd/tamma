@@ -2,16 +2,15 @@
   "name": "@tamma/wiki-site",
   "version": "1.0.0",
   "private": true,
-  "description": "Tamma documentation and wiki site — Astro Starlight on Cloudflare Workers",
+  "description": "Tamma documentation and wiki site — Vite React on Cloudflare Workers",
   "type": "module",
   "scripts": {
     "sync-content": "tsx scripts/sync-content.ts",
-    "dev": "pnpm sync-content && astro dev",
-    "build": "pnpm sync-content && astro build",
-    "preview": "astro preview",
-    "deploy": "wrangler deploy",
-    "deploy:prod": "pnpm build && wrangler deploy",
-    "astro": "astro"
+    "dev": "pnpm sync-content && vite",
+    "build": "pnpm sync-content && vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler deploy --config wrangler.jsonc",
+    "deploy:prod": "pnpm build && wrangler deploy --config wrangler.jsonc"
   },
   "keywords": [
     "tamma",
@@ -23,17 +22,29 @@
   ],
   "author": "Tamma Project",
   "license": "SEE LICENSE IN ../../LICENSE",
-  "dependencies": {
-    "@astrojs/cloudflare": "^12.0.0",
-    "@astrojs/starlight": "^0.33.0",
-    "astro": "^5.5.0"
-  },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.2.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "wrangler": "^4.45.3"
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "wrangler": "^4.79.0"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.10.2",
+    "mermaid": "^11.13.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-router": "^7.9.5",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.0"
   }
 }

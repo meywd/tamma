@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -14,6 +15,8 @@ public class ContextGatheringActivityTests
     private Mock<ILogger<ContextGatheringActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
     private Mock<IIntegrationService> _mockIntegrationService = null!;
+    private Mock<IHttpClientFactory> _mockHttpClientFactory = null!;
+    private Mock<IConfiguration> _mockConfiguration = null!;
 
     [SetUp]
     public void SetUp()
@@ -21,6 +24,8 @@ public class ContextGatheringActivityTests
         _mockLogger = new Mock<ILogger<ContextGatheringActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
         _mockIntegrationService = new Mock<IIntegrationService>();
+        _mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        _mockConfiguration = new Mock<IConfiguration>();
     }
 
     [Test]
@@ -30,7 +35,9 @@ public class ContextGatheringActivityTests
         Action act = () => new ContextGatheringActivity(
             _mockLogger.Object,
             _mockRepository.Object,
-            _mockIntegrationService.Object);
+            _mockIntegrationService.Object,
+            _mockHttpClientFactory.Object,
+            _mockConfiguration.Object);
 
         // Assert
         act.Should().NotThrow();

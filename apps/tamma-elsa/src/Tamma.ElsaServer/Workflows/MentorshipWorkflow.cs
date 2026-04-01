@@ -4,6 +4,7 @@ using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Activities.Flowchart.Models;
 using Elsa.Workflows.Runtime.Activities;
+using System.Text.Json;
 using Tamma.Activities.Mentorship;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
@@ -52,11 +53,15 @@ public class MentorshipWorkflow : WorkflowBase
         var sessionId = builder.WithVariable<Guid>("SessionId", default(Guid));
         var storyId = builder.WithVariable<string>("StoryId", "");
         var juniorId = builder.WithVariable<string>("JuniorId", "");
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 3);
         var assessmentAttempt = builder.WithVariable<int>("AssessmentAttempt", 0);
         var planIteration = builder.WithVariable<int>("PlanIteration", 0);
         var qualityRetryCount = builder.WithVariable<int>("QualityRetryCount", 0);
         var reviewIteration = builder.WithVariable<int>("ReviewIteration", 0);
         var blockerEscalationLevel = builder.WithVariable<int>("BlockerEscalationLevel", 0);
+
+        // DispatchWorkflow result capture for AssessmentWorkflow
+        var assessmentDispatchResult = builder.WithVariable<IDictionary<string, object>?>();
 
         // =====================================================================
         // 1. INITIALIZATION ACTIVITIES
@@ -357,7 +362,7 @@ public class MentorshipWorkflow : WorkflowBase
             Input = new(context => new Dictionary<string, object>
             {
                 ["SessionId"] = sessionId.Get(context),
-                ["SkillLevel"] = 3
+                ["SkillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true)
         };
@@ -390,11 +395,59 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["juniorId"] = juniorId.Get(context) ?? "",
-                ["skillLevel"] = 3
+                ["skillLevel"] = skillLevel.Get(context)
             }),
-            WaitForCompletion = new(true)
+            WaitForCompletion = new(true),
+            Result = new(assessmentDispatchResult)
         };
         assessmentWorkflow.SetDisplayText("Dispatch Assessment (7-1E)");
+
+        // Extract skill level from AssessmentWorkflow output after it completes.
+        // The AssessmentWorkflow outputs "assessmentResult" (JSON) containing Confidence (0.0-1.0).
+        // Map confidence to skill level 1-5:
+        //   >= 0.8 -> 5 (Expert)
+        //   >= 0.6 -> 4 (Proficient)
+        //   >= 0.4 -> 3 (Intermediate)
+        //   >= 0.2 -> 2 (Beginner)
+        //   <  0.2 -> 1 (Novice)
+        var extractSkillLevel = new SetVariable<int>(
+            skillLevel,
+            context =>
+            {
+                var result = assessmentDispatchResult.Get(context);
+                if (result == null)
+                    return skillLevel.Get(context); // keep current value
+
+                if (result.TryGetValue("assessmentResult", out var assessmentJson) &&
+                    assessmentJson is string json && !string.IsNullOrEmpty(json))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("Confidence", out var confProp) ||
+                            doc.RootElement.TryGetProperty("confidence", out confProp))
+                        {
+                            var confidence = confProp.GetDecimal();
+                            if (confidence >= 0.8m) return 5;
+                            if (confidence >= 0.6m) return 4;
+                            if (confidence >= 0.4m) return 3;
+                            if (confidence >= 0.2m) return 2;
+                            return 1;
+                        }
+                    }
+                    catch
+                    {
+                        // JSON parse failure - keep current skill level
+                    }
+                }
+
+                return skillLevel.Get(context);
+            })
+        {
+            Id = "ExtractSkillLevel",
+            Name = "Extract Skill Level from Assessment"
+        };
+        extractSkillLevel.SetDisplayText("Extract Skill Level from Assessment");
 
         // 7-1G: Blocker Diagnosis Workflow — used during blocker diagnosis
         var blockerDiagnosisWorkflow = new DispatchWorkflow
@@ -407,7 +460,7 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["juniorId"] = juniorId.Get(context) ?? "",
-                ["skillLevel"] = 3,
+                ["skillLevel"] = skillLevel.Get(context),
                 ["repository"] = "",
                 ["branchName"] = ""
             }),
@@ -426,7 +479,7 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["taskDescription"] = "",
-                ["skillLevel"] = 3
+                ["skillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true)
         };
@@ -443,7 +496,7 @@ public class MentorshipWorkflow : WorkflowBase
                 ["sessionId"] = sessionId.Get(context),
                 ["storyId"] = storyId.Get(context) ?? "",
                 ["debugContextMode"] = "BugInvestigation",
-                ["skillLevel"] = 3
+                ["skillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true)
         };
@@ -647,12 +700,13 @@ public class MentorshipWorkflow : WorkflowBase
                 failed,
                 timeout,
 
-                // Sub-Workflow Dispatches (8)
+                // Sub-Workflow Dispatches (8) + skill level extraction
                 llmCallWorkflow,
                 contextGatheringWorkflow,
                 testingWorkflow,
                 codeReviewWorkflow,
                 assessmentWorkflow,
+                extractSkillLevel,
                 blockerDiagnosisWorkflow,
                 tddWorkflow,
                 debuggingWorkflow,
@@ -708,8 +762,9 @@ public class MentorshipWorkflow : WorkflowBase
                 new(new FlowEndpoint(validateStory, "Valid"),
                     new FlowEndpoint(assessJunior)),
 
-                // 5. Assessment sub-workflow -> ASSESS (invoked when needed from ASSESS phase)
-                new(assessmentWorkflow, assessJunior),
+                // 5. Assessment sub-workflow -> Extract Skill Level -> ASSESS
+                new(assessmentWorkflow, extractSkillLevel),
+                new(extractSkillLevel, assessJunior),
 
                 // 6. VALIDATE -> Debugging sub-workflow (Bug fast path)
                 new(new FlowEndpoint(validateStory, "BugIssue"),

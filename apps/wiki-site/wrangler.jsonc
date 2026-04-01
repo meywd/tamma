@@ -1,0 +1,28 @@
+{
+  // Tamma Documentation & Wiki Site
+  // Vite React SPA on Cloudflare Workers
+  "name": "tamma-wiki-site",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-01-01",
+
+  // Static assets from Vite build
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+
+  // Custom domain
+  "routes": [
+    {
+      "pattern": "wiki.tamma.dev",
+      "zone_name": "tamma.dev"
+    }
+  ],
+
+  "workers_dev": true,
+  "preview_urls": true,
+
+  "observability": {
+    "enabled": true
+  }
+}

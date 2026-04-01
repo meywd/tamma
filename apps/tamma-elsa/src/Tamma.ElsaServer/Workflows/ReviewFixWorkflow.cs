@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -7,6 +8,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.ADL.Models;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Security;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
@@ -26,6 +28,7 @@ public class ReviewFixWorkflow : WorkflowBase
         var hasActionableVar = builder.WithVariable<bool>("HasActionable", false);
         var analysisJsonVar = builder.WithVariable<string>("AnalysisJson", "");
         var fixesAppliedVar = builder.WithVariable<bool>("FixesApplied", false);
+        var fixResultVar = builder.WithVariable<ReviewFixResult?>();
         var llmResultVar = builder.WithVariable<IDictionary<string, object>?>();
 
         var analyze = new AnalyzeReviewActivity
@@ -63,17 +66,31 @@ public class ReviewFixWorkflow : WorkflowBase
             AnalysisJson = new Input<string>(ctx => analysisJsonVar.Get(ctx)),
             Repository = new Input<string>(ctx => ctx.GetInput<string>("repository") ?? ""),
             BranchName = new Input<string>(ctx => ctx.GetInput<string>("branchName") ?? ""),
-            FixesApplied = new Output<bool>(fixesAppliedVar)
+            LlmFixResponse = new Input<string?>(ctx =>
+            {
+                var result = llmResultVar.Get(ctx);
+                if (result != null && result.TryGetValue("llmResponse", out var resp))
+                    return resp?.ToString();
+                return null;
+            }),
+            FixesApplied = new Output<bool>(fixesAppliedVar),
+            FixResult = new Output<ReviewFixResult?>(fixResultVar)
         };
         applyFixes.SetDisplayText("Apply Fixes");
 
-        // ApplyReviewFixesActivity only outputs FixesApplied (bool), no file paths —
-        // pass null so the indexer falls back to git-diff detection.
+        // Pass fixed file paths from the fix result to the code indexer;
+        // falls back to git-diff detection if no files are available.
         var updateCodeIndex = new UpdateCodeIndexActivity
         {
             Id = "UpdateCodeIndex",
             Name = "Update Code Index",
-            ChangedFilesJson = new Input<string?>(ctx => (string?)null),
+            ChangedFilesJson = new Input<string?>(ctx =>
+            {
+                var fixResult = fixResultVar.Get(ctx);
+                if (fixResult?.FilesFixed != null && fixResult.FilesFixed.Count > 0)
+                    return JsonSerializer.Serialize(fixResult.FilesFixed);
+                return null;
+            }),
             RepositoryPath = new Input<string?>(ctx => ctx.GetInput<string>("repository"))
         };
         updateCodeIndex.SetDisplayText("Update Code Index");

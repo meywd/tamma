@@ -26,24 +26,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build all images locally
+      - name: Create test environment
         working-directory: docker
         run: |
-          docker compose build
-        env:
-          COMPOSE_FILE: docker-compose.yml
+          cp .env.example .env 2>/dev/null || touch .env
+          cat >> .env <<'EOV'
+          POSTGRES_PASSWORD=testpass123
+          GITHUB_TOKEN=ghp_test_token
+          ANTHROPIC_API_KEY=sk-ant-test-key
+          GITHUB_OWNER=test-org
+          GITHUB_REPO=test-repo
+          GITHUB_APP_ID=12345
+          GITHUB_APP_PRIVATE_KEY=test-key
+          GITHUB_WEBHOOK_SECRET=test-secret
+          JWT_SECRET=test-jwt-secret
+          EOV
+
+      - name: Build all images locally
+        working-directory: docker
+        run: docker compose build
 
       - name: Start stack
         working-directory: docker
-        run: |
-          cp .env.example .env
-          # Override required secrets with test values
-          echo "POSTGRES_PASSWORD=testpass123" >> .env
-          echo "GITHUB_TOKEN=ghp_test_token" >> .env
-          echo "ANTHROPIC_API_KEY=sk-ant-test-key" >> .env
-          echo "GITHUB_OWNER=test-org" >> .env
-          echo "GITHUB_REPO=test-repo" >> .env
-          docker compose up -d
+        run: docker compose up -d
 
       - name: Wait for health checks
         timeout-minutes: 5

@@ -1,21 +1,25 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Net.Http.Json;
+using Tamma.Activities.ADL.Models;
 
 namespace Tamma.Activities.ADL;
 
 /// <summary>
 /// Applies fixes for review comments using AI-generated code changes.
-/// This activity dispatches to the llm-call sub-workflow in the parent
-/// workflow to generate and commit fixes.
+/// Calls the LLM (mock/callback/direct modes, same pattern as WriteImplementationActivity)
+/// to generate fixes based on review comments, then returns the result.
 ///
 /// Outcomes:
-///   - Fixed: fixes applied and committed
-///   - Error: fix generation or commit failed
+///   - Fixed: fixes generated successfully
+///   - Error: fix generation failed
 /// </summary>
 [Activity(
     "Tamma.ADL",
@@ -27,6 +31,8 @@ namespace Tamma.Activities.ADL;
 public class ApplyReviewFixesActivity : Activity
 {
     private readonly ILogger<ApplyReviewFixesActivity>? _logger;
+    private readonly IHttpClientFactory? _httpClientFactory;
+    private readonly IConfiguration? _configuration;
 
     [Input(Description = "Review analysis JSON with fix items")]
     public Input<string> AnalysisJson { get; set; } = default!;
@@ -37,8 +43,14 @@ public class ApplyReviewFixesActivity : Activity
     [Input(Description = "Branch name for commits")]
     public Input<string> BranchName { get; set; } = default!;
 
+    [Input(Description = "LLM-generated fix response from the dispatched llm-call workflow (optional — if provided, skips internal LLM call)")]
+    public Input<string?> LlmFixResponse { get; set; } = default!;
+
     [Output(Description = "Whether fixes were successfully applied")]
     public Output<bool> FixesApplied { get; set; } = default!;
+
+    [Output(Description = "Structured result of the fix operation")]
+    public Output<ReviewFixResult?> FixResult { get; set; } = default!;
 
     [JsonConstructor]
     public ApplyReviewFixesActivity() { }
@@ -48,29 +60,291 @@ public class ApplyReviewFixesActivity : Activity
         _logger = logger;
     }
 
+    public ApplyReviewFixesActivity(
+        ILogger<ApplyReviewFixesActivity> logger,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
+    {
+        _logger = logger;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+    }
+
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var analysisJson = AnalysisJson.Get(context);
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
+        var externalLlmResponse = LlmFixResponse.Get(context);
 
         try
         {
-            // The actual fix generation is handled by dispatching to llm-call
-            // in the parent ReviewFixWorkflow. This activity serves as the
-            // coordination point that processes the LLM response and commits.
-            _logger?.LogInformation(
-                "Applying review fixes on branch {Branch} in {Repo}",
-                branchName, repository);
+            var analysis = DeserializeAnalysis(analysisJson);
+            if (analysis == null || analysis.FixItems.Count == 0)
+            {
+                _logger?.LogInformation("No fix items found in analysis for {Repo}", repository);
+                var emptyResult = new ReviewFixResult { Success = true };
+                FixesApplied.Set(context, true);
+                FixResult.Set(context, emptyResult);
+                await context.CompleteActivityWithOutcomesAsync("Fixed");
+                return;
+            }
 
-            FixesApplied.Set(context, true);
+            _logger?.LogInformation(
+                "Applying review fixes on branch {Branch} in {Repo}: {Count} fix items",
+                branchName, repository, analysis.FixItems.Count);
+
+            string response;
+            if (!string.IsNullOrEmpty(externalLlmResponse))
+            {
+                // Response was provided by the parent workflow's DispatchWorkflow (llm-call)
+                response = externalLlmResponse;
+            }
+            else
+            {
+                // Generate fixes internally (mock/callback/direct LLM)
+                var prompt = BuildFixPrompt(analysis, repository, branchName);
+                var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+                var callbackUrl = _configuration?["Engine:CallbackUrl"];
+
+                if (useMock)
+                {
+                    response = SimulateFixGeneration(analysis);
+                }
+                else if (!string.IsNullOrEmpty(callbackUrl))
+                {
+                    response = await CallEngineCallback(callbackUrl, prompt);
+                }
+                else
+                {
+                    response = await CallLlm(prompt);
+                }
+            }
+
+            var result = ParseFixResponse(response, analysis);
+
+            _logger?.LogInformation(
+                "Review fixes generated: {FileCount} files fixed, success={Success}",
+                result.FilesFixed.Count, result.Success);
+
+            FixesApplied.Set(context, result.Success);
+            FixResult.Set(context, result);
             await context.CompleteActivityWithOutcomesAsync("Fixed");
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error applying review fixes");
+            _logger?.LogError(ex, "Error applying review fixes on branch {Branch} in {Repo}",
+                branchName, repository);
+
+            var errorResult = new ReviewFixResult
+            {
+                Success = false,
+                ErrorMessage = $"Fix generation failed: {ex.Message}"
+            };
             FixesApplied.Set(context, false);
+            FixResult.Set(context, errorResult);
             await context.CompleteActivityWithOutcomesAsync("Error");
+        }
+    }
+
+    internal static string BuildFixPrompt(ReviewAnalysisResult analysis, string repository, string branchName)
+    {
+        var commentSections = new System.Text.StringBuilder();
+        for (var i = 0; i < analysis.FixItems.Count; i++)
+        {
+            var item = analysis.FixItems[i];
+            commentSections.AppendLine($"### Comment {i + 1} [{item.Category}] (Priority: {item.Priority})");
+            commentSections.AppendLine($"- File: {item.FilePath}");
+            if (item.Line.HasValue)
+                commentSections.AppendLine($"- Line: {item.Line}");
+            commentSections.AppendLine($"- Comment: {item.Comment}");
+            if (!string.IsNullOrEmpty(item.SuggestedFix))
+                commentSections.AppendLine($"- Suggested fix: {item.SuggestedFix}");
+            commentSections.AppendLine();
+        }
+
+        return $@"You are a code reviewer fix assistant. You need to apply fixes for the following review comments on repository {repository}, branch {branchName}.
+
+## Review Comments to Address
+
+{commentSections}
+
+## Instructions
+
+1. For each review comment above, generate the corrected code
+2. Maintain all existing functionality — only fix what each comment asks for
+3. If a comment is a question, add a code comment explaining the answer
+4. If a comment is praise, skip it (no changes needed)
+5. Prioritize bug fixes and security issues over style changes
+6. Keep fixes minimal and focused — do not refactor unrelated code
+
+## Response Format
+
+Respond with valid JSON:
+{{
+  ""fixedCode"": ""<the complete fixed code for all files, with file markers>"",
+  ""filesFixed"": [""path/to/file1.ts"", ""path/to/file2.ts""],
+  ""fixDescriptions"": [
+    {{
+      ""filePath"": ""path/to/file.ts"",
+      ""originalComment"": ""the review comment"",
+      ""fixApplied"": ""description of what was fixed"",
+      ""line"": 42
+    }}
+  ]
+}}";
+    }
+
+    private async Task<string> CallEngineCallback(string callbackUrl, string prompt)
+    {
+        var httpClient = _httpClientFactory!.CreateClient();
+        var requestBody = new { prompt, role = "implementer" };
+        var response = await httpClient.PostAsJsonAsync(
+            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return result.GetProperty("output").GetString() ?? "{}";
+    }
+
+    private async Task<string> CallLlm(string prompt)
+    {
+        var httpClient = _httpClientFactory!.CreateClient("anthropic");
+        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
+
+        var requestBody = new
+        {
+            model,
+            max_tokens = 4096,
+            system = "You are a code fix assistant. Apply targeted fixes for code review comments. Keep changes minimal and focused. Respond with valid JSON only.",
+            messages = new[] { new { role = "user", content = prompt } }
+        };
+
+        var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var contentArray = result.GetProperty("content");
+        foreach (var block in contentArray.EnumerateArray())
+        {
+            if (block.GetProperty("type").GetString() == "text")
+            {
+                return block.GetProperty("text").GetString() ?? "{}";
+            }
+        }
+
+        return "{}";
+    }
+
+    internal static string SimulateFixGeneration(ReviewAnalysisResult analysis)
+    {
+        var filesFixed = analysis.FixItems
+            .Where(f => ReviewCommentCategory.IsActionable(f.Category))
+            .Select(f => f.FilePath)
+            .Distinct()
+            .ToList();
+
+        var fixDescriptions = analysis.FixItems
+            .Where(f => ReviewCommentCategory.IsActionable(f.Category))
+            .Select(f => new
+            {
+                filePath = f.FilePath,
+                originalComment = f.Comment,
+                fixApplied = $"Applied fix for: {f.Comment}",
+                line = f.Line
+            })
+            .ToList();
+
+        return JsonSerializer.Serialize(new
+        {
+            fixedCode = "// Mock: fixes applied for review comments",
+            filesFixed,
+            fixDescriptions
+        });
+    }
+
+    internal static ReviewFixResult ParseFixResponse(string response, ReviewAnalysisResult analysis)
+    {
+        try
+        {
+            // Try to extract JSON from markdown code fences if present
+            var jsonStr = ExtractJson(response);
+            var json = JsonSerializer.Deserialize<JsonElement>(jsonStr);
+
+            var fixedCode = json.TryGetProperty("fixedCode", out var fc)
+                ? fc.GetString() ?? ""
+                : "";
+            var filesFixed = json.TryGetProperty("filesFixed", out var ff)
+                ? JsonSerializer.Deserialize<List<string>>(ff.GetRawText()) ?? new List<string>()
+                : new List<string>();
+            var fixDescriptions = json.TryGetProperty("fixDescriptions", out var fd)
+                ? ParseFixDescriptions(fd)
+                : new List<ReviewFixDescription>();
+
+            return new ReviewFixResult
+            {
+                Success = filesFixed.Count > 0 || !string.IsNullOrEmpty(fixedCode),
+                FixedCode = fixedCode,
+                FilesFixed = filesFixed,
+                FixDescriptions = fixDescriptions
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ReviewFixResult
+            {
+                Success = false,
+                ErrorMessage = $"Failed to parse fix response: {ex.Message}"
+            };
+        }
+    }
+
+    private static List<ReviewFixDescription> ParseFixDescriptions(JsonElement element)
+    {
+        var descriptions = new List<ReviewFixDescription>();
+        foreach (var item in element.EnumerateArray())
+        {
+            var desc = new ReviewFixDescription
+            {
+                FilePath = item.TryGetProperty("filePath", out var fp) ? fp.GetString() ?? "" : "",
+                OriginalComment = item.TryGetProperty("originalComment", out var oc) ? oc.GetString() ?? "" : "",
+                FixApplied = item.TryGetProperty("fixApplied", out var fa) ? fa.GetString() ?? "" : "",
+                Line = item.TryGetProperty("line", out var ln) && ln.ValueKind == JsonValueKind.Number ? ln.GetInt32() : null
+            };
+            descriptions.Add(desc);
+        }
+        return descriptions;
+    }
+
+    private static string ExtractJson(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return "{}";
+
+        // Strip markdown code fences: ```json ... ``` or ``` ... ```
+        var trimmed = text.Trim();
+        if (trimmed.StartsWith("```"))
+        {
+            var firstNewline = trimmed.IndexOf('\n');
+            if (firstNewline > 0)
+                trimmed = trimmed[(firstNewline + 1)..];
+            if (trimmed.EndsWith("```"))
+                trimmed = trimmed[..^3].TrimEnd();
+        }
+
+        return trimmed;
+    }
+
+    private static ReviewAnalysisResult? DeserializeAnalysis(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<ReviewAnalysisResult>(json);
+        }
+        catch
+        {
+            return null;
         }
     }
 }

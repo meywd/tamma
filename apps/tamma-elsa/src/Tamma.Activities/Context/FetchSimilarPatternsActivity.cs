@@ -1,8 +1,11 @@
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Context.Models;
 using Tamma.Core.Interfaces;
@@ -24,6 +27,8 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
 {
     private readonly ILogger<FetchSimilarPatternsActivity>? _logger;
     private readonly IIntegrationService? _integrationService;
+    private readonly IHttpClientFactory? _httpClientFactory;
+    private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL (e.g., owner/repo)</summary>
     [Input(Description = "Repository URL or identifier")]
@@ -48,10 +53,14 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
 
     public FetchSimilarPatternsActivity(
         ILogger<FetchSimilarPatternsActivity> logger,
-        IIntegrationService integrationService)
+        IIntegrationService integrationService,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
     {
         _logger = logger;
         _integrationService = integrationService;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -77,10 +86,19 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
                 return;
             }
 
-            // In production, this would use code search APIs, embeddings, or AST analysis.
-            // For now, we simulate pattern discovery based on common code structures.
-            var patterns = await DiscoverPatternsAsync(
-                repositoryUrl, storyTitle, storyTags, maxPatterns);
+            var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
+
+            List<PatternMatch> patterns;
+            if (useMock)
+            {
+                _logger?.LogInformation("Using mock pattern discovery for '{StoryTitle}'", storyTitle);
+                patterns = SimulatePatternDiscovery(storyTitle, storyTags, maxPatterns);
+            }
+            else
+            {
+                patterns = await DiscoverPatternsFromRepoAsync(
+                    repositoryUrl, storyTitle, storyTags, maxPatterns);
+            }
 
             context.SetResult(new SimilarPatternsResult
             {
@@ -105,19 +123,281 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
     }
 
     /// <summary>
-    /// Discover code patterns similar to the story requirements.
-    /// In production, this would leverage code search, embeddings, or static analysis.
+    /// Discover code patterns by scanning the repository tree via GitHub API.
+    /// Matches file names and paths against story keywords to find relevant patterns.
     /// </summary>
-    private Task<List<PatternMatch>> DiscoverPatternsAsync(
+    private async Task<List<PatternMatch>> DiscoverPatternsFromRepoAsync(
         string repositoryUrl,
         string storyTitle,
         string[]? tags,
         int maxPatterns)
     {
-        // Simulated pattern discovery.
-        // A real implementation would call a code search service or analyze the AST.
-        var patterns = new List<PatternMatch>();
+        if (_httpClientFactory == null)
+        {
+            _logger?.LogWarning("HttpClientFactory not available, falling back to mock patterns");
+            return SimulatePatternDiscovery(storyTitle, tags, maxPatterns);
+        }
 
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            // Fetch the repository tree recursively
+            var treeResponse = await httpClient.GetAsync(
+                $"/repos/{repositoryUrl}/git/trees/main?recursive=1");
+
+            if (!treeResponse.IsSuccessStatusCode)
+            {
+                // Try master branch
+                treeResponse = await httpClient.GetAsync(
+                    $"/repos/{repositoryUrl}/git/trees/master?recursive=1");
+            }
+
+            if (!treeResponse.IsSuccessStatusCode)
+            {
+                _logger?.LogWarning(
+                    "Failed to fetch repository tree for {Repo} (HTTP {Status}), falling back to mock",
+                    repositoryUrl, treeResponse.StatusCode);
+                return SimulatePatternDiscovery(storyTitle, tags, maxPatterns);
+            }
+
+            var treeData = await treeResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var treeEntries = treeData.GetProperty("tree");
+
+            // Extract keywords from story title and tags
+            var keywords = ExtractKeywords(storyTitle, tags);
+
+            var patterns = new List<PatternMatch>();
+
+            foreach (var entry in treeEntries.EnumerateArray())
+            {
+                var path = entry.GetProperty("path").GetString() ?? "";
+                var type = entry.GetProperty("type").GetString() ?? "";
+
+                // Only consider source files (blobs), not directories
+                if (type != "blob")
+                    continue;
+
+                // Skip non-code files
+                if (!IsCodeFile(path))
+                    continue;
+
+                var relevance = CalculateFileRelevance(path, keywords);
+
+                if (relevance > 0.3)
+                {
+                    var patternName = InferPatternName(path);
+                    var description = InferPatternDescription(path);
+
+                    patterns.Add(new PatternMatch
+                    {
+                        PatternName = patternName,
+                        FilePath = path,
+                        Description = description,
+                        Relevance = relevance
+                    });
+                }
+            }
+
+            if (patterns.Count == 0)
+            {
+                _logger?.LogInformation(
+                    "No matching patterns found in repo tree for '{StoryTitle}', returning empty",
+                    storyTitle);
+            }
+
+            return patterns
+                .OrderByDescending(p => p.Relevance)
+                .Take(maxPatterns)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "Error scanning repository tree for patterns, falling back to mock");
+            return SimulatePatternDiscovery(storyTitle, tags, maxPatterns);
+        }
+    }
+
+    /// <summary>
+    /// Extract meaningful keywords from the story title and tags for file matching.
+    /// </summary>
+    private static List<string> ExtractKeywords(string storyTitle, string[]? tags)
+    {
+        var keywords = new List<string>();
+
+        // Split title into words and keep meaningful ones (3+ chars, not common stop words)
+        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the", "and", "for", "with", "from", "into", "that", "this", "have", "will",
+            "should", "could", "would", "can", "not", "are", "was", "were", "been", "being",
+            "has", "had", "does", "did", "but", "its", "all", "any", "each", "new", "add",
+            "use", "set", "get", "implement", "create", "update", "delete", "remove"
+        };
+
+        var titleWords = storyTitle
+            .Split(new[] { ' ', '-', '_', '.', ',', ':', ';', '/', '(', ')', '[', ']' },
+                StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length >= 3 && !stopWords.Contains(w))
+            .Select(w => w.ToLowerInvariant());
+
+        keywords.AddRange(titleWords);
+
+        if (tags != null)
+        {
+            keywords.AddRange(tags.Select(t => t.ToLowerInvariant()));
+        }
+
+        return keywords.Distinct().ToList();
+    }
+
+    /// <summary>
+    /// Calculate relevance of a file path to the story keywords (0.0 to 1.0).
+    /// </summary>
+    private static double CalculateFileRelevance(string filePath, List<string> keywords)
+    {
+        if (keywords.Count == 0)
+            return 0;
+
+        var pathLower = filePath.ToLowerInvariant();
+        var fileName = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
+
+        int matches = 0;
+        double totalScore = 0;
+
+        foreach (var keyword in keywords)
+        {
+            if (fileName.Contains(keyword))
+            {
+                // File name match is strongest signal
+                totalScore += 1.0;
+                matches++;
+            }
+            else if (pathLower.Contains(keyword))
+            {
+                // Path match is weaker
+                totalScore += 0.5;
+                matches++;
+            }
+        }
+
+        if (matches == 0)
+            return 0;
+
+        // Normalize: ratio of matched keywords, weighted by match quality
+        return Math.Min(1.0, totalScore / keywords.Count);
+    }
+
+    /// <summary>
+    /// Infer a human-readable pattern name from a file path.
+    /// </summary>
+    private static string InferPatternName(string filePath)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        var dirName = Path.GetDirectoryName(filePath)?.Replace('\\', '/');
+        var lastDir = dirName?.Split('/').LastOrDefault(d => !string.IsNullOrEmpty(d)) ?? "";
+
+        // Common suffixes that indicate patterns
+        var patternSuffixes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Controller", "Controller Pattern" },
+            { "Service", "Service Pattern" },
+            { "Repository", "Repository Pattern" },
+            { "Handler", "Handler Pattern" },
+            { "Factory", "Factory Pattern" },
+            { "Provider", "Provider Pattern" },
+            { "Middleware", "Middleware Pattern" },
+            { "Validator", "Validator Pattern" },
+            { "Activity", "Activity Pattern" },
+            { "Workflow", "Workflow Pattern" },
+            { "Command", "Command Pattern" },
+            { "Query", "Query Pattern" },
+            { "Event", "Event Pattern" },
+            { "Model", "Model Pattern" },
+            { "Interface", "Interface Pattern" },
+        };
+
+        foreach (var (suffix, patternName) in patternSuffixes)
+        {
+            if (fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{fileName} ({patternName})";
+            }
+        }
+
+        // Fall back to directory-based naming
+        if (!string.IsNullOrEmpty(lastDir))
+        {
+            return $"{fileName} (in {lastDir})";
+        }
+
+        return fileName;
+    }
+
+    /// <summary>
+    /// Generate a description for a pattern based on its file path.
+    /// </summary>
+    private static string InferPatternDescription(string filePath)
+    {
+        var extension = Path.GetExtension(filePath).ToLowerInvariant();
+        var language = extension switch
+        {
+            ".cs" => "C#",
+            ".ts" => "TypeScript",
+            ".tsx" => "TypeScript/React",
+            ".js" => "JavaScript",
+            ".py" => "Python",
+            ".java" => "Java",
+            ".go" => "Go",
+            ".rs" => "Rust",
+            _ => "source"
+        };
+
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        return $"Existing {language} implementation: {fileName} at {filePath}";
+    }
+
+    /// <summary>
+    /// Check if a file path represents a code file worth examining.
+    /// </summary>
+    private static bool IsCodeFile(string path)
+    {
+        var codeExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".cs", ".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".go", ".rs",
+            ".rb", ".php", ".kt", ".swift", ".scala", ".vue", ".svelte"
+        };
+
+        var extension = Path.GetExtension(path);
+        if (!codeExtensions.Contains(extension))
+            return false;
+
+        // Skip common non-pattern files
+        var pathLower = path.ToLowerInvariant();
+        if (pathLower.Contains("node_modules/") ||
+            pathLower.Contains("bin/") ||
+            pathLower.Contains("obj/") ||
+            pathLower.Contains(".min.") ||
+            pathLower.Contains("dist/") ||
+            pathLower.Contains("migrations/"))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Mock fallback: simulated pattern discovery based on common code structures.
+    /// Used when UseMock=true or when GitHub API is unavailable.
+    /// </summary>
+    private static List<PatternMatch> SimulatePatternDiscovery(
+        string storyTitle,
+        string[]? tags,
+        int maxPatterns)
+    {
+        var patterns = new List<PatternMatch>();
         var titleLower = storyTitle.ToLowerInvariant();
 
         if (titleLower.Contains("api") || titleLower.Contains("controller") ||
@@ -127,7 +407,7 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
             {
                 PatternName = "REST Controller Pattern",
                 FilePath = "src/Controllers/ExampleController.cs",
-                Description = "Standard REST API controller with CRUD operations and validation",
+                Description = "[MOCK] Standard REST API controller with CRUD operations and validation",
                 Relevance = 0.85
             });
         }
@@ -139,7 +419,7 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
             {
                 PatternName = "Service Layer Pattern",
                 FilePath = "src/Services/ExampleService.cs",
-                Description = "Service class with dependency injection and async operations",
+                Description = "[MOCK] Service class with dependency injection and async operations",
                 Relevance = 0.80
             });
         }
@@ -151,24 +431,22 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
             {
                 PatternName = "Repository Pattern",
                 FilePath = "src/Repositories/ExampleRepository.cs",
-                Description = "Data access using repository pattern with EF Core",
+                Description = "[MOCK] Data access using repository pattern with EF Core",
                 Relevance = 0.75
             });
         }
 
-        // Always include a generic patterns entry
         if (patterns.Count == 0)
         {
             patterns.Add(new PatternMatch
             {
                 PatternName = "Standard Implementation Pattern",
                 FilePath = "src/Services/ExampleService.cs",
-                Description = "Reference implementation following project conventions",
+                Description = "[MOCK] Reference implementation following project conventions",
                 Relevance = 0.60
             });
         }
 
-        // Add tag-based patterns
         if (tags?.Any() == true)
         {
             foreach (var tag in tags.Take(2))
@@ -177,13 +455,12 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
                 {
                     PatternName = $"{tag} Pattern",
                     FilePath = $"src/{tag}/Example{tag}.cs",
-                    Description = $"Implementation pattern for {tag} functionality",
+                    Description = $"[MOCK] Implementation pattern for {tag} functionality",
                     Relevance = 0.65
                 });
             }
         }
 
-        return Task.FromResult(
-            patterns.OrderByDescending(p => p.Relevance).Take(maxPatterns).ToList());
+        return patterns.OrderByDescending(p => p.Relevance).Take(maxPatterns).ToList();
     }
 }

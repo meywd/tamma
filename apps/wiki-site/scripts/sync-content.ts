@@ -20,7 +20,7 @@ import { join, basename, dirname, relative, extname } from 'node:path';
 const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 const WIKI_DIR = join(REPO_ROOT, 'wiki');
 const STORIES_DIR = join(REPO_ROOT, 'docs', 'stories');
-const OUTPUT_DIR = join(import.meta.dirname, '..', 'src', 'content', 'docs');
+const OUTPUT_DIR = join(import.meta.dirname, '..', 'public', 'content');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,10 +228,14 @@ function syncWikiEpics(): void {
     const order = epicNumMatch ? parseFloat(epicNumMatch[1]!) : 99;
 
     // Output filename: Epic-1-Foundation.md -> 1-foundation.md
-    const outName = file
+    // Replace dots in the stem with dashes to avoid slug collisions (e.g., 1.5 vs 15)
+    const ext = extname(file); // .md
+    const stem = file.slice(0, -ext.length);
+    const outName = stem
       .replace(/^Epic-/, '')
       .toLowerCase()
-      .replace(/\s+/g, '-');
+      .replace(/\./g, '-')
+      .replace(/\s+/g, '-') + ext;
 
     const frontmatter = buildFrontmatter(title, { order });
     writeFileSync(join(outDir, outName), `${frontmatter}\n\n${transformed}`);
@@ -264,7 +268,10 @@ function syncStories(): void {
 
     // Epic directories (e.g., epic-1/, epic-6/)
     if (entry.isDirectory() && entry.name.startsWith('epic-')) {
-      syncEpicStoryDir(srcPath, entry.name);
+      // Rename epic-1.5 -> epic-1-5 to avoid slug collision with epic-15
+      // (Astro's glob loader strips dots from directory names when generating IDs)
+      const outDirName = entry.name.replace(/\./g, '-');
+      syncEpicStoryDir(srcPath, outDirName);
     }
   }
 }
@@ -330,6 +337,36 @@ function syncStoryFile(srcPath: string, outPath: string): void {
 // Main
 // ---------------------------------------------------------------------------
 
+function syncWorkflows(): void {
+  console.log('Syncing wiki/Workflow-*.md pages...');
+  const workflowDir = join(OUTPUT_DIR, 'workflows');
+  ensureDir(workflowDir);
+
+  // Sync Workflows.md as index
+  const indexSrc = join(WIKI_DIR, 'Workflows.md');
+  if (existsSync(indexSrc)) {
+    const raw = readFileSync(indexSrc, 'utf-8');
+    const [, body] = extractFrontmatter(raw);
+    const title = deriveTitle(body, 'Workflows.md');
+    const transformed = transformLinks(removeFirstH1(body));
+    writeFileSync(join(workflowDir, 'index.md'), `${buildFrontmatter(title, {})}\n\n${transformed}`);
+    console.log(`  Workflows.md -> workflows/index.md`);
+  }
+
+  // Sync individual workflow pages
+  for (const entry of readdirSync(WIKI_DIR)) {
+    if (!entry.startsWith('Workflow-') || !entry.endsWith('.md')) continue;
+    const srcPath = join(WIKI_DIR, entry);
+    const raw = readFileSync(srcPath, 'utf-8');
+    const [, body] = extractFrontmatter(raw);
+    const title = deriveTitle(body, entry);
+    const transformed = transformLinks(removeFirstH1(body));
+    const slug = entry.replace('Workflow-', '').replace('.md', '').toLowerCase();
+    writeFileSync(join(workflowDir, `${slug}.md`), `${buildFrontmatter(title, {})}\n\n${transformed}`);
+    console.log(`  ${entry} -> workflows/${slug}.md`);
+  }
+}
+
 function main(): void {
   console.log('=== Tamma Wiki Content Sync ===\n');
   console.log(`Repo root:   ${REPO_ROOT}`);
@@ -340,6 +377,7 @@ function main(): void {
   cleanOutput();
   syncWikiTopLevel();
   syncWikiEpics();
+  syncWorkflows();
   syncStories();
 
   // Count output files
@@ -352,7 +390,52 @@ function main(): void {
   }
   countFiles(OUTPUT_DIR);
 
-  console.log(`\nDone. ${count} files synced to ${relative(process.cwd(), OUTPUT_DIR)}/`);
+  // Generate manifest.json for sidebar navigation
+  const manifest: { path: string; title: string; section: string }[] = [];
+  function detectSection(dir: string, parentSection: string, dirName: string): string {
+    if (dirName === 'workflows') return 'Workflows';
+    if (dirName === 'epics') return 'Epics';
+    if (dirName.startsWith('epic-')) return `Epic ${dirName.replace('epic-', '')}`;
+    if (dirName === 'stories') return parentSection; // stories root stays in parent
+    return parentSection;
+  }
+  function scanManifest(dir: string, section: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const childSection = detectSection(dir, section, entry.name);
+        scanManifest(fullPath, childSection);
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        const relPath = relative(OUTPUT_DIR, fullPath).replace(/\.md$/, '');
+        const content = readFileSync(fullPath, 'utf-8');
+        const titleMatch = content.match(/title:\s*"?([^"\n]+)"?/) || content.match(/^#\s+(.+)$/m);
+        const title = titleMatch?.[1]?.trim() || entry.name.replace(/\.md$/, '');
+
+        let routePath = '/' + relPath.replace(/\/index$/, '').replace(/^index$/, '');
+        if (!routePath || routePath === '/') routePath = '/';
+
+        // Skip index pages from manifest (they're handled as top-level nav)
+        if (routePath === '/' || routePath === '/epics' || routePath === '/stories' || routePath === '/workflows') continue;
+
+        manifest.push({ path: routePath, title, section });
+      }
+    }
+  }
+  scanManifest(OUTPUT_DIR, 'Pages');
+
+  // Sort: Pages first, then Epics, then Workflows, then Epic N (numerically)
+  const sectionOrder = (s: string): number => {
+    if (s === 'Pages') return 0;
+    if (s === 'Epics') return 1;
+    if (s === 'Workflows') return 2;
+    const m = s.match(/^Epic (\d+(?:[.-]\d+)?)$/);
+    if (m) return 100 + parseFloat(m[1].replace('-', '.'));
+    return 50;
+  };
+  manifest.sort((a, b) => sectionOrder(a.section) - sectionOrder(b.section) || a.title.localeCompare(b.title));
+  writeFileSync(join(OUTPUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+  console.log(`\nDone. ${count} files synced + manifest.json to ${relative(process.cwd(), OUTPUT_DIR)}/`);
 }
 
 main();

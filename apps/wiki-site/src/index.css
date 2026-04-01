@@ -1,0 +1,25 @@
+@import 'tailwindcss';
+
+/* Prose overrides for markdown content */
+.prose {
+  --tw-prose-body: #d4d4d8;
+  --tw-prose-headings: #f4f4f5;
+  --tw-prose-links: #60a5fa;
+  --tw-prose-bold: #f4f4f5;
+  --tw-prose-code: #fbbf24;
+  --tw-prose-pre-bg: #18181b;
+  --tw-prose-pre-code: #d4d4d8;
+  --tw-prose-quotes: #a1a1aa;
+  --tw-prose-quote-borders: #3f3f46;
+  --tw-prose-counters: #a1a1aa;
+  --tw-prose-bullets: #52525b;
+  --tw-prose-hr: #27272a;
+  --tw-prose-th-borders: #3f3f46;
+  --tw-prose-td-borders: #27272a;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
