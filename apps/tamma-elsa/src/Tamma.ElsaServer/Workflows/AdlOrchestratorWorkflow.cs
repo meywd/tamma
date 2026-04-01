@@ -50,8 +50,10 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
 
         var issuesCompleted = builder.WithVariable<int>("IssuesCompleted", 0);
+        var consecutiveFailures = builder.WithVariable<int>("ConsecutiveFailures", 0);
         var lastExitReason = builder.WithVariable<string>("LastExitReason", "");
         var stopReason = builder.WithVariable<string>("StopReason", "");
+        var maxPerRun = builder.WithVariable<int>("MaxPerRun", 10);
 
         var cycleResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -59,7 +61,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         // Activities
         // ================================================================
 
-        // 1. Init config from inputs (proper activity with explicit I/O)
+        // 1. Init config from inputs
         var initConfig = new InitAdlConfigActivity
         {
             Id = "InitAdlConfig",
@@ -74,30 +76,26 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             ResolvedBotAssignee = new Output<string>(botAssignee),
             ResolvedBaseBranch = new Output<string>(baseBranch),
             ResolvedCooldownSeconds = new Output<int>(cooldownSeconds),
+            ResolvedMaxIssuesPerRun = new Output<int>(maxPerRun),
             ResolvedConfigJson = new Output<string>(configJson),
         };
         initConfig.SetDisplayText("Load Config");
 
-        // 2. Check operational limits
+        // 2. Check limits — uses outcomes directly (no separate FlowDecision)
         var checkLimits = new CheckLimitsActivity
         {
             Id = "CheckLimits",
             Name = "Check Limits",
             IssuesCompleted = new Input<int>(ctx => issuesCompleted.Get(ctx)),
-            ConfigJson = new Input<string?>(ctx => configJson.Get(ctx)),
+            ConsecutiveFailures = new Input<int>(ctx => consecutiveFailures.Get(ctx)),
+            DailyQuota = new Input<int>(20),
+            MaxPerRun = new Input<int>(ctx => maxPerRun.Get(ctx)),
+            MaxConsecutiveFailures = new Input<int>(3),
             StopReason = new Output<string?>(stopReason)
         };
         checkLimits.SetDisplayText("Check Limits");
 
-        // 3. Guard: limits OK?
-        var limitsOk = new FlowDecision(ctx => string.IsNullOrEmpty(stopReason.Get(ctx)))
-        {
-            Id = "LimitsOk",
-            Name = "Within Limits?"
-        };
-        limitsOk.SetDisplayText("Within Limits?");
-
-        // 4. Dispatch single-issue-cycle
+        // 3. Dispatch single-issue-cycle
         var dispatchCycle = new DispatchWorkflow
         {
             Id = "DispatchIssueCycle",
@@ -115,7 +113,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         };
         dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
 
-        // 5. Parse cycle result
+        // 4. Parse cycle result — track success/failure counts
         var parseResult = new SetVariable
         {
             Id = "ParseCycleResult",
@@ -129,57 +127,67 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                     reason = er?.ToString() ?? "unknown";
 
                 if (reason == "success")
+                {
                     issuesCompleted.Set(ctx, issuesCompleted.Get(ctx) + 1);
+                    consecutiveFailures.Set(ctx, 0); // reset on success
+                }
+                else if (reason != "noIssues")
+                {
+                    consecutiveFailures.Set(ctx, consecutiveFailures.Get(ctx) + 1);
+                }
 
                 return (object)reason;
             })
         };
         parseResult.SetDisplayText("Parse Result");
 
-        // 6. Guard: should continue looping?
-        var shouldContinue = new FlowDecision(ctx =>
-        {
-            var reason = lastExitReason.Get(ctx);
-            return reason != "noIssues";
-        })
+        // 5. Should continue? (only stop on "noIssues" — failures are caught by CheckLimits)
+        var shouldContinue = new FlowDecision(ctx => lastExitReason.Get(ctx) != "noIssues")
         {
             Id = "ShouldContinue",
             Name = "More Issues?"
         };
         shouldContinue.SetDisplayText("More Issues?");
 
-        // 7. Cooldown delay
+        // 6. Cooldown — adaptive: longer after failures
         var cooldown = new Delay
         {
             Id = "CooldownDelay",
             Name = "Cooldown",
             TimeSpan = new Input<TimeSpan>(ctx =>
-                System.TimeSpan.FromSeconds(cooldownSeconds.Get(ctx)))
+            {
+                var baseSeconds = cooldownSeconds.Get(ctx);
+                var failures = consecutiveFailures.Get(ctx);
+                // Exponential backoff: 10s, 20s, 40s, 80s... capped at 5 min
+                var multiplier = failures > 0 ? Math.Pow(2, Math.Min(failures, 5)) : 1;
+                return System.TimeSpan.FromSeconds(baseSeconds * multiplier);
+            })
         };
         cooldown.SetDisplayText("Cooldown");
 
-        // 8. Set final outputs (limits reached path)
+        // 7. Set final outputs (limits reached path)
         var setOutputsLimits = new Sequence
         {
             Id = "SetOutputsLimits",
             Name = "Output (Limits)",
             Activities =
             {
-                WithLabel(new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total Completed (Limits)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (Limits)"),
-                WithLabel(new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Exit Reason (Limits)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }, "Set Exit Reason (Limits)")
+                WithLabel(new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total"),
+                WithLabel(new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Reason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }, "Set Reason"),
+                WithLabel(new SetOutput { Id = "SetOutputLimitsFailures", Name = "Set Failures", OutputName = new("consecutiveFailures"), OutputValue = new(ctx => (object)consecutiveFailures.Get(ctx)) }, "Set Failures")
             }
         };
         setOutputsLimits.SetDisplayText("Output (Limits)");
 
-        // 9. Set final outputs (no issues path)
+        // 8. Set final outputs (no issues path)
         var setOutputsNoIssues = new Sequence
         {
             Id = "SetOutputsNoIssues",
             Name = "Output (No Issues)",
             Activities =
             {
-                WithLabel(new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total Completed (No Issues)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (No Issues)"),
-                WithLabel(new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Exit Reason (No Issues)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }, "Set Exit Reason (No Issues)")
+                WithLabel(new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total"),
+                WithLabel(new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Reason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }, "Set Reason")
             }
         };
         setOutputsNoIssues.SetDisplayText("Output (No Issues)");
@@ -196,7 +204,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Start = initConfig,
             Activities =
             {
-                initConfig, checkLimits, limitsOk,
+                initConfig, checkLimits,
                 dispatchCycle, parseResult, shouldContinue,
                 cooldown,
                 setOutputsLimits, setOutputsNoIssues, finish
@@ -206,20 +214,15 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 // Init → Check Limits
                 Connect(initConfig, checkLimits),
 
-                // Check Limits → Within Limits?
-                Connect(checkLimits, limitsOk),
+                // Check Limits → Continue → Dispatch Cycle
+                ConnectOutcome(checkLimits, "Continue", dispatchCycle),
 
-                // Within Limits? Yes → Dispatch Cycle
-                ConnectOutcome(limitsOk, "True", dispatchCycle),
-
-                // Within Limits? No → Output (Limits) → Finish
-                ConnectOutcome(limitsOk, "False", setOutputsLimits),
+                // Check Limits → Stop → Output (Limits) → Finish
+                ConnectOutcome(checkLimits, "Stop", setOutputsLimits),
                 Connect(setOutputsLimits, finish),
 
-                // Dispatch Cycle → Parse Result
+                // Dispatch Cycle → Parse Result → More Issues?
                 Connect(dispatchCycle, parseResult),
-
-                // Parse Result → More Issues?
                 Connect(parseResult, shouldContinue),
 
                 // More Issues? Yes → Cooldown → loop back to Check Limits

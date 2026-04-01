@@ -4,184 +4,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Tamma.Activities.Core;
 
-/// <summary>
-/// Base activity for all Tamma activities.
-/// Provides automatic event emission via the SaveEvent pattern.
-/// Subclasses override BuildEvent to define their event payload.
-/// </summary>
-public abstract class TammaActivity : CodeActivity
-{
-    protected ILogger? Logger { get; set; }
-
-    /// <summary>
-    /// Override to define the event type for this activity (e.g., "ADL.CONFIG.INIT").
-    /// Return null to skip event emission.
-    /// </summary>
-    protected virtual string? EventType => null;
-
-    /// <summary>
-    /// Override to add custom data to the start event.
-    /// </summary>
-    protected virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context)
-        => new();
-
-    /// <summary>
-    /// Override to add custom data to the end event.
-    /// </summary>
-    protected virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
-        => new();
-
-    /// <summary>
-    /// Implement your activity logic here instead of Execute.
-    /// </summary>
-    protected abstract void Run(ActivityExecutionContext context);
-
-    protected override void Execute(ActivityExecutionContext context)
-    {
-        var startedAt = DateTime.UtcNow;
-
-        // Emit start event
-        if (EventType != null)
-        {
-            EmitEvent(context, new TammaEvent
-            {
-                EventType = $"{EventType}.STARTED",
-                Status = "started",
-                Data = BuildStartData(context),
-            });
-        }
-
-        try
-        {
-            Run(context);
-
-            // Emit success event
-            if (EventType != null)
-            {
-                EmitEvent(context, new TammaEvent
-                {
-                    EventType = $"{EventType}.COMPLETED",
-                    Status = "success",
-                    Duration = DateTime.UtcNow - startedAt,
-                    Data = BuildEndData(context),
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            // Emit error event
-            if (EventType != null)
-            {
-                EmitEvent(context, new TammaEvent
-                {
-                    EventType = $"{EventType}.FAILED",
-                    Status = "error",
-                    Error = ex.Message,
-                    Duration = DateTime.UtcNow - startedAt,
-                    Data = BuildEndData(context),
-                });
-            }
-            throw;
-        }
-    }
-
-    private void EmitEvent(ActivityExecutionContext context, TammaEvent evt)
-    {
-        evt.Timestamp = DateTime.UtcNow;
-        evt.ActivityId = Id;
-        evt.ActivityName = Name ?? GetType().Name;
-        evt.WorkflowInstanceId = context.WorkflowExecutionContext.Id;
-
-        // Store event in workflow transient properties for collection by the orchestrator
-        var events = context.WorkflowExecutionContext.TransientProperties
-            .GetOrAdd("tamma:events", () => new List<TammaEvent>()) as List<TammaEvent>;
-        events?.Add(evt);
-
-        Logger?.LogInformation(
-            "[EVENT] {EventType} | {ActivityName} | {Status} | {Duration}ms",
-            evt.EventType, evt.ActivityName, evt.Status, evt.Duration?.TotalMilliseconds ?? 0);
-    }
-}
-
-/// <summary>
-/// Base activity for async Tamma activities.
-/// </summary>
-public abstract class TammaAsyncActivity : CodeActivity
-{
-    protected ILogger? Logger { get; set; }
-
-    protected virtual string? EventType => null;
-
-    protected virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context)
-        => new();
-
-    protected virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
-        => new();
-
-    protected abstract Task RunAsync(ActivityExecutionContext context);
-
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
-    {
-        var startedAt = DateTime.UtcNow;
-
-        if (EventType != null)
-        {
-            EmitEvent(context, new TammaEvent
-            {
-                EventType = $"{EventType}.STARTED",
-                Status = "started",
-                Data = BuildStartData(context),
-            });
-        }
-
-        try
-        {
-            await RunAsync(context);
-
-            if (EventType != null)
-            {
-                EmitEvent(context, new TammaEvent
-                {
-                    EventType = $"{EventType}.COMPLETED",
-                    Status = "success",
-                    Duration = DateTime.UtcNow - startedAt,
-                    Data = BuildEndData(context),
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            if (EventType != null)
-            {
-                EmitEvent(context, new TammaEvent
-                {
-                    EventType = $"{EventType}.FAILED",
-                    Status = "error",
-                    Error = ex.Message,
-                    Duration = DateTime.UtcNow - startedAt,
-                    Data = BuildEndData(context),
-                });
-            }
-            throw;
-        }
-    }
-
-    private void EmitEvent(ActivityExecutionContext context, TammaEvent evt)
-    {
-        evt.Timestamp = DateTime.UtcNow;
-        evt.ActivityId = Id;
-        evt.ActivityName = Name ?? GetType().Name;
-        evt.WorkflowInstanceId = context.WorkflowExecutionContext.Id;
-
-        var events = context.WorkflowExecutionContext.TransientProperties
-            .GetOrAdd("tamma:events", () => new List<TammaEvent>()) as List<TammaEvent>;
-        events?.Add(evt);
-
-        Logger?.LogInformation(
-            "[EVENT] {EventType} | {ActivityName} | {Status} | {Duration}ms",
-            evt.EventType, evt.ActivityName, evt.Status, evt.Duration?.TotalMilliseconds ?? 0);
-    }
-}
+// ============================================
+// Event Model
+// ============================================
 
 /// <summary>
 /// Event emitted by a Tamma activity.
@@ -197,4 +22,192 @@ public class TammaEvent
     public string? ActivityName { get; set; }
     public string? WorkflowInstanceId { get; set; }
     public Dictionary<string, object?> Data { get; set; } = new();
+}
+
+// ============================================
+// Interface
+// ============================================
+
+/// <summary>
+/// Interface for Tamma activities that emit lifecycle events.
+/// Implement on any activity base class (CodeActivity, Activity, Composite).
+/// </summary>
+public interface ITammaActivity
+{
+    /// <summary>
+    /// Event type prefix (e.g., "ADL.CONFIG.INIT").
+    /// Return null to skip event emission.
+    /// </summary>
+    string? EventType { get; }
+
+    /// <summary>
+    /// Custom data for the start event.
+    /// </summary>
+    Dictionary<string, object?> BuildStartData(ActivityExecutionContext context);
+
+    /// <summary>
+    /// Custom data for the end event (success or failure).
+    /// </summary>
+    Dictionary<string, object?> BuildEndData(ActivityExecutionContext context);
+}
+
+// ============================================
+// Event Emission Helper
+// ============================================
+
+/// <summary>
+/// Static helper for emitting events from any activity.
+/// Used by all TammaActivity variants.
+/// </summary>
+public static class TammaEventEmitter
+{
+    public static void EmitStart(ActivityExecutionContext context, ITammaActivity activity, IActivity source, ILogger? logger)
+    {
+        if (activity.EventType == null) return;
+        Emit(context, source, logger, new TammaEvent
+        {
+            EventType = $"{activity.EventType}.STARTED",
+            Status = "started",
+            Data = activity.BuildStartData(context),
+        });
+    }
+
+    public static void EmitSuccess(ActivityExecutionContext context, ITammaActivity activity, IActivity source, ILogger? logger, TimeSpan duration)
+    {
+        if (activity.EventType == null) return;
+        Emit(context, source, logger, new TammaEvent
+        {
+            EventType = $"{activity.EventType}.COMPLETED",
+            Status = "success",
+            Duration = duration,
+            Data = activity.BuildEndData(context),
+        });
+    }
+
+    public static void EmitFailure(ActivityExecutionContext context, ITammaActivity activity, IActivity source, ILogger? logger, TimeSpan duration, string error)
+    {
+        if (activity.EventType == null) return;
+        Emit(context, source, logger, new TammaEvent
+        {
+            EventType = $"{activity.EventType}.FAILED",
+            Status = "error",
+            Error = error,
+            Duration = duration,
+            Data = activity.BuildEndData(context),
+        });
+    }
+
+    private static void Emit(ActivityExecutionContext context, IActivity source, ILogger? logger, TammaEvent evt)
+    {
+        evt.Timestamp = DateTime.UtcNow;
+        evt.ActivityId = source.Id;
+        evt.ActivityName = source.Name ?? source.GetType().Name;
+        evt.WorkflowInstanceId = context.WorkflowExecutionContext.Id;
+
+        var events = context.WorkflowExecutionContext.TransientProperties
+            .GetOrAdd("tamma:events", () => new List<TammaEvent>()) as List<TammaEvent>;
+        events?.Add(evt);
+
+        logger?.LogInformation(
+            "[EVENT] {EventType} | {ActivityName} | {Status} | {Duration}ms",
+            evt.EventType, evt.ActivityName, evt.Status, evt.Duration?.TotalMilliseconds ?? 0);
+    }
+}
+
+// ============================================
+// Base Classes
+// ============================================
+
+/// <summary>
+/// Sync activity with no outcomes. Inherits CodeActivity.
+/// </summary>
+public abstract class TammaActivity : CodeActivity, ITammaActivity
+{
+    protected ILogger? Logger { get; set; }
+
+    public virtual string? EventType => null;
+    public virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new();
+    public virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new();
+
+    protected abstract void Run(ActivityExecutionContext context);
+
+    protected override void Execute(ActivityExecutionContext context)
+    {
+        var startedAt = DateTime.UtcNow;
+        TammaEventEmitter.EmitStart(context, this, this, Logger);
+
+        try
+        {
+            Run(context);
+            TammaEventEmitter.EmitSuccess(context, this, this, Logger, DateTime.UtcNow - startedAt);
+        }
+        catch (Exception ex)
+        {
+            TammaEventEmitter.EmitFailure(context, this, this, Logger, DateTime.UtcNow - startedAt, ex.Message);
+            throw;
+        }
+    }
+}
+
+/// <summary>
+/// Async activity with no outcomes. Inherits CodeActivity.
+/// </summary>
+public abstract class TammaAsyncActivity : CodeActivity, ITammaActivity
+{
+    protected ILogger? Logger { get; set; }
+
+    public virtual string? EventType => null;
+    public virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new();
+    public virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new();
+
+    protected abstract Task RunAsync(ActivityExecutionContext context);
+
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    {
+        var startedAt = DateTime.UtcNow;
+        TammaEventEmitter.EmitStart(context, this, this, Logger);
+
+        try
+        {
+            await RunAsync(context);
+            TammaEventEmitter.EmitSuccess(context, this, this, Logger, DateTime.UtcNow - startedAt);
+        }
+        catch (Exception ex)
+        {
+            TammaEventEmitter.EmitFailure(context, this, this, Logger, DateTime.UtcNow - startedAt, ex.Message);
+            throw;
+        }
+    }
+}
+
+/// <summary>
+/// Async activity WITH outcomes (FlowNode). Inherits Activity.
+/// Use for activities that need Continue/Stop, True/False, etc.
+/// </summary>
+public abstract class TammaOutcomeActivity : Activity, ITammaActivity
+{
+    protected ILogger? Logger { get; set; }
+
+    public virtual string? EventType => null;
+    public virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new();
+    public virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new();
+
+    protected abstract Task RunAsync(ActivityExecutionContext context);
+
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    {
+        var startedAt = DateTime.UtcNow;
+        TammaEventEmitter.EmitStart(context, this, this, Logger);
+
+        try
+        {
+            await RunAsync(context);
+            TammaEventEmitter.EmitSuccess(context, this, this, Logger, DateTime.UtcNow - startedAt);
+        }
+        catch (Exception ex)
+        {
+            TammaEventEmitter.EmitFailure(context, this, this, Logger, DateTime.UtcNow - startedAt, ex.Message);
+            throw;
+        }
+    }
 }
