@@ -40,19 +40,25 @@ test.describe('ELSA Studio Tests', () => {
     }
 
     // Blazor WASM apps include specific framework files
+    // OR the page may be an auth redirect (nginx auth_request -> GitHub OAuth)
     const html = await page.content();
+    const url = page.url();
     const hasBlazorFramework =
       html.includes('blazor.webassembly.js') ||
       html.includes('blazor.web.js') ||
       html.includes('_framework') ||
       html.includes('Blazor') ||
       html.includes('blazor');
+    const isAuthRedirect =
+      url.includes('github.com/login') ||
+      url.includes('github.com/sessions') ||
+      html.includes('html-auth') ||
+      html.includes('Sign in to GitHub');
 
     expect(
-      hasBlazorFramework,
-      `ELSA Studio at ${ELSA_URL} does not contain Blazor framework references. ` +
-        `The page HTML may be an error page or wrong service. ` +
-        `HTML snippet: ${html.substring(0, 500)}...`,
+      hasBlazorFramework || isAuthRedirect,
+      `ELSA Studio at ${ELSA_URL} returned neither Blazor content nor auth redirect. ` +
+        `URL: ${url}. HTML snippet: ${html.substring(0, 500)}...`,
     ).toBeTruthy();
   });
 
@@ -89,7 +95,8 @@ test.describe('ELSA Studio Tests', () => {
       finalUrl.includes('/login') ||
       finalUrl.includes('/auth') ||
       finalUrl.includes('/signin') ||
-      finalUrl.includes('github.com/login');
+      finalUrl.includes('github.com/login') ||
+      finalUrl.includes('github.com/sessions');
 
     if (isRedirectedToLogin) {
       // Auth redirect is working — this is valid

@@ -131,6 +131,7 @@ test.describe('Dashboard UI Tests', () => {
         finalUrl.includes('/login') ||
         finalUrl.includes('/auth') ||
         finalUrl.includes('github.com/login') ||
+        finalUrl.includes('github.com/sessions') ||
         finalUrl.includes('/signin') ||
         finalUrl.includes('/sign-in');
 
