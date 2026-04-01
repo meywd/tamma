@@ -1,6 +1,6 @@
 # Epic 3: Quality Gates & Intelligence Layer
 
-**Status:** Ready for Dev (all 12 stories ready)
+**Status:** Near Complete (8/12 done, 4 drafted)
 **Stories:** 12 (3-1 through 3-12)
 **Task Plans:** 0
 **Tech Spec:** [tech-spec-epic-3.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-3/tech-spec-epic-3.md)
@@ -27,18 +27,18 @@ Quality gates prevent Tamma from breaking itself during self-maintenance. Mandat
 
 | Story | Title | Priority | Status |
 |-------|-------|----------|--------|
-| 3-1 | Build Automation with Retry Logic | MVP Critical | Ready for Dev |
-| 3-2 | Test Execution with Retry Logic | MVP Critical | Ready for Dev |
-| 3-3 | Mandatory Escalation Workflow | MVP Critical | Ready for Dev |
-| 3-4 | Research Capability for Unfamiliar Concepts | MVP Critical | Ready for Dev |
-| 3-5 | Clarifying Questions for Ambiguous Requirements | MVP Critical | Ready for Dev |
-| 3-6 | Ambiguity Detection Scoring | MVP Critical | Ready for Dev |
-| 3-7 | Multi-Option Design Proposals | MVP Critical | Ready for Dev |
-| 3-8 | Static Analysis Integration | MVP Critical | Ready for Dev |
-| 3-9 | Security Scanning Integration | MVP Critical | Ready for Dev |
-| 3-10 | Agent Performance Monitoring | MVP Critical | Ready for Dev |
-| 3-11 | Cost-Aware AI Usage | MVP Critical | Ready for Dev |
-| 3-12 | Task Complexity Assessment | MVP Critical | Ready for Dev |
+| 3-1 | Build Automation with Retry Logic | MVP Critical | Done |
+| 3-2 | Test Execution with Retry Logic | MVP Critical | Done |
+| 3-3 | Mandatory Escalation Workflow | MVP Critical | Done |
+| 3-4 | Research Capability for Unfamiliar Concepts | MVP Critical | Drafted |
+| 3-5 | Clarifying Questions for Ambiguous Requirements | MVP Critical | Drafted |
+| 3-6 | Ambiguity Detection Scoring | MVP Critical | Drafted |
+| 3-7 | Multi-Option Design Proposals | MVP Critical | Drafted |
+| 3-8 | Static Analysis Integration | MVP Critical | Done |
+| 3-9 | Security Scanning Integration | MVP Critical | Done |
+| 3-10 | Agent Performance Monitoring | MVP Critical | Done |
+| 3-11 | Cost-Aware AI Usage | MVP Critical | Done |
+| 3-12 | Task Complexity Assessment | MVP Critical | Done |
 
 ## Key Technical Details
 

@@ -1,6 +1,6 @@
 # Epic 6: Context & Knowledge Management
 
-**Status:** Completed
+**Status:** Near Complete (9/10 done, 1 in progress)
 **Stories:** 10 (6-1 through 6-10)
 **Packages:** `@tamma/intelligence`, `@tamma/mcp-client`, `@tamma/cost-monitor`, `@tamma/gates`, `@tamma/scrum-master`, `@tamma/dashboard`, `@tamma/api`
 
@@ -173,7 +173,7 @@ Settings API routes (related to Epic 6):
 | Story | Title | Package(s) | Status |
 |-------|-------|-----------|--------|
 | 6-1 | Codebase Indexer Implementation | intelligence | Done |
-| 6-2 | Vector Database Integration | intelligence | Done |
+| 6-2 | Vector Database Integration | intelligence | In Progress |
 | 6-3 | RAG Pipeline Implementation | intelligence | Done |
 | 6-4 | MCP Client Integration | mcp-client | Done |
 | 6-5 | Context Aggregator Service | intelligence | Done |

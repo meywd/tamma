@@ -56,59 +56,67 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
-**Last Audit:** 2026-03-31 (sprint-status.yaml audited against codebase for all 26 epics)
+**Last Audit:** 2026-04-01 (sprint-status.yaml audited against codebase for all 26 epics)
+**Audit Results:** 115 done, 20 in-progress, 56 drafted
 
 ### Recent Progress
 
-- **Epic 2 near complete** -- 13/16 autonomous loop stories done (issue selection through prompt optimization); retrospective completed
-- **Sprint status audit** -- all 26 epics audited against codebase, story statuses corrected
-- **Epic 1.5** -- NPM publishing (1.5-8) and binary releases (1.5-9) now done; Kubernetes deployment (1.5-10) in progress
-- **Epic 1** -- additional AI providers (1-10) and agent customization (1-13) in progress
-- **Landing page prototypes** -- 3 redesign variants with video integration
-- **Epic 25** added -- Custom Wiki Site on Cloudflare Workers (Astro Starlight, wiki.tamma.dev / wiki.its-done.dev)
-- **Video production plans** finalized -- ELI5 ~75s + Deep Dive ~4 min, 79 scene images at 4K Pro
-- **CodeQL security alerts fixed** -- 9 files patched (log forging, incomplete URL sanitization, SQL wildcard escaping, API key validation)
+- **PR #325 merged** -- Workflow enhancements, 10 bug fixes, wiki site rewrite as Vite+React SPA, Midnight Ocean marketing redesign
+- **PR #326 created** -- CodeQL ReDoS fix in EpicDetailPage regex
+- **New stories added** -- 2-17, 2-18, 2-19, 3-13, 7-8 overhaul, 7-11, 7-12, 11-6, 12-5, 12-6
+- **Deep audit completed** -- all 26 epics verified against codebase; Epic 3, 4, 5, 8 statuses significantly corrected
+- **Epic 8 completed** -- All 8 distribution stories done (esbuild, npm publish, binary, Docker, Homebrew)
+- **Epic 3 near complete** -- 8/12 quality gate stories done (build, test, escalation, static analysis, security, monitoring, cost, complexity)
+- **Epic 4 near complete** -- 6/8 event sourcing stories done; PostgreSQL backend in progress
+- **Wiki site rewritten** -- Vite + React + React Router SPA with React Flow diagrams, deployed to wiki.tamma.dev
+- **Marketing site redesigned** -- Midnight Ocean theme applied as main landing page
+- **CodeQL security alerts fixed** -- ReDoS vulnerability patched
 
-### Completed Epics (12)
+### Completed Epics (13)
 
 | Epic | Name | Key Deliverables |
 |------|------|------------------|
-| Epic 6 | Context & Knowledge Management | Codebase indexer, vector DB, RAG pipeline, MCP client, cost monitor, permissions, knowledge base, scrum master |
-| Epic 7 | Mentorship Workflow | 28-state mentorship workflow, 12+ ELSA activities, TypeScript bridge |
+| Epic 8 | Distribution & Installation | esbuild bundle, npm publish, standalone binary, Docker Compose, Homebrew, CI/CD |
 | Epic 9 | Agent Management | Config-driven multi-agent, circuit breakers, diagnostics, security layer |
-| Epic 10 | Engine Core | Workflow-driven engine, ELSA integration, event store |
 | Epic 11 | Security Hardening | C# security pipeline, LLM input/output sanitization, tool validation |
 | Epic 12 | Agentic Tool Loop | Multi-turn tool execution, context compaction, streaming |
 | Epic 13 | Workflow Decomposition | TDD/CI retry sub-workflows, consolidated finish sequences |
 | Epic 14 | Custom ELSA Studio | Custom Blazor WASM studio, Tamma branding, UI hints |
 | Epic 15 | Observability | OpenSearch log aggregation (3 bug fixes for ESM/Serilog/Fastify) |
 | Epic 16 | Unified Auth & Admin | GitHub OAuth SSO (oauth2-proxy removed), user management, admin panel, RBAC, ELSA Studio auto-login |
+| Epic 25 | Documentation & Wiki Site | Vite+React SPA wiki site, React Flow diagrams, deployed to wiki.tamma.dev |
 
-### Near Complete (3)
+### Near Complete (7)
 
 | Epic | Name | Done | Remaining |
 |------|------|------|-----------|
 | Epic 1 | Foundation & Core Infrastructure | 10/15 | 2 in progress (AI providers, agent customization), 3 ready |
 | Epic 1.5 | Infrastructure & Deployment | 9/10 | Kubernetes deployment in progress |
 | Epic 2 | Autonomous Development Loop | 13/16 | Issue decomposition, task dependencies, sequencing (ready for dev) |
+| Epic 3 | Quality Gates & Intelligence | 8/12 | 4 drafted (research, clarifying questions, ambiguity, design proposals) |
+| Epic 4 | Event Sourcing & Audit Trail | 6/8 | PostgreSQL backend in progress, replay drafted |
+| Epic 6 | Context & Knowledge Management | 9/10 | Vector DB stubs (Pinecone, Qdrant, Weaviate) in progress |
+| Epic 7 | Mentorship Workflow | 8/9 core | TDD sub-workflow in progress (test execution mocked) |
+
+### Partially Implemented (4)
+
+| Epic | Name | Done | In Progress | Drafted |
+|------|------|------|-------------|---------|
+| Epic 5 | Observability Dashboard & Docs | 4 | 3 | 7 |
+| Epic 18 | End-User Auth & Registration | 1 | 2 | 2 |
+| Epic 19 | GitHub App Agent Dispatch | 1 | 1 | 3 |
+| Epic 21 | Marketing Site & User Dashboard | 1 | 1 | 3 |
 
 ### Planned / Drafted
 
 | Epic | Name | Stories | Status |
 |------|------|---------|--------|
-| Epic 3 | Quality Gates & Intelligence | 12 | Ready for Dev |
-| Epic 4 | Event Sourcing & Audit Trail | 8 | Ready for Dev |
-| Epic 5 | Observability Dashboard & Docs | 12 | Partially Implemented |
-| Epic 8 | Distribution & Installation | 8 | Drafted |
+| Epic 10 | Engine Core | 8 | Drafted (engine exists but stories define new architecture) |
 | Epic 17 | Multi-Tenancy Foundation | 5 | Drafted |
-| Epic 18 | End-User Auth & Registration | 5 | Drafted |
-| Epic 19 | GitHub App Agent Dispatch | 5 | Drafted |
 | Epic 20 | Billing & Payments | 5 | Drafted |
-| Epic 21 | Marketing Site & User Dashboard | 5 | Drafted |
 | Epic 22 | CLI Mode Preservation | 5 | Drafted |
 | Epic 23 | System Monitoring & Observability Dashboard | 12 | Drafted (26 task plans) |
 | Epic 24 | Realtime Voice Conversation | 7 | Drafted (24 task plans) |
-| Epic 25 | Documentation & Wiki Site | 1 | Drafted |
 
 ## Getting Started
 
@@ -130,4 +138,4 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 
 ---
 
-_Last updated: 2026-03-31 | Maintained by: meywd_
+_Last updated: 2026-04-01 | Maintained by: meywd_

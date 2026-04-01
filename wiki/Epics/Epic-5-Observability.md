@@ -1,6 +1,6 @@
 # Epic 5: Observability Dashboard & Documentation
 
-**Status:** Partially Implemented
+**Status:** Partially Implemented (4/14 done, 3 in progress)
 **Stories:** 14 (5-1 through 5-10, with 5-9a through 5-9e)
 **Task Plans:** 0
 **Tech Spec:** [tech-spec-epic-5.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-5/tech-spec-epic-5.md)
@@ -27,20 +27,20 @@ Epic 5 provides real-time observability, monitoring capabilities, and comprehens
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 5-1 | Structured Logging Implementation | Ready for Dev |
-| 5-2 | Metrics Collection Infrastructure | Ready for Dev |
-| 5-3 | Real-Time Dashboard -- System Health | Ready for Dev |
-| 5-4 | Real-Time Dashboard -- Development Velocity | Ready for Dev |
-| 5-5 | Event Trail Exploration UI | Ready for Dev |
-| 5-6 | Alert System for Critical Issues | Ready for Dev |
-| 5-7 | Feedback Collection System | Ready for Dev |
-| 5-8 | Integration Testing Suite | Drafted |
+| 5-1 | Structured Logging Implementation | Done |
+| 5-2 | Metrics Collection Infrastructure | Drafted |
+| 5-3 | Real-Time Dashboard -- System Health | Done |
+| 5-4 | Real-Time Dashboard -- Development Velocity | Drafted |
+| 5-5 | Event Trail Exploration UI | In Progress |
+| 5-6 | Alert System for Critical Issues | In Progress |
+| 5-7 | Feedback Collection System | In Progress |
+| 5-8 | Integration Testing Suite | Done |
 | 5-9a | Installation & Setup Documentation | Drafted |
 | 5-9b | Usage & Configuration Documentation | Drafted |
 | 5-9c | API Reference Documentation | Backlog |
 | 5-9d | Full Documentation Website | Backlog |
 | 5-9e | Video Walkthrough | Backlog |
-| 5-10 | Alpha Release Preparation | Drafted |
+| 5-10 | Alpha Release Preparation | Done |
 
 ## Key Technical Details
 

@@ -2,7 +2,7 @@
 
 Comprehensive roadmap covering all 26 epics from foundation through SaaS platform.
 
-_Last audited: 2026-03-31_
+_Last audited: 2026-04-01_
 
 ## Epic Overview
 
@@ -11,14 +11,14 @@ _Last audited: 2026-03-31_
 | **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete (2 in progress, 3 ready) |
 | **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (1 in progress) |
 | **Epic 2** | Autonomous Development Loop | 16 | 13 | Near Complete (3 ready for dev) |
-| **Epic 3** | Quality Gates & Intelligence | 12 | 0 | Ready for Dev (all 12 stories ready) |
-| **Epic 4** | Event Sourcing & Audit Trail | 8 | 0 | Ready for Dev (all 8 stories ready) |
-| **Epic 5** | Observability Dashboard & Docs | 12 | 0 | Partially Implemented |
-| **Epic 6** | Context & Knowledge Management | 10 | -- | Completed |
-| **Epic 7** | Autonomous Mentorship Workflow | 9 | -- | Completed |
-| **Epic 8** | Distribution & Installation | 8 | 0 | Drafted |
+| **Epic 3** | Quality Gates & Intelligence | 12 | 8 | Near Complete (4 drafted) |
+| **Epic 4** | Event Sourcing & Audit Trail | 8 | 6 | Near Complete (1 in progress, 1 drafted) |
+| **Epic 5** | Observability Dashboard & Docs | 14 | 4 | Partially Implemented (3 in progress, 7 drafted/backlog) |
+| **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete (1 in progress) |
+| **Epic 7** | Autonomous Mentorship Workflow | 9 | 8 | Near Complete (1 in progress) |
+| **Epic 8** | Distribution & Installation | 8 | 8 | Completed |
 | **Epic 9** | Config-Driven Multi-Agent Management | 11 | -- | Completed |
-| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 8 | -- | Completed |
+| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 8 | 0 | Drafted (engine exists but stories define new architecture) |
 | **Epic 11** | Security Hardening (ELSA) | 5 | -- | Completed |
 | **Epic 12** | Agentic Tool Loop | 4 | -- | Completed |
 | **Epic 13** | Workflow Decomposition | 3 | -- | Completed |
@@ -26,14 +26,14 @@ _Last audited: 2026-03-31_
 | **Epic 15** | Observability & Log Aggregation | 1 | -- | Completed (3 bug fixes shipped) |
 | **Epic 16** | Unified Auth, User Management & Admin | 6 | -- | Completed |
 | **Epic 17** | Multi-Tenancy Foundation | 5 | 0 | Drafted |
-| **Epic 18** | End-User Auth & Registration | 5 | 0 | Drafted |
-| **Epic 19** | GitHub App Agent Dispatch | 5 | 0 | Drafted |
+| **Epic 18** | End-User Auth & Registration | 5 | 1 | Partially Implemented (2 in progress, 2 drafted) |
+| **Epic 19** | GitHub App Agent Dispatch | 5 | 1 | Partially Implemented (1 in progress, 3 drafted) |
 | **Epic 20** | Billing & Payments | 5 | 0 | Drafted |
-| **Epic 21** | Marketing Site & User Dashboard | 5 | 0 | Drafted |
+| **Epic 21** | Marketing Site & User Dashboard | 5 | 1 | Partially Implemented (1 in progress, 3 drafted) |
 | **Epic 22** | CLI Mode Preservation | 5 | 0 | Drafted |
-| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans) |
-| **Epic 24** | Realtime Voice Conversation | 7 | 0 | Drafted (24 task plans) |
-| **Epic 25** | Documentation & Wiki Site | 1 | 0 | Drafted |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans, some in progress) |
+| **Epic 24** | Realtime Voice Conversation | 7 | 1 | Drafted (24 task plans) |
+| **Epic 25** | Documentation & Wiki Site | 1 | 1 | Completed |
 
 ---
 
@@ -85,10 +85,11 @@ _Last audited: 2026-03-31_
 ### Epic 6: Context & Knowledge Management
 
 **Goal:** Advanced context gathering through vector databases, RAG systems, MCP servers, cost monitoring, permissions, and knowledge base.
+**Status:** Near Complete -- 9/10 stories done. Vector DB integration (6-2) in progress (ChromaDB + pgvector real; Pinecone, Qdrant, Weaviate are stubs).
 
 **Key Deliverables:**
 - Codebase indexer with TypeScript-aware chunking (`@tamma/intelligence`)
-- Vector database integration (ChromaDB, pgvector, Pinecone, Qdrant, Weaviate) (`@tamma/intelligence`)
+- Vector database integration (ChromaDB, pgvector real; Pinecone, Qdrant, Weaviate stubs) (`@tamma/intelligence`)
 - RAG pipeline with hybrid search (`@tamma/intelligence`)
 - MCP client with transport support (stdio, SSE, WebSocket) (`@tamma/mcp-client`)
 - Context aggregator service with token budget management (`@tamma/intelligence`)
@@ -107,6 +108,7 @@ _Last audited: 2026-03-31_
 ### Epic 7: Autonomous Mentorship Workflow
 
 **Goal:** AI-powered mentorship workflow guiding developers through story implementation using a 28-state state machine.
+**Status:** Near Complete -- 8/9 core stories done. TDD sub-workflow (7-8) in progress (structure real but test execution is mocked).
 
 **Key Deliverables:**
 - 28-state mentorship state machine in ELSA (.NET/C#)
@@ -144,12 +146,7 @@ _Last audited: 2026-03-31_
 ### Epic 10: Engine Core -- Workflow-Driven Architecture
 
 **Goal:** Refactor the engine from a hardcoded state machine into a workflow-driven orchestration service with ELSA as the workflow provider.
-
-**Key Deliverables:**
-- Engine brain with static workflow (`@tamma/orchestrator`)
-- 20+ code-first ELSA workflows (ADL orchestrator, single issue cycle, LLM call, TDD, CI retry, etc.)
-- Workflow engine TypeScript bridge
-- ELSA integration through `IWorkflowProvider` abstraction
+**Status:** Drafted -- the engine exists as an imperative state machine but these stories define the target agentic architecture (smart queue, event store PostgreSQL/Emmett, state reconstruction, input normalization). None of the 8 stories match current implementation.
 
 **Stories:** 10-1 through 10-8 (8 stories)
 
@@ -276,25 +273,23 @@ _Last audited: 2026-03-31_
 ### Epic 3: Quality Gates & Intelligence
 
 **Goal:** Build automation, test execution, CI/CD integration with retry limits and mandatory escalation.
+**Status:** Near Complete -- 8/12 stories done.
 
 **Stories:** 3-1 through 3-12 (12 stories)
-- Build/test automation with retry logic
-- Mandatory escalation workflow
-- Research capability, clarifying questions, ambiguity detection
-- Static analysis and security scanning integration
-- Agent performance monitoring, cost-aware AI usage, task complexity assessment
+- Done: Build automation (3-1), test execution (3-2), escalation workflow (3-3), static analysis (3-8), security scanning (3-9), agent performance monitoring (3-10), cost-aware AI usage (3-11), task complexity assessment (3-12)
+- Drafted: Research workflow (3-4), clarifying questions (3-5), ambiguity scoring (3-6), design proposals (3-7)
 
 ---
 
 ### Epic 4: Event Sourcing & Audit Trail
 
 **Goal:** CQRS event sourcing for complete audit trail.
+**Status:** Near Complete -- 6/8 stories done, PostgreSQL backend in progress.
 
 **Stories:** 4-1 through 4-8 (8 stories)
-- Event schema design and store backend
-- Event capture for all operations (issues, AI interactions, code changes, approvals)
-- Event query API for time-travel debugging
-- Black-box replay for debugging
+- Done: Event schema design (4-1), event capture for issues (4-3), AI interactions (4-4), code changes (4-5), approvals (4-6), time-travel query API (4-7)
+- In Progress: Event store backend -- PostgreSQL (4-2)
+- Drafted: Black-box replay (4-8)
 
 ---
 
@@ -302,26 +297,26 @@ _Last audited: 2026-03-31_
 
 **Goal:** Real-time observability and comprehensive documentation.
 
-**Status:** Partially implemented -- dashboard exists with settings/admin/knowledge-base pages but not all stories complete.
+**Status:** Partially implemented -- 4 done, 3 in progress, 7 drafted/backlog.
 
 **Stories:** 5-1 through 5-10 (14 stories)
-- Dashboard scaffolding and routing (partially done)
-- Event trail visualization
-- System health and development velocity dashboards
-- Alert system, feedback collection
-- Documentation (installation, usage, API reference, website)
-- Alpha release preparation
+- Done: Structured logging (5-1), system health dashboard (5-3), integration testing suite (5-8), alpha release preparation (5-10)
+- In Progress: Event trail exploration (5-5), alert system (5-6), feedback collection (5-7)
+- Drafted: Metrics collection (5-2), development velocity (5-4), documentation (5-9a through 5-9e)
 
 ---
 
 ### Epic 8: Distribution & Installation
 
 **Goal:** Three-tier distribution: npm, standalone binary, Docker full-stack.
+**Status:** Completed -- all 8 stories done.
+
+**Key Deliverables:**
+- Tier 1: esbuild bundle (build.mjs) + npm publish CI/CD (release.yml, package.json.publish, prepare-package.mjs)
+- Tier 2: Standalone binary (build-binary.mjs via Bun) + install scripts + Homebrew template
+- Tier 3: Docker Compose full stack (Dockerfile.ts, Dockerfile.dashboard) + Docker CI/CD (docker-publish.yml, docker-smoke-test.yml)
 
 **Stories:** 8-1 through 8-8 (8 stories)
-- Tier 1: esbuild bundle + npm publish CI/CD
-- Tier 2: Standalone binary (Bun) + install scripts + auto-update
-- Tier 3: Docker Compose full stack + CLI integration
 
 ---
 
@@ -340,24 +335,24 @@ _Last audited: 2026-03-31_
 ### Epic 18: End-User Auth & Registration
 
 **Goal:** Self-service registration, email verification, organization management, GitHub App onboarding.
+**Status:** Partially Implemented -- GitHub App onboarding (18-4) done; login/session (18-2) and dashboard shell (18-5) in progress; registration (18-1) and org creation (18-3) drafted.
 
 **Stories:** 18-1 through 18-5 (5 stories)
-- User registration with email verification
-- Login and session management
-- Organization/tenant creation
-- GitHub App installation onboarding
-- User-facing dashboard shell
+- Done: GitHub App installation onboarding (18-4)
+- In Progress: User login & session management (18-2), user-facing dashboard shell (18-5)
+- Drafted: User registration & email verification (18-1), organization/tenant creation (18-3)
 
 ---
 
 ### Epic 19: GitHub App Agent Dispatch
 
 **Goal:** Orchestrate agents on user's GitHub Actions runners.
+**Status:** Partially Implemented -- workflow template (19-1) done; result collection (19-4) in progress; dispatch (19-2), monitoring (19-3), abstraction (19-5) drafted.
 
 **Stories:** 19-1 through 19-5 (5 stories)
-- Agent dispatch via `workflow_dispatch` events
-- Runner monitoring and result collection
-- Execution isolation and security
+- Done: Tamma agent workflow template (19-1)
+- In Progress: Result collection (19-4)
+- Drafted: Workflow dispatch from ELSA (19-2), agent monitoring (19-3), agent executor abstraction (19-5)
 
 ---
 
@@ -379,11 +374,12 @@ _Last audited: 2026-03-31_
 
 **Goal:** Production marketing site and user-facing dashboard.
 
-**Status:** Marketing site exists at `apps/marketing-site/` (Cloudflare Workers), user dashboard partially implemented.
+**Status:** Partially Implemented -- Marketing landing page (21-1) done with Midnight Ocean redesign; documentation site (21-3) in progress (wiki-site scaffold exists); pricing (21-2), user repos/runs (21-4), settings/billing (21-5) drafted.
 
 **Stories:** 21-1 through 21-5 (5 stories)
-- Marketing landing page, pricing page, documentation site
-- User dashboard: repos, runs, settings, billing
+- Done: Marketing landing page (21-1) -- Midnight Ocean redesign deployed
+- In Progress: Documentation site (21-3) -- wiki-site scaffold at apps/wiki-site/
+- Drafted: Pricing page (21-2), user repos/runs (21-4), settings/billing (21-5)
 
 ---
 
@@ -446,19 +442,18 @@ Each implementation story now has task plan breakdowns:
 
 ### Epic 25: Documentation & Wiki Site
 
-**Goal:** Build and deploy a custom documentation/wiki site using Astro Starlight on Cloudflare Workers, accessible at wiki.tamma.dev and wiki.its-done.dev.
+**Goal:** Build and deploy a custom documentation/wiki site on Cloudflare Workers, accessible at wiki.tamma.dev.
 
-**Status:** Planned. Wiki site scaffold created at `apps/wiki-site/` with Astro Starlight, content sync script, and Cloudflare Workers config. Deployment workflow pending.
+**Status:** Completed. Wiki site rewritten as Vite + React + React Router SPA with React Flow interactive diagrams, deployed to Cloudflare Workers.
 
 **Key Deliverables:**
-- Astro Starlight documentation site rendering ~475 markdown pages from `wiki/` and `docs/stories/`
-- Pagefind full-text search (client-side WASM, no backend)
-- Collapsible sidebar navigation grouped by epic
-- Dark/light mode with Tamma purple branding
-- Auto-deployment via GitHub Actions on content changes
-- Dual-domain: wiki.tamma.dev and wiki.its-done.dev
+- Vite + React SPA wiki site with React Flow interactive flowcharts (dagre auto-layout, draggable nodes, minimap)
+- Designed pages: Home, Epics, Workflows, Stories with detail views
+- Dark sidebar, collapsible navigation, prose styling
+- Cloudflare Workers Static Assets deployment
+- Content sync from wiki/ and docs/stories/ directories
 
-**Stories:** 25-1 (1 story, 8 tasks)
+**Stories:** 25-1 (1 story) -- Done
 
 [Detailed Breakdown](Epics/Epic-25-Wiki-Site)
 
@@ -472,10 +467,10 @@ Phase 1 (Completed):
   Epic 1.5 (Infrastructure)         [NEAR COMPLETE - 9/10 done, 1 in progress]
   Epic 9   (Multi-Agent Management)  [COMPLETED]
 
-Phase 2 (Completed):
-  Epic 6   (Context & Knowledge)     [COMPLETED]
-  Epic 7   (Mentorship Workflow)     [COMPLETED]
-  Epic 10  (Engine Core)             [COMPLETED]
+Phase 2 (Near Complete):
+  Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10 done]
+  Epic 7   (Mentorship Workflow)     [NEAR COMPLETE - 8/9 core done]
+  Epic 10  (Engine Core)             [DRAFTED - stories define new architecture]
 
 Phase 3 (Completed):
   Epic 11  (Security Hardening)      [COMPLETED]
@@ -487,23 +482,23 @@ Phase 3 (Completed):
 
 Phase 4 (Active):
   Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 13/16 done]
-  Epic 3   (Quality Gates)           [READY FOR DEV - 12 stories]
-  Epic 4   (Event Sourcing)          [READY FOR DEV - 8 stories]
-  Epic 5   (Observability/Docs)      [Partially Implemented]
+  Epic 3   (Quality Gates)           [NEAR COMPLETE - 8/12 done]
+  Epic 4   (Event Sourcing)          [NEAR COMPLETE - 6/8 done]
+  Epic 5   (Observability/Docs)      [PARTIAL - 4/14 done, 3 in progress]
+  Epic 8   (Distribution)            [COMPLETED - 8/8 done]
+  Epic 25  (Wiki Site)               [COMPLETED]
 
 Phase 5 (Planned - SaaS):
   Epic 17  (Multi-Tenancy)           [Drafted]
-  Epic 18  (End-User Auth)           [Drafted]
-  Epic 19  (Agent Dispatch)          [Drafted]
+  Epic 18  (End-User Auth)           [PARTIAL - 1 done, 2 in progress]
+  Epic 19  (Agent Dispatch)          [PARTIAL - 1 done, 1 in progress]
   Epic 20  (Billing)                 [Drafted]
-  Epic 21  (Marketing/Dashboard)     [Drafted]
+  Epic 21  (Marketing/Dashboard)     [PARTIAL - 1 done, 1 in progress]
   Epic 22  (CLI Preservation)        [Drafted]
 
 Phase 6 (Planned - Advanced):
-  Epic 8   (Distribution)            [Drafted - 8 stories]
   Epic 23  (System Monitoring)       [Drafted - 26 task plans]
   Epic 24  (Voice Conversation)      [Drafted - 24 task plans]
-  Epic 25  (Wiki Site)               [Drafted - Astro Starlight]
 ```
 
 ---

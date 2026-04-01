@@ -1,6 +1,6 @@
 # Epic 21: Marketing Site & User Dashboard
 
-**Status:** Drafted (marketing site exists at apps/marketing-site/)
+**Status:** Partially Implemented (1 done, 1 in progress, 3 drafted)
 **Stories:** 5 (21-1 through 21-5)
 **Estimated Effort:** 128 hours
 
@@ -35,10 +35,10 @@ Epic 21 builds a production-quality marketing site at tamma.dev and a user-facin
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
 | 21-1 | Marketing Landing Page | P0 (Critical) | 20 hours | Done |
-| 21-2 | Pricing Page + Stripe Checkout | P1 (High) | 24 hours | Planned |
-| 21-3 | Documentation Site | P1 (High) | 28 hours | Planned |
-| 21-4 | User Dashboard -- Repos & Workflow Runs | P0 (Critical) | 32 hours | Planned |
-| 21-5 | User Dashboard -- Settings & Billing | P1 (High) | 24 hours | Planned |
+| 21-2 | Pricing Page + Stripe Checkout | P1 (High) | 24 hours | Drafted |
+| 21-3 | Documentation Site | P1 (High) | 28 hours | In Progress |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | P0 (Critical) | 32 hours | Drafted |
+| 21-5 | User Dashboard -- Settings & Billing | P1 (High) | 24 hours | Drafted |
 
 ## Key Technical Details
 
