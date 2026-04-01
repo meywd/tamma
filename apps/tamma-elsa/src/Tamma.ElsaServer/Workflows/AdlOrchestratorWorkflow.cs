@@ -77,29 +77,35 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         initConfig.SetDisplayText("Load Config");
 
         // ================================================================
-        // 2. Select Issue
+        // 2. Select Work Item (priority-based, multiple sources)
         // ================================================================
-        var selectIssue = new SelectIssueActivity
+        var selectWorkItem = new SelectWorkItemActivity
         {
-            Id = "SelectIssue",
-            Name = "Select Issue",
+            Id = "SelectWorkItem",
+            Name = "Select Work Item",
             Repository = new Input<string>(ctx => repository.Get(ctx)),
-            IssueLabels = new Input<string[]>(ctx => issueLabels.Get(ctx)),
+            AutoLabels = new Input<string[]>(ctx => issueLabels.Get(ctx)),
             BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
-            IssueJson = new Output<string?>(selectedIssueJson),
+            WorkItemJson = new Output<string?>(selectedIssueJson),
             IssueNumber = new Output<int>(selectedIssueNumber),
         };
-        selectIssue.SetDisplayText("Select Issue");
+        selectWorkItem.SetDisplayText("Select Work Item");
 
         // ================================================================
-        // 3. Issue Found?
+        // 2b. Dispatch Triage (when untriaged issues found but nothing ready)
         // ================================================================
-        var issueFound = new FlowDecision(ctx => !string.IsNullOrEmpty(selectedIssueJson.Get(ctx)))
+        var dispatchTriage = new DispatchWorkflow
         {
-            Id = "IssueFound",
-            Name = "Issue Found?"
+            Id = "DispatchTriage",
+            Name = "Dispatch Triage",
+            WorkflowDefinitionId = new("issue-triage"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+            }),
+            WaitForCompletion = new(true), // wait for triage to finish, then re-select
         };
-        issueFound.SetDisplayText("Issue Found?");
+        dispatchTriage.SetDisplayText("Dispatch Triage");
 
         // ================================================================
         // 4. Check Limits
@@ -203,26 +209,27 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Start = initConfig,
             Activities =
             {
-                initConfig, selectIssue, issueFound,
+                initConfig, selectWorkItem, dispatchTriage,
                 checkLimits, dispatchCycle, incrementCount, cooldown,
                 setOutputsDone, setOutputsLimits, finish
             },
             Connections =
             {
-                // Load Config → Select Issue
-                Connect(initConfig, selectIssue),
+                // Load Config → Select Work Item
+                Connect(initConfig, selectWorkItem),
 
-                // Select Issue → Issue Found?
-                Connect(selectIssue, issueFound),
-
-                // No issue → Output (No Issues) → Finish
-                ConnectOutcome(issueFound, "False", setOutputsDone),
+                // Nothing found → repo is clean → Finish
+                ConnectOutcome(selectWorkItem, "NothingFound", setOutputsDone),
                 Connect(setOutputsDone, finish),
 
-                // Issue found → Check Limits
-                ConnectOutcome(issueFound, "True", checkLimits),
+                // Needs triage → dispatch triage → re-select
+                ConnectOutcome(selectWorkItem, "NeedsTriage", dispatchTriage),
+                Connect(dispatchTriage, selectWorkItem), // loop back after triage
 
-                // Limits reached → Output (Limits) → Finish
+                // Selected → Check Limits
+                ConnectOutcome(selectWorkItem, "Selected", checkLimits),
+
+                // Limits reached → Finish
                 ConnectOutcome(checkLimits, "Stop", setOutputsLimits),
                 Connect(setOutputsLimits, finish),
 
@@ -230,7 +237,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, incrementCount),
                 Connect(incrementCount, cooldown),
-                Connect(cooldown, selectIssue), // loop back
+                Connect(cooldown, selectWorkItem), // loop back to select next
             }
         };
     }
