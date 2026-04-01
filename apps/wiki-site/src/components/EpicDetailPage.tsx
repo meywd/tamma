@@ -375,7 +375,7 @@ export default function EpicDetailPage() {
           // Skip sections with no meaningful content (empty or only whitespace/sub-heading markers)
           s.content.trim().length > 0 &&
           // Skip sections whose content is just sub-headings with no own text
-          !s.content.trim().match(/^(###\s+.+\s*)+$/)
+          !s.content.trim().split('\n').every(line => line.trim() === '' || line.trim().startsWith('### '))
       );
     },
     [sections, specialHeadings, tableSections]
