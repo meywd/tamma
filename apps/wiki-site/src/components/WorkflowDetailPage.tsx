@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import MermaidDiagram from './MermaidDiagram';
 
 interface ManifestEntry {
   path: string;
@@ -445,8 +446,19 @@ export default function WorkflowDetailPage() {
             </div>
           )}
 
-          {/* ASCII diagram in styled pre block */}
-          {flowDiagram && (
+          {/* Flow diagram — Mermaid if steps available, ASCII fallback */}
+          {flowSteps.length > 1 && (
+            <MermaidDiagram
+              chart={`flowchart TD\n${flowSteps.map((s, i) => {
+                const id = `S${i}`;
+                const nextId = `S${i + 1}`;
+                const label = s.label.replace(/"/g, "'");
+                if (i === 0) return `  ${id}["${label}"]`;
+                return `  ${id}["${label}"]\n  S${i - 1} --> ${id}`;
+              }).join('\n')}`}
+            />
+          )}
+          {flowDiagram && !flowSteps.length && (
             <div className="bg-[#18181b] border border-zinc-800 rounded-lg overflow-x-auto">
               <pre className="p-4 text-[12px] leading-relaxed font-mono text-zinc-400 whitespace-pre">
                 {flowDiagram}
