@@ -76,6 +76,10 @@ import { registerEngineGitHubRoutes } from './routes/engine/engine-github-routes
 import type { EngineGitHubRouteOptions } from './routes/engine/engine-github-routes.js';
 import { registerEngineTaskRoutes } from './routes/engine/engine-task-routes.js';
 import type { EngineTaskRouteOptions } from './routes/engine/engine-task-routes.js';
+import { registerPromptRoutes } from './routes/prompts/prompt-routes.js';
+import { PromptStore } from './services/prompt-store.js';
+import type { PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
+import type { PromptTemplate, PromptRole, PromptAction } from './services/default-prompts.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -117,6 +121,8 @@ export {
   registerEngineContextRoutes,
   registerEngineGitHubRoutes,
   registerEngineTaskRoutes,
+  registerPromptRoutes,
+  PromptStore,
 };
 
 export { startApiServer } from './serve.js';
@@ -174,6 +180,14 @@ export type {
   UserManagementRouteOptions,
   EngineGitHubRouteOptions,
   EngineTaskRouteOptions,
+  PromptStoreOptions,
+  UpsertPromptInput,
+  RenderInput,
+  PromptSummary,
+  RenderedPrompt,
+  PromptTemplate,
+  PromptRole,
+  PromptAction,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -208,6 +222,8 @@ export interface CreateAppOptions {
   engineTask?: EngineTaskRouteOptions;
   /** Enable engine context routes (store-context, query-context). Always registered when true. */
   engineContext?: boolean;
+  /** Prompt store for the prompt registry API (optional; creates default in-memory store if omitted). */
+  promptStore?: PromptStore;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
   /** Pre-built pino Logger instance (takes precedence over logger option). */
@@ -333,6 +349,12 @@ export async function createApp(options?: CreateAppOptions) {
   // Engine task routes (Elsa activity callbacks for LLM execution and cycle results)
   if (options?.engineTask !== undefined) {
     await registerEngineTaskRoutes(app, options.engineTask);
+  }
+
+  // Prompt Registry routes (always registered — uses default store if none provided)
+  {
+    const promptStore = options?.promptStore ?? new PromptStore();
+    await registerPromptRoutes(app, promptStore);
   }
 
   // Dashboard routes (requires both engine registry and workflow store)
