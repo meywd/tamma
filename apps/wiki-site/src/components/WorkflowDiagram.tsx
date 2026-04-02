@@ -166,7 +166,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('limitsOutcome', 'dispatch', 'Continue'),
       e('limitsOutcome', 'exitLimits', 'Stop', 'right'),
       e('dispatch', 'cooldown'),
-      e('cooldown', 'select'),
+      e('cooldown', 'start'),
     ],
   },
   // SingleIssueCycleWorkflow.cs — 14-step autonomous dev cycle
@@ -208,6 +208,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('plan', 'reviewPlan'),
       e('reviewPlan', 'reviewOutcome'),
       e('reviewOutcome', 'createTasks', 'Approved'),
+      e('reviewOutcome', 'plan', 'NeedsModification'),
       e('reviewOutcome', 'defer', 'Defer', 'right'),
       e('reviewOutcome', 'split', 'Split', 'right'),
       e('reviewOutcome', 'needsHuman', 'NeedsHuman', 'right'),
