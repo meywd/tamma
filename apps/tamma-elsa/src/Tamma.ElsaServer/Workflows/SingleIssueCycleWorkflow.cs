@@ -127,6 +127,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["poSummary"] = poSummary.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
+                ["reviewNotes"] = reviewNotes.Get(ctx),
+                ["revisionNumber"] = planRevisionCount.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -166,19 +168,32 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             var result = subResult.Get(ctx);
             if (result != null)
             {
-                if (result.TryGetValue("decision", out var d)) return (object)(d?.ToString() ?? "needsHuman");
-                if (result.TryGetValue("planJson", out var p)) planJson.Set(ctx, p?.ToString() ?? "");
+                if (result.TryGetValue("decision", out var d))
+                {
+                    var decision = d?.ToString() ?? "needsHuman";
+                    if (result.TryGetValue("planJson", out var p)) planJson.Set(ctx, p?.ToString() ?? "");
+                    if (result.TryGetValue("reviewNotes", out var notes)) reviewNotes.Set(ctx, notes?.ToString() ?? "");
+                    return (object)decision;
+                }
             }
             return (object)"needsHuman";
         }, "ExtractReviewDecision", "Extract Review Decision");
 
         // Review outcome routing
+        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
+        var planRevisionCount = builder.WithVariable<int>("PlanRevisionCount", 0);
+
         var reviewOutcome = new FlowSwitch<string>
         {
             Id = "ReviewOutcome",
             Name = "Review Outcome",
             Expression = new(ctx => reviewDecision.Get(ctx)),
-            Cases = { { "approved", "Approved" }, { "defer", "Defer" }, { "split", "Split" } },
+            Cases = {
+                { "approved", "Approved" },
+                { "needsModification", "NeedsModification" },
+                { "defer", "Defer" },
+                { "split", "Split" }
+            },
             Default = "NeedsHuman",
         };
         reviewOutcome.SetDisplayText("Review Outcome");
@@ -575,6 +590,34 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             "🔀 Issue decomposed into sub-issues. Closing.", new[] { "split" }, new[] { "tamma-processing" });
         var notifyNeedsHuman = NotifyIssue("NotifyNeedsHuman", repository, issueNumber,
             "🙋 Needs human decision. See discussion.", new[] { "needs-human" });
+        var notifyPlanRevision = NotifyIssue("NotifyPlanRevision", repository, issueNumber,
+            "🔄 Plan needs modification. Revising...");
+        var notifyTaskRevision = NotifyIssue("NotifyTaskRevision", repository, issueNumber,
+            "🔄 Tasks need changes. Revising...");
+
+        // Revision counters and max checks
+        var incrementPlanRevision = Assign(planRevisionCount, ctx =>
+            (object)(planRevisionCount.Get(ctx) + 1),
+            "IncrPlanRevision", "Increment Plan Revision");
+
+        var planMaxRevisionsCheck = new FlowDecision(ctx => planRevisionCount.Get(ctx) >= 3)
+        {
+            Id = "PlanMaxRevisions",
+            Name = "Plan Max Revisions?"
+        };
+        planMaxRevisionsCheck.SetDisplayText("Plan Max Revisions?");
+
+        var taskRevisionCount = builder.WithVariable<int>("TaskRevisionCount", 0);
+        var incrementTaskRevision = Assign(taskRevisionCount, ctx =>
+            (object)(taskRevisionCount.Get(ctx) + 1),
+            "IncrTaskRevision", "Increment Task Revision");
+
+        var taskMaxRevisionsCheck = new FlowDecision(ctx => taskRevisionCount.Get(ctx) >= 3)
+        {
+            Id = "TaskMaxRevisions",
+            Name = "Task Max Revisions?"
+        };
+        taskMaxRevisionsCheck.SetDisplayText("Task Max Revisions?");
         var notifyTasksApproved = NotifyIssue("NotifyTasksApproved", repository, issueNumber,
             "✅ Tasks approved. Starting implementation...");
         var notifyBranchCreated = NotifyIssue("NotifyBranchCreated", repository, issueNumber,
@@ -617,6 +660,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
                 notifyDeferred, notifySplit, notifyNeedsHuman,
+                notifyPlanRevision, notifyTaskRevision,
+                incrementPlanRevision, planMaxRevisionsCheck,
+                incrementTaskRevision, taskMaxRevisionsCheck,
                 notifyTasksApproved, notifyBranchCreated,
                 notifyTddDone, notifyMerged, notifyError,
                 // Exit paths
@@ -662,6 +708,15 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(reportSplit, finish),
 
                 // NeedsHuman → notify + report (parallel)
+                // NeedsModification → increment → max check → loop or escalate
+                ConnectOutcome(reviewOutcome, "NeedsModification", notifyPlanRevision),
+                ConnectOutcome(reviewOutcome, "NeedsModification", incrementPlanRevision),
+                Connect(incrementPlanRevision, planMaxRevisionsCheck),
+                ConnectOutcome(planMaxRevisionsCheck, "False", generatePlan), // loop back
+                ConnectOutcome(planMaxRevisionsCheck, "True", notifyNeedsHuman), // escalate
+                ConnectOutcome(planMaxRevisionsCheck, "True", reportNeedsHuman),
+
+                // NeedsHuman
                 ConnectOutcome(reviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(reviewOutcome, "NeedsHuman", reportNeedsHuman),
                 Connect(reportNeedsHuman, finish),
@@ -677,7 +732,15 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // Tasks approved → notify + Create Branch (parallel)
                 ConnectOutcome(taskReviewOutcome, "Approved", notifyTasksApproved),
                 ConnectOutcome(taskReviewOutcome, "Approved", createBranch),
-                ConnectOutcome(taskReviewOutcome, "NeedsChanges", createTasks),
+                // Task NeedsChanges → increment → max check → loop or escalate
+                ConnectOutcome(taskReviewOutcome, "NeedsChanges", notifyTaskRevision),
+                ConnectOutcome(taskReviewOutcome, "NeedsChanges", incrementTaskRevision),
+                Connect(incrementTaskRevision, taskMaxRevisionsCheck),
+                ConnectOutcome(taskMaxRevisionsCheck, "False", createTasks), // loop back
+                ConnectOutcome(taskMaxRevisionsCheck, "True", notifyNeedsHuman), // escalate
+                ConnectOutcome(taskMaxRevisionsCheck, "True", reportNeedsHuman),
+
+                // Task NeedsHuman
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
 
