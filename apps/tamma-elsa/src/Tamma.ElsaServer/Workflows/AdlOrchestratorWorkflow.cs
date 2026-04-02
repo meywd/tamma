@@ -155,11 +155,22 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         };
         exitLimits.SetDisplayText("Exit (Limits)");
 
+        // ================================================================
+        // Restart: Dispatch new ADL instance after cooldown
+        // ================================================================
+        var dispatchAdl = new DispatchAdlActivity
+        {
+            Id = "DispatchAdl",
+            Name = "Dispatch ADL",
+            ConfigJson = new Input<string>(ctx => configJson.Get(ctx)),
+        };
+        dispatchAdl.SetDisplayText("Dispatch ADL");
+
         var finish = new Finish { Id = "Finish", Name = "Complete" };
         finish.SetDisplayText("Complete");
 
         // ================================================================
-        // Flowchart
+        // Flowchart — every path → cooldown → dispatch ADL → finish
         // ================================================================
         builder.Root = new Flowchart
         {
@@ -169,32 +180,35 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             {
                 initConfig, selectWorkItem, dispatchTriage,
                 checkLimits, dispatchCycle, cooldown,
-                exitNoIssues, exitLimits, finish
+                exitNoIssues, exitLimits, dispatchAdl, finish
             },
             Connections =
             {
                 // Load Config → Select Work Item
                 Connect(initConfig, selectWorkItem),
 
-                // Nothing found → repo is clean → Exit → Finish
+                // Nothing found → report → cooldown
                 ConnectOutcome(selectWorkItem, "NothingFound", exitNoIssues),
-                Connect(exitNoIssues, finish),
+                Connect(exitNoIssues, cooldown),
 
-                // Needs triage → dispatch triage → re-select
+                // Needs triage → dispatch triage (f&f) → cooldown
                 ConnectOutcome(selectWorkItem, "NeedsTriage", dispatchTriage),
-                Connect(dispatchTriage, selectWorkItem),
+                Connect(dispatchTriage, cooldown),
 
                 // Selected → Check Limits
                 ConnectOutcome(selectWorkItem, "Selected", checkLimits),
 
-                // Limits reached → Exit → Finish
+                // Limits reached → report → cooldown
                 ConnectOutcome(checkLimits, "Stop", exitLimits),
-                Connect(exitLimits, finish),
+                Connect(exitLimits, cooldown),
 
-                // Within limits → Dispatch (fire & forget) → Cooldown → Restart (reload config)
+                // Within limits → Dispatch cycle (f&f) → cooldown
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, cooldown),
-                Connect(cooldown, initConfig), // restart from config load
+
+                // All paths: cooldown → dispatch new ADL → finish this instance
+                Connect(cooldown, dispatchAdl),
+                Connect(dispatchAdl, finish),
             }
         };
     }
