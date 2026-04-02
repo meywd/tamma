@@ -84,34 +84,29 @@ public class ContextGatheringWorkflow : WorkflowBase
         // 2-6. Role Scans — each dispatches LlmCallWorkflow
         // ================================================================
         var devScan = RoleScan("DevScan", "Dev Scan", "developer",
-            "Scan the codebase for source files, interfaces, dependencies, and implementation patterns relevant to this work item. Use file_read, search_code, git_log tools. Return JSON: { files, snippets, dependencies, patterns }. Return {} if nothing relevant.",
             repository, workItemJson, workItemType, "{}",
             llmResult);
         var extractDev = Extract(devFindings, llmResult, "ExtractDev", "Extract Dev Findings");
 
         var qaScan = RoleScan("QAScan", "QA Scan", "tester",
-            "Based on previous findings, scan for existing tests, coverage gaps, test patterns, fixtures, mocking. Return JSON: { existingTests, coverageGaps, testPatterns, fixtures }. Return {} if nothing relevant.",
             repository, workItemJson, workItemType,
             ctx => devFindings.Get(ctx),
             llmResult);
         var extractQA = Extract(qaFindings, llmResult, "ExtractQA", "Extract QA Findings");
 
         var secScan = RoleScan("SecurityScan", "Security Scan", "security",
-            "Review affected code for security: input validation, auth, injection, sensitive data. Return JSON: { concerns, inputValidation, authChecks }. Return {} if no security relevance.",
             repository, workItemJson, workItemType,
             ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)}}}",
             llmResult);
         var extractSec = Extract(securityFindings, llmResult, "ExtractSec", "Extract Security Findings");
 
         var devopsScan = RoleScan("DevOpsScan", "DevOps Scan", "devops",
-            "Check deployment impact: Docker, CI, env vars, infrastructure. Return JSON: { configs, ciImpact, envVars }. Return {} if no deployment relevance.",
             repository, workItemJson, workItemType,
             ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)},\"security\":{securityFindings.Get(ctx)}}}",
             llmResult);
         var extractDevOps = Extract(devopsFindings, llmResult, "ExtractDevOps", "Extract DevOps Findings");
 
         var archScan = RoleScan("ArchScan", "Architect Scan", "architect",
-            "Review architecture: coding patterns, naming conventions, CLAUDE.md rules, interfaces, module boundaries. Return JSON: { patterns, conventions, interfaces, boundaries }. Return {} if nothing to add.",
             repository, workItemJson, workItemType,
             ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)},\"security\":{securityFindings.Get(ctx)},\"devops\":{devopsFindings.Get(ctx)}}}",
             llmResult);
@@ -144,11 +139,17 @@ public class ContextGatheringWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["role"] = "product_owner",
-                ["prompt"] = BuildPOPrompt(
-                    workItemJson.Get(ctx),
-                    devFindings.Get(ctx), qaFindings.Get(ctx),
-                    securityFindings.Get(ctx), devopsFindings.Get(ctx),
-                    architectFindings.Get(ctx), contextIds.Get(ctx)),
+                ["action"] = "summarize",
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["workItemJson"] = workItemJson.Get(ctx),
+                    ["devFindings"] = devFindings.Get(ctx),
+                    ["qaFindings"] = qaFindings.Get(ctx),
+                    ["securityFindings"] = securityFindings.Get(ctx),
+                    ["devopsFindings"] = devopsFindings.Get(ctx),
+                    ["architectFindings"] = architectFindings.Get(ctx),
+                    ["contextIds"] = contextIds.Get(ctx),
+                },
                 ["enableTools"] = false,
             }),
             WaitForCompletion = new(true),
@@ -248,10 +249,11 @@ public class ContextGatheringWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Creates a DispatchWorkflow that calls LlmCallWorkflow with a role-specific scan prompt.
+    /// Creates a DispatchWorkflow that calls LlmCallWorkflow with role + action + variables.
+    /// Prompts are resolved from the prompt registry, not hardcoded.
     /// </summary>
     private static DispatchWorkflow RoleScan(
-        string id, string name, string role, string scanPrompt,
+        string id, string name, string role,
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType, string previousFindings,
         Variable<IDictionary<string, object>?> result)
@@ -263,7 +265,14 @@ public class ContextGatheringWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["role"] = role,
-                ["prompt"] = $"You are a {role} scanning a codebase for a {workItemType.Get(ctx)} work item.\n\nWork Item:\n{workItemJson.Get(ctx)}\n\nPrevious findings:\n{previousFindings}\n\n{scanPrompt}",
+                ["action"] = "context-scan",
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["workItemJson"] = workItemJson.Get(ctx),
+                    ["workItemType"] = workItemType.Get(ctx),
+                    ["previousFindings"] = previousFindings,
+                    ["repository"] = repository.Get(ctx),
+                },
                 ["enableTools"] = true,
             }),
             WaitForCompletion = new(true),
@@ -274,10 +283,10 @@ public class ContextGatheringWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Overload that takes a dynamic previous findings builder.
+    /// Overload with dynamic previous findings.
     /// </summary>
     private static DispatchWorkflow RoleScan(
-        string id, string name, string role, string scanPrompt,
+        string id, string name, string role,
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> previousFindingsBuilder,
@@ -290,7 +299,14 @@ public class ContextGatheringWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["role"] = role,
-                ["prompt"] = $"You are a {role} scanning a codebase for a {workItemType.Get(ctx)} work item.\n\nWork Item:\n{workItemJson.Get(ctx)}\n\nPrevious findings:\n{previousFindingsBuilder(ctx)}\n\n{scanPrompt}",
+                ["action"] = "context-scan",
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["workItemJson"] = workItemJson.Get(ctx),
+                    ["workItemType"] = workItemType.Get(ctx),
+                    ["previousFindings"] = previousFindingsBuilder(ctx),
+                    ["repository"] = repository.Get(ctx),
+                },
                 ["enableTools"] = true,
             }),
             WaitForCompletion = new(true),
@@ -317,35 +333,6 @@ public class ContextGatheringWorkflow : WorkflowBase
         };
         sv.SetDisplayText(name);
         return sv;
-    }
-
-    private static string BuildPOPrompt(string workItem, string dev, string qa,
-        string security, string devops, string architect, string contextIds)
-    {
-        return $@"You are a Product Owner reviewing context gathered by your team.
-
-Work Item:
-{workItem}
-
-Dev findings: {dev}
-QA findings: {qa}
-Security findings: {security}
-DevOps findings: {devops}
-Architect findings: {architect}
-
-Context IDs in vector DB: {contextIds}
-
-Produce a concise summary:
-1. What this work item needs
-2. Key files and code areas
-3. Test coverage status
-4. Security considerations
-5. Deployment impact
-6. Architecture patterns to follow
-7. Risks
-8. Related links
-
-Respond with JSON: {{ ""summary"": ""..."", ""links"": [""...""], ""scope"": ""..."", ""outOfScope"": ""..."", ""risks"": [""...""] }}";
     }
 
     private static FlowConnection Connect(IActivity source, IActivity target)
