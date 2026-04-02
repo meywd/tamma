@@ -71,6 +71,11 @@ import type {
 } from './services/task-queue.js';
 import { registerAdminRoutes } from './routes/admin/index.js';
 import type { AdminRouteOptions } from './routes/admin/index.js';
+import { registerEngineContextRoutes } from './routes/engine/engine-context-routes.js';
+import { registerEngineGitHubRoutes } from './routes/engine/engine-github-routes.js';
+import type { EngineGitHubRouteOptions } from './routes/engine/engine-github-routes.js';
+import { registerEngineTaskRoutes } from './routes/engine/engine-task-routes.js';
+import type { EngineTaskRouteOptions } from './routes/engine/engine-task-routes.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -109,6 +114,9 @@ export {
   requireSelfOrRole,
   registerAdminRoutes,
   registerUserManagementRoutes,
+  registerEngineContextRoutes,
+  registerEngineGitHubRoutes,
+  registerEngineTaskRoutes,
 };
 
 export { startApiServer } from './serve.js';
@@ -164,6 +172,8 @@ export type {
   AuthMeUser,
   AdminRouteOptions,
   UserManagementRouteOptions,
+  EngineGitHubRouteOptions,
+  EngineTaskRouteOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -192,6 +202,12 @@ export interface CreateAppOptions {
   userManagement?: UserManagementRouteOptions;
   /** Admin route options (optional; enables /api/admin/health). */
   admin?: AdminRouteOptions;
+  /** Engine GitHub route options (optional; enables /api/engine/issues, etc.). */
+  engineGitHub?: EngineGitHubRouteOptions;
+  /** Engine task route options (optional; enables /api/engine/execute-task, etc.). */
+  engineTask?: EngineTaskRouteOptions;
+  /** Enable engine context routes (store-context, query-context). Always registered when true. */
+  engineContext?: boolean;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
   /** Pre-built pino Logger instance (takes precedence over logger option). */
@@ -302,6 +318,21 @@ export async function createApp(options?: CreateAppOptions) {
   // Admin routes (system health)
   if (options?.admin !== undefined) {
     await registerAdminRoutes(app, options.admin);
+  }
+
+  // Engine context routes (Elsa activity callbacks — always register when enabled)
+  if (options?.engineContext === true) {
+    await registerEngineContextRoutes(app);
+  }
+
+  // Engine GitHub routes (Elsa activity callbacks for GitHub operations)
+  if (options?.engineGitHub !== undefined) {
+    await registerEngineGitHubRoutes(app, options.engineGitHub);
+  }
+
+  // Engine task routes (Elsa activity callbacks for LLM execution and cycle results)
+  if (options?.engineTask !== undefined) {
+    await registerEngineTaskRoutes(app, options.engineTask);
   }
 
   // Dashboard routes (requires both engine registry and workflow store)
