@@ -134,13 +134,14 @@ const edgeDefaults = {
   labelBgBorderRadius: 4,
 };
 
-function e(source: string, target: string, label?: string, sourceHandle?: string): Edge {
+function e(source: string, target: string, label?: string, sourceHandle?: string, targetHandle?: string): Edge {
   return {
-    id: `${source}-${target}${sourceHandle || ''}`,
+    id: `${source}-${target}${sourceHandle || ''}${targetHandle || ''}`,
     source,
     target,
     label,
-    sourceHandle,
+    sourceHandle: sourceHandle ?? undefined,
+    targetHandle: targetHandle ?? undefined,
     type: 'default',
     ...edgeDefaults,
   };
@@ -712,7 +713,32 @@ function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB')
     };
   });
 
-  return { nodes: layoutedNodes, edges };
+  // Post-process edges: pick best handle based on relative positions
+  const nodeMap = new Map(layoutedNodes.map(n => [n.id, n]));
+  const smartEdges = edges.map(edge => {
+    // Skip edges that already have explicit handles
+    if (edge.sourceHandle || edge.targetHandle) return edge;
+
+    const src = nodeMap.get(edge.source);
+    const tgt = nodeMap.get(edge.target);
+    if (!src || !tgt) return edge;
+
+    const dx = tgt.position.x - src.position.x;
+    const dy = tgt.position.y - src.position.y;
+
+    // If target is significantly to the right/left (more horizontal than vertical)
+    if (Math.abs(dx) > Math.abs(dy) * 1.2) {
+      return {
+        ...edge,
+        sourceHandle: dx > 0 ? 'right' : 'left',
+        targetHandle: dx > 0 ? 'target-left' : 'target-right',
+      };
+    }
+
+    return edge;
+  });
+
+  return { nodes: layoutedNodes, edges: smartEdges };
 }
 
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
