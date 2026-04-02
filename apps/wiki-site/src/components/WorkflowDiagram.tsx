@@ -717,32 +717,7 @@ function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB')
     };
   });
 
-  // Post-process edges: pick best handle based on relative positions
-  const nodeMap = new Map(layoutedNodes.map(n => [n.id, n]));
-  const smartEdges = edges.map(edge => {
-    // Skip edges that already have explicit handles
-    if (edge.sourceHandle || edge.targetHandle) return edge;
-
-    const src = nodeMap.get(edge.source);
-    const tgt = nodeMap.get(edge.target);
-    if (!src || !tgt) return edge;
-
-    const dx = tgt.position.x - src.position.x;
-    const dy = tgt.position.y - src.position.y;
-
-    // If target is significantly to the right/left and on roughly the same row
-    if (Math.abs(dx) > 150 && Math.abs(dy) < 80) {
-      return {
-        ...edge,
-        sourceHandle: dx > 0 ? 'right' : 'left',
-        targetHandle: dx > 0 ? 'target-left' : undefined,
-      };
-    }
-
-    return edge;
-  });
-
-  return { nodes: layoutedNodes, edges: smartEdges };
+  return { nodes: layoutedNodes, edges };
 }
 
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
