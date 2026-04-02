@@ -1,14 +1,11 @@
-using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
-using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
-using Tamma.Activities.Context;
-using Tamma.Activities.Context.Models;
-using ElsaParallel = Elsa.Workflows.Activities.Parallel;
+using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -17,416 +14,251 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Context Gathering sub-workflow.
+/// Context Gathering — sequential role-based codebase scanning.
 ///
-/// Collects contextual data from multiple sources in parallel using ELSA's Parallel
-/// activity (fan-out/fan-in). Each source fetch is a separate ELSA activity
-/// (visible, auditable in ELSA Studio). After all parallel fetches complete, the workflow
-/// assembles the gathered data and applies priority-based budget trimming.
+/// Each role scans from their perspective, accumulating findings.
+/// If a role finds nothing relevant, it skips. Each role sees what
+/// previous roles found.
 ///
-/// Design: Flowchart with visible nodes for each phase in ELSA Studio.
+/// Pipeline:
+///   Dev → QA → Security → DevOps → Architect → Store in Vector DB → PO Summary
 ///
 /// Flow:
-///   InitInputs → IndependentFetches → StoryMetadataOk?
-///     No  → FaultNode (abort)
-///     Yes → TrackPhase1 → DependentFetches → TrackPhase2
-///           → AssembleContext → ApplyBudget → SetOutputs
+///   Init → Dev Scan → QA Scan → Security Scan → DevOps Scan → Architect Scan
+///   → Store Findings → PO Review → Output (summary + context IDs + links)
 /// </summary>
 public class ContextGatheringWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
     {
-        builder.Name = "Context Gathering Sub-Workflow";
+        builder.Name = "Context Gathering";
         builder.DefinitionId = "context-gathering";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description =
-            "Gathers context from multiple sources in parallel, assembles it, and applies budget trimming.";
+        builder.Description = "Sequential role-based codebase scanning with vector DB storage and PO summary";
 
-        // ============================================
-        // Workflow variables (set from parent workflow input)
-        // ============================================
-        var sessionId = builder.WithVariable<Guid>()
-            .WithWorkflowStorage();
-        var storyId = builder.WithVariable<string>()
-            .WithWorkflowStorage();
-        var repositoryUrl = builder.WithVariable<string>()
-            .WithWorkflowStorage();
-        var targetFiles = builder.WithVariable<List<string>?>()
-            .WithWorkflowStorage();
-        var maxContextSize = builder.WithVariable<int>()
-            .WithWorkflowStorage();
-        var purpose = builder.WithVariable<ContextPurpose>()
-            .WithWorkflowStorage();
+        // ================================================================
+        // Variables
+        // ================================================================
+        var repository = builder.WithVariable<string>("Repository", "");
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
+        var workItemType = builder.WithVariable<string>("WorkItemType", "feature");
 
-        // Variables to hold intermediate results from parallel branches
-        var storyMetadataResult = builder.WithVariable<StoryMetadata?>()
-            .WithWorkflowStorage();
-        var recentCommitsResult = builder.WithVariable<RecentCommitsResult?>()
-            .WithWorkflowStorage();
-        var fileContentsResult = builder.WithVariable<FileContentsResult?>()
-            .WithWorkflowStorage();
-        var testResultsResult = builder.WithVariable<TestResultsData?>()
-            .WithWorkflowStorage();
-        var sessionHistoryResult = builder.WithVariable<SessionHistoryResult?>()
-            .WithWorkflowStorage();
-        var similarPatternsResult = builder.WithVariable<SimilarPatternsResult?>()
-            .WithWorkflowStorage();
-        var assembledResult = builder.WithVariable<AssembledContext>()
-            .WithWorkflowStorage();
-        var budgetResult = builder.WithVariable<ContextGatheringOutput?>()
-            .WithWorkflowStorage();
+        // Accumulated findings from each role
+        var devFindingsJson = builder.WithVariable<string>("DevFindings", "{}");
+        var qaFindingsJson = builder.WithVariable<string>("QAFindings", "{}");
+        var securityFindingsJson = builder.WithVariable<string>("SecurityFindings", "{}");
+        var devopsFindingsJson = builder.WithVariable<string>("DevOpsFindings", "{}");
+        var architectFindingsJson = builder.WithVariable<string>("ArchitectFindings", "{}");
 
-        // Tracking variables
-        var failedSources = builder.WithVariable<string>()
-            .WithWorkflowStorage();
-        failedSources.Value = "[]";
-        var contextSuccess = builder.WithVariable<bool>()
-            .WithWorkflowStorage();
-        contextSuccess.Value = true;
+        // Storage + output
+        var contextIdsJson = builder.WithVariable<string>("ContextIds", "[]");
+        var poSummary = builder.WithVariable<string>("POSummary", "");
+        var linksJson = builder.WithVariable<string>("Links", "[]");
 
-        // ============================================
-        // Activities
-        // ============================================
+        var subResult = builder.WithVariable<IDictionary<string, object>?>();
 
-        // 1. Input initialization: set variables from workflow input
-        var initInputs = new Sequence
+        // ================================================================
+        // 1. Init — extract inputs
+        // ================================================================
+        var init = new SetVariable
         {
-            Id = "InitInputs",
-            Name = "Initialize Inputs",
-            Activities =
+            Id = "Init",
+            Name = "Initialize",
+            Variable = repository,
+            Value = new Input<object?>(ctx =>
             {
-                WithLabel(new SetVariable
-                {
-                    Id = "SetSessionId",
-                    Name = "Set SessionId",
-                    Variable = sessionId,
-                    Value = new(ctx => ctx.GetInput<Guid>("SessionId"))
-                }, "Set SessionId"),
-                WithLabel(new SetVariable
-                {
-                    Id = "SetStoryId",
-                    Name = "Set StoryId",
-                    Variable = storyId,
-                    Value = new(ctx => ctx.GetInput<string>("StoryId") ?? string.Empty)
-                }, "Set StoryId"),
-                WithLabel(new SetVariable
-                {
-                    Id = "SetRepositoryUrl",
-                    Name = "Set RepositoryUrl",
-                    Variable = repositoryUrl,
-                    Value = new(ctx => ctx.GetInput<string>("RepositoryUrl") ?? string.Empty)
-                }, "Set RepositoryUrl"),
-                WithLabel(new SetVariable
-                {
-                    Id = "SetTargetFiles",
-                    Name = "Set TargetFiles",
-                    Variable = targetFiles,
-                    Value = new(ctx => ctx.GetInput<List<string>?>("TargetFiles"))
-                }, "Set TargetFiles"),
-                WithLabel(new SetVariable
-                {
-                    Id = "SetMaxContextSize",
-                    Name = "Set MaxContextSize",
-                    Variable = maxContextSize,
-                    Value = new(ctx => ctx.GetInput<int?>("MaxContextSize") ?? 50000)
-                }, "Set MaxContextSize"),
-                WithLabel(new SetVariable
-                {
-                    Id = "SetPurpose",
-                    Name = "Set Purpose",
-                    Variable = purpose,
-                    Value = new(ctx =>
-                        ctx.GetInput<ContextPurpose?>("Purpose") ?? ContextPurpose.Assessment)
-                }, "Set Purpose")
-            }
-        };
-        initInputs.SetDisplayText("Initialize Inputs");
+                var repo = ctx.GetInput<string>("repository") ?? "";
+                issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
+                workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
 
-        // 2. Phase 1: Independent parallel fetches
-        var independentFetches = new ElsaParallel
-        {
-            Id = "IndependentFetches",
-            Name = "Phase 1: Parallel Fetches",
-            Activities =
-            {
-                WithLabel(new FetchStoryMetadataActivity
-                {
-                    Id = "FetchStoryMetadata",
-                    Name = "Fetch Story Metadata",
-                    StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
-                    Result = new(storyMetadataResult)
-                }, "Fetch Story Metadata"),
-                WithLabel(new FetchRecentCommitsActivity
-                {
-                    Id = "FetchRecentCommits",
-                    Name = "Fetch Recent Commits",
-                    RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
-                    StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
-                    Result = new(recentCommitsResult)
-                }, "Fetch Recent Commits"),
-                WithLabel(new FetchTestResultsActivity
-                {
-                    Id = "FetchTestResults",
-                    Name = "Fetch Test Results",
-                    RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
-                    StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
-                    Result = new(testResultsResult)
-                }, "Fetch Test Results"),
-                WithLabel(new FetchSessionHistoryActivity
-                {
-                    Id = "FetchSessionHistory",
-                    Name = "Fetch Session History",
-                    SessionId = new(ctx => sessionId.Get(ctx)),
-                    Result = new(sessionHistoryResult)
-                }, "Fetch Session History")
-            }
-        };
-        independentFetches.SetDisplayText("Phase 1: Parallel Fetches");
+                // Determine work item type
+                var itemJson = ctx.GetInput<string>("workItemJson") ?? "";
+                var type = "feature";
+                if (itemJson.Contains("\"type\":\"bug\"", System.StringComparison.OrdinalIgnoreCase)) type = "bug";
+                else if (itemJson.Contains("\"type\":\"security", System.StringComparison.OrdinalIgnoreCase)) type = "security";
+                else if (itemJson.Contains("\"type\":\"test", System.StringComparison.OrdinalIgnoreCase)) type = "test";
+                else if (itemJson.Contains("\"type\":\"docs", System.StringComparison.OrdinalIgnoreCase)) type = "docs";
+                else if (itemJson.Contains("\"type\":\"chore", System.StringComparison.OrdinalIgnoreCase)) type = "chore";
+                workItemType.Set(ctx, type);
 
-        // 3. Viability check: Story metadata is critical
-        var storyMetadataOk = new FlowDecision(ctx => storyMetadataResult.Get(ctx) != null)
-        {
-            Id = "StoryMetadataOk",
-            Name = "Story Metadata OK?"
-        };
-        storyMetadataOk.SetDisplayText("Story Metadata OK?");
-
-        // 3a. Fault if story metadata missing
-        var faultNode = new Sequence
-        {
-            Id = "FaultNoMetadata",
-            Name = "Fault (No Metadata)",
-            Activities =
-            {
-                WithLabel(new SetVariable
-                {
-                    Id = "SetContextFailed",
-                    Name = "Set Context Failed",
-                    Variable = contextSuccess,
-                    Value = new(false)
-                }, "Set Context Failed"),
-                WithLabel(new Fault("Story metadata fetch failed completely — context gathering cannot proceed without story metadata."), "Fault: No Story Metadata")
-            }
-        };
-        faultNode.SetDisplayText("Fault (No Metadata)");
-
-        // 4. Track Phase 1 failures
-        var trackPhase1Failures = new SetVariable
-        {
-            Id = "TrackPhase1Failures",
-            Name = "Track Phase 1 Failures",
-            Variable = failedSources,
-            Value = new(ctx =>
-            {
-                var current = DeserializeStringList(failedSources.Get(ctx));
-                var updated = new List<string>(current);
-                if (storyMetadataResult.Get(ctx) == null)
-                    updated.Add("StoryMetadata");
-                if (recentCommitsResult.Get(ctx) == null)
-                    updated.Add("RecentCommits");
-                if (testResultsResult.Get(ctx) == null)
-                    updated.Add("TestResults");
-                if (sessionHistoryResult.Get(ctx) == null)
-                    updated.Add("SessionHistory");
-                return JsonSerializer.Serialize(updated);
+                return (object)repo;
             })
         };
-        trackPhase1Failures.SetDisplayText("Track Phase 1 Failures");
+        init.SetDisplayText("Initialize");
 
-        // 5. Phase 2: Dependent parallel fetches
-        var dependentFetches = new ElsaParallel
+        // ================================================================
+        // 2. Dev Scan — source files, interfaces, deps, patterns
+        // ================================================================
+        var devScan = new RoleScanActivity
         {
-            Id = "DependentFetches",
-            Name = "Phase 2: Dependent Fetches",
-            Activities =
-            {
-                WithLabel(new FetchFileContentsActivity
-                {
-                    Id = "FetchFileContents",
-                    Name = "Fetch File Contents",
-                    RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
-                    StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
-                    TargetFiles = new(ctx => targetFiles.Get(ctx)),
-                    StoryDescription = new(ctx => storyMetadataResult.Get(ctx)?.Description),
-                    CommitFiles = new(ctx =>
-                    {
-                        var commits = recentCommitsResult.Get(ctx);
-                        if (commits?.Commits == null || !commits.Commits.Any())
-                            return null;
-                        return commits.Commits
-                            .SelectMany(c => c.Files)
-                            .Distinct()
-                            .ToList();
-                    }),
-                    Result = new(fileContentsResult)
-                }, "Fetch File Contents"),
-                WithLabel(new FetchSimilarPatternsActivity
-                {
-                    Id = "FetchSimilarPatterns",
-                    Name = "Fetch Similar Patterns",
-                    RepositoryUrl = new(ctx => repositoryUrl.Get(ctx) ?? string.Empty),
-                    StoryTitle = new(ctx =>
-                        storyMetadataResult.Get(ctx)?.Title ?? string.Empty),
-                    StoryTags = new(ctx => storyMetadataResult.Get(ctx)?.Tags),
-                    Result = new(similarPatternsResult)
-                }, "Fetch Similar Patterns")
-            }
+            Id = "DevScan",
+            Name = "Dev Scan",
+            Role = new Input<string>("developer"),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            WorkItemType = new Input<string>(ctx => workItemType.Get(ctx)),
+            PreviousFindingsJson = new Input<string>("{}"),
+            ScanPrompt = new Input<string>("Scan the codebase for source files, interfaces, dependencies, and implementation patterns relevant to this work item. Focus on files that will need to be modified or referenced."),
+            FindingsJson = new Output<string>(devFindingsJson),
         };
-        dependentFetches.SetDisplayText("Phase 2: Dependent Fetches");
+        devScan.SetDisplayText("Dev Scan");
 
-        // 6. Track Phase 2 failures
-        var trackPhase2Failures = new SetVariable
+        // ================================================================
+        // 3. QA Scan — existing tests, coverage, test patterns
+        // ================================================================
+        var qaScan = new RoleScanActivity
         {
-            Id = "TrackPhase2Failures",
-            Name = "Track Phase 2 Failures",
-            Variable = failedSources,
-            Value = new(ctx =>
-            {
-                var current = DeserializeStringList(failedSources.Get(ctx));
-                var updated = new List<string>(current);
-                if (fileContentsResult.Get(ctx) == null)
-                    updated.Add("FileContents");
-                if (similarPatternsResult.Get(ctx) == null)
-                    updated.Add("SimilarPatterns");
-                return JsonSerializer.Serialize(updated);
-            })
+            Id = "QAScan",
+            Name = "QA Scan",
+            Role = new Input<string>("tester"),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            WorkItemType = new Input<string>(ctx => workItemType.Get(ctx)),
+            PreviousFindingsJson = new Input<string>(ctx => devFindingsJson.Get(ctx)),
+            ScanPrompt = new Input<string>("Based on the dev findings, scan for existing tests, coverage gaps, test patterns, fixtures, and mocking approaches. Identify what tests exist for the affected code and what's missing."),
+            FindingsJson = new Output<string>(qaFindingsJson),
         };
-        trackPhase2Failures.SetDisplayText("Track Phase 2 Failures");
+        qaScan.SetDisplayText("QA Scan");
 
-        // 7. Assemble context
-        var assembleContext = new AssembleContextActivity
+        // ================================================================
+        // 4. Security Scan — attack surface, input validation, auth
+        // ================================================================
+        var securityScan = new RoleScanActivity
         {
-            Id = "AssembleContext",
-            Name = "Assemble Context",
-            StoryMetadata = new(ctx => storyMetadataResult.Get(ctx)),
-            RecentCommits = new(ctx => recentCommitsResult.Get(ctx)),
-            FileContents = new(ctx => fileContentsResult.Get(ctx)),
-            TestResults = new(ctx => testResultsResult.Get(ctx)),
-            SessionHistory = new(ctx => sessionHistoryResult.Get(ctx)),
-            SimilarPatterns = new(ctx => similarPatternsResult.Get(ctx)),
-            Purpose = new(ctx => purpose.Get(ctx)),
-            Result = new(assembledResult)
+            Id = "SecurityScan",
+            Name = "Security Scan",
+            Role = new Input<string>("security"),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            WorkItemType = new Input<string>(ctx => workItemType.Get(ctx)),
+            PreviousFindingsJson = new Input<string>(ctx =>
+                $"{{\"dev\":{devFindingsJson.Get(ctx)},\"qa\":{qaFindingsJson.Get(ctx)}}}"),
+            ScanPrompt = new Input<string>("Review the affected code for security concerns: input validation, authentication, authorization, injection risks, sensitive data handling. Skip if no security relevance."),
+            FindingsJson = new Output<string>(securityFindingsJson),
         };
-        assembleContext.SetDisplayText("Assemble Context");
+        securityScan.SetDisplayText("Security Scan");
 
-        // 8. Apply budget
-        var applyBudget = new ApplyBudgetActivity
+        // ================================================================
+        // 5. DevOps Scan — deploy config, CI, infrastructure
+        // ================================================================
+        var devopsScan = new RoleScanActivity
         {
-            Id = "ApplyBudget",
-            Name = "Apply Budget",
-            AssembledContext = new(ctx => assembledResult.Get(ctx)!),
-            MaxContextSize = new(ctx => maxContextSize.Get(ctx)),
-            StoryId = new(ctx => storyId.Get(ctx) ?? string.Empty),
-            Result = new(budgetResult)
+            Id = "DevOpsScan",
+            Name = "DevOps Scan",
+            Role = new Input<string>("devops"),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            WorkItemType = new Input<string>(ctx => workItemType.Get(ctx)),
+            PreviousFindingsJson = new Input<string>(ctx =>
+                $"{{\"dev\":{devFindingsJson.Get(ctx)},\"qa\":{qaFindingsJson.Get(ctx)},\"security\":{securityFindingsJson.Get(ctx)}}}"),
+            ScanPrompt = new Input<string>("Check for deployment impact: Docker configs, CI workflows, environment variables, infrastructure changes needed. Skip if no deployment relevance."),
+            FindingsJson = new Output<string>(devopsFindingsJson),
         };
-        applyBudget.SetDisplayText("Apply Budget");
+        devopsScan.SetDisplayText("DevOps Scan");
 
-        // 9. Set workflow outputs
+        // ================================================================
+        // 6. Architect Scan — patterns, conventions, interfaces
+        // ================================================================
+        var architectScan = new RoleScanActivity
+        {
+            Id = "ArchitectScan",
+            Name = "Architect Scan",
+            Role = new Input<string>("architect"),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            WorkItemType = new Input<string>(ctx => workItemType.Get(ctx)),
+            PreviousFindingsJson = new Input<string>(ctx =>
+                $"{{\"dev\":{devFindingsJson.Get(ctx)},\"qa\":{qaFindingsJson.Get(ctx)},\"security\":{securityFindingsJson.Get(ctx)},\"devops\":{devopsFindingsJson.Get(ctx)}}}"),
+            ScanPrompt = new Input<string>("Review architecture: coding patterns, naming conventions, CLAUDE.md rules, interface design, module boundaries. Identify conventions the implementation must follow."),
+            FindingsJson = new Output<string>(architectFindingsJson),
+        };
+        architectScan.SetDisplayText("Architect Scan");
+
+        // ================================================================
+        // 7. Store Findings in Vector DB
+        // ================================================================
+        var storeFindings = new StoreFindingsActivity
+        {
+            Id = "StoreFindings",
+            Name = "Store in Vector DB",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            DevFindingsJson = new Input<string>(ctx => devFindingsJson.Get(ctx)),
+            QAFindingsJson = new Input<string>(ctx => qaFindingsJson.Get(ctx)),
+            SecurityFindingsJson = new Input<string>(ctx => securityFindingsJson.Get(ctx)),
+            DevOpsFindingsJson = new Input<string>(ctx => devopsFindingsJson.Get(ctx)),
+            ArchitectFindingsJson = new Input<string>(ctx => architectFindingsJson.Get(ctx)),
+            ContextIdsJson = new Output<string>(contextIdsJson),
+        };
+        storeFindings.SetDisplayText("Store in Vector DB");
+
+        // ================================================================
+        // 8. PO Review — summarize all findings
+        // ================================================================
+        var poReview = new POContextReviewActivity
+        {
+            Id = "POReview",
+            Name = "PO Review",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            AllFindingsJson = new Input<string>(ctx =>
+                $"{{\"dev\":{devFindingsJson.Get(ctx)},\"qa\":{qaFindingsJson.Get(ctx)},\"security\":{securityFindingsJson.Get(ctx)},\"devops\":{devopsFindingsJson.Get(ctx)},\"architect\":{architectFindingsJson.Get(ctx)}}}"),
+            ContextIdsJson = new Input<string>(ctx => contextIdsJson.Get(ctx)),
+            Summary = new Output<string>(poSummary),
+            LinksJson = new Output<string>(linksJson),
+        };
+        poReview.SetDisplayText("PO Review");
+
+        // ================================================================
+        // 9. Set Outputs
+        // ================================================================
         var setOutputs = new Sequence
         {
             Id = "SetOutputs",
             Name = "Set Outputs",
             Activities =
             {
-                WithLabel(new SetOutput
-                {
-                    Id = "OutputContextJson",
-                    Name = "Output contextJson",
-                    OutputName = new("contextJson"),
-                    OutputValue = new(ctx =>
-                    {
-                        var result = budgetResult.Get(ctx);
-                        return (object)(result != null ? JsonSerializer.Serialize(result) : "{}");
-                    })
-                }, "Output contextJson"),
-                WithLabel(new SetOutput
-                {
-                    Id = "OutputSuccess",
-                    Name = "Output success",
-                    OutputName = new("success"),
-                    OutputValue = new(ctx => (object)contextSuccess.Get(ctx))
-                }, "Output success"),
-                WithLabel(new SetOutput
-                {
-                    Id = "OutputFailedSources",
-                    Name = "Output failedSources",
-                    OutputName = new("failedSources"),
-                    OutputValue = new(ctx => (object)(failedSources.Get(ctx) ?? "[]"))
-                }, "Output failedSources")
+                new Elsa.Workflows.Management.Activities.SetOutput.SetOutput
+                    { Id = "OutSummary", OutputName = new("summary"), OutputValue = new(ctx => (object)poSummary.Get(ctx)) },
+                new Elsa.Workflows.Management.Activities.SetOutput.SetOutput
+                    { Id = "OutContextIds", OutputName = new("contextIds"), OutputValue = new(ctx => (object)contextIdsJson.Get(ctx)) },
+                new Elsa.Workflows.Management.Activities.SetOutput.SetOutput
+                    { Id = "OutLinks", OutputName = new("links"), OutputValue = new(ctx => (object)linksJson.Get(ctx)) },
             }
         };
         setOutputs.SetDisplayText("Set Outputs");
 
-        // ============================================
-        // Flowchart
-        // ============================================
+        var finish = new Finish { Id = "Finish", Name = "Complete" };
+        finish.SetDisplayText("Complete");
+
+        // ================================================================
+        // Flowchart — sequential pipeline
+        // ================================================================
         builder.Root = new Flowchart
         {
             Id = "ContextGatheringFlowchart",
-            Start = initInputs,
+            Start = init,
             Activities =
             {
-                initInputs, independentFetches, storyMetadataOk, faultNode,
-                trackPhase1Failures, dependentFetches, trackPhase2Failures,
-                assembleContext, applyBudget, setOutputs
+                init, devScan, qaScan, securityScan, devopsScan, architectScan,
+                storeFindings, poReview, setOutputs, finish,
             },
             Connections =
             {
-                // InitInputs → Phase 1: Parallel Fetches
-                Connect(initInputs, independentFetches),
-
-                // Phase 1 → Story Metadata OK?
-                Connect(independentFetches, storyMetadataOk),
-
-                // Story Metadata OK? Yes → Track Phase 1 Failures
-                ConnectOutcome(storyMetadataOk, "True", trackPhase1Failures),
-
-                // Story Metadata OK? No → Fault
-                ConnectOutcome(storyMetadataOk, "False", faultNode),
-
-                // Track Phase 1 → Phase 2: Dependent Fetches
-                Connect(trackPhase1Failures, dependentFetches),
-
-                // Phase 2 → Track Phase 2 Failures
-                Connect(dependentFetches, trackPhase2Failures),
-
-                // Track Phase 2 → Assemble Context
-                Connect(trackPhase2Failures, assembleContext),
-
-                // Assemble → Apply Budget
-                Connect(assembleContext, applyBudget),
-
-                // Apply Budget → Set Outputs
-                Connect(applyBudget, setOutputs)
+                Connect(init, devScan),
+                Connect(devScan, qaScan),
+                Connect(qaScan, securityScan),
+                Connect(securityScan, devopsScan),
+                Connect(devopsScan, architectScan),
+                Connect(architectScan, storeFindings),
+                Connect(storeFindings, poReview),
+                Connect(poReview, setOutputs),
+                Connect(setOutputs, finish),
             }
         };
     }
 
-    // ================================================================
-    // Flowchart helpers
-    // ================================================================
-
     private static FlowConnection Connect(IActivity source, IActivity target)
         => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
-
-    // ================================================================
-    // Helper methods (static, used in expression lambdas)
-    // ================================================================
-
-    private static List<string> DeserializeStringList(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return new List<string>();
-
-        try
-        {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
-        }
-        catch
-        {
-            return new List<string>();
-        }
-    }
 }
