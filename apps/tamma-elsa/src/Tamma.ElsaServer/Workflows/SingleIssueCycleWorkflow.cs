@@ -459,12 +459,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         waitForApproval.SetDisplayText("Wait for PR Approval");
 
         // ================================================================
-        // 12. Merge (sub-workflow)
+        // 12. Dispatch Merge (fire & forget — handles merge, CI on main, conflicts)
         // ================================================================
-        var merge = new DispatchWorkflow
+        var dispatchMerge = new DispatchWorkflow
         {
-            Id = "Merge",
-            Name = "Merge",
+            Id = "DispatchMerge",
+            Name = "Dispatch Merge",
             WorkflowDefinitionId = new("merge"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -473,10 +473,50 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
             }),
-            WaitForCompletion = new(true),
+            WaitForCompletion = new(false), // fire & forget
+        };
+        dispatchMerge.SetDisplayText("Dispatch Merge");
+
+        // ================================================================
+        // 13. Wait for PR Merged (bookmark — blocks until merged)
+        // ================================================================
+        var mergeSha = builder.WithVariable<string>("MergeSha", "");
+        var waitForMerged = new WaitForPRMergedActivity
+        {
+            Id = "WaitForPRMerged",
+            Name = "Wait for PR Merged",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
+            MergeSha = new Output<string?>(mergeSha),
+        };
+        waitForMerged.SetDisplayText("Wait for PR Merged");
+
+        // ================================================================
+        // 14. Update & Close Issue
+        // ================================================================
+        var closeIssue = NotifyIssue("CloseIssue", repository, issueNumber,
+            "🎉 PR merged! Issue resolved.",
+            new[] { "tamma-completed" }, new[] { "tamma-processing" });
+
+        // ================================================================
+        // 15. Deployment Pipeline (sub-workflow — QA → UAT → Prod)
+        // ================================================================
+        var deploymentPipeline = new DispatchWorkflow
+        {
+            Id = "DeploymentPipeline",
+            Name = "Deployment Pipeline",
+            WorkflowDefinitionId = new("deployment-pipeline"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["mergeSha"] = mergeSha.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+                ["branchName"] = branchName.Get(ctx),
+            }),
+            WaitForCompletion = new(true), // wait — need deployment result before reporting
             Result = new(subResult),
         };
-        merge.SetDisplayText("Merge");
+        deploymentPipeline.SetDisplayText("Deployment Pipeline");
 
         // ================================================================
         // Exit paths — all report to orchestrator
@@ -571,7 +611,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
-                dispatchCodeReview, waitForApproval, merge,
+                dispatchCodeReview, waitForApproval,
+                dispatchMerge, waitForMerged, closeIssue, deploymentPipeline,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
@@ -664,12 +705,17 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(hasMoreTasks, "False", dispatchCodeReview),
                 ConnectOutcome(hasMoreTasks, "False", waitForApproval),
 
-                // 11. PR Approved → 12. Merge
-                Connect(waitForApproval, merge),
+                // 11. PR Approved → Dispatch Merge + Wait for Merged (parallel)
+                Connect(waitForApproval, dispatchMerge),
+                Connect(waitForApproval, waitForMerged),
 
-                // 12. Merge → notify + Report (parallel)
-                Connect(merge, notifyMerged),
-                Connect(merge, reportSuccess),
+                // 13. Merged → Close Issue + Deployment Pipeline (parallel)
+                Connect(waitForMerged, closeIssue),
+                Connect(waitForMerged, deploymentPipeline),
+
+                // 15. Deployment done → Report Success → Finish
+                Connect(deploymentPipeline, notifyMerged),
+                Connect(deploymentPipeline, reportSuccess),
                 Connect(reportSuccess, finish),
 
                 // Error → notify + report (parallel)
