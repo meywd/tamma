@@ -191,10 +191,10 @@ public class AdlOrchestratorWorkflow : WorkflowBase
                 ConnectOutcome(checkLimits, "Stop", exitLimits),
                 Connect(exitLimits, finish),
 
-                // Within limits → Dispatch (fire & forget) → Cooldown → Loop
+                // Within limits → Dispatch (fire & forget) → Cooldown → Restart (reload config)
                 ConnectOutcome(checkLimits, "Continue", dispatchCycle),
                 Connect(dispatchCycle, cooldown),
-                Connect(cooldown, selectWorkItem),
+                Connect(cooldown, initConfig), // restart from config load
             }
         };
     }
