@@ -740,6 +740,9 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
           maxZoom={2}
           panOnDrag
           zoomOnScroll
+          selectionOnDrag
+          multiSelectionKeyCode="Shift"
+          selectionMode={1}
           nodesDraggable={true}
           nodesConnectable={false}
           proOptions={{ hideAttribution: true }}
