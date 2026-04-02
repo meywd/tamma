@@ -429,12 +429,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             "IncrementTask", "Next Task");
 
         // ================================================================
-        // 11. Code Review (sub-workflow)
+        // 11a. Dispatch Code Review (fire & forget — LLM reviews the PR)
         // ================================================================
-        var codeReview = new DispatchWorkflow
+        var dispatchCodeReview = new DispatchWorkflow
         {
-            Id = "CodeReview",
-            Name = "Code Review",
+            Id = "DispatchCodeReview",
+            Name = "Dispatch Code Review",
             WorkflowDefinitionId = new("code-review"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -442,10 +442,21 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
             }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
+            WaitForCompletion = new(false), // fire & forget
         };
-        codeReview.SetDisplayText("Code Review");
+        dispatchCodeReview.SetDisplayText("Dispatch Code Review");
+
+        // ================================================================
+        // 11b. Wait for PR Approval (bookmark — blocks until approved)
+        // ================================================================
+        var waitForApproval = new WaitForPRApprovalActivity
+        {
+            Id = "WaitForPRApproval",
+            Name = "Wait for PR Approval",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
+        };
+        waitForApproval.SetDisplayText("Wait for PR Approval");
 
         // ================================================================
         // 12. Merge (sub-workflow)
@@ -560,7 +571,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
-                codeReview, merge,
+                dispatchCodeReview, waitForApproval, merge,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
@@ -648,12 +659,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(tddForTask, incrementTask),
                 Connect(incrementTask, hasMoreTasks), // loop back
 
-                // TDD Loop done → notify + Code Review (parallel)
+                // TDD Loop done → notify + dispatch code review + wait for approval (parallel)
                 ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
-                ConnectOutcome(hasMoreTasks, "False", codeReview),
+                ConnectOutcome(hasMoreTasks, "False", dispatchCodeReview),
+                ConnectOutcome(hasMoreTasks, "False", waitForApproval),
 
-                // 11. Code Review → 12. Merge
-                Connect(codeReview, merge),
+                // 11. PR Approved → 12. Merge
+                Connect(waitForApproval, merge),
 
                 // 12. Merge → notify + Report (parallel)
                 Connect(merge, notifyMerged),
