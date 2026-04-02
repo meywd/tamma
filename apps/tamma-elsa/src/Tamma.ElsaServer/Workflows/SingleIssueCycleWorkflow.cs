@@ -462,6 +462,38 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         reportError.SetDisplayText("Report Error");
 
+        // ================================================================
+        // Issue notifications (fire-and-forget sub-workflow dispatches)
+        // ================================================================
+        var notifyProcessing = NotifyIssue("NotifyProcessing", repository, issueNumber,
+            "🤖 Tamma is processing this issue.", new[] { "tamma-processing" });
+        var notifyInvalid = NotifyIssue("NotifyInvalid", repository, issueNumber,
+            "❌ Cannot process this issue.", new[] { "tamma-error" });
+        var notifyContextDone = NotifyIssue("NotifyContextDone", repository, issueNumber,
+            "📋 Context gathered. Generating implementation plan...");
+        var notifyPlanDone = NotifyIssue("NotifyPlanDone", repository, issueNumber,
+            "📝 Plan generated. Sending for panel review...");
+        var notifyPlanApproved = NotifyIssue("NotifyPlanApproved", repository, issueNumber,
+            "✅ Plan approved. Creating implementation tasks...");
+        var notifyDeferred = NotifyIssue("NotifyDeferred", repository, issueNumber,
+            "⏸️ Items deferred to new issues. Closing.", new[] { "deferred" }, new[] { "tamma-processing" });
+        var notifySplit = NotifyIssue("NotifySplit", repository, issueNumber,
+            "🔀 Issue decomposed into sub-issues. Closing.", new[] { "split" }, new[] { "tamma-processing" });
+        var notifyNeedsHuman = NotifyIssue("NotifyNeedsHuman", repository, issueNumber,
+            "🙋 Needs human decision. See discussion.", new[] { "needs-human" });
+        var notifyTasksApproved = NotifyIssue("NotifyTasksApproved", repository, issueNumber,
+            "✅ Tasks approved. Starting implementation...");
+        var notifyBranchCreated = NotifyIssue("NotifyBranchCreated", repository, issueNumber,
+            "🌿 Branch created. Running TDD cycle...");
+        var notifyTddDone = NotifyIssue("NotifyTddDone", repository, issueNumber,
+            "✅ TDD complete. Creating PR...");
+        var notifyCiPassed = NotifyIssue("NotifyCiPassed", repository, issueNumber,
+            "✅ CI passed. Starting code review...");
+        var notifyMerged = NotifyIssue("NotifyMerged", repository, issueNumber,
+            "🎉 PR merged! Issue resolved.", new[] { "tamma-completed" }, new[] { "tamma-processing" });
+        var notifyError = NotifyIssue("NotifyError", repository, issueNumber,
+            "❌ Error encountered.", new[] { "tamma-error" }, new[] { "tamma-processing" });
+
         var finish = new Finish { Id = "Finish", Name = "Complete" };
         finish.SetDisplayText("Complete");
 
@@ -484,77 +516,137 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createBranch, extractBranch,
                 tddCycle, createPR, extractPR,
                 ciCheck, codeReview, merge,
+                // Notifications (fire-and-forget)
+                notifyProcessing, notifyInvalid, notifyContextDone,
+                notifyPlanDone, notifyPlanApproved,
+                notifyDeferred, notifySplit, notifyNeedsHuman,
+                notifyTasksApproved, notifyBranchCreated,
+                notifyTddDone, notifyCiPassed, notifyMerged, notifyError,
                 // Exit paths
                 reportSuccess, reportDeferred, reportSplit,
                 reportNeedsHuman, reportError, finish,
             },
             Connections =
             {
-                // 1. Validate → 2. Gather Context
+                // 1. Validate → notify + continue (parallel)
+                ConnectOutcome(validateItem, "Valid", notifyProcessing),
                 ConnectOutcome(validateItem, "Valid", gatherContext),
+                ConnectOutcome(validateItem, "Invalid", notifyInvalid),
                 ConnectOutcome(validateItem, "Invalid", reportError),
 
-                // 2. Gather Context → Extract → 3. Generate Plan
+                // 2. Gather Context → notify + Generate Plan (parallel)
                 Connect(gatherContext, extractContext),
+                Connect(extractContext, notifyContextDone),
                 Connect(extractContext, generatePlan),
 
-                // 3. Generate Plan → Extract → 4. Review Plan
+                // 3. Generate Plan → notify + Review Plan (parallel)
                 Connect(generatePlan, extractPlan),
+                Connect(extractPlan, notifyPlanDone),
                 Connect(extractPlan, reviewPlan),
 
-                // 4. Review Plan → Extract Decision → Route
+                // 4. Review Plan → Route
                 Connect(reviewPlan, extractReviewDecision),
                 Connect(extractReviewDecision, reviewOutcome),
 
-                // 4 outcomes
+                // Approved → notify + Create Tasks (parallel)
+                ConnectOutcome(reviewOutcome, "Approved", notifyPlanApproved),
                 ConnectOutcome(reviewOutcome, "Approved", createTasks),
-                ConnectOutcome(reviewOutcome, "Defer", createDeferredIssues),
-                ConnectOutcome(reviewOutcome, "Split", createSplitIssues),
-                ConnectOutcome(reviewOutcome, "NeedsHuman", reportNeedsHuman),
 
-                // Defer → Report → Finish
+                // Defer → notify + create issues + report (parallel)
+                ConnectOutcome(reviewOutcome, "Defer", notifyDeferred),
+                ConnectOutcome(reviewOutcome, "Defer", createDeferredIssues),
                 Connect(createDeferredIssues, reportDeferred),
                 Connect(reportDeferred, finish),
 
-                // Split → Report → Finish
+                // Split → notify + create issues + report (parallel)
+                ConnectOutcome(reviewOutcome, "Split", notifySplit),
+                ConnectOutcome(reviewOutcome, "Split", createSplitIssues),
                 Connect(createSplitIssues, reportSplit),
                 Connect(reportSplit, finish),
 
-                // NeedsHuman → Finish
+                // NeedsHuman → notify + report (parallel)
+                ConnectOutcome(reviewOutcome, "NeedsHuman", notifyNeedsHuman),
+                ConnectOutcome(reviewOutcome, "NeedsHuman", reportNeedsHuman),
                 Connect(reportNeedsHuman, finish),
 
-                // 5. Create Tasks → Extract → 6. Review Tasks
+                // 5. Create Tasks → 6. Review Tasks
                 Connect(createTasks, extractTasks),
                 Connect(extractTasks, reviewTasks),
 
                 // 6. Review Tasks → Route
                 Connect(reviewTasks, extractTaskReview),
                 Connect(extractTaskReview, taskReviewOutcome),
+
+                // Tasks approved → notify + Create Branch (parallel)
+                ConnectOutcome(taskReviewOutcome, "Approved", notifyTasksApproved),
                 ConnectOutcome(taskReviewOutcome, "Approved", createBranch),
-                ConnectOutcome(taskReviewOutcome, "NeedsChanges", createTasks), // loop back
+                ConnectOutcome(taskReviewOutcome, "NeedsChanges", createTasks),
+                ConnectOutcome(taskReviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
 
-                // 7. Create Branch → Extract → 8. TDD
+                // 7. Create Branch → notify + TDD (parallel)
                 Connect(createBranch, extractBranch),
+                Connect(extractBranch, notifyBranchCreated),
                 Connect(extractBranch, tddCycle),
 
-                // 8. TDD → 9. Create PR → Extract → 10. CI
+                // 8. TDD → notify + Create PR (parallel)
+                Connect(tddCycle, notifyTddDone),
                 Connect(tddCycle, createPR),
+
+                // 9. Create PR → CI
                 Connect(createPR, extractPR),
                 Connect(extractPR, ciCheck),
 
-                // 10. CI → 11. Code Review → 12. Merge
+                // 10. CI → notify + Code Review (parallel)
+                Connect(ciCheck, notifyCiPassed),
                 Connect(ciCheck, codeReview),
+
+                // 11. Code Review → 12. Merge
                 Connect(codeReview, merge),
 
-                // 12. Merge → Report Success → Finish
+                // 12. Merge → notify + Report (parallel)
+                Connect(merge, notifyMerged),
                 Connect(merge, reportSuccess),
                 Connect(reportSuccess, finish),
 
-                // Error path
+                // Error → notify + report (parallel)
                 Connect(reportError, finish),
             }
         };
+    }
+
+    /// <summary>
+    /// Fire-and-forget dispatch to update-issue-status sub-workflow.
+    /// </summary>
+    private static DispatchWorkflow NotifyIssue(
+        string id,
+        Variable<string> repository,
+        Variable<int> issueNumber,
+        string message,
+        string[]? addLabels = null,
+        string[]? removeLabels = null)
+    {
+        var dispatch = new DispatchWorkflow
+        {
+            Id = id,
+            Name = $"Notify: {message[..Math.Min(message.Length, 30)]}",
+            WorkflowDefinitionId = new("update-issue-status"),
+            Input = new(ctx =>
+            {
+                var input = new Dictionary<string, object>
+                {
+                    ["repository"] = repository.Get(ctx),
+                    ["issueNumber"] = issueNumber.Get(ctx),
+                    ["message"] = message,
+                };
+                if (addLabels != null) input["addLabels"] = addLabels;
+                if (removeLabels != null) input["removeLabels"] = removeLabels;
+                return input;
+            }),
+            WaitForCompletion = new(false), // fire and forget
+        };
+        dispatch.SetDisplayText($"Notify: {message[..Math.Min(message.Length, 30)]}");
+        return dispatch;
     }
 
     private static SetVariable Assign(Variable variable, Func<Elsa.Expressions.Models.ExpressionExecutionContext, object?> valueFunc, string id, string name)
