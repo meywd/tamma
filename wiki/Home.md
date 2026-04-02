@@ -6,7 +6,7 @@
 
 - [Project Roadmap](Roadmap) - All 27 epics with timeline and status
 - [Architecture](Architecture) - System architecture overview
-- [Epics](Epics) - All 26 epics organized by phase
+- [Epics](Epics) - All 27 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
 - [Epic 2: Autonomous Loop](Epics/Epic-2-Autonomous-Loop) - 14-step autonomous development loop (13/16 done)
@@ -57,23 +57,24 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Phase:** Active Implementation
 **Deployment:** VPS at 204.168.131.39 (Hetzner CPX42, 16GB) with Docker Compose stack
 **Domains:** app.tamma.dev, api.tamma.dev, elsa.tamma.dev (Cloudflare DNS, Full SSL)
-**Last Audit:** 2026-04-01 (sprint-status.yaml audited against codebase for all 27 epics)
+**Last Audit:** 2026-04-02 (sprint-status.yaml audited against codebase for all 27 epics)
 **Audit Results:** 115 done, 20 in-progress, 56 drafted
 
 ### Recent Progress
 
-- **ADL Orchestrator redesigned** -- Priority-based work item selection, fire-and-forget cycle dispatch, triage integration, concurrency-based limits, full event emission on every step
-- **Epic 26 created** -- Project Management & Triage (issue triage workflow, scrum management, release management, priority configuration)
+- **Workflow Optimization (in progress)** -- ADL Orchestrator and SingleIssueCycleWorkflow completely redesigned on `feat/workflow-optimization` branch
+- **ADL Orchestrator redesigned** -- Fire-and-forget dispatch, priority-based work item selection, triage integration, concurrency-based limits, full event emission on every step
+- **SingleIssueCycle redesigned** -- 15 steps (was 36), plan review panels, task creation, TDD loop, deployment pipeline, 6 new stub sub-workflows
+- **TammaActivity base classes** -- `TammaActivity`, `TammaAsyncActivity`, `TammaOutcomeActivity` with `ITammaActivity` interface; every activity emits start/end events automatically (Story 10-9)
+- **Story 2-20 created** -- Priority-Based Work Item Selection (replaces single-source issue selection with multi-source priority selector)
+- **Story 10-9 created** -- TammaActivity Base Class and Workflow Event Emission
+- **Epic 26 created** -- Project Management & Triage (4 stories: issue triage, scrum management, release management, priority configuration)
+- **Wiki site React Flow diagrams updated** -- ADL and SingleIssueCycle diagrams updated, multi-select support (Shift+drag), better layout (dagre optimization, bezier curves)
 - **PR #325 merged** -- Workflow enhancements, 10 bug fixes, wiki site rewrite as Vite+React SPA, Midnight Ocean marketing redesign
 - **PR #326 created** -- CodeQL ReDoS fix in EpicDetailPage regex
-- **New stories added** -- 2-17, 2-18, 2-19, 3-13, 7-8 overhaul, 7-11, 7-12, 11-6, 12-5, 12-6
 - **Deep audit completed** -- all 27 epics verified against codebase; Epic 3, 4, 5, 8 statuses significantly corrected
 - **Epic 8 completed** -- All 8 distribution stories done (esbuild, npm publish, binary, Docker, Homebrew)
-- **Epic 3 near complete** -- 8/12 quality gate stories done (build, test, escalation, static analysis, security, monitoring, cost, complexity)
-- **Epic 4 near complete** -- 6/8 event sourcing stories done; PostgreSQL backend in progress
 - **Wiki site rewritten** -- Vite + React + React Router SPA with React Flow diagrams, deployed to wiki.tamma.dev
-- **Marketing site redesigned** -- Midnight Ocean theme applied as main landing page
-- **CodeQL security alerts fixed** -- ReDoS vulnerability patched
 
 ### Completed Epics (13)
 
@@ -95,7 +96,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 |------|------|------|-----------|
 | Epic 1 | Foundation & Core Infrastructure | 10/15 | 2 in progress (AI providers, agent customization), 3 ready |
 | Epic 1.5 | Infrastructure & Deployment | 9/10 | Kubernetes deployment in progress |
-| Epic 2 | Autonomous Development Loop | 13/16 | Issue decomposition, task dependencies, sequencing (ready for dev) |
+| Epic 2 | Autonomous Development Loop | 13/20 | Priority work item selection (2-20 drafted), issue decomposition (2-14), task dependencies (2-15), sequencing (2-16), + 2-17/2-18/2-19 |
 | Epic 3 | Quality Gates & Intelligence | 8/12 | 4 drafted (research, clarifying questions, ambiguity, design proposals) |
 | Epic 4 | Event Sourcing & Audit Trail | 6/8 | PostgreSQL backend in progress, replay drafted |
 | Epic 6 | Context & Knowledge Management | 9/10 | Vector DB stubs (Pinecone, Qdrant, Weaviate) in progress |
@@ -114,7 +115,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 
 | Epic | Name | Stories | Status |
 |------|------|---------|--------|
-| Epic 10 | Engine Core | 8 | Drafted (engine exists but stories define new architecture) |
+| Epic 10 | Engine Core | 9 | Drafted (engine exists but stories define new architecture); Story 10-9 (TammaActivity base class) in progress |
 | Epic 17 | Multi-Tenancy Foundation | 5 | Drafted |
 | Epic 20 | Billing & Payments | 5 | Drafted |
 | Epic 22 | CLI Mode Preservation | 5 | Drafted |
@@ -142,4 +143,4 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 
 ---
 
-_Last updated: 2026-04-01 | Maintained by: meywd_
+_Last updated: 2026-04-02 | Maintained by: meywd_
