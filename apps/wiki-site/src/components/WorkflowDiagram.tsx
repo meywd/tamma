@@ -23,6 +23,7 @@ function ProcessNode({ data }: { data: { label: string; description?: string } }
     <div className="bg-zinc-800 border border-zinc-600 rounded-lg px-4 py-2.5 min-w-[140px] max-w-[200px] shadow-lg shadow-black/30">
       <Handle type="target" position={Position.Top} className="!bg-zinc-500 !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Left} id="target-left" className="!bg-zinc-500 !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Right} id="target-right" className="!bg-zinc-500 !w-2 !h-2 !border-0" />
       <div className="text-[12px] font-medium text-zinc-200 text-center leading-tight">{data.label}</div>
       {data.description && (
         <div className="text-[10px] text-zinc-500 text-center mt-1 leading-tight">{data.description}</div>
@@ -39,6 +40,7 @@ function DecisionNode({ data }: { data: { label: string } }) {
     <div className="relative">
       <Handle type="target" position={Position.Top} className="!bg-amber-500 !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Left} id="target-left" className="!bg-amber-500 !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Right} id="target-right" className="!bg-amber-500 !w-2 !h-2 !border-0" />
       <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg px-4 py-2.5 min-w-[120px] max-w-[180px] shadow-lg shadow-black/30"
         style={{ clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' , padding: '20px 30px' }}>
       </div>
@@ -78,6 +80,7 @@ function SubWorkflowNode({ data }: { data: { label: string; description?: string
     <div className="bg-blue-500/10 border-2 border-blue-500/30 border-dashed rounded-lg px-4 py-2.5 min-w-[150px] max-w-[200px] shadow-lg shadow-black/30">
       <Handle type="target" position={Position.Top} className="!bg-blue-400 !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Left} id="target-left" className="!bg-blue-400 !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Right} id="target-right" className="!bg-blue-400 !w-2 !h-2 !border-0" />
       <div className="text-[10px] text-blue-400/60 uppercase tracking-wider mb-0.5">sub-workflow</div>
       <div className="text-[12px] font-medium text-blue-300 text-center leading-tight">{data.label}</div>
       {data.description && (
@@ -95,6 +98,7 @@ function ParallelNode({ data }: { data: { label: string; items: string[] } }) {
     <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg px-4 py-3 min-w-[180px] shadow-lg shadow-black/30">
       <Handle type="target" position={Position.Top} className="!bg-purple-400 !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Left} id="target-left" className="!bg-purple-400 !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Right} id="target-right" className="!bg-purple-400 !w-2 !h-2 !border-0" />
       <div className="text-[10px] text-purple-400/60 uppercase tracking-wider mb-1.5">parallel</div>
       <div className="text-[12px] font-medium text-purple-300 mb-2">{data.label}</div>
       <div className="flex flex-wrap gap-1">
@@ -726,12 +730,12 @@ function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB')
     const dx = tgt.position.x - src.position.x;
     const dy = tgt.position.y - src.position.y;
 
-    // If target is significantly to the right/left (more horizontal than vertical)
-    if (Math.abs(dx) > Math.abs(dy) * 1.2) {
+    // If target is significantly to the right/left and on roughly the same row
+    if (Math.abs(dx) > 150 && Math.abs(dy) < 80) {
       return {
         ...edge,
         sourceHandle: dx > 0 ? 'right' : 'left',
-        targetHandle: dx > 0 ? 'target-left' : 'target-right',
+        targetHandle: dx > 0 ? 'target-left' : undefined,
       };
     }
 
