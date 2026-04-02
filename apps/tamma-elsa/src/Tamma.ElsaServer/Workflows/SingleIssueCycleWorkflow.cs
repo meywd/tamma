@@ -1,12 +1,11 @@
-using Elsa.Expressions.Models;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
-using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -15,16 +14,20 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Single Issue Cycle workflow — the 14-step autonomous development cycle
-/// for one GitHub issue, implemented as a Flowchart for visual clarity in ELSA Studio.
+/// Single Issue Cycle — processes one work item from validation to merge.
+/// Receives a pre-selected work item from the ADL Orchestrator.
 ///
 /// Flow:
-///   SelectIssue → GatherContext → GeneratePlan → (approval) → CreateBranch
-///   → TddCycle → (debug retry loop) → CreatePR → TestingPipeline → (CI retry loop)
-///   → ReviewFixCheck → MergeApproval → MergePR → Finish
+///   Validate Work Item → Gather Context → Generate Plan → Review Plan
+///     ├─ approved → Create Tasks → Review Tasks → Create Branch
+///     │    → TDD Cycle (per task) → Create PR → CI Check
+///     │    → Code Review → Merge → Report Complete
+///     ├─ defer → Create Deferred Issues → Report (deferred)
+///     ├─ split → Create Sub-Issues → Report (split)
+///     └─ needsHuman → Report (needsHuman)
 ///
-/// Each step dispatches to a sub-workflow and routes based on outcomes.
-/// Debugging integration at TDD (3x) and CI (3x) failure points.
+/// Every step inherits TammaActivity for automatic event emission.
+/// On any failure → Report to orchestrator → Finish.
 /// </summary>
 public class SingleIssueCycleWorkflow : WorkflowBase
 {
@@ -33,263 +36,310 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         builder.Name = "Single Issue Cycle";
         builder.DefinitionId = "single-issue-cycle";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "14-step autonomous development cycle for one issue";
+        builder.Description = "Processes one work item from validation through merge";
 
         // ================================================================
         // Variables
         // ================================================================
+        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
         var repository = builder.WithVariable<string>("Repository", "");
-        var issueLabels = builder.WithVariable<string[]>("IssueLabels", Array.Empty<string>());
+        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
 
-        var issueJson = builder.WithVariable<string>("IssueJson", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var issueTitle = builder.WithVariable<string>("IssueTitle", "");
-        var contextJson = builder.WithVariable<string>("ContextJson", "");
+        // Step outputs
+        var contextIds = builder.WithVariable<string>("ContextIds", "");
+        var poSummary = builder.WithVariable<string>("POSummary", "");
         var planJson = builder.WithVariable<string>("PlanJson", "");
+        var reviewDecision = builder.WithVariable<string>("ReviewDecision", "");
+        var tasksJson = builder.WithVariable<string>("TasksJson", "");
+        var taskReviewDecision = builder.WithVariable<string>("TaskReviewDecision", "");
         var branchName = builder.WithVariable<string>("BranchName", "");
-        var prNumber = builder.WithVariable<int>("PrNumber", 0);
-        var prUrl = builder.WithVariable<string>("PrUrl", "");
-
-        var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0);
-
-        // DispatchWorkflow result capture variables
-        var issueResult = builder.WithVariable<IDictionary<string, object>?>();
-        var contextResult = builder.WithVariable<IDictionary<string, object>?>();
-        var planResult = builder.WithVariable<IDictionary<string, object>?>();
-        var branchResult = builder.WithVariable<IDictionary<string, object>?>();
-        var tddResult = builder.WithVariable<IDictionary<string, object>?>();
-        var prResult = builder.WithVariable<IDictionary<string, object>?>();
-        var testResult = builder.WithVariable<IDictionary<string, object>?>();
-        var reviewResult = builder.WithVariable<IDictionary<string, object>?>();
-        var mergeApprovalResult = builder.WithVariable<IDictionary<string, object>?>();
-        var mergeResult = builder.WithVariable<IDictionary<string, object>?>();
+        var prNumber = builder.WithVariable<int>("PRNumber", 0);
+        var prUrl = builder.WithVariable<string>("PRUrl", "");
         var exitReason = builder.WithVariable<string>("ExitReason", "");
 
-        // ================================================================
-        // INIT: Capture config from parent inputs
-        // ================================================================
-        var initConfig = new SetVariable
-        {
-            Id = "InitConfig",
-            Name = "Init Config",
-            Variable = repository,
-            Value = new Input<object?>(ctx =>
-            {
-                var labels = ctx.GetInput<string[]>("issueLabels");
-                if (labels != null) issueLabels.Set(ctx, labels);
-                var bot = ctx.GetInput<string>("botAssignee");
-                if (!string.IsNullOrEmpty(bot)) botAssignee.Set(ctx, bot);
-                var bb = ctx.GetInput<string>("baseBranch");
-                if (!string.IsNullOrEmpty(bb)) baseBranch.Set(ctx, bb);
-                return (object)(ctx.GetInput<string>("repository") ?? "");
-            })
-        };
-        initConfig.SetDisplayText("Init Config");
+        // Sub-workflow results
+        var subResult = builder.WithVariable<IDictionary<string, object>?>();
 
         // ================================================================
-        // Step 1: Issue Selection
+        // 1. Validate Work Item
         // ================================================================
-        var selectIssue = new DispatchWorkflow
+        var validateItem = new ValidateWorkItemActivity
         {
-            Id = "DispatchIssueSelection",
-            Name = "Select Issue",
-            WorkflowDefinitionId = new("issue-selection"),
-            Input = new(ctx => new Dictionary<string, object>
+            Id = "ValidateWorkItem",
+            Name = "Validate Work Item",
+            WorkItemJson = new Input<string>(ctx => ctx.GetInput<string>("workItemJson") ?? ""),
+            Repository = new Input<string>(ctx =>
             {
-                ["repository"] = repository.Get(ctx),
-                ["issueLabels"] = issueLabels.Get(ctx),
-                ["botAssignee"] = botAssignee.Get(ctx)
+                var repo = ctx.GetInput<string>("repository") ?? "";
+                repository.Set(ctx, repo);
+                botAssignee.Set(ctx, ctx.GetInput<string>("botAssignee") ?? "tamma-bot");
+                baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
+                issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
+                return repo;
             }),
-            WaitForCompletion = new(true),
-            Result = new(issueResult)
         };
-        selectIssue.SetDisplayText("Select Issue");
-
-        var extractIssue = new SetVariable
-        {
-            Id = "ExtractIssueData",
-            Name = "Extract Issue Data",
-            Variable = issueNumber,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = issueResult.Get(ctx);
-                if (result != null)
-                {
-                    if (result.TryGetValue("issueJson", out var ij))
-                        issueJson.Set(ctx, ij?.ToString() ?? "");
-                    if (result.TryGetValue("issueTitle", out var it))
-                        issueTitle.Set(ctx, it?.ToString() ?? "");
-                    if (result.TryGetValue("issueNumber", out var num) && num is int n)
-                        return (object)n;
-                }
-                return (object)0;
-            })
-        };
-        extractIssue.SetDisplayText("Extract Issue Data");
-
-        var hasIssue = new FlowDecision(ctx => issueNumber.Get(ctx) > 0)
-        { Id = "HasIssue", Name = "Issue Found?" };
-        hasIssue.SetDisplayText("Issue Found?");
+        validateItem.SetDisplayText("Validate Work Item");
 
         // ================================================================
-        // Step 2: Context Gathering (existing workflow)
+        // 2. Gather Context (sub-workflow)
         // ================================================================
         var gatherContext = new DispatchWorkflow
         {
-            Id = "DispatchContextGathering",
+            Id = "GatherContext",
             Name = "Gather Context",
             WorkflowDefinitionId = new("context-gathering"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
-                ["issueTitle"] = issueTitle.Get(ctx),
-                ["issueBody"] = issueJson.Get(ctx)
+                ["workItemJson"] = workItemJson.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(contextResult)
+            Result = new(subResult),
         };
         gatherContext.SetDisplayText("Gather Context");
 
-        var extractContext = new SetVariable
+        var extractContext = Assign(poSummary, ctx =>
         {
-            Id = "ExtractContextData",
-            Name = "Extract Context Data",
-            Variable = contextJson,
-            Value = new Input<object?>(ctx =>
+            var result = subResult.Get(ctx);
+            if (result != null)
             {
-                var result = contextResult.Get(ctx);
-                if (result != null && result.TryGetValue("contextJson", out var cj))
-                    return cj?.ToString() ?? "{}";
-                return (object)"{}";
-            })
-        };
-        extractContext.SetDisplayText("Extract Context Data");
+                if (result.TryGetValue("summary", out var s)) poSummary.Set(ctx, s?.ToString() ?? "");
+                if (result.TryGetValue("contextIds", out var ids)) contextIds.Set(ctx, ids?.ToString() ?? "");
+            }
+            return (object)(poSummary.Get(ctx));
+        }, "ExtractContext", "Extract Context");
 
         // ================================================================
-        // Step 3: Plan Generation (with approval bookmark)
+        // 3. Generate Plan (sub-workflow)
         // ================================================================
         var generatePlan = new DispatchWorkflow
         {
-            Id = "DispatchPlanGeneration",
+            Id = "GeneratePlan",
             Name = "Generate Plan",
             WorkflowDefinitionId = new("plan-generation"),
             Input = new(ctx => new Dictionary<string, object>
             {
+                ["repository"] = repository.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
-                ["issueTitle"] = issueTitle.Get(ctx),
-                ["issueBody"] = issueJson.Get(ctx),
-                ["contextJson"] = contextJson.Get(ctx),
-                ["repository"] = repository.Get(ctx)
+                ["poSummary"] = poSummary.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
+                ["workItemJson"] = workItemJson.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(planResult)
+            Result = new(subResult),
         };
         generatePlan.SetDisplayText("Generate Plan");
 
-        var extractPlan = new SetVariable
+        var extractPlan = Assign(planJson, ctx =>
         {
-            Id = "ExtractPlanData",
-            Name = "Extract Plan Data",
-            Variable = planJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = planResult.Get(ctx);
-                if (result != null && result.TryGetValue("planJson", out var pj))
-                    return pj?.ToString() ?? "{}";
-                return (object)"{}";
-            })
-        };
-        extractPlan.SetDisplayText("Extract Plan Data");
-
-        var planApproved = new FlowDecision(ctx =>
-        {
-            var result = planResult.Get(ctx);
-            if (result != null && result.TryGetValue("approved", out var a))
-                return a is true || a?.ToString() == "True";
-            return false;
-        })
-        { Id = "PlanApproved", Name = "Plan Approved?" };
-        planApproved.SetDisplayText("Plan Approved?");
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("planJson", out var p))
+                return (object)(p?.ToString() ?? "");
+            return (object)"";
+        }, "ExtractPlan", "Extract Plan");
 
         // ================================================================
-        // Step 4: Branch Creation
+        // 4. Review Plan (sub-workflow — 7-role panel)
+        // ================================================================
+        var reviewPlan = new DispatchWorkflow
+        {
+            Id = "ReviewPlan",
+            Name = "Review Plan",
+            WorkflowDefinitionId = new("plan-review"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+                ["planJson"] = planJson.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
+            }),
+            WaitForCompletion = new(true),
+            Result = new(subResult),
+        };
+        reviewPlan.SetDisplayText("Review Plan");
+
+        var extractReviewDecision = Assign(reviewDecision, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null)
+            {
+                if (result.TryGetValue("decision", out var d)) return (object)(d?.ToString() ?? "needsHuman");
+                if (result.TryGetValue("planJson", out var p)) planJson.Set(ctx, p?.ToString() ?? "");
+            }
+            return (object)"needsHuman";
+        }, "ExtractReviewDecision", "Extract Review Decision");
+
+        // Review outcome routing
+        var reviewOutcome = new FlowSwitch<string>
+        {
+            Id = "ReviewOutcome",
+            Name = "Review Outcome",
+            Expression = new(ctx => reviewDecision.Get(ctx)),
+            Cases = { { "approved", "Approved" }, { "defer", "Defer" }, { "split", "Split" } },
+            Default = "NeedsHuman",
+        };
+        reviewOutcome.SetDisplayText("Review Outcome");
+
+        // ================================================================
+        // 4a. Defer — create issues and finish
+        // ================================================================
+        var createDeferredIssues = new DispatchWorkflow
+        {
+            Id = "CreateDeferredIssues",
+            Name = "Create Deferred Issues",
+            WorkflowDefinitionId = new("create-issues"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["issuesJson"] = subResult.Get(ctx)?.GetValueOrDefault("deferred")?.ToString() ?? "[]",
+            }),
+            WaitForCompletion = new(true),
+        };
+        createDeferredIssues.SetDisplayText("Create Deferred Issues");
+
+        // ================================================================
+        // 4b. Split — create sub-issues and finish
+        // ================================================================
+        var createSplitIssues = new DispatchWorkflow
+        {
+            Id = "CreateSplitIssues",
+            Name = "Create Sub-Issues",
+            WorkflowDefinitionId = new("create-issues"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["issuesJson"] = subResult.Get(ctx)?.GetValueOrDefault("split")?.ToString() ?? "[]",
+            }),
+            WaitForCompletion = new(true),
+        };
+        createSplitIssues.SetDisplayText("Create Sub-Issues");
+
+        // ================================================================
+        // 5. Create Tasks (senior dev LLM — deep implementation plans)
+        // ================================================================
+        var createTasks = new DispatchWorkflow
+        {
+            Id = "CreateTasks",
+            Name = "Create Tasks",
+            WorkflowDefinitionId = new("task-creation"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+                ["planJson"] = planJson.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
+            }),
+            WaitForCompletion = new(true),
+            Result = new(subResult),
+        };
+        createTasks.SetDisplayText("Create Tasks");
+
+        var extractTasks = Assign(tasksJson, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("tasksJson", out var t))
+                return (object)(t?.ToString() ?? "");
+            return (object)"";
+        }, "ExtractTasks", "Extract Tasks");
+
+        // ================================================================
+        // 6. Review Tasks (4-role: architect, senior dev, dev, QA)
+        // ================================================================
+        var reviewTasks = new DispatchWorkflow
+        {
+            Id = "ReviewTasks",
+            Name = "Review Tasks",
+            WorkflowDefinitionId = new("task-review"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+                ["tasksJson"] = tasksJson.Get(ctx),
+                ["planJson"] = planJson.Get(ctx),
+            }),
+            WaitForCompletion = new(true),
+            Result = new(subResult),
+        };
+        reviewTasks.SetDisplayText("Review Tasks");
+
+        var extractTaskReview = Assign(taskReviewDecision, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null)
+            {
+                if (result.TryGetValue("decision", out var d)) return (object)(d?.ToString() ?? "needsHuman");
+                if (result.TryGetValue("tasksJson", out var t)) tasksJson.Set(ctx, t?.ToString() ?? "");
+            }
+            return (object)"needsHuman";
+        }, "ExtractTaskReview", "Extract Task Review");
+
+        var taskReviewOutcome = new FlowSwitch<string>
+        {
+            Id = "TaskReviewOutcome",
+            Name = "Tasks Approved?",
+            Expression = new(ctx => taskReviewDecision.Get(ctx)),
+            Cases = { { "approved", "Approved" }, { "needsChanges", "NeedsChanges" } },
+            Default = "NeedsHuman",
+        };
+        taskReviewOutcome.SetDisplayText("Tasks Approved?");
+
+        // ================================================================
+        // 7. Create Branch
         // ================================================================
         var createBranch = new DispatchWorkflow
         {
-            Id = "DispatchBranchCreation",
+            Id = "CreateBranch",
             Name = "Create Branch",
             WorkflowDefinitionId = new("branch-creation"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
-                ["issueTitle"] = issueTitle.Get(ctx)
+                ["baseBranch"] = baseBranch.Get(ctx),
+                ["workItemJson"] = workItemJson.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(branchResult)
+            Result = new(subResult),
         };
         createBranch.SetDisplayText("Create Branch");
 
-        var extractBranch = new SetVariable
+        var extractBranch = Assign(branchName, ctx =>
         {
-            Id = "ExtractBranchData",
-            Name = "Extract Branch Data",
-            Variable = branchName,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = branchResult.Get(ctx);
-                if (result != null && result.TryGetValue("branchName", out var bn))
-                    return bn?.ToString() ?? "";
-                return (object)"";
-            })
-        };
-        extractBranch.SetDisplayText("Extract Branch Data");
-
-        var branchCreated = new FlowDecision(ctx => !string.IsNullOrEmpty(branchName.Get(ctx)))
-        { Id = "BranchCreated", Name = "Branch Created?" };
-        branchCreated.SetDisplayText("Branch Created?");
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("branchName", out var b))
+                return (object)(b?.ToString() ?? "");
+            return (object)"";
+        }, "ExtractBranch", "Extract Branch");
 
         // ================================================================
-        // Steps 5-7: TDD Cycle (dispatched to sub-workflow)
+        // 8. TDD Cycle (sub-workflow — processes tasks in dependency order)
         // ================================================================
-        var dispatchTddRetry = new DispatchWorkflow
+        var tddCycle = new DispatchWorkflow
         {
-            Id = "DispatchTddWithDebugRetry",
-            Name = "TDD with Debug Retry",
+            Id = "TddCycle",
+            Name = "TDD Cycle",
             WorkflowDefinitionId = new("tdd-with-debug-retry"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["storyId"] = $"adl-{issueNumber.Get(ctx)}",
-                ["planJson"] = planJson.Get(ctx),
-                ["repositoryUrl"] = repository.Get(ctx),
+                ["repository"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = 5,
-                ["issueNumber"] = issueNumber.Get(ctx)
+                ["tasksJson"] = tasksJson.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(tddResult)
+            Result = new(subResult),
         };
-        dispatchTddRetry.SetDisplayText("TDD with Debug Retry");
-
-        var tddRetrySuccess = new FlowDecision(ctx =>
-        {
-            var result = tddResult.Get(ctx);
-            if (result != null && result.TryGetValue("success", out var s))
-                return s is true || s?.ToString() == "True";
-            return false;
-        })
-        { Id = "TddRetrySuccess", Name = "TDD Passed?" };
-        tddRetrySuccess.SetDisplayText("TDD Passed?");
+        tddCycle.SetDisplayText("TDD Cycle");
 
         // ================================================================
-        // Step 8: Create PR
+        // 9. Create PR
         // ================================================================
-        var createPr = new DispatchWorkflow
+        var createPR = new DispatchWorkflow
         {
-            Id = "DispatchCreatePR",
+            Id = "CreatePR",
             Name = "Create PR",
             WorkflowDefinitionId = new("pull-request"),
             Input = new(ctx => new Dictionary<string, object>
@@ -298,291 +348,122 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
-                ["issueTitle"] = issueTitle.Get(ctx),
-                ["planJson"] = planJson.Get(ctx)
+                ["planJson"] = planJson.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(prResult)
+            Result = new(subResult),
         };
-        createPr.SetDisplayText("Create PR");
+        createPR.SetDisplayText("Create PR");
 
-        var extractPr = new SetVariable
+        var extractPR = Assign(prNumber, ctx =>
         {
-            Id = "ExtractPrData",
-            Name = "Extract PR Data",
-            Variable = prNumber,
-            Value = new Input<object?>(ctx =>
+            var result = subResult.Get(ctx);
+            if (result != null)
             {
-                var result = prResult.Get(ctx);
-                if (result != null)
-                {
-                    if (result.TryGetValue("prUrl", out var u))
-                        prUrl.Set(ctx, u?.ToString() ?? "");
-                    if (result.TryGetValue("prNumber", out var n) && n is int num)
-                        return (object)num;
-                }
-                return (object)0;
-            })
-        };
-        extractPr.SetDisplayText("Extract PR Data");
-
-        var prCreated = new FlowDecision(ctx => prNumber.Get(ctx) > 0)
-        { Id = "PrCreated", Name = "PR Created?" };
-        prCreated.SetDisplayText("PR Created?");
+                if (result.TryGetValue("prNumber", out var n) && n is int num) prNumber.Set(ctx, num);
+                if (result.TryGetValue("prUrl", out var u)) prUrl.Set(ctx, u?.ToString() ?? "");
+            }
+            return (object)prNumber.Get(ctx);
+        }, "ExtractPR", "Extract PR");
 
         // ================================================================
-        // Step 9: CI Pipeline (dispatched to sub-workflow)
+        // 10. CI Check (sub-workflow)
         // ================================================================
-        var dispatchCiRetry = new DispatchWorkflow
+        var ciCheck = new DispatchWorkflow
         {
-            Id = "DispatchCiWithDebugRetry",
-            Name = "CI with Debug Retry",
+            Id = "CICheck",
+            Name = "CI Check",
             WorkflowDefinitionId = new("ci-with-debug-retry"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["issueNumber"] = issueNumber.Get(ctx),
-                ["skillLevel"] = 5,
-                // NOTE: ciRetryCount is passed through to preserve existing behavior.
-                // This means the counter persists across re-entries (review-fix, merge re-test).
-                // This is likely a bug — re-entry should reset the counter.
-                // Fix tracked as a separate ticket.
-                ["ciRetryCount"] = ciRetryCount.Get(ctx)
+                ["prNumber"] = prNumber.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(testResult)
+            Result = new(subResult),
         };
-        dispatchCiRetry.SetDisplayText("CI with Debug Retry");
-
-        // Extract ciRetryCount from sub-workflow output to preserve across re-entries
-        var extractCiRetryCount = new SetVariable
-        {
-            Id = "ExtractCiRetryCount",
-            Name = "Extract CI Retry Count",
-            Variable = ciRetryCount,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = testResult.Get(ctx);
-                if (result != null && result.TryGetValue("ciRetryCount", out var c) && c is int count)
-                    return (object)count;
-                return (object)ciRetryCount.Get(ctx);
-            })
-        };
-        extractCiRetryCount.SetDisplayText("Extract CI Retry Count");
-
-        var ciRetryPassed = new FlowDecision(ctx =>
-        {
-            var result = testResult.Get(ctx);
-            if (result != null && result.TryGetValue("passed", out var p))
-                return p is true || p?.ToString() == "True";
-            return false;
-        })
-        { Id = "CiRetryPassed", Name = "CI Passed?" };
-        ciRetryPassed.SetDisplayText("CI Passed?");
+        ciCheck.SetDisplayText("CI Check");
 
         // ================================================================
-        // Step 10: Review Fix Check
+        // 11. Code Review (sub-workflow)
         // ================================================================
-        var reviewFixCheck = new DispatchWorkflow
+        var codeReview = new DispatchWorkflow
         {
-            Id = "DispatchReviewFix",
-            Name = "Review Fix Check",
-            WorkflowDefinitionId = new("review-fix"),
+            Id = "CodeReview",
+            Name = "Code Review",
+            WorkflowDefinitionId = new("code-review"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
-                ["branchName"] = branchName.Get(ctx)
+                ["branchName"] = branchName.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(reviewResult)
+            Result = new(subResult),
         };
-        reviewFixCheck.SetDisplayText("Review Fix Check");
-
-        var hasReviewComments = new FlowDecision(ctx =>
-        {
-            var result = reviewResult.Get(ctx);
-            if (result != null && result.TryGetValue("hasComments", out var h))
-                return h is true || h?.ToString() == "True";
-            return false;
-        })
-        { Id = "HasReviewComments", Name = "Has Comments?" };
-        hasReviewComments.SetDisplayText("Has Comments?");
+        codeReview.SetDisplayText("Code Review");
 
         // ================================================================
-        // Step 11: Merge Approval (bookmark)
+        // 12. Merge (sub-workflow)
         // ================================================================
-        var mergeApproval = new DispatchWorkflow
+        var merge = new DispatchWorkflow
         {
-            Id = "DispatchMergeApproval",
-            Name = "Merge Approval",
-            WorkflowDefinitionId = new("merge-approval"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["issueNumber"] = issueNumber.Get(ctx),
-                ["prNumber"] = prNumber.Get(ctx),
-                ["prUrl"] = prUrl.Get(ctx)
-            }),
-            WaitForCompletion = new(true),
-            Result = new(mergeApprovalResult)
-        };
-        mergeApproval.SetDisplayText("Merge Approval");
-
-        var mergeDecision = new FlowDecision(ctx =>
-        {
-            var result = mergeApprovalResult.Get(ctx);
-            if (result != null && result.TryGetValue("decision", out var d))
-                return d?.ToString() == "merge";
-            return false;
-        })
-        { Id = "MergeDecision", Name = "Merge Approved?" };
-        mergeDecision.SetDisplayText("Merge Approved?");
-
-        var testDecision = new FlowDecision(ctx =>
-        {
-            var result = mergeApprovalResult.Get(ctx);
-            if (result != null && result.TryGetValue("decision", out var d))
-                return d?.ToString() == "test";
-            return false;
-        })
-        { Id = "TestDecision", Name = "Run More Tests?" };
-        testDecision.SetDisplayText("Run More Tests?");
-
-        // ================================================================
-        // Step 12: Merge PR
-        // ================================================================
-        var mergePr = new DispatchWorkflow
-        {
-            Id = "DispatchMergePR",
-            Name = "Merge PR",
-            WorkflowDefinitionId = new("merge-complete"),
+            Id = "Merge",
+            Name = "Merge",
+            WorkflowDefinitionId = new("merge"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
+                ["branchName"] = branchName.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
-                ["branchName"] = branchName.Get(ctx)
             }),
             WaitForCompletion = new(true),
-            Result = new(mergeResult)
+            Result = new(subResult),
         };
-        mergePr.SetDisplayText("Merge PR");
-
-        var mergeSuccess = new FlowDecision(ctx =>
-        {
-            var result = mergeResult.Get(ctx);
-            if (result != null && result.TryGetValue("success", out var s))
-                return s is true || s?.ToString() == "True";
-            return false;
-        })
-        { Id = "MergeSuccess", Name = "Merged?" };
-        mergeSuccess.SetDisplayText("Merged?");
+        merge.SetDisplayText("Merge");
 
         // ================================================================
-        // Finish reason SetVariable nodes (one per exit path)
+        // Exit paths — all report to orchestrator
         // ================================================================
-        var setReasonSuccess = new SetVariable
+        var reportSuccess = new ReportCycleResultActivity
         {
-            Id = "SetReasonSuccess",
-            Name = "Set Reason: Success",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"success")
+            Id = "ReportSuccess", Name = "Report Success",
+            Reason = new("success"), IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
         };
-        setReasonSuccess.SetDisplayText("Set Reason: Success");
+        reportSuccess.SetDisplayText("Report Success");
 
-        var setReasonNoIssues = new SetVariable
+        var reportDeferred = new ReportCycleResultActivity
         {
-            Id = "SetReasonNoIssues",
-            Name = "Set Reason: No Issues",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"noIssues")
+            Id = "ReportDeferred", Name = "Report Deferred",
+            Reason = new("deferred"), IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
         };
-        setReasonNoIssues.SetDisplayText("Set Reason: No Issues");
+        reportDeferred.SetDisplayText("Report Deferred");
 
-        var setReasonPlanRejected = new SetVariable
+        var reportSplit = new ReportCycleResultActivity
         {
-            Id = "SetReasonPlanRejected",
-            Name = "Set Reason: Plan Rejected",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"plan_rejected")
+            Id = "ReportSplit", Name = "Report Split",
+            Reason = new("split"), IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
         };
-        setReasonPlanRejected.SetDisplayText("Set Reason: Plan Rejected");
+        reportSplit.SetDisplayText("Report Split");
 
-        var setReasonReviewRejected = new SetVariable
+        var reportNeedsHuman = new ReportCycleResultActivity
         {
-            Id = "SetReasonReviewRejected",
-            Name = "Set Reason: Review Rejected",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"review_rejected")
+            Id = "ReportNeedsHuman", Name = "Report Needs Human",
+            Reason = new("needsHuman"), IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
         };
-        setReasonReviewRejected.SetDisplayText("Set Reason: Review Rejected");
+        reportNeedsHuman.SetDisplayText("Report Needs Human");
 
-        var setReasonError = new SetVariable
+        var reportError = new ReportCycleResultActivity
         {
-            Id = "SetReasonError",
-            Name = "Set Reason: Error",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"error")
+            Id = "ReportError", Name = "Report Error",
+            Reason = new("error"), IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
         };
-        setReasonError.SetDisplayText("Set Reason: Error");
+        reportError.SetDisplayText("Report Error");
 
-        var setReasonTddFailed = new SetVariable
-        {
-            Id = "SetReasonTddFailed",
-            Name = "Set Reason: TDD Failed",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"tddFailed")
-        };
-        setReasonTddFailed.SetDisplayText("Set Reason: TDD Failed");
-
-        var setReasonCiFailed = new SetVariable
-        {
-            Id = "SetReasonCiFailed",
-            Name = "Set Reason: CI Failed",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"ciFailed")
-        };
-        setReasonCiFailed.SetDisplayText("Set Reason: CI Failed");
-
-        var setReasonMergeFailed = new SetVariable
-        {
-            Id = "SetReasonMergeFailed",
-            Name = "Set Reason: Merge Failed",
-            Variable = exitReason,
-            Value = new Input<object?>(_ => (object)"mergeFailed")
-        };
-        setReasonMergeFailed.SetDisplayText("Set Reason: Merge Failed");
-
-        // ================================================================
-        // Shared Finish Sequence — all exit paths converge here
-        // ================================================================
-        var sharedFinish = new Sequence
-        {
-            Id = "SharedFinishSequence",
-            Name = "Shared Finish",
-            Activities =
-            {
-                // Always set exitReason output
-                WithLabel(new SetOutput { Id = "SetOutputExitReason", Name = "Set Exit Reason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)exitReason.Get(ctx)) }, "Set Exit Reason"),
-                // Always set finishReason output (same value, explicit name for analytics)
-                WithLabel(new SetOutput { Id = "SetOutputFinishReason", Name = "Set Finish Reason", OutputName = new("finishReason"), OutputValue = new(ctx => (object)exitReason.Get(ctx)) }, "Set Finish Reason"),
-                // Derive success flag from reason
-                WithLabel(new SetOutput { Id = "SetOutputSuccess", Name = "Set Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)(exitReason.Get(ctx) == "success")) }, "Set Success Flag"),
-                // Conditionally set success-specific outputs (issueNumber, prNumber, mergeSha)
-                WithLabel(new SetOutput { Id = "SetOutputIssueNumber", Name = "Set Issue Number", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumber.Get(ctx)) }, "Set Issue Number"),
-                WithLabel(new SetOutput { Id = "SetOutputPrNumber", Name = "Set PR Number", OutputName = new("prNumber"), OutputValue = new(ctx => (object)prNumber.Get(ctx)) }, "Set PR Number"),
-                WithLabel(new SetOutput { Id = "SetOutputMergeSha", Name = "Set Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx =>
-                {
-                    var r = mergeResult.Get(ctx);
-                    return (object)(r != null && r.TryGetValue("mergeSha", out var ms) ? ms?.ToString() ?? "" : "");
-                }) }, "Set Merge SHA")
-            }
-        };
-        sharedFinish.SetDisplayText("Shared Finish");
-
-        var finish = new Finish { Id = "Finish", Name = "Complete: Issue Cycle Done" };
-        finish.SetDisplayText("Complete: Issue Cycle Done");
+        var finish = new Finish { Id = "Finish", Name = "Complete" };
+        finish.SetDisplayText("Complete");
 
         // ================================================================
         // Flowchart
@@ -590,132 +471,102 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "SingleIssueCycleFlowchart",
-            Name = "Single Issue Cycle Flowchart",
-            Start = initConfig,
+            Start = validateItem,
             Activities =
             {
-                // Init
-                initConfig,
-
-                // Step 1: Issue Selection
-                selectIssue, extractIssue, hasIssue,
-
-                // Step 2: Context Gathering
-                gatherContext, extractContext,
-
-                // Step 3: Plan Generation
-                generatePlan, extractPlan, planApproved,
-
-                // Step 4: Branch Creation
-                createBranch, extractBranch, branchCreated,
-
-                // Steps 5-7: TDD Cycle (sub-workflow)
-                dispatchTddRetry, tddRetrySuccess,
-
-                // Step 8: Create PR
-                createPr, extractPr, prCreated,
-
-                // Step 9: CI Pipeline (sub-workflow)
-                dispatchCiRetry, extractCiRetryCount, ciRetryPassed,
-
-                // Step 10: Review Fix
-                reviewFixCheck, hasReviewComments,
-
-                // Step 11: Merge Approval
-                mergeApproval, mergeDecision, testDecision,
-
-                // Step 12: Merge PR
-                mergePr, mergeSuccess,
-
-                // Finish reason nodes + shared finish
-                setReasonSuccess, setReasonNoIssues, setReasonPlanRejected, setReasonReviewRejected,
-                setReasonError, setReasonTddFailed, setReasonCiFailed,
-                setReasonMergeFailed, sharedFinish, finish
+                // Main flow
+                validateItem, gatherContext, extractContext,
+                generatePlan, extractPlan,
+                reviewPlan, extractReviewDecision, reviewOutcome,
+                createDeferredIssues, createSplitIssues,
+                createTasks, extractTasks,
+                reviewTasks, extractTaskReview, taskReviewOutcome,
+                createBranch, extractBranch,
+                tddCycle, createPR, extractPR,
+                ciCheck, codeReview, merge,
+                // Exit paths
+                reportSuccess, reportDeferred, reportSplit,
+                reportNeedsHuman, reportError, finish,
             },
-
             Connections =
             {
-                // --- INIT ---
-                Connect(initConfig, selectIssue),
+                // 1. Validate → 2. Gather Context
+                ConnectOutcome(validateItem, "Valid", gatherContext),
+                ConnectOutcome(validateItem, "Invalid", reportError),
 
-                // --- Step 1: Issue Selection ---
-                Connect(selectIssue, extractIssue),
-                Connect(extractIssue, hasIssue),
-                ConnectOutcome(hasIssue, "True", gatherContext),
-                ConnectOutcome(hasIssue, "False", setReasonNoIssues),
-
-                // --- Step 2: Context Gathering ---
+                // 2. Gather Context → Extract → 3. Generate Plan
                 Connect(gatherContext, extractContext),
                 Connect(extractContext, generatePlan),
 
-                // --- Step 3: Plan Generation ---
+                // 3. Generate Plan → Extract → 4. Review Plan
                 Connect(generatePlan, extractPlan),
-                Connect(extractPlan, planApproved),
-                ConnectOutcome(planApproved, "True", createBranch),
-                ConnectOutcome(planApproved, "False", setReasonPlanRejected),
+                Connect(extractPlan, reviewPlan),
 
-                // --- Step 4: Branch Creation ---
+                // 4. Review Plan → Extract Decision → Route
+                Connect(reviewPlan, extractReviewDecision),
+                Connect(extractReviewDecision, reviewOutcome),
+
+                // 4 outcomes
+                ConnectOutcome(reviewOutcome, "Approved", createTasks),
+                ConnectOutcome(reviewOutcome, "Defer", createDeferredIssues),
+                ConnectOutcome(reviewOutcome, "Split", createSplitIssues),
+                ConnectOutcome(reviewOutcome, "NeedsHuman", reportNeedsHuman),
+
+                // Defer → Report → Finish
+                Connect(createDeferredIssues, reportDeferred),
+                Connect(reportDeferred, finish),
+
+                // Split → Report → Finish
+                Connect(createSplitIssues, reportSplit),
+                Connect(reportSplit, finish),
+
+                // NeedsHuman → Finish
+                Connect(reportNeedsHuman, finish),
+
+                // 5. Create Tasks → Extract → 6. Review Tasks
+                Connect(createTasks, extractTasks),
+                Connect(extractTasks, reviewTasks),
+
+                // 6. Review Tasks → Route
+                Connect(reviewTasks, extractTaskReview),
+                Connect(extractTaskReview, taskReviewOutcome),
+                ConnectOutcome(taskReviewOutcome, "Approved", createBranch),
+                ConnectOutcome(taskReviewOutcome, "NeedsChanges", createTasks), // loop back
+                ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
+
+                // 7. Create Branch → Extract → 8. TDD
                 Connect(createBranch, extractBranch),
-                Connect(extractBranch, branchCreated),
-                ConnectOutcome(branchCreated, "True", dispatchTddRetry),
-                ConnectOutcome(branchCreated, "False", setReasonError),
+                Connect(extractBranch, tddCycle),
 
-                // --- Steps 5-7: TDD Cycle (sub-workflow) ---
-                Connect(dispatchTddRetry, tddRetrySuccess),
-                ConnectOutcome(tddRetrySuccess, "True", createPr),
-                ConnectOutcome(tddRetrySuccess, "False", setReasonTddFailed),
+                // 8. TDD → 9. Create PR → Extract → 10. CI
+                Connect(tddCycle, createPR),
+                Connect(createPR, extractPR),
+                Connect(extractPR, ciCheck),
 
-                // --- Step 8: Create PR ---
-                Connect(createPr, extractPr),
-                Connect(extractPr, prCreated),
-                ConnectOutcome(prCreated, "True", dispatchCiRetry),
-                ConnectOutcome(prCreated, "False", setReasonError),
+                // 10. CI → 11. Code Review → 12. Merge
+                Connect(ciCheck, codeReview),
+                Connect(codeReview, merge),
 
-                // --- Step 9: CI Pipeline (sub-workflow) ---
-                Connect(dispatchCiRetry, extractCiRetryCount),
-                Connect(extractCiRetryCount, ciRetryPassed),
-                ConnectOutcome(ciRetryPassed, "True", reviewFixCheck),
-                ConnectOutcome(ciRetryPassed, "False", setReasonCiFailed),
+                // 12. Merge → Report Success → Finish
+                Connect(merge, reportSuccess),
+                Connect(reportSuccess, finish),
 
-                // --- Step 10: Review Fix Check ---
-                Connect(reviewFixCheck, hasReviewComments),
-                ConnectOutcome(hasReviewComments, "True", dispatchCiRetry), // re-run CI after fixes
-                ConnectOutcome(hasReviewComments, "False", mergeApproval),
-
-                // --- Step 11: Merge Approval ---
-                Connect(mergeApproval, mergeDecision),
-                ConnectOutcome(mergeDecision, "True", mergePr),
-                ConnectOutcome(mergeDecision, "False", testDecision),
-                ConnectOutcome(testDecision, "True", dispatchCiRetry), // re-run tests
-                ConnectOutcome(testDecision, "False", setReasonReviewRejected),
-
-                // --- Step 12: Merge PR ---
-                Connect(mergePr, mergeSuccess),
-                ConnectOutcome(mergeSuccess, "True", setReasonSuccess),
-                ConnectOutcome(mergeSuccess, "False", setReasonMergeFailed),
-
-                // --- All reason nodes lead to shared finish, then terminal ---
-                Connect(setReasonSuccess, sharedFinish),
-                Connect(setReasonNoIssues, sharedFinish),
-                Connect(setReasonPlanRejected, sharedFinish),
-                Connect(setReasonReviewRejected, sharedFinish),
-                Connect(setReasonError, sharedFinish),
-                Connect(setReasonTddFailed, sharedFinish),
-                Connect(setReasonCiFailed, sharedFinish),
-                Connect(setReasonMergeFailed, sharedFinish),
-                Connect(sharedFinish, finish)
+                // Error path
+                Connect(reportError, finish),
             }
         };
     }
 
-    // ================================================================
-    // Helper methods
-    // ================================================================
+    private static SetVariable Assign(Variable variable, Func<Elsa.Expressions.Models.ExpressionExecutionContext, object?> valueFunc, string id, string name)
+    {
+        var sv = new SetVariable { Id = id, Name = name, Variable = variable, Value = new Input<object?>(valueFunc) };
+        sv.SetDisplayText(name);
+        return sv;
+    }
 
     private static FlowConnection Connect(IActivity source, IActivity target)
         => new(new FlowEndpoint(source), new FlowEndpoint(target));
 
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
-
 }
