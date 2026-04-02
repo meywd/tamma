@@ -146,7 +146,7 @@ function e(source: string, target: string, label?: string, sourceHandle?: string
     label,
     sourceHandle: sourceHandle ?? undefined,
     targetHandle: targetHandle ?? undefined,
-    type: 'default',
+    type: 'smoothstep',
     ...edgeDefaults,
   };
 }
