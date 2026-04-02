@@ -315,32 +315,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         }, "ExtractBranch", "Extract Branch");
 
         // ================================================================
-        // 8. TDD Cycle (sub-workflow — processes tasks in dependency order)
-        // ================================================================
-        var tddCycle = new DispatchWorkflow
-        {
-            Id = "TddCycle",
-            Name = "TDD Cycle",
-            WorkflowDefinitionId = new("tdd-with-debug-retry"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["branchName"] = branchName.Get(ctx),
-                ["tasksJson"] = tasksJson.Get(ctx),
-                ["contextIds"] = contextIds.Get(ctx),
-            }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
-        };
-        tddCycle.SetDisplayText("TDD Cycle");
-
-        // ================================================================
-        // 9. Create PR
+        // 8. Create PR (draft, with implementation plan .md files)
         // ================================================================
         var createPR = new DispatchWorkflow
         {
             Id = "CreatePR",
-            Name = "Create PR",
+            Name = "Create Draft PR",
             WorkflowDefinitionId = new("pull-request"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -349,11 +329,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
+                ["draft"] = true,
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
         };
-        createPR.SetDisplayText("Create PR");
+        createPR.SetDisplayText("Create Draft PR");
 
         var extractPR = Assign(prNumber, ctx =>
         {
@@ -367,23 +348,85 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         }, "ExtractPR", "Extract PR");
 
         // ================================================================
-        // 10. CI Check (sub-workflow)
+        // 9. Create Test Cases (from tasks, committed to PR branch)
         // ================================================================
-        var ciCheck = new DispatchWorkflow
+        var createTestCases = new DispatchWorkflow
         {
-            Id = "CICheck",
-            Name = "CI Check",
-            WorkflowDefinitionId = new("ci-with-debug-retry"),
+            Id = "CreateTestCases",
+            Name = "Create Test Cases",
+            WorkflowDefinitionId = new("test-case-creation"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["prNumber"] = prNumber.Get(ctx),
+                ["tasksJson"] = tasksJson.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
         };
-        ciCheck.SetDisplayText("CI Check");
+        createTestCases.SetDisplayText("Create Test Cases");
+
+        // ================================================================
+        // 10. TDD Loop (for each task in dependency order)
+        // Each task: red → green → CI → refactor → commit
+        // ================================================================
+        var currentTaskIndex = builder.WithVariable<int>("CurrentTaskIndex", 0);
+        var totalTasks = builder.WithVariable<int>("TotalTasks", 0);
+        var currentTaskJson = builder.WithVariable<string>("CurrentTaskJson", "");
+
+        var initTaskLoop = Assign(totalTasks, ctx =>
+        {
+            // Parse tasks array to get count
+            try
+            {
+                var tasks = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(tasksJson.Get(ctx));
+                var count = tasks.GetArrayLength();
+                currentTaskIndex.Set(ctx, 0);
+                return (object)count;
+            }
+            catch { return (object)0; }
+        }, "InitTaskLoop", "Init Task Loop");
+
+        var hasMoreTasks = new FlowDecision(ctx => currentTaskIndex.Get(ctx) < totalTasks.Get(ctx))
+        {
+            Id = "HasMoreTasks",
+            Name = "More Tasks?"
+        };
+        hasMoreTasks.SetDisplayText("More Tasks?");
+
+        var extractCurrentTask = Assign(currentTaskJson, ctx =>
+        {
+            try
+            {
+                var tasks = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(tasksJson.Get(ctx));
+                var idx = currentTaskIndex.Get(ctx);
+                return (object)tasks[idx].GetRawText();
+            }
+            catch { return (object)"{}"; }
+        }, "ExtractCurrentTask", "Extract Current Task");
+
+        var tddForTask = new DispatchWorkflow
+        {
+            Id = "TddForTask",
+            Name = "TDD for Task",
+            WorkflowDefinitionId = new("tdd-cycle"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["repository"] = repository.Get(ctx),
+                ["branchName"] = branchName.Get(ctx),
+                ["taskJson"] = currentTaskJson.Get(ctx),
+                ["contextIds"] = contextIds.Get(ctx),
+                ["issueNumber"] = issueNumber.Get(ctx),
+            }),
+            WaitForCompletion = new(true),
+            Result = new(subResult),
+        };
+        tddForTask.SetDisplayText("TDD for Task");
+
+        var incrementTask = Assign(currentTaskIndex, ctx =>
+            (object)(currentTaskIndex.Get(ctx) + 1),
+            "IncrementTask", "Next Task");
 
         // ================================================================
         // 11. Code Review (sub-workflow)
@@ -514,14 +557,16 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createTasks, extractTasks,
                 reviewTasks, extractTaskReview, taskReviewOutcome,
                 createBranch, extractBranch,
-                tddCycle, createPR, extractPR,
-                ciCheck, codeReview, merge,
+                createPR, extractPR,
+                createTestCases,
+                initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
+                codeReview, merge,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
                 notifyDeferred, notifySplit, notifyNeedsHuman,
                 notifyTasksApproved, notifyBranchCreated,
-                notifyTddDone, notifyCiPassed, notifyMerged, notifyError,
+                notifyTddDone, notifyMerged, notifyError,
                 // Exit paths
                 reportSuccess, reportDeferred, reportSplit,
                 reportNeedsHuman, reportError, finish,
@@ -584,22 +629,28 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
 
-                // 7. Create Branch → notify + TDD (parallel)
+                // 7. Create Branch → notify + Create Draft PR (parallel)
                 Connect(createBranch, extractBranch),
                 Connect(extractBranch, notifyBranchCreated),
-                Connect(extractBranch, tddCycle),
+                Connect(extractBranch, createPR),
 
-                // 8. TDD → notify + Create PR (parallel)
-                Connect(tddCycle, notifyTddDone),
-                Connect(tddCycle, createPR),
-
-                // 9. Create PR → CI
+                // 8. Create Draft PR → 9. Create Test Cases
                 Connect(createPR, extractPR),
-                Connect(extractPR, ciCheck),
+                Connect(extractPR, createTestCases),
 
-                // 10. CI → notify + Code Review (parallel)
-                Connect(ciCheck, notifyCiPassed),
-                Connect(ciCheck, codeReview),
+                // 9. Create Test Cases → 10. TDD Loop
+                Connect(createTestCases, initTaskLoop),
+                Connect(initTaskLoop, hasMoreTasks),
+
+                // TDD Loop: more tasks? → extract task → TDD → increment → loop
+                ConnectOutcome(hasMoreTasks, "True", extractCurrentTask),
+                Connect(extractCurrentTask, tddForTask),
+                Connect(tddForTask, incrementTask),
+                Connect(incrementTask, hasMoreTasks), // loop back
+
+                // TDD Loop done → notify + Code Review (parallel)
+                ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
+                ConnectOutcome(hasMoreTasks, "False", codeReview),
 
                 // 11. Code Review → 12. Merge
                 Connect(codeReview, merge),
