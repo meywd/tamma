@@ -129,7 +129,7 @@ function e(source: string, target: string, label?: string, sourceHandle?: string
     target,
     label,
     sourceHandle,
-    type: 'smoothstep',
+    type: 'default',
     ...edgeDefaults,
   };
 }
@@ -661,15 +661,17 @@ function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB')
   const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: direction,
-    nodesep: 60,
-    ranksep: 80,
-    marginx: 40,
-    marginy: 40,
+    nodesep: 80,
+    ranksep: 100,
+    marginx: 50,
+    marginy: 50,
+    acyclicer: 'greedy',
+    ranker: 'tight-tree',
   });
 
   for (const node of nodes) {
-    const width = node.type === 'parallel' ? 220 : node.type === 'decision' ? 140 : 170;
-    const height = node.type === 'parallel' ? 100 : node.type === 'decision' ? 80 : 60;
+    const width = node.type === 'parallel' ? 240 : node.type === 'decision' ? 160 : 180;
+    const height = node.type === 'parallel' ? 110 : node.type === 'decision' ? 90 : 65;
     g.setNode(node.id, { width, height });
   }
 
@@ -681,8 +683,8 @@ function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB')
 
   const layoutedNodes = nodes.map((node) => {
     const pos = g.node(node.id);
-    const width = node.type === 'parallel' ? 220 : node.type === 'decision' ? 140 : 170;
-    const height = node.type === 'parallel' ? 100 : node.type === 'decision' ? 80 : 60;
+    const width = node.type === 'parallel' ? 240 : node.type === 'decision' ? 160 : 180;
+    const height = node.type === 'parallel' ? 110 : node.type === 'decision' ? 90 : 65;
     return {
       ...node,
       position: {
@@ -741,7 +743,7 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
           nodesDraggable={true}
           nodesConnectable={false}
           proOptions={{ hideAttribution: true }}
-          defaultEdgeOptions={{ type: 'smoothstep', ...edgeDefaults }}
+          defaultEdgeOptions={{ type: 'default', ...edgeDefaults }}
         >
           <Background color="#27272a" gap={20} variant={BackgroundVariant.Dots} />
           <Controls className="!bg-zinc-800 !border-zinc-700 !rounded-lg [&_button]:!bg-zinc-800 [&_button]:!border-zinc-700 [&_button]:!text-zinc-400 [&_button:hover]:!bg-zinc-700" />
