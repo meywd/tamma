@@ -4,7 +4,7 @@ sidebar:
   order: 10
 ---
 
-**Status:** Completed
+**Status:** Drafted (engine exists as imperative state machine; stories define target agentic architecture)
 **Stories:** 8 (10-1 through 10-8)
 **Packages:** `@tamma/orchestrator`, `apps/tamma-elsa/`
 
@@ -74,14 +74,14 @@ CLI / Web / Mobile / Desktop / GitHub / Gitea / GitLab
 
 | Story | Title | Priority | Status |
 |-------|-------|----------|--------|
-| 10-1 | Engine Static Workflow & Brain | P0 | Done |
-| 10-2 | Comprehensive Event Catalog & Typed Schema | P0 | Done |
-| 10-3 | Event Store -- PostgreSQL/Emmett Implementation | P0 | Done |
-| 10-4 | Smart Queue with State-Based Deduplication | P0 | Done |
-| 10-5 | Workflow Provider Abstraction & ELSA Integration | P0 | Done |
-| 10-6 | Input Channel Unification (UI + Platform Events) | P1 | Done |
-| 10-7 | Event Store Security & Sanitization Pipeline | P0 | Done |
-| 10-8 | State Reconstruction from Event Stream | P0 | Done |
+| 10-1 | Engine Static Workflow & Brain | P0 | Drafted |
+| 10-2 | Comprehensive Event Catalog & Typed Schema | P0 | Drafted |
+| 10-3 | Event Store -- PostgreSQL/Emmett Implementation | P0 | Drafted |
+| 10-4 | Smart Queue with State-Based Deduplication | P0 | Drafted |
+| 10-5 | Workflow Provider Abstraction & ELSA Integration | P0 | Drafted |
+| 10-6 | Input Channel Unification (UI + Platform Events) | P1 | Drafted |
+| 10-7 | Event Store Security & Sanitization Pipeline | P0 | Drafted |
+| 10-8 | State Reconstruction from Event Stream | P0 | Drafted |
 
 ## Performance Targets
 

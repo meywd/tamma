@@ -266,6 +266,9 @@ importers:
       '@xyflow/react':
         specifier: ^12.10.2
         version: 12.10.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      elkjs:
+        specifier: ^0.11.1
+        version: 0.11.1
       mermaid:
         specifier: ^11.13.0
         version: 11.13.0
@@ -4330,6 +4333,9 @@ packages:
 
   electron-to-chromium@1.5.243:
     resolution: {integrity: sha512-ZCphxFW3Q1TVhcgS9blfut1PX8lusVi2SvXQgmEEnK4TCmE1JhH2JkjJN+DNt0pJJwfBri5AROBnz2b/C+YU9g==}
+
+  elkjs@0.11.1:
+    resolution: {integrity: sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==}
 
   emittery@0.13.1:
     resolution: {integrity: sha512-DeWwawk6r5yR9jFgnDKYt4sLS0LmHJJi3ZOnb5/JdbYwj3nW+FxQnHIjhBKz8YLC7oRNPVM9NQ47I3CVx34eqQ==}
@@ -10840,6 +10846,8 @@ snapshots:
   ee-first@1.1.1: {}
 
   electron-to-chromium@1.5.243: {}
+
+  elkjs@0.11.1: {}
 
   emittery@0.13.1: {}
 

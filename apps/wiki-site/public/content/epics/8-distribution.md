@@ -4,7 +4,7 @@ sidebar:
   order: 8
 ---
 
-**Status:** Drafted
+**Status:** Completed
 **Stories:** 8 (8-1 through 8-8)
 **Task Plans:** 0
 
@@ -31,14 +31,14 @@ Epic 8 covers the distribution and installation infrastructure for Tamma, enabli
 
 | Story | Title | Tier | Priority | Status |
 |-------|-------|------|----------|--------|
-| 8-1 | esbuild Bundle & Package Structure | Tier 1 (npm) | P0 | Planned |
-| 8-2 | npm Publish CI/CD Pipeline | Tier 1 (npm) | P0 | Planned |
-| 8-3 | Standalone Binary Compilation | Tier 2 (binary) | P1 | Planned |
-| 8-4 | Install Scripts & GitHub Releases | Tier 2 (binary) | P1 | Planned |
-| 8-5 | Auto-Update & Package Manager Distribution | Tier 2 (binary) | P2 | Planned |
-| 8-6 | TypeScript & Dashboard Dockerfiles | Tier 3 (Docker) | P1 | Planned |
-| 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | P1 | Planned |
-| 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | P2 | Planned |
+| 8-1 | esbuild Bundle & Package Structure | Tier 1 (npm) | P0 | Done |
+| 8-2 | npm Publish CI/CD Pipeline | Tier 1 (npm) | P0 | Done |
+| 8-3 | Standalone Binary Compilation | Tier 2 (binary) | P1 | Done |
+| 8-4 | Install Scripts & GitHub Releases | Tier 2 (binary) | P1 | Done |
+| 8-5 | Auto-Update & Package Manager Distribution | Tier 2 (binary) | P2 | Done |
+| 8-6 | TypeScript & Dashboard Dockerfiles | Tier 3 (Docker) | P1 | Done |
+| 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | P1 | Done |
+| 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | P2 | Done |
 
 ## Key Technical Details
 

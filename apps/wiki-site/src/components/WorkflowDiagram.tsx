@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -14,7 +14,7 @@ import {
   useEdgesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import Dagre from '@dagrejs/dagre';
+import ELK from 'elkjs/lib/elk.bundled.js';
 
 // --- Custom Node Types ---
 
@@ -678,46 +678,68 @@ interface FlowStep {
   type: 'process' | 'decision' | 'terminal' | 'start';
 }
 
-// --- Auto-layout with Dagre ---
+// --- Auto-layout with ELK (minimizes edge crossings) ---
 
-function autoLayout(nodes: Node[], edges: Edge[], direction: 'TB' | 'LR' = 'TB'): { nodes: Node[]; edges: Edge[] } {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({
-    rankdir: direction,
-    nodesep: 80,
-    ranksep: 100,
-    marginx: 50,
-    marginy: 50,
-    acyclicer: 'greedy',
-    ranker: 'tight-tree',
+const elk = new ELK();
+
+async function autoLayoutAsync(nodes: Node[], edges: Edge[]): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  const elkNodes = nodes.map((node) => {
+    const width = node.type === 'parallel' ? 240 : node.type === 'decision' ? 160 : 180;
+    const height = node.type === 'parallel' ? 110 : node.type === 'decision' ? 90 : 65;
+    return { id: node.id, width, height };
   });
 
-  for (const node of nodes) {
-    const width = node.type === 'parallel' ? 240 : node.type === 'decision' ? 160 : 180;
-    const height = node.type === 'parallel' ? 110 : node.type === 'decision' ? 90 : 65;
-    g.setNode(node.id, { width, height });
-  }
+  const elkEdges = edges.map((edge, i) => ({
+    id: edge.id || `e${i}`,
+    sources: [edge.source],
+    targets: [edge.target],
+  }));
 
-  for (const edge of edges) {
-    g.setEdge(edge.source, edge.target);
-  }
-
-  Dagre.layout(g);
+  const graph = await elk.layout({
+    id: 'root',
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'DOWN',
+      'elk.spacing.nodeNode': '80',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '100',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.layered.mergeEdges': 'true',
+    },
+    children: elkNodes,
+    edges: elkEdges,
+  });
 
   const layoutedNodes = nodes.map((node) => {
-    const pos = g.node(node.id);
-    const width = node.type === 'parallel' ? 240 : node.type === 'decision' ? 160 : 180;
-    const height = node.type === 'parallel' ? 110 : node.type === 'decision' ? 90 : 65;
+    const elkNode = graph.children?.find((n) => n.id === node.id);
     return {
       ...node,
       position: {
-        x: pos.x - width / 2,
-        y: pos.y - height / 2,
+        x: elkNode?.x ?? 0,
+        y: elkNode?.y ?? 0,
       },
     };
   });
 
   return { nodes: layoutedNodes, edges };
+}
+
+// Synchronous wrapper using cached layout
+function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[] } {
+  // Fallback: simple grid layout until async ELK completes
+  const cols = Math.ceil(Math.sqrt(nodes.length));
+  return {
+    nodes: nodes.map((node, i) => ({
+      ...node,
+      position: {
+        x: (i % cols) * 250,
+        y: Math.floor(i / cols) * 120,
+      },
+    })),
+    edges,
+  };
 }
 
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
@@ -727,23 +749,28 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
     return null;
   }, [slug, flowSteps]);
 
-  const layouted = useMemo(() => {
+  // Start with grid fallback, then async ELK layout replaces it
+  const fallback = useMemo(() => {
     if (!rawDiagram) return null;
     return autoLayout(rawDiagram.nodes, rawDiagram.edges);
   }, [rawDiagram]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layouted?.nodes ?? []);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layouted?.edges ?? []);
+  const [nodes, setNodes, onNodesChange] = useNodesState(fallback?.nodes ?? []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(fallback?.edges ?? []);
+  const [layoutDone, setLayoutDone] = useState(false);
 
-  // Re-layout when diagram changes
-  useMemo(() => {
-    if (layouted) {
-      setNodes(layouted.nodes);
-      setEdges(layouted.edges);
-    }
-  }, [layouted]);
+  // Run ELK async layout
+  useEffect(() => {
+    if (!rawDiagram) return;
+    setLayoutDone(false);
+    autoLayoutAsync(rawDiagram.nodes, rawDiagram.edges).then((result) => {
+      setNodes(result.nodes);
+      setEdges(result.edges);
+      setLayoutDone(true);
+    });
+  }, [rawDiagram]);
 
-  if (!layouted) return null;
+  if (!fallback) return null;
 
   return (
     <div className="my-6">

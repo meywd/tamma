@@ -4,7 +4,7 @@ sidebar:
   order: 7
 ---
 
-**Status:** Completed
+**Status:** Near Complete (18/19 done, TDD sub-workflow in progress)
 **Stories:** 19 (7-1 through 7-10, 7-1A through 7-1I)
 **Location:** `apps/tamma-elsa/` (C# / .NET 8), `packages/orchestrator/` (TypeScript bridge)
 
@@ -177,7 +177,7 @@ Located in `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/`:
 | 7-1E | Assessment Sub-Workflow | Done |
 | 7-1F | Context Gathering Sub-Workflow | Done |
 | 7-1G | Blocker Diagnosis Sub-Workflow | Done |
-| 7-1H | TDD Sub-Workflow | Done |
+| 7-1H | TDD Sub-Workflow | In Progress |
 | 7-1I | Debugging Sub-Workflow | Done |
 
 ---
