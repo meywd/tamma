@@ -59,8 +59,32 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var prUrl = builder.WithVariable<string>("PRUrl", "");
         var exitReason = builder.WithVariable<string>("ExitReason", "");
 
+        // Review / revision tracking (must be declared before activities that reference them)
+        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
+        var planRevisionCount = builder.WithVariable<int>("PlanRevisionCount", 0);
+
         // Sub-workflow results
         var subResult = builder.WithVariable<IDictionary<string, object>?>();
+
+        // ================================================================
+        // 0. Read workflow inputs into variables (no side effects in activity lambdas)
+        // ================================================================
+        var initInputs = new SetVariable
+        {
+            Id = "InitInputs",
+            Name = "Initialize Inputs",
+            Variable = repository,
+            Value = new Input<object?>(ctx =>
+            {
+                var repo = ctx.GetInput<string>("repository") ?? "";
+                workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
+                botAssignee.Set(ctx, ctx.GetInput<string>("botAssignee") ?? "tamma-bot");
+                baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
+                issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
+                return (object)repo;
+            }),
+        };
+        initInputs.SetDisplayText("Initialize Inputs");
 
         // ================================================================
         // 1. Validate Work Item
@@ -69,16 +93,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         {
             Id = "ValidateWorkItem",
             Name = "Validate Work Item",
-            WorkItemJson = new Input<string>(ctx => ctx.GetInput<string>("workItemJson") ?? ""),
-            Repository = new Input<string>(ctx =>
-            {
-                var repo = ctx.GetInput<string>("repository") ?? "";
-                repository.Set(ctx, repo);
-                botAssignee.Set(ctx, ctx.GetInput<string>("botAssignee") ?? "tamma-bot");
-                baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
-                issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
-                return repo;
-            }),
+            WorkItemJson = new Input<string>(ctx => workItemJson.Get(ctx)),
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
         };
         validateItem.SetDisplayText("Validate Work Item");
 
@@ -180,9 +196,6 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         }, "ExtractReviewDecision", "Extract Review Decision");
 
         // Review outcome routing
-        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
-        var planRevisionCount = builder.WithVariable<int>("PlanRevisionCount", 0);
-
         var reviewOutcome = new FlowSwitch<string>
         {
             Id = "ReviewOutcome",
@@ -640,11 +653,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         builder.Root = new Flowchart
         {
             Id = "SingleIssueCycleFlowchart",
-            Start = validateItem,
+            Start = initInputs,
             Activities =
             {
                 // Main flow
-                validateItem, gatherContext, extractContext,
+                initInputs, validateItem, gatherContext, extractContext,
                 generatePlan, extractPlan,
                 reviewPlan, extractReviewDecision, reviewOutcome,
                 createDeferredIssues, createSplitIssues,
@@ -671,6 +684,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             },
             Connections =
             {
+                // 0. Init Inputs → Validate
+                Connect(initInputs, validateItem),
+
                 // 1. Validate → notify + continue (parallel)
                 ConnectOutcome(validateItem, "Valid", notifyProcessing),
                 ConnectOutcome(validateItem, "Valid", gatherContext),

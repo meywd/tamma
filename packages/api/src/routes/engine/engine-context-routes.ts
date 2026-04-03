@@ -116,6 +116,12 @@ export async function registerEngineContextRoutes(
 
       contextStore.set(key, stored);
 
+      // Evict oldest entry if map exceeds max size
+      if (contextStore.size > 10_000) {
+        const firstKey = contextStore.keys().next().value;
+        if (firstKey !== undefined) contextStore.delete(firstKey);
+      }
+
       fastify.log.info(
         { repository, issueNumber, contextIdCount: contextIds.length },
         'Context stored',

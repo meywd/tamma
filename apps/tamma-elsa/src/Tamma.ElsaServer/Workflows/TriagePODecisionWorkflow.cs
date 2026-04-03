@@ -1,5 +1,6 @@
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Management.Activities.SetOutput;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -25,8 +26,22 @@ public class TriagePODecisionWorkflow : WorkflowBase
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "PO makes final triage decision based on panel review";
 
+        var setDefault = new SetOutput
+        {
+            Id = "SetDefaultDecisionJson",
+            Name = "Set Default decisionJson",
+            OutputName = new("decisionJson"),
+            OutputValue = new(ctx => (object)"{}")
+        };
+        setDefault.SetDisplayText("Set Default decisionJson");
+
         var stub = new Finish { Id = "Stub", Name = "Stub: PO Decision" };
         stub.SetDisplayText("Stub: PO Decision — TODO");
-        builder.Root = stub;
+
+        builder.Root = new Sequence
+        {
+            Id = "TriagePODecisionSequence",
+            Activities = { setDefault, stub }
+        };
     }
 }

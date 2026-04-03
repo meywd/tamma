@@ -95,6 +95,12 @@ export async function registerPromptRoutes(
         });
       }
 
+      if (body.template.length > 500_000) {
+        return reply.status(400).send({
+          error: 'Template exceeds maximum size of 500,000 characters',
+        });
+      }
+
       if (body.variables !== undefined && !Array.isArray(body.variables)) {
         return reply.status(400).send({
           error: '"variables" must be an array of strings',

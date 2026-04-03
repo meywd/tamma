@@ -96,19 +96,34 @@ public class ContextGatheringWorkflow : WorkflowBase
 
         var secScan = RoleScan("SecurityScan", "Security Scan", "security",
             repository, workItemJson, workItemType,
-            ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)}}}",
+            ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["dev"] = devFindings.Get(ctx),
+                ["qa"] = qaFindings.Get(ctx),
+            }),
             llmResult);
         var extractSec = Extract(securityFindings, llmResult, "ExtractSec", "Extract Security Findings");
 
         var devopsScan = RoleScan("DevOpsScan", "DevOps Scan", "devops",
             repository, workItemJson, workItemType,
-            ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)},\"security\":{securityFindings.Get(ctx)}}}",
+            ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["dev"] = devFindings.Get(ctx),
+                ["qa"] = qaFindings.Get(ctx),
+                ["security"] = securityFindings.Get(ctx),
+            }),
             llmResult);
         var extractDevOps = Extract(devopsFindings, llmResult, "ExtractDevOps", "Extract DevOps Findings");
 
         var archScan = RoleScan("ArchScan", "Architect Scan", "architect",
             repository, workItemJson, workItemType,
-            ctx => $"{{\"dev\":{devFindings.Get(ctx)},\"qa\":{qaFindings.Get(ctx)},\"security\":{securityFindings.Get(ctx)},\"devops\":{devopsFindings.Get(ctx)}}}",
+            ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["dev"] = devFindings.Get(ctx),
+                ["qa"] = qaFindings.Get(ctx),
+                ["security"] = securityFindings.Get(ctx),
+                ["devops"] = devopsFindings.Get(ctx),
+            }),
             llmResult);
         var extractArch = Extract(architectFindings, llmResult, "ExtractArch", "Extract Architect Findings");
 

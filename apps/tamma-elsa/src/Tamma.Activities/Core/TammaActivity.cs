@@ -181,6 +181,39 @@ public abstract class TammaAsyncActivity : CodeActivity, ITammaActivity
 }
 
 /// <summary>
+/// Sync activity that returns a result. Inherits CodeActivity&lt;T&gt;.
+/// Use for activities like ValidateWorkItemActivity that produce a typed output.
+/// </summary>
+public abstract class TammaResultActivity<T> : CodeActivity<T>, ITammaActivity
+{
+    protected ILogger? Logger { get; set; }
+
+    public virtual string? EventType => null;
+    public virtual Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new();
+    public virtual Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new();
+
+    protected abstract T RunWithResult(ActivityExecutionContext context);
+
+    protected override void Execute(ActivityExecutionContext context)
+    {
+        var startedAt = DateTime.UtcNow;
+        TammaEventEmitter.EmitStart(context, this, this, Logger);
+
+        try
+        {
+            var result = RunWithResult(context);
+            context.SetResult(result);
+            TammaEventEmitter.EmitSuccess(context, this, this, Logger, DateTime.UtcNow - startedAt);
+        }
+        catch (Exception ex)
+        {
+            TammaEventEmitter.EmitFailure(context, this, this, Logger, DateTime.UtcNow - startedAt, ex.Message);
+            throw;
+        }
+    }
+}
+
+/// <summary>
 /// Async activity WITH outcomes (FlowNode). Inherits Activity.
 /// Use for activities that need Continue/Stop, True/False, etc.
 /// </summary>

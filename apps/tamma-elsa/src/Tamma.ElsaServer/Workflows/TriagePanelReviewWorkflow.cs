@@ -1,5 +1,6 @@
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
+using Elsa.Workflows.Management.Activities.SetOutput;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -25,8 +26,22 @@ public class TriagePanelReviewWorkflow : WorkflowBase
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "4-role panel reviews item for triage (security/dev/devops/qa)";
 
+        var setDefault = new SetOutput
+        {
+            Id = "SetDefaultPanelResultJson",
+            Name = "Set Default panelResultJson",
+            OutputName = new("panelResultJson"),
+            OutputValue = new(ctx => (object)"{}")
+        };
+        setDefault.SetDisplayText("Set Default panelResultJson");
+
         var stub = new Finish { Id = "Stub", Name = "Stub: Triage Panel" };
         stub.SetDisplayText("Stub: Triage Panel — TODO");
-        builder.Root = stub;
+
+        builder.Root = new Sequence
+        {
+            Id = "TriagePanelReviewSequence",
+            Activities = { setDefault, stub }
+        };
     }
 }
