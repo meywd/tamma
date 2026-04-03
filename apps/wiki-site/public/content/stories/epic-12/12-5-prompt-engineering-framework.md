@@ -6,7 +6,9 @@ sidebar:
 
 ## Summary
 
-Introduce a structured prompt engineering framework that replaces the current ad-hoc, one-line system prompts with template-based, role-specific, convention-aware prompt construction. This story addresses the gap between having a solid LLM call pipeline (Stories 12.1-12.4) and actually producing high-quality outputs from it.
+Introduce a structured prompt engineering framework with a **role + action** 2-dimensional key system. Each role (developer, tester, architect, etc.) has prompts for each action (context-scan, implement, plan-review, write-tests, etc.). Prompts are stored in the DB/config, served via API, and resolved by the LLM Call workflow.
+
+Replaces the current ad-hoc, one-line system prompts with template-based, role-specific, convention-aware prompt construction.
 
 ## Motivation
 
@@ -474,9 +476,107 @@ interface ProjectConventions {
 2. **Context window pressure** -- Detailed system prompts + conventions + few-shot examples consume tokens. Mitigation: priority-based truncation ensures task content is never squeezed out.
 3. **Convention drift** -- Project conventions change over time; injected conventions may become stale. Mitigation: conventions loaded from file at runtime, not baked into compiled code.
 
+## Role + Action Key System
+
+### Design
+
+Prompts are keyed by **role** and **action**:
+
+```
+GET /api/prompts/:role/:action
+```
+
+### Roles
+- `developer` — writes code, scans for implementation details
+- `tester` — writes tests, scans for coverage gaps
+- `security` — reviews for vulnerabilities, validates inputs
+- `devops` — checks deployment, CI, infrastructure impact
+- `architect` — reviews patterns, conventions, interfaces
+- `product_owner` — summarizes, prioritizes, decides scope
+- `senior_developer` — deep implementation plans, task breakdown
+- `tech_writer` — summarizes for issue comments
+
+### Actions
+- `context-scan` — scan codebase for relevant context
+- `plan` — generate implementation plan
+- `plan-review` — review a plan from role's perspective
+- `implement` — write implementation code
+- `write-tests` — write test cases
+- `refactor` — analyze and refactor code
+- `code-review` — review a PR from role's perspective
+- `triage` — classify and prioritize an issue/alert
+- `summarize` — summarize findings for issue comment
+- `debug` — diagnose and fix a failure
+
+### Template Format
+
+```json
+{
+  "role": "developer",
+  "action": "context-scan",
+  "version": 1,
+  "template": "You are a {{role}} scanning a codebase for a {{workItemType}} work item.\n\nWork Item:\n{{workItemJson}}\n\nPrevious findings:\n{{previousFindings}}\n\nScan for source files, interfaces, dependencies...",
+  "variables": ["role", "workItemType", "workItemJson", "previousFindings"],
+  "systemPrompt": "You are an expert {{role}}. Use available tools to scan the codebase thoroughly.",
+  "enableTools": true,
+  "maxTokens": 4096
+}
+```
+
+### API Endpoints
+
+```
+GET  /api/prompts/:role/:action          → returns template
+PUT  /api/prompts/:role/:action          → update template
+GET  /api/prompts                        → list all role/action pairs
+POST /api/prompts/:role/:action/render   → render template with variables
+```
+
+### Storage
+
+Prompts stored in PostgreSQL:
+```sql
+CREATE TABLE prompt_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  role TEXT NOT NULL,
+  action TEXT NOT NULL,
+  version INT NOT NULL DEFAULT 1,
+  template TEXT NOT NULL,
+  system_prompt TEXT,
+  variables TEXT[] DEFAULT '{}',
+  enable_tools BOOLEAN DEFAULT false,
+  max_tokens INT DEFAULT 4096,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(role, action, version)
+);
+```
+
+### Integration
+
+Callers (workflows) pass `role + action + variables`:
+```csharp
+Input = new Dictionary<string, object>
+{
+    ["role"] = "developer",
+    ["action"] = "context-scan",
+    ["variables"] = new { workItemJson, previousFindings, workItemType },
+    ["enableTools"] = true,
+}
+```
+
+LlmCallWorkflow:
+1. Resolves prompt template from registry (`GET /api/prompts/{role}/{action}`)
+2. Interpolates `{{variables}}`
+3. Sends to LLM with resolved system prompt
+
+### Seeding
+
+Default prompts seeded from config files on startup. Can be overridden via API or dashboard.
+
 ---
 
-**Last Updated**: 2026-03-31
+**Last Updated**: 2026-04-02
 **Epic**: 12 (Agentic Tool Loop)
 **Priority**: P0 (all other workflows depend on prompt quality)
 **Status**: Planned

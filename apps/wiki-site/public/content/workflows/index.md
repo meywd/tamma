@@ -4,7 +4,7 @@ title: "Tamma ELSA Workflows"
 
 Tamma uses [ELSA Workflows](https://elsa-workflows.github.io/elsa-core/) (C# .NET 8) as its orchestration engine. All workflows are **code-first** (defined in C# classes extending `WorkflowBase`) and rendered as visual flowcharts in ELSA Studio.
 
-This page is the index for all 28 workflows in the system.
+This page is the index for all 30 workflows in the system.
 
 ## Workflow Inventory
 
@@ -12,9 +12,9 @@ This page is the index for all 28 workflows in the system.
 |---|----------|---------------|-------------|------|
 | 1 | **ADL Orchestrator** | `adl-orchestrator` | Priority-based work item selection, fire-and-forget cycle dispatch, triage integration | [Details](Workflow-ADL-Orchestrator) |
 | 2 | **Single Issue Cycle** | `single-issue-cycle` | 15-step autonomous development cycle for one issue (receives pre-selected work item from ADL) | [Details](Workflow-Single-Issue-Cycle) |
-| 3 | **Issue Triage** | `issue-triage` | LLM classification, labeling, and priority assignment for untriaged items | [Details](Workflow-Triage) |
+| 3 | **Issue Triage** | `issue-triage` | Fetch untriaged items, panel review, PO decision, apply labels | [Details](Workflow-Triage) |
 | 4 | **Issue Selection** | `issue-selection` | Select and assign the next GitHub issue (legacy, now handled by ADL Orchestrator) | [Details](Workflow-Single-Issue-Cycle#issue-selection) |
-| 5 | **Context Gathering** | `context-gathering` | Parallel context fetching from 6 sources with budget trimming | [Details](Workflow-Context-Gathering) |
+| 5 | **Context Gathering** | `context-gathering` | Sequential role-based codebase scanning via LLM Call sub-workflow | [Details](Workflow-Context-Gathering) |
 | 6 | **Plan Generation** | `plan-generation` | AI plan generation with human approval loop | [Details](Workflow-Single-Issue-Cycle#plan-generation) |
 | 7 | **Plan Review** | `plan-review` | 7-role LLM panel review (architect, dev, QA, security, devops, PO, orchestrator) with iterative discussion rounds | [Details](Workflow-Single-Issue-Cycle#plan-review) |
 | 8 | **Task Creation** | `task-creation` | Senior dev LLM breaks plan into deep implementation plans per task | [Details](Workflow-Single-Issue-Cycle#task-creation) |
@@ -37,7 +37,9 @@ This page is the index for all 28 workflows in the system.
 | 25 | **Assessment** | `assessment` | Junior developer skill assessment with AI | [Details](Workflow-Mentorship#assessment) |
 | 26 | **Blocker Diagnosis** | `blocker-diagnosis` | 4-level progressive blocker resolution | [Details](Workflow-Blocker-Diagnosis) |
 | 27 | **Debugging** | `debugging` | Systematic AI-driven debugging with 3 entry modes | [Details](Workflow-Debugging) |
-| 28 | **Issue Triage** | `issue-triage` | LLM classification, labeling, and routing for new issues | [Details](Workflow-Single-Issue-Cycle#issue-triage) |
+| 28 | **Triage Context Gathering** | `triage-context-gathering` | Gather context for triage: code usage, deps, CVE, changelog | [Details](Workflow-Triage#triage-context-gathering) |
+| 29 | **Triage Panel Review** | `triage-panel-review` | 4-role panel reviews item for triage (security/dev/devops/qa) | [Details](Workflow-Triage#triage-panel-review) |
+| 30 | **Triage PO Decision** | `triage-po-decision` | PO makes final triage decision based on panel review | [Details](Workflow-Triage#triage-po-decision) |
 
 ## Dependency Diagram
 
@@ -47,6 +49,12 @@ The following shows which workflows dispatch which sub-workflows via `DispatchWo
 ADL Orchestrator (selects work items, manages concurrency)
   |
   +-- Issue Triage (fire & forget, when NeedsTriage)
+  |     +-- Fetch Untriaged Items (issues + Dependabot + CodeQL)
+  |     +-- For Each Item:
+  |           +-- Triage Context Gathering (wait)
+  |           +-- Triage Panel Review (wait) — security/dev/devops/qa
+  |           +-- Triage PO Decision (wait) — priority, labels, automation
+  |           +-- Apply Labels & Post Comment
   |
   +-- Single Issue Cycle (fire & forget, receives pre-selected work item)
         |
@@ -111,6 +119,7 @@ Most inter-workflow calls use `DispatchWorkflow` with `WaitForCompletion = true`
 
 **Fire-and-forget dispatches:**
 - ADL Orchestrator dispatches Single Issue Cycle and Issue Triage (`WaitForCompletion = false`)
+- Issue Triage dispatches Triage Context Gathering, Triage Panel Review, and Triage PO Decision (`WaitForCompletion = true`)
 - Single Issue Cycle dispatches Update Issue Status at every step (`WaitForCompletion = false`)
 - Single Issue Cycle dispatches Code Review (`WaitForCompletion = false`), then blocks on PR approval bookmark
 - Single Issue Cycle dispatches Merge Complete (`WaitForCompletion = false`), then blocks on PR merged bookmark

@@ -280,6 +280,11 @@
     "section": "Workflows"
   },
   {
+    "path": "/workflows/triage",
+    "title": "Workflow: Issue Triage",
+    "section": "Workflows"
+  },
+  {
     "path": "/workflows/llm-call",
     "title": "Workflow: LLM Call",
     "section": "Workflows"
@@ -1227,6 +1232,11 @@
   {
     "path": "/stories/epic-6/6-10-implementation-plan",
     "title": "Story 6-10: Scrum Master Task Loop - Implementation Plan",
+    "section": "Epic 6"
+  },
+  {
+    "path": "/stories/epic-6/6-11-context-api-wiring",
+    "title": "Story 6-11: Context API Wiring — Connect C# Activities to TypeScript Packages",
     "section": "Epic 6"
   },
   {

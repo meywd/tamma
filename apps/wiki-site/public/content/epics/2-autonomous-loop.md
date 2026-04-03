@@ -4,8 +4,8 @@ sidebar:
   order: 2
 ---
 
-**Status:** Near Complete (13/16 done)
-**Stories:** 16 (2-1 through 2-16)
+**Status:** Near Complete (13/20 done)
+**Stories:** 20 (2-1 through 2-20)
 **Task Plans:** 3
 **Tech Spec:** [tech-spec-epic-2.md](/stories/epic-2//tech-spec-epic-2.md)
 **Retrospective:** Completed
@@ -52,6 +52,15 @@ Epic 2 implements the fundamental 14-step autonomous development loop with basic
 | 2-14 | Issue Decomposition Engine | 0 | Ready for Dev |
 | 2-15 | Task Dependency Mapping | 0 | Ready for Dev |
 | 2-16 | Incremental Task Sequencing | 0 | Ready for Dev |
+
+### Workflow Optimization (2-17 through 2-20)
+
+| Story | Title | Task Plans | Status |
+|-------|-------|------------|--------|
+| 2-17 | Context Gathering Redesign | 0 | Drafted |
+| 2-18 | Plan Generation Redesign | 0 | Drafted |
+| 2-19 | Plan Review Redesign | 0 | Drafted |
+| 2-20 | Priority-Based Work Item Selection | 0 | Drafted |
 
 ## Key Technical Details
 
@@ -103,6 +112,20 @@ Story 2-12 introduces automatic provider selection based on task type, cost, and
 ### Issue Decomposition
 
 Stories 2-14 through 2-16 add the ability to break large issues into smaller implementable tasks, map dependencies between them, and sequence execution for incremental delivery.
+
+### Priority-Based Work Item Selection (Story 2-20)
+
+Replaces single-source issue selection with a multi-source priority selector that queries:
+
+| Priority | Source | Trigger |
+|----------|--------|---------|
+| **Urgent** | Security alerts (critical/high) | Dependabot, CodeQL |
+| **Urgent** | Failed CI on main | GitHub Actions status |
+| **High** | Security alerts (medium/low) | Dependabot, CodeQL |
+| **Normal** | Issues by label | Configurable labels (e.g., `tamma-auto`) |
+| **Low** | Stale PRs | Review requested, no response > 24h |
+
+The `SelectWorkItemActivity` replaces the old `SelectIssueActivity` in the ADL Orchestrator, returning a `WorkItem` with type, priority, source, and metadata. SingleIssueCycle receives a `WorkItem` instead of selecting its own issue.
 
 ## Dependencies
 

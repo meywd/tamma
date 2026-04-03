@@ -4,8 +4,8 @@ sidebar:
   order: 10
 ---
 
-**Status:** Drafted (engine exists as imperative state machine; stories define target agentic architecture)
-**Stories:** 8 (10-1 through 10-8)
+**Status:** Drafted (engine exists as imperative state machine; stories define target agentic architecture). Story 10-9 in progress.
+**Stories:** 9 (10-1 through 10-9)
 **Packages:** `@tamma/orchestrator`, `apps/tamma-elsa/`
 
 ## Overview
@@ -82,6 +82,25 @@ CLI / Web / Mobile / Desktop / GitHub / Gitea / GitLab
 | 10-6 | Input Channel Unification (UI + Platform Events) | P1 | Drafted |
 | 10-7 | Event Store Security & Sanitization Pipeline | P0 | Drafted |
 | 10-8 | State Reconstruction from Event Stream | P0 | Drafted |
+| 10-9 | TammaActivity Base Class and Workflow Event Emission | P0 | In Progress |
+
+## Story 10-9: TammaActivity Base Class (In Progress)
+
+Creates base classes that all Tamma ELSA activities inherit from, providing automatic start/end event emission:
+
+- **`TammaActivity`** -- synchronous activities (extends `CodeActivity`)
+- **`TammaAsyncActivity`** -- async activities (extends `CodeActivity`)
+- **`TammaOutcomeActivity`** -- activities with multiple outcomes
+- **`ITammaActivity`** -- interface implemented by all three
+
+Each activity execution emits:
+1. `{EventType}.STARTED` -- before `Run()` executes
+2. `{EventType}.COMPLETED` -- after `Run()` succeeds (includes duration)
+3. `{EventType}.FAILED` -- if `Run()` throws (includes error + duration)
+
+Events follow the `AGGREGATE.ACTION.STATUS` naming pattern (e.g., `ADL.CONFIG.INIT.COMPLETED`).
+
+**Files:** `Tamma.Activities/Core/TammaActivity.cs`, all activity files in `Tamma.Activities/`
 
 ## Performance Targets
 

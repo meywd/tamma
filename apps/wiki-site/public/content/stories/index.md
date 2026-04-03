@@ -4,7 +4,7 @@ sidebar:
   order: 0
 ---
 
-This page provides an index of all user stories across all 25 epics. Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 27 epics. Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -64,7 +64,7 @@ Each story includes:
 
 ---
 
-## Epic 2: Autonomous Development Loop (Near Complete -- 13/16 Done)
+## Epic 2: Autonomous Development Loop (Near Complete -- 13/20 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -84,6 +84,10 @@ Each story includes:
 | 2-14 | Issue Decomposition Engine | Ready for Dev |
 | 2-15 | Task Dependency Mapping | Ready for Dev |
 | 2-16 | Incremental Task Sequencing | Ready for Dev |
+| 2-17 | Context Gathering Redesign | Drafted |
+| 2-18 | Plan Generation Redesign | Drafted |
+| 2-19 | Plan Review Redesign | Drafted |
+| 2-20 | Priority-Based Work Item Selection | Drafted |
 
 [Detailed Breakdown](/epics/2-autonomous-loop/) | [Story Files](/stories/epic-2/)
 
@@ -152,7 +156,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 6: Context & Knowledge Management (Near Complete -- 9/10 Done)
+## Epic 6: Context & Knowledge Management (Near Complete -- 10/11 Done)
 
 | Story | Title | Package | Status |
 |-------|-------|---------|--------|
@@ -166,6 +170,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 6-8 | Agent Permissions System | gates | Done |
 | 6-9 | Agent Knowledge Base | intelligence | Done |
 | 6-10 | Scrum Master Task Loop | scrum-master | Done |
+| 6-11 | Context API Wiring | api | Done |
 
 [Detailed Breakdown](/epics/6-context-knowledge/) | [Story Files](/stories/epic-6/)
 
@@ -236,9 +241,9 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 10: Engine Core -- Workflow-Driven Architecture (Drafted)
+## Epic 10: Engine Core -- Workflow-Driven Architecture (Drafted, 10-9 In Progress)
 
-Engine exists as an imperative state machine (`packages/orchestrator/src/engine.ts`) but these stories define the target agentic architecture. None match current implementation.
+Engine exists as an imperative state machine (`packages/orchestrator/src/engine.ts`) but these stories define the target agentic architecture. Story 10-9 (TammaActivity base class) is actively being implemented.
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -250,6 +255,7 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 | 10-6 | Input Channel Unification | Drafted |
 | 10-7 | Event Store Security & Sanitization Pipeline | Drafted |
 | 10-8 | State Reconstruction from Event Stream | Drafted |
+| 10-9 | TammaActivity Base Class and Workflow Event Emission | In Progress |
 
 [Detailed Breakdown](/epics/10-engine-core/) | [Story Files](/stories/epic-10/)
 
@@ -277,6 +283,7 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 | 12-2 | Agentic Tool Loop in CallLlm | Done |
 | 12-3 | Context Compaction | Done |
 | 12-4 | Streaming & Parallel Tools | Done |
+| 12-5 | Prompt Registry API | Done |
 
 [Detailed Breakdown](/epics/12-tool-loop/) | [Combined](/epics/11-14-elsa/) | [Story Files](/stories/epic-12/)
 
@@ -472,6 +479,21 @@ Custom wiki site deployed as Vite + React + React Router SPA on Cloudflare Worke
 
 ---
 
+## Epic 26: Project Management & Triage (Partially Implemented)
+
+Autonomous project management workflows integrating with the ADL Orchestrator's priority-based work item selection.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 26-1 | Issue Triage Workflow | In Progress |
+| 26-2 | Scrum Management Workflow | Drafted |
+| 26-3 | Release Management Workflow | Drafted |
+| 26-4 | Priority Configuration System | Drafted |
+
+[Detailed Breakdown](/epics/26-project-management/) | [Story Files](/stories/epic-26/)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -487,19 +509,19 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~221 |
-| Stories done | 115 |
-| Stories in progress | 20 |
-| Stories drafted | 56 |
-| Epics completed | 8 (8, 9, 11, 12, 13, 14, 15, 16, 25) |
+| Total stories across all epics | ~232 |
+| Stories done | 117 |
+| Stories in progress | 22 |
+| Stories drafted | 62 |
+| Epics completed | 9 (8, 9, 11, 12, 13, 14, 15, 16, 25) |
 | Epics near complete | 7 (1, 1.5, 2, 3, 4, 6, 7) |
-| Epics partially implemented | 4 (5, 18, 19, 21) |
-| Epics drafted | 7 (10, 17, 20, 22, 23, 24) |
+| Epics partially implemented | 5 (5, 18, 19, 21, 26) |
+| Epics drafted | 6 (10, 17, 20, 22, 23, 24) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
-| ELSA code-first workflows | 20+ |
+| ELSA code-first workflows | 30 |
 
 ---
 
