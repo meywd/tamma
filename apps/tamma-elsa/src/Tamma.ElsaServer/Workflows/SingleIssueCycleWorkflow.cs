@@ -2,6 +2,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.Activities.Flowchart.Models;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
@@ -196,18 +197,18 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         }, "ExtractReviewDecision", "Extract Review Decision");
 
         // Review outcome routing
-        var reviewOutcome = new FlowSwitch<string>
+        var reviewOutcome = new FlowSwitch
         {
             Id = "ReviewOutcome",
             Name = "Review Outcome",
-            Expression = new(ctx => reviewDecision.Get(ctx)),
-            Cases = {
-                { "approved", "Approved" },
-                { "needsModification", "NeedsModification" },
-                { "defer", "Defer" },
-                { "split", "Split" }
+            Cases =
+            {
+                new FlowSwitchCase("Approved", ctx => reviewDecision.Get(ctx) == "approved"),
+                new FlowSwitchCase("NeedsModification", ctx => reviewDecision.Get(ctx) == "needsModification"),
+                new FlowSwitchCase("Defer", ctx => reviewDecision.Get(ctx) == "defer"),
+                new FlowSwitchCase("Split", ctx => reviewDecision.Get(ctx) == "split"),
+                new FlowSwitchCase("NeedsHuman", ctx => true),
             },
-            Default = "NeedsHuman",
         };
         reviewOutcome.SetDisplayText("Review Outcome");
 
@@ -304,13 +305,16 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             return (object)"needsHuman";
         }, "ExtractTaskReview", "Extract Task Review");
 
-        var taskReviewOutcome = new FlowSwitch<string>
+        var taskReviewOutcome = new FlowSwitch
         {
             Id = "TaskReviewOutcome",
             Name = "Tasks Approved?",
-            Expression = new(ctx => taskReviewDecision.Get(ctx)),
-            Cases = { { "approved", "Approved" }, { "needsChanges", "NeedsChanges" } },
-            Default = "NeedsHuman",
+            Cases =
+            {
+                new FlowSwitchCase("Approved", ctx => taskReviewDecision.Get(ctx) == "approved"),
+                new FlowSwitchCase("NeedsChanges", ctx => taskReviewDecision.Get(ctx) == "needsChanges"),
+                new FlowSwitchCase("NeedsHuman", ctx => true),
+            },
         };
         taskReviewOutcome.SetDisplayText("Tasks Approved?");
 

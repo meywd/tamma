@@ -4,6 +4,8 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime;
+using Elsa.Workflows.Runtime.Contracts;
+using Elsa.Workflows.Runtime.Requests;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 
@@ -72,19 +74,20 @@ public class DispatchCycleActivity : TammaAsyncActivity
             ["baseBranch"] = BaseBranch.Get(context),
         };
 
-        var request = new DispatchWorkflowDefinitionRequest
+        var instanceId = Guid.NewGuid().ToString();
+        var request = new DispatchWorkflowDefinitionRequest("single-issue-cycle")
         {
-            DefinitionId = "single-issue-cycle",
             Input = input,
+            InstanceId = instanceId,
         };
 
-        var result = await _dispatcher.DispatchAsync(request);
+        await _dispatcher.DispatchAsync(request, default);
 
-        InstanceId.Set(context, result.InstanceId);
+        InstanceId.Set(context, instanceId);
 
         Logger?.LogInformation(
             "Dispatched single-issue-cycle for issue #{IssueNumber}, instance {InstanceId}",
-            IssueNumber.Get(context), result.InstanceId);
+            IssueNumber.Get(context), instanceId);
     }
 
     public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()
@@ -96,6 +99,6 @@ public class DispatchCycleActivity : TammaAsyncActivity
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
         ["issueNumber"] = IssueNumber.Get(context),
-        ["instanceId"] = InstanceId.Get(context),
+        ["instanceId"] = this.GetOutput<string?>(context, nameof(InstanceId)),
     };
 }

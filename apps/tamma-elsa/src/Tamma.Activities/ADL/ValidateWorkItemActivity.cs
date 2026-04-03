@@ -95,7 +95,7 @@ public class ValidateWorkItemActivity : TammaOutcomeActivity
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
-        ["workItemType"] = WorkItemType.Get(context),
-        ["errorMessage"] = ErrorMessage.Get(context),
+        ["workItemType"] = this.GetOutput<string?>(context, nameof(WorkItemType)),
+        ["errorMessage"] = this.GetOutput<string?>(context, nameof(ErrorMessage)),
     };
 }

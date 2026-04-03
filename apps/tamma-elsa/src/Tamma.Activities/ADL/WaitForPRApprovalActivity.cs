@@ -75,6 +75,6 @@ public class WaitForPRApprovalActivity : TammaOutcomeActivity
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
         ["prNumber"] = PRNumber.Get(context),
-        ["approvedBy"] = ApprovedBy.Get(context),
+        ["approvedBy"] = this.GetOutput<string?>(context, nameof(ApprovedBy)),
     };
 }

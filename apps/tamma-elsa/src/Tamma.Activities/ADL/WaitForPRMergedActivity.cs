@@ -66,6 +66,6 @@ public class WaitForPRMergedActivity : TammaOutcomeActivity
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
         ["prNumber"] = PRNumber.Get(context),
-        ["mergeSha"] = MergeSha.Get(context),
+        ["mergeSha"] = this.GetOutput<string?>(context, nameof(MergeSha)),
     };
 }

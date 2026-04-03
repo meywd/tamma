@@ -105,10 +105,10 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             var diagnosis = AnalyzeBlocker(diagnosticData, patterns, blockerContext);
 
             // Log the diagnosis event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.BlockerDiagnosed,
+                EventType = Tamma.Core.Entities.EventTypes.BlockerDiagnosed,
                 StateFrom = session.CurrentState,
                 StateTo = MentorshipState.DIAGNOSE_BLOCKER
             });
@@ -147,8 +147,8 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
     }
 
     private async Task<DiagnosticData> CollectDiagnosticData(
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior,
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior,
         string storyId,
         string juniorId)
     {

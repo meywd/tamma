@@ -4,6 +4,8 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime;
+using Elsa.Workflows.Runtime.Contracts;
+using Elsa.Workflows.Runtime.Requests;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 
@@ -50,16 +52,15 @@ public class DispatchAdlActivity : TammaAsyncActivity
 
         var configJson = ConfigJson.Get(context);
 
-        var request = new DispatchWorkflowDefinitionRequest
+        var request = new DispatchWorkflowDefinitionRequest("adl-orchestrator")
         {
-            DefinitionId = "adl-orchestrator",
             Input = new Dictionary<string, object>
             {
                 ["configJson"] = configJson,
             },
         };
 
-        await _dispatcher.DispatchAsync(request);
+        await _dispatcher.DispatchAsync(request, default);
         Logger?.LogInformation("Dispatched new ADL Orchestrator cycle");
     }
 }

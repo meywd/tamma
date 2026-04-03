@@ -112,8 +112,8 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
             {
                 SessionId = sessionId,
                 EventType = EventTypes.GuidanceProvided,
-                StateFrom = Core.Enums.MentorshipState.MONITOR_REVIEW,
-                StateTo = Core.Enums.MentorshipState.GUIDE_FIXES
+                StateFrom = Tamma.Core.Enums.MentorshipState.MONITOR_REVIEW,
+                StateTo = Tamma.Core.Enums.MentorshipState.GUIDE_FIXES
             });
 
             _logger?.LogInformation(

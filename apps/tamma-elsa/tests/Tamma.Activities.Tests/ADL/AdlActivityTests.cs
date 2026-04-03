@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Elsa.Workflows.Management;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -205,7 +206,8 @@ public class AdlActivityTests
     {
         var logger = new Mock<ILogger<CheckLimitsActivity>>();
 
-        Action act = () => new CheckLimitsActivity(logger.Object);
+        var store = new Mock<IWorkflowInstanceStore>();
+        Action act = () => new CheckLimitsActivity(logger.Object, store.Object);
         act.Should().NotThrow();
     }
 

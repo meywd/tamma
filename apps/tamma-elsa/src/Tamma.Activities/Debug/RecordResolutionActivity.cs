@@ -120,7 +120,7 @@ public class RecordResolutionActivity : CodeActivity
             // Log the resolution event
             if (_repository != null)
             {
-                await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+                await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
                 {
                     SessionId = sessionId,
                     EventType = "debug_resolved",

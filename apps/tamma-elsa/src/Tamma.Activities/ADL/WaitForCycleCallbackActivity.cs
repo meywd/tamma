@@ -110,8 +110,8 @@ public class WaitForCycleCallbackActivity : TammaOutcomeActivity
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
-        ["exitReason"] = ExitReason.Get(context),
-        ["issueNumber"] = IssueNumber.Get(context),
-        ["cycleSucceeded"] = CycleSucceeded.Get(context),
+        ["exitReason"] = this.GetOutput<string>(context, nameof(ExitReason)),
+        ["issueNumber"] = this.GetOutput<int?>(context, nameof(IssueNumber)),
+        ["cycleSucceeded"] = this.GetOutput<bool>(context, nameof(CycleSucceeded)),
     };
 }

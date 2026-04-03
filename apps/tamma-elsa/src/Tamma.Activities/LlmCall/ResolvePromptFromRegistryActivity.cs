@@ -81,6 +81,8 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
             ResolvedSystemPrompt.Set(context, "");
             EnableTools.Set(context, false);
             MaxTokens.Set(context, 4096);
+            context.TransientProperties["resolvedPromptLength"] = fallback?.Length ?? 0;
+            context.TransientProperties["hasSystemPrompt"] = false;
             Logger?.LogInformation("No action specified, using fallback prompt for role {Role}", role);
             return;
         }
@@ -122,6 +124,8 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
                 ResolvedSystemPrompt.Set(context, systemPrompt);
                 EnableTools.Set(context, enableTools);
                 MaxTokens.Set(context, maxTokens);
+                context.TransientProperties["resolvedPromptLength"] = rendered.Length;
+                context.TransientProperties["hasSystemPrompt"] = !string.IsNullOrEmpty(systemPrompt);
 
                 Logger?.LogInformation("Resolved prompt from registry: {Role}/{Action} ({Length} chars)",
                     role, action, rendered.Length);
@@ -142,6 +146,8 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         ResolvedSystemPrompt.Set(context, "");
         EnableTools.Set(context, false);
         MaxTokens.Set(context, 4096);
+        context.TransientProperties["resolvedPromptLength"] = fallback?.Length ?? 0;
+        context.TransientProperties["hasSystemPrompt"] = false;
     }
 
     public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()
@@ -150,11 +156,16 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         ["action"] = Action.Get(context),
     };
 
-    public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
+    public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
     {
-        ["role"] = Role.Get(context),
-        ["action"] = Action.Get(context),
-        ["promptLength"] = ResolvedPrompt.Get(context)?.Length ?? 0,
-        ["hasSystemPrompt"] = !string.IsNullOrEmpty(ResolvedSystemPrompt.Get(context)),
-    };
+        var promptLength = context.TransientProperties.TryGetValue("resolvedPromptLength", out var len) ? len : 0;
+        var hasSystem = context.TransientProperties.TryGetValue("hasSystemPrompt", out var hs) && hs is true;
+        return new()
+        {
+            ["role"] = Role.Get(context),
+            ["action"] = Action.Get(context),
+            ["promptLength"] = promptLength,
+            ["hasSystemPrompt"] = hasSystem,
+        };
+    }
 }

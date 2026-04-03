@@ -23,7 +23,7 @@ namespace Tamma.Activities.ADL;
 )]
 public class InitAdlConfigActivity : TammaActivity
 {
-    protected override string? EventType => "ADL.CONFIG.INIT";
+    public override string? EventType => "ADL.CONFIG.INIT";
 
     // --- Inputs ---
 
@@ -122,9 +122,10 @@ public class InitAdlConfigActivity : TammaActivity
         context.TransientProperties["resolvedConfig"] = config;
     }
 
-    protected override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
+    public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
     {
-        var config = context.TransientProperties.GetValueOrDefault("resolvedConfig") as AdlConfig;
+        context.TransientProperties.TryGetValue("resolvedConfig", out var configObj);
+        var config = configObj as AdlConfig;
         return new()
         {
             ["repository"] = config?.Repository,

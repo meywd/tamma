@@ -1,3 +1,4 @@
+using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
@@ -104,9 +105,13 @@ public static class TammaEventEmitter
         evt.ActivityName = source.Name ?? source.GetType().Name;
         evt.WorkflowInstanceId = context.WorkflowExecutionContext.Id;
 
-        var events = context.WorkflowExecutionContext.TransientProperties
-            .GetOrAdd("tamma:events", () => new List<TammaEvent>()) as List<TammaEvent>;
-        events?.Add(evt);
+        var props = context.WorkflowExecutionContext.TransientProperties;
+        if (!props.TryGetValue("tamma:events", out var existing) || existing is not List<TammaEvent>)
+        {
+            existing = new List<TammaEvent>();
+            props["tamma:events"] = existing;
+        }
+        ((List<TammaEvent>)existing).Add(evt);
 
         logger?.LogInformation(
             "[EVENT] {EventType} | {ActivityName} | {Status} | {Duration}ms",

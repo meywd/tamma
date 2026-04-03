@@ -218,7 +218,7 @@ public class FetchUntriagedItemsActivity : TammaAsyncActivity
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
-        ["totalCount"] = TotalCount.Get(context),
+        ["totalCount"] = this.GetOutput<int>(context, nameof(TotalCount)),
     };
 }
 

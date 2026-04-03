@@ -114,10 +114,10 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
             }
 
             // Log the assessment event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.AssessmentCompleted,
+                EventType = Tamma.Core.Entities.EventTypes.AssessmentCompleted,
                 StateFrom = MentorshipState.INIT_STORY_PROCESSING,
                 StateTo = MentorshipState.ASSESS_JUNIOR_CAPABILITY
             });
@@ -136,10 +136,10 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
         {
             _logger?.LogError(ex, "Error during capability assessment for session {SessionId}", sessionId);
 
-            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.Error
+                EventType = Tamma.Core.Entities.EventTypes.Error
             });
 
             context.SetResult(new AssessmentOutput

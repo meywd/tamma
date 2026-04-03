@@ -122,10 +122,10 @@ public class SuggestionGeneratorActivity : CodeActivity<SuggestionsOutput>
             suggestions = PrioritizeSuggestions(suggestions, patterns, junior.SkillLevel);
 
             // Log the suggestion generation
-            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SuggestionsGenerated
+                EventType = Tamma.Core.Entities.EventTypes.SuggestionsGenerated
             });
 
             // Record analytics

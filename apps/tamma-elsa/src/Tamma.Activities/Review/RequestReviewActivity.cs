@@ -91,8 +91,8 @@ public class RequestReviewActivity : CodeActivity<RequestReviewOutput>
             {
                 SessionId = sessionId,
                 EventType = EventTypes.CodeReviewSubmitted,
-                StateFrom = Core.Enums.MentorshipState.PREPARE_CODE_REVIEW,
-                StateTo = Core.Enums.MentorshipState.MONITOR_REVIEW
+                StateFrom = Tamma.Core.Enums.MentorshipState.PREPARE_CODE_REVIEW,
+                StateTo = Tamma.Core.Enums.MentorshipState.MONITOR_REVIEW
             });
 
             _logger?.LogInformation(

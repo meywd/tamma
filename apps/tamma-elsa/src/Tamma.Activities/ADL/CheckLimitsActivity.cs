@@ -4,8 +4,8 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Elsa.Workflows.Runtime;
-using Elsa.Workflows.Runtime.Filters;
+using Elsa.Workflows.Management;
+using Elsa.Workflows.Management.Filters;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 
@@ -134,7 +134,7 @@ public class CheckLimitsActivity : TammaOutcomeActivity
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
-        ["activeInstances"] = ActiveInstances.Get(context),
-        ["stopReason"] = StopReason.Get(context),
+        ["activeInstances"] = this.GetOutput<int>(context, nameof(ActiveInstances)),
+        ["stopReason"] = this.GetOutput<string?>(context, nameof(StopReason)),
     };
 }

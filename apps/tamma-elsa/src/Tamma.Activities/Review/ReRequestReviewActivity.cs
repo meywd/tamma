@@ -115,8 +115,8 @@ public class ReRequestReviewActivity : CodeActivity<ReRequestReviewOutput>
             {
                 SessionId = sessionId,
                 EventType = EventTypes.CodeReviewUpdate,
-                StateFrom = Core.Enums.MentorshipState.GUIDE_FIXES,
-                StateTo = Core.Enums.MentorshipState.RE_REQUEST_REVIEW
+                StateFrom = Tamma.Core.Enums.MentorshipState.GUIDE_FIXES,
+                StateTo = Tamma.Core.Enums.MentorshipState.RE_REQUEST_REVIEW
             });
 
             _logger?.LogInformation(

@@ -109,14 +109,14 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
             };
 
             // Log the event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
                 EventType = action switch
                 {
-                    CodeReviewAction.Prepare => Core.Entities.EventTypes.CodeReviewPrepared,
-                    CodeReviewAction.Monitor => Core.Entities.EventTypes.CodeReviewMonitored,
-                    _ => Core.Entities.EventTypes.CodeReviewUpdate
+                    CodeReviewAction.Prepare => Tamma.Core.Entities.EventTypes.CodeReviewPrepared,
+                    CodeReviewAction.Monitor => Tamma.Core.Entities.EventTypes.CodeReviewMonitored,
+                    _ => Tamma.Core.Entities.EventTypes.CodeReviewUpdate
                 },
                 StateFrom = MentorshipState.QUALITY_GATE_CHECK,
                 StateTo = result.NextState
@@ -140,8 +140,8 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 
     private async Task<CodeReviewOutput> PrepareCodeReview(
         Guid sessionId,
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior)
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior)
     {
         await _repository!.UpdateStateAsync(sessionId, MentorshipState.PREPARE_CODE_REVIEW);
 
@@ -227,8 +227,8 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 
     private async Task<CodeReviewOutput> MonitorCodeReview(
         Guid sessionId,
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior,
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior,
         int? prNumber)
     {
         await _repository!.UpdateStateAsync(sessionId, MentorshipState.MONITOR_REVIEW);
@@ -309,8 +309,8 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 
     private async Task<CodeReviewOutput> HandleReviewChanges(
         Guid sessionId,
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior,
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior,
         int? prNumber)
     {
         await _repository!.UpdateStateAsync(sessionId, MentorshipState.GUIDE_FIXES);
@@ -360,8 +360,8 @@ After making changes, the PR will be re-reviewed automatically.";
     }
 
     private string BuildPullRequestBody(
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior,
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior,
         List<GitHubFileChange> fileChanges,
         List<GitHubCommit> commits)
     {

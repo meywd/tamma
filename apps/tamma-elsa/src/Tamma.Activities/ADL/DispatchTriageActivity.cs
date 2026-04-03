@@ -4,6 +4,8 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime;
+using Elsa.Workflows.Runtime.Contracts;
+using Elsa.Workflows.Runtime.Requests;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 
@@ -55,13 +57,12 @@ public class DispatchTriageActivity : TammaAsyncActivity
             ["repository"] = Repository.Get(context),
         };
 
-        var request = new DispatchWorkflowDefinitionRequest
+        var request = new DispatchWorkflowDefinitionRequest("issue-triage")
         {
-            DefinitionId = "issue-triage",
             Input = input,
         };
 
-        await _dispatcher.DispatchAsync(request);
+        await _dispatcher.DispatchAsync(request, default);
 
         Logger?.LogInformation(
             "Dispatched issue-triage for {Count} untriaged issues",

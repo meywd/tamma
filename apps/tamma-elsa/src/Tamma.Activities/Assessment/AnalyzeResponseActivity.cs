@@ -88,10 +88,10 @@ public class AnalyzeResponseActivity : CodeActivity<AnalysisResult>
                 sessionId, result.Status, result.Confidence, analysisTime);
 
             // Log the analysis event
-            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.AIAnalysis,
+                EventType = Tamma.Core.Entities.EventTypes.AIAnalysis,
                 Trigger = "assessment_response_analysis"
             });
 

@@ -266,10 +266,10 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
     {
-        ["workItemType"] = WorkItemType.Get(context),
-        ["issueNumber"] = IssueNumber.Get(context),
-        ["priority"] = Priority.Get(context),
-        ["untriagedCount"] = UntriagedCount.Get(context),
+        ["workItemType"] = this.GetOutput<string?>(context, nameof(WorkItemType)),
+        ["issueNumber"] = this.GetOutput<int>(context, nameof(IssueNumber)),
+        ["priority"] = this.GetOutput<string>(context, nameof(Priority)),
+        ["untriagedCount"] = this.GetOutput<int>(context, nameof(UntriagedCount)),
     };
 }
 

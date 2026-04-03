@@ -55,10 +55,10 @@ public class InitStoryProcessingActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.INIT_STORY_PROCESSING);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SessionStarted,
+                EventType = Tamma.Core.Entities.EventTypes.SessionStarted,
                 StateTo = MentorshipState.INIT_STORY_PROCESSING
             });
 
@@ -109,10 +109,10 @@ public class ValidateStoryActivity : Activity
                 return;
             }
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.StoryValidated,
+                EventType = Tamma.Core.Entities.EventTypes.StoryValidated,
                 StateFrom = MentorshipState.INIT_STORY_PROCESSING,
                 StateTo = MentorshipState.VALIDATE_STORY
             });
@@ -144,7 +144,7 @@ public class ValidateStoryActivity : Activity
         }
     }
 
-    private static bool IsBugIssue(Core.Entities.Story story)
+    private static bool IsBugIssue(Tamma.Core.Entities.Story story)
     {
         var title = story.Title?.ToLowerInvariant() ?? "";
         var description = story.Description?.ToLowerInvariant() ?? "";
@@ -188,10 +188,10 @@ public class ClarifyRequirementsActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.CLARIFY_REQUIREMENTS);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.RequirementsClarified,
+                EventType = Tamma.Core.Entities.EventTypes.RequirementsClarified,
                 StateFrom = MentorshipState.ASSESS_JUNIOR_CAPABILITY,
                 StateTo = MentorshipState.CLARIFY_REQUIREMENTS
             });
@@ -248,10 +248,10 @@ public class ReExplainStoryActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.RE_EXPLAIN_STORY);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.StoryReExplained,
+                EventType = Tamma.Core.Entities.EventTypes.StoryReExplained,
                 StateFrom = MentorshipState.ASSESS_JUNIOR_CAPABILITY,
                 StateTo = MentorshipState.RE_EXPLAIN_STORY
             });
@@ -302,10 +302,10 @@ public class PlanDecompositionActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.PLAN_DECOMPOSITION);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.PlanCreated,
+                EventType = Tamma.Core.Entities.EventTypes.PlanCreated,
                 StateFrom = MentorshipState.ASSESS_JUNIOR_CAPABILITY,
                 StateTo = MentorshipState.PLAN_DECOMPOSITION
             });
@@ -355,10 +355,10 @@ public class ReviewPlanActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.REVIEW_PLAN);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.PlanReviewed,
+                EventType = Tamma.Core.Entities.EventTypes.PlanReviewed,
                 StateFrom = MentorshipState.PLAN_DECOMPOSITION,
                 StateTo = MentorshipState.REVIEW_PLAN
             });
@@ -411,10 +411,10 @@ public class AdjustPlanActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.ADJUST_PLAN);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.PlanAdjusted,
+                EventType = Tamma.Core.Entities.EventTypes.PlanAdjusted,
                 StateFrom = MentorshipState.REVIEW_PLAN,
                 StateTo = MentorshipState.ADJUST_PLAN
             });
@@ -457,10 +457,10 @@ public class StartImplementationActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.START_IMPLEMENTATION);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ImplementationStarted,
+                EventType = Tamma.Core.Entities.EventTypes.ImplementationStarted,
                 StateFrom = MentorshipState.REVIEW_PLAN,
                 StateTo = MentorshipState.START_IMPLEMENTATION
             });
@@ -504,10 +504,10 @@ public class DetectPatternActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.DETECT_PATTERN);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.PatternDetected,
+                EventType = Tamma.Core.Entities.EventTypes.PatternDetected,
                 StateTo = MentorshipState.DETECT_PATTERN
             });
 
@@ -558,10 +558,10 @@ public class AutoFixIssuesActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.AUTO_FIX_ISSUES);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.AutoFixAttempted,
+                EventType = Tamma.Core.Entities.EventTypes.AutoFixAttempted,
                 StateFrom = MentorshipState.QUALITY_GATE_CHECK,
                 StateTo = MentorshipState.AUTO_FIX_ISSUES
             });
@@ -615,10 +615,10 @@ public class ManualFixRequiredActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.MANUAL_FIX_REQUIRED);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ManualFixRequired,
+                EventType = Tamma.Core.Entities.EventTypes.ManualFixRequired,
                 StateFrom = MentorshipState.AUTO_FIX_ISSUES,
                 StateTo = MentorshipState.MANUAL_FIX_REQUIRED
             });
@@ -669,10 +669,10 @@ public class ReRequestReviewActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.RE_REQUEST_REVIEW);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ReviewReRequested,
+                EventType = Tamma.Core.Entities.EventTypes.ReviewReRequested,
                 StateFrom = MentorshipState.GUIDE_FIXES,
                 StateTo = MentorshipState.RE_REQUEST_REVIEW
             });
@@ -725,10 +725,10 @@ public class EscalateToSeniorActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.ESCALATE_TO_SENIOR);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.EscalatedToSenior,
+                EventType = Tamma.Core.Entities.EventTypes.EscalatedToSenior,
                 StateTo = MentorshipState.ESCALATE_TO_SENIOR
             });
 
@@ -766,10 +766,10 @@ public class CompletedActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.COMPLETED);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SessionCompleted,
+                EventType = Tamma.Core.Entities.EventTypes.SessionCompleted,
                 StateTo = MentorshipState.COMPLETED
             });
         }
@@ -810,10 +810,10 @@ public class PauseSessionActivity : Activity
         logger.LogInformation("Pausing session {SessionId}", sessionId);
 
         await repository.UpdateStateAsync(sessionId, MentorshipState.PAUSED);
-        await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+        await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
         {
             SessionId = sessionId,
-            EventType = Core.Entities.EventTypes.SessionPaused,
+            EventType = Tamma.Core.Entities.EventTypes.SessionPaused,
             StateTo = MentorshipState.PAUSED
         });
 
@@ -845,10 +845,10 @@ public class CancelSessionActivity : Activity
         logger.LogInformation("Cancelling session {SessionId}", sessionId);
 
         await repository.UpdateStateAsync(sessionId, MentorshipState.CANCELLED);
-        await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+        await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
         {
             SessionId = sessionId,
-            EventType = Core.Entities.EventTypes.SessionCancelled,
+            EventType = Tamma.Core.Entities.EventTypes.SessionCancelled,
             StateTo = MentorshipState.CANCELLED
         });
 
@@ -881,10 +881,10 @@ public class FailSessionActivity : Activity
         logger.LogError("Session {SessionId} failed. Reason: {Reason}", sessionId, reason ?? "Unknown");
 
         await repository.UpdateStateAsync(sessionId, MentorshipState.FAILED);
-        await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+        await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
         {
             SessionId = sessionId,
-            EventType = Core.Entities.EventTypes.SessionFailed,
+            EventType = Tamma.Core.Entities.EventTypes.SessionFailed,
             StateTo = MentorshipState.FAILED
         });
 
@@ -913,10 +913,10 @@ public class TimeoutSessionActivity : Activity
         logger.LogWarning("Session {SessionId} timed out", sessionId);
 
         await repository.UpdateStateAsync(sessionId, MentorshipState.TIMEOUT);
-        await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+        await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
         {
             SessionId = sessionId,
-            EventType = Core.Entities.EventTypes.SessionTimedOut,
+            EventType = Tamma.Core.Entities.EventTypes.SessionTimedOut,
             StateTo = MentorshipState.TIMEOUT
         });
 
@@ -973,10 +973,10 @@ public class AssessJuniorFlowActivity : Activity
                 return;
             }
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.AssessmentCompleted,
+                EventType = Tamma.Core.Entities.EventTypes.AssessmentCompleted,
                 StateFrom = MentorshipState.VALIDATE_STORY,
                 StateTo = MentorshipState.ASSESS_JUNIOR_CAPABILITY
             });
@@ -1031,10 +1031,10 @@ public class MonitorProgressFlowActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.MONITOR_PROGRESS);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ProgressUpdate,
+                EventType = Tamma.Core.Entities.EventTypes.ProgressUpdate,
                 StateTo = MentorshipState.MONITOR_PROGRESS
             });
 
@@ -1090,10 +1090,10 @@ public class DiagnoseBlockerFlowActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.DIAGNOSE_BLOCKER);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.BlockerDiagnosed,
+                EventType = Tamma.Core.Entities.EventTypes.BlockerDiagnosed,
                 StateTo = MentorshipState.DIAGNOSE_BLOCKER
             });
 
@@ -1139,10 +1139,10 @@ public class ProvideHintFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.PROVIDE_HINT);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.HintProvided,
+                EventType = Tamma.Core.Entities.EventTypes.HintProvided,
                 StateTo = MentorshipState.PROVIDE_HINT
             });
 
@@ -1179,10 +1179,10 @@ public class ProvideGuidanceFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.PROVIDE_GUIDANCE);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.GuidanceProvided,
+                EventType = Tamma.Core.Entities.EventTypes.GuidanceProvided,
                 StateTo = MentorshipState.PROVIDE_GUIDANCE
             });
 
@@ -1219,10 +1219,10 @@ public class ProvideAssistanceFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.PROVIDE_ASSISTANCE);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.GuidanceProvided,
+                EventType = Tamma.Core.Entities.EventTypes.GuidanceProvided,
                 StateTo = MentorshipState.PROVIDE_ASSISTANCE
             });
 
@@ -1264,10 +1264,10 @@ public class QualityGateFlowActivity : Activity
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.QUALITY_GATE_CHECK);
 
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.QualityGateRun,
+                EventType = Tamma.Core.Entities.EventTypes.QualityGateRun,
                 StateTo = MentorshipState.QUALITY_GATE_CHECK
             });
 
@@ -1306,10 +1306,10 @@ public class PrepareCodeReviewFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.PREPARE_CODE_REVIEW);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.CodeReviewPrepared,
+                EventType = Tamma.Core.Entities.EventTypes.CodeReviewPrepared,
                 StateTo = MentorshipState.PREPARE_CODE_REVIEW
             });
 
@@ -1347,10 +1347,10 @@ public class MonitorReviewFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.MONITOR_REVIEW);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.CodeReviewMonitored,
+                EventType = Tamma.Core.Entities.EventTypes.CodeReviewMonitored,
                 StateTo = MentorshipState.MONITOR_REVIEW
             });
 
@@ -1394,10 +1394,10 @@ public class GuideFixesFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.GUIDE_FIXES);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.CodeReviewUpdate,
+                EventType = Tamma.Core.Entities.EventTypes.CodeReviewUpdate,
                 StateTo = MentorshipState.GUIDE_FIXES
             });
 
@@ -1434,10 +1434,10 @@ public class MergeAndCompleteFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.MERGE_AND_COMPLETE);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.MergeCompleted,
+                EventType = Tamma.Core.Entities.EventTypes.MergeCompleted,
                 StateFrom = MentorshipState.MONITOR_REVIEW,
                 StateTo = MentorshipState.MERGE_AND_COMPLETE
             });
@@ -1475,10 +1475,10 @@ public class GenerateReportFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.GENERATE_REPORT);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ReportGenerated,
+                EventType = Tamma.Core.Entities.EventTypes.ReportGenerated,
                 StateFrom = MentorshipState.MERGE_AND_COMPLETE,
                 StateTo = MentorshipState.GENERATE_REPORT
             });
@@ -1516,10 +1516,10 @@ public class UpdateSkillProfileFlowActivity : Activity
         try
         {
             await repository.UpdateStateAsync(sessionId, MentorshipState.UPDATE_SKILL_PROFILE);
-            await repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SkillProfileUpdated,
+                EventType = Tamma.Core.Entities.EventTypes.SkillProfileUpdated,
                 StateFrom = MentorshipState.GENERATE_REPORT,
                 StateTo = MentorshipState.UPDATE_SKILL_PROFILE
             });

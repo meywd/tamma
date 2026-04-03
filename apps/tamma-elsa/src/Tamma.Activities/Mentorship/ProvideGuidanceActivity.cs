@@ -116,10 +116,10 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
             var resources = GetRelevantResources(blockerType, story);
 
             // Log the guidance event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.GuidanceProvided,
+                EventType = Tamma.Core.Entities.EventTypes.GuidanceProvided,
                 StateFrom = MentorshipState.DIAGNOSE_BLOCKER,
                 StateTo = newState
             });
@@ -174,38 +174,38 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         int level,
         int skillLevel,
         string? issueContext,
-        Core.Entities.Story story)
+        Tamma.Core.Entities.Story story)
     {
         var content = new GuidanceContent();
 
         // Base guidance generation by blocker type
         switch (blockerType)
         {
-            case Core.Enums.BlockerType.REQUIREMENTS_UNCLEAR:
+            case Tamma.Core.Enums.BlockerType.REQUIREMENTS_UNCLEAR:
                 content = GenerateRequirementsGuidance(level, story, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.TECHNICAL_KNOWLEDGE_GAP:
+            case Tamma.Core.Enums.BlockerType.TECHNICAL_KNOWLEDGE_GAP:
                 content = GenerateTechnicalGuidance(level, skillLevel, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.ENVIRONMENT_ISSUE:
+            case Tamma.Core.Enums.BlockerType.ENVIRONMENT_ISSUE:
                 content = GenerateEnvironmentGuidance(level, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.TESTING_CHALLENGE:
+            case Tamma.Core.Enums.BlockerType.TESTING_CHALLENGE:
                 content = GenerateTestingGuidance(level, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.ARCHITECTURE_CONFUSION:
+            case Tamma.Core.Enums.BlockerType.ARCHITECTURE_CONFUSION:
                 content = GenerateArchitectureGuidance(level, story, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.DEPENDENCY_ISSUE:
+            case Tamma.Core.Enums.BlockerType.DEPENDENCY_ISSUE:
                 content = GenerateDependencyGuidance(level, issueContext);
                 break;
 
-            case Core.Enums.BlockerType.MOTIVATION_ISSUE:
+            case Tamma.Core.Enums.BlockerType.MOTIVATION_ISSUE:
                 content = GenerateMotivationGuidance(level, skillLevel);
                 break;
 
@@ -217,7 +217,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         return content;
     }
 
-    private GuidanceContent GenerateRequirementsGuidance(int level, Core.Entities.Story story, string? context)
+    private GuidanceContent GenerateRequirementsGuidance(int level, Tamma.Core.Entities.Story story, string? context)
     {
         var content = new GuidanceContent();
 
@@ -377,7 +377,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         return content;
     }
 
-    private GuidanceContent GenerateArchitectureGuidance(int level, Core.Entities.Story story, string? context)
+    private GuidanceContent GenerateArchitectureGuidance(int level, Tamma.Core.Entities.Story story, string? context)
     {
         var content = new GuidanceContent
         {
@@ -462,7 +462,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         };
     }
 
-    private string GuessEntryPoint(Core.Entities.Story story)
+    private string GuessEntryPoint(Tamma.Core.Entities.Story story)
     {
         var title = story.Title?.ToLower() ?? "";
         if (title.Contains("api") || title.Contains("endpoint"))
@@ -474,13 +474,13 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         return "Start with the main feature file";
     }
 
-    private List<Resource> GetRelevantResources(BlockerType blockerType, Core.Entities.Story story)
+    private List<Resource> GetRelevantResources(BlockerType blockerType, Tamma.Core.Entities.Story story)
     {
         var resources = new List<Resource>();
 
         switch (blockerType)
         {
-            case Core.Enums.BlockerType.TECHNICAL_KNOWLEDGE_GAP:
+            case Tamma.Core.Enums.BlockerType.TECHNICAL_KNOWLEDGE_GAP:
                 resources.Add(new Resource
                 {
                     Title = "Team Knowledge Base",
@@ -489,7 +489,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
                 });
                 break;
 
-            case Core.Enums.BlockerType.TESTING_CHALLENGE:
+            case Tamma.Core.Enums.BlockerType.TESTING_CHALLENGE:
                 resources.Add(new Resource
                 {
                     Title = "Testing Best Practices",
@@ -498,7 +498,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
                 });
                 break;
 
-            case Core.Enums.BlockerType.ARCHITECTURE_CONFUSION:
+            case Tamma.Core.Enums.BlockerType.ARCHITECTURE_CONFUSION:
                 resources.Add(new Resource
                 {
                     Title = "Architecture Decision Records",

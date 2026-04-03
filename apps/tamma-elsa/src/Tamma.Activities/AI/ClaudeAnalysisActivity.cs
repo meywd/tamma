@@ -109,10 +109,10 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
 
             var result = ParseResponse(response, analysisType);
 
-            await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository!.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.AIAnalysis
+                EventType = Tamma.Core.Entities.EventTypes.AIAnalysis
             });
 
             _logger?.LogInformation(
