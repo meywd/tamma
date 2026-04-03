@@ -152,7 +152,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 6: Context & Knowledge Management (Near Complete -- 9/10 Done)
+## Epic 6: Context & Knowledge Management (Near Complete -- 10/11 Done)
 
 | Story | Title | Package | Status |
 |-------|-------|---------|--------|
@@ -166,6 +166,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 6-8 | Agent Permissions System | gates | Done |
 | 6-9 | Agent Knowledge Base | intelligence | Done |
 | 6-10 | Scrum Master Task Loop | scrum-master | Done |
+| 6-11 | Context API Wiring | api | Done |
 
 [Detailed Breakdown](Epics/Epic-6-Context-Knowledge) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-6)
 
@@ -278,6 +279,7 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 | 12-2 | Agentic Tool Loop in CallLlm | Done |
 | 12-3 | Context Compaction | Done |
 | 12-4 | Streaming & Parallel Tools | Done |
+| 12-5 | Prompt Registry API | Done |
 
 [Detailed Breakdown](Epics/Epic-12-Tool-Loop) | [Combined](Epics/Epic-11-14-ELSA) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-12)
 
@@ -473,13 +475,13 @@ Custom wiki site deployed as Vite + React + React Router SPA on Cloudflare Worke
 
 ---
 
-## Epic 26: Project Management & Triage (Drafted)
+## Epic 26: Project Management & Triage (Partially Implemented)
 
 Autonomous project management workflows integrating with the ADL Orchestrator's priority-based work item selection.
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 26-1 | Issue Triage Workflow | Drafted |
+| 26-1 | Issue Triage Workflow | In Progress |
 | 26-2 | Scrum Management Workflow | Drafted |
 | 26-3 | Release Management Workflow | Drafted |
 | 26-4 | Priority Configuration System | Drafted |
@@ -503,19 +505,19 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~230 |
-| Stories done | 115 |
-| Stories in progress | 21 |
-| Stories drafted | 63 |
+| Total stories across all epics | ~232 |
+| Stories done | 117 |
+| Stories in progress | 22 |
+| Stories drafted | 62 |
 | Epics completed | 9 (8, 9, 11, 12, 13, 14, 15, 16, 25) |
 | Epics near complete | 7 (1, 1.5, 2, 3, 4, 6, 7) |
-| Epics partially implemented | 4 (5, 18, 19, 21) |
-| Epics drafted | 7 (10, 17, 20, 22, 23, 24, 26) |
+| Epics partially implemented | 5 (5, 18, 19, 21, 26) |
+| Epics drafted | 6 (10, 17, 20, 22, 23, 24) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
-| ELSA code-first workflows | 20+ |
+| ELSA code-first workflows | 30 |
 
 ---
 
