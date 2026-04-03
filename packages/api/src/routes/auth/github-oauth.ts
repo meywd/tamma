@@ -178,16 +178,13 @@ export async function registerGitHubOAuthRoutes(
       maxAge: tokenExpiresIn,
     };
 
-    const subdomains = ['app.tamma.dev', 'api.tamma.dev', 'elsa.tamma.dev', 'logs.tamma.dev', 'wiki.tamma.dev'];
+    const subdomains = ['app.tamma.dev', 'api.tamma.dev', 'elsa.tamma.dev', 'logs.tamma.dev', 'wiki.tamma.dev', '.tamma.dev'];
 
-    let r = reply;
     for (const subdomain of subdomains) {
-      r = r.setCookie('tamma_session', token, { ...cookieOptions, domain: subdomain });
+      reply.setCookie('tamma_session', token, { ...cookieOptions, domain: subdomain });
     }
-    // Also set on the bare domain as fallback
-    r = r.setCookie('tamma_session', token, { ...cookieOptions, domain: '.tamma.dev' });
 
-    return r.redirect(redirectTo);
+    return reply.redirect(redirectTo);
   });
 
   // -------------------------------------------------------------------
@@ -212,11 +209,10 @@ export async function registerGitHubOAuthRoutes(
   // -------------------------------------------------------------------
   app.post('/api/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
     const subdomains = ['app.tamma.dev', 'api.tamma.dev', 'elsa.tamma.dev', 'logs.tamma.dev', 'wiki.tamma.dev', '.tamma.dev'];
-    let r = reply;
     for (const subdomain of subdomains) {
-      r = r.clearCookie('tamma_session', { path: '/', domain: subdomain });
+      reply.clearCookie('tamma_session', { path: '/', domain: subdomain });
     }
-    return r.send({ ok: true });
+    return reply.send({ ok: true });
   });
 }
 
