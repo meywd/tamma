@@ -174,10 +174,10 @@ export async function registerGitHubOAuthRoutes(
       .setCookie('tamma_session', token, {
         path: '/',
         httpOnly: true,
-        secure: true, // Cloudflare handles TLS
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none', // Must be 'none' for cross-subdomain cookies in modern browsers
         maxAge: tokenExpiresIn,
-        domain: '.tamma.dev', // Shared across subdomains
+        domain: '.tamma.dev',
       })
       .redirect(redirectTo);
   });
