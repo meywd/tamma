@@ -59,6 +59,8 @@ public class LlmCallWorkflow : WorkflowBase
 
         // Input variables (populated from workflow input)
         var agentRoleVar = builder.WithVariable<string>("AgentRole", "assistant");
+        var actionVar = builder.WithVariable<string>("Action", "");
+        var variablesJsonVar = builder.WithVariable<string>("VariablesJson", "{}");
         var taskPromptVar = builder.WithVariable<string>("TaskPrompt", "");
         var contextVar = builder.WithVariable<string>("Context", "");
         var sessionIdVar = builder.WithVariable<string>("SessionId", "");
@@ -101,17 +103,28 @@ public class LlmCallWorkflow : WorkflowBase
             Variable = agentRoleVar,
             Value = new(context => {
                 // Try new typed inputs first
-                var role = context.GetInput<string>("agentRole");
+                // New: role + action + variables pattern (from prompt registry)
+                var action = context.GetInput<string>("action") ?? "";
+                actionVar.Set(context, action);
+
+                // Serialize variables dict if provided
+                var variables = context.GetInput<IDictionary<string, object>>("variables");
+                if (variables != null)
+                    variablesJsonVar.Set(context, JsonSerializer.Serialize(variables));
+
+                // Enable tools from input
+                var enableTools = context.GetInput<bool?>("enableTools") ?? false;
+                enableToolLoopVar.Set(context, enableTools);
+
+                var role = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role");
                 if (!string.IsNullOrWhiteSpace(role))
                 {
-                    taskPromptVar.Set(context, context.GetInput<string>("taskPrompt") ?? "");
+                    taskPromptVar.Set(context, context.GetInput<string>("taskPrompt") ?? context.GetInput<string>("prompt") ?? "");
                     contextVar.Set(context, context.GetInput<string>("context") ?? "");
                     sessionIdVar.Set(context, context.GetInput<string>("sessionId") ?? "");
                     systemPromptOverrideVar.Set(context, context.GetInput<string>("systemPromptOverride") ?? "");
 
                     // Tool loop config from typed inputs
-                    var enableLoop = context.GetInput<bool?>("enableToolLoop") ?? false;
-                    enableToolLoopVar.Set(context, enableLoop);
                     var loopConfigJson = context.GetInput<string>("toolLoopConfig") ?? "";
                     toolLoopConfigJsonVar.Set(context, loopConfigJson);
 
@@ -145,6 +158,21 @@ public class LlmCallWorkflow : WorkflowBase
             })
         };
         initInputs.SetDisplayText("Initialize Inputs");
+
+        // 1b. Resolve prompt from registry (role + action → rendered prompt)
+        var resolvePrompt = new ResolvePromptFromRegistryActivity
+        {
+            Id = "ResolvePrompt",
+            Name = "Resolve Prompt",
+            Role = new Input<string>(ctx => agentRoleVar.Get(ctx)),
+            Action = new Input<string>(ctx => actionVar.Get(ctx)),
+            VariablesJson = new Input<string>(ctx => variablesJsonVar.Get(ctx)),
+            FallbackPrompt = new Input<string>(ctx => taskPromptVar.Get(ctx)),
+            ResolvedPrompt = new Output<string>(taskPromptVar), // overrides taskPrompt with rendered template
+            ResolvedSystemPrompt = new Output<string>(resolvedSystemPromptVar),
+            EnableTools = new Output<bool>(enableToolLoopVar),
+        };
+        resolvePrompt.SetDisplayText("Resolve Prompt");
 
         // 2. Parse input and set up budget
         var setupBudget = new SetVariable
@@ -540,13 +568,14 @@ public class LlmCallWorkflow : WorkflowBase
             Start = initInputs,
             Activities =
             {
-                initInputs, setupBudget, resolveAgentConfig, resolveChain,
+                initInputs, resolvePrompt, setupBudget, resolveAgentConfig, resolveChain,
                 forEachProviders, failureCheck, buildFailureOutput, setOutputs
             },
             Connections =
             {
-                // InitInputs → Setup Budget
-                Connect(initInputs, setupBudget),
+                // InitInputs → Resolve Prompt → Setup Budget
+                Connect(initInputs, resolvePrompt),
+                Connect(resolvePrompt, setupBudget),
 
                 // Setup Budget → Resolve Agent Config (DB lookup)
                 Connect(setupBudget, resolveAgentConfig),
