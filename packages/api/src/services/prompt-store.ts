@@ -267,7 +267,7 @@ export class PromptStore {
    * Extract {{variable}} names from a template string.
    */
   private _extractVariables(template: string): string[] {
-    const matches = template.matchAll(/\{\{([^}]+)\}\}/g);
+    const matches = template.matchAll(/\{\{([^}]{1,64})\}\}/g);
     const vars = new Set<string>();
     for (const match of matches) {
       const varName = match[1];
@@ -288,7 +288,7 @@ export class PromptStore {
     vars: Record<string, string>,
     unresolvedTracker: string[],
   ): string {
-    let result = template.replace(/\{\{([^}]+)\}\}/g, (_match, key: string) => {
+    let result = template.replace(/\{\{([^}]{1,64})\}\}/g, (_match, key: string) => {
       const value = vars[key];
       if (value === undefined) {
         unresolvedTracker.push(key);

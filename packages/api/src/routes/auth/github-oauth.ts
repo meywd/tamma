@@ -184,7 +184,9 @@ export async function registerGitHubOAuthRoutes(
       reply.setCookie('tamma_session', token, { ...cookieOptions, domain: subdomain });
     }
 
-    return reply.redirect(redirectTo);
+    // Final safety check: only redirect to validated tamma.dev URLs or default dashboard
+    const safeRedirect = isValidRedirect(redirectTo) ? redirectTo : dashboardUrl;
+    return reply.redirect(safeRedirect);
   });
 
   // -------------------------------------------------------------------
