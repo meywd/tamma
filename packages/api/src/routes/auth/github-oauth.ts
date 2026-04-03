@@ -169,20 +169,17 @@ export async function registerGitHubOAuthRoutes(
       }
     }
 
-    // Set cookie on each subdomain (modern browsers block cross-subdomain cookies)
-    const cookieOptions = {
+    // Single cookie on parent domain — covers all *.tamma.dev subdomains.
+    // Browsers reject Set-Cookie for domains that don't match the current origin,
+    // so per-subdomain cookies from api.tamma.dev would be silently dropped.
+    reply.setCookie('tamma_session', token, {
       path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'lax' as const,
       maxAge: tokenExpiresIn,
-    };
-
-    const subdomains = ['app.tamma.dev', 'api.tamma.dev', 'elsa.tamma.dev', 'logs.tamma.dev', 'wiki.tamma.dev', '.tamma.dev'];
-
-    for (const subdomain of subdomains) {
-      reply.setCookie('tamma_session', token, { ...cookieOptions, domain: subdomain });
-    }
+      domain: '.tamma.dev',
+    });
 
     // Final safety check: only redirect to validated tamma.dev URLs or default dashboard
     const safeRedirect = isValidRedirect(redirectTo) ? redirectTo : dashboardUrl;
@@ -210,10 +207,7 @@ export async function registerGitHubOAuthRoutes(
   // POST /api/auth/logout — clear session cookie
   // -------------------------------------------------------------------
   app.post('/api/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
-    const subdomains = ['app.tamma.dev', 'api.tamma.dev', 'elsa.tamma.dev', 'logs.tamma.dev', 'wiki.tamma.dev', '.tamma.dev'];
-    for (const subdomain of subdomains) {
-      reply.clearCookie('tamma_session', { path: '/', domain: subdomain });
-    }
+    reply.clearCookie('tamma_session', { path: '/', domain: '.tamma.dev' });
     return reply.send({ ok: true });
   });
 }
