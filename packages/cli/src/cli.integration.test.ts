@@ -4,8 +4,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const hasIntegration = process.env['INTEGRATION_TEST_CLI'] === 'true';
-
 const CLI_PATH = path.resolve(__dirname, 'index.tsx');
 
 function runCli(args: string, options?: { cwd?: string; env?: Record<string, string> }): string {
@@ -23,7 +21,7 @@ function runCli(args: string, options?: { cwd?: string; env?: Record<string, str
   }
 }
 
-describe.skipIf(!hasIntegration)('CLI Integration', () => {
+describe('CLI Integration', () => {
   let tempDir: string | undefined;
 
   afterEach(() => {
@@ -43,7 +41,8 @@ describe.skipIf(!hasIntegration)('CLI Integration', () => {
 
   it('should show version', () => {
     const output = runCli('--version');
-    expect(output).toContain('0.1.0');
+    // Version format: major.minor.patch (possibly with -dev suffix)
+    expect(output).toMatch(/\d+\.\d+\.\d+/);
   });
 
   it('should show status when no engine running', () => {

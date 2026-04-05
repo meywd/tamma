@@ -6,8 +6,6 @@ import type { IAgentProvider } from '@tamma/providers';
 import type { IGitPlatform } from '@tamma/platforms';
 import type { ILogger } from '@tamma/shared/contracts';
 
-const hasIntegration = process.env['INTEGRATION_TEST_ENGINE'] === 'true';
-
 function createIntegrationConfig(): TammaConfig {
   return {
     mode: 'standalone',
@@ -41,7 +39,7 @@ function createMockLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-describe.skipIf(!hasIntegration)('TammaEngine Integration', () => {
+describe('TammaEngine Integration', () => {
   it('should process a full issue lifecycle with mocked dependencies', async () => {
     const config = createIntegrationConfig();
     const logger = createMockLogger();

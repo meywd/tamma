@@ -66,9 +66,9 @@ jobs:
           timeout_minutes: 3
           max_attempts: 3
           retry_wait_seconds: 60
-          command: docker pull postgres:16-alpine
+          command: docker pull pgvector/pgvector:pg16
 
-      - name: Start Postgres
+      - name: Start Postgres (pgvector)
         run: |
           docker run -d --name postgres-test \
             -e POSTGRES_USER=tamma_test \
@@ -80,7 +80,15 @@ jobs:
             --health-interval 5s \
             --health-timeout 5s \
             --health-retries 5 \
-            postgres:16-alpine
+            pgvector/pgvector:pg16
+
+      - name: Start ChromaDB
+        run: |
+          docker run -d --name chromadb-test \
+            -e ANONYMIZED_TELEMETRY=false \
+            -e IS_PERSISTENT=false \
+            -p 8000:8000 \
+            chromadb/chroma:0.6.3
 
       - name: Wait for Postgres healthy
         run: |
@@ -91,6 +99,18 @@ jobs:
             sleep 2
           done
           echo "Postgres failed to become healthy" && docker logs postgres-test && exit 1
+
+      - name: Wait for ChromaDB healthy
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1; then
+              echo "ChromaDB is healthy"
+              exit 0
+            fi
+            echo "Check $i/15: waiting..."
+            sleep 2
+          done
+          echo "ChromaDB failed to become healthy" && docker logs chromadb-test && exit 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -115,6 +135,8 @@ jobs:
           PG_TEST_USER: tamma_test
           PG_TEST_PASSWORD: tamma_test
           PG_TEST_DB: tamma_test
+          PGVECTOR_TEST_CONNECTION_STRING: 'postgresql://tamma_test:tamma_test@localhost:5433/tamma_test'
+          CHROMADB_TEST_URL: 'http://localhost:8000'
         run: npx vitest run --config vitest.integration.config.ts
 
   e2e-tests:
