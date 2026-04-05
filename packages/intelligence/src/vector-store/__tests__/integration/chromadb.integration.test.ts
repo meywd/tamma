@@ -181,7 +181,9 @@ describe.skipIf(SKIP_INTEGRATION || !CHROMADB_URL)('ChromaDB Integration Tests',
         },
         {
           id: 'doc-ts-2',
-          embedding: normalizeVector([...Array(dimensions).fill(0.9)]),
+          // Use alternating values so the direction differs from all-1s after normalization
+          // (all-0.9 normalizes to the same direction as all-1.0, making ordering nondeterministic)
+          embedding: normalizeVector(Array.from({ length: dimensions }, (_, i) => (i % 2 === 0 ? 1.0 : 0.5))),
           content: 'TypeScript class definition',
           metadata: { language: 'typescript', type: 'class' },
         },
