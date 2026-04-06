@@ -14,14 +14,17 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Issue Triage Workflow — fetches untriaged items (issues, security alerts,
-/// CodeQL, Dependabot), runs a panel review for each, then PO decides
-/// priority and labels.
+/// Issue Triage — fetches untriaged items and dispatches a singleton
+/// triage-item-cycle for each one (fire & forget).
+///
+/// The per-item processing (context → panel → PO → labels) is handled
+/// by TriageItemCycleWorkflow which runs as a singleton — Elsa queues
+/// dispatches so items are triaged sequentially without overloading.
 ///
 /// Flow:
-///   Fetch Untriaged Items → For Each Item:
-///     Gather Context → Panel Review (security/dev/devops/qa)
-///     → PO Decision → Apply Labels → Post Comment
+///   Fetch Untriaged Items → Has Items? → Loop:
+///     Extract Item → Dispatch Triage Item Cycle (fire & forget)
+///     → Next Item → More Items? → loop / Report Complete → Finish
 ///
 /// Triggered by:
 ///   - ADL Orchestrator (NeedsTriage outcome)
@@ -35,7 +38,7 @@ public class IssueTriageWorkflow : WorkflowBase
         builder.Name = "Issue Triage";
         builder.DefinitionId = "issue-triage";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Triage untriaged items: panel review + PO decision + labels";
+        builder.Description = "Fetch untriaged items and dispatch singleton triage cycles";
 
         // ================================================================
         // Variables
@@ -45,14 +48,9 @@ public class IssueTriageWorkflow : WorkflowBase
         var currentItemIndex = builder.WithVariable<int>("CurrentItemIndex", 0);
         var totalItems = builder.WithVariable<int>("TotalItems", 0);
         var currentItemJson = builder.WithVariable<string>("CurrentItemJson", "");
-        var contextJson = builder.WithVariable<string>("ContextJson", "");
-        var panelResultJson = builder.WithVariable<string>("PanelResultJson", "");
-        var poDecisionJson = builder.WithVariable<string>("PODecisionJson", "");
-        var triagedCount = builder.WithVariable<int>("TriagedCount", 0);
-        var subResult = builder.WithVariable<IDictionary<string, object>?>();
 
         // ================================================================
-        // 1. Fetch Untriaged Items (issues + security alerts + CodeQL + Dependabot)
+        // 1. Fetch Untriaged Items
         // ================================================================
         var fetchItems = new FetchUntriagedItemsActivity
         {
@@ -101,131 +99,25 @@ public class IssueTriageWorkflow : WorkflowBase
         extractItem.SetDisplayText("Extract Current Item");
 
         // ================================================================
-        // 4. Gather Context (code usage, deps, CVE details)
+        // 4. Dispatch Triage Item Cycle (fire & forget, singleton)
         // ================================================================
-        var gatherContext = new DispatchWorkflow
+        var dispatchCycle = new DispatchWorkflow
         {
-            Id = "GatherTriageContext",
-            Name = "Gather Triage Context",
-            WorkflowDefinitionId = new("triage-context-gathering"),
+            Id = "DispatchTriageCycle",
+            Name = "Dispatch Triage Cycle",
+            WorkflowDefinitionId = new("triage-item-cycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["itemJson"] = currentItemJson.Get(ctx),
             }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
+            WaitForCompletion = new(false), // fire & forget — singleton queues
         };
-        gatherContext.SetDisplayText("Gather Triage Context");
-
-        var extractContext = new SetVariable
-        {
-            Id = "ExtractContext",
-            Name = "Extract Context",
-            Variable = contextJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = subResult.Get(ctx);
-                if (result != null && result.TryGetValue("contextJson", out var c))
-                    return (object)(c?.ToString() ?? "");
-                return (object)"";
-            })
-        };
-        extractContext.SetDisplayText("Extract Context");
+        dispatchCycle.SetDisplayText("Dispatch Triage Cycle");
 
         // ================================================================
-        // 5. Panel Review (security analyst, dev, devops, qa)
+        // 5. Next Item
         // ================================================================
-        var panelReview = new DispatchWorkflow
-        {
-            Id = "PanelReview",
-            Name = "Panel Review",
-            WorkflowDefinitionId = new("triage-panel-review"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["itemJson"] = currentItemJson.Get(ctx),
-                ["contextJson"] = contextJson.Get(ctx),
-            }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
-        };
-        panelReview.SetDisplayText("Panel Review");
-
-        var extractPanelResult = new SetVariable
-        {
-            Id = "ExtractPanelResult",
-            Name = "Extract Panel Result",
-            Variable = panelResultJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = subResult.Get(ctx);
-                if (result != null && result.TryGetValue("panelResultJson", out var p))
-                    return (object)(p?.ToString() ?? "");
-                return (object)"";
-            })
-        };
-        extractPanelResult.SetDisplayText("Extract Panel Result");
-
-        // ================================================================
-        // 6. PO Decision (priority, labels, automation level)
-        // ================================================================
-        var poDecision = new DispatchWorkflow
-        {
-            Id = "PODecision",
-            Name = "PO Decision",
-            WorkflowDefinitionId = new("triage-po-decision"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["itemJson"] = currentItemJson.Get(ctx),
-                ["panelResultJson"] = panelResultJson.Get(ctx),
-            }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
-        };
-        poDecision.SetDisplayText("PO Decision");
-
-        var extractDecision = new SetVariable
-        {
-            Id = "ExtractDecision",
-            Name = "Extract Decision",
-            Variable = poDecisionJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = subResult.Get(ctx);
-                if (result != null && result.TryGetValue("decisionJson", out var d))
-                    return (object)(d?.ToString() ?? "");
-                return (object)"";
-            })
-        };
-        extractDecision.SetDisplayText("Extract Decision");
-
-        // ================================================================
-        // 7. Apply Labels + Post Comment (fire & forget)
-        // ================================================================
-        var applyLabels = new ApplyTriageResultActivity
-        {
-            Id = "ApplyLabels",
-            Name = "Apply Labels & Comment",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            ItemJson = new Input<string>(ctx => currentItemJson.Get(ctx)),
-            DecisionJson = new Input<string>(ctx => poDecisionJson.Get(ctx)),
-        };
-        applyLabels.SetDisplayText("Apply Labels & Comment");
-
-        // ================================================================
-        // 8. Increment + Loop
-        // ================================================================
-        var incrementTriaged = new SetVariable
-        {
-            Id = "IncrTriaged",
-            Name = "Increment Triaged",
-            Variable = triagedCount,
-            Value = new Input<object?>(ctx => (object)(triagedCount.Get(ctx) + 1))
-        };
-        incrementTriaged.SetDisplayText("Increment Triaged");
-
         var incrementIndex = new SetVariable
         {
             Id = "IncrIndex",
@@ -243,7 +135,7 @@ public class IssueTriageWorkflow : WorkflowBase
         hasMoreItems.SetDisplayText("More Items?");
 
         // ================================================================
-        // 9. Report Complete
+        // 6. Report Complete
         // ================================================================
         var reportComplete = new ReportCycleResultActivity
         {
@@ -266,10 +158,8 @@ public class IssueTriageWorkflow : WorkflowBase
             Activities =
             {
                 fetchItems, hasItems,
-                extractItem, gatherContext, extractContext,
-                panelReview, extractPanelResult,
-                poDecision, extractDecision,
-                applyLabels, incrementTriaged, incrementIndex, hasMoreItems,
+                extractItem, dispatchCycle,
+                incrementIndex, hasMoreItems,
                 reportComplete, finish,
             },
             Connections =
@@ -281,17 +171,10 @@ public class IssueTriageWorkflow : WorkflowBase
                 ConnectOutcome(hasItems, "False", reportComplete),
                 Connect(reportComplete, finish),
 
-                // Has items → extract → gather context → panel → PO → apply → loop
+                // Has items → extract → dispatch (f&f) → next → loop
                 ConnectOutcome(hasItems, "True", extractItem),
-                Connect(extractItem, gatherContext),
-                Connect(gatherContext, extractContext),
-                Connect(extractContext, panelReview),
-                Connect(panelReview, extractPanelResult),
-                Connect(extractPanelResult, poDecision),
-                Connect(poDecision, extractDecision),
-                Connect(extractDecision, applyLabels),
-                Connect(applyLabels, incrementTriaged),
-                Connect(incrementTriaged, incrementIndex),
+                Connect(extractItem, dispatchCycle),
+                Connect(dispatchCycle, incrementIndex),
                 Connect(incrementIndex, hasMoreItems),
 
                 // More items → loop back

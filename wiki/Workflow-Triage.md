@@ -6,7 +6,7 @@
 
 ## Purpose
 
-The Issue Triage workflow fetches **untriaged items** (GitHub issues, Dependabot alerts, CodeQL alerts) and processes each one through a structured pipeline: gather context, run a 4-role panel review, get a PO decision, then apply labels and post a triage comment.
+The Issue Triage workflow fetches **untriaged items** (GitHub issues, Dependabot alerts, CodeQL alerts) and dispatches a **singleton triage cycle** for each one. The per-item processing (context → panel review → PO decision → labels) is handled by the `TriageItemCycleWorkflow` sub-workflow, which runs as a singleton — Elsa queues dispatches so items are triaged sequentially without overloading LLM resources.
 
 ## Triggers
 
@@ -36,33 +36,8 @@ The Issue Triage workflow fetches **untriaged items** (GitHub issues, Dependabot
             |                             |
             v                             v
 +----------------------------+   +------------------+
-| Gather Triage Context      |   | Finish           |
-| (triage-context-gathering) |   +------------------+
-+-----------+----------------+
-            |
-            v
-+----------------------------+
-| Panel Review               |
-| (triage-panel-review)      |
-| security/dev/devops/qa     |
-+-----------+----------------+
-            |
-            v
-+----------------------------+
-| PO Decision                |
-| (triage-po-decision)       |
-| priority, labels, type     |
-+-----------+----------------+
-            |
-            v
-+----------------------------+
-| Apply Labels & Comment     |
-| (ApplyTriageResultActivity)|
-+-----------+----------------+
-            |
-            v
-+----------------------------+
-| Increment Triaged          |
+| Dispatch Triage Cycle      |   | Finish           |
+| (fire & forget, singleton) |   +------------------+
 +-----------+----------------+
             |
             v
@@ -82,6 +57,19 @@ The Issue Triage workflow fetches **untriaged items** (GitHub issues, Dependabot
 ```
 
 ## Sub-Workflows
+
+### Triage Item Cycle (singleton)
+
+**Definition ID:** `triage-item-cycle`
+**Class:** `TriageItemCycleWorkflow`
+
+Processes a single untriaged item sequentially. Runs as a **singleton** — only one instance at a time. Dispatches are queued by Elsa.
+
+**Flow:** Init → Gather Context → Panel Review → PO Decision → Apply Labels → Finish
+
+**Inputs:** `repository`, `itemJson`
+
+Each step dispatches an LLM call sub-workflow. The LLM call workflow self-throttles on budget and concurrency limits, providing natural backpressure.
 
 ### Triage Context Gathering
 
@@ -114,8 +102,6 @@ Four-role LLM panel assesses the item:
 | DevOps | Infrastructure impact, deployment considerations, dependency chain |
 | QA | Test impact, compatibility, regression risk |
 
-For security alerts, the panel specifically evaluates: CVE severity, attack surface exposure, breaking changes from upgrades, dependency chain depth, and compatibility constraints.
-
 **Inputs:** `repository`, `itemJson`, `contextJson`
 **Outputs:** `panelResultJson`
 
@@ -142,19 +128,25 @@ The Product Owner makes the final triage decision:
 
 **Status:** Stub -- workflow structure defined, implementation pending.
 
-## Item Processing
+## Concurrency Model
 
-The workflow processes items in a loop:
+```
+IssueTriageWorkflow          TriageItemCycleWorkflow (singleton)
+┌──────────────┐             ┌──────────────────────┐
+│ Fetch 5 items│             │ Item 1: context →    │
+│ Dispatch #1  │──f&f──────→ │   panel → PO → label │
+│ Dispatch #2  │──f&f──┐     │                      │
+│ Dispatch #3  │──f&f──┤     └──────────────────────┘
+│ Dispatch #4  │──f&f──┤          ↓ (queued)
+│ Dispatch #5  │──f&f──┤     ┌──────────────────────┐
+│ Report Done  │       ├────→│ Item 2: context →    │
+└──────────────┘       │     │   panel → PO → label │
+                       │     └──────────────────────┘
+                       │          ↓ (queued)
+                       └───→ Items 3, 4, 5 ...
+```
 
-1. **FetchUntriagedItemsActivity** -- Queries GitHub for issues without triage labels, plus Dependabot and CodeQL security alerts
-2. For each item:
-   - Extract the item from the JSON array by index
-   - Dispatch `triage-context-gathering` (wait for completion)
-   - Dispatch `triage-panel-review` (wait for completion)
-   - Dispatch `triage-po-decision` (wait for completion)
-   - **ApplyTriageResultActivity** -- Applies labels and posts the triage comment via GitHub API
-3. Increment counters and loop until all items are processed
-4. **ReportCycleResultActivity** -- Logs triage completion
+The triage workflow completes quickly (just dispatches). The actual work is serialized by the singleton constraint on `triage-item-cycle`. Each LLM call within the cycle self-throttles via budget and concurrency guards.
 
 ## Inputs
 
@@ -169,8 +161,7 @@ The workflow processes items in a loop:
 | `ItemsJson` | string | JSON array of untriaged items |
 | `TotalItems` | int | Count of items to process |
 | `CurrentItemIndex` | int | Current loop index |
-| `TriagedCount` | int | Number of items successfully triaged |
 
 ---
 
-_See also: [ADL Orchestrator](Workflow-ADL-Orchestrator) | [Context Gathering](Workflow-Context-Gathering) | [Workflows Index](Workflows)_
+_See also: [ADL Orchestrator](Workflow-ADL-Orchestrator) | [Triage Item Cycle](Workflow-Triage-Item-Cycle) | [Workflows Index](Workflows)_

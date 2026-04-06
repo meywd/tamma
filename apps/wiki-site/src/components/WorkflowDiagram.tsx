@@ -620,17 +620,13 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('budget', 'outputs'),
     ],
   },
-  // IssueTriageWorkflow.cs — Fetch untriaged items, loop: context → panel → PO → apply
+  // IssueTriageWorkflow.cs — Fetch items, dispatch singleton triage cycles
   'triage': {
     nodes: [
       n('fetch', 'Fetch Untriaged Items', 0, 0, 'start', { description: 'Issues + Dependabot + CodeQL' }),
       n('hasItems', 'Has Items?', 0, 0, 'decision'),
       n('extract', 'Extract Current Item', 0, 0),
-      n('context', 'Gather Triage Context', 0, 0, 'subworkflow', { description: 'Code usage, deps, CVE' }),
-      n('panel', 'Panel Review', 0, 0, 'subworkflow', { description: 'Security / Dev / DevOps / QA' }),
-      n('po', 'PO Decision', 0, 0, 'subworkflow', { description: 'Priority, type, labels' }),
-      n('apply', 'Apply Labels & Comment', 0, 0),
-      n('incr', 'Increment Triaged', 0, 0),
+      n('dispatch', 'Dispatch Triage Cycle', 0, 0, 'subworkflow', { description: 'Fire & forget (singleton)' }),
       n('next', 'Next Item', 0, 0),
       n('more', 'More Items?', 0, 0, 'decision'),
       n('report', 'Report Triage Complete', 0, 0),
@@ -640,16 +636,30 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('fetch', 'hasItems'),
       e('hasItems', 'extract', 'Yes'),
       e('hasItems', 'report', 'No', 'right'),
-      e('extract', 'context'),
-      e('context', 'panel'),
-      e('panel', 'po'),
-      e('po', 'apply'),
-      e('apply', 'incr'),
-      e('incr', 'next'),
+      e('extract', 'dispatch'),
+      e('dispatch', 'next'),
       e('next', 'more'),
       e('more', 'extract', 'Yes'),
       e('more', 'report', 'No', 'right'),
       e('report', 'done'),
+    ],
+  },
+  // TriageItemCycleWorkflow.cs — Singleton: context → panel → PO → labels
+  'triage-item-cycle': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('context', 'Gather Triage Context', 0, 0, 'subworkflow', { description: 'Code usage, deps, CVE' }),
+      n('panel', 'Panel Review', 0, 0, 'subworkflow', { description: 'Security / Dev / DevOps / QA' }),
+      n('po', 'PO Decision', 0, 0, 'subworkflow', { description: 'Priority, type, labels' }),
+      n('apply', 'Apply Labels & Comment', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'context'),
+      e('context', 'panel'),
+      e('panel', 'po'),
+      e('po', 'apply'),
+      e('apply', 'done'),
     ],
   },
   // PlanGenerationWorkflow.cs — Architect LLM generates plan, validates, retries

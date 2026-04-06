@@ -2,7 +2,7 @@
 
 Tamma uses [ELSA Workflows](https://elsa-workflows.github.io/elsa-core/) (C# .NET 8) as its orchestration engine. All workflows are **code-first** (defined in C# classes extending `WorkflowBase`) and rendered as visual flowcharts in ELSA Studio.
 
-This page is the index for all 29 workflows in the system.
+This page is the index for all 30 workflows in the system.
 
 ## Workflow Inventory
 
@@ -34,9 +34,10 @@ This page is the index for all 29 workflows in the system.
 | 24 | **Assessment** | `assessment` | Junior developer skill assessment with AI | [Details](Workflow-Mentorship#assessment) |
 | 25 | **Blocker Diagnosis** | `blocker-diagnosis` | 4-level progressive blocker resolution | [Details](Workflow-Blocker-Diagnosis) |
 | 26 | **Debugging** | `debugging` | Systematic AI-driven debugging with 3 entry modes | [Details](Workflow-Debugging) |
-| 27 | **Triage Context Gathering** | `triage-context-gathering` | Gather context for triage: code usage, deps, CVE, changelog | [Details](Workflow-Triage#triage-context-gathering) |
-| 28 | **Triage Panel Review** | `triage-panel-review` | 4-role panel reviews item for triage (security/dev/devops/qa) | [Details](Workflow-Triage#triage-panel-review) |
-| 29 | **Triage PO Decision** | `triage-po-decision` | PO makes final triage decision based on panel review | [Details](Workflow-Triage#triage-po-decision) |
+| 27 | **Triage Item Cycle** | `triage-item-cycle` | Singleton: context → panel → PO → labels for one item | [Details](Workflow-Triage-Item-Cycle) |
+| 28 | **Triage Context Gathering** | `triage-context-gathering` | Gather context for triage: code usage, deps, CVE, changelog | [Details](Workflow-Triage#triage-context-gathering) |
+| 29 | **Triage Panel Review** | `triage-panel-review` | 4-role panel reviews item for triage (security/dev/devops/qa) | [Details](Workflow-Triage#triage-panel-review) |
+| 30 | **Triage PO Decision** | `triage-po-decision` | PO makes final triage decision based on panel review | [Details](Workflow-Triage#triage-po-decision) |
 
 ## Dependency Diagram
 
@@ -48,10 +49,11 @@ ADL Orchestrator (selects work items, manages concurrency)
   +-- Issue Triage (fire & forget, when NeedsTriage)
   |     +-- Fetch Untriaged Items (issues + Dependabot + CodeQL)
   |     +-- For Each Item:
-  |           +-- Triage Context Gathering (wait)
-  |           +-- Triage Panel Review (wait) — security/dev/devops/qa
-  |           +-- Triage PO Decision (wait) — priority, labels, automation
-  |           +-- Apply Labels & Post Comment
+  |           +-- Triage Item Cycle (fire & forget, singleton — queued)
+  |                 +-- Triage Context Gathering (wait)
+  |                 +-- Triage Panel Review (wait) — security/dev/devops/qa
+  |                 +-- Triage PO Decision (wait) — priority, labels, automation
+  |                 +-- Apply Labels & Post Comment
   |
   +-- Single Issue Cycle (fire & forget, receives pre-selected work item)
         |
