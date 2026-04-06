@@ -652,6 +652,333 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('report', 'done'),
     ],
   },
+  // PlanGenerationWorkflow.cs — Architect LLM generates plan, validates, retries
+  'plan-generation': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('generate', 'Generate Plan', 0, 0, 'subworkflow', { description: 'LLM Call (architect)' }),
+      n('validate', 'Extract & Validate', 0, 0),
+      n('valid', 'Plan Valid?', 0, 0, 'decision'),
+      n('output', 'Output Plan', 0, 0),
+      n('incrRetry', 'Increment Retry', 0, 0),
+      n('canRetry', 'Can Retry?', 0, 0, 'decision'),
+      n('error', 'Error Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'generate'),
+      e('generate', 'validate'),
+      e('validate', 'valid'),
+      e('valid', 'output', 'Yes'),
+      e('valid', 'incrRetry', 'No', 'right'),
+      e('output', 'done'),
+      e('incrRetry', 'canRetry'),
+      e('canRetry', 'generate', 'Yes'),
+      e('canRetry', 'error', 'No', 'right'),
+      e('error', 'done'),
+    ],
+  },
+  // PlanReviewWorkflow.cs — 7-role panel with discussion rounds
+  'plan-review': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('arch', 'Architect Review', 0, 0, 'subworkflow'),
+      n('dev', 'Developer Review', 0, 0, 'subworkflow'),
+      n('tester', 'Tester Review', 0, 0, 'subworkflow'),
+      n('sec', 'Security Review', 0, 0, 'subworkflow'),
+      n('devops', 'DevOps Review', 0, 0, 'subworkflow'),
+      n('po', 'PO Review', 0, 0, 'subworkflow'),
+      n('srdev', 'Senior Dev Review', 0, 0, 'subworkflow'),
+      n('aggregate', 'Aggregate Verdicts', 0, 0),
+      n('allApproved', 'All Approved?', 0, 0, 'decision'),
+      n('approved', 'Set Approved', 0, 0),
+      n('discussion', 'Discussion Round', 0, 0, 'subworkflow', { description: 'PO resolves concerns' }),
+      n('needsReReview', 'Needs Re-review?', 0, 0, 'decision'),
+      n('incrRound', 'Increment Round', 0, 0),
+      n('canContinue', 'Round <= 3?', 0, 0, 'decision'),
+      n('forceHuman', 'Force Needs Human', 0, 0),
+      n('outputs', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'arch'),
+      e('arch', 'dev'), e('dev', 'tester'), e('tester', 'sec'),
+      e('sec', 'devops'), e('devops', 'po'), e('po', 'srdev'),
+      e('srdev', 'aggregate'),
+      e('aggregate', 'allApproved'),
+      e('allApproved', 'approved', 'Yes'),
+      e('allApproved', 'discussion', 'No', 'right'),
+      e('approved', 'outputs'),
+      e('discussion', 'needsReReview'),
+      e('needsReReview', 'incrRound', 'Yes'),
+      e('needsReReview', 'outputs', 'No', 'right'),
+      e('incrRound', 'canContinue'),
+      e('canContinue', 'arch', 'Yes'),
+      e('canContinue', 'forceHuman', 'No', 'right'),
+      e('forceHuman', 'outputs'),
+      e('outputs', 'done'),
+    ],
+  },
+  // TddWithDebugRetryWorkflow.cs — TDD with up to 3 debug retries
+  'tdd-with-debug-retry': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('tdd', 'TDD Cycle', 0, 0, 'subworkflow'),
+      n('passed', 'TDD Passed?', 0, 0, 'decision'),
+      n('guard', 'Debug Guard (<3)?', 0, 0, 'decision'),
+      n('debug', 'Debugging', 0, 0, 'subworkflow'),
+      n('incr', 'Increment Debug Count', 0, 0),
+      n('pass', 'Finish (Pass)', 0, 0, 'end'),
+      n('fail', 'Finish (Fail)', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'tdd'),
+      e('tdd', 'passed'),
+      e('passed', 'pass', 'Yes'),
+      e('passed', 'guard', 'No', 'right'),
+      e('guard', 'debug', 'Yes'),
+      e('guard', 'fail', 'No', 'right'),
+      e('debug', 'incr'),
+      e('incr', 'tdd'),
+    ],
+  },
+  // CiWithDebugRetryWorkflow.cs — CI with up to 3 debug retries
+  'ci-with-debug-retry': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('ci', 'Testing Pipeline', 0, 0, 'subworkflow'),
+      n('passed', 'CI Passed?', 0, 0, 'decision'),
+      n('guard', 'Retry Guard (<3)?', 0, 0, 'decision'),
+      n('debug', 'CI Debugging', 0, 0, 'subworkflow'),
+      n('incr', 'Increment Retry', 0, 0),
+      n('pass', 'Finish (Pass)', 0, 0, 'end'),
+      n('fail', 'Finish (Fail)', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'ci'),
+      e('ci', 'passed'),
+      e('passed', 'pass', 'Yes'),
+      e('passed', 'guard', 'No', 'right'),
+      e('guard', 'debug', 'Yes'),
+      e('guard', 'fail', 'No', 'right'),
+      e('debug', 'incr'),
+      e('incr', 'ci'),
+    ],
+  },
+  // AssessmentWorkflow.cs — Junior developer skill assessment
+  'assessment': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('context', 'Context Gathering', 0, 0, 'subworkflow'),
+      n('generate', 'Generate Questions', 0, 0, 'subworkflow', { description: 'LLM Call' }),
+      n('present', 'Present Challenge', 0, 0),
+      n('wait', 'Wait for Response', 0, 0, 'process', { description: 'Bookmark' }),
+      n('evaluate', 'Evaluate Response', 0, 0, 'subworkflow', { description: 'LLM Call' }),
+      n('more', 'More Questions?', 0, 0, 'decision'),
+      n('score', 'Calculate Score', 0, 0),
+      n('report', 'Generate Report', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'context'),
+      e('context', 'generate'),
+      e('generate', 'present'),
+      e('present', 'wait'),
+      e('wait', 'evaluate'),
+      e('evaluate', 'more'),
+      e('more', 'present', 'Yes'),
+      e('more', 'score', 'No', 'right'),
+      e('score', 'report'),
+      e('report', 'done'),
+    ],
+  },
+  // ReviewFixWorkflow.cs — Analyze review comments and apply fixes
+  'review-fix': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('analyze', 'Analyze Comments', 0, 0, 'process', { description: 'Categorize & prioritize' }),
+      n('hasActionable', 'Actionable Items?', 0, 0, 'decision'),
+      n('fix', 'Apply Fixes', 0, 0, 'subworkflow', { description: 'LLM Call' }),
+      n('commit', 'Commit Changes', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'analyze'),
+      e('analyze', 'hasActionable'),
+      e('hasActionable', 'fix', 'Yes'),
+      e('hasActionable', 'done', 'No', 'right'),
+      e('fix', 'commit'),
+      e('commit', 'done'),
+    ],
+  },
+  // BranchCreationWorkflow.cs — Create feature branch
+  'branch-creation': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('create', 'Create Branch', 0, 0, 'process', { description: 'feature/<issue>-<slug>' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'create'),
+      e('create', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // PullRequestWorkflow.cs — Create draft PR
+  'pull-request': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('create', 'Create Draft PR', 0, 0, 'process', { description: 'Plan .md files attached' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'create'),
+      e('create', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // MergeApprovalWorkflow.cs — Wait for PR approval
+  'merge-approval': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('wait', 'Wait for Approval', 0, 0, 'process', { description: 'Bookmark' }),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'wait'),
+      e('wait', 'done'),
+    ],
+  },
+  // MergeWorkflow.cs — Merge PR
+  'merge': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('merge', 'Merge PR', 0, 0),
+      n('cleanup', 'Delete Branch', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'merge'),
+      e('merge', 'cleanup'),
+      e('cleanup', 'done'),
+    ],
+  },
+  // UpdateIssueStatusWorkflow.cs — Fire-and-forget issue notification
+  'update-issue-status': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('comment', 'Post Comment', 0, 0),
+      n('labels', 'Update Labels', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'comment'),
+      e('comment', 'labels'),
+      e('labels', 'done'),
+    ],
+  },
+  // DeploymentPipelineWorkflow.cs — Stub
+  'deployment-pipeline': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('qa', 'QA Stage', 0, 0, 'process', { description: 'TODO' }),
+      n('uat', 'UAT Stage', 0, 0, 'process', { description: 'TODO' }),
+      n('prod', 'Production Stage', 0, 0, 'process', { description: 'TODO' }),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'qa'),
+      e('qa', 'uat'),
+      e('uat', 'prod'),
+      e('prod', 'done'),
+    ],
+  },
+  // TaskCreationWorkflow.cs — Stub
+  'task-creation': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('create', 'Create Tasks', 0, 0, 'subworkflow', { description: 'Senior dev LLM — TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'create'),
+      e('create', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // TaskReviewWorkflow.cs — Stub
+  'task-review': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('review', 'Review Tasks', 0, 0, 'subworkflow', { description: '4-role panel — TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'review'),
+      e('review', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // TestCaseCreationWorkflow.cs — Stub
+  'test-case-creation': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('generate', 'Generate Test Cases', 0, 0, 'subworkflow', { description: 'TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'generate'),
+      e('generate', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // TriageContextGatheringWorkflow.cs — Stub
+  'triage-context-gathering': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('gather', 'Gather Context', 0, 0, 'subworkflow', { description: 'Code usage, CVE, deps — TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'gather'),
+      e('gather', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // TriagePanelReviewWorkflow.cs — Stub
+  'triage-panel-review': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('panel', 'Panel Review', 0, 0, 'subworkflow', { description: 'Security/Dev/DevOps/QA — TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'panel'),
+      e('panel', 'output'),
+      e('output', 'done'),
+    ],
+  },
+  // TriagePODecisionWorkflow.cs — Stub
+  'triage-po-decision': {
+    nodes: [
+      n('init', 'Initialize', 0, 0, 'start'),
+      n('decide', 'PO Decision', 0, 0, 'subworkflow', { description: 'Priority, type, labels — TODO' }),
+      n('output', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
+    ],
+    edges: [
+      e('init', 'decide'),
+      e('decide', 'output'),
+      e('output', 'done'),
+    ],
+  },
   'architecture-flow': {
     nodes: [
       n('gh', 'GitHub Webhook', 0, 0, 'start'),
