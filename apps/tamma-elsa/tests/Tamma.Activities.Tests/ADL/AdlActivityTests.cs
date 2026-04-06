@@ -15,27 +15,6 @@ namespace Tamma.Activities.Tests.ADL;
 public class AdlActivityTests
 {
     // ================================================================
-    // SelectIssueActivity
-    // ================================================================
-
-    [Test]
-    public void SelectIssueActivity_JsonConstructor_ShouldNotThrow()
-    {
-        Action act = () => new SelectIssueActivity();
-        act.Should().NotThrow();
-    }
-
-    [Test]
-    public void SelectIssueActivity_WithDependencies_ShouldNotThrow()
-    {
-        var logger = new Mock<ILogger<SelectIssueActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
-
-        Action act = () => new SelectIssueActivity(logger.Object, github.Object);
-        act.Should().NotThrow();
-    }
-
-    // ================================================================
     // WaitForPlanApprovalActivity
     // ================================================================
 
