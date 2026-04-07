@@ -2,13 +2,13 @@
 title: "Workflow: Merge"
 ---
 
-**Definition ID:** `merge-complete`
+**Definition ID:** `merge`
 **Class:** `MergeWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/MergeWorkflow.cs`
 
 ## Purpose
 
-The Merge workflow performs a squash-merge of a pull request, closes the associated issue, and deletes the feature branch. It uses `MergePullRequestActivity` for the actual merge operation, then outputs whether the merge succeeded and the resulting merge SHA.
+The Merge workflow squash-merges a pull request, closes the associated issue, and deletes the feature branch -- all handled internally by the single `MergePullRequestActivity`. There is no separate "Close Issue" or "Delete Branch" step in the workflow flowchart. The workflow then checks whether the merge SHA is non-empty to determine success, and exposes both the success flag and merge SHA as outputs.
 
 ## Flow Diagram
 
@@ -44,7 +44,7 @@ The Merge workflow performs a squash-merge of a pull request, closes the associa
 | `repository` | string | Repository identifier (owner/repo) |
 | `prNumber` | int | Pull request number to merge |
 | `issueNumber` | int | Issue number to close |
-| `branchName` | string | Feature branch to delete after merge |
+| `branchName` | string | Feature branch name (passed to `MergePullRequestActivity` for deletion) |
 
 ## Variables
 

@@ -191,33 +191,41 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('restart', 'done'),
     ],
   },
-  // SingleIssueCycleWorkflow.cs — 14-step autonomous dev cycle
-  // Flow: Init -> SelectIssue -> Issue Found? -> GatherContext -> GeneratePlan
-  //   -> Plan Approved? -> CreateBranch -> Branch Created? -> TDD w/ Debug Retry
-  //   -> TDD Passed? -> CreatePR -> PR Created? -> CI w/ Debug Retry -> CI Passed?
-  //   -> Review Fix Check -> Has Comments? -> Merge Approval -> Merge Approved?
-  //   -> Run More Tests? -> Merge PR -> Merged? -> Shared Finish -> Complete
+  // SingleIssueCycleWorkflow.cs — Full autonomous dev cycle with revision guards
+  // Flow: Init -> Validate [Valid/Invalid] -> GatherContext -> GeneratePlan
+  //   -> ReviewPlan -> ReviewOutcome [Approved/NeedsModification/Defer/Split/NeedsHuman]
+  //   NeedsModification -> IncrPlanRevision -> PlanMaxRevisions? [True->escalate, False->loop]
+  //   Approved -> CreateTasks -> ReviewTasks -> TaskReviewOutcome
+  //     [Approved/NeedsChanges/NeedsHuman] + task revision guard
+  //   -> CreateBranch -> CreateDraftPR -> CreateTestCases -> TDD Loop
+  //   -> DispatchCodeReview + WaitApproval -> DispatchMerge + WaitMerged
+  //   -> CloseIssue + DeploymentPipeline -> ReportSuccess -> Finish
   'single-issue-cycle': {
     nodes: [
       n('validate', 'Validate Work Item', 0, 0, 'start'),
+      n('invalid', 'Report Error', 0, 0, 'end'),
       n('context', 'Gather Context', 0, 0, 'subworkflow', { description: 'PO LLM + vector DB' }),
       n('plan', 'Generate Plan', 0, 0, 'subworkflow', { description: 'Architect LLM' }),
       n('reviewPlan', 'Review Plan', 0, 0, 'subworkflow', { description: '7-role panel' }),
       n('reviewOutcome', 'Review Outcome', 0, 0, 'decision'),
+      n('incrPlanRev', 'Incr Plan Revision', 0, 0),
+      n('planMaxRev', 'Plan Max Revisions?', 0, 0, 'decision'),
       n('createTasks', 'Create Tasks', 0, 0, 'subworkflow', { description: 'Senior dev LLM' }),
       n('reviewTasks', 'Review Tasks', 0, 0, 'subworkflow', { description: '4-role panel' }),
       n('taskOutcome', 'Tasks Approved?', 0, 0, 'decision'),
+      n('incrTaskRev', 'Incr Task Revision', 0, 0),
+      n('taskMaxRev', 'Task Max Revisions?', 0, 0, 'decision'),
       n('branch', 'Create Branch', 0, 0),
       n('draftPR', 'Create Draft PR', 0, 0, 'process', { description: 'Plan .md files' }),
       n('testCases', 'Create Test Cases', 0, 0, 'subworkflow'),
-      n('tddLoop', 'TDD Loop', 0, 0, 'subworkflow', { description: 'Per task (red→green→CI→refactor)' }),
+      n('tddLoop', 'TDD Loop', 0, 0, 'subworkflow', { description: 'Per task (red->green->CI->refactor)' }),
       n('codeReview', 'Dispatch Code Review', 0, 0, 'subworkflow', { description: 'Fire & forget' }),
       n('waitApproval', 'Wait for PR Approval', 0, 0, 'process', { description: 'Bookmark' }),
       n('merge', 'Dispatch Merge', 0, 0, 'subworkflow', { description: 'Fire & forget' }),
       n('waitMerged', 'Wait for PR Merged', 0, 0, 'process', { description: 'Bookmark' }),
       n('closeIssue', 'Close Issue', 0, 0),
-      n('deploy', 'Deployment Pipeline', 0, 0, 'subworkflow', { description: 'QA → UAT → Prod' }),
-      n('done', 'Report Complete', 0, 0, 'end'),
+      n('deploy', 'Deployment Pipeline', 0, 0, 'subworkflow', { description: 'QA -> UAT -> Prod' }),
+      n('done', 'Report Success', 0, 0, 'end'),
       n('defer', 'Create Deferred Issues', 0, 0),
       n('split', 'Create Sub-Issues', 0, 0),
       n('needsHuman', 'Report Needs Human', 0, 0, 'end'),
@@ -225,21 +233,31 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       n('reportSplit', 'Report Split', 0, 0, 'end'),
     ],
     edges: [
-      e('validate', 'context'),
+      e('validate', 'context', 'Valid'),
+      e('validate', 'invalid', 'Invalid', 'right'),
       e('context', 'plan'),
       e('plan', 'reviewPlan'),
       e('reviewPlan', 'reviewOutcome'),
       e('reviewOutcome', 'createTasks', 'Approved'),
-      e('reviewOutcome', 'plan', 'NeedsModification'),
+      e('reviewOutcome', 'incrPlanRev', 'NeedsModification'),
       e('reviewOutcome', 'defer', 'Defer', 'right'),
       e('reviewOutcome', 'split', 'Split', 'right'),
       e('reviewOutcome', 'needsHuman', 'NeedsHuman', 'right'),
+      // Plan revision guard
+      e('incrPlanRev', 'planMaxRev'),
+      e('planMaxRev', 'plan', 'False'),
+      e('planMaxRev', 'needsHuman', 'True', 'right'),
       e('defer', 'reportDefer'),
       e('split', 'reportSplit'),
       e('createTasks', 'reviewTasks'),
       e('reviewTasks', 'taskOutcome'),
       e('taskOutcome', 'branch', 'Approved'),
-      e('taskOutcome', 'createTasks', 'NeedsChanges'),
+      e('taskOutcome', 'incrTaskRev', 'NeedsChanges'),
+      e('taskOutcome', 'needsHuman', 'NeedsHuman', 'right'),
+      // Task revision guard
+      e('incrTaskRev', 'taskMaxRev'),
+      e('taskMaxRev', 'createTasks', 'False'),
+      e('taskMaxRev', 'needsHuman', 'True', 'right'),
       e('branch', 'draftPR'),
       e('draftPR', 'testCases'),
       e('testCases', 'tddLoop'),
@@ -425,37 +443,46 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     ],
   },
   // CodeReviewWorkflow.cs — Full PR lifecycle with bookmark-based waiting
-  // Flow: CreatePR -> PR Created? -> RequestReview -> MonitorReview
-  //   Approved -> MergeAndComplete | ChangesRequested -> StoreComments
-  //   -> DeliverGuidance -> WaitForFixes -> ReRequestReview -> MaxIterations?
-  //   TimedOut -> Escalate | Escalation: Resolved -> Merge, Rejected -> Fail
+  // Flow: CreatePR -> StorePRResult -> PRCreated?
+  //   True -> RequestReview -> MonitorReview
+  //     Approved -> MergeAndComplete -> Success
+  //     Commented -> MonitorReview (self-loop)
+  //     ChangesRequested -> StoreComments -> IncrementIteration -> DeliverGuidance
+  //       -> WaitForFixes [FixesReceived -> ReRequest -> MaxIterations?]
+  //     TimedOut -> EscalateTimeout
+  //   False -> Failure
+  //   Escalation: Resolved -> Merge, Rejected -> Fail
   'code-review': {
     nodes: [
-      n('start', 'Create Pull Request', 250, 0, 'start'),
-      n('prCheck', 'PR Created?', 250, 100, 'decision'),
-      n('request', 'Request Code Review', 250, 200),
-      n('monitor', 'Monitor Review Status', 250, 300, 'process', { description: 'Bookmark (24h timeout)' }),
-      n('merge', 'Merge and Complete Review', 250, 420),
-      n('success', 'Success', 250, 520, 'end'),
-      n('storeComments', 'Store Review Comments', 520, 300),
-      n('guidance', 'Deliver Fix Guidance', 520, 400),
-      n('waitFixes', 'Wait for Fix Submission', 520, 500, 'process', { description: 'Bookmark (24h)' }),
-      n('rerequest', 'Re-Request Code Review', 520, 610),
-      n('maxIter', 'Max Iterations Reached?', 520, 710, 'decision'),
-      n('escalateMax', 'Escalate: Max Iterations', 750, 710, 'decision'),
-      n('escalateTimeout', 'Escalate: Review Timeout', 750, 300, 'decision'),
-      n('failEnd', 'Failure', 0, 100, 'end'),
-      n('failEscalate', 'Rejected', 750, 520, 'end'),
+      n('start', 'Create Pull Request', 0, 0, 'start'),
+      n('storePR', 'Store PR Result', 0, 0),
+      n('prCheck', 'PR Created?', 0, 0, 'decision'),
+      n('request', 'Request Code Review', 0, 0),
+      n('monitor', 'Monitor Review Status', 0, 0, 'process', { description: 'Bookmark (24h timeout)' }),
+      n('merge', 'Merge and Complete Review', 0, 0),
+      n('success', 'Success', 0, 0, 'end'),
+      n('storeComments', 'Store Review Comments', 0, 0),
+      n('incrIter', 'Increment Iteration', 0, 0),
+      n('guidance', 'Deliver Fix Guidance', 0, 0),
+      n('waitFixes', 'Wait for Fix Submission', 0, 0, 'process', { description: 'Bookmark (24h)' }),
+      n('rerequest', 'Re-Request Code Review', 0, 0),
+      n('maxIter', 'Max Iterations Reached?', 0, 0, 'decision'),
+      n('escalateMax', 'Escalate: Max Iterations', 0, 0, 'process', { description: 'Bookmark' }),
+      n('escalateTimeout', 'Escalate: Review Timeout', 0, 0, 'process', { description: 'Bookmark' }),
+      n('failEnd', 'Failure', 0, 0, 'end'),
     ],
     edges: [
-      e('start', 'prCheck'),
+      e('start', 'storePR'),
+      e('storePR', 'prCheck'),
       e('prCheck', 'request', 'True'),
       e('prCheck', 'failEnd', 'False', 'left'),
       e('request', 'monitor'),
       e('monitor', 'merge', 'Approved'),
-      e('monitor', 'storeComments', 'ChangesRequested', 'right'),
+      e('monitor', 'monitor', 'Commented', 'right', 'target-right'),
+      e('monitor', 'storeComments', 'ChangesRequested'),
       e('monitor', 'escalateTimeout', 'TimedOut', 'right'),
-      e('storeComments', 'guidance'),
+      e('storeComments', 'incrIter'),
+      e('incrIter', 'guidance'),
       e('guidance', 'waitFixes'),
       e('waitFixes', 'rerequest', 'FixesReceived'),
       e('waitFixes', 'escalateTimeout', 'TimedOut', 'right'),
@@ -464,39 +491,42 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('maxIter', 'escalateMax', 'True', 'right'),
       e('merge', 'success'),
       e('escalateMax', 'merge', 'Resolved'),
-      e('escalateMax', 'failEscalate', 'Rejected', 'right'),
+      e('escalateMax', 'failEnd', 'Rejected', 'right'),
       e('escalateTimeout', 'merge', 'Resolved'),
-      e('escalateTimeout', 'failEscalate', 'Rejected'),
+      e('escalateTimeout', 'failEnd', 'Rejected'),
     ],
   },
   // TestingWorkflow.cs — Testing pipeline with CI, quality checks, auto-fix
-  // Flow: TriggerCI -> WaitForCI -> EvaluateResults
-  //   AllPass/MinorIssues -> Coverage+Linting+Security -> Report -> Pass
-  //   MajorIssues -> FixAttemptsRemaining? -> CommitFix -> ReTriggerCI -> retry
-  //   Critical -> Coverage+Linting+Security -> Report -> Fail
+  // Flow: TriggerCI -> WaitForCI -> StoreCIResults -> EvaluateResults
+  //   AllPass -> Quality Checks -> Report -> Pass
+  //   MinorIssues -> Quality Checks (same path as AllPass)
+  //   MajorIssues -> FixAttemptsRemaining? -> CommitFix -> UpdateCodeIndex
+  //     -> IncrementAttempt -> ReTriggerCI -> WaitRetry -> EvalRetry -> route
+  //   Critical -> Quality Checks (Critical) -> Report (Critical) -> Fail
   'testing': {
     nodes: [
-      n('start', 'Trigger CI Pipeline', 250, 0, 'start'),
-      n('wait', 'Wait for CI Results', 250, 90, 'process', { description: 'Bookmark (30min)' }),
-      n('evaluate', 'Evaluate CI Results', 250, 190),
-      n('checks', 'Quality Checks', 250, 300, 'parallel', { items: ['Check Code Coverage', 'Check Linting Rules', 'Check Security Issues'] }),
-      n('report', 'Generate Quality Report', 250, 430),
-      n('pass', 'Complete: Tests Passed', 250, 530, 'end'),
-      n('guard', 'Fix Attempts Remaining?', 530, 190, 'decision'),
-      n('fix', 'Commit Auto-Fix', 530, 300),
-      n('index', 'Update Code Index', 530, 390),
-      n('retrigger', 'Re-Trigger CI After Fix', 530, 480),
-      n('waitRetry', 'Wait for CI Results (Retry)', 530, 570, 'process', { description: 'Bookmark' }),
-      n('evalRetry', 'Evaluate Retry Results', 530, 660),
-      n('fail', 'Complete: Tests Failed', 530, 100, 'end'),
-      n('critChecks', 'Quality Checks (Critical)', 0, 300, 'parallel', { items: ['Check Code Coverage', 'Check Linting Rules', 'Check Security Issues'] }),
-      n('critReport', 'Generate Report (Critical)', 0, 430),
-      n('critFail', 'Complete: Tests Failed', 0, 530, 'end'),
+      n('start', 'Trigger CI Pipeline', 0, 0, 'start'),
+      n('wait', 'Wait for CI Results', 0, 0, 'process', { description: 'Bookmark (30min)' }),
+      n('evaluate', 'Evaluate CI Results', 0, 0),
+      n('checks', 'Quality Checks', 0, 0, 'parallel', { items: ['Coverage', 'Linting', 'Security'] }),
+      n('report', 'Generate Quality Report', 0, 0),
+      n('pass', 'Complete: Tests Passed', 0, 0, 'end'),
+      n('guard', 'Fix Attempts Remaining?', 0, 0, 'decision'),
+      n('fix', 'Commit Auto-Fix', 0, 0),
+      n('index', 'Update Code Index', 0, 0),
+      n('incrAttempt', 'Increment Fix Attempt', 0, 0),
+      n('retrigger', 'Re-Trigger CI After Fix', 0, 0),
+      n('waitRetry', 'Wait for CI Results (Retry)', 0, 0, 'process', { description: 'Bookmark' }),
+      n('evalRetry', 'Evaluate Retry Results', 0, 0),
+      n('fail', 'Complete: Tests Failed', 0, 0, 'end'),
+      n('critChecks', 'Quality Checks (Critical)', 0, 0, 'parallel', { items: ['Coverage', 'Linting', 'Security'] }),
+      n('critReport', 'Generate Report (Critical)', 0, 0),
     ],
     edges: [
       e('start', 'wait'),
       e('wait', 'evaluate'),
       e('evaluate', 'checks', 'AllPass'),
+      e('evaluate', 'checks', 'MinorIssues'),
       e('evaluate', 'guard', 'MajorIssues', 'right'),
       e('evaluate', 'critChecks', 'Critical', 'left'),
       e('checks', 'report'),
@@ -504,46 +534,58 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('guard', 'fix', 'True'),
       e('guard', 'fail', 'False'),
       e('fix', 'index'),
-      e('index', 'retrigger'),
+      e('index', 'incrAttempt'),
+      e('incrAttempt', 'retrigger'),
       e('retrigger', 'waitRetry'),
       e('waitRetry', 'evalRetry'),
       e('evalRetry', 'checks', 'AllPass'),
+      e('evalRetry', 'checks', 'MinorIssues'),
       e('evalRetry', 'guard', 'MajorIssues'),
+      e('evalRetry', 'fail', 'Critical'),
       e('critChecks', 'critReport'),
-      e('critReport', 'critFail'),
+      e('critReport', 'fail'),
     ],
   },
   // DebuggingWorkflow.cs — Systematic AI debugging with 3 entry modes
-  // Flow: Classify (TDD/Runtime/Bug) -> FlowFork (5 parallel collectors)
-  //   -> FlowJoin -> AIDiagnosis -> SelectHypothesis -> Has Hypothesis?
+  // Flow: Init chain -> Classify [TddFailure/RuntimeError/BugInvestigation]
+  //   -> TDD/Runtime/Bug Emphasis -> FlowFork (5 parallel collectors)
+  //   -> FlowJoin -> Serialize -> AIDiagnosis -> SelectHypothesis -> Has Hypothesis?
   //   True -> IsBugMode? -> (optional WriteRegressionTest) -> ApplyFix (LLM Call)
   //     -> RunTests (Testing Pipeline) -> Tests Pass?
   //     True -> RecordResolution -> UpdateCodeIndex -> Resolved
   //     False -> RefineHypothesis -> loop | False -> CompileDebugReport -> Escalated
   'debugging': {
     nodes: [
-      n('start', 'Start', 250, 0, 'start'),
-      n('classify', 'Classify Debug Context', 250, 90, 'process', { description: 'TDD / Runtime / Bug' }),
-      n('fork', 'Context Fork', 250, 190, 'parallel', { items: ['Error Messages', 'Relevant Code', 'Git History', 'Test Results', 'Reproduction Steps'] }),
-      n('join', 'Context Join', 250, 320),
-      n('diagnose', 'AI Diagnosis', 250, 410),
-      n('select', 'Select Hypothesis', 250, 500),
-      n('hasHyp', 'Has Hypothesis?', 250, 590, 'decision'),
-      n('bugMode', 'Is Bug Mode?', 250, 690, 'decision'),
-      n('regTest', 'Write Regression Test', 500, 690),
-      n('fix', 'Apply Fix', 250, 800, 'subworkflow', { description: 'via LLM Call' }),
-      n('test', 'Run Tests', 250, 900, 'subworkflow', { description: 'via Testing Pipeline' }),
-      n('pass', 'Tests Pass?', 250, 1000, 'decision'),
-      n('record', 'Record Resolution', 250, 1100),
-      n('index', 'Update Code Index', 250, 1190),
-      n('done', 'Complete: Debugging Done', 250, 1280, 'end'),
-      n('refine', 'Refine Hypothesis', 500, 1000),
-      n('report', 'Compile Debug Report', 500, 590),
-      n('escalated', 'Escalated', 500, 1280, 'end'),
+      n('start', 'Initialize', 0, 0, 'start'),
+      n('classify', 'Classify Debug Context', 0, 0, 'decision'),
+      n('tddEmph', 'TDD Emphasis', 0, 0, 'process', { description: 'Test output focus' }),
+      n('runtimeEmph', 'Runtime Emphasis', 0, 0, 'process', { description: 'Stack trace focus' }),
+      n('bugEmph', 'Bug Emphasis', 0, 0, 'process', { description: 'Repro steps focus' }),
+      n('fork', 'Context Fork', 0, 0, 'parallel', { items: ['Errors', 'Code', 'Git', 'Tests', 'Repro'] }),
+      n('join', 'Context Join', 0, 0),
+      n('diagnose', 'AI Diagnosis', 0, 0),
+      n('select', 'Select Hypothesis', 0, 0),
+      n('hasHyp', 'Has Hypothesis?', 0, 0, 'decision'),
+      n('bugMode', 'Is Bug Mode?', 0, 0, 'decision'),
+      n('regTest', 'Write Regression Test', 0, 0),
+      n('fix', 'Apply Fix', 0, 0, 'subworkflow', { description: 'via LLM Call' }),
+      n('test', 'Run Tests', 0, 0, 'subworkflow', { description: 'via Testing Pipeline' }),
+      n('pass', 'Tests Pass?', 0, 0, 'decision'),
+      n('record', 'Record Resolution', 0, 0),
+      n('index', 'Update Code Index', 0, 0),
+      n('done', 'Complete: Debugging Done', 0, 0, 'end'),
+      n('refine', 'Refine Hypothesis', 0, 0),
+      n('report', 'Compile Debug Report', 0, 0),
+      n('escalated', 'Escalated', 0, 0, 'end'),
     ],
     edges: [
       e('start', 'classify'),
-      e('classify', 'fork'),
+      e('classify', 'tddEmph', 'TddFailure'),
+      e('classify', 'runtimeEmph', 'RuntimeError'),
+      e('classify', 'bugEmph', 'BugInvestigation', 'right'),
+      e('tddEmph', 'fork'),
+      e('runtimeEmph', 'fork'),
+      e('bugEmph', 'fork'),
       e('fork', 'join'),
       e('join', 'diagnose'),
       e('diagnose', 'select'),
@@ -639,13 +681,13 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     ],
     edges: [
       e('fetch', 'hasItems'),
-      e('hasItems', 'extract', 'Yes'),
-      e('hasItems', 'report', 'No', 'right'),
+      e('hasItems', 'extract', 'True'),
+      e('hasItems', 'report', 'False', 'right'),
       e('extract', 'dispatch'),
       e('dispatch', 'next'),
       e('next', 'more'),
-      e('more', 'extract', 'Yes'),
-      e('more', 'report', 'No', 'right'),
+      e('more', 'extract', 'True'),
+      e('more', 'report', 'False', 'right'),
       e('report', 'done'),
     ],
   },
@@ -740,21 +782,21 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       n('init', 'Initialize', 0, 0, 'start'),
       n('tdd', 'TDD Cycle', 0, 0, 'subworkflow'),
       n('passed', 'TDD Passed?', 0, 0, 'decision'),
-      n('guard', 'Debug Guard (<3)?', 0, 0, 'decision'),
-      n('debug', 'Debugging', 0, 0, 'subworkflow'),
-      n('incr', 'Increment Debug Count', 0, 0),
+      n('guard', 'TDD Debug < 3?', 0, 0, 'decision'),
+      n('incr', 'Increment TDD Debug', 0, 0),
+      n('debug', 'Debug TDD Failure', 0, 0, 'subworkflow'),
       n('pass', 'Finish (Pass)', 0, 0, 'end'),
       n('fail', 'Finish (Fail)', 0, 0, 'end'),
     ],
     edges: [
       e('init', 'tdd'),
       e('tdd', 'passed'),
-      e('passed', 'pass', 'Yes'),
-      e('passed', 'guard', 'No', 'right'),
-      e('guard', 'debug', 'Yes'),
-      e('guard', 'fail', 'No', 'right'),
-      e('debug', 'incr'),
-      e('incr', 'tdd'),
+      e('passed', 'pass', 'True'),
+      e('passed', 'guard', 'False', 'right'),
+      e('guard', 'incr', 'True'),
+      e('guard', 'fail', 'False', 'right'),
+      e('incr', 'debug'),
+      e('debug', 'tdd'),
     ],
   },
   // CiWithDebugRetryWorkflow.cs — CI with up to 3 debug retries
@@ -762,68 +804,100 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     nodes: [
       n('init', 'Initialize', 0, 0, 'start'),
       n('ci', 'Testing Pipeline', 0, 0, 'subworkflow'),
-      n('passed', 'CI Passed?', 0, 0, 'decision'),
-      n('guard', 'Retry Guard (<3)?', 0, 0, 'decision'),
-      n('debug', 'CI Debugging', 0, 0, 'subworkflow'),
-      n('incr', 'Increment Retry', 0, 0),
+      n('passed', 'Tests Passed?', 0, 0, 'decision'),
+      n('guard', 'CI Retries < 3?', 0, 0, 'decision'),
+      n('incr', 'Increment CI Retry', 0, 0),
+      n('debug', 'Debug CI Failure', 0, 0, 'subworkflow'),
       n('pass', 'Finish (Pass)', 0, 0, 'end'),
       n('fail', 'Finish (Fail)', 0, 0, 'end'),
     ],
     edges: [
       e('init', 'ci'),
       e('ci', 'passed'),
-      e('passed', 'pass', 'Yes'),
-      e('passed', 'guard', 'No', 'right'),
-      e('guard', 'debug', 'Yes'),
-      e('guard', 'fail', 'No', 'right'),
-      e('debug', 'incr'),
-      e('incr', 'ci'),
+      e('passed', 'pass', 'True'),
+      e('passed', 'guard', 'False', 'right'),
+      e('guard', 'incr', 'True'),
+      e('guard', 'fail', 'False', 'right'),
+      e('incr', 'debug'),
+      e('debug', 'ci'),
     ],
   },
   // AssessmentWorkflow.cs — Junior developer skill assessment
+  // Flow: ReadInputs -> GatherContext -> StoreContext -> GenerateQuestions -> StoreQuestions
+  //   -> DeliverQuestions -> WaitForResponse
+  //   [Responded] -> StoreResponse -> Analyze -> StoreAnalysis -> Classify -> StoreClassification
+  //     -> UpdateProfile -> SetOutput -> ExposeOutput -> Done
+  //   [Timeout] -> SetTimeoutResult -> UpdateProfile(Timeout) -> SetOutputTimeout -> ExposeOutputTimeout -> Done
   'assessment': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('context', 'Context Gathering', 0, 0, 'subworkflow'),
-      n('generate', 'Generate Questions', 0, 0, 'subworkflow', { description: 'LLM Call' }),
-      n('present', 'Present Challenge', 0, 0),
-      n('wait', 'Wait for Response', 0, 0, 'process', { description: 'Bookmark' }),
-      n('evaluate', 'Evaluate Response', 0, 0, 'subworkflow', { description: 'LLM Call' }),
-      n('more', 'More Questions?', 0, 0, 'decision'),
-      n('score', 'Calculate Score', 0, 0),
-      n('report', 'Generate Report', 0, 0),
-      n('done', 'Finish', 0, 0, 'end'),
+      n('init', 'Read Inputs', 0, 0, 'start'),
+      n('context', 'Gather Context', 0, 0, 'subworkflow', { description: 'Dispatch context-gathering' }),
+      n('storeCtx', 'Store Context Result', 0, 0),
+      n('generate', 'Generate Questions', 0, 0, 'process', { description: 'AI-generated questions' }),
+      n('storeQ', 'Store Questions', 0, 0),
+      n('deliver', 'Deliver Questions', 0, 0),
+      n('wait', 'Wait for Response', 0, 0, 'process', { description: 'Bookmark (with timeout)' }),
+      n('storeResp', 'Store Response', 0, 0),
+      n('analyze', 'Analyze Response', 0, 0, 'process', { description: 'AI analysis' }),
+      n('storeAnalysis', 'Store Analysis', 0, 0),
+      n('classify', 'Classify Result', 0, 0),
+      n('storeClass', 'Store Classification', 0, 0),
+      n('profile', 'Update Skill Profile', 0, 0),
+      n('setOutput', 'Set Output Result', 0, 0),
+      n('expose', 'Expose Outputs', 0, 0),
+      n('timeout', 'Set Timeout Result', 0, 0),
+      n('profileTimeout', 'Update Skill Profile (Timeout)', 0, 0),
+      n('setOutputTimeout', 'Set Output Timeout', 0, 0),
+      n('exposeTimeout', 'Expose Outputs (Timeout)', 0, 0),
     ],
     edges: [
       e('init', 'context'),
-      e('context', 'generate'),
-      e('generate', 'present'),
-      e('present', 'wait'),
-      e('wait', 'evaluate'),
-      e('evaluate', 'more'),
-      e('more', 'present', 'Yes'),
-      e('more', 'score', 'No', 'right'),
-      e('score', 'report'),
-      e('report', 'done'),
+      e('context', 'storeCtx'),
+      e('storeCtx', 'generate'),
+      e('generate', 'storeQ'),
+      e('storeQ', 'deliver'),
+      e('deliver', 'wait'),
+      // Response path
+      e('wait', 'storeResp', 'Responded'),
+      e('storeResp', 'analyze'),
+      e('analyze', 'storeAnalysis'),
+      e('storeAnalysis', 'classify'),
+      e('classify', 'storeClass'),
+      e('storeClass', 'profile'),
+      e('profile', 'setOutput'),
+      e('setOutput', 'expose'),
+      // Timeout path
+      e('wait', 'timeout', 'Timeout', 'right'),
+      e('timeout', 'profileTimeout'),
+      e('profileTimeout', 'setOutputTimeout'),
+      e('setOutputTimeout', 'exposeTimeout'),
     ],
   },
-  // ReviewFixWorkflow.cs — Analyze review comments and apply fixes
+  // ReviewFixWorkflow.cs — Analyze review comments and apply AI-generated fixes
+  // Flow: AnalyzeReview -> HasActionable?
+  //   True -> GenerateFixes (LLM) -> ApplyFixes -> UpdateCodeIndex -> OutputSuccess
+  //   False -> OutputSuccess
+  //   -> OutputHasComments -> OutputFixesApplied
   'review-fix': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('analyze', 'Analyze Comments', 0, 0, 'process', { description: 'Categorize & prioritize' }),
-      n('hasActionable', 'Actionable Items?', 0, 0, 'decision'),
-      n('fix', 'Apply Fixes', 0, 0, 'subworkflow', { description: 'LLM Call' }),
-      n('commit', 'Commit Changes', 0, 0),
-      n('done', 'Finish', 0, 0, 'end'),
+      n('analyze', 'Analyze Review', 0, 0, 'start', { description: 'Parse PR comments' }),
+      n('hasActionable', 'Has Actionable?', 0, 0, 'decision'),
+      n('generate', 'Generate Fixes', 0, 0, 'subworkflow', { description: 'LLM Call' }),
+      n('apply', 'Apply Fixes', 0, 0),
+      n('index', 'Update Code Index', 0, 0),
+      n('outputSuccess', 'Output Success', 0, 0),
+      n('outputComments', 'Output Has Comments', 0, 0),
+      n('outputFixes', 'Output Fixes Applied', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'analyze'),
       e('analyze', 'hasActionable'),
-      e('hasActionable', 'fix', 'Yes'),
-      e('hasActionable', 'done', 'No', 'right'),
-      e('fix', 'commit'),
-      e('commit', 'done'),
+      e('hasActionable', 'generate', 'True'),
+      e('hasActionable', 'outputSuccess', 'False', 'right'),
+      e('generate', 'apply'),
+      e('apply', 'index'),
+      e('index', 'outputSuccess'),
+      e('outputSuccess', 'outputComments'),
+      e('outputComments', 'outputFixes'),
     ],
   },
   // BranchCreationWorkflow.cs — Create feature branch
@@ -880,18 +954,17 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('cleanup', 'done'),
     ],
   },
-  // UpdateIssueStatusWorkflow.cs — Fire-and-forget issue notification
+  // UpdateIssueStatusWorkflow.cs — Fire-and-forget issue notification (single activity)
+  // C# uses builder.Root = updateIssue (no flowchart, just one activity)
   'update-issue-status': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('comment', 'Post Comment', 0, 0),
-      n('labels', 'Update Labels', 0, 0),
-      n('done', 'Finish', 0, 0, 'end'),
+      n('start', 'Start', 0, 0, 'start'),
+      n('update', 'Update Issue Status', 0, 0, 'process', { description: 'Comment + labels (with retries)' }),
+      n('done', 'Done', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'comment'),
-      e('comment', 'labels'),
-      e('labels', 'done'),
+      e('start', 'update'),
+      e('update', 'done'),
     ],
   },
   // DeploymentPipelineWorkflow.cs — Stub
@@ -910,88 +983,70 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('prod', 'done'),
     ],
   },
-  // TaskCreationWorkflow.cs — Stub
+  // TaskCreationWorkflow.cs — Stub (single Finish activity)
   'task-creation': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('create', 'Create Tasks', 0, 0, 'subworkflow', { description: 'Senior dev LLM — TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'create'),
-      e('create', 'output'),
-      e('output', 'done'),
+      e('start', 'done'),
     ],
   },
-  // TaskReviewWorkflow.cs — Stub
+  // TaskReviewWorkflow.cs — Stub (single Finish activity)
   'task-review': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('review', 'Review Tasks', 0, 0, 'subworkflow', { description: '4-role panel — TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'review'),
-      e('review', 'output'),
-      e('output', 'done'),
+      e('start', 'done'),
     ],
   },
-  // TestCaseCreationWorkflow.cs — Stub
+  // TestCaseCreationWorkflow.cs — Stub (single Finish activity)
   'test-case-creation': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('generate', 'Generate Test Cases', 0, 0, 'subworkflow', { description: 'TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'generate'),
-      e('generate', 'output'),
-      e('output', 'done'),
+      e('start', 'done'),
     ],
   },
-  // TriageContextGatheringWorkflow.cs — Stub
+  // TriageContextGatheringWorkflow.cs — Stub (SetOutput + Finish sequence)
   'triage-context-gathering': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('gather', 'Gather Context', 0, 0, 'subworkflow', { description: 'Code usage, CVE, deps — TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
+      n('setDefault', 'Set Default Output', 0, 0, 'process', { description: 'contextJson = {}' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'gather'),
-      e('gather', 'output'),
-      e('output', 'done'),
+      e('start', 'setDefault'),
+      e('setDefault', 'done'),
     ],
   },
-  // TriagePanelReviewWorkflow.cs — Stub
+  // TriagePanelReviewWorkflow.cs — Stub (SetOutput + Finish sequence)
   'triage-panel-review': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('panel', 'Panel Review', 0, 0, 'subworkflow', { description: 'Security/Dev/DevOps/QA — TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
+      n('setDefault', 'Set Default Output', 0, 0, 'process', { description: 'panelResultJson = {}' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'panel'),
-      e('panel', 'output'),
-      e('output', 'done'),
+      e('start', 'setDefault'),
+      e('setDefault', 'done'),
     ],
   },
-  // TriagePODecisionWorkflow.cs — Stub
+  // TriagePODecisionWorkflow.cs — Stub (SetOutput + Finish sequence)
   'triage-po-decision': {
     nodes: [
-      n('init', 'Initialize', 0, 0, 'start'),
-      n('decide', 'PO Decision', 0, 0, 'subworkflow', { description: 'Priority, type, labels — TODO' }),
-      n('output', 'Set Outputs', 0, 0),
+      n('start', 'Start', 0, 0, 'start', { description: 'Stub -- TODO' }),
+      n('setDefault', 'Set Default Output', 0, 0, 'process', { description: 'decisionJson = {}' }),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('init', 'decide'),
-      e('decide', 'output'),
-      e('output', 'done'),
+      e('start', 'setDefault'),
+      e('setDefault', 'done'),
     ],
   },
   'architecture-flow': {

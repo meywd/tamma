@@ -16,7 +16,7 @@ public class MergeWorkflow : WorkflowBase
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Merge Complete";
-        builder.DefinitionId = "merge-complete";
+        builder.DefinitionId = "merge";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Squash-merge PR, close issue, and delete branch";
 
