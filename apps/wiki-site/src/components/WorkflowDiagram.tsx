@@ -599,25 +599,30 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
   // Flow: InitInputs -> Phase 1 (Story,Commits,Tests,History) -> Story Metadata OK?
   //   True -> Phase 2 (FileContents,SimilarPatterns) -> AssembleContext -> ApplyBudget -> SetOutputs
   //   False -> Fault (No Metadata)
+  // ContextGatheringWorkflow.cs — Sequential role-based scanning + vector DB + PO summary
   'context-gathering': {
     nodes: [
-      n('start', 'Initialize Inputs', 250, 0, 'start'),
-      n('phase1', 'Phase 1: Parallel Fetches', 250, 100, 'parallel', { items: ['Story', 'Commits', 'Tests', 'History'] }),
-      n('check', 'Story Metadata OK?', 250, 240, 'decision'),
-      n('phase2', 'Phase 2: Dependent Fetches', 250, 350, 'parallel', { items: ['File Contents', 'Similar Patterns'] }),
-      n('assemble', 'Assemble Context', 250, 480),
-      n('budget', 'Apply Budget', 250, 570, 'process', { description: 'Priority-based trimming' }),
-      n('outputs', 'Set Outputs', 250, 660, 'end'),
-      n('fault', 'Fault (No Metadata)', 500, 240, 'end'),
+      n('init', 'Initialize', 0, 0, 'start', { description: 'Repo, issue, workItemType' }),
+      n('devScan', 'Dev Scan', 0, 0, 'subworkflow', { description: 'LLM Call: developer' }),
+      n('qaScan', 'QA Scan', 0, 0, 'subworkflow', { description: 'LLM Call: tester' }),
+      n('secScan', 'Security Scan', 0, 0, 'subworkflow', { description: 'LLM Call: security' }),
+      n('devopsScan', 'DevOps Scan', 0, 0, 'subworkflow', { description: 'LLM Call: devops' }),
+      n('archScan', 'Architect Scan', 0, 0, 'subworkflow', { description: 'LLM Call: architect' }),
+      n('store', 'Store in Vector DB', 0, 0),
+      n('poReview', 'PO Review', 0, 0, 'subworkflow', { description: 'LLM Call: summarize' }),
+      n('outputs', 'Set Outputs', 0, 0),
+      n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
-      e('start', 'phase1'),
-      e('phase1', 'check'),
-      e('check', 'phase2', 'True'),
-      e('check', 'fault', 'False', 'right'),
-      e('phase2', 'assemble'),
-      e('assemble', 'budget'),
-      e('budget', 'outputs'),
+      e('init', 'devScan'),
+      e('devScan', 'qaScan'),
+      e('qaScan', 'secScan'),
+      e('secScan', 'devopsScan'),
+      e('devopsScan', 'archScan'),
+      e('archScan', 'store'),
+      e('store', 'poReview'),
+      e('poReview', 'outputs'),
+      e('outputs', 'done'),
     ],
   },
   // IssueTriageWorkflow.cs — Fetch items, dispatch singleton triage cycles
