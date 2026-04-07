@@ -18,12 +18,14 @@ namespace Tamma.ElsaServer.Workflows;
 ///
 /// Each role dispatches LlmCallWorkflow with role-specific prompt and tools.
 /// Results accumulate — each role sees previous findings.
-/// Stored in vector DB, PO summarizes.
+/// Each role's findings are stored in the vector DB immediately after extraction,
+/// so partial results persist even if later scans fail.
+/// PO summarizes all findings at the end.
 ///
 /// Pipeline:
-///   Init → Dev Scan (llm-call) → QA Scan (llm-call) → Security Scan (llm-call)
-///   → DevOps Scan (llm-call) → Architect Scan (llm-call)
-///   → Store in Vector DB → PO Review (llm-call) → Output
+///   Init → Dev Scan → Store Dev → QA Scan → Store QA → Security Scan → Store Sec
+///   → DevOps Scan → Store DevOps → Architect Scan → Store Arch
+///   → PO Review (llm-call) → Output
 /// </summary>
 public class ContextGatheringWorkflow : WorkflowBase
 {
@@ -32,7 +34,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         builder.Name = "Context Gathering";
         builder.DefinitionId = "context-gathering";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Sequential role-based codebase scanning via LLM Call sub-workflow";
+        builder.Description = "Sequential role-based codebase scanning with per-role vector DB storage";
 
         // ================================================================
         // Variables
@@ -49,7 +51,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         var devopsFindings = builder.WithVariable<string>("DevOpsFindings", "{}");
         var architectFindings = builder.WithVariable<string>("ArchitectFindings", "{}");
 
-        // Output
+        // Context IDs accumulated from per-role storage
         var contextIds = builder.WithVariable<string>("ContextIds", "[]");
         var poSummary = builder.WithVariable<string>("POSummary", "");
         var links = builder.WithVariable<string>("Links", "[]");
@@ -81,19 +83,27 @@ public class ContextGatheringWorkflow : WorkflowBase
         init.SetDisplayText("Initialize");
 
         // ================================================================
-        // 2-6. Role Scans — each dispatches LlmCallWorkflow
+        // 2-6. Role Scans — each: LLM call → extract → store in vector DB
         // ================================================================
+
+        // Dev Scan
         var devScan = RoleScan("DevScan", "Dev Scan", "developer",
             repository, workItemJson, workItemType, "{}",
             llmResult);
         var extractDev = Extract(devFindings, llmResult, "ExtractDev", "Extract Dev Findings");
+        var storeDev = StoreRole("StoreDev", "Store Dev", "developer",
+            repository, issueNumber, devFindings, contextIds);
 
+        // QA Scan
         var qaScan = RoleScan("QAScan", "QA Scan", "tester",
             repository, workItemJson, workItemType,
             ctx => devFindings.Get(ctx),
             llmResult);
         var extractQA = Extract(qaFindings, llmResult, "ExtractQA", "Extract QA Findings");
+        var storeQA = StoreRole("StoreQA", "Store QA", "tester",
+            repository, issueNumber, qaFindings, contextIds);
 
+        // Security Scan
         var secScan = RoleScan("SecurityScan", "Security Scan", "security",
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -103,7 +113,10 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractSec = Extract(securityFindings, llmResult, "ExtractSec", "Extract Security Findings");
+        var storeSec = StoreRole("StoreSec", "Store Security", "security",
+            repository, issueNumber, securityFindings, contextIds);
 
+        // DevOps Scan
         var devopsScan = RoleScan("DevOpsScan", "DevOps Scan", "devops",
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -114,7 +127,10 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractDevOps = Extract(devopsFindings, llmResult, "ExtractDevOps", "Extract DevOps Findings");
+        var storeDevOps = StoreRole("StoreDevOps", "Store DevOps", "devops",
+            repository, issueNumber, devopsFindings, contextIds);
 
+        // Architect Scan
         var archScan = RoleScan("ArchScan", "Architect Scan", "architect",
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -126,26 +142,11 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractArch = Extract(architectFindings, llmResult, "ExtractArch", "Extract Architect Findings");
+        var storeArch = StoreRole("StoreArch", "Store Architect", "architect",
+            repository, issueNumber, architectFindings, contextIds);
 
         // ================================================================
-        // 7. Store in Vector DB
-        // ================================================================
-        var store = new StoreFindingsActivity
-        {
-            Id = "StoreFindings", Name = "Store in Vector DB",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
-            DevFindingsJson = new Input<string>(ctx => devFindings.Get(ctx)),
-            QAFindingsJson = new Input<string>(ctx => qaFindings.Get(ctx)),
-            SecurityFindingsJson = new Input<string>(ctx => securityFindings.Get(ctx)),
-            DevOpsFindingsJson = new Input<string>(ctx => devopsFindings.Get(ctx)),
-            ArchitectFindingsJson = new Input<string>(ctx => architectFindings.Get(ctx)),
-            ContextIdsJson = new Output<string>(contextIds),
-        };
-        store.SetDisplayText("Store in Vector DB");
-
-        // ================================================================
-        // 8. PO Review (via LlmCallWorkflow)
+        // 7. PO Review (via LlmCallWorkflow)
         // ================================================================
         var poReviewScan = new DispatchWorkflow
         {
@@ -183,7 +184,6 @@ public class ContextGatheringWorkflow : WorkflowBase
                 {
                     var output = r?.ToString() ?? "";
                     poSummary.Set(ctx, output);
-                    // Try to extract links
                     try
                     {
                         var jsonStart = output.IndexOf('{');
@@ -204,7 +204,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         extractPO.SetDisplayText("Extract PO Summary");
 
         // ================================================================
-        // 9. Set Outputs
+        // 8. Set Outputs
         // ================================================================
         var setOutputs = new Sequence
         {
@@ -234,28 +234,37 @@ public class ContextGatheringWorkflow : WorkflowBase
             Activities =
             {
                 init,
-                devScan, extractDev,
-                qaScan, extractQA,
-                secScan, extractSec,
-                devopsScan, extractDevOps,
-                archScan, extractArch,
-                store, poReviewScan, extractPO,
+                devScan, extractDev, storeDev,
+                qaScan, extractQA, storeQA,
+                secScan, extractSec, storeSec,
+                devopsScan, extractDevOps, storeDevOps,
+                archScan, extractArch, storeArch,
+                poReviewScan, extractPO,
                 setOutputs, finish,
             },
             Connections =
             {
                 Connect(init, devScan),
                 Connect(devScan, extractDev),
-                Connect(extractDev, qaScan),
+                Connect(extractDev, storeDev),
+                Connect(storeDev, qaScan),
+
                 Connect(qaScan, extractQA),
-                Connect(extractQA, secScan),
+                Connect(extractQA, storeQA),
+                Connect(storeQA, secScan),
+
                 Connect(secScan, extractSec),
-                Connect(extractSec, devopsScan),
+                Connect(extractSec, storeSec),
+                Connect(storeSec, devopsScan),
+
                 Connect(devopsScan, extractDevOps),
-                Connect(extractDevOps, archScan),
+                Connect(extractDevOps, storeDevOps),
+                Connect(storeDevOps, archScan),
+
                 Connect(archScan, extractArch),
-                Connect(extractArch, store),
-                Connect(store, poReviewScan),
+                Connect(extractArch, storeArch),
+                Connect(storeArch, poReviewScan),
+
                 Connect(poReviewScan, extractPO),
                 Connect(extractPO, setOutputs),
                 Connect(setOutputs, finish),
@@ -263,10 +272,10 @@ public class ContextGatheringWorkflow : WorkflowBase
         };
     }
 
-    /// <summary>
-    /// Creates a DispatchWorkflow that calls LlmCallWorkflow with role + action + variables.
-    /// Prompts are resolved from the prompt registry, not hardcoded.
-    /// </summary>
+    // ================================================================
+    // Helpers
+    // ================================================================
+
     private static DispatchWorkflow RoleScan(
         string id, string name, string role,
         Variable<string> repository, Variable<string> workItemJson,
@@ -297,9 +306,6 @@ public class ContextGatheringWorkflow : WorkflowBase
         return dispatch;
     }
 
-    /// <summary>
-    /// Overload with dynamic previous findings.
-    /// </summary>
     private static DispatchWorkflow RoleScan(
         string id, string name, string role,
         Variable<string> repository, Variable<string> workItemJson,
@@ -348,6 +354,28 @@ public class ContextGatheringWorkflow : WorkflowBase
         };
         sv.SetDisplayText(name);
         return sv;
+    }
+
+    /// <summary>
+    /// Store one role's findings immediately. Appends the returned context ID
+    /// to the accumulated contextIds JSON array.
+    /// </summary>
+    private static StoreRoleFindingActivity StoreRole(
+        string id, string name, string role,
+        Variable<string> repository, Variable<int> issueNumber,
+        Variable<string> findingsVar, Variable<string> contextIds)
+    {
+        var store = new StoreRoleFindingActivity
+        {
+            Id = id, Name = name,
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            Role = new Input<string>(role),
+            FindingsJson = new Input<string>(ctx => findingsVar.Get(ctx)),
+            ContextId = new Output<string>(new Variable<string>()),
+        };
+        store.SetDisplayText(name);
+        return store;
     }
 
     private static FlowConnection Connect(IActivity source, IActivity target)

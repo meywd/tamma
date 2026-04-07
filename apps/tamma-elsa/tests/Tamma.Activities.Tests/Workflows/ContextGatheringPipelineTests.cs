@@ -59,20 +59,25 @@ public class ContextGatheringPipelineTests
     }
 
     [Test]
-    public void Scans_ChainSequentially()
+    public void Scans_ChainSequentially_WithPerRoleStorage()
     {
-        // Dev → ExtractDev → QA → ExtractQA → Security → ExtractSec → DevOps → ExtractDevOps → Arch → ExtractArch
+        // Dev → ExtractDev → StoreDev → QA → ExtractQA → StoreQA → ...
         var expectedChain = new[]
         {
             ("DevScan", "ExtractDev"),
-            ("ExtractDev", "QAScan"),
+            ("ExtractDev", "StoreDev"),
+            ("StoreDev", "QAScan"),
             ("QAScan", "ExtractQA"),
-            ("ExtractQA", "SecurityScan"),
+            ("ExtractQA", "StoreQA"),
+            ("StoreQA", "SecurityScan"),
             ("SecurityScan", "ExtractSec"),
-            ("ExtractSec", "DevOpsScan"),
+            ("ExtractSec", "StoreSec"),
+            ("StoreSec", "DevOpsScan"),
             ("DevOpsScan", "ExtractDevOps"),
-            ("ExtractDevOps", "ArchScan"),
+            ("ExtractDevOps", "StoreDevOps"),
+            ("StoreDevOps", "ArchScan"),
             ("ArchScan", "ExtractArch"),
+            ("ExtractArch", "StoreArch"),
         };
 
         foreach (var (from, to) in expectedChain)
@@ -84,21 +89,33 @@ public class ContextGatheringPipelineTests
     }
 
     [Test]
-    public void Pipeline_EndsWithStoreFindings_ThenPOReview()
+    public void Pipeline_EndsWithStoreArch_ThenPOReview()
     {
-        // ExtractArch → StoreFindings → POReview → ExtractPO → SetOutputs → Finish
-        var hasStoreConnection = _flowchart.Connections.Any(c =>
-            c.Source.Activity.Id == "ExtractArch" && c.Target.Activity.Id == "StoreFindings");
-
+        // StoreArch → POReview → ExtractPO → SetOutputs → Finish
         var hasPOConnection = _flowchart.Connections.Any(c =>
-            c.Source.Activity.Id == "StoreFindings" && c.Target.Activity.Id == "POReview");
+            c.Source.Activity.Id == "StoreArch" && c.Target.Activity.Id == "POReview");
 
         var hasFinishConnection = _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "SetOutputs" && c.Target.Activity.Id == "Finish");
 
-        hasStoreConnection.Should().BeTrue("ExtractArch should connect to StoreFindings");
-        hasPOConnection.Should().BeTrue("StoreFindings should connect to POReview");
+        hasPOConnection.Should().BeTrue("StoreArch should connect to POReview");
         hasFinishConnection.Should().BeTrue("SetOutputs should connect to Finish");
+    }
+
+    [Test]
+    public void HasFivePerRoleStoreActivities()
+    {
+        var storeActivities = _flowchart.Activities
+            .Where(a => a.Id != null && a.Id.StartsWith("Store") && a.Id != "SetOutputs")
+            .Select(a => a.Id!)
+            .ToList();
+
+        storeActivities.Should().HaveCount(5, "should have 5 per-role store activities");
+        storeActivities.Should().Contain("StoreDev");
+        storeActivities.Should().Contain("StoreQA");
+        storeActivities.Should().Contain("StoreSec");
+        storeActivities.Should().Contain("StoreDevOps");
+        storeActivities.Should().Contain("StoreArch");
     }
 
     [Test]

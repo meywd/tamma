@@ -13,7 +13,7 @@ The Context Gathering workflow performs **sequential role-based codebase scannin
 - **No inline prompts** -- Every LLM call uses `role + action + variables` resolved from the Prompt Registry (Story 12-5)
 - **Sequential accumulation** -- Each role sees all previous findings, building a progressively richer picture
 - **LlmCallWorkflow dispatch** -- Each scan dispatches the `llm-call` sub-workflow (not direct HTTP calls)
-- **Vector DB storage** -- All findings are persisted for later retrieval via RAG
+- **Per-role vector DB storage** -- Each role's findings are stored immediately after extraction, so partial results persist even if later scans fail
 - **PO summarization** -- The Product Owner produces a concise summary with links
 
 ## Flow Diagram
@@ -21,80 +21,47 @@ The Context Gathering workflow performs **sequential role-based codebase scannin
 ```
 +---------------------+
 | Initialize          |
-| (repo, issue,       |
-|  workItemJson,      |
-|  workItemType)      |
 +---------+-----------+
           |
           v
-+---------------------+
-| Dev Scan            |
-| (llm-call:          |
-|  developer /        |
-|  context-scan)      |
-+---------+-----------+
-          |
++---------------------+     +-------------------+
+| Dev Scan            | --> | Store Dev (VecDB) |
++---------+-----------+     +--------+----------+
+                                     |
+          +-------------------------+
           v
-+---------------------+
-| QA Scan             |
-| (llm-call:          |
-|  tester /           |
-|  context-scan)      |
-| sees: dev findings  |
-+---------+-----------+
-          |
++---------------------+     +-------------------+
+| QA Scan             | --> | Store QA (VecDB)  |
+| sees: dev findings  |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
           v
-+---------------------+
-| Security Scan       |
-| (llm-call:          |
-|  security /         |
-|  context-scan)      |
-| sees: dev, qa       |
-+---------+-----------+
-          |
++---------------------+     +-------------------+
+| Security Scan       | --> | Store Sec (VecDB) |
+| sees: dev, qa       |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
           v
-+---------------------+
-| DevOps Scan         |
-| (llm-call:          |
-|  devops /           |
-|  context-scan)      |
-| sees: dev, qa, sec  |
-+---------+-----------+
-          |
++---------------------+     +----------------------+
+| DevOps Scan         | --> | Store DevOps (VecDB) |
+| sees: dev, qa, sec  |     +--------+-------------+
++---------+-----------+              |
+          +-------------------------+
           v
-+---------------------+
-| Architect Scan      |
-| (llm-call:          |
-|  architect /        |
-|  context-scan)      |
-| sees: all previous  |
-+---------+-----------+
-          |
-          v
-+---------------------+
-| Store in Vector DB  |
-| (StoreFindingsAct.) |
-+---------+-----------+
-          |
++---------------------+     +-------------------+
+| Architect Scan      | --> | Store Arch (VecDB)|
+| sees: all previous  |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
           v
 +---------------------+
 | PO Review           |
-| (llm-call:          |
-|  product_owner /    |
-|  summarize)         |
-+---------+-----------+
-          |
-          v
-+---------------------+
-| Extract PO Summary  |
-| (summary, links)    |
+| (summarize all)     |
 +---------+-----------+
           |
           v
 +---------------------+
 | Set Outputs         |
-| (summary,           |
-|  contextIds, links) |
 +---------+-----------+
           |
           v
@@ -132,7 +99,12 @@ The workflow auto-detects the work item type from the JSON content:
 
 ## Vector DB Storage
 
-The `StoreFindingsActivity` persists all role findings to the vector database, indexed by repository and issue number. Each finding gets a unique context ID. The API endpoint (`POST /api/engine/store-context`) supports:
+Each role's findings are stored **immediately** via `StoreRoleFindingActivity` after extraction. This ensures:
+- **Partial results persist** -- if scan 3 crashes, scans 1 and 2 are already in the vector DB
+- **Progressive context** -- later scans could query stored findings via RAG
+- **Fault tolerance** -- no single point of failure for all 5 scans
+
+The API endpoint (`POST /api/engine/store-context`) supports:
 - Storing findings keyed by role
 - Retrieving by issue number
 - RAG query with role filtering and token budget

@@ -641,28 +641,36 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
   // Flow: InitInputs -> Phase 1 (Story,Commits,Tests,History) -> Story Metadata OK?
   //   True -> Phase 2 (FileContents,SimilarPatterns) -> AssembleContext -> ApplyBudget -> SetOutputs
   //   False -> Fault (No Metadata)
-  // ContextGatheringWorkflow.cs — Sequential role-based scanning + vector DB + PO summary
+  // ContextGatheringWorkflow.cs — Sequential role scans with per-role vector DB storage
   'context-gathering': {
     nodes: [
       n('init', 'Initialize', 0, 0, 'start', { description: 'Repo, issue, workItemType' }),
       n('devScan', 'Dev Scan', 0, 0, 'subworkflow', { description: 'LLM Call: developer' }),
+      n('storeDev', 'Store Dev', 0, 0, 'process', { description: 'Vector DB' }),
       n('qaScan', 'QA Scan', 0, 0, 'subworkflow', { description: 'LLM Call: tester' }),
+      n('storeQA', 'Store QA', 0, 0, 'process', { description: 'Vector DB' }),
       n('secScan', 'Security Scan', 0, 0, 'subworkflow', { description: 'LLM Call: security' }),
+      n('storeSec', 'Store Security', 0, 0, 'process', { description: 'Vector DB' }),
       n('devopsScan', 'DevOps Scan', 0, 0, 'subworkflow', { description: 'LLM Call: devops' }),
+      n('storeDevOps', 'Store DevOps', 0, 0, 'process', { description: 'Vector DB' }),
       n('archScan', 'Architect Scan', 0, 0, 'subworkflow', { description: 'LLM Call: architect' }),
-      n('store', 'Store in Vector DB', 0, 0),
+      n('storeArch', 'Store Architect', 0, 0, 'process', { description: 'Vector DB' }),
       n('poReview', 'PO Review', 0, 0, 'subworkflow', { description: 'LLM Call: summarize' }),
       n('outputs', 'Set Outputs', 0, 0),
       n('done', 'Finish', 0, 0, 'end'),
     ],
     edges: [
       e('init', 'devScan'),
-      e('devScan', 'qaScan'),
-      e('qaScan', 'secScan'),
-      e('secScan', 'devopsScan'),
-      e('devopsScan', 'archScan'),
-      e('archScan', 'store'),
-      e('store', 'poReview'),
+      e('devScan', 'storeDev'),
+      e('storeDev', 'qaScan'),
+      e('qaScan', 'storeQA'),
+      e('storeQA', 'secScan'),
+      e('secScan', 'storeSec'),
+      e('storeSec', 'devopsScan'),
+      e('devopsScan', 'storeDevOps'),
+      e('storeDevOps', 'archScan'),
+      e('archScan', 'storeArch'),
+      e('storeArch', 'poReview'),
       e('poReview', 'outputs'),
       e('outputs', 'done'),
     ],
