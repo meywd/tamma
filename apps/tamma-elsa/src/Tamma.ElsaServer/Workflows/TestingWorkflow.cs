@@ -58,6 +58,22 @@ public class TestingWorkflow : WorkflowBase
         var ciResultsFromWaitVar = builder.WithVariable<CIResultsPayload>("CIResultsFromWait", default!);
 
         // ============================================
+        // Step 0: Initialize — read optional maxRetries input
+        // ============================================
+        var initInputs = new SetVariable
+        {
+            Id = "InitTestingInputs",
+            Name = "Init Inputs",
+            Variable = maxAttemptsVar,
+            Value = new Input<object?>(ctx =>
+            {
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                return (object)(inputMaxRetries ?? maxAttemptsVar.Get(ctx));
+            })
+        };
+        initInputs.SetDisplayText("Init Inputs");
+
+        // ============================================
         // Step 1: Trigger CI Pipeline
         // ============================================
         var triggerCI = new TriggerCIActivity
@@ -442,6 +458,8 @@ public class TestingWorkflow : WorkflowBase
         // Add all activities to the flowchart
         var allActivities = new IActivity[]
         {
+            // Init
+            initInputs,
             // Main pipeline
             triggerCI, waitForCI, storeCIResults, evaluateResults,
             // AllPass/MinorIssues path
@@ -470,7 +488,8 @@ public class TestingWorkflow : WorkflowBase
         // Wire connections
         // ============================================
 
-        // Main pipeline: Trigger -> Wait -> Store -> Evaluate
+        // Init -> Main pipeline: Trigger -> Wait -> Store -> Evaluate
+        Connect(flowchart, initInputs, triggerCI);
         Connect(flowchart, triggerCI, waitForCI);
         Connect(flowchart, waitForCI, storeCIResults);
         Connect(flowchart, storeCIResults, evaluateResults);

@@ -51,6 +51,7 @@ public class TaskCreationWorkflow : WorkflowBase
         var tasksValid = builder.WithVariable<bool>("TasksValid", false);
         var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
         var retryCount = builder.WithVariable<int>("RetryCount", 0);
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 2);
 
         var llmResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -68,6 +69,8 @@ public class TaskCreationWorkflow : WorkflowBase
                 planJson.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)repo;
             })
         };
@@ -197,7 +200,7 @@ public class TaskCreationWorkflow : WorkflowBase
         };
         incrementRetry.SetDisplayText("Increment Retry");
 
-        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < 2)
+        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < maxRetries.Get(ctx))
         { Id = "CanRetry", Name = "Can Retry?" };
         canRetry.SetDisplayText("Can Retry?");
 

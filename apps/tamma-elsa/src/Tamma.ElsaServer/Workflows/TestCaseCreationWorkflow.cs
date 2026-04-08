@@ -50,6 +50,7 @@ public class TestCaseCreationWorkflow : WorkflowBase
         var testsValid = builder.WithVariable<bool>("TestsValid", false);
         var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
         var retryCount = builder.WithVariable<int>("RetryCount", 0);
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 2);
 
         var llmResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -66,6 +67,8 @@ public class TestCaseCreationWorkflow : WorkflowBase
                 branchName.Set(ctx, ctx.GetInput<string>("branchName") ?? "");
                 tasksJson.Set(ctx, ctx.GetInput<string>("tasksJson") ?? "[]");
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)repo;
             })
         };
@@ -191,7 +194,7 @@ public class TestCaseCreationWorkflow : WorkflowBase
         };
         incrementRetry.SetDisplayText("Increment Retry");
 
-        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < 2)
+        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < maxRetries.Get(ctx))
         { Id = "CanRetry", Name = "Can Retry?" };
         canRetry.SetDisplayText("Can Retry?");
 

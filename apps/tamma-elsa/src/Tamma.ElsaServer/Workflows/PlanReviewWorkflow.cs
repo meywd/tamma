@@ -75,6 +75,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Discussion
         var roundCount = builder.WithVariable<int>("RoundCount", 0);
+        var maxRounds = builder.WithVariable<int>("MaxRounds", 3);
         var discussionLog = builder.WithVariable<string>("DiscussionLog", "[]");
         var discussionResult = builder.WithVariable<string>("DiscussionResult", "{}");
 
@@ -114,6 +115,8 @@ public class PlanReviewWorkflow : WorkflowBase
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
                 roundCount.Set(ctx, 1);
+                var inputMaxRounds = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRounds.HasValue) maxRounds.Set(ctx, inputMaxRounds.Value);
                 discussionLog.Set(ctx, "[]");
                 return (object)repo;
             })
@@ -417,9 +420,9 @@ public class PlanReviewWorkflow : WorkflowBase
         };
         incrementRound.SetDisplayText("Increment Round");
 
-        var canContinue = new FlowDecision(ctx => roundCount.Get(ctx) <= 3)
-        { Id = "CanContinue", Name = "Round <= 3?" };
-        canContinue.SetDisplayText("Round <= 3?");
+        var canContinue = new FlowDecision(ctx => roundCount.Get(ctx) <= maxRounds.Get(ctx))
+        { Id = "CanContinue", Name = "Round <= Max?" };
+        canContinue.SetDisplayText("Round <= Max?");
 
         // ================================================================
         // 10. Max rounds exceeded — force needsHuman
@@ -430,7 +433,7 @@ public class PlanReviewWorkflow : WorkflowBase
             Variable = decision,
             Value = new Input<object?>(ctx =>
             {
-                reviewNotes.Set(ctx, "Max review rounds (3) exceeded without consensus. Escalating to human.");
+                reviewNotes.Set(ctx, $"Max review rounds ({maxRounds.Get(ctx)}) exceeded without consensus. Escalating to human.");
                 return (object)"needsHuman";
             })
         };

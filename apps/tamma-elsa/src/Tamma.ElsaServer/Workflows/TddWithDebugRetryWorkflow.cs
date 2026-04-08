@@ -21,7 +21,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// Flow:
 ///   tddCycle -> tddSuccess?
 ///     YES -> finish(success=true)
-///     NO  -> tddDebugGuard (< 3)?
+///     NO  -> tddDebugGuard (< max, default 3)?
 ///       NO  -> finish(success=false, errorMessage)
 ///       YES -> incrementTddDebug -> dispatchTddDebugging -> (loop to tddCycle)
 ///
@@ -47,6 +47,7 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
         var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var tddDebugAttempt = builder.WithVariable<int>("TddDebugAttempt", 0);
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
 
         // DispatchWorkflow result capture
         var tddResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -72,6 +73,8 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
                 if (skill > 0) skillLevel.Set(ctx, skill);
                 var issue = ctx.GetInput<int>("issueNumber");
                 if (issue > 0) issueNumber.Set(ctx, issue);
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)(ctx.GetInput<string>("storyId") ?? "");
             })
         };
@@ -116,9 +119,9 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
         // ================================================================
         // TDD Debug retry guard (< 3 attempts)
         // ================================================================
-        var tddDebugGuard = new FlowDecision(ctx => tddDebugAttempt.Get(ctx) < 3)
-        { Id = "TddDebugGuard", Name = "TDD Debug < 3?" };
-        tddDebugGuard.SetDisplayText("TDD Debug < 3?");
+        var tddDebugGuard = new FlowDecision(ctx => tddDebugAttempt.Get(ctx) < maxRetries.Get(ctx))
+        { Id = "TddDebugGuard", Name = "TDD Debug < Max?" };
+        tddDebugGuard.SetDisplayText("TDD Debug < Max?");
 
         // ================================================================
         // Increment TDD debug counter
@@ -180,7 +183,7 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
             Activities =
             {
                 WithLabel(new SetOutput { Id = "SetTddRetryFailed", Name = "Set Failed", OutputName = new("success"), OutputValue = new(_ => (object)false) }, "Set Failed"),
-                WithLabel(new SetOutput { Id = "SetTddRetryErrorMsg", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(_ => (object)"TDD debug retry limit reached (3 attempts)") }, "Set Error Message")
+                WithLabel(new SetOutput { Id = "SetTddRetryErrorMsg", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)$"TDD debug retry limit reached ({maxRetries.Get(ctx)} attempts)") }, "Set Error Message")
             }
         };
         finishFailureOutputs.SetDisplayText("Finish Failure");
