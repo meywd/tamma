@@ -150,11 +150,12 @@ function e(source: string, target: string, label?: string): Edge {
 }
 
 /**
- * Recompute edge handles based on current node positions.
- * - Default: bottom (source) → top (target) for downward flow
- * - If target is significantly to the right: use right → target-left
- * - If target is significantly to the left: use left → target-right
- * - If target is above (back-edge/loop): use left → target-left
+ * Recompute source handle based on node positions.
+ * Target is ALWAYS top (incoming = top). Only source changes:
+ * - Target below: source = bottom (default, downward flow)
+ * - Target above (back-edge): source = left (loop goes up on left)
+ * - Target far right: source = right
+ * - Target far left: source = left
  */
 function computeEdgeHandles(edges: Edge[], nodeMap: Map<string, { x: number; y: number }>): Edge[] {
   return edges.map((edge) => {
@@ -166,28 +167,20 @@ function computeEdgeHandles(edges: Edge[], nodeMap: Map<string, { x: number; y: 
     const dy = tgtPos.y - srcPos.y;
 
     let sourceHandle: string | undefined;
-    let targetHandle: string | undefined;
 
     if (dy < -30) {
-      // Target is above → back-edge (loop) → route left side
+      // Target is above → back-edge → exit left
       sourceHandle = 'left';
-      targetHandle = 'target-left';
     } else if (Math.abs(dx) > 180 && Math.abs(dx) > Math.abs(dy) * 0.8) {
-      // Target is far to the side → use horizontal handles
-      if (dx > 0) {
-        sourceHandle = 'right';
-        targetHandle = 'target-left';
-      } else {
-        sourceHandle = 'left';
-        targetHandle = 'target-right';
-      }
+      // Target is far to the side
+      sourceHandle = dx > 0 ? 'right' : 'left';
     }
-    // else: default bottom → top (no handle override)
+    // else: default bottom (no override)
 
     return {
       ...edge,
       sourceHandle,
-      targetHandle,
+      targetHandle: undefined, // always top
     };
   });
 }
