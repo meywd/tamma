@@ -317,10 +317,8 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     ],
   },
   // LlmCallWorkflow.cs — Universal LLM call with provider chain + concurrency check
-  // Flow: InitInputs -> ResolvePrompt -> SetupBudget -> ResolveAgentConfig -> ResolveChain
-  //   -> CheckConcurrency [OK -> ForEach, AtLimit -> Delay -> re-check]
-  //   -> ForEachProvider (CircuitBreaker + Budget + RetryLoop(CallLLM))
-  //   -> Call Succeeded? -> SetOutputs | BuildFailureOutput -> SetOutputs
+  // Top-level flowchart nodes only. The ForEach body (circuit breaker, budget,
+  // retry loop) is nested inside the ForEach activity — shown as a parallel node.
   'llm-call': {
     nodes: [
       n('start', 'Initialize Inputs', 0, 0, 'start'),
@@ -328,21 +326,13 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       n('budget', 'Setup Budget', 0, 0),
       n('agent', 'Resolve Agent Config', 0, 0),
       n('chain', 'Resolve Provider Chain', 0, 0),
-      n('concurrency', 'Check LLM Concurrency', 0, 0, 'decision'),
-      n('concurrencyWait', 'Concurrency Wait', 0, 0, 'process', { description: 'Delay then re-check' }),
-      n('foreach', 'For Each Provider', 0, 0, 'subworkflow', { description: 'Iterate provider chain' }),
-      n('skipCheck', 'Already Succeeded?', 0, 0, 'decision'),
-      n('circuitBreaker', 'Circuit Breaker Open?', 0, 0, 'decision'),
-      n('budgetCheck', 'Budget Exceeded?', 0, 0, 'decision'),
-      n('callLlm', 'Call LLM', 0, 0, 'process', { description: 'With rendered prompt' }),
-      n('llmOk', 'LLM Succeeded?', 0, 0, 'decision'),
-      n('transient', 'Transient Error?', 0, 0, 'decision'),
-      n('retry', 'Retry with Backoff', 0, 0),
-      n('nextProvider', 'Next Provider', 0, 0),
+      n('concurrency', 'Check Concurrency', 0, 0, 'decision'),
+      n('concurrencyWait', 'Wait', 0, 0, 'process', { description: 'Delay 5s, re-check' }),
+      n('foreach', 'For Each Provider', 0, 0, 'parallel', { items: ['Circuit Breaker', 'Budget Check', 'Call LLM', 'Retry on Transient'] }),
       n('succeeded', 'Call Succeeded?', 0, 0, 'decision'),
       n('outputs', 'Set Outputs', 0, 0),
-      n('done', 'Done', 0, 0, 'end'),
       n('failure', 'Build Failure Output', 0, 0),
+      n('done', 'Done', 0, 0, 'end'),
     ],
     edges: [
       e('start', 'resolve'),
@@ -353,20 +343,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('concurrency', 'foreach', 'OK'),
       e('concurrency', 'concurrencyWait', 'AtLimit', 'right'),
       e('concurrencyWait', 'concurrency'),
-      e('foreach', 'skipCheck'),
-      e('skipCheck', 'circuitBreaker', 'No'),
-      e('skipCheck', 'succeeded', 'Yes', 'right'),
-      e('circuitBreaker', 'budgetCheck', 'Closed'),
-      e('circuitBreaker', 'nextProvider', 'Open', 'right'),
-      e('budgetCheck', 'callLlm', 'OK'),
-      e('budgetCheck', 'nextProvider', 'Exceeded', 'right'),
-      e('callLlm', 'llmOk'),
-      e('llmOk', 'succeeded', 'Yes'),
-      e('llmOk', 'transient', 'No', 'right'),
-      e('transient', 'retry', 'Yes'),
-      e('transient', 'nextProvider', 'No', 'right'),
-      e('retry', 'callLlm'),
-      e('nextProvider', 'foreach'),
+      e('foreach', 'succeeded'),
       e('succeeded', 'outputs', 'True'),
       e('succeeded', 'failure', 'False', 'right'),
       e('failure', 'outputs'),
