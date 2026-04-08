@@ -9,6 +9,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.ElsaServer.Workflows.Helpers;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -117,38 +118,10 @@ public class PlanGenerationWorkflow : WorkflowBase
                 if (result != null && result.TryGetValue("llmResponse", out var r))
                     output = r?.ToString() ?? "";
 
-                // Extract JSON
-                var jsonStart = output.IndexOf('{');
-                var jsonEnd = output.LastIndexOf('}');
-                if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    output = output[jsonStart..(jsonEnd + 1)];
-
-                // Validate
-                var errors = new System.Collections.Generic.List<string>();
-                if (string.IsNullOrWhiteSpace(output) || output == "{}")
-                {
-                    errors.Add("Empty plan");
-                }
-                else
-                {
-                    try
-                    {
-                        var doc = System.Text.Json.JsonDocument.Parse(output);
-                        var root = doc.RootElement;
-                        if (!root.TryGetProperty("tasks", out _) && !root.TryGetProperty("steps", out _))
-                            errors.Add("Missing 'tasks' or 'steps'");
-                        if (!root.TryGetProperty("fileMap", out _) && !root.TryGetProperty("files", out _) && !root.TryGetProperty("filesToModify", out _))
-                            errors.Add("Missing file map");
-                    }
-                    catch (System.Text.Json.JsonException ex)
-                    {
-                        errors.Add($"Invalid JSON: {ex.Message}");
-                    }
-                }
-
-                planValid.Set(ctx, errors.Count == 0);
-                validationErrors.Set(ctx, string.Join("; ", errors));
-                return (object)output;
+                var (json, isValid, errors) = PlanValidationHelper.ValidatePlan(output);
+                planValid.Set(ctx, isValid);
+                validationErrors.Set(ctx, errors);
+                return (object)json;
             })
         };
         extractAndValidate.SetDisplayText("Extract & Validate");
