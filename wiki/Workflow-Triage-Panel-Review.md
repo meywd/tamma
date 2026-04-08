@@ -8,34 +8,115 @@ title: "Workflow: Triage Panel Review"
 
 ## Purpose
 
-**Status:** Stub -- structure defined, implementation pending.
+The Triage Panel Review workflow runs a 4-role LLM panel to assess a triage item from multiple perspectives. Each role dispatches `llm-call` with `role=<role>` and `action=triage`, providing the item JSON and gathered context. Results are aggregated into a panel result JSON containing all assessments.
 
-The Triage Panel Review workflow will run a 4-role panel (Security Analyst, Developer, DevOps, QA) to assess a triage item from their respective perspectives. For security alerts, this includes CVE impact, attack surface, breaking changes, dependency chain, and compatibility. For issues, this includes type classification, complexity estimate, and scope. Currently outputs a default empty JSON object.
+For security alerts, this includes CVE impact, attack surface, breaking changes, dependency chain, and compatibility. For issues, this includes type classification, complexity estimate, and scope.
 
 ## Flow Diagram
 
 ```
-+---------------------+
-| Set Default         |
-| panelResultJson     |
-| = "{}"              |
-+--------+------------+
++------------------+
+|   Initialize     |
+| (read inputs)    |
++--------+---------+
          |
          v
-+---------------------+
-| Stub: Triage        |
-| Panel -- TODO       |
-+---------------------+
++------------------+
+| Security Review  |
+| (llm-call:       |
+|  security,       |
+|  triage)         |
++--------+---------+
+         |
+         v
++------------------+
+| Extract Security |
+| Review           |
++--------+---------+
+         |
+         v
++------------------+
+| Developer Review |
+| (llm-call:       |
+|  developer,      |
+|  triage)         |
++--------+---------+
+         |
+         v
++------------------+
+| Extract Developer|
+| Review           |
++--------+---------+
+         |
+         v
++------------------+
+| DevOps Review    |
+| (llm-call:       |
+|  devops,         |
+|  triage)         |
++--------+---------+
+         |
+         v
++------------------+
+| Extract DevOps   |
+| Review           |
++--------+---------+
+         |
+         v
++------------------+
+| Tester Review    |
+| (llm-call:       |
+|  tester,         |
+|  triage)         |
++--------+---------+
+         |
+         v
++------------------+
+| Extract Tester   |
+| Review           |
++--------+---------+
+         |
+         v
++------------------+
+| Aggregate        |
+| Results          |
++--------+---------+
+         |
+         v
++------------------+
+| Output Panel     |
+| Result           |
++--------+---------+
+         |
+         v
++------------------+
+| Finish           |
++------------------+
 ```
 
-## Planned Review Roles
+## Review Roles
 
 | Role | Focus |
 |------|-------|
-| Security Analyst | CVE impact, attack surface, vulnerability assessment |
+| Security | CVE impact, attack surface, vulnerability assessment |
 | Developer | Implementation complexity, breaking changes, compatibility |
 | DevOps | Deployment impact, infrastructure concerns, dependency chain |
-| QA | Test coverage impact, regression risk, scope |
+| Tester | Test coverage impact, regression risk, scope |
+
+Each role receives `itemJson`, `contextJson`, and `repository` via the LLM call variables.
+
+## Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `Repository` | string | Repository identifier |
+| `ItemJson` | string | Triage item JSON |
+| `ContextJson` | string | Context from triage-context-gathering |
+| `SecurityReview` | string | Security analyst review JSON |
+| `DeveloperReview` | string | Developer review JSON |
+| `DevOpsReview` | string | DevOps review JSON |
+| `TesterReview` | string | Tester review JSON |
+| `PanelResultJson` | string | Aggregated panel result JSON |
 
 ## Inputs
 
@@ -49,7 +130,27 @@ The Triage Panel Review workflow will run a 4-role panel (Security Analyst, Deve
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `panelResultJson` | string | Panel review results JSON (currently defaults to "{}") |
+| `panelResultJson` | string | Panel review results JSON |
+
+## Output Format
+
+The aggregated panel result is a JSON object:
+
+```json
+{
+  "reviews": [
+    { "role": "security", "assessment": "..." },
+    { "role": "developer", "assessment": "..." },
+    { "role": "devops", "assessment": "..." },
+    { "role": "tester", "assessment": "..." }
+  ],
+  "reviewCount": 4
+}
+```
+
+## Review Extraction
+
+Each role's LLM response is parsed for JSON. If valid JSON is found, it is used as the assessment. If not, the raw text is wrapped in a `{"rawAssessment": "..."}` object.
 
 ---
 

@@ -8,24 +8,66 @@ title: "Workflow: Triage Context Gathering"
 
 ## Purpose
 
-**Status:** Stub -- structure defined, implementation pending.
+The Triage Context Gathering workflow gathers context for issue/alert triage. It dispatches `llm-call` with `role=developer` and `action=context-scan` to analyze code usage of the affected package/module, dependency graphs, CVE details (for security alerts), changelogs, and migration guides.
 
-The Triage Context Gathering workflow will gather context for issue/alert triage including code usage of the affected package, dependency graph, CVE details, changelog, and migration guide. Currently outputs a default empty JSON object.
+The workflow auto-detects the item type (issue, security alert, or dependency update) from the item JSON and adjusts the context scan focus accordingly.
 
 ## Flow Diagram
 
 ```
-+---------------------+
-| Set Default         |
-| contextJson = "{}"  |
-+--------+------------+
++------------------+
+|   Initialize     |
+| (read inputs,    |
+|  detect item     |
+|  type)           |
++--------+---------+
          |
          v
-+---------------------+
-| Stub: Triage        |
-| Context -- TODO     |
-+---------------------+
++------------------+
+| Gather Context   |
+| (llm-call:       |
+|  developer,      |
+|  context-scan,   |
+|  scanFocus=      |
+|  triage)         |
++--------+---------+
+         |
+         v
++------------------+
+| Extract Result   |
+| (parse JSON or   |
+|  wrap raw text)  |
++--------+---------+
+         |
+         v
++------------------+
+| Output Context   |
++--------+---------+
+         |
+         v
++------------------+
+| Finish           |
++------------------+
 ```
+
+## Item Type Detection
+
+The workflow detects the triage item type by inspecting the `itemJson` content:
+
+| Detected Type | Trigger Patterns | Scan Focus |
+|---------------|------------------|------------|
+| `security` | Contains `"type":"security"`, `"advisory"`, or `"cve"` | CVE impact, attack surface |
+| `dependency` | Contains `"type":"dependabot"` or `"dependency"` | Dependency chain, breaking changes |
+| `issue` | Default (no security/dependency patterns found) | Code usage, module impact |
+
+## Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `Repository` | string | Repository identifier |
+| `ItemJson` | string | Triage item JSON |
+| `ContextJson` | string | Gathered context result JSON |
+| `ItemType` | string | Detected item type: `issue`, `security`, or `dependency` |
 
 ## Inputs
 
@@ -38,7 +80,11 @@ The Triage Context Gathering workflow will gather context for issue/alert triage
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `contextJson` | string | Gathered context JSON (currently defaults to "{}") |
+| `contextJson` | string | Gathered context JSON |
+
+## Result Extraction
+
+The LLM response is parsed for JSON. If valid JSON is found, it is returned directly. If not, the raw text is wrapped in a `{"rawContext": "..."}` object.
 
 ---
 

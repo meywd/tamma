@@ -86,7 +86,9 @@ Gathers context specific to triage decisions:
 **Inputs:** `repository`, `itemJson`
 **Outputs:** `contextJson`
 
-**Status:** Stub -- workflow structure defined, implementation pending.
+Dispatches `llm-call` with `role=developer`, `action=context-scan`, `scanFocus=triage`. Auto-detects item type (issue/security/dependency) from the item JSON.
+
+See [Triage Context Gathering](Workflow-Triage-Context-Gathering) for full details.
 
 ### Triage Panel Review
 
@@ -105,7 +107,9 @@ Four-role LLM panel assesses the item:
 **Inputs:** `repository`, `itemJson`, `contextJson`
 **Outputs:** `panelResultJson`
 
-**Status:** Stub -- workflow structure defined, implementation pending.
+Each role dispatches `llm-call` with `role=<role>`, `action=triage`. Results are aggregated into a JSON object with all 4 assessments.
+
+See [Triage Panel Review](Workflow-Triage-Panel-Review) for full details.
 
 ### Triage PO Decision
 
@@ -126,7 +130,9 @@ The Product Owner makes the final triage decision:
 **Inputs:** `repository`, `itemJson`, `panelResultJson`
 **Outputs:** `decisionJson`
 
-**Status:** Stub -- workflow structure defined, implementation pending.
+Dispatches `llm-call` with `role=product_owner`, `action=triage` (tools disabled). Parses the PO response for priority, type, complexity, automation, labels, and comment fields with sensible defaults.
+
+See [Triage PO Decision](Workflow-Triage-PO-Decision) for full details.
 
 ## Concurrency Model
 
