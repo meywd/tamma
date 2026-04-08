@@ -52,6 +52,7 @@ public class PlanGenerationWorkflow : WorkflowBase
         var planValid = builder.WithVariable<bool>("PlanValid", false);
         var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
         var retryCount = builder.WithVariable<int>("RetryCount", 0);
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 2);
 
         var llmResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -71,6 +72,8 @@ public class PlanGenerationWorkflow : WorkflowBase
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
                 reviewNotes.Set(ctx, ctx.GetInput<string>("reviewNotes") ?? "");
                 revisionNumber.Set(ctx, ctx.GetInput<int>("revisionNumber"));
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)repo;
             })
         };
@@ -89,7 +92,10 @@ public class PlanGenerationWorkflow : WorkflowBase
                 ["action"] = "plan",
                 ["variables"] = new Dictionary<string, object>
                 {
+                    ["role"] = "architect",
                     ["workItemJson"] = workItemJson.Get(ctx),
+                    ["contextFindings"] = poSummary.Get(ctx),
+                    ["conventions"] = "TypeScript strict mode, ESM imports with .js, kebab-case files, I-prefix interfaces, async/await only, Pino logging, Vitest tests colocated as *.test.ts",
                     ["poSummary"] = poSummary.Get(ctx),
                     ["contextIds"] = contextIds.Get(ctx),
                     ["repository"] = repository.Get(ctx),
@@ -144,7 +150,7 @@ public class PlanGenerationWorkflow : WorkflowBase
         };
         incrementRetry.SetDisplayText("Increment Retry");
 
-        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < 2)
+        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < maxRetries.Get(ctx))
         { Id = "CanRetry", Name = "Can Retry?" };
         canRetry.SetDisplayText("Can Retry?");
 
