@@ -8,6 +8,7 @@
  *   POST /api/engine/store-context   — store findings JSON for an issue
  *   GET  /api/engine/context/:issueNumber — retrieve stored context by issue number
  *   POST /api/engine/query-context   — simplified RAG query over stored context
+ *   GET  /api/engine/repo-config     — read repo config (.tamma/config.json)
  *
  * Storage: in-memory Map keyed by `${repository}:${issueNumber}`.
  * For production, swap to PostgreSQL cycle_context table.
@@ -17,6 +18,7 @@
 
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { RepoConfigReader } from '../../services/settings/repo-config-reader.js';
 
 // ---------------------------------------------------------------------------
 // Zod Schemas
@@ -81,8 +83,14 @@ function generateId(): string {
 // Plugin
 // ---------------------------------------------------------------------------
 
+export interface EngineContextRouteOptions {
+  /** Optional RepoConfigReader for serving repo config to Elsa activities. */
+  repoConfigReader?: RepoConfigReader;
+}
+
 export async function registerEngineContextRoutes(
   fastify: FastifyInstance,
+  options?: EngineContextRouteOptions,
 ): Promise<void> {
   // ---------- POST /api/engine/store-context ----------
   fastify.post(
@@ -255,6 +263,53 @@ export async function registerEngineContextRoutes(
         totalTokens,
       };
       return reply.send(response);
+    },
+  );
+
+  // ---------- GET /api/engine/repo-config ----------
+  fastify.get(
+    '/api/engine/repo-config',
+    async (
+      request: FastifyRequest<{
+        Querystring: { repo?: string; branch?: string };
+      }>,
+      reply: FastifyReply,
+    ) => {
+      const repoParam = request.query.repo ?? '';
+      if (!repoParam) {
+        return reply.status(400).send({ error: 'Missing required query parameter: repo' });
+      }
+
+      const parts = repoParam.split('/');
+      if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+        return reply.status(400).send({
+          error: `Invalid repo format: "${repoParam}". Expected "owner/repo".`,
+        });
+      }
+
+      const owner = parts[0]!;
+      const repo = parts[1]!;
+      const branch = request.query.branch ?? 'main';
+
+      const reader = options?.repoConfigReader;
+      if (!reader) {
+        // No reader configured — return empty config (graceful degradation)
+        fastify.log.info(
+          { repo: repoParam },
+          'Repo config requested but no RepoConfigReader configured — returning empty',
+        );
+        return reply.send({});
+      }
+
+      try {
+        const config = await reader.readRepoConfig(owner, repo, branch);
+        return reply.send(config);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fastify.log.error({ repo: repoParam, error: message }, 'Failed to read repo config');
+        // Return empty config on error rather than 500 — Elsa activities handle empty gracefully
+        return reply.send({});
+      }
     },
   );
 }

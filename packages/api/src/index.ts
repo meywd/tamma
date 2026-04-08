@@ -72,12 +72,14 @@ import type {
 import { registerAdminRoutes } from './routes/admin/index.js';
 import type { AdminRouteOptions } from './routes/admin/index.js';
 import { registerEngineContextRoutes } from './routes/engine/engine-context-routes.js';
+import type { EngineContextRouteOptions } from './routes/engine/engine-context-routes.js';
 import { registerEngineGitHubRoutes } from './routes/engine/engine-github-routes.js';
 import type { EngineGitHubRouteOptions } from './routes/engine/engine-github-routes.js';
 import { registerEngineTaskRoutes } from './routes/engine/engine-task-routes.js';
 import type { EngineTaskRouteOptions } from './routes/engine/engine-task-routes.js';
 import { registerPromptRoutes } from './routes/prompts/prompt-routes.js';
 import { PromptStore } from './services/prompt-store.js';
+import { registerConventionTemplateRoutes } from './routes/convention-templates.js';
 import type { PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
 import type { PromptTemplate, PromptRole, PromptAction } from './services/default-prompts.js';
 
@@ -122,6 +124,7 @@ export {
   registerEngineGitHubRoutes,
   registerEngineTaskRoutes,
   registerPromptRoutes,
+  registerConventionTemplateRoutes,
   PromptStore,
 };
 
@@ -188,6 +191,7 @@ export type {
   PromptTemplate,
   PromptRole,
   PromptAction,
+  EngineContextRouteOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -220,8 +224,8 @@ export interface CreateAppOptions {
   engineGitHub?: EngineGitHubRouteOptions;
   /** Engine task route options (optional; enables /api/engine/execute-task, etc.). */
   engineTask?: EngineTaskRouteOptions;
-  /** Enable engine context routes (store-context, query-context). Always registered when true. */
-  engineContext?: boolean;
+  /** Enable engine context routes (store-context, query-context, repo-config). Always registered when true. */
+  engineContext?: boolean | EngineContextRouteOptions;
   /** Prompt store for the prompt registry API (optional; creates default in-memory store if omitted). */
   promptStore?: PromptStore;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
@@ -337,8 +341,9 @@ export async function createApp(options?: CreateAppOptions) {
   }
 
   // Engine context routes (Elsa activity callbacks — always register when enabled)
-  if (options?.engineContext === true) {
-    await registerEngineContextRoutes(app);
+  if (options?.engineContext) {
+    const contextOpts = typeof options.engineContext === 'object' ? options.engineContext : undefined;
+    await registerEngineContextRoutes(app, contextOpts);
   }
 
   // Engine GitHub routes (Elsa activity callbacks for GitHub operations)
@@ -356,6 +361,9 @@ export async function createApp(options?: CreateAppOptions) {
     const promptStore = options?.promptStore ?? new PromptStore();
     await registerPromptRoutes(app, promptStore);
   }
+
+  // Convention template routes (always registered — read-only reference data)
+  await registerConventionTemplateRoutes(app);
 
   // Dashboard routes (requires both engine registry and workflow store)
   if (options?.engineRegistry !== undefined && options?.workflowStore !== undefined) {

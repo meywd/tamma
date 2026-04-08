@@ -119,10 +119,10 @@ public class LlmCallWorkflow : WorkflowBase
                         var r = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role") ?? "assistant";
                         variables["role"] = r;
                     }
-                    // Inject 'conventions' if not provided — read from config or use empty
+                    // Inject 'conventions' if not provided — read from workflow input, fall back to empty
                     if (!variables.ContainsKey("conventions"))
                     {
-                        variables["conventions"] = "";
+                        variables["conventions"] = context.GetInput<string>("conventions") ?? "";
                     }
                     variablesJsonVar.Set(context, JsonSerializer.Serialize(variables));
                 }

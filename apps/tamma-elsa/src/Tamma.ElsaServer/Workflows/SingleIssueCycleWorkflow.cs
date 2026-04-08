@@ -7,6 +7,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.Context;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -48,6 +49,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
 
+        // Conventions (loaded from repo config)
+        var conventions = builder.WithVariable<string>("Conventions", "");
+
         // Step outputs
         var contextIds = builder.WithVariable<string>("ContextIds", "");
         var poSummary = builder.WithVariable<string>("POSummary", "");
@@ -88,6 +92,18 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         initInputs.SetDisplayText("Initialize Inputs");
 
         // ================================================================
+        // 0b. Read repo conventions
+        // ================================================================
+        var readConventions = new ReadRepoConventionsActivity
+        {
+            Id = "ReadRepoConventions",
+            Name = "Read Repo Conventions",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            Conventions = new Output<string>(conventions),
+        };
+        readConventions.SetDisplayText("Read Repo Conventions");
+
+        // ================================================================
         // 1. Validate Work Item
         // ================================================================
         var validateItem = new ValidateWorkItemActivity
@@ -112,6 +128,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["repository"] = repository.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -146,6 +163,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["workItemJson"] = workItemJson.Get(ctx),
                 ["reviewNotes"] = reviewNotes.Get(ctx),
                 ["revisionNumber"] = planRevisionCount.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -174,6 +192,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -260,6 +279,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -288,6 +308,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -393,6 +414,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -450,6 +472,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["taskJson"] = currentTaskJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -473,6 +496,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
+                ["conventions"] = conventions.Get(ctx),
             }),
             WaitForCompletion = new(false), // fire & forget
         };
@@ -661,7 +685,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             Activities =
             {
                 // Main flow
-                initInputs, validateItem, gatherContext, extractContext,
+                initInputs, readConventions, validateItem, gatherContext, extractContext,
                 generatePlan, extractPlan,
                 reviewPlan, extractReviewDecision, reviewOutcome,
                 createDeferredIssues, createSplitIssues,
@@ -688,8 +712,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             },
             Connections =
             {
-                // 0. Init Inputs → Validate
-                Connect(initInputs, validateItem),
+                // 0. Init Inputs → Read Conventions → Validate
+                Connect(initInputs, readConventions),
+                Connect(readConventions, validateItem),
 
                 // 1. Validate → notify + continue (parallel)
                 ConnectOutcome(validateItem, "Valid", notifyProcessing),

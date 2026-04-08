@@ -26,6 +26,7 @@ import {
   PgInviteStore,
   InstallationRouter,
   InMemoryTaskQueue,
+  GitHubRepoConfigReader,
 } from './index.js';
 
 export interface ApiServerOptions {
@@ -173,7 +174,7 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   }
 
   // --- Engine Context API routes (Elsa activity callbacks) ---
-  // Always enable context storage routes
+  // Always enable context storage routes; wire RepoConfigReader when Octokit is available.
   appOptions.engineContext = true;
 
   // Engine GitHub routes: use a PAT-authenticated Octokit if GITHUB_TOKEN is set,
@@ -182,6 +183,11 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   if (githubToken) {
     const engineOctokit = new Octokit({ auth: githubToken });
     appOptions.engineGitHub = { octokit: engineOctokit };
+    appOptions.engineContext = {
+      repoConfigReader: new GitHubRepoConfigReader(
+        (params) => engineOctokit.repos.getContent(params) as ReturnType<typeof engineOctokit.repos.getContent>,
+      ),
+    };
     console.log('Engine GitHub routes enabled (PAT)');
   } else if (appId && privateKey) {
     // Use app-level Octokit without installation-specific auth.
@@ -197,6 +203,11 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
         },
       });
       appOptions.engineGitHub = { octokit: engineOctokit };
+      appOptions.engineContext = {
+        repoConfigReader: new GitHubRepoConfigReader(
+          (params) => engineOctokit.repos.getContent(params) as ReturnType<typeof engineOctokit.repos.getContent>,
+        ),
+      };
       console.log(`Engine GitHub routes enabled (App installation ${defaultInstallationId})`);
     } else {
       console.warn('Engine GitHub routes disabled — no GITHUB_TOKEN or GITHUB_DEFAULT_INSTALLATION_ID');
