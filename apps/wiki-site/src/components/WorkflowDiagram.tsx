@@ -138,17 +138,58 @@ const edgeDefaults = {
   labelBgBorderRadius: 4,
 };
 
-function e(source: string, target: string, label?: string, sourceHandle?: string, targetHandle?: string): Edge {
+function e(source: string, target: string, label?: string): Edge {
   return {
-    id: `${source}-${target}${sourceHandle || ''}${targetHandle || ''}`,
+    id: `${source}-${target}-${label || ''}`,
     source,
     target,
     label,
-    sourceHandle: sourceHandle ?? undefined,
-    targetHandle: targetHandle ?? undefined,
     type: 'smoothstep',
     ...edgeDefaults,
   };
+}
+
+/**
+ * Recompute edge handles based on current node positions.
+ * - Default: bottom (source) → top (target) for downward flow
+ * - If target is significantly to the right: use right → target-left
+ * - If target is significantly to the left: use left → target-right
+ * - If target is above (back-edge/loop): use left → target-left
+ */
+function computeEdgeHandles(edges: Edge[], nodeMap: Map<string, { x: number; y: number }>): Edge[] {
+  return edges.map((edge) => {
+    const srcPos = nodeMap.get(edge.source);
+    const tgtPos = nodeMap.get(edge.target);
+    if (!srcPos || !tgtPos) return edge;
+
+    const dx = tgtPos.x - srcPos.x;
+    const dy = tgtPos.y - srcPos.y;
+
+    let sourceHandle: string | undefined;
+    let targetHandle: string | undefined;
+
+    if (dy < -30) {
+      // Target is above → back-edge (loop) → route left side
+      sourceHandle = 'left';
+      targetHandle = 'target-left';
+    } else if (Math.abs(dx) > 180 && Math.abs(dx) > Math.abs(dy) * 0.8) {
+      // Target is far to the side → use horizontal handles
+      if (dx > 0) {
+        sourceHandle = 'right';
+        targetHandle = 'target-left';
+      } else {
+        sourceHandle = 'left';
+        targetHandle = 'target-right';
+      }
+    }
+    // else: default bottom → top (no handle override)
+
+    return {
+      ...edge,
+      sourceHandle,
+      targetHandle,
+    };
+  });
 }
 
 function n(id: string, label: string, x: number, y: number, type = 'process', extra?: Record<string, unknown>): Node {
@@ -178,13 +219,13 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('start', 'select'),
       e('select', 'selectOutcome'),
       e('selectOutcome', 'limits', 'Selected'),
-      e('selectOutcome', 'reportNoIssues', 'NothingFound', 'right'),
+      e('selectOutcome', 'reportNoIssues', 'NothingFound'),
       e('selectOutcome', 'triage', 'NeedsTriage'),
       e('reportNoIssues', 'cooldown'),
       e('triage', 'cooldown'),
       e('limits', 'limitsOutcome'),
       e('limitsOutcome', 'dispatch', 'Continue'),
-      e('limitsOutcome', 'reportLimits', 'Stop', 'right'),
+      e('limitsOutcome', 'reportLimits', 'Stop'),
       e('reportLimits', 'cooldown'),
       e('dispatch', 'cooldown'),
       e('cooldown', 'restart'),
@@ -234,30 +275,30 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     ],
     edges: [
       e('validate', 'context', 'Valid'),
-      e('validate', 'invalid', 'Invalid', 'right'),
+      e('validate', 'invalid', 'Invalid'),
       e('context', 'plan'),
       e('plan', 'reviewPlan'),
       e('reviewPlan', 'reviewOutcome'),
       e('reviewOutcome', 'createTasks', 'Approved'),
       e('reviewOutcome', 'incrPlanRev', 'NeedsModification'),
-      e('reviewOutcome', 'defer', 'Defer', 'right'),
-      e('reviewOutcome', 'split', 'Split', 'right'),
-      e('reviewOutcome', 'needsHuman', 'NeedsHuman', 'right'),
+      e('reviewOutcome', 'defer', 'Defer'),
+      e('reviewOutcome', 'split', 'Split'),
+      e('reviewOutcome', 'needsHuman', 'NeedsHuman'),
       // Plan revision guard
       e('incrPlanRev', 'planMaxRev'),
-      e('planMaxRev', 'plan', 'False', 'left', 'target-left'),
-      e('planMaxRev', 'needsHuman', 'True', 'right'),
+      e('planMaxRev', 'plan', 'False'),
+      e('planMaxRev', 'needsHuman', 'True'),
       e('defer', 'reportDefer'),
       e('split', 'reportSplit'),
       e('createTasks', 'reviewTasks'),
       e('reviewTasks', 'taskOutcome'),
       e('taskOutcome', 'branch', 'Approved'),
       e('taskOutcome', 'incrTaskRev', 'NeedsChanges'),
-      e('taskOutcome', 'needsHuman', 'NeedsHuman', 'right'),
+      e('taskOutcome', 'needsHuman', 'NeedsHuman'),
       // Task revision guard
       e('incrTaskRev', 'taskMaxRev'),
-      e('taskMaxRev', 'createTasks', 'False', 'left', 'target-left'),
-      e('taskMaxRev', 'needsHuman', 'True', 'right'),
+      e('taskMaxRev', 'createTasks', 'False'),
+      e('taskMaxRev', 'needsHuman', 'True'),
       e('branch', 'draftPR'),
       e('draftPR', 'testCases'),
       e('testCases', 'tddLoop'),
@@ -297,20 +338,20 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('start', 'write-tests'),
       e('write-tests', 'check-fail'),
       e('check-fail', 'write-impl', 'TestsFail'),
-      e('check-fail', 'max-rewrites', 'TestsPass', 'right'),
+      e('check-fail', 'max-rewrites', 'TestsPass'),
       e('max-rewrites', 'write-impl', 'True'),
-      e('max-rewrites', 'write-tests', 'False', 'left', 'target-left'),
+      e('max-rewrites', 'write-tests', 'False'),
       e('write-impl', 'green-pass'),
       e('green-pass', 'analyze', 'True'),
-      e('green-pass', 'max-debug', 'False', 'right'),
-      e('max-debug', 'failed', 'True', 'right'),
-      e('max-debug', 'write-impl', 'False', 'left', 'target-left'),
+      e('green-pass', 'max-debug', 'False'),
+      e('max-debug', 'failed', 'True'),
+      e('max-debug', 'write-impl', 'False'),
       e('analyze', 'refactor-needed'),
       e('refactor-needed', 'apply-refactor', 'True'),
       e('refactor-needed', 'commit', 'False'),
       e('apply-refactor', 'refactor-pass'),
       e('refactor-pass', 'commit', 'True'),
-      e('refactor-pass', 'revert', 'False', 'right'),
+      e('refactor-pass', 'revert', 'False'),
       e('revert', 'commit'),
       e('commit', 'index'),
       e('index', 'done'),
@@ -341,11 +382,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('agent', 'chain'),
       e('chain', 'concurrency'),
       e('concurrency', 'foreach', 'OK'),
-      e('concurrency', 'concurrencyWait', 'AtLimit', 'right'),
-      e('concurrencyWait', 'concurrency', undefined, 'left', 'target-left'),
+      e('concurrency', 'concurrencyWait', 'AtLimit'),
+      e('concurrencyWait', 'concurrency'),
       e('foreach', 'succeeded'),
       e('succeeded', 'outputs', 'True'),
-      e('succeeded', 'failure', 'False', 'right'),
+      e('succeeded', 'failure', 'False'),
       e('failure', 'outputs'),
       e('outputs', 'done'),
     ],
@@ -389,27 +430,27 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('init', 'ctxGather'),
       e('ctxGather', 'validate'),
       e('validate', 'assess', 'Valid'),
-      e('validate', 'debug', 'BugIssue', 'right'),
-      e('validate', 'failed', 'Invalid', 'right'),
-      e('debug', 'quality', undefined, 'left', 'target-left'),
+      e('validate', 'debug', 'BugIssue'),
+      e('validate', 'failed', 'Invalid'),
+      e('debug', 'quality'),
       e('assess', 'plan', 'Correct'),
-      e('assess', 'diagnose', 'Timeout', 'right'),
+      e('assess', 'diagnose', 'Timeout'),
       e('plan', 'reviewPlan', 'Planned'),
       e('reviewPlan', 'impl', 'Approved'),
       e('impl', 'tdd', 'Started'),
       e('tdd', 'monitor'),
       e('monitor', 'quality', 'Complete'),
-      e('monitor', 'diagnose', 'Stalled', 'right'),
-      e('monitor', 'guidance', 'Slowing', 'right'),
+      e('monitor', 'diagnose', 'Stalled'),
+      e('monitor', 'guidance', 'Slowing'),
       e('quality', 'testing', 'Passed'),
-      e('quality', 'autofix', 'Failed', 'right'),
-      e('autofix', 'quality', 'Fixed', 'left', 'target-left'),
+      e('quality', 'autofix', 'Failed'),
+      e('autofix', 'quality', 'Fixed'),
       e('testing', 'prepReview'),
       e('prepReview', 'codeReview', 'Prepared'),
       e('codeReview', 'monReview'),
       e('monReview', 'merge', 'Approved'),
-      e('monReview', 'guideFixes', 'ChangesRequested', 'right'),
-      e('guideFixes', 'monReview', undefined, 'left', 'target-left'),
+      e('monReview', 'guideFixes', 'ChangesRequested'),
+      e('guideFixes', 'monReview'),
       e('merge', 'report', 'Merged'),
       e('report', 'profile', 'Generated'),
       e('profile', 'done', 'Updated'),
@@ -417,11 +458,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('diagnose', 'guidance', 'Guidance'),
       e('diagnose', 'assistance', 'Assistance'),
       e('diagnose', 'escalate', 'Escalate'),
-      e('hint', 'monitor', 'Done', 'left', 'target-left'),
+      e('hint', 'monitor', 'Done'),
       e('hint', 'guidance', 'Error'),
-      e('guidance', 'monitor', 'Done', 'left', 'target-left'),
+      e('guidance', 'monitor', 'Done'),
       e('guidance', 'assistance', 'Error'),
-      e('assistance', 'impl', 'Done', 'left', 'target-left'),
+      e('assistance', 'impl', 'Done'),
       e('assistance', 'escalate', 'Error'),
     ],
   },
@@ -458,24 +499,24 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('start', 'storePR'),
       e('storePR', 'prCheck'),
       e('prCheck', 'request', 'True'),
-      e('prCheck', 'failEnd', 'False', 'left'),
+      e('prCheck', 'failEnd', 'False'),
       e('request', 'monitor'),
       e('monitor', 'merge', 'Approved'),
-      e('monitor', 'monitor', 'Commented', 'right', 'target-right'),
+      e('monitor', 'monitor', 'Commented'),
       e('monitor', 'storeComments', 'ChangesRequested'),
-      e('monitor', 'escalateTimeout', 'TimedOut', 'right'),
+      e('monitor', 'escalateTimeout', 'TimedOut'),
       e('storeComments', 'incrIter'),
       e('incrIter', 'guidance'),
       e('guidance', 'waitFixes'),
       e('waitFixes', 'rerequest', 'FixesReceived'),
-      e('waitFixes', 'escalateTimeout', 'TimedOut', 'right'),
+      e('waitFixes', 'escalateTimeout', 'TimedOut'),
       e('rerequest', 'maxIter'),
-      e('maxIter', 'monitor', 'False', 'left', 'target-left'),
-      e('maxIter', 'escalateMax', 'True', 'right'),
+      e('maxIter', 'monitor', 'False'),
+      e('maxIter', 'escalateMax', 'True'),
       e('merge', 'success'),
-      e('escalateMax', 'merge', 'Resolved', 'left', 'target-left'),
-      e('escalateMax', 'failEnd', 'Rejected', 'right'),
-      e('escalateTimeout', 'merge', 'Resolved', 'left', 'target-left'),
+      e('escalateMax', 'merge', 'Resolved'),
+      e('escalateMax', 'failEnd', 'Rejected'),
+      e('escalateTimeout', 'merge', 'Resolved'),
       e('escalateTimeout', 'failEnd', 'Rejected'),
     ],
   },
@@ -510,8 +551,8 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('wait', 'evaluate'),
       e('evaluate', 'checks', 'AllPass'),
       e('evaluate', 'checks', 'MinorIssues'),
-      e('evaluate', 'guard', 'MajorIssues', 'right'),
-      e('evaluate', 'critChecks', 'Critical', 'left'),
+      e('evaluate', 'guard', 'MajorIssues'),
+      e('evaluate', 'critChecks', 'Critical'),
       e('checks', 'report'),
       e('report', 'pass'),
       e('guard', 'fix', 'True'),
@@ -521,9 +562,9 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('incrAttempt', 'retrigger'),
       e('retrigger', 'waitRetry'),
       e('waitRetry', 'evalRetry'),
-      e('evalRetry', 'checks', 'AllPass', 'left', 'target-left'),
-      e('evalRetry', 'checks', 'MinorIssues', 'left', 'target-left'),
-      e('evalRetry', 'guard', 'MajorIssues', 'left', 'target-left'),
+      e('evalRetry', 'checks', 'AllPass'),
+      e('evalRetry', 'checks', 'MinorIssues'),
+      e('evalRetry', 'guard', 'MajorIssues'),
       e('evalRetry', 'fail', 'Critical'),
       e('critChecks', 'critReport'),
       e('critReport', 'fail'),
@@ -565,7 +606,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('start', 'classify'),
       e('classify', 'tddEmph', 'TddFailure'),
       e('classify', 'runtimeEmph', 'RuntimeError'),
-      e('classify', 'bugEmph', 'BugInvestigation', 'right'),
+      e('classify', 'bugEmph', 'BugInvestigation'),
       e('tddEmph', 'fork'),
       e('runtimeEmph', 'fork'),
       e('bugEmph', 'fork'),
@@ -574,15 +615,15 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('diagnose', 'select'),
       e('select', 'hasHyp'),
       e('hasHyp', 'bugMode', 'True'),
-      e('hasHyp', 'report', 'False', 'right'),
-      e('bugMode', 'regTest', 'True', 'right'),
+      e('hasHyp', 'report', 'False'),
+      e('bugMode', 'regTest', 'True'),
       e('bugMode', 'fix', 'False'),
       e('regTest', 'fix'),
       e('fix', 'test'),
       e('test', 'pass'),
       e('pass', 'record', 'True'),
-      e('pass', 'refine', 'False', 'right'),
-      e('refine', 'select', undefined, 'left', 'target-left'),
+      e('pass', 'refine', 'False'),
+      e('refine', 'select'),
       e('record', 'index'),
       e('index', 'done'),
       e('report', 'escalated'),
@@ -673,12 +714,12 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     edges: [
       e('fetch', 'hasItems'),
       e('hasItems', 'extract', 'True'),
-      e('hasItems', 'report', 'False', 'right'),
+      e('hasItems', 'report', 'False'),
       e('extract', 'dispatch'),
       e('dispatch', 'next'),
       e('next', 'more'),
-      e('more', 'extract', 'True', 'left', 'target-left'),
-      e('more', 'report', 'False', 'right'),
+      e('more', 'extract', 'True'),
+      e('more', 'report', 'False'),
       e('report', 'done'),
     ],
   },
@@ -718,11 +759,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('generate', 'validate'),
       e('validate', 'valid'),
       e('valid', 'output', 'Yes'),
-      e('valid', 'incrRetry', 'No', 'right'),
+      e('valid', 'incrRetry', 'No'),
       e('output', 'done'),
       e('incrRetry', 'canRetry'),
-      e('canRetry', 'generate', 'Yes', 'left', 'target-left'),
-      e('canRetry', 'error', 'No', 'right'),
+      e('canRetry', 'generate', 'Yes'),
+      e('canRetry', 'error', 'No'),
       e('error', 'done'),
     ],
   },
@@ -755,14 +796,14 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('srdev', 'aggregate'),
       e('aggregate', 'allApproved'),
       e('allApproved', 'approved', 'Yes'),
-      e('allApproved', 'discussion', 'No', 'right'),
+      e('allApproved', 'discussion', 'No'),
       e('approved', 'outputs'),
       e('discussion', 'needsReReview'),
       e('needsReReview', 'incrRound', 'Yes'),
-      e('needsReReview', 'outputs', 'No', 'right'),
+      e('needsReReview', 'outputs', 'No'),
       e('incrRound', 'canContinue'),
-      e('canContinue', 'arch', 'Yes', 'left', 'target-left'),
-      e('canContinue', 'forceHuman', 'No', 'right'),
+      e('canContinue', 'arch', 'Yes'),
+      e('canContinue', 'forceHuman', 'No'),
       e('forceHuman', 'outputs'),
       e('outputs', 'done'),
     ],
@@ -783,11 +824,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('init', 'tdd'),
       e('tdd', 'passed'),
       e('passed', 'pass', 'True'),
-      e('passed', 'guard', 'False', 'right'),
+      e('passed', 'guard', 'False'),
       e('guard', 'incr', 'True'),
-      e('guard', 'fail', 'False', 'right'),
+      e('guard', 'fail', 'False'),
       e('incr', 'debug'),
-      e('debug', 'tdd', undefined, 'left', 'target-left'),
+      e('debug', 'tdd'),
     ],
   },
   // CiWithDebugRetryWorkflow.cs — CI with up to 3 debug retries
@@ -806,11 +847,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('init', 'ci'),
       e('ci', 'passed'),
       e('passed', 'pass', 'True'),
-      e('passed', 'guard', 'False', 'right'),
+      e('passed', 'guard', 'False'),
       e('guard', 'incr', 'True'),
-      e('guard', 'fail', 'False', 'right'),
+      e('guard', 'fail', 'False'),
       e('incr', 'debug'),
-      e('debug', 'ci', undefined, 'left', 'target-left'),
+      e('debug', 'ci'),
     ],
   },
   // AssessmentWorkflow.cs — Junior developer skill assessment
@@ -858,7 +899,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('profile', 'setOutput'),
       e('setOutput', 'expose'),
       // Timeout path
-      e('wait', 'timeout', 'Timeout', 'right'),
+      e('wait', 'timeout', 'Timeout'),
       e('timeout', 'profileTimeout'),
       e('profileTimeout', 'setOutputTimeout'),
       e('setOutputTimeout', 'exposeTimeout'),
@@ -883,7 +924,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     edges: [
       e('analyze', 'hasActionable'),
       e('hasActionable', 'generate', 'True'),
-      e('hasActionable', 'outputSuccess', 'False', 'right'),
+      e('hasActionable', 'outputSuccess', 'False'),
       e('generate', 'apply'),
       e('apply', 'index'),
       e('index', 'outputSuccess'),
@@ -983,17 +1024,17 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('qaDeploy', 'extractQa'),
       e('extractQa', 'qaOk'),
       e('qaOk', 'uatDeploy', 'Yes'),
-      e('qaOk', 'qaFailed', 'No', 'right'),
+      e('qaOk', 'qaFailed', 'No'),
       e('qaFailed', 'outputs'),
       e('uatDeploy', 'extractUat'),
       e('extractUat', 'uatOk'),
       e('uatOk', 'prodDeploy', 'Yes'),
-      e('uatOk', 'uatFailed', 'No', 'right'),
+      e('uatOk', 'uatFailed', 'No'),
       e('uatFailed', 'outputs'),
       e('prodDeploy', 'extractProd'),
       e('extractProd', 'prodOk'),
       e('prodOk', 'success', 'Yes'),
-      e('prodOk', 'prodFailed', 'No', 'right'),
+      e('prodOk', 'prodFailed', 'No'),
       e('prodFailed', 'outputs'),
       e('success', 'outputs'),
       e('outputs', 'done'),
@@ -1017,11 +1058,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('generate', 'validate'),
       e('validate', 'valid'),
       e('valid', 'output', 'Yes'),
-      e('valid', 'incrRetry', 'No', 'right'),
+      e('valid', 'incrRetry', 'No'),
       e('output', 'done'),
       e('incrRetry', 'canRetry'),
-      e('canRetry', 'generate', 'Yes', 'left', 'target-left'),
-      e('canRetry', 'error', 'No', 'right'),
+      e('canRetry', 'generate', 'Yes'),
+      e('canRetry', 'error', 'No'),
       e('error', 'done'),
     ],
   },
@@ -1056,7 +1097,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('extractTester', 'aggregate'),
       e('aggregate', 'allApproved'),
       e('allApproved', 'setApproved', 'Yes'),
-      e('allApproved', 'setNeedsChanges', 'No', 'right'),
+      e('allApproved', 'setNeedsChanges', 'No'),
       e('setApproved', 'outputs'),
       e('setNeedsChanges', 'outputs'),
       e('outputs', 'done'),
@@ -1080,11 +1121,11 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
       e('generate', 'validate'),
       e('validate', 'valid'),
       e('valid', 'output', 'Yes'),
-      e('valid', 'incrRetry', 'No', 'right'),
+      e('valid', 'incrRetry', 'No'),
       e('output', 'done'),
       e('incrRetry', 'canRetry'),
-      e('canRetry', 'generate', 'Yes', 'left', 'target-left'),
-      e('canRetry', 'error', 'No', 'right'),
+      e('canRetry', 'generate', 'Yes'),
+      e('canRetry', 'error', 'No'),
       e('error', 'done'),
     ],
   },
@@ -1198,7 +1239,7 @@ const WORKFLOW_DIAGRAMS: Record<string, WorkflowDef> = {
     edges: [
       e('input', 'sanitize'), e('sanitize', 'harden'), e('harden', 'llm'),
       e('llm', 'validate'), e('validate', 'gate'),
-      e('gate', 'exec', 'Allowed'), e('gate', 'block', 'Denied', 'right'),
+      e('gate', 'exec', 'Allowed'), e('gate', 'block', 'Denied'),
       e('exec', 'redact'), e('redact', 'output'), e('output', 'clean'),
     ],
   },
@@ -1303,6 +1344,7 @@ function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[
 
 function DiagramCanvas({
   nodes, edges, onNodesChange, onEdgesChange, isFullscreen, onToggleFullscreen,
+  hasSavedLayout, onResetLayout,
 }: {
   nodes: Node[];
   edges: Edge[];
@@ -1310,6 +1352,8 @@ function DiagramCanvas({
   onEdgesChange: Parameters<typeof ReactFlow>[0]['onEdgesChange'];
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  hasSavedLayout?: boolean;
+  onResetLayout?: () => void;
 }) {
   return (
     <ReactFlow
@@ -1349,8 +1393,20 @@ function DiagramCanvas({
           maskColor="rgba(0,0,0,0.7)"
         />
       )}
-      {/* Fullscreen toggle button */}
-      <div className="absolute top-3 right-3 z-10">
+      {/* Toolbar */}
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+        {hasSavedLayout && onResetLayout && (
+          <button
+            onClick={onResetLayout}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500 bg-zinc-800/90 border border-zinc-700 rounded-lg hover:bg-zinc-700 hover:text-zinc-300 transition-all backdrop-blur-sm"
+            title="Reset to auto-layout"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Reset
+          </button>
+        )}
         <button
           onClick={onToggleFullscreen}
           className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-zinc-400 bg-zinc-800/90 border border-zinc-700 rounded-lg hover:bg-zinc-700 hover:text-zinc-200 transition-all backdrop-blur-sm"
@@ -1377,6 +1433,32 @@ function DiagramCanvas({
   );
 }
 
+function getStorageKey(slug: string): string {
+  return `tamma-diagram-${slug}`;
+}
+
+function loadSavedPositions(slug: string): Record<string, { x: number; y: number }> | null {
+  try {
+    const saved = localStorage.getItem(getStorageKey(slug));
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  return null;
+}
+
+function savePositions(slug: string, nodes: Node[]): void {
+  try {
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const node of nodes) positions[node.id] = node.position;
+    localStorage.setItem(getStorageKey(slug), JSON.stringify(positions));
+  } catch { /* ignore */ }
+}
+
+function applyEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
+  const nodeMap = new Map<string, { x: number; y: number }>();
+  for (const node of nodes) nodeMap.set(node.id, node.position);
+  return computeEdgeHandles(edges, nodeMap);
+}
+
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
   const rawDiagram = useMemo(() => {
     if (WORKFLOW_DIAGRAMS[slug]) return WORKFLOW_DIAGRAMS[slug];
@@ -1384,7 +1466,6 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
     return null;
   }, [slug, flowSteps]);
 
-  // Start with grid fallback, then async ELK layout replaces it
   const fallback = useMemo(() => {
     if (!rawDiagram) return null;
     return autoLayout(rawDiagram.nodes, rawDiagram.edges);
@@ -1394,17 +1475,60 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(fallback?.edges ?? []);
   const [layoutDone, setLayoutDone] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hasSavedLayout, setHasSavedLayout] = useState(false);
 
-  // Run ELK async layout
+  // Load saved positions or run ELK layout
   useEffect(() => {
     if (!rawDiagram) return;
     setLayoutDone(false);
+
+    const saved = loadSavedPositions(slug);
+    if (saved) {
+      const restored = rawDiagram.nodes.map((node) => ({
+        ...node,
+        position: saved[node.id] ?? node.position,
+      }));
+      setNodes(restored);
+      setEdges(applyEdgeHandles(restored, rawDiagram.edges));
+      setLayoutDone(true);
+      setHasSavedLayout(true);
+    } else {
+      autoLayoutAsync(rawDiagram.nodes, rawDiagram.edges).then((result) => {
+        setNodes(result.nodes);
+        setEdges(applyEdgeHandles(result.nodes, result.edges));
+        setLayoutDone(true);
+        setHasSavedLayout(false);
+      });
+    }
+  }, [rawDiagram, slug]);
+
+  // On node drag end: recompute edge handles + save positions
+  const handleNodesChange: typeof onNodesChange = useCallback((changes) => {
+    onNodesChange(changes);
+    const hasDrag = changes.some((c) => c.type === 'position' && (c as any).dragging === false);
+    if (hasDrag) {
+      // Use setTimeout to read positions after React state update
+      setTimeout(() => {
+        setNodes((currentNodes) => {
+          setEdges(applyEdgeHandles(currentNodes, rawDiagram?.edges ?? []));
+          savePositions(slug, currentNodes);
+          setHasSavedLayout(true);
+          return currentNodes;
+        });
+      }, 0);
+    }
+  }, [onNodesChange, rawDiagram, slug, setNodes, setEdges]);
+
+  // Reset to auto-layout
+  const resetLayout = useCallback(() => {
+    if (!rawDiagram) return;
+    localStorage.removeItem(getStorageKey(slug));
+    setHasSavedLayout(false);
     autoLayoutAsync(rawDiagram.nodes, rawDiagram.edges).then((result) => {
       setNodes(result.nodes);
-      setEdges(result.edges);
-      setLayoutDone(true);
+      setEdges(applyEdgeHandles(result.nodes, result.edges));
     });
-  }, [rawDiagram]);
+  }, [rawDiagram, slug, setNodes, setEdges]);
 
   // Escape key closes fullscreen
   useEffect(() => {
@@ -1441,10 +1565,12 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
           <DiagramCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
+            onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             isFullscreen={false}
             onToggleFullscreen={toggleFullscreen}
+            hasSavedLayout={hasSavedLayout}
+            onResetLayout={resetLayout}
           />
         </div>
       </div>
@@ -1455,10 +1581,12 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
           <DiagramCanvas
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
+            onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             isFullscreen={true}
             onToggleFullscreen={toggleFullscreen}
+            hasSavedLayout={hasSavedLayout}
+            onResetLayout={resetLayout}
           />
         </div>
       )}
