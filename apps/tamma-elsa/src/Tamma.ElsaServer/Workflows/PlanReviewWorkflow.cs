@@ -7,6 +7,8 @@ using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities.Context;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -126,6 +128,7 @@ public class PlanReviewWorkflow : WorkflowBase
         // ================================================================
         // 2. Role Reviews — 7 sequential llm-call dispatches
         // Each role: action="plan-review", gets plan + context
+        // After each extraction, persist the review via StoreRoleFindingActivity
         // ================================================================
 
         // Architect review
@@ -133,45 +136,60 @@ public class PlanReviewWorkflow : WorkflowBase
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractArch = ExtractReview(architectReview, llmResult, "architect",
             "ExtractArchReview", "Extract Architect Review");
+        var storeArch = StoreReviewRole("StoreArchReview", "Store Architect Review", "architect",
+            repository, issueNumber, architectReview);
 
         // Developer review
         var devReviewCall = RoleReviewDispatch("DevReview", "Developer Review", "developer",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractDev = ExtractReview(developerReview, llmResult, "developer",
             "ExtractDevReview", "Extract Developer Review");
+        var storeDev = StoreReviewRole("StoreDevReview", "Store Developer Review", "developer",
+            repository, issueNumber, developerReview);
 
         // Tester review
         var testerReviewCall = RoleReviewDispatch("TesterReview", "Tester Review", "tester",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractTester = ExtractReview(testerReview, llmResult, "tester",
             "ExtractTesterReview", "Extract Tester Review");
+        var storeTester = StoreReviewRole("StoreTesterReview", "Store Tester Review", "tester",
+            repository, issueNumber, testerReview);
 
         // Security review
         var secReviewCall = RoleReviewDispatch("SecReview", "Security Review", "security",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractSec = ExtractReview(securityReview, llmResult, "security",
             "ExtractSecReview", "Extract Security Review");
+        var storeSec = StoreReviewRole("StoreSecReview", "Store Security Review", "security",
+            repository, issueNumber, securityReview);
 
         // DevOps review
         var devopsReviewCall = RoleReviewDispatch("DevOpsReview", "DevOps Review", "devops",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractDevOps = ExtractReview(devopsReview, llmResult, "devops",
             "ExtractDevOpsReview", "Extract DevOps Review");
+        var storeDevOps = StoreReviewRole("StoreDevOpsReview", "Store DevOps Review", "devops",
+            repository, issueNumber, devopsReview);
 
         // Product Owner review
         var poReviewCall = RoleReviewDispatch("POReview", "PO Review", "product_owner",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractPO = ExtractReview(productOwnerReview, llmResult, "product_owner",
             "ExtractPOReview", "Extract PO Review");
+        var storePO = StoreReviewRole("StorePOReview", "Store PO Review", "product_owner",
+            repository, issueNumber, productOwnerReview);
 
         // Senior Developer review (orchestrator perspective)
         var srDevReviewCall = RoleReviewDispatch("SrDevReview", "Senior Dev Review", "senior_developer",
             repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
         var extractSrDev = ExtractReview(seniorDeveloperReview, llmResult, "senior_developer",
             "ExtractSrDevReview", "Extract Senior Dev Review");
+        var storeSrDev = StoreReviewRole("StoreSrDevReview", "Store Senior Dev Review", "senior_developer",
+            repository, issueNumber, seniorDeveloperReview);
 
         // ================================================================
         // 3. Aggregate Verdicts — collect all reviews, check if all approved
+        //    Uses ReviewAggregationHelper for parsing
         // ================================================================
         var aggregate = new SetVariable
         {
@@ -180,38 +198,14 @@ public class PlanReviewWorkflow : WorkflowBase
             Value = new Input<object?>(ctx =>
             {
                 var reviews = new List<object>();
-                var approved = true;
+                var verdicts = new List<string>();
 
                 foreach (var role in ReviewRoles)
                 {
                     var reviewJson = roleVariables[role].Get(ctx);
-                    var verdict = "concerns"; // default pessimistic
-                    var comments = "";
-                    var suggestedChanges = "";
+                    var (verdict, comments, suggestedChanges) = ReviewAggregationHelper.ParseRoleVerdict(reviewJson);
 
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(reviewJson) && reviewJson != "{}")
-                        {
-                            var doc = JsonDocument.Parse(reviewJson);
-                            var root = doc.RootElement;
-                            if (root.TryGetProperty("verdict", out var v))
-                                verdict = v.GetString() ?? "concerns";
-                            if (root.TryGetProperty("comments", out var c))
-                                comments = c.GetString() ?? "";
-                            if (root.TryGetProperty("suggestedChanges", out var s))
-                                suggestedChanges = s.GetString() ?? "";
-                        }
-                    }
-                    catch
-                    {
-                        // Treat parse errors as concerns
-                        comments = reviewJson;
-                    }
-
-                    if (verdict != "approve")
-                        approved = false;
-
+                    verdicts.Add(verdict);
                     reviews.Add(new Dictionary<string, object>
                     {
                         ["role"] = role,
@@ -220,6 +214,8 @@ public class PlanReviewWorkflow : WorkflowBase
                         ["suggestedChanges"] = suggestedChanges,
                     });
                 }
+
+                var approved = ReviewAggregationHelper.AggregateVerdicts(verdicts);
 
                 var reviewsArray = JsonSerializer.Serialize(reviews);
                 allReviewsJson.Set(ctx, reviewsArray);
@@ -303,16 +299,7 @@ public class PlanReviewWorkflow : WorkflowBase
         discussionCall.SetDisplayText("Discussion Round");
 
         // ================================================================
-        // 7. Extract Discussion Result
-        //    Expected JSON:
-        //    {
-        //      "resolutions": [{ "concern": "...", "resolution": "fix|defer|split|accept|needsHuman", "detail": "..." }],
-        //      "modifiedPlan": "..." (optional, JSON string of new plan),
-        //      "deferred": [{ "title": "...", "body": "...", "labels": [], "reason": "..." }],
-        //      "split": [{ "title": "...", "body": "...", "labels": [] }],
-        //      "overallDecision": "approved|needsModification|defer|split|needsHuman",
-        //      "reviewNotes": "..."
-        //    }
+        // 7. Extract Discussion Result — uses ReviewAggregationHelper
         // ================================================================
         var extractDiscussion = new SetVariable
         {
@@ -325,77 +312,49 @@ public class PlanReviewWorkflow : WorkflowBase
                 if (result != null && result.TryGetValue("llmResponse", out var r))
                     output = r?.ToString() ?? "";
 
-                // Extract JSON block
-                var jsonStart = output.IndexOf('{');
-                var jsonEnd = output.LastIndexOf('}');
-                if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    output = output[jsonStart..(jsonEnd + 1)];
+                var parsed = ReviewAggregationHelper.ParseDiscussionResult(output);
 
-                // Parse and apply
-                try
+                // Apply parsed fields to workflow variables
+                if (!string.IsNullOrWhiteSpace(parsed.ModifiedPlan) && parsed.ModifiedPlan != "{}")
+                    planJson.Set(ctx, parsed.ModifiedPlan);
+
+                deferred.Set(ctx, parsed.Deferred);
+                split.Set(ctx, parsed.Split);
+                decision.Set(ctx, parsed.Decision);
+                reviewNotes.Set(ctx, parsed.ReviewNotes);
+
+                // Append resolutions to discussion log
+                if (parsed.Resolutions != "[]")
                 {
-                    var doc = JsonDocument.Parse(output);
-                    var root = doc.RootElement;
-
-                    // Extract modified plan if present
-                    if (root.TryGetProperty("modifiedPlan", out var mp))
+                    var currentLog = discussionLog.Get(ctx);
+                    var logEntries = new List<object>();
+                    try
                     {
-                        var modifiedPlan = mp.ValueKind == JsonValueKind.String
-                            ? mp.GetString() ?? ""
-                            : mp.GetRawText();
-                        if (!string.IsNullOrWhiteSpace(modifiedPlan) && modifiedPlan != "{}")
-                            planJson.Set(ctx, modifiedPlan);
+                        if (!string.IsNullOrWhiteSpace(currentLog) && currentLog != "[]")
+                            logEntries = JsonSerializer.Deserialize<List<object>>(currentLog) ?? [];
                     }
+                    catch { /* start fresh */ }
 
-                    // Extract deferred items
-                    if (root.TryGetProperty("deferred", out var def))
-                        deferred.Set(ctx, def.GetRawText());
-
-                    // Extract split items
-                    if (root.TryGetProperty("split", out var sp))
-                        split.Set(ctx, sp.GetRawText());
-
-                    // Extract overall decision
-                    if (root.TryGetProperty("overallDecision", out var od))
-                        decision.Set(ctx, od.GetString() ?? "needsHuman");
-
-                    // Extract review notes
-                    if (root.TryGetProperty("reviewNotes", out var rn))
-                        reviewNotes.Set(ctx, rn.GetString() ?? "");
-
-                    // Append resolutions to discussion log
-                    if (root.TryGetProperty("resolutions", out var res))
+                    var round = roundCount.Get(ctx);
+                    logEntries.Add(new Dictionary<string, object>
                     {
-                        var currentLog = discussionLog.Get(ctx);
-                        var logEntries = new List<object>();
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(currentLog) && currentLog != "[]")
-                                logEntries = JsonSerializer.Deserialize<List<object>>(currentLog) ?? [];
-                        }
-                        catch { /* start fresh */ }
-
-                        var round = roundCount.Get(ctx);
-                        logEntries.Add(new Dictionary<string, object>
-                        {
-                            ["round"] = round,
-                            ["type"] = "discussion",
-                            ["resolutions"] = res.GetRawText(),
-                        });
-                        discussionLog.Set(ctx, JsonSerializer.Serialize(logEntries));
-                    }
-                }
-                catch
-                {
-                    // Couldn't parse discussion — escalate
-                    decision.Set(ctx, "needsHuman");
-                    reviewNotes.Set(ctx, $"Failed to parse discussion result: {output}");
+                        ["round"] = round,
+                        ["type"] = "discussion",
+                        ["resolutions"] = parsed.Resolutions,
+                    });
+                    discussionLog.Set(ctx, JsonSerializer.Serialize(logEntries));
                 }
 
                 return (object)output;
             })
         };
         extractDiscussion.SetDisplayText("Extract Discussion");
+
+        // ================================================================
+        // 7b. Persist discussion log incrementally after each round
+        // ================================================================
+        var storeDiscussion = StoreDiscussionRound("StoreDiscussionRound", "Store Discussion Round",
+            repository, issueNumber, roundCount, discussionLog);
 
         // ================================================================
         // 8. Needs Re-review? — check if decision is needsModification
@@ -478,14 +437,14 @@ public class PlanReviewWorkflow : WorkflowBase
                 // Init
                 init,
 
-                // 7 role reviews (sequential)
-                archReviewCall, extractArch,
-                devReviewCall, extractDev,
-                testerReviewCall, extractTester,
-                secReviewCall, extractSec,
-                devopsReviewCall, extractDevOps,
-                poReviewCall, extractPO,
-                srDevReviewCall, extractSrDev,
+                // 7 role reviews (sequential) with per-role persistence
+                archReviewCall, extractArch, storeArch,
+                devReviewCall, extractDev, storeDev,
+                testerReviewCall, extractTester, storeTester,
+                secReviewCall, extractSec, storeSec,
+                devopsReviewCall, extractDevOps, storeDevOps,
+                poReviewCall, extractPO, storePO,
+                srDevReviewCall, extractSrDev, storeSrDev,
 
                 // Aggregate + branch
                 aggregate, allApprovedCheck,
@@ -494,7 +453,7 @@ public class PlanReviewWorkflow : WorkflowBase
                 setApproved,
 
                 // Discussion path
-                discussionCall, extractDiscussion,
+                discussionCall, extractDiscussion, storeDiscussion,
                 needsReReview, incrementRound, canContinue,
                 forceNeedsHuman,
 
@@ -503,24 +462,37 @@ public class PlanReviewWorkflow : WorkflowBase
             },
             Connections =
             {
-                // Init → sequential role reviews
+                // Init → sequential role reviews with per-role persistence
                 Connect(init, archReviewCall),
                 Connect(archReviewCall, extractArch),
-                Connect(extractArch, devReviewCall),
+                Connect(extractArch, storeArch),
+                Connect(storeArch, devReviewCall),
+
                 Connect(devReviewCall, extractDev),
-                Connect(extractDev, testerReviewCall),
+                Connect(extractDev, storeDev),
+                Connect(storeDev, testerReviewCall),
+
                 Connect(testerReviewCall, extractTester),
-                Connect(extractTester, secReviewCall),
+                Connect(extractTester, storeTester),
+                Connect(storeTester, secReviewCall),
+
                 Connect(secReviewCall, extractSec),
-                Connect(extractSec, devopsReviewCall),
+                Connect(extractSec, storeSec),
+                Connect(storeSec, devopsReviewCall),
+
                 Connect(devopsReviewCall, extractDevOps),
-                Connect(extractDevOps, poReviewCall),
+                Connect(extractDevOps, storeDevOps),
+                Connect(storeDevOps, poReviewCall),
+
                 Connect(poReviewCall, extractPO),
-                Connect(extractPO, srDevReviewCall),
+                Connect(extractPO, storePO),
+                Connect(storePO, srDevReviewCall),
+
                 Connect(srDevReviewCall, extractSrDev),
+                Connect(extractSrDev, storeSrDev),
 
                 // → Aggregate
-                Connect(extractSrDev, aggregate),
+                Connect(storeSrDev, aggregate),
                 Connect(aggregate, allApprovedCheck),
 
                 // All approved → set approved → outputs → finish
@@ -530,7 +502,8 @@ public class PlanReviewWorkflow : WorkflowBase
                 // Not all approved → discussion
                 ConnectOutcome(allApprovedCheck, "False", discussionCall),
                 Connect(discussionCall, extractDiscussion),
-                Connect(extractDiscussion, needsReReview),
+                Connect(extractDiscussion, storeDiscussion),
+                Connect(storeDiscussion, needsReReview),
 
                 // needsModification → increment round → check max
                 ConnectOutcome(needsReReview, "True", incrementRound),
@@ -638,6 +611,48 @@ public class PlanReviewWorkflow : WorkflowBase
         };
         sv.SetDisplayText(displayName);
         return sv;
+    }
+
+    // ================================================================
+    // Helper: Store a role's review result immediately after extraction
+    // ================================================================
+    private static StoreRoleFindingActivity StoreReviewRole(
+        string id, string name, string role,
+        Variable<string> repository, Variable<int> issueNumber,
+        Variable<string> reviewVar)
+    {
+        var store = new StoreRoleFindingActivity
+        {
+            Id = id, Name = name,
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            Role = new Input<string>(role),
+            FindingsJson = new Input<string>(ctx => reviewVar.Get(ctx)),
+            ContextId = new Output<string>(new Variable<string>()),
+        };
+        store.SetDisplayText(name);
+        return store;
+    }
+
+    // ================================================================
+    // Helper: Store discussion log incrementally after each round
+    // ================================================================
+    private static StoreRoleFindingActivity StoreDiscussionRound(
+        string id, string name,
+        Variable<string> repository, Variable<int> issueNumber,
+        Variable<int> roundCount, Variable<string> discussionLog)
+    {
+        var store = new StoreRoleFindingActivity
+        {
+            Id = id, Name = name,
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            Role = new Input<string>(ctx => $"discussion-round-{roundCount.Get(ctx)}"),
+            FindingsJson = new Input<string>(ctx => discussionLog.Get(ctx)),
+            ContextId = new Output<string>(new Variable<string>()),
+        };
+        store.SetDisplayText(name);
+        return store;
     }
 
     // ================================================================
