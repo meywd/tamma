@@ -39,10 +39,12 @@ namespace Tamma.ElsaServer.Workflows;
 /// Design: Flowchart with visible nodes for each phase in ELSA Studio.
 ///
 /// Flow:
-///   InitInputs → SetupBudget → ResolveAgentConfig → ResolveChain → ForEachProviderChain
-///     → FailureCheck → [success?]
-///       Yes → SetOutputs
-///       No  → BuildFailureOutput → SetOutputs
+///   InitInputs → ResolvePrompt → SetupBudget → ResolveAgentConfig → ResolveChain
+///     → CheckConcurrency → [OK?]
+///       OK      → ForEachProviderChain → FailureCheck → [success?]
+///                   Yes → SetOutputs
+///                   No  → BuildFailureOutput → SetOutputs
+///       AtLimit → ConcurrencyDelay → CheckConcurrency (loop)
 /// </summary>
 public class LlmCallWorkflow : WorkflowBase
 {
@@ -233,6 +235,22 @@ public class LlmCallWorkflow : WorkflowBase
             })
         };
         resolveChain.SetDisplayText("Resolve Provider Chain");
+
+        // 4b. Check LLM concurrency — wait-loop until a slot opens
+        var checkConcurrency = new CheckLlmConcurrencyActivity
+        {
+            Id = "CheckConcurrency",
+            Name = "Check LLM Concurrency",
+        };
+        checkConcurrency.SetDisplayText("Check LLM Concurrency");
+
+        // 4c. Delay before re-checking concurrency
+        var concurrencyDelay = new ConcurrencyWaitDelayActivity
+        {
+            Id = "ConcurrencyDelay",
+            Name = "Concurrency Wait",
+        };
+        concurrencyDelay.SetDisplayText("Concurrency Wait");
 
         // 5. ForEach provider in chain — reads from the resolved providerChainVar
         var forEachProviders = new ForEach<string>
@@ -569,6 +587,7 @@ public class LlmCallWorkflow : WorkflowBase
             Activities =
             {
                 initInputs, resolvePrompt, setupBudget, resolveAgentConfig, resolveChain,
+                checkConcurrency, concurrencyDelay,
                 forEachProviders, failureCheck, buildFailureOutput, setOutputs
             },
             Connections =
@@ -583,8 +602,15 @@ public class LlmCallWorkflow : WorkflowBase
                 // Resolve Agent Config → Resolve Provider Chain
                 Connect(resolveAgentConfig, resolveChain),
 
-                // Resolve Provider Chain → For Each Provider
-                Connect(resolveChain, forEachProviders),
+                // Resolve Provider Chain → Check Concurrency
+                Connect(resolveChain, checkConcurrency),
+
+                // Check Concurrency → [OK] → For Each Provider
+                ConnectOutcome(checkConcurrency, "OK", forEachProviders),
+
+                // Check Concurrency → [AtLimit] → Delay → re-check (loop)
+                ConnectOutcome(checkConcurrency, "AtLimit", concurrencyDelay),
+                Connect(concurrencyDelay, checkConcurrency),
 
                 // For Each Provider → Call Succeeded?
                 Connect(forEachProviders, failureCheck),
