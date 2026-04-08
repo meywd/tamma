@@ -1317,6 +1317,82 @@ function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges: Edge[
   };
 }
 
+function DiagramCanvas({
+  nodes, edges, onNodesChange, onEdgesChange, isFullscreen, onToggleFullscreen,
+}: {
+  nodes: Node[];
+  edges: Edge[];
+  onNodesChange: Parameters<typeof ReactFlow>[0]['onNodesChange'];
+  onEdgesChange: Parameters<typeof ReactFlow>[0]['onEdgesChange'];
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+}) {
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      nodeTypes={nodeTypes}
+      fitView
+      fitViewOptions={{ padding: 0.3 }}
+      minZoom={0.1}
+      maxZoom={3}
+      panOnDrag={[0]}
+      zoomOnScroll
+      selectionOnDrag={[2]}
+      multiSelectionKeyCode="Shift"
+      selectionMode={1}
+      selectionKeyCode="Shift"
+      nodesDraggable={true}
+      nodesConnectable={false}
+      proOptions={{ hideAttribution: true }}
+      defaultEdgeOptions={{ type: 'default', ...edgeDefaults }}
+    >
+      <Background color="#27272a" gap={20} variant={BackgroundVariant.Dots} />
+      <Controls className="!bg-zinc-800 !border-zinc-700 !rounded-lg [&_button]:!bg-zinc-800 [&_button]:!border-zinc-700 [&_button]:!text-zinc-400 [&_button:hover]:!bg-zinc-700" />
+      {!isFullscreen && (
+        <MiniMap
+          className="!bg-zinc-900 !border-zinc-800 !rounded-lg"
+          nodeColor={(n) => {
+            if (n.type === 'start') return '#22c55e';
+            if (n.type === 'end') return '#ef4444';
+            if (n.type === 'decision') return '#f59e0b';
+            if (n.type === 'subworkflow') return '#3b82f6';
+            if (n.type === 'parallel') return '#a855f7';
+            return '#52525b';
+          }}
+          maskColor="rgba(0,0,0,0.7)"
+        />
+      )}
+      {/* Fullscreen toggle button */}
+      <div className="absolute top-3 right-3 z-10">
+        <button
+          onClick={onToggleFullscreen}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-zinc-400 bg-zinc-800/90 border border-zinc-700 rounded-lg hover:bg-zinc-700 hover:text-zinc-200 transition-all backdrop-blur-sm"
+          title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+        >
+          {isFullscreen ? (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Close
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              Fullscreen
+            </>
+          )}
+        </button>
+      </div>
+    </ReactFlow>
+  );
+}
+
 export default function WorkflowDiagram({ slug, flowSteps }: Props) {
   const rawDiagram = useMemo(() => {
     if (WORKFLOW_DIAGRAMS[slug]) return WORKFLOW_DIAGRAMS[slug];
@@ -1333,6 +1409,7 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState(fallback?.nodes ?? []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(fallback?.edges ?? []);
   const [layoutDone, setLayoutDone] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Run ELK async layout
   useEffect(() => {
@@ -1345,52 +1422,63 @@ export default function WorkflowDiagram({ slug, flowSteps }: Props) {
     });
   }, [rawDiagram]);
 
+  // Escape key closes fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
+
+  // Lock body scroll when fullscreen
+  useEffect(() => {
+    if (isFullscreen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isFullscreen]);
+
+  const toggleFullscreen = useCallback(() => setIsFullscreen((prev) => !prev), []);
+
   if (!fallback) return null;
 
   return (
-    <div className="my-6">
-      <div
-        className="bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden"
-        style={{ height: '600px' }}
-      >
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.3 }}
-          minZoom={0.2}
-          maxZoom={2}
-          panOnDrag={[0]}
-          zoomOnScroll
-          selectionOnDrag={[2]}
-          multiSelectionKeyCode="Shift"
-          selectionMode={1}
-          selectionKeyCode="Shift"
-          nodesDraggable={true}
-          nodesConnectable={false}
-          proOptions={{ hideAttribution: true }}
-          defaultEdgeOptions={{ type: 'default', ...edgeDefaults }}
+    <>
+      {/* Inline diagram */}
+      <div className="my-6">
+        <div
+          className="bg-[#0c0c0e] border border-zinc-800 rounded-xl overflow-hidden relative"
+          style={{ height: '600px' }}
         >
-          <Background color="#27272a" gap={20} variant={BackgroundVariant.Dots} />
-          <Controls className="!bg-zinc-800 !border-zinc-700 !rounded-lg [&_button]:!bg-zinc-800 [&_button]:!border-zinc-700 [&_button]:!text-zinc-400 [&_button:hover]:!bg-zinc-700" />
-          <MiniMap
-            className="!bg-zinc-900 !border-zinc-800 !rounded-lg"
-            nodeColor={(n) => {
-              if (n.type === 'start') return '#22c55e';
-              if (n.type === 'end') return '#ef4444';
-              if (n.type === 'decision') return '#f59e0b';
-              if (n.type === 'subworkflow') return '#3b82f6';
-              if (n.type === 'parallel') return '#a855f7';
-              return '#52525b';
-            }}
-            maskColor="rgba(0,0,0,0.7)"
+          <DiagramCanvas
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            isFullscreen={false}
+            onToggleFullscreen={toggleFullscreen}
           />
-        </ReactFlow>
+        </div>
       </div>
-    </div>
+
+      {/* Fullscreen overlay */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 bg-[#0c0c0e]">
+          <DiagramCanvas
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            isFullscreen={true}
+            onToggleFullscreen={toggleFullscreen}
+          />
+        </div>
+      )}
+    </>
   );
 }
 
