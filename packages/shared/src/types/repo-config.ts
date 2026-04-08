@@ -42,6 +42,8 @@ export interface IRepoConfig {
     maxFetchSizeBytes?: number;
     blockedCommandPatterns?: string[];
   };
+  /** Project coding conventions injected into every LLM prompt via {{conventions}}. */
+  conventions?: string;
   /** GitHub-specific settings. */
   github?: Partial<{
     issueLabels: string[];

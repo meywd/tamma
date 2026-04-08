@@ -109,10 +109,23 @@ public class LlmCallWorkflow : WorkflowBase
                 var action = context.GetInput<string>("action") ?? "";
                 actionVar.Set(context, action);
 
-                // Serialize variables dict if provided
+                // Serialize variables dict if provided, injecting defaults for common template vars
                 var variables = context.GetInput<IDictionary<string, object>>("variables");
                 if (variables != null)
+                {
+                    // Inject 'role' if not provided — every template uses {{role}}
+                    if (!variables.ContainsKey("role"))
+                    {
+                        var r = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role") ?? "assistant";
+                        variables["role"] = r;
+                    }
+                    // Inject 'conventions' if not provided — read from config or use empty
+                    if (!variables.ContainsKey("conventions"))
+                    {
+                        variables["conventions"] = "";
+                    }
                     variablesJsonVar.Set(context, JsonSerializer.Serialize(variables));
+                }
 
                 // Enable tools from input
                 var enableTools = context.GetInput<bool?>("enableTools") ?? false;

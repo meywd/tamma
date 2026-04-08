@@ -92,10 +92,8 @@ public class PlanGenerationWorkflow : WorkflowBase
                 ["action"] = "plan",
                 ["variables"] = new Dictionary<string, object>
                 {
-                    ["role"] = "architect",
                     ["workItemJson"] = workItemJson.Get(ctx),
                     ["contextFindings"] = poSummary.Get(ctx),
-                    ["conventions"] = "TypeScript strict mode, ESM imports with .js, kebab-case files, I-prefix interfaces, async/await only, Pino logging, Vitest tests colocated as *.test.ts",
                     ["poSummary"] = poSummary.Get(ctx),
                     ["contextIds"] = contextIds.Get(ctx),
                     ["repository"] = repository.Get(ctx),
