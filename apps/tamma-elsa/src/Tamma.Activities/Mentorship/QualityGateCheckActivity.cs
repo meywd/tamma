@@ -124,10 +124,10 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
             var output = AggregateResults(results, allowWarnings);
 
             // Log quality gate event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.QualityGateRun,
+                EventType = Tamma.Core.Entities.EventTypes.QualityGateRun,
                 StateFrom = MentorshipState.MONITOR_PROGRESS,
                 StateTo = output.Passed ? MentorshipState.PREPARE_CODE_REVIEW : MentorshipState.AUTO_FIX_ISSUES
             });

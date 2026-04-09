@@ -4,13 +4,31 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const hasIntegration = process.env['INTEGRATION_TEST_CLI'] === 'true';
-
 const CLI_PATH = path.resolve(__dirname, 'index.tsx');
+
+/**
+ * Resolve the tsx binary path.  In a pnpm workspace the binary may only live
+ * inside this package's own `node_modules/.bin` rather than at the repo root,
+ * so `npx tsx` fails in CI.  Walk up from __dirname looking for a
+ * `node_modules/.bin/tsx` that actually exists.
+ */
+function resolveTsxBin(): string {
+  let dir = __dirname;
+  const root = path.parse(dir).root;
+  while (dir !== root) {
+    const candidate = path.join(dir, 'node_modules', '.bin', 'tsx');
+    if (fs.existsSync(candidate)) return candidate;
+    dir = path.dirname(dir);
+  }
+  // Fallback: let the OS resolve it from PATH
+  return 'tsx';
+}
+
+const TSX_BIN = resolveTsxBin();
 
 function runCli(args: string, options?: { cwd?: string; env?: Record<string, string> }): string {
   try {
-    return execFileSync('npx', ['tsx', CLI_PATH, ...args.split(/\s+/).filter(Boolean)], {
+    return execFileSync(TSX_BIN, [CLI_PATH, ...args.split(/\s+/).filter(Boolean)], {
       encoding: 'utf-8',
       timeout: 30_000,
       cwd: options?.cwd,
@@ -23,7 +41,7 @@ function runCli(args: string, options?: { cwd?: string; env?: Record<string, str
   }
 }
 
-describe.skipIf(!hasIntegration)('CLI Integration', () => {
+describe('CLI Integration', () => {
   let tempDir: string | undefined;
 
   afterEach(() => {
@@ -43,7 +61,8 @@ describe.skipIf(!hasIntegration)('CLI Integration', () => {
 
   it('should show version', () => {
     const output = runCli('--version');
-    expect(output).toContain('0.1.0');
+    // Version format: major.minor.patch (possibly with -dev suffix)
+    expect(output).toMatch(/\d+\.\d+\.\d+/);
   });
 
   it('should show status when no engine running', () => {

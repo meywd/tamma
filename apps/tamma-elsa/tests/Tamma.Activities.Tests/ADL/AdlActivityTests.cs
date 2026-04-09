@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Elsa.Workflows.Management;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -13,27 +14,6 @@ namespace Tamma.Activities.Tests.ADL;
 [TestFixture]
 public class AdlActivityTests
 {
-    // ================================================================
-    // SelectIssueActivity
-    // ================================================================
-
-    [Test]
-    public void SelectIssueActivity_JsonConstructor_ShouldNotThrow()
-    {
-        Action act = () => new SelectIssueActivity();
-        act.Should().NotThrow();
-    }
-
-    [Test]
-    public void SelectIssueActivity_WithDependencies_ShouldNotThrow()
-    {
-        var logger = new Mock<ILogger<SelectIssueActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
-
-        Action act = () => new SelectIssueActivity(logger.Object, github.Object);
-        act.Should().NotThrow();
-    }
-
     // ================================================================
     // WaitForPlanApprovalActivity
     // ================================================================
@@ -205,7 +185,8 @@ public class AdlActivityTests
     {
         var logger = new Mock<ILogger<CheckLimitsActivity>>();
 
-        Action act = () => new CheckLimitsActivity(logger.Object);
+        var store = new Mock<IWorkflowInstanceStore>();
+        Action act = () => new CheckLimitsActivity(logger.Object, store.Object);
         act.Should().NotThrow();
     }
 

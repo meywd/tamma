@@ -95,8 +95,8 @@ public class EscalateReviewActivity : Activity
             {
                 SessionId = sessionId,
                 EventType = EventTypes.EscalationTriggered,
-                StateFrom = Core.Enums.MentorshipState.GUIDE_FIXES,
-                StateTo = Core.Enums.MentorshipState.ESCALATE_TO_SENIOR
+                StateFrom = Tamma.Core.Enums.MentorshipState.GUIDE_FIXES,
+                StateTo = Tamma.Core.Enums.MentorshipState.ESCALATE_TO_SENIOR
             });
 
             // Notify the junior

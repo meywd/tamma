@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Scheduling.Activities;
 using Elsa.Workflows;
@@ -18,17 +17,15 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// ADL Orchestrator Workflow — the top-level loop that continuously picks
-/// GitHub issues and dispatches single-issue-cycle workflows for each.
-///
-/// Design: Flowchart with loop-back connections for visual clarity in Studio.
+/// ADL Orchestrator — the top-level loop that selects GitHub issues
+/// and dispatches fire-and-forget single-issue-cycle workflows.
 ///
 /// Flow:
-///   InitConfig → CheckLimits → [Continue?]
-///     Yes → DispatchCycle → ParseResult → [noIssues?]
-///       No  → Cooldown → loop back to CheckLimits
-///       Yes → SetOutputs → Finish
-///     No  → SetOutputs → Finish
+///   Load Config → Select Issue → [Issue Found?]
+///     No  → Finish (no issues)
+///     Yes → Check Limits → [Within Limits?]
+///       No  → Finish (limits reached)
+///       Yes → Dispatch Cycle (fire & forget) → Cooldown → loop to Select Issue
 /// </summary>
 public class AdlOrchestratorWorkflow : WorkflowBase
 {
@@ -37,7 +34,7 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         builder.Name = "ADL Orchestrator";
         builder.DefinitionId = "adl-orchestrator";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Top-level loop that picks issues and dispatches autonomous development cycles";
+        builder.Description = "Selects issues and dispatches autonomous development cycles";
 
         // ================================================================
         // Variables
@@ -48,164 +45,132 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
         var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
+        var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1);
 
-        var issuesCompleted = builder.WithVariable<int>("IssuesCompleted", 0);
-        var lastExitReason = builder.WithVariable<string>("LastExitReason", "");
-        var stopReason = builder.WithVariable<string>("StopReason", "");
-
-        var cycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        // Selected work item data
+        var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null);
+        var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0);
 
         // ================================================================
-        // Activities
+        // 1. Load Config
         // ================================================================
-
-        // 1. Init config from inputs
-        var initConfig = new SetVariable
+        var initConfig = new InitAdlConfigActivity
         {
             Id = "InitAdlConfig",
             Name = "Load Config",
-            Variable = repository,
-            Value = new Input<object?>(ctx =>
-            {
-                var repo = ctx.GetInput<string>("repository") ?? "";
-                var config = ctx.GetInput<string>("configJson");
-                if (!string.IsNullOrEmpty(config))
-                {
-                    configJson.Set(ctx, config);
-                    var parsed = SafeDeserialize<AdlConfig>(config);
-                    if (parsed != null)
-                    {
-                        repo = string.IsNullOrEmpty(repo) ? parsed.Repository : repo;
-                        issueLabels.Set(ctx, parsed.IssueLabels);
-                        botAssignee.Set(ctx, parsed.BotAssignee);
-                        baseBranch.Set(ctx, parsed.BaseBranch);
-                        cooldownSeconds.Set(ctx, parsed.CooldownSeconds);
-                    }
-                }
-
-                var directLabels = ctx.GetInput<string[]>("issueLabels");
-                if (directLabels != null) issueLabels.Set(ctx, directLabels);
-                var directBot = ctx.GetInput<string>("botAssignee");
-                if (!string.IsNullOrEmpty(directBot)) botAssignee.Set(ctx, directBot);
-                var directBase = ctx.GetInput<string>("baseBranch");
-                if (!string.IsNullOrEmpty(directBase)) baseBranch.Set(ctx, directBase);
-
-                return (object)repo;
-            })
+            Repository = new Input<string?>(ctx => ctx.GetInput<string>("repository")),
+            ConfigJson = new Input<string?>(ctx => ctx.GetInput<string>("configJson")),
+            IssueLabels = new Input<string[]?>(ctx => ctx.GetInput<string[]>("issueLabels")),
+            BotAssignee = new Input<string?>(ctx => ctx.GetInput<string>("botAssignee")),
+            BaseBranch = new Input<string?>(ctx => ctx.GetInput<string>("baseBranch")),
+            ResolvedRepository = new Output<string>(repository),
+            ResolvedIssueLabels = new Output<string[]>(issueLabels),
+            ResolvedBotAssignee = new Output<string>(botAssignee),
+            ResolvedBaseBranch = new Output<string>(baseBranch),
+            ResolvedCooldownSeconds = new Output<int>(cooldownSeconds),
+            ResolvedMaxIssuesPerRun = new Output<int>(maxConcurrent),
+            ResolvedConfigJson = new Output<string>(configJson),
         };
         initConfig.SetDisplayText("Load Config");
 
-        // 2. Check operational limits
+        // ================================================================
+        // 2. Select Work Item (priority-based, multiple sources)
+        // ================================================================
+        var selectWorkItem = new SelectWorkItemActivity
+        {
+            Id = "SelectWorkItem",
+            Name = "Select Work Item",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            AutoLabels = new Input<string[]>(ctx => issueLabels.Get(ctx)),
+            BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
+            WorkItemJson = new Output<string?>(selectedItemJson),
+            IssueNumber = new Output<int>(selectedIssueNumber),
+        };
+        selectWorkItem.SetDisplayText("Select Work Item");
+
+        // ================================================================
+        // 2b. Dispatch Triage
+        // ================================================================
+        var dispatchTriage = new DispatchTriageActivity
+        {
+            Id = "DispatchTriage",
+            Name = "Dispatch Triage",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+        };
+        dispatchTriage.SetDisplayText("Dispatch Triage");
+
+        // ================================================================
+        // 3. Check Limits
+        // ================================================================
         var checkLimits = new CheckLimitsActivity
         {
             Id = "CheckLimits",
             Name = "Check Limits",
-            IssuesCompleted = new Input<int>(ctx => issuesCompleted.Get(ctx)),
-            ConfigJson = new Input<string?>(ctx => configJson.Get(ctx)),
-            StopReason = new Output<string?>(stopReason)
+            MaxConcurrent = new Input<int>(ctx => maxConcurrent.Get(ctx)),
         };
         checkLimits.SetDisplayText("Check Limits");
 
-        // 3. Guard: limits OK?
-        var limitsOk = new FlowDecision(ctx => string.IsNullOrEmpty(stopReason.Get(ctx)))
-        {
-            Id = "LimitsOk",
-            Name = "Within Limits?"
-        };
-        limitsOk.SetDisplayText("Within Limits?");
-
-        // 4. Dispatch single-issue-cycle
-        var dispatchCycle = new DispatchWorkflow
+        // ================================================================
+        // 4. Dispatch Cycle (fire & forget)
+        // ================================================================
+        var dispatchCycle = new DispatchCycleActivity
         {
             Id = "DispatchIssueCycle",
             Name = "Dispatch Issue Cycle",
-            WorkflowDefinitionId = new("single-issue-cycle"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["issueLabels"] = issueLabels.Get(ctx),
-                ["botAssignee"] = botAssignee.Get(ctx),
-                ["baseBranch"] = baseBranch.Get(ctx)
-            }),
-            WaitForCompletion = new(true),
-            Result = new(cycleResult)
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            WorkItemJson = new Input<string>(ctx => selectedItemJson.Get(ctx) ?? ""),
+            IssueNumber = new Input<int>(ctx => selectedIssueNumber.Get(ctx)),
+            BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
+            BaseBranch = new Input<string>(ctx => baseBranch.Get(ctx)),
         };
         dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
 
-        // 5. Parse cycle result
-        var parseResult = new SetVariable
-        {
-            Id = "ParseCycleResult",
-            Name = "Parse Result",
-            Variable = lastExitReason,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = cycleResult.Get(ctx);
-                var reason = "unknown";
-                if (result != null && result.TryGetValue("exitReason", out var er))
-                    reason = er?.ToString() ?? "unknown";
-
-                if (reason == "success")
-                    issuesCompleted.Set(ctx, issuesCompleted.Get(ctx) + 1);
-
-                return (object)reason;
-            })
-        };
-        parseResult.SetDisplayText("Parse Result");
-
-        // 6. Guard: should continue looping?
-        var shouldContinue = new FlowDecision(ctx =>
-        {
-            var reason = lastExitReason.Get(ctx);
-            return reason != "noIssues";
-        })
-        {
-            Id = "ShouldContinue",
-            Name = "More Issues?"
-        };
-        shouldContinue.SetDisplayText("More Issues?");
-
-        // 7. Cooldown delay
-        var cooldown = new Delay
+        // ================================================================
+        // 5. Cooldown
+        // ================================================================
+        var cooldown = new CooldownActivity
         {
             Id = "CooldownDelay",
             Name = "Cooldown",
-            TimeSpan = new Input<TimeSpan>(ctx =>
-                System.TimeSpan.FromSeconds(cooldownSeconds.Get(ctx)))
+            Seconds = new Input<int>(ctx => cooldownSeconds.Get(ctx)),
         };
         cooldown.SetDisplayText("Cooldown");
 
-        // 8. Set final outputs (limits reached path)
-        var setOutputsLimits = new Sequence
+        // ================================================================
+        // Exit paths
+        // ================================================================
+        var exitNoIssues = new SetExitReasonActivity
         {
-            Id = "SetOutputsLimits",
-            Name = "Output (Limits)",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputLimitsTotal", Name = "Set Total Completed (Limits)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (Limits)"),
-                WithLabel(new SetOutput { Id = "SetOutputLimitsReason", Name = "Set Exit Reason (Limits)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(stopReason.Get(ctx) ?? "limitsReached")) }, "Set Exit Reason (Limits)")
-            }
+            Id = "ExitNoIssues",
+            Name = "Exit (No Issues)",
+            Reason = new Input<string>("noIssues"),
         };
-        setOutputsLimits.SetDisplayText("Output (Limits)");
+        exitNoIssues.SetDisplayText("Exit (No Issues)");
 
-        // 9. Set final outputs (no issues path)
-        var setOutputsNoIssues = new Sequence
+        var exitLimits = new SetExitReasonActivity
         {
-            Id = "SetOutputsNoIssues",
-            Name = "Output (No Issues)",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "SetOutputNoIssuesTotal", Name = "Set Total Completed (No Issues)", OutputName = new("totalIssuesCompleted"), OutputValue = new(ctx => (object)issuesCompleted.Get(ctx)) }, "Set Total Completed (No Issues)"),
-                WithLabel(new SetOutput { Id = "SetOutputNoIssuesReason", Name = "Set Exit Reason (No Issues)", OutputName = new("exitReason"), OutputValue = new(ctx => (object)"noIssues") }, "Set Exit Reason (No Issues)")
-            }
+            Id = "ExitLimits",
+            Name = "Exit (Limits)",
+            Reason = new Input<string>("limitsReached"),
         };
-        setOutputsNoIssues.SetDisplayText("Output (No Issues)");
-
-        var finish = new Finish { Id = "Finish", Name = "Complete: Orchestrator Done" };
-        finish.SetDisplayText("Complete: Orchestrator Done");
+        exitLimits.SetDisplayText("Exit (Limits)");
 
         // ================================================================
-        // Flowchart
+        // Restart: Dispatch new ADL instance after cooldown
+        // ================================================================
+        var dispatchAdl = new DispatchAdlActivity
+        {
+            Id = "DispatchAdl",
+            Name = "Dispatch ADL",
+            ConfigJson = new Input<string>(ctx => configJson.Get(ctx)),
+        };
+        dispatchAdl.SetDisplayText("Dispatch ADL");
+
+        var finish = new Finish { Id = "Finish", Name = "Complete" };
+        finish.SetDisplayText("Complete");
+
+        // ================================================================
+        // Flowchart — every path → cooldown → dispatch ADL → finish
         // ================================================================
         builder.Root = new Flowchart
         {
@@ -213,39 +178,37 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             Start = initConfig,
             Activities =
             {
-                initConfig, checkLimits, limitsOk,
-                dispatchCycle, parseResult, shouldContinue,
-                cooldown,
-                setOutputsLimits, setOutputsNoIssues, finish
+                initConfig, selectWorkItem, dispatchTriage,
+                checkLimits, dispatchCycle, cooldown,
+                exitNoIssues, exitLimits, dispatchAdl, finish
             },
             Connections =
             {
-                // Init → Check Limits
-                Connect(initConfig, checkLimits),
+                // Load Config → Select Work Item
+                Connect(initConfig, selectWorkItem),
 
-                // Check Limits → Within Limits?
-                Connect(checkLimits, limitsOk),
+                // Nothing found → report → cooldown
+                ConnectOutcome(selectWorkItem, "NothingFound", exitNoIssues),
+                Connect(exitNoIssues, cooldown),
 
-                // Within Limits? Yes → Dispatch Cycle
-                ConnectOutcome(limitsOk, "True", dispatchCycle),
+                // Needs triage → dispatch triage (f&f) → cooldown
+                ConnectOutcome(selectWorkItem, "NeedsTriage", dispatchTriage),
+                Connect(dispatchTriage, cooldown),
 
-                // Within Limits? No → Output (Limits) → Finish
-                ConnectOutcome(limitsOk, "False", setOutputsLimits),
-                Connect(setOutputsLimits, finish),
+                // Selected → Check Limits
+                ConnectOutcome(selectWorkItem, "Selected", checkLimits),
 
-                // Dispatch Cycle → Parse Result
-                Connect(dispatchCycle, parseResult),
+                // Limits reached → report → cooldown
+                ConnectOutcome(checkLimits, "Stop", exitLimits),
+                Connect(exitLimits, cooldown),
 
-                // Parse Result → More Issues?
-                Connect(parseResult, shouldContinue),
+                // Within limits → Dispatch cycle (f&f) → cooldown
+                ConnectOutcome(checkLimits, "Continue", dispatchCycle),
+                Connect(dispatchCycle, cooldown),
 
-                // More Issues? Yes → Cooldown → loop back to Check Limits
-                ConnectOutcome(shouldContinue, "True", cooldown),
-                Connect(cooldown, checkLimits),
-
-                // More Issues? No → Output (No Issues) → Finish
-                ConnectOutcome(shouldContinue, "False", setOutputsNoIssues),
-                Connect(setOutputsNoIssues, finish)
+                // All paths: cooldown → dispatch new ADL → finish this instance
+                Connect(cooldown, dispatchAdl),
+                Connect(dispatchAdl, finish),
             }
         };
     }
@@ -255,11 +218,4 @@ public class AdlOrchestratorWorkflow : WorkflowBase
 
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
-
-    private static T? SafeDeserialize<T>(string? json) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        try { return JsonSerializer.Deserialize<T>(json); }
-        catch { return null; }
-    }
 }

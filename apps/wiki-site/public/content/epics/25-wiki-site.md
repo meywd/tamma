@@ -69,7 +69,7 @@ wiki.tamma.dev / wiki.its-done.dev
 
 | Story | Title | Tasks | Status |
 |-------|-------|-------|--------|
-| 25-1 | Custom Wiki Site | 8 | Planned |
+| 25-1 | Custom Wiki Site | 8 | Done |
 
 ### Story 25-1 Tasks
 
@@ -84,12 +84,13 @@ wiki.tamma.dev / wiki.its-done.dev
 
 ## Current State
 
-The wiki site scaffold has been created at `apps/wiki-site/` with:
-- `astro.config.mjs` with Starlight integration
-- `wrangler.toml` for Cloudflare Workers deployment
-- `scripts/sync-content.ts` for build-time content transformation
-- Custom CSS with Tamma purple branding
-- Logo assets (dark/light variants)
+The wiki site has been rewritten as a Vite + React + React Router SPA deployed on Cloudflare Workers at wiki.tamma.dev:
+- Vite + React with React Router for client-side routing
+- React Flow interactive flowcharts with dagre auto-layout, draggable nodes, minimap
+- Designed pages: Home, Epics, Workflows, Stories with detail views
+- Dark sidebar, collapsible navigation, prose styling
+- Cloudflare Workers Static Assets deployment via Wrangler
+- Content synced from `wiki/` and `docs/stories/` directories
 
 ## Dependencies
 

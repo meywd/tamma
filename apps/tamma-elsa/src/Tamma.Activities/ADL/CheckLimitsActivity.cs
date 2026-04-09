@@ -1,105 +1,140 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Elsa.Workflows.Management;
+using Elsa.Workflows.Management.Filters;
 using Microsoft.Extensions.Logging;
-using Tamma.Activities.ADL.Models;
+using Tamma.Activities.Core;
 
 namespace Tamma.Activities.ADL;
 
 /// <summary>
-/// Checks operational limits: daily quota, budget, emergency stop flag.
-/// Used by the ADL orchestrator loop to decide whether to continue.
+/// Checks operational limits before dispatching the next issue cycle.
+///
+/// Checks (in order):
+///   1. Emergency stop flag
+///   2. Active instances &lt; max concurrent (queries Elsa runtime)
+///   3. Budget remaining (from cost tracker)
 ///
 /// Outcomes:
-///   - Continue: within limits, proceed with next issue
-///   - Stop: limits reached or emergency stop active
+///   - Continue: within all limits, safe to dispatch
+///   - Stop: a limit was reached
 /// </summary>
 [Activity(
     "Tamma.ADL",
     "Check Limits",
-    "Check daily quota, budget, and emergency stop before next cycle",
+    "Check concurrency, budget, and emergency stop before next dispatch",
     Kind = ActivityKind.Task
 )]
 [FlowNode("Continue", "Stop")]
-public class CheckLimitsActivity : Activity
+public class CheckLimitsActivity : TammaOutcomeActivity
 {
-    private readonly ILogger<CheckLimitsActivity>? _logger;
+    public override string? EventType => "ADL.LIMITS.CHECK";
 
-    [Input(Description = "Number of issues completed so far in this run")]
-    public Input<int> IssuesCompleted { get; set; } = default!;
+    private readonly IWorkflowInstanceStore? _workflowInstanceStore;
 
-    [Input(Description = "Configuration JSON with operational limits")]
-    public Input<string?> ConfigJson { get; set; } = default!;
+    // --- Inputs ---
 
-    [Output(Description = "Reason for stopping, if applicable")]
+    [Input(Description = "Max concurrent SingleIssueCycle instances")]
+    public Input<int> MaxConcurrent { get; set; } = new(1);
+
+    [Input(Description = "Emergency stop flag")]
+    public Input<bool> EmergencyStop { get; set; } = new(false);
+
+    // --- Outputs ---
+
+    [Output(Description = "Reason for stopping, empty if continuing")]
     public Output<string?> StopReason { get; set; } = default!;
+
+    [Output(Description = "Number of currently active cycle instances")]
+    public Output<int> ActiveInstances { get; set; } = default!;
 
     [JsonConstructor]
     public CheckLimitsActivity() { }
 
-    public CheckLimitsActivity(ILogger<CheckLimitsActivity> logger)
+    public CheckLimitsActivity(
+        ILogger<CheckLimitsActivity> logger,
+        IWorkflowInstanceStore workflowInstanceStore)
     {
-        _logger = logger;
+        Logger = logger;
+        _workflowInstanceStore = workflowInstanceStore;
     }
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async Task RunAsync(ActivityExecutionContext context)
     {
-        var issuesCompleted = IssuesCompleted.Get(context);
-        var configJson = ConfigJson.Get(context);
+        var maxConcurrent = MaxConcurrent.Get(context);
+        var emergencyStop = EmergencyStop.Get(context);
 
-        var config = DeserializeConfig(configJson);
-        var limits = config.Limits;
-
-        // Check emergency stop
-        if (limits.EmergencyStop)
+        // 1. Emergency stop
+        if (emergencyStop)
         {
-            _logger?.LogWarning("Emergency stop flag is active");
-            StopReason.Set(context, "Emergency stop");
-            await context.CompleteActivityWithOutcomesAsync("Stop");
+            await Stop(context, "Emergency stop", 0);
             return;
         }
 
-        // Check daily quota
-        if (issuesCompleted >= limits.DailyIssueQuota)
+        // 2. Check active instances
+        var activeCount = await GetActiveInstanceCount(context);
+        ActiveInstances.Set(context, activeCount);
+
+        if (activeCount >= maxConcurrent)
         {
-            _logger?.LogInformation("Daily issue quota reached: {Completed}/{Quota}",
-                issuesCompleted, limits.DailyIssueQuota);
-            StopReason.Set(context, $"Daily quota reached ({issuesCompleted}/{limits.DailyIssueQuota})");
-            await context.CompleteActivityWithOutcomesAsync("Stop");
+            await Stop(context, $"Max concurrent reached ({activeCount}/{maxConcurrent})", activeCount);
             return;
         }
 
-        // Check max issues per run
-        if (issuesCompleted >= config.MaxIssuesPerRun)
-        {
-            _logger?.LogInformation("Max issues per run reached: {Completed}/{Max}",
-                issuesCompleted, config.MaxIssuesPerRun);
-            StopReason.Set(context, $"Max per run reached ({issuesCompleted}/{config.MaxIssuesPerRun})");
-            await context.CompleteActivityWithOutcomesAsync("Stop");
-            return;
-        }
-
-        _logger?.LogInformation("Limits check passed: {Completed} completed, quota {Quota}",
-            issuesCompleted, limits.DailyIssueQuota);
+        // All checks passed
+        StopReason.Set(context, null);
+        Logger?.LogInformation(
+            "Limits OK: {Active}/{Max} active instances",
+            activeCount, maxConcurrent);
         await context.CompleteActivityWithOutcomesAsync("Continue");
     }
 
-    private static AdlConfig DeserializeConfig(string? json)
+    private async Task<int> GetActiveInstanceCount(ActivityExecutionContext context)
     {
-        if (string.IsNullOrWhiteSpace(json))
-            return new AdlConfig();
+        if (_workflowInstanceStore == null)
+        {
+            Logger?.LogWarning("No IWorkflowInstanceStore available, assuming 0 active instances");
+            return 0;
+        }
 
         try
         {
-            return JsonSerializer.Deserialize<AdlConfig>(json) ?? new AdlConfig();
+            var filter = new WorkflowInstanceFilter
+            {
+                DefinitionId = "single-issue-cycle",
+                WorkflowStatus = WorkflowStatus.Running,
+            };
+
+            var count = await _workflowInstanceStore.CountAsync(filter);
+            return (int)count;
         }
-        catch
+        catch (Exception ex)
         {
-            return new AdlConfig();
+            Logger?.LogError(ex, "Failed to query active workflow instances");
+            return 0; // fail open — don't block on query failure
         }
     }
+
+    private async Task Stop(ActivityExecutionContext context, string reason, int active)
+    {
+        StopReason.Set(context, reason);
+        ActiveInstances.Set(context, active);
+        Logger?.LogWarning("Limits reached: {Reason}", reason);
+        await context.CompleteActivityWithOutcomesAsync("Stop");
+    }
+
+    public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()
+    {
+        ["maxConcurrent"] = MaxConcurrent.Get(context),
+    };
+
+    public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()
+    {
+        ["activeInstances"] = this.GetOutput<int>(context, nameof(ActiveInstances)),
+        ["stopReason"] = this.GetOutput<string?>(context, nameof(StopReason)),
+    };
 }

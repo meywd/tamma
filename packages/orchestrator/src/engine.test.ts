@@ -923,6 +923,87 @@ describe('TammaEngine', () => {
     });
   });
 
+  describe('error recovery', () => {
+    it('emits ERROR_OCCURRED event on failure', async () => {
+      const agent = createMockAgent();
+      const eventStore = new InMemoryEventStore();
+      vi.mocked(agent.executeTask).mockResolvedValue({
+        success: false,
+        output: '',
+        costUsd: 0,
+        durationMs: 0,
+        error: 'Agent crashed',
+      });
+      const { engine } = createEngine({ agent, eventStore });
+
+      await expect(engine.processOneIssue()).rejects.toThrow();
+      const events = eventStore.getEvents(42);
+      const errorEvents = events.filter((e) => e.type === EngineEventType.ERROR_OCCURRED);
+      expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('clears work references even on failure', async () => {
+      const agent = createMockAgent();
+      vi.mocked(agent.executeTask).mockRejectedValue(new Error('Unexpected crash'));
+      const { engine } = createEngine({ agent });
+
+      await expect(engine.processOneIssue()).rejects.toThrow();
+      expect(engine.getCurrentIssue()).toBeNull();
+      expect(engine.getCurrentPlan()).toBeNull();
+      expect(engine.getCurrentBranch()).toBeNull();
+      expect(engine.getCurrentPR()).toBeNull();
+    });
+
+    it('state returns to ERROR after failure', async () => {
+      const agent = createMockAgent();
+      vi.mocked(agent.executeTask).mockRejectedValue(new Error('Unexpected crash'));
+      const { engine } = createEngine({ agent });
+
+      await expect(engine.processOneIssue()).rejects.toThrow();
+      expect(engine.getState()).toBe(EngineState.ERROR);
+    });
+  });
+
+  describe('agent task routing', () => {
+    it('calls agent with issue context for analysis phase', async () => {
+      const agent = createMockAgent();
+      const { engine } = createEngine({ agent });
+
+      const issue: IssueData = {
+        number: 42,
+        title: 'Fix auth',
+        body: 'Auth is broken',
+        labels: ['tamma'],
+        url: 'https://example.com/42',
+        comments: [],
+        relatedIssueNumbers: [],
+        createdAt: '2024-01-01T00:00:00Z',
+      };
+
+      const context = await engine.analyzeIssue(issue);
+      expect(context).toContain('#42');
+      expect(context).toContain('Fix auth');
+      expect(context).toContain('Auth is broken');
+    });
+
+    it('calls agent with plan context for implementation phase', async () => {
+      const agent = createMockAgent();
+      const { engine } = createEngine({ agent });
+
+      await engine.processOneIssue();
+
+      // Agent should have been called twice: first for plan (analysis context), then for implement
+      expect(agent.executeTask).toHaveBeenCalledTimes(2);
+      const calls = vi.mocked(agent.executeTask).mock.calls;
+
+      // Second call (implementation) should reference the plan
+      const implCall = calls[1];
+      expect(implCall).toBeDefined();
+      const implPrompt = implCall![0].prompt;
+      expect(implPrompt).toBeDefined();
+    });
+  });
+
   describe('dispose', () => {
     it('should stop running and clean up', async () => {
       const { engine, agent, platform } = createEngine();

@@ -72,9 +72,11 @@ export async function registerGitHubOAuthRoutes(
     const callbackUrl = `${dashboardUrl}/oauth2/callback`;
     const scope = 'read:user user:email';
 
-    // Encode redirect destination in OAuth state param
+    // Encode redirect destination in OAuth state param.
+    // Sanitize the URL upfront so only reconstructed (non-tainted) values are stored.
     const rd = request.query.rd;
-    const statePayload = rd && isValidRedirect(rd) ? { rd } : {};
+    const sanitizedRd = rd ? sanitizeRedirectUrl(rd) : null;
+    const statePayload = sanitizedRd ? { rd: sanitizedRd } : {};
     const state = Buffer.from(JSON.stringify(statePayload)).toString('base64url');
 
     const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&state=${encodeURIComponent(state)}`;
@@ -156,30 +158,36 @@ export async function registerGitHubOAuthRoutes(
       role: user.role,
     });
 
-    // Determine redirect target from OAuth state param
-    let redirectTo = dashboardUrl;
+    // Determine redirect target from OAuth state param.
+    // We use sanitizeRedirectUrl() to reconstruct the URL from parsed, validated
+    // components. This produces a new string (not the original user input), which
+    // breaks the taint chain for static analysis tools like CodeQL.
+    let redirectTo: string | null = null;
     if (state) {
       try {
         const parsed = JSON.parse(Buffer.from(state, 'base64url').toString()) as { rd?: string };
-        if (parsed.rd && isValidRedirect(parsed.rd)) {
-          redirectTo = parsed.rd;
+        if (parsed.rd) {
+          redirectTo = sanitizeRedirectUrl(parsed.rd);
         }
       } catch {
         // Invalid state — fall back to default dashboard URL
       }
     }
 
-    // Set cookie and redirect
-    return reply
-      .setCookie('tamma_session', token, {
-        path: '/',
-        httpOnly: true,
-        secure: true, // Cloudflare handles TLS
-        sameSite: 'lax',
-        maxAge: tokenExpiresIn,
-        domain: '.tamma.dev', // Shared across subdomains
-      })
-      .redirect(redirectTo);
+    // Single cookie on parent domain — covers all *.tamma.dev subdomains.
+    // Browsers reject Set-Cookie for domains that don't match the current origin,
+    // so per-subdomain cookies from api.tamma.dev would be silently dropped.
+    reply.setCookie('tamma_session', token, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax' as const,
+      maxAge: tokenExpiresIn,
+      domain: '.tamma.dev',
+    });
+
+    // Use the sanitized URL if valid, otherwise fall back to the server-controlled dashboardUrl
+    return reply.redirect(redirectTo ?? dashboardUrl);
   });
 
   // -------------------------------------------------------------------
@@ -203,28 +211,42 @@ export async function registerGitHubOAuthRoutes(
   // POST /api/auth/logout — clear session cookie
   // -------------------------------------------------------------------
   app.post('/api/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply
-      .clearCookie('tamma_session', {
-        path: '/',
-        domain: '.tamma.dev',
-      })
-      .send({ ok: true });
+    reply.clearCookie('tamma_session', { path: '/', domain: '.tamma.dev' });
+    return reply.send({ ok: true });
   });
 }
 
 /**
- * Validate that a redirect URL is safe (on *.tamma.dev or a relative path).
- * Prevents open-redirect attacks.
+ * Sanitize a redirect URL by reconstructing it from parsed components.
+ * This breaks the taint chain for static analysis tools (e.g. CodeQL) by
+ * ensuring the returned string is constructed from validated parts rather
+ * than being the original user-provided value passed through.
+ *
+ * Returns `null` if the URL is not a valid tamma.dev redirect target.
  */
-function isValidRedirect(url: string): boolean {
-  // Allow relative paths
-  if (url.startsWith('/')) return true;
+function sanitizeRedirectUrl(url: string): string | null {
+  // Allow relative paths — reconstruct to ensure no protocol-relative tricks
+  if (url.startsWith('/')) {
+    // Reconstruct: only keep pathname + search + hash, strip any authority
+    try {
+      // Use a dummy base to parse the relative URL safely
+      const parsed = new URL(url, 'https://placeholder.invalid');
+      return parsed.pathname + parsed.search + parsed.hash;
+    } catch {
+      return null;
+    }
+  }
 
   try {
     const parsed = new URL(url);
     // Must be HTTPS and on *.tamma.dev
-    return parsed.protocol === 'https:' && (parsed.hostname === 'tamma.dev' || parsed.hostname.endsWith('.tamma.dev'));
+    if (parsed.protocol !== 'https:') return null;
+    if (parsed.hostname !== 'tamma.dev' && !parsed.hostname.endsWith('.tamma.dev')) return null;
+
+    // Reconstruct from validated components — this is a new string, not the
+    // user-provided value, so CodeQL will not flag it as tainted.
+    return `https://${parsed.hostname}${parsed.pathname}${parsed.search}${parsed.hash}`;
   } catch {
-    return false;
+    return null;
   }
 }

@@ -143,13 +143,13 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
 
             // Step 6: Update session as completed
             await _repository.UpdateStateAsync(sessionId, MentorshipState.COMPLETED);
-            await _repository.UpdateStatusAsync(sessionId, Core.Entities.SessionStatus.Completed);
+            await _repository.UpdateStatusAsync(sessionId, Tamma.Core.Entities.SessionStatus.Completed);
 
             // Step 7: Log completion event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SessionCompleted,
+                EventType = Tamma.Core.Entities.EventTypes.SessionCompleted,
                 StateFrom = MentorshipState.MERGE_AND_COMPLETE,
                 StateTo = MentorshipState.COMPLETED
             });
@@ -190,9 +190,9 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
     }
 
     private async Task<SessionReport> GenerateSessionReport(
-        Core.Entities.MentorshipSession session,
-        Core.Entities.Story story,
-        Core.Entities.JuniorDeveloper junior)
+        Tamma.Core.Entities.MentorshipSession session,
+        Tamma.Core.Entities.Story story,
+        Tamma.Core.Entities.JuniorDeveloper junior)
     {
         // Get all events for the session
         var events = await _repository!.GetEventsBySessionIdAsync(session.Id);
@@ -210,8 +210,8 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
             .GroupBy(e => $"{e.StateFrom}->{e.StateTo}")
             .ToDictionary(g => g.Key, g => g.Count());
 
-        var blockerCount = events.Count(e => e.EventType == Core.Entities.EventTypes.BlockerDiagnosed);
-        var guidanceCount = events.Count(e => e.EventType == Core.Entities.EventTypes.GuidanceProvided);
+        var blockerCount = events.Count(e => e.EventType == Tamma.Core.Entities.EventTypes.BlockerDiagnosed);
+        var guidanceCount = events.Count(e => e.EventType == Tamma.Core.Entities.EventTypes.GuidanceProvided);
 
         // Identify strengths and areas for improvement
         var strengths = new List<string>();
@@ -227,7 +227,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         else if (sessionDuration.TotalHours > story.EstimatedHours * 1.5)
             improvements.Add("Time management could be improved");
 
-        var qualityEvents = events.Where(e => e.EventType == Core.Entities.EventTypes.QualityGateRun).ToList();
+        var qualityEvents = events.Where(e => e.EventType == Tamma.Core.Entities.EventTypes.QualityGateRun).ToList();
         if (qualityEvents.Count <= 2)
             strengths.Add("Good code quality - few iterations needed");
         else if (qualityEvents.Count > 4)
@@ -277,8 +277,8 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
     }
 
     private async Task<SkillUpdateResult> CalculateSkillUpdate(
-        Core.Entities.MentorshipSession session,
-        Core.Entities.JuniorDeveloper junior,
+        Tamma.Core.Entities.MentorshipSession session,
+        Tamma.Core.Entities.JuniorDeveloper junior,
         SessionReport report)
     {
         // Get skill recommendation from analytics
@@ -322,7 +322,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
 
     private async Task RecordCompletionAnalytics(
         Guid sessionId,
-        Core.Entities.MentorshipSession session,
+        Tamma.Core.Entities.MentorshipSession session,
         SessionReport report)
     {
         await _analyticsService!.RecordMetricAsync(sessionId, "session_completed", 1);
@@ -340,7 +340,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
 
     private async Task NotifyCompletion(
         string slackId,
-        Core.Entities.Story story,
+        Tamma.Core.Entities.Story story,
         SessionReport report,
         SkillUpdateResult skillUpdate)
     {

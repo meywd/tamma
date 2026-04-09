@@ -109,7 +109,6 @@ CLI / Web / Mobile / GitHub / GitLab / Gitea
 |  - CodeReviewWorkflow, ReviewFixWorkflow                  |
 |  - BranchCreationWorkflow, PullRequestWorkflow            |
 |  - MergeWorkflow, MergeApprovalWorkflow                  |
-|  - IssueSelectionWorkflow                                 |
 |  - AssessmentWorkflow, BlockerDiagnosisWorkflow           |
 |  - DebuggingWorkflow                                      |
 +----------------------------------------------------------+

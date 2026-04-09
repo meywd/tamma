@@ -17,7 +17,7 @@ so that I can access my Tamma dashboard with a secure session.
 5. **GitHub OAuth login** endpoint `GET /api/v1/auth/github` initiates OAuth flow, `GET /api/v1/auth/github/callback` completes it
 6. **GitHub OAuth** creates a new user if none exists (with `emailVerified: true`, `authMethod: 'github'`), or links to existing email-matched user
 7. **Account linking**: If a GitHub OAuth user's email matches an existing email-registered user, the accounts are linked (`authMethod: 'both'`)
-8. **JWT access token** contains claims: `{ id, email, name, orgId, role, authMethod }`; expires in 15 minutes
+8. **JWT access token** contains claims: `{ id, email, name, tenantId, role, authMethod }`; expires in 15 minutes
 9. **Refresh token** is an opaque token stored in DB (not a JWT); expires in 7 days; single-use (rotation on refresh)
 10. **Token refresh** endpoint `POST /api/v1/auth/refresh` accepts `{ refreshToken }`, returns new access+refresh token pair, invalidates old refresh token
 11. **Logout** endpoint `POST /api/v1/auth/logout` clears the session cookie and invalidates the refresh token
@@ -128,8 +128,8 @@ interface UserJwtPayload {
   id: string;          // User UUID
   email: string;       // User email
   name: string;        // Display name
-  orgId: string | null; // Organization ID (null if not yet in an org)
-  role: 'member' | 'admin' | 'owner'; // Role within org
+  tenantId: string | null; // Active tenant ID (null if not yet in a tenant). Maps to tenants.id from Epic 17.
+  role: 'member' | 'admin' | 'owner'; // Role within tenant
   authMethod: 'email' | 'github' | 'both';
   iat: number;         // Issued at
   exp: number;         // Expiry (15 min)
@@ -146,6 +146,34 @@ The system will have two separate GitHub OAuth flows:
 | End-user | `/api/v1/auth/github` | `tamma_session` on `.tamma.dev` | New end-user registration/login |
 
 Both use the same GitHub OAuth App but different callback URLs and different post-auth behavior. The admin flow redirects to `app.tamma.dev`, the end-user flow redirects to `dash.tamma.dev`.
+
+### Unified JWT Payload Contract
+
+Both OAuth flows (admin and end-user) and the email+password login **must produce the same JWT structure**. This ensures all downstream services (API middleware, RBAC checks, Elsa workflow context) can rely on a single token format regardless of how the user authenticated.
+
+```typescript
+interface UnifiedJwtPayload {
+  sub: string;                   // User UUID (primary identifier)
+  tenantId: string | null;       // Active tenant/org ID (null for platform admins without an active tenant)
+  role: 'member' | 'admin' | 'owner'; // User's role within the active tenant
+  platformRole: 'user' | 'platform_admin'; // Global platform-level role
+  email: string;                 // User email
+  name: string;                  // Display name
+  authMethod: 'email' | 'github' | 'both'; // How the user authenticated
+  iat: number;                   // Issued at (epoch seconds)
+  exp: number;                   // Expiry (epoch seconds, 15 min from iat)
+}
+```
+
+**Key rules:**
+
+- `sub` is always the user's UUID (not GitHub ID, not email). All downstream lookups use `sub`.
+- `tenantId` is nullable. A `platform_admin` may not have an active tenant (e.g., accessing platform-wide admin pages). For tenant-scoped operations, `tenantId` must be non-null.
+- `role` reflects the user's role within the active `tenantId`. When `tenantId` is null, `role` defaults to `'member'` (ignored by RBAC since tenant-scoped checks require a tenant).
+- `platformRole` distinguishes platform-wide administrators from regular users. A `platform_admin` can access any tenant's data. Regular `user` can only access tenants they are members of.
+- Both the admin OAuth flow (`/api/auth/github`) and the end-user OAuth flow (`/api/v1/auth/github`) set these same claims after resolving the user's memberships.
+- The email+password login (`POST /api/v1/auth/login`) also produces this exact structure.
+- The `UserJwtPayload` interface (defined above in this story) should be updated to match `UnifiedJwtPayload`. The `id` field becomes `sub` for JWT standard compliance, and `orgId` becomes `tenantId` for consistency with Epic 17 naming.
 
 ### Security Considerations
 
@@ -166,6 +194,7 @@ Both use the same GitHub OAuth App but different callback URLs and different pos
 
 - **18-1**: User model with `passwordHash`, `emailVerified`, `authMethod` fields
 - **18-1**: Password hashing service (`hashPassword`, `verifyPassword`)
+- **Epic 17 Story 17-1** (Tenant Model): The `tenants` table must exist. JWT `tenantId` claim maps to `tenants.id`.
 
 ## Estimated Effort
 

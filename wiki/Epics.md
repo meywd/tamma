@@ -1,8 +1,8 @@
 # Epics Index
 
-All 26 epics for the Tamma project, organized by implementation phase.
+All 27 epics for the Tamma project, organized by implementation phase.
 
-_Last audited: 2026-04-01_
+_Last audited: 2026-04-02_
 
 ## Completed Epics (9)
 
@@ -26,7 +26,7 @@ _Last audited: 2026-04-01_
 |------|------|------|---------|------|
 | 1 | Foundation & Core Infrastructure | 10/15 | 15 | [Epic-1-Foundation](Epics/Epic-1-Foundation) |
 | 1.5 | Infrastructure & Deployment | 9/10 | 10 | [Epic-1.5-Infrastructure](Epics/Epic-1.5-Infrastructure) |
-| 2 | Autonomous Development Loop | 13/16 | 16 | [Epic-2-Autonomous-Loop](Epics/Epic-2-Autonomous-Loop) |
+| 2 | Autonomous Development Loop | 13/20 | 20 | [Epic-2-Autonomous-Loop](Epics/Epic-2-Autonomous-Loop) |
 | 3 | Quality Gates & Intelligence | 8/12 | 12 | [Epic-3-Quality-Gates](Epics/Epic-3-Quality-Gates) |
 | 4 | Event Sourcing & Audit Trail | 6/8 | 8 | [Epic-4-Event-Sourcing](Epics/Epic-4-Event-Sourcing) |
 | 6 | Context & Knowledge Management | 9/10 | 10 | [Epic-6-Context-Knowledge](Epics/Epic-6-Context-Knowledge) |
@@ -45,12 +45,13 @@ _Last audited: 2026-04-01_
 
 | Epic | Name | Stories | Status | Page |
 |------|------|---------|--------|------|
-| 10 | Engine Core -- Workflow-Driven Architecture | 8 | Drafted | [Epic-10-Engine-Core](Epics/Epic-10-Engine-Core) |
+| 10 | Engine Core -- Workflow-Driven Architecture | 9 | Drafted (10-9 in progress) | [Epic-10-Engine-Core](Epics/Epic-10-Engine-Core) |
 | 17 | Multi-Tenancy Foundation | 5 | Drafted | [Epic-17-Multi-Tenancy](Epics/Epic-17-Multi-Tenancy) |
 | 20 | Billing & Payments | 5 | Drafted | [Epic-20-Billing](Epics/Epic-20-Billing) |
 | 22 | CLI Mode Preservation | 5 | Drafted | [Epic-22-CLI-Standalone](Epics/Epic-22-CLI-Standalone) |
 | 23 | System Monitoring & Observability Dashboard | 12 | Drafted (26 task plans) | [Epic-23-System-Monitoring](Epics/Epic-23-System-Monitoring) |
 | 24 | Realtime Voice Conversation | 7 | Drafted (24 task plans) | [Epic-24-Voice-Conversation](Epics/Epic-24-Voice-Conversation) |
+| 26 | Project Management & Triage | 4 | Drafted | [Epic-26-Project-Management](Epics/Epic-26-Project-Management) |
 
 ## Related Pages
 

@@ -4,7 +4,7 @@ sidebar:
   order: 0
 ---
 
-This page provides an index of all user stories across all 25 epics. Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 27 epics. Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -64,7 +64,7 @@ Each story includes:
 
 ---
 
-## Epic 2: Autonomous Development Loop (Near Complete -- 13/16 Done)
+## Epic 2: Autonomous Development Loop (Near Complete -- 13/20 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -84,80 +84,84 @@ Each story includes:
 | 2-14 | Issue Decomposition Engine | Ready for Dev |
 | 2-15 | Task Dependency Mapping | Ready for Dev |
 | 2-16 | Incremental Task Sequencing | Ready for Dev |
+| 2-17 | Context Gathering Redesign | Drafted |
+| 2-18 | Plan Generation Redesign | Drafted |
+| 2-19 | Plan Review Redesign | Drafted |
+| 2-20 | Priority-Based Work Item Selection | Drafted |
 
 [Detailed Breakdown](/epics/2-autonomous-loop/) | [Story Files](/stories/epic-2/)
 
 ---
 
-## Epic 3: Quality Gates & Intelligence (Ready for Dev)
+## Epic 3: Quality Gates & Intelligence (Near Complete -- 8/12 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 3-1 | Build Automation Gate Implementation | Ready for Dev |
-| 3-2 | Test Execution Gate Implementation | Ready for Dev |
-| 3-3 | Escalation Workflow Implementation | Ready for Dev |
-| 3-4 | Research Workflow Implementation | Ready for Dev |
-| 3-5 | Clarifying Questions Workflow Implementation | Ready for Dev |
-| 3-6 | Ambiguity Scoring Implementation | Ready for Dev |
-| 3-7 | Design Proposal Workflow Implementation | Ready for Dev |
-| 3-8 | Static Analysis Gate Implementation | Ready for Dev |
-| 3-9 | Security Scanning Gate Implementation | Ready for Dev |
-| 3-10 | Agent Performance Monitoring | Ready for Dev |
-| 3-11 | Cost-Aware AI Usage | Ready for Dev |
-| 3-12 | Task Complexity Assessment | Ready for Dev |
+| 3-1 | Build Automation Gate Implementation | Done |
+| 3-2 | Test Execution Gate Implementation | Done |
+| 3-3 | Escalation Workflow Implementation | Done |
+| 3-4 | Research Workflow Implementation | Drafted |
+| 3-5 | Clarifying Questions Workflow Implementation | Drafted |
+| 3-6 | Ambiguity Scoring Implementation | Drafted |
+| 3-7 | Design Proposal Workflow Implementation | Drafted |
+| 3-8 | Static Analysis Gate Implementation | Done |
+| 3-9 | Security Scanning Gate Implementation | Done |
+| 3-10 | Agent Performance Monitoring | Done |
+| 3-11 | Cost-Aware AI Usage | Done |
+| 3-12 | Task Complexity Assessment | Done |
 
 [Detailed Breakdown](/epics/3-quality-gates/) | [Story Files](/stories/epic-3/)
 
 ---
 
-## Epic 4: Event Sourcing & Audit Trail (Ready for Dev)
+## Epic 4: Event Sourcing & Audit Trail (Near Complete -- 6/8 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 4-1 | Event Schema Design | Ready for Dev |
-| 4-2 | Event Store Backend Selection | Ready for Dev |
-| 4-3 | Event Capture - Issue Selection & Analysis | Ready for Dev |
-| 4-4 | Event Capture - AI Provider Interactions | Ready for Dev |
-| 4-5 | Event Capture - Code Changes & Git Operations | Ready for Dev |
-| 4-6 | Event Capture - Approvals & Escalations | Ready for Dev |
-| 4-7 | Event Query API for Time-Travel | Ready for Dev |
-| 4-8 | Black-Box Replay for Debugging | Ready for Dev |
+| 4-1 | Event Schema Design | Done |
+| 4-2 | Event Store Backend Selection | In Progress |
+| 4-3 | Event Capture - Issue Selection & Analysis | Done |
+| 4-4 | Event Capture - AI Provider Interactions | Done |
+| 4-5 | Event Capture - Code Changes & Git Operations | Done |
+| 4-6 | Event Capture - Approvals & Escalations | Done |
+| 4-7 | Event Query API for Time-Travel | Done |
+| 4-8 | Black-Box Replay for Debugging | Drafted |
 
 [Detailed Breakdown](/epics/4-event-sourcing/) | [Story Files](/stories/epic-4/)
 
 ---
 
-## Epic 5: Observability Dashboard & Documentation (Partially Implemented)
+## Epic 5: Observability Dashboard & Documentation (Partially Implemented -- 4/14 Done)
 
-Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base pages. Not all stories are fully implemented.
+Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base pages. Logging, health dashboard, integration tests, and alpha release prep are done.
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 5-1 | Structured Logging Implementation | Ready for Dev |
-| 5-2 | Metrics Collection Infrastructure | Ready for Dev |
-| 5-3 | Real-Time Dashboard - System Health | Ready for Dev |
-| 5-4 | Real-Time Dashboard - Development Velocity | Ready for Dev |
-| 5-5 | Event Trail Exploration UI | Ready for Dev |
-| 5-6 | Alert System for Critical Issues | Ready for Dev |
-| 5-7 | Feedback Collection System | Ready for Dev |
-| 5-8 | Integration Testing Suite | Drafted |
+| 5-1 | Structured Logging Implementation | Done |
+| 5-2 | Metrics Collection Infrastructure | Drafted |
+| 5-3 | Real-Time Dashboard - System Health | Done |
+| 5-4 | Real-Time Dashboard - Development Velocity | Drafted |
+| 5-5 | Event Trail Exploration UI | In Progress |
+| 5-6 | Alert System for Critical Issues | In Progress |
+| 5-7 | Feedback Collection System | In Progress |
+| 5-8 | Integration Testing Suite | Done |
 | 5-9a | Installation & Setup Documentation | Drafted |
 | 5-9b | Usage & Configuration Documentation | Drafted |
 | 5-9c | API Reference Documentation | Backlog |
 | 5-9d | Full Documentation Website | Backlog |
 | 5-9e | Video Walkthrough | Backlog |
-| 5-10 | Alpha Release Preparation | Drafted |
+| 5-10 | Alpha Release Preparation | Done |
 
 [Detailed Breakdown](/epics/5-observability/) | [Story Files](/stories/epic-5/)
 
 ---
 
-## Epic 6: Context & Knowledge Management (Completed)
+## Epic 6: Context & Knowledge Management (Near Complete -- 10/11 Done)
 
 | Story | Title | Package | Status |
 |-------|-------|---------|--------|
 | 6-1 | Codebase Indexer Implementation | intelligence | Done |
-| 6-2 | Vector Database Integration | intelligence | Done |
+| 6-2 | Vector Database Integration | intelligence | In Progress |
 | 6-3 | RAG Pipeline Implementation | intelligence | Done |
 | 6-4 | MCP Client Integration | mcp-client | Done |
 | 6-5 | Context Aggregator Service | intelligence | Done |
@@ -166,12 +170,13 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 6-8 | Agent Permissions System | gates | Done |
 | 6-9 | Agent Knowledge Base | intelligence | Done |
 | 6-10 | Scrum Master Task Loop | scrum-master | Done |
+| 6-11 | Context API Wiring | api | Done |
 
 [Detailed Breakdown](/epics/6-context-knowledge/) | [Story Files](/stories/epic-6/)
 
 ---
 
-## Epic 7: Autonomous Mentorship Workflow (Completed)
+## Epic 7: Autonomous Mentorship Workflow (Near Complete)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -192,25 +197,25 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 7-1E | Assessment Sub-Workflow | Done |
 | 7-1F | Context Gathering Sub-Workflow | Done |
 | 7-1G | Blocker Diagnosis Sub-Workflow | Done |
-| 7-1H | TDD Sub-Workflow | Done |
+| 7-1H | TDD Sub-Workflow | In Progress |
 | 7-1I | Debugging Sub-Workflow | Done |
 
 [Detailed Breakdown](/epics/7-mentorship/) | [Story Files](/stories/epic-7/)
 
 ---
 
-## Epic 8: Distribution & Installation (Drafted)
+## Epic 8: Distribution & Installation (Completed)
 
 | Story | Title | Tier | Status |
 |-------|-------|------|--------|
-| 8-1 | esbuild Bundle & Package Structure | Tier 1 (npm) | Planned |
-| 8-2 | npm Publish CI/CD Pipeline | Tier 1 (npm) | Planned |
-| 8-3 | Standalone Binary Compilation | Tier 2 (binary) | Planned |
-| 8-4 | Install Scripts & GitHub Releases | Tier 2 (binary) | Planned |
-| 8-5 | Auto-Update & Package Manager Distribution | Tier 2 (binary) | Planned |
-| 8-6 | TypeScript & Dashboard Dockerfiles | Tier 3 (Docker) | Planned |
-| 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | Planned |
-| 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | Planned |
+| 8-1 | esbuild Bundle & Package Structure | Tier 1 (npm) | Done |
+| 8-2 | npm Publish CI/CD Pipeline | Tier 1 (npm) | Done |
+| 8-3 | Standalone Binary Compilation | Tier 2 (binary) | Done |
+| 8-4 | Install Scripts & GitHub Releases | Tier 2 (binary) | Done |
+| 8-5 | Auto-Update & Package Manager Distribution | Tier 2 (binary) | Done |
+| 8-6 | TypeScript & Dashboard Dockerfiles | Tier 3 (Docker) | Done |
+| 8-7 | Docker Compose Full Stack | Tier 3 (Docker) | Done |
+| 8-8 | Docker CI/CD & CLI Integration | Tier 3 (Docker) | Done |
 
 [Detailed Breakdown](/epics/8-distribution/) | [Story Files](/stories/epic-8/)
 
@@ -236,18 +241,21 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 10: Engine Core -- Workflow-Driven Architecture (Completed)
+## Epic 10: Engine Core -- Workflow-Driven Architecture (Drafted, 10-9 In Progress)
+
+Engine exists as an imperative state machine (`packages/orchestrator/src/engine.ts`) but these stories define the target agentic architecture. Story 10-9 (TammaActivity base class) is actively being implemented.
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 10-1 | Engine Static Workflow & Brain | Done |
-| 10-2 | Comprehensive Event Catalog & Typed Schema | Done |
-| 10-3 | Event Store -- PostgreSQL/Emmett Implementation | Done |
-| 10-4 | Smart Queue with State-Based Deduplication | Done |
-| 10-5 | Workflow Provider Abstraction & ELSA Integration | Done |
-| 10-6 | Input Channel Unification | Done |
-| 10-7 | Event Store Security & Sanitization Pipeline | Done |
-| 10-8 | State Reconstruction from Event Stream | Done |
+| 10-1 | Engine Static Workflow & Brain | Drafted |
+| 10-2 | Comprehensive Event Catalog & Typed Schema | Drafted |
+| 10-3 | Event Store -- PostgreSQL/Emmett Implementation | Drafted |
+| 10-4 | Smart Queue with State-Based Deduplication | Drafted |
+| 10-5 | Workflow Provider Abstraction & ELSA Integration | Drafted |
+| 10-6 | Input Channel Unification | Drafted |
+| 10-7 | Event Store Security & Sanitization Pipeline | Drafted |
+| 10-8 | State Reconstruction from Event Stream | Drafted |
+| 10-9 | TammaActivity Base Class and Workflow Event Emission | In Progress |
 
 [Detailed Breakdown](/epics/10-engine-core/) | [Story Files](/stories/epic-10/)
 
@@ -275,6 +283,7 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 12-2 | Agentic Tool Loop in CallLlm | Done |
 | 12-3 | Context Compaction | Done |
 | 12-4 | Streaming & Parallel Tools | Done |
+| 12-5 | Prompt Registry API | Done |
 
 [Detailed Breakdown](/epics/12-tool-loop/) | [Combined](/epics/11-14-elsa/) | [Story Files](/stories/epic-12/)
 
@@ -345,29 +354,29 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 18: End-User Auth & Registration (Drafted)
+## Epic 18: End-User Auth & Registration (Partially Implemented)
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 18-1 | User Registration & Email Verification | Planned |
-| 18-2 | User Login & Session Management | Planned |
-| 18-3 | Organization/Tenant Creation | Planned |
-| 18-4 | GitHub App Installation Onboarding | Planned |
-| 18-5 | User-Facing Dashboard Shell | Planned |
+| 18-1 | User Registration & Email Verification | Drafted |
+| 18-2 | User Login & Session Management | In Progress |
+| 18-3 | Organization/Tenant Creation | Drafted |
+| 18-4 | GitHub App Installation Onboarding | Done |
+| 18-5 | User-Facing Dashboard Shell | In Progress |
 
 [Detailed Breakdown](/epics/18-user-auth/) | [Story Files](/stories/epic-18/)
 
 ---
 
-## Epic 19: GitHub App Agent Dispatch (Drafted)
+## Epic 19: GitHub App Agent Dispatch (Partially Implemented)
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 19-1 | Tamma Agent GitHub Actions Workflow Template | Planned |
-| 19-2 | Workflow Dispatch from ELSA | Planned |
-| 19-3 | Agent Execution Monitoring | Planned |
-| 19-4 | Result Collection | Planned |
-| 19-5 | CLI / SaaS Mode Abstraction (IAgentExecutor) | Planned |
+| 19-1 | Tamma Agent GitHub Actions Workflow Template | Done |
+| 19-2 | Workflow Dispatch from ELSA | Drafted |
+| 19-3 | Agent Execution Monitoring | Drafted |
+| 19-4 | Result Collection | In Progress |
+| 19-5 | CLI / SaaS Mode Abstraction (IAgentExecutor) | Drafted |
 
 [Detailed Breakdown](/epics/19-agent-dispatch/) | [Story Files](/stories/epic-19/)
 
@@ -387,17 +396,17 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 
 ---
 
-## Epic 21: Marketing Site & User Dashboard (Drafted)
+## Epic 21: Marketing Site & User Dashboard (Partially Implemented)
 
-Marketing site exists at `apps/marketing-site/` (Cloudflare Workers). User dashboard not yet implemented.
+Marketing site exists at `apps/marketing-site/` with Midnight Ocean redesign. Wiki site at `apps/wiki-site/`. User dashboard not yet implemented.
 
 | Story | Title | Status |
 |-------|-------|--------|
 | 21-1 | Marketing Landing Page | Done |
-| 21-2 | Pricing Page + Stripe Checkout | Planned |
-| 21-3 | Documentation Site | Planned |
-| 21-4 | User Dashboard -- Repos & Workflow Runs | Planned |
-| 21-5 | User Dashboard -- Settings & Billing | Planned |
+| 21-2 | Pricing Page + Stripe Checkout | Drafted |
+| 21-3 | Documentation Site | In Progress |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | Drafted |
+| 21-5 | User Dashboard -- Settings & Billing | Drafted |
 
 [Detailed Breakdown](/epics/21-marketing-dashboard/) | [Story Files](/stories/epic-21/)
 
@@ -458,15 +467,30 @@ Voice as a first-class input/output mode for the Tamma orchestrator. Research co
 
 ---
 
-## Epic 25: Documentation & Wiki Site (Drafted)
+## Epic 25: Documentation & Wiki Site (Completed)
 
-Custom documentation site on Cloudflare Workers using Astro Starlight. Renders ~475 pages from `wiki/` and `docs/stories/` with full-text search, collapsible sidebar, and dark/light mode.
+Custom wiki site deployed as Vite + React + React Router SPA on Cloudflare Workers at wiki.tamma.dev with React Flow interactive diagrams.
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 25-1 | Custom Wiki Site (Astro Starlight on Cloudflare Workers) | Planned |
+| 25-1 | Custom Wiki Site | Done |
 
 [Detailed Breakdown](/epics/25-wiki-site/) | [Story Files](/stories/epic-25/)
+
+---
+
+## Epic 26: Project Management & Triage (Partially Implemented)
+
+Autonomous project management workflows integrating with the ADL Orchestrator's priority-based work item selection.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 26-1 | Issue Triage Workflow | In Progress |
+| 26-2 | Scrum Management Workflow | Drafted |
+| 26-3 | Release Management Workflow | Drafted |
+| 26-4 | Priority Configuration System | Drafted |
+
+[Detailed Breakdown](/epics/26-project-management/) | [Story Files](/stories/epic-26/)
 
 ---
 
@@ -485,18 +509,19 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~221 |
-| Epics completed | 12 |
-| Epics near complete | 1 (Epic 2: 13/16 done) |
-| Epics partially implemented | 3 |
-| Epics planned (stories drafted/ready) | 10 |
+| Total stories across all epics | ~232 |
+| Stories done | 117 |
+| Stories in progress | 22 |
+| Stories drafted | 62 |
+| Epics completed | 9 (8, 9, 11, 12, 13, 14, 15, 16, 25) |
+| Epics near complete | 7 (1, 1.5, 2, 3, 4, 6, 7) |
+| Epics partially implemented | 5 (5, 18, 19, 21, 26) |
+| Epics drafted | 6 (10, 17, 20, 22, 23, 24) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
 | TypeScript packages with code | 14 |
 | C# ELSA activities | 70+ |
-| ELSA code-first workflows | 20+ |
-| Video production plans | 2 (ELI5 + Deep Dive) |
-| Generated scene images (4K) | 79 |
+| ELSA code-first workflows | 30 |
 
 ---
 

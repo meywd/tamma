@@ -21,7 +21,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// Flow:
 ///   testingPipeline -> testsPassed?
 ///     YES -> finish(passed=true, ciRetryCount)
-///     NO  -> ciRetryGuard (< 3)?
+///     NO  -> ciRetryGuard (< max, default 3)?
 ///       NO  -> finish(passed=false, errorMessage, ciRetryCount)
 ///       YES -> incrementCiRetry -> dispatchCiDebugging -> (loop to testingPipeline)
 ///
@@ -54,6 +54,7 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         // This is likely a bug — re-entry should reset the counter.
         // Fix tracked as a separate ticket.
         var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0);
+        var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
 
         // DispatchWorkflow result capture
         var testResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -77,6 +78,8 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 if (skill > 0) skillLevel.Set(ctx, skill);
                 // Always set ciRetryCount — 0 is a valid value meaning "no retries yet"
                 ciRetryCount.Set(ctx, ctx.GetInput<int>("ciRetryCount"));
+                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
+                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)(ctx.GetInput<string>("repository") ?? "");
             })
         };
@@ -118,9 +121,9 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         // ================================================================
         // CI retry guard (< 3 retries)
         // ================================================================
-        var ciRetryGuard = new FlowDecision(ctx => ciRetryCount.Get(ctx) < 3)
-        { Id = "CiRetryGuard", Name = "CI Retries < 3?" };
-        ciRetryGuard.SetDisplayText("CI Retries < 3?");
+        var ciRetryGuard = new FlowDecision(ctx => ciRetryCount.Get(ctx) < maxRetries.Get(ctx))
+        { Id = "CiRetryGuard", Name = "CI Retries < Max?" };
+        ciRetryGuard.SetDisplayText("CI Retries < Max?");
 
         // ================================================================
         // Increment CI retry counter
@@ -183,7 +186,7 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
             Activities =
             {
                 WithLabel(new SetOutput { Id = "SetCiRetryFailed", Name = "Set Failed", OutputName = new("passed"), OutputValue = new(_ => (object)false) }, "Set Failed"),
-                WithLabel(new SetOutput { Id = "SetCiRetryErrorMsg", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(_ => (object)"CI debug retry limit reached (3 attempts)") }, "Set Error Message"),
+                WithLabel(new SetOutput { Id = "SetCiRetryErrorMsg", Name = "Set Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)$"CI debug retry limit reached ({maxRetries.Get(ctx)} attempts)") }, "Set Error Message"),
                 WithLabel(new SetOutput { Id = "SetCiRetryCountFail", Name = "Set CI Retry Count", OutputName = new("ciRetryCount"), OutputValue = new(ctx => (object)ciRetryCount.Get(ctx)) }, "Set CI Retry Count")
             }
         };

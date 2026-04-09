@@ -3,6 +3,7 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Activities.Flowchart.Models;
+using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
 using Tamma.Activities.Mentorship;
@@ -59,6 +60,8 @@ public class MentorshipWorkflow : WorkflowBase
         var qualityRetryCount = builder.WithVariable<int>("QualityRetryCount", 0);
         var reviewIteration = builder.WithVariable<int>("ReviewIteration", 0);
         var blockerEscalationLevel = builder.WithVariable<int>("BlockerEscalationLevel", 0);
+        var maxBasicRetries = builder.WithVariable<int>("MaxBasicRetries", 2);
+        var maxDebugRetries = builder.WithVariable<int>("MaxDebugRetries", 3);
 
         // DispatchWorkflow result capture for AssessmentWorkflow
         var assessmentDispatchResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -66,6 +69,23 @@ public class MentorshipWorkflow : WorkflowBase
         // =====================================================================
         // 1. INITIALIZATION ACTIVITIES
         // =====================================================================
+
+        // Read configurable retry limits from workflow inputs
+        var initRetryLimits = new SetVariable
+        {
+            Id = "InitRetryLimits",
+            Name = "Init Retry Limits",
+            Variable = maxBasicRetries,
+            Value = new Input<object?>(ctx =>
+            {
+                var inputBasic = ctx.GetInput<int?>("maxBasicRetries");
+                if (inputBasic.HasValue) maxBasicRetries.Set(ctx, inputBasic.Value);
+                var inputDebug = ctx.GetInput<int?>("maxDebugRetries");
+                if (inputDebug.HasValue) maxDebugRetries.Set(ctx, inputDebug.Value);
+                return (object)maxBasicRetries.Get(ctx);
+            })
+        };
+        initRetryLimits.SetDisplayText("Init Retry Limits");
 
         var initStoryProcessing = new InitStoryProcessingActivity
         {
@@ -506,32 +526,32 @@ public class MentorshipWorkflow : WorkflowBase
         // 11. GUARD CONDITION ACTIVITIES (FlowDecision)
         // =====================================================================
 
-        // Guard: Max assessment retries not exceeded (max 3)
+        // Guard: Max assessment retries not exceeded (default 3, configurable)
         var guardAssessmentRetries = new FlowDecision(
-            context => assessmentAttempt.Get(context) < 3)
+            context => assessmentAttempt.Get(context) < maxDebugRetries.Get(context))
         {
             Id = "GuardAssessmentRetries",
-            Name = "Assessment Retries < 3?"
+            Name = "Assessment Retries < Max?"
         };
-        guardAssessmentRetries.SetDisplayText("Assessment Retries < 3?");
+        guardAssessmentRetries.SetDisplayText("Assessment Retries < Max?");
 
-        // Guard: Max plan iterations not exceeded (max 2)
+        // Guard: Max plan iterations not exceeded (default 2, configurable)
         var guardPlanIterations = new FlowDecision(
-            context => planIteration.Get(context) < 2)
+            context => planIteration.Get(context) < maxBasicRetries.Get(context))
         {
             Id = "GuardPlanIterations",
-            Name = "Plan Iterations < 2?"
+            Name = "Plan Iterations < Max?"
         };
-        guardPlanIterations.SetDisplayText("Plan Iterations < 2?");
+        guardPlanIterations.SetDisplayText("Plan Iterations < Max?");
 
-        // Guard: Max quality retries not exceeded (max 3)
+        // Guard: Max quality retries not exceeded (default 3, configurable)
         var guardQualityRetries = new FlowDecision(
-            context => qualityRetryCount.Get(context) < 3)
+            context => qualityRetryCount.Get(context) < maxDebugRetries.Get(context))
         {
             Id = "GuardQualityRetries",
-            Name = "Quality Retries < 3?"
+            Name = "Quality Retries < Max?"
         };
-        guardQualityRetries.SetDisplayText("Quality Retries < 3?");
+        guardQualityRetries.SetDisplayText("Quality Retries < Max?");
 
         // Guard: Max review iterations not exceeded (max 5)
         var guardReviewIterations = new FlowDecision(
@@ -643,7 +663,7 @@ public class MentorshipWorkflow : WorkflowBase
             Name = "Mentorship Flowchart",
 
             // Start activity is the first in the flow
-            Start = initStoryProcessing,
+            Start = initRetryLimits,
 
             // ================================================================
             // ALL ACTIVITIES (28 state activities + guards + sub-workflows +
@@ -651,6 +671,9 @@ public class MentorshipWorkflow : WorkflowBase
             // ================================================================
             Activities =
             {
+                // Retry limit init
+                initRetryLimits,
+
                 // Initialization (2)
                 initStoryProcessing,
                 validateStory,
@@ -735,6 +758,12 @@ public class MentorshipWorkflow : WorkflowBase
             // ================================================================
             Connections =
             {
+                // =============================================================
+                // RETRY LIMIT INIT -> INITIALIZATION PATH
+                // =============================================================
+                new(new FlowEndpoint(initRetryLimits),
+                    new FlowEndpoint(initStoryProcessing)),
+
                 // =============================================================
                 // INITIALIZATION PATH
                 // INIT -> ContextGathering -> VALIDATE

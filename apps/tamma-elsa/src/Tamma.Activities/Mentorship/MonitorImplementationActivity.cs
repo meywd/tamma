@@ -100,10 +100,10 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
             var analysis = AnalyzeProgress(progressData);
 
             // Log progress event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.ProgressUpdate,
+                EventType = Tamma.Core.Entities.EventTypes.ProgressUpdate,
                 StateFrom = MentorshipState.START_IMPLEMENTATION,
                 StateTo = MentorshipState.MONITOR_PROGRESS
             });

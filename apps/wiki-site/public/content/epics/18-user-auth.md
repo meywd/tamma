@@ -4,7 +4,7 @@ sidebar:
   order: 18
 ---
 
-**Status:** Drafted
+**Status:** Partially Implemented (1 done, 2 in progress, 2 drafted)
 **Stories:** 5 (18-1 through 18-5)
 **Estimated Effort:** ~23 days (single developer)
 
@@ -24,11 +24,11 @@ Epic 18 adds end-user registration, authentication, organization management, Git
 
 | Story | Title | Effort | Status |
 |-------|-------|--------|--------|
-| 18-1 | User Registration & Email Verification | L (5 days) | Planned |
-| 18-2 | User Login & Session Management | L (5 days) | Planned |
-| 18-3 | Organization/Tenant Creation | L (5 days) | Planned |
-| 18-4 | GitHub App Installation Onboarding | M (3 days) | Planned |
-| 18-5 | User-Facing Dashboard Shell | L (5 days) | Planned |
+| 18-1 | User Registration & Email Verification | L (5 days) | Drafted |
+| 18-2 | User Login & Session Management | L (5 days) | In Progress |
+| 18-3 | Organization/Tenant Creation | L (5 days) | Drafted |
+| 18-4 | GitHub App Installation Onboarding | M (3 days) | Done |
+| 18-5 | User-Facing Dashboard Shell | L (5 days) | In Progress |
 
 ## Key Technical Details
 

@@ -439,28 +439,23 @@ public class WorkflowStructureTests
     }
 
     [Test]
-    public void SingleIssueCycleWorkflow_ActivityCountIsReduced()
+    public void SingleIssueCycleWorkflow_ActivityCountIsReasonable()
     {
         // Arrange & Act
         var workflow = new SingleIssueCycleWorkflow();
         var builder = BuildWorkflow(workflow);
         var flowchart = GetFlowchart(builder);
 
-        // Assert — after decomposition, top-level activities should be < 40
-        // The inline TDD/CI retry loops were extracted to sub-workflows,
-        // reducing from 39+ activities to 37 (still includes 8 exit reason nodes
-        // + shared finish sequence + 10 dispatch steps with extracts/decisions).
-        flowchart.Activities.Count.Should().BeLessThan(40,
-            "after Epic 13 decomposition, SingleIssueCycleWorkflow should have fewer " +
-            "than 40 top-level activities (TDD/CI retry loops extracted to sub-workflows)");
-
-        // Also verify it's in the expected range (37 currently)
-        flowchart.Activities.Count.Should().BeInRange(30, 39,
-            "activity count should be between 30 and 39 after decomposition");
+        // Assert — redesigned workflow has ~50-70 activities
+        // (15 main steps + notifications + extract steps + review routing)
+        flowchart.Activities.Count.Should().BeGreaterThan(20,
+            "SingleIssueCycleWorkflow should have at least 20 activities");
+        flowchart.Activities.Count.Should().BeLessThan(80,
+            "SingleIssueCycleWorkflow should not exceed 80 activities");
     }
 
     [Test]
-    public void SingleIssueCycleWorkflow_DispatchesToTddWithDebugRetryAndCiWithDebugRetry()
+    public void SingleIssueCycleWorkflow_DispatchesKeySubWorkflows()
     {
         // Arrange & Act
         var workflow = new SingleIssueCycleWorkflow();
@@ -471,11 +466,11 @@ public class WorkflowStructureTests
         var dispatches = flowchart.Activities.OfType<DispatchWorkflow>().ToList();
         var dispatchIds = dispatches.Select(d => d.Id).ToList();
 
-        // Assert — should reference the new sub-workflows
-        dispatchIds.Should().Contain("DispatchTddWithDebugRetry",
-            "should dispatch to tdd-with-debug-retry sub-workflow");
-        dispatchIds.Should().Contain("DispatchCiWithDebugRetry",
-            "should dispatch to ci-with-debug-retry sub-workflow");
+        // Assert — should dispatch to the redesigned sub-workflows
+        dispatchIds.Should().Contain("GatherContext", "should dispatch context-gathering");
+        dispatchIds.Should().Contain("GeneratePlan", "should dispatch plan-generation");
+        dispatchIds.Should().Contain("ReviewPlan", "should dispatch plan-review");
+        dispatchIds.Should().Contain("CreateTasks", "should dispatch task-creation");
     }
 
     [Test]
@@ -494,29 +489,24 @@ public class WorkflowStructureTests
     }
 
     [Test]
-    public void SingleIssueCycleWorkflow_Has8DistinctExitReasons()
+    public void SingleIssueCycleWorkflow_HasReportActivities()
     {
         // Arrange & Act
         var workflow = new SingleIssueCycleWorkflow();
         var builder = BuildWorkflow(workflow);
         var flowchart = GetFlowchart(builder);
 
-        // Get exit reason SetVariable nodes
-        var exitReasonNodeIds = GetExitReasonNodeIds(flowchart);
+        // In the redesigned workflow, exit paths use ReportCycleResultActivity
+        var reports = flowchart.Activities
+            .Where(a => a.Id?.StartsWith("Report") == true)
+            .Select(a => a.Id!)
+            .ToList();
 
-        // Assert — should have 8 distinct exit reasons:
-        // success, noIssues, plan_rejected, review_rejected, error, tddFailed, ciFailed, mergeFailed
-        exitReasonNodeIds.Should().HaveCount(8,
-            "SingleIssueCycleWorkflow should have 8 distinct exit reason nodes");
-
-        exitReasonNodeIds.Should().Contain("SetReasonSuccess");
-        exitReasonNodeIds.Should().Contain("SetReasonNoIssues");
-        exitReasonNodeIds.Should().Contain("SetReasonPlanRejected");
-        exitReasonNodeIds.Should().Contain("SetReasonReviewRejected");
-        exitReasonNodeIds.Should().Contain("SetReasonError");
-        exitReasonNodeIds.Should().Contain("SetReasonTddFailed");
-        exitReasonNodeIds.Should().Contain("SetReasonCiFailed");
-        exitReasonNodeIds.Should().Contain("SetReasonMergeFailed");
+        // Assert — should have report activities for each exit path
+        reports.Should().Contain("ReportSuccess", "should have success report");
+        reports.Should().Contain("ReportError", "should have error report");
+        reports.Count.Should().BeGreaterThanOrEqualTo(3,
+            "should have at least 3 report activities (success, error, needsHuman)");
     }
 
     [Test]
@@ -556,23 +546,25 @@ public class WorkflowStructureTests
         var builder = BuildWorkflow(workflow);
         var flowchart = GetFlowchart(builder);
 
-        // All SetReason* nodes should connect to SharedFinishSequence
-        var exitReasonNodes = flowchart.Activities
-            .OfType<SetVariable>()
-            .Where(sv => sv.Id?.StartsWith("SetReason") == true)
+        // All Report* activities should connect to the Finish node
+        var reportNodes = flowchart.Activities
+            .Where(a => a.Id?.StartsWith("Report") == true)
             .ToList();
 
-        var sharedFinish = flowchart.Activities
-            .FirstOrDefault(a => a.Id == "SharedFinishSequence");
-        sharedFinish.Should().NotBeNull("workflow should have a SharedFinishSequence activity");
+        reportNodes.Should().HaveCountGreaterOrEqualTo(3,
+            "workflow should have at least 3 report activities");
 
-        // Verify each exit reason node has a connection to shared finish
-        foreach (var exitNode in exitReasonNodes)
+        var finishNode = flowchart.Activities
+            .FirstOrDefault(a => a.Id == "Finish");
+        finishNode.Should().NotBeNull("workflow should have a Finish activity");
+
+        // Verify each report node has a connection to Finish
+        foreach (var reportNode in reportNodes)
         {
             var hasConnectionToFinish = flowchart.Connections.Any(c =>
-                c.Source.Activity == exitNode && c.Target.Activity == sharedFinish);
+                c.Source.Activity == reportNode && c.Target.Activity == finishNode);
             hasConnectionToFinish.Should().BeTrue(
-                $"Exit reason node '{exitNode.Id}' should connect to SharedFinishSequence");
+                $"Report node '{reportNode.Id}' should connect to Finish");
         }
     }
 

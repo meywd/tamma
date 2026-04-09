@@ -152,10 +152,10 @@ public class UpdateSkillProfileActivity : CodeActivity
             await _repository.UpdateJuniorAsync(junior);
 
             // Log the skill profile update event
-            await _repository.LogEventAsync(new Core.Entities.MentorshipEvent
+            await _repository.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
             {
                 SessionId = sessionId,
-                EventType = Core.Entities.EventTypes.SkillLevelUpdated,
+                EventType = Tamma.Core.Entities.EventTypes.SkillLevelUpdated,
                 Trigger = "assessment_skill_profile_update"
             });
 

@@ -95,10 +95,10 @@ public class SlackActivity : CodeActivity<SlackOperationResult>
             // Log the event if session is provided
             if (sessionId.HasValue && result.Success)
             {
-                await _repository!.LogEventAsync(new Core.Entities.MentorshipEvent
+                await _repository!.LogEventAsync(new Tamma.Core.Entities.MentorshipEvent
                 {
                     SessionId = sessionId.Value,
-                    EventType = Core.Entities.EventTypes.Info
+                    EventType = Tamma.Core.Entities.EventTypes.Info
                 });
             }
 

@@ -1,8 +1,8 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all 26 epics from foundation through SaaS platform.
+Comprehensive roadmap covering all 27 epics from foundation through SaaS platform.
 
-_Last audited: 2026-04-01_
+_Last audited: 2026-04-02_
 
 ## Epic Overview
 
@@ -10,7 +10,7 @@ _Last audited: 2026-04-01_
 |------|------|---------|------|--------|
 | **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete (2 in progress, 3 ready) |
 | **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (1 in progress) |
-| **Epic 2** | Autonomous Development Loop | 16 | 13 | Near Complete (3 ready for dev) |
+| **Epic 2** | Autonomous Development Loop | 20 | 13 | Near Complete (2-20 drafted, 3 ready for dev, others drafted) |
 | **Epic 3** | Quality Gates & Intelligence | 12 | 8 | Near Complete (4 drafted) |
 | **Epic 4** | Event Sourcing & Audit Trail | 8 | 6 | Near Complete (1 in progress, 1 drafted) |
 | **Epic 5** | Observability Dashboard & Docs | 14 | 4 | Partially Implemented (3 in progress, 7 drafted/backlog) |
@@ -18,7 +18,7 @@ _Last audited: 2026-04-01_
 | **Epic 7** | Autonomous Mentorship Workflow | 9 | 8 | Near Complete (1 in progress) |
 | **Epic 8** | Distribution & Installation | 8 | 8 | Completed |
 | **Epic 9** | Config-Driven Multi-Agent Management | 11 | -- | Completed |
-| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 8 | 0 | Drafted (engine exists but stories define new architecture) |
+| **Epic 10** | Engine Core -- Workflow-Driven Architecture | 9 | 0 | Drafted (Story 10-9 TammaActivity base class in progress) |
 | **Epic 11** | Security Hardening (ELSA) | 5 | -- | Completed |
 | **Epic 12** | Agentic Tool Loop | 4 | -- | Completed |
 | **Epic 13** | Workflow Decomposition | 3 | -- | Completed |
@@ -34,6 +34,7 @@ _Last audited: 2026-04-01_
 | **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans, some in progress) |
 | **Epic 24** | Realtime Voice Conversation | 7 | 1 | Drafted (24 task plans) |
 | **Epic 25** | Documentation & Wiki Site | 1 | 1 | Completed |
+| **Epic 26** | Project Management & Triage | 4 | 0 | Drafted |
 
 ---
 
@@ -146,9 +147,11 @@ _Last audited: 2026-04-01_
 ### Epic 10: Engine Core -- Workflow-Driven Architecture
 
 **Goal:** Refactor the engine from a hardcoded state machine into a workflow-driven orchestration service with ELSA as the workflow provider.
-**Status:** Drafted -- the engine exists as an imperative state machine but these stories define the target agentic architecture (smart queue, event store PostgreSQL/Emmett, state reconstruction, input normalization). None of the 8 stories match current implementation.
+**Status:** Drafted -- the engine exists as an imperative state machine but these stories define the target agentic architecture. Story 10-9 (TammaActivity base class) is in progress.
 
-**Stories:** 10-1 through 10-8 (8 stories)
+**Stories:** 10-1 through 10-9 (9 stories)
+- 10-1 through 10-8: Drafted (smart queue, event store, state reconstruction, input normalization)
+- **Story 10-9: TammaActivity Base Class and Workflow Event Emission** -- In Progress (base classes for automatic event emission on all activities)
 
 [Detailed Breakdown](Epics/Epic-10-Engine-Core)
 
@@ -258,13 +261,15 @@ _Last audited: 2026-04-01_
 ### Epic 2: Autonomous Development Loop
 
 **Goal:** Implement the 14-step autonomous development loop.
-**Status:** Near Complete -- 13 of 16 stories done, retrospective completed.
+**Status:** Near Complete -- 13 of 20 stories done, retrospective completed.
 
-**Stories:** 2-1 through 2-16 (16 stories)
+**Stories:** 2-1 through 2-20 (20 stories)
 - Core loop (2-1 through 2-11): All done -- issue selection, context analysis, plan generation, branch creation, TDD, code generation, refactoring, PR creation, status monitoring, merge, auto-next
 - Intelligent provider selection (2-12): Done
 - Prompt engineering optimization (2-13): Done
-- Remaining: Issue decomposition engine (2-14), task dependency mapping (2-15), incremental task sequencing (2-16) -- ready for dev
+- Issue decomposition engine (2-14), task dependency mapping (2-15), incremental task sequencing (2-16) -- ready for dev
+- Stories 2-17, 2-18, 2-19: Drafted
+- **Story 2-20: Priority-Based Work Item Selection** -- Drafted (replaces single-source issue selection with multi-source priority selector: security alerts, CI failures, issues, stale PRs)
 
 ---
 
@@ -440,6 +445,22 @@ Each implementation story now has task plan breakdowns:
 
 ---
 
+### Epic 26: Project Management & Triage
+
+**Goal:** Automated project management workflows -- issue triage, scrum management, release management, and priority configuration.
+
+**Status:** Drafted -- created as part of the ADL Orchestrator redesign to support the new triage integration.
+
+**Stories:** 26-1 through 26-4 (4 stories)
+- 26-1 Issue Triage Workflow -- LLM-powered classification and labeling of untriaged issues
+- 26-2 Scrum Management Workflow -- Sprint planning, standups, retrospectives
+- 26-3 Release Management Workflow -- Changelog generation, deployment orchestration
+- 26-4 Priority Configuration System -- Configurable priority rules for work item selection
+
+[Detailed Breakdown](Epics/Epic-26-Project-Management)
+
+---
+
 ### Epic 25: Documentation & Wiki Site
 
 **Goal:** Build and deploy a custom documentation/wiki site on Cloudflare Workers, accessible at wiki.tamma.dev.
@@ -470,7 +491,7 @@ Phase 1 (Completed):
 Phase 2 (Near Complete):
   Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10 done]
   Epic 7   (Mentorship Workflow)     [NEAR COMPLETE - 8/9 core done]
-  Epic 10  (Engine Core)             [DRAFTED - stories define new architecture]
+  Epic 10  (Engine Core)             [DRAFTED - 10-9 in progress, rest drafted]
 
 Phase 3 (Completed):
   Epic 11  (Security Hardening)      [COMPLETED]
@@ -481,7 +502,7 @@ Phase 3 (Completed):
   Epic 16  (Unified Auth & Admin)    [COMPLETED]
 
 Phase 4 (Active):
-  Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 13/16 done]
+  Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 13/20 done]
   Epic 3   (Quality Gates)           [NEAR COMPLETE - 8/12 done]
   Epic 4   (Event Sourcing)          [NEAR COMPLETE - 6/8 done]
   Epic 5   (Observability/Docs)      [PARTIAL - 4/14 done, 3 in progress]
@@ -499,6 +520,7 @@ Phase 5 (Planned - SaaS):
 Phase 6 (Planned - Advanced):
   Epic 23  (System Monitoring)       [Drafted - 26 task plans]
   Epic 24  (Voice Conversation)      [Drafted - 24 task plans]
+  Epic 26  (Project Mgmt & Triage)   [Drafted - 4 stories]
 ```
 
 ---

@@ -6,163 +6,141 @@
 
 ## Purpose
 
-The Context Gathering workflow collects contextual data from **6 sources in parallel** using ELSA's Parallel activity (fan-out/fan-in). It assembles gathered data and applies priority-based budget trimming to stay within token limits.
+The Context Gathering workflow performs **sequential role-based codebase scanning** via the LLM Call sub-workflow. Each role scans the codebase from its perspective, accumulating findings that subsequent roles can see. Results are stored in the vector DB and a Product Owner summarizes everything into a **Minimum Viable Context**.
+
+## Design Principles
+
+- **No inline prompts** -- Every LLM call uses `role + action + variables` resolved from the Prompt Registry (Story 12-5)
+- **Sequential accumulation** -- Each role sees all previous findings, building a progressively richer picture
+- **LlmCallWorkflow dispatch** -- Each scan dispatches the `llm-call` sub-workflow (not direct HTTP calls)
+- **Per-role vector DB storage** -- Each role's findings are stored immediately after extraction, so partial results persist even if later scans fail
+- **PO summarization** -- The Product Owner produces a concise summary with links
 
 ## Flow Diagram
 
 ```
-+-----------------------+
-| Initialize Inputs     |
-| (SessionId, StoryId,  |
-|  RepositoryUrl,       |
-|  TargetFiles,         |
-|  MaxContextSize,      |
-|  Purpose)             |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Phase 1: Parallel     |
-| Fetches (independent) |
-|                       |
-| +-------------------+ |
-| | Fetch Story       | |
-| | Metadata          | |
-| +-------------------+ |
-| | Fetch Recent      | |
-| | Commits           | |
-| +-------------------+ |
-| | Fetch Test        | |
-| | Results           | |
-| +-------------------+ |
-| | Fetch Session     | |
-| | History           | |
-| +-------------------+ |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Story Metadata OK?    |
-+--+----------------+---+
-  YES                NO
-   |                  |
-   v                  v
-+-------------------+ +-----------------------+
-| Track Phase 1     | | Fault: No Metadata    |
-| Failures          | | (abort workflow)      |
-+--------+----------+ +-----------------------+
-         |
-         v
-+-----------------------+
-| Phase 2: Parallel     |
-| Fetches (dependent)   |
-|                       |
-| +-------------------+ |
-| | Fetch File        | |
-| | Contents          | |
-| +-------------------+ |
-| | Fetch Similar     | |
-| | Patterns          | |
-| +-------------------+ |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Track Phase 2         |
-| Failures              |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Assemble Context      |
-| (AssembleContext       |
-|  Activity)            |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Apply Budget          |
-| (ApplyBudget          |
-|  Activity)            |
-+-----------+-----------+
-            |
-            v
-+-----------------------+
-| Set Outputs           |
-| (contextJson,         |
-|  success,             |
-|  failedSources)       |
-+-----------------------+
++---------------------+
+| Initialize          |
++---------+-----------+
+          |
+          v
++---------------------+     +-------------------+
+| Dev Scan            | --> | Store Dev (VecDB) |
++---------+-----------+     +--------+----------+
+                                     |
+          +-------------------------+
+          v
++---------------------+     +-------------------+
+| QA Scan             | --> | Store QA (VecDB)  |
+| sees: dev findings  |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
+          v
++---------------------+     +-------------------+
+| Security Scan       | --> | Store Sec (VecDB) |
+| sees: dev, qa       |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
+          v
++---------------------+     +----------------------+
+| DevOps Scan         | --> | Store DevOps (VecDB) |
+| sees: dev, qa, sec  |     +--------+-------------+
++---------+-----------+              |
+          +-------------------------+
+          v
++---------------------+     +-------------------+
+| Architect Scan      | --> | Store Arch (VecDB)|
+| sees: all previous  |     +--------+----------+
++---------+-----------+              |
+          +-------------------------+
+          v
++---------------------+
+| PO Review           |
+| (summarize all)     |
++---------+-----------+
+          |
+          v
++---------------------+
+| Set Outputs         |
++---------+-----------+
+          |
+          v
++---------------------+
+| Complete            |
++---------------------+
 ```
 
-## Two-Phase Parallel Fetching
+## Sequential Role-Based Scanning
 
-### Phase 1: Independent Fetches
+Each role dispatches `LlmCallWorkflow` with these inputs:
 
-These sources can be fetched concurrently with no dependencies:
+| Step | Role | Action | Previous Findings | Tools |
+|------|------|--------|-------------------|-------|
+| 1 | `developer` | `context-scan` | None | Enabled |
+| 2 | `tester` | `context-scan` | Dev findings | Enabled |
+| 3 | `security` | `context-scan` | Dev + QA findings | Enabled |
+| 4 | `devops` | `context-scan` | Dev + QA + Security findings | Enabled |
+| 5 | `architect` | `context-scan` | All previous findings | Enabled |
 
-| Source | Activity | Description |
-|--------|----------|-------------|
-| Story Metadata | `FetchStoryMetadataActivity` | Story title, description, tags, acceptance criteria |
-| Recent Commits | `FetchRecentCommitsActivity` | Recent commits on the branch with files changed |
-| Test Results | `FetchTestResultsActivity` | Latest test run results |
-| Session History | `FetchSessionHistoryActivity` | Previous session context and decisions |
+Each scan passes:
+- `workItemJson` -- The full work item description
+- `workItemType` -- Detected type (feature/bug/security/test/docs)
+- `previousFindings` -- JSON object with all prior role findings
+- `repository` -- Repository identifier
 
-**Story Metadata is critical** -- if it fails, the workflow aborts with a Fault. Other Phase 1 failures are tracked but do not block the workflow.
+### Work Item Type Detection
 
-### Phase 2: Dependent Fetches
+The workflow auto-detects the work item type from the JSON content:
+- `"type":"bug"` -- bug
+- `"type":"security"` -- security
+- `"type":"test"` -- test
+- `"type":"docs"` -- docs
+- Default -- feature
 
-These sources depend on Phase 1 results (story description, commit file lists):
+## Vector DB Storage
 
-| Source | Activity | Depends On |
-|--------|----------|------------|
-| File Contents | `FetchFileContentsActivity` | Story description (for relevance), commit files (for scope) |
-| Similar Patterns | `FetchSimilarPatternsActivity` | Story title and tags (for similarity search) |
+Each role's findings are stored **immediately** via `StoreRoleFindingActivity` after extraction. This ensures:
+- **Partial results persist** -- if scan 3 crashes, scans 1 and 2 are already in the vector DB
+- **Progressive context** -- later scans could query stored findings via RAG
+- **Fault tolerance** -- no single point of failure for all 5 scans
 
-Phase 2 failures are tracked but do not block the workflow.
+The API endpoint (`POST /api/engine/store-context`) supports:
+- Storing findings keyed by role
+- Retrieving by issue number
+- RAG query with role filtering and token budget
 
-## Context Assembly
+## PO Review (Minimum Viable Context)
 
-The `AssembleContextActivity` takes all fetched data and organizes it into a structured `AssembledContext` object with sections prioritized by the `Purpose` parameter:
-
-| Purpose | Priority Order |
-|---------|---------------|
-| Assessment | Story metadata > test results > file contents > patterns |
-| Implementation | File contents > story metadata > commits > patterns |
-| Debugging | Test results > file contents > commits > session history |
-
-## Budget Trimming
-
-The `ApplyBudgetActivity` enforces the `MaxContextSize` limit (default: 50,000 characters) by:
-1. Measuring the total assembled context size
-2. Trimming lowest-priority sections first
-3. Truncating individual sections if needed
-4. Producing a `ContextGatheringOutput` with the final trimmed context and metadata
+The Product Owner LLM call receives all findings and produces:
+- **Summary** -- Concise description of what the context reveals
+- **Links** -- References to relevant files, docs, or external resources
+- **Context IDs** -- References to stored vector DB entries
 
 ## Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `SessionId` | Guid | required | Session identifier |
-| `StoryId` | string | required | Story identifier |
-| `RepositoryUrl` | string | `""` | Repository URL |
-| `TargetFiles` | List\<string\>? | null | Specific files to fetch |
-| `MaxContextSize` | int | 50000 | Maximum context size in characters |
-| `Purpose` | ContextPurpose | Assessment | Context purpose (affects priority) |
+| `repository` | string | required | Repository identifier |
+| `issueNumber` | int | required | Issue number |
+| `workItemJson` | string | required | Full work item JSON |
 
 ## Outputs
 
 | Output | Type | Description |
 |--------|------|-------------|
-| `contextJson` | string | Serialized context gathering output JSON |
-| `success` | bool | Whether context gathering succeeded |
-| `failedSources` | string | JSON array of source names that failed |
+| `summary` | string | PO-generated Minimum Viable Context summary |
+| `contextIds` | string | JSON array of vector DB context IDs |
+| `links` | string | JSON array of relevant links extracted by PO |
 
-## Failure Tracking
+## Prompt Resolution
 
-Failed sources are tracked in a JSON string array. Each phase adds any failed sources to the list. This allows the parent workflow to know which context was unavailable.
+All prompts are resolved from the **Prompt Registry** (Story 12-5) using the `(role, action)` key pair. The registry provides:
+- Template with `{{variable}}` placeholders
+- System prompt (role identity)
+- Tool enablement flag
+- Max token budget
 
-Example: `["RecentCommits", "SimilarPatterns"]` means those two fetches failed but the rest succeeded.
+This means prompt text is never hardcoded in workflow code. Templates can be updated via the Prompt Registry API (`PUT /api/prompts/:role/:action`) without redeploying workflows.
 
 ## Usage
 
@@ -173,4 +151,4 @@ Context Gathering is invoked by:
 
 ---
 
-_See also: [Single Issue Cycle](Workflow-Single-Issue-Cycle) | [Mentorship](Workflow-Mentorship) | [Assessment](Workflow-Mentorship#assessment) | [Workflows Index](Workflows)_
+_See also: [Single Issue Cycle](Workflow-Single-Issue-Cycle) | [Issue Triage](Workflow-Triage) | [LLM Call](Workflow-LLM-Call) | [Prompt Registry (Story 12-5)](Stories#epic-12-agentic-tool-loop-completed) | [Workflows Index](Workflows)_

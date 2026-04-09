@@ -26,6 +26,7 @@ import {
   PgInviteStore,
   InstallationRouter,
   InMemoryTaskQueue,
+  GitHubRepoConfigReader,
 } from './index.js';
 
 export interface ApiServerOptions {
@@ -171,6 +172,54 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     if (!privateKey) console.warn('  Missing: GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_PATH');
     if (!webhookSecret) console.warn('  Missing: GITHUB_WEBHOOK_SECRET');
   }
+
+  // --- Engine Context API routes (Elsa activity callbacks) ---
+  // Always enable context storage routes; wire RepoConfigReader when Octokit is available.
+  appOptions.engineContext = true;
+
+  // Engine GitHub routes: use a PAT-authenticated Octokit if GITHUB_TOKEN is set,
+  // or fall back to an app-authenticated Octokit for a default installation.
+  const githubToken = process.env['GITHUB_TOKEN'];
+  if (githubToken) {
+    const engineOctokit = new Octokit({ auth: githubToken });
+    appOptions.engineGitHub = { octokit: engineOctokit };
+    appOptions.engineContext = {
+      repoConfigReader: new GitHubRepoConfigReader(
+        (params) => engineOctokit.repos.getContent(params) as ReturnType<typeof engineOctokit.repos.getContent>,
+      ),
+    };
+    console.log('Engine GitHub routes enabled (PAT)');
+  } else if (appId && privateKey) {
+    // Use app-level Octokit without installation-specific auth.
+    // The engine GitHub routes that need installation scope will fail gracefully.
+    const defaultInstallationId = process.env['GITHUB_DEFAULT_INSTALLATION_ID'];
+    if (defaultInstallationId) {
+      const engineOctokit = new Octokit({
+        authStrategy: createAppAuth,
+        auth: {
+          appId,
+          privateKey,
+          installationId: parseInt(defaultInstallationId, 10),
+        },
+      });
+      appOptions.engineGitHub = { octokit: engineOctokit };
+      appOptions.engineContext = {
+        repoConfigReader: new GitHubRepoConfigReader(
+          (params) => engineOctokit.repos.getContent(params) as ReturnType<typeof engineOctokit.repos.getContent>,
+        ),
+      };
+      console.log(`Engine GitHub routes enabled (App installation ${defaultInstallationId})`);
+    } else {
+      console.warn('Engine GitHub routes disabled — no GITHUB_TOKEN or GITHUB_DEFAULT_INSTALLATION_ID');
+    }
+  } else {
+    console.warn('Engine GitHub routes disabled — no GitHub credentials available');
+  }
+
+  // Engine task routes: agent resolver is not available in the standalone API server.
+  // The execute-task endpoint will return 503 until an agent resolver is injected.
+  appOptions.engineTask = {};
+  console.log('Engine task routes enabled (agent resolver not yet configured)');
 
   const app = await createApp(appOptions);
 
