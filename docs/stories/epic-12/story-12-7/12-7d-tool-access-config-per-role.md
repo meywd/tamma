@@ -45,9 +45,10 @@ Extend the existing `ToolLoopConfig.AllowedTools` mechanism to support per-role 
 
 ### AC3: Account-Level Overrides
 - [ ] Account admins can override the default context tool access per role
-- [ ] Override stored in the prompt store (extends Epic 27 schema) or account config
+- [ ] Override stored in the `agent_configs` table from Story 9-1 (per-account JSONB config), **not** in the prompt tables. The `agent_configs.config` JSONB gains a `contextToolAccess` key: `Record<role, string[]>`.
 - [ ] Account override takes precedence over system defaults
 - [ ] Account can disable context tools entirely for a role, or add tools not in the default set
+- [ ] The `agent_configs` table is the single source of truth for per-account tool access configuration, keeping tool config alongside provider chains and other agent settings
 
 ### AC4: Tool Resolution in LlmCallWorkflow
 - [ ] `ResolveToolsActivity` resolves context tools based on:
@@ -89,11 +90,25 @@ The existing `enableTools` boolean in prompt templates controls whether tools ar
 | `packages/api/src/services/default-prompts.ts` | Default prompt templates (80 role+action) |
 | `packages/api/src/services/prompt-store.ts` | Prompt store with template retrieval |
 
+## Storage Design Note
+
+Per-role tool access overrides are stored in the `agent_configs` table (Story 9-1), **not** in the prompt store tables (Epic 27). Rationale:
+
+- Tool access is an **agent configuration concern** (which tools an agent role can use), not a **prompt concern** (what text to send the LLM).
+- The `agent_configs.config` JSONB already stores per-account agent settings (provider chains, role configs, security settings). Adding `contextToolAccess` here keeps all agent behavior configuration in one place.
+- The prompt store's `contextTools` field on `PromptTemplate` remains as a per-template override for specific role+action combinations, but the account-level default is in `agent_configs`.
+
+Resolution order for context tools:
+1. Prompt template `contextTools` field (if set for this specific role+action)
+2. `agent_configs.config.contextToolAccess[role]` (account-level override from Story 9-1)
+3. Per-role defaults from `ContextToolDefaults`
+
 ## Dependencies
 
 - **Story 12-7a**: Vector DB search tools (tools being configured)
 - **Story 12-7b**: Convention & history tools (tools being configured)
-- **Epic 27**: Prompt store (for persisting account overrides)
+- **Story 9-1**: `agent_configs` table (for persisting account-level tool access overrides)
+- **Epic 27**: Prompt store (for per-template `contextTools` field, not account overrides)
 - **Story 12-1**: `IToolExecutorRegistry` and allowlist mechanism
 
 ## Estimated Effort
@@ -113,3 +128,4 @@ The existing `enableTools` boolean in prompt templates controls whether tools ar
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-04-08 | 1.0 | Initial story creation | Architecture Team |
+| 2026-04-09 | 1.1 | Changed account-level overrides to use `agent_configs` table (Story 9-1) instead of prompt tables. Updated dependencies and added Storage Design Note. | Cross-epic review |

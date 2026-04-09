@@ -10,7 +10,7 @@ Replace the in-memory `ConfigService` with a Postgres-backed `PgAgentConfigStore
 
 ### Task 1: Create the Migration SQL File (2 hours)
 
-**File to create**: `database/migrations/008_agent_configs.sql`
+**File to create**: `database/migrations/012_agent_configs.sql`
 
 ```sql
 -- Agent configs: per-account agent and security configuration
@@ -303,7 +303,7 @@ Ensure `normalizeAgentsConfig()` continues to work for CLI mode. No breaking cha
 
 | # | File Path | Purpose |
 |---|-----------|---------|
-| 1 | `database/migrations/008_agent_configs.sql` | DDL + system default seed |
+| 1 | `database/migrations/012_agent_configs.sql` | DDL + system default seed |
 | 2 | `packages/api/src/services/agent-config-store.ts` | Interface + types |
 | 3 | `packages/api/src/services/pg-agent-config-store.ts` | Postgres implementation |
 | 4 | `packages/api/src/services/agent-config-store.test.ts` | Service tests |
@@ -321,8 +321,8 @@ Ensure `normalizeAgentsConfig()` continues to work for CLI mode. No breaking cha
 
 ## Dependencies
 
-- **Epic 16** (tenants table for account_id FK -- deferred via nullable column)
-- **Epic 17** (JWT auth for extracting accountId from request)
+- **Epic 17** (tenants table for account_id FK -- deferred via nullable column)
+- **Epic 18** (JWT auth for extracting accountId from request)
 - **Migration 007** must be applied first (next migration is 008)
 
 ## Migration from Existing Code

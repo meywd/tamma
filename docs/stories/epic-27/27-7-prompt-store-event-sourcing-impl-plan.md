@@ -2,7 +2,7 @@
 
 ## Overview
 
-Integrate DCB event emission into the `PgPromptStore` so that all prompt mutations (create, update, delete, reset) emit structured events with audit metadata. Events are best-effort (non-blocking) and include tags for accountId, role, action, and userId. A `diffFields()` utility identifies which fields changed without storing full template text in events.
+Integrate DCB event emission into the `PgPromptStore` so that all prompt mutations (create, update, delete, reset) emit structured events with audit metadata. Events are best-effort (non-blocking) and include tags for tenantId, role, action, and userId. A `diffFields()` utility identifies which fields changed without storing full template text in events.
 
 ---
 
@@ -42,7 +42,7 @@ export type PromptEventType = (typeof PROMPT_EVENT_TYPES)[keyof typeof PROMPT_EV
 // ---------------------------------------------------------------------------
 
 export interface PromptEventTags {
-  accountId?: string;
+  tenantId?: string;
   role: string;
   action: string;
   userId?: string;
@@ -86,8 +86,8 @@ export async function emitPromptEvent(
       role: tags.role,
       action: tags.action,
     };
-    if (tags.accountId !== undefined) {
-      cleanTags['accountId'] = tags.accountId;
+    if (tags.tenantId !== undefined) {
+      cleanTags['tenantId'] = tags.tenantId;
     }
     if (tags.userId !== undefined) {
       cleanTags['userId'] = tags.userId;
@@ -139,11 +139,11 @@ export function diffFields(before: PromptTemplate, after: PromptTemplate): strin
 The `IPromptStore` interface from Story 27-2 already includes optional `userId` parameter on mutation methods:
 
 ```typescript
-upsert(accountId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
-delete(accountId: string, role: string, action: string, userId?: string): Promise<boolean>;
+upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
+delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean>;
 resetSystemDefault(role: string, action: string, userId?: string): Promise<PromptTemplate | undefined>;
 upsertSystemDefault(role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
-upsertSystemPrompt(accountId: string | null, role: string, prompt: string, userId?: string): Promise<void>;
+upsertSystemPrompt(tenantId: string | null, role: string, prompt: string, userId?: string): Promise<void>;
 ```
 
 Verify this is in place. If not, add the optional `userId` parameter.
@@ -173,9 +173,9 @@ export class PgPromptStore implements IPromptStore {
 Modify `upsert()` to emit `PROMPT.CREATED.SUCCESS` or `PROMPT.UPDATED.SUCCESS`:
 
 ```typescript
-async upsert(accountId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
+async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
   // Fetch existing row before mutation (for diff)
-  const existing = await this._getRow(accountId, role, action);
+  const existing = await this._getRow(tenantId, role, action);
 
   // ... existing INSERT ... ON CONFLICT logic ...
   const result = this._mapRow(queryResult.rows[0]!);
@@ -188,7 +188,7 @@ async upsert(accountId: string | null, role: string, action: string, input: Upse
       emitPromptEvent(
         this.eventStore,
         PROMPT_EVENT_TYPES.UPDATED,
-        { accountId: accountId ?? undefined, role, action, userId },
+        { tenantId: tenantId ?? undefined, role, action, userId },
         { previousVersion: existing.version, newVersion: result.version, changedFields },
         this.logger,
       );
@@ -198,7 +198,7 @@ async upsert(accountId: string | null, role: string, action: string, input: Upse
     emitPromptEvent(
       this.eventStore,
       PROMPT_EVENT_TYPES.CREATED,
-      { accountId: accountId ?? undefined, role, action, userId },
+      { tenantId: tenantId ?? undefined, role, action, userId },
       { version: result.version, enableTools: result.enableTools, maxTokens: result.maxTokens },
       this.logger,
     );
@@ -211,13 +211,13 @@ async upsert(accountId: string | null, role: string, action: string, input: Upse
 #### 3c. Emit Events in delete()
 
 ```typescript
-async delete(accountId: string, role: string, action: string, userId?: string): Promise<boolean> {
+async delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean> {
   // Fetch existing row for version info
-  const existing = await this._getRow(accountId, role, action);
+  const existing = await this._getRow(tenantId, role, action);
 
   const result = await this.pool.query(
-    `DELETE FROM prompts WHERE account_id = $1 AND role = $2 AND action = $3`,
-    [accountId, role, action],
+    `DELETE FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3`,
+    [tenantId, role, action],
   );
   const deleted = (result.rowCount ?? 0) > 0;
 
@@ -225,7 +225,7 @@ async delete(accountId: string, role: string, action: string, userId?: string): 
     emitPromptEvent(
       this.eventStore,
       PROMPT_EVENT_TYPES.DELETED,
-      { accountId, role, action, userId },
+      { tenantId, role, action, userId },
       { deletedVersion: existing.version },
       this.logger,
     );
@@ -273,17 +273,17 @@ async resetSystemDefault(role: string, action: string, userId?: string): Promise
 #### 3e. Add Private Helper _getRow()
 
 ```typescript
-private async _getRow(accountId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
+private async _getRow(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
   let result: pg.QueryResult<Record<string, unknown>>;
-  if (accountId === null) {
+  if (tenantId === null) {
     result = await this.pool.query<Record<string, unknown>>(
-      `SELECT * FROM prompts WHERE account_id IS NULL AND role = $1 AND action = $2`,
+      `SELECT * FROM prompts WHERE tenant_id IS NULL AND role = $1 AND action = $2`,
       [role, action],
     );
   } else {
     result = await this.pool.query<Record<string, unknown>>(
-      `SELECT * FROM prompts WHERE account_id = $1 AND role = $2 AND action = $3`,
-      [accountId, role, action],
+      `SELECT * FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3`,
+      [tenantId, role, action],
     );
   }
   if (result.rows.length === 0) return undefined;
@@ -301,10 +301,10 @@ In each mutating route handler, pass `request.userId` to the store method:
 
 ```typescript
 // PUT /api/prompts/:role/:action
-const updated = await store.upsert(accountId, role, action, input, request.userId);
+const updated = await store.upsert(tenantId, role, action, input, request.userId);
 
 // DELETE /api/prompts/:role/:action
-const deleted = await store.delete(accountId, role, action, request.userId);
+const deleted = await store.delete(tenantId, role, action, request.userId);
 
 // PUT /api/prompts/system/:role/:action
 const updated = await store.upsertSystemDefault(role, action, input, request.userId);
@@ -368,21 +368,21 @@ describe('emitPromptEvent', () => {
     await emitPromptEvent(
       mockStore,
       PROMPT_EVENT_TYPES.CREATED,
-      { accountId: 'acct-123', role: 'developer', action: 'implement', userId: 'user-456' },
+      { tenantId: 'acct-123', role: 'developer', action: 'implement', userId: 'user-456' },
       { version: 1, enableTools: true, maxTokens: 4096 },
     );
 
     expect(mockStore.append).toHaveBeenCalledOnce();
     const event = mockStore.append.mock.calls[0]![0]!;
     expect(event.type).toBe('PROMPT.CREATED.SUCCESS');
-    expect(event.tags.accountId).toBe('acct-123');
+    expect(event.tags.tenantId).toBe('acct-123');
     expect(event.tags.role).toBe('developer');
     expect(event.tags.action).toBe('implement');
     expect(event.tags.userId).toBe('user-456');
     expect(event.data.version).toBe(1);
   });
 
-  it('should omit accountId tag when null', async () => {
+  it('should omit tenantId tag when null', async () => {
     const mockStore = { append: vi.fn().mockResolvedValue(undefined) };
     await emitPromptEvent(
       mockStore,
@@ -392,7 +392,7 @@ describe('emitPromptEvent', () => {
     );
 
     const event = mockStore.append.mock.calls[0]![0]!;
-    expect(event.tags.accountId).toBeUndefined();
+    expect(event.tags.tenantId).toBeUndefined();
   });
 
   it('should not throw when eventStore.append fails', async () => {
@@ -468,7 +468,7 @@ Uses `InMemoryPromptStore` with a mock event store to verify end-to-end event em
 | 3 | `upsert()` with no changes does NOT emit UPDATE | No event when nothing changed |
 | 4 | `delete()` emits `PROMPT.DELETED.SUCCESS` | deletedVersion matches |
 | 5 | `resetSystemDefault()` emits `PROMPT.RESET.SUCCESS` | resetFrom/resetTo present |
-| 6 | Events are queryable by accountId tag | Tag filtering works |
+| 6 | Events are queryable by tenantId tag | Tag filtering works |
 | 7 | Events are queryable by role + action tags | Tag filtering works |
 
 ---

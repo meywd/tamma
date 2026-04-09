@@ -10,7 +10,7 @@ Promote the in-process `ProviderHealthTracker` to a persistent service backed by
 
 ### Task 1: Create the Migration SQL File (2 hours)
 
-**File to create**: `database/migrations/010_provider_health.sql`
+**File to create**: `database/migrations/014_provider_health.sql`
 
 ```sql
 -- Provider health / circuit breaker state
@@ -364,7 +364,7 @@ export class HealthService {
 
 | # | File Path | Purpose |
 |---|-----------|---------|
-| 1 | `database/migrations/010_provider_health.sql` | DDL + indexes |
+| 1 | `database/migrations/014_provider_health.sql` | DDL + indexes |
 | 2 | `packages/api/src/services/health-store.ts` | Interface + types |
 | 3 | `packages/api/src/services/pg-health-store.ts` | Postgres implementation |
 | 4 | `packages/api/src/services/health-store.test.ts` | Service tests |

@@ -19,7 +19,7 @@
 | 12.2 | Agentic Tool Loop in CallLlm | P0 | Story 12.1 | Planned |
 | 12.3 | Context Compaction | P1 | Story 12.2 | Planned |
 | 12.4 | Streaming & Parallel Tools | P2 | Story 12.2 | Planned |
-| 12.5 | Prompt Engineering Framework | P0 | Stories 12.1-12.4, 9-6 | Partially Complete |
+| 12.5 | Prompt Engineering Framework | P0 | Stories 12.1-12.4, Epic 27 (27-2, 27-3) | Partially Complete |
 | 12.6 | Tool Executor Enhancements | P1 | Stories 12.1-12.4 | Planned |
 | 12.7 | LLM Context Tool Access | P0 | Stories 12.1-12.2, Epic 6 | Planned |
 

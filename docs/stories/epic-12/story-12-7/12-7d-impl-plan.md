@@ -127,7 +127,7 @@ Update the prompt store to read and return the `contextTools` field.
 
 ---
 
-### Task 3: Account-Level Override Storage (3 hours)
+### Task 3: Account-Level Override Storage via `agent_configs` (3 hours)
 
 **File to create**: `packages/api/src/services/context-tool-access-service.ts`
 
@@ -135,9 +135,14 @@ Update the prompt store to read and return the `contextTools` field.
 /**
  * Manages per-role context tool access configuration with account overrides.
  *
+ * Account-level overrides are stored in the `agent_configs` table (Story 9-1),
+ * specifically in the `config.contextToolAccess` JSONB key. This keeps tool
+ * access configuration alongside other agent settings (provider chains, role
+ * configs, security) instead of in the prompt tables.
+ *
  * Resolution order:
- * 1. Account-level override (if exists)
- * 2. Prompt template contextTools field (if set)
+ * 1. Prompt template contextTools field (if set for specific role+action)
+ * 2. agent_configs.config.contextToolAccess[role] (account override from 9-1)
  * 3. Per-role defaults from ContextToolDefaults
  */
 export interface IContextToolAccessService {
@@ -148,11 +153,13 @@ export interface IContextToolAccessService {
 
   /**
    * Get the account-level override for a role (null if no override).
+   * Reads from agent_configs.config.contextToolAccess[role].
    */
   getAccountOverride(role: string, accountId: string): Promise<string[] | null>;
 
   /**
    * Set an account-level override for a role's context tools.
+   * Writes to agent_configs.config.contextToolAccess[role] via JSONB merge.
    */
   setAccountOverride(
     role: string,
@@ -162,24 +169,23 @@ export interface IContextToolAccessService {
 
   /**
    * Remove an account-level override, reverting to defaults.
+   * Removes the role key from agent_configs.config.contextToolAccess.
    */
   removeAccountOverride(role: string, accountId: string): Promise<void>;
 }
 ```
 
-Default implementation stores overrides in the database (extends the prompt store schema) or in a separate `context_tool_access` table:
+**No new database table is created.** Account-level overrides are stored in the existing `agent_configs` table from Story 9-1. The `config` JSONB column gains a `contextToolAccess` key:
 
-```sql
-CREATE TABLE IF NOT EXISTS context_tool_access (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id  UUID NOT NULL,
-  role        TEXT NOT NULL,
-  tools       JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of tool names
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(account_id, role)
-);
+```typescript
+// In AgentsConfig (packages/shared/src/types/agent-config.ts)
+interface AgentsConfig {
+  // ... existing fields (defaults, roles, etc.)
+  contextToolAccess?: Record<string, string[]>;  // NEW: role -> allowed context tools
+}
 ```
+
+This is read/written via the existing `GET/PUT /api/v1/agents/config` endpoints (Story 9-1). The `IContextToolAccessService` is a thin wrapper that reads/writes the `contextToolAccess` key within the agent config.
 
 ---
 

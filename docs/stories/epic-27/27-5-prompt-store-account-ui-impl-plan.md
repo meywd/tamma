@@ -1,8 +1,8 @@
-# Story 27-5: Prompt Store Account UI — Implementation Plan
+# Story 27-5: Prompt Store Tenant UI — Implementation Plan
 
 ## Overview
 
-Add an "AI Prompts" page at `/settings/prompts` (account scope) within the existing dashboard. Account admins can create overrides of system default prompts, preview rendered output with test variables, and use a convention template selector. Regular members see prompts as read-only.
+Add an "AI Prompts" page at `/settings/prompts` (account scope) within the existing dashboard. Tenant admins can create overrides of system default prompts, preview rendered output with test variables, and use a convention template selector. Regular members see prompts as read-only.
 
 ---
 
@@ -10,7 +10,7 @@ Add an "AI Prompts" page at `/settings/prompts` (account scope) within the exist
 
 ### Task 1: Create Data Fetching Hook (2 hours)
 
-**File to create**: `packages/dashboard/src/hooks/useAccountPrompts.ts`
+**File to create**: `packages/dashboard/src/hooks/useTenantPrompts.ts`
 
 ```typescript
 import { useState, useEffect, useCallback } from 'react';
@@ -24,7 +24,7 @@ export interface ResolvedPrompt {
   variableCount: number;
   updatedAt: string;
   source: 'system' | 'override';
-  accountId: string | null;
+  tenantId: string | null;
 }
 
 export interface PromptDetail {
@@ -68,7 +68,7 @@ interface UpsertData {
   maxTokens?: number;
 }
 
-export function useAccountPrompts(): UseAccountPromptsReturn {
+export function useTenantPrompts(): UseAccountPromptsReturn {
   const [prompts, setPrompts] = useState<ResolvedPrompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -137,16 +137,16 @@ export function useAccountPrompts(): UseAccountPromptsReturn {
 
 ### Task 2: Create Account Prompt Table Component (3 hours)
 
-**File to create**: `packages/dashboard/src/components/prompts/AccountPromptTable.tsx`
+**File to create**: `packages/dashboard/src/components/prompts/TenantPromptTable.tsx`
 
 ```typescript
-interface AccountPromptTableProps {
+interface TenantPromptTableProps {
   prompts: ResolvedPrompt[];
   overrideCount: number;
   onRowClick: (role: string, action: string) => void;
 }
 
-export function AccountPromptTable({ prompts, overrideCount, onRowClick }: AccountPromptTableProps): JSX.Element {
+export function TenantPromptTable({ prompts, overrideCount, onRowClick }: TenantPromptTableProps): JSX.Element {
   const [roleFilter, setRoleFilter] = useState('all');
   const [actionFilter, setActionFilter] = useState('all');
 
@@ -225,12 +225,12 @@ export function OverrideBadge({ source }: OverrideBadgeProps): JSX.Element {
 
 ### Task 4: Create Account Prompt Editor Component (3 hours)
 
-**File to create**: `packages/dashboard/src/components/prompts/AccountPromptEditor.tsx`
+**File to create**: `packages/dashboard/src/components/prompts/TenantPromptEditor.tsx`
 
 Override-aware editor that shows different UI depending on whether the prompt is a system default or an existing override.
 
 ```typescript
-interface AccountPromptEditorProps {
+interface TenantPromptEditorProps {
   open: boolean;
   role: string;
   action: string;
@@ -243,11 +243,11 @@ interface AccountPromptEditorProps {
   deleteOverride: (role: string, action: string) => Promise<boolean>;
 }
 
-export function AccountPromptEditor(props: AccountPromptEditorProps): JSX.Element | null {
+export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element | null {
   // Load prompt on open
   // Show info banner:
-  //   - System default: "This is a system default. Saving will create an override for your account."
-  //   - Override: "This is an account override." + "Reset to Default" button
+  //   - System default: "This is a system default. Saving will create an override for your tenant."
+  //   - Override: "This is an tenant override." + "Reset to Default" button
   // Template textarea (monospaced)
   // Variables list (auto-extracted)
   // System prompt textarea
@@ -259,7 +259,7 @@ export function AccountPromptEditor(props: AccountPromptEditorProps): JSX.Elemen
 
 Key behaviors:
 - **Info banner** depends on `isOverride` prop:
-  - `false` (system default): yellow info banner with text "Saving will create an override for your account."
+  - `false` (system default): yellow info banner with text "Saving will create an override for your tenant."
   - `true` (override): blue info banner with "Reset to Default" button
 - **Read-only mode**: when `readOnly=true`, all inputs are disabled, Save/Delete buttons hidden
 - **Reset to Default**: calls `deleteOverride()` after `ConfirmDialog`, then `onSaved()` to refresh
@@ -369,18 +369,18 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
 
 **File to create**: `packages/dashboard/src/pages/settings/AccountPromptsPage.tsx`
 
-This replaces/extends the existing `PromptsPage.tsx` at `/settings/prompts`. Since `PromptsPage.tsx` already exists, we modify it to use the new account-aware components.
+This replaces/extends the existing `PromptsPage.tsx` at `/settings/prompts`. Since `PromptsPage.tsx` already exists, we modify it to use the new tenant-aware components.
 
 **File to modify**: `packages/dashboard/src/pages/settings/PromptsPage.tsx`
 
 ```typescript
-import { useAccountPrompts } from '../../hooks/useAccountPrompts.js';
-import { AccountPromptTable } from '../../components/prompts/AccountPromptTable.js';
-import { AccountPromptEditor } from '../../components/prompts/AccountPromptEditor.js';
+import { useTenantPrompts } from '../../hooks/useTenantPrompts.js';
+import { TenantPromptTable } from '../../components/prompts/TenantPromptTable.js';
+import { TenantPromptEditor } from '../../components/prompts/TenantPromptEditor.js';
 import { useAuth } from '../../hooks/useAuth.js'; // hypothetical auth hook
 
 export function PromptsPage(): JSX.Element {
-  const { prompts, loading, error, overrideCount, fetchPrompts, getPrompt, upsertOverride, deleteOverride, renderPreview } = useAccountPrompts();
+  const { prompts, loading, error, overrideCount, fetchPrompts, getPrompt, upsertOverride, deleteOverride, renderPreview } = useTenantPrompts();
   const { userRole } = useAuth();  // 'owner' | 'admin' | 'member'
   const readOnly = userRole === 'member';
   const [selected, setSelected] = useState<{ role: string; action: string } | null>(null);
@@ -391,12 +391,12 @@ export function PromptsPage(): JSX.Element {
       <h1 className="text-2xl font-bold text-gray-900 mb-6">AI Prompts</h1>
       {readOnly && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded mb-4">
-          You have read-only access. Contact your account admin to modify prompts.
+          You have read-only access. Contact your tenant admin to modify prompts.
         </div>
       )}
-      <AccountPromptTable prompts={prompts} overrideCount={overrideCount} onRowClick={(r, a) => setSelected({ role: r, action: a })} />
+      <TenantPromptTable prompts={prompts} overrideCount={overrideCount} onRowClick={(r, a) => setSelected({ role: r, action: a })} />
       {selected && (
-        <AccountPromptEditor
+        <TenantPromptEditor
           open={true} role={selected.role} action={selected.action}
           isOverride={isOverride} readOnly={readOnly}
           onClose={() => setSelected(null)}
@@ -415,7 +415,7 @@ export function PromptsPage(): JSX.Element {
 
 **File to modify**: `packages/dashboard/src/router.tsx`
 
-The route `/settings/prompts` already exists and points to `PromptsPage`. It currently uses `AdminGuard`. Since account prompts should be visible to all authenticated users (read-only for non-admins), change the guard:
+The route `/settings/prompts` already exists and points to `PromptsPage`. It currently uses `AdminGuard`. Since tenant prompts should be visible to all authenticated users (read-only for non-admins), change the guard:
 
 ```typescript
 // Before:
@@ -466,10 +466,10 @@ Rename the sidebar link from "Prompt Templates" to "AI Prompts" and move it to t
 
 | # | File Path | Purpose |
 |---|-----------|---------|
-| 1 | `packages/dashboard/src/hooks/useAccountPrompts.ts` | Data fetching hook |
-| 2 | `packages/dashboard/src/components/prompts/AccountPromptTable.tsx` | Table with override badges |
+| 1 | `packages/dashboard/src/hooks/useTenantPrompts.ts` | Data fetching hook |
+| 2 | `packages/dashboard/src/components/prompts/TenantPromptTable.tsx` | Table with override badges |
 | 3 | `packages/dashboard/src/components/prompts/OverrideBadge.tsx` | Override/Default badge |
-| 4 | `packages/dashboard/src/components/prompts/AccountPromptEditor.tsx` | Override-aware editor |
+| 4 | `packages/dashboard/src/components/prompts/TenantPromptEditor.tsx` | Override-aware editor |
 | 5 | `packages/dashboard/src/components/prompts/PromptPreview.tsx` | Variable input + render preview |
 | 6 | `packages/dashboard/src/components/prompts/ConventionSelector.tsx` | Convention template dropdown |
 | 7 | `packages/dashboard/src/pages/settings/PromptsPage.test.tsx` | Tests |
@@ -478,7 +478,7 @@ Rename the sidebar link from "Prompt Templates" to "AI Prompts" and move it to t
 
 | # | File Path | Change |
 |---|-----------|--------|
-| 1 | `packages/dashboard/src/pages/settings/PromptsPage.tsx` | Replace with account-aware prompt management |
+| 1 | `packages/dashboard/src/pages/settings/PromptsPage.tsx` | Replace with tenant-aware prompt management |
 | 2 | `packages/dashboard/src/router.tsx` | Remove AdminGuard from `/settings/prompts` route |
 | 3 | `packages/dashboard/src/components/layout/Sidebar.tsx` | Rename link, move to member section |
 
@@ -486,8 +486,8 @@ Rename the sidebar link from "Prompt Templates" to "AI Prompts" and move it to t
 
 ## Dependencies
 
-- **Story 27-3** (API Endpoints) — `/api/prompts` account-scoped endpoints must exist
-- **Epic 16** (Auth) — JWT session provides accountId and role
+- **Story 27-3** (API Endpoints) — `/api/prompts` tenant-scoped endpoints must exist
+- **Epic 16** (Auth) — JWT session provides tenantId and role
 - **Internal**: Existing common components: `Card`, `LoadingSpinner`, `ConfirmDialog`, `Toggle`, `FormField`
 
 ---
@@ -507,10 +507,10 @@ Rename the sidebar link from "Prompt Templates" to "AI Prompts" and move it to t
 
 | Task | Hours |
 |------|-------|
-| useAccountPrompts hook | 2 |
-| AccountPromptTable component | 3 |
+| useTenantPrompts hook | 2 |
+| TenantPromptTable component | 3 |
 | OverrideBadge component | 0.5 |
-| AccountPromptEditor component | 3 |
+| TenantPromptEditor component | 3 |
 | PromptPreview component | 3 |
 | ConventionSelector component | 1.5 |
 | Page + route wiring | 2 |

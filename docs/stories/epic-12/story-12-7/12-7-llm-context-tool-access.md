@@ -30,6 +30,8 @@ The solution: expose the RAG/vector DB, knowledge base, conventions, and history
 | 12-7e | Elsa Tool Loop Integration | P0 | 20h | 12-7a, 12-7b, 12-7c, 12-7d |
 | **Total** | | | **92h** | |
 
+> **Note on estimates**: The 92h total covers implementation of each sub-story individually. It does **not** include integration testing overhead -- testing the full chain (LLM calls context tool -> C# executor -> HTTP to Node.js API -> vector DB/event store -> results back through tool loop) across all 5 tool types, multiple roles, and multiple providers. Suggest adding **+30h** for cross-sub-story integration testing, bringing the realistic total to approximately **122h**.
+
 ## Architecture
 
 ```

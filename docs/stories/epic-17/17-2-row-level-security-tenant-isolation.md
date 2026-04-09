@@ -208,14 +208,37 @@ async function setTenantContext(client: pg.PoolClient, tenantId: string): Promis
 
 For pooled connections, this must happen after `pool.connect()` and before any business query. The middleware in Story 17.5 handles this.
 
+## Tables Exempt from RLS
+
+The following tables do **NOT** have RLS policies and are exempt from tenant isolation:
+
+| Table | Reason | Cross-reference |
+|-------|--------|-----------------|
+| `prompts` | Prompt resolution must read `tenant_id IS NULL` rows (system defaults) when no tenant override exists. RLS would block reading system defaults when the session tenant is set. Application-level filtering is used instead. | Epic 27 (Prompt Store) |
+| `system_prompts` | Same reason as `prompts` -- the two-tier resolution (tenant override then system default) requires cross-tenant reads of NULL rows. | Epic 27 (Prompt Store) |
+| `action_prompts` | Same reason as `prompts` and `system_prompts`. | Epic 27 (Prompt Store) |
+
+**Why not RLS on prompt tables?** The prompt resolution logic intentionally crosses tenant boundaries:
+
+1. First, look for a tenant-specific override: `WHERE tenant_id = :currentTenant AND role = :role AND action = :action`
+2. If not found, fall back to the system default: `WHERE tenant_id IS NULL AND role = :role AND action = :action`
+
+An RLS policy filtering on `tenant_id = current_setting('app.current_tenant_id')::uuid` would block step 2, because `NULL != <any-uuid>`. Making `NULL` match all tenants would defeat the purpose of RLS. Therefore, prompt tables use application-level filtering (the `IPromptStore` implementation) rather than database-level RLS.
+
+**Mitigation**: The `IPromptStore.get(tenantId, role, action)` method ensures that:
+- A tenant can only read its own overrides or system defaults (never another tenant's overrides)
+- The `list(tenantId)` method returns a merged view scoped to the tenant
+- All write operations validate `tenantId` matches the authenticated user's tenant
+
 ## Implementation Notes
 
 1. `FORCE ROW LEVEL SECURITY` is used on all tables so that even if the application connects as the table owner, RLS applies. Only a SUPERUSER or BYPASSRLS role can bypass.
 2. The `current_setting('app.current_tenant_id', true)` form (with `true` as second arg) returns NULL when not set, causing all comparisons to fail (fail-closed).
 3. The `github_installation_repos` and `user_installations` tables do NOT get direct RLS policies. They are join tables accessed through FK relationships. If direct access is needed later, RLS can be added.
-4. Performance: The B-tree indexes on `tenant_id` (created in Story 17.1) ensure RLS filter predicates use index scans, not sequential scans. On small tables (< 100K rows), the overhead is negligible.
-5. The migration creates the `tamma_app` role with a placeholder password. The actual password must be configured via environment variable in production.
-6. If the database currently uses a single superuser for everything, the application's connection string must be updated to use `tamma_app` after this migration. This is a deployment concern documented in the migration file.
+4. The `prompts`, `system_prompts`, and `action_prompts` tables (Epic 27) are exempt from RLS. See "Tables Exempt from RLS" section above.
+5. Performance: The B-tree indexes on `tenant_id` (created in Story 17.1) ensure RLS filter predicates use index scans, not sequential scans. On small tables (< 100K rows), the overhead is negligible.
+6. The migration creates the `tamma_app` role with a placeholder password. The actual password must be configured via environment variable in production.
+7. If the database currently uses a single superuser for everything, the application's connection string must be updated to use `tamma_app` after this migration. This is a deployment concern documented in the migration file.
 
 ## Testing Strategy
 
@@ -242,9 +265,13 @@ Create `packages/api/src/persistence/__tests__/rls-tenant-isolation.integration.
 11. Run `\d+ users` in psql and confirm "Policies" section shows `tenant_isolation_policy`
 12. Run `SELECT * FROM pg_policies WHERE tablename = 'users'` to verify policy definition
 
+## Migration Number
+
+This story uses **migration 009** (`009_rls_tenant_isolation.sql`). See `/docs/stories/migration-ordering.md` for the cross-epic migration sequence.
+
 ## Dependencies
 
-- **Story 17.1** (Tenant Model + Database Schema) — `tenants` table and `tenant_id` columns must exist
+- **Story 17.1** (Tenant Model + Database Schema) -- `tenants` table and `tenant_id` columns must exist (migration 008)
 - Internal: `database/migrations/008_tenants.sql` must have been applied
 
 ## Estimated Effort

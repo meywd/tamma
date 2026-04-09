@@ -10,7 +10,7 @@ Add per-account sanitization rule configuration stored in Postgres and expose Fa
 
 ### Task 1: Create the Migration SQL File (2 hours)
 
-**File to create**: `database/migrations/011_sanitization_rules.sql`
+**File to create**: `database/migrations/015_sanitization_rules.sql`
 
 ```sql
 -- Per-account sanitization rules
@@ -339,7 +339,7 @@ Wire `registerSecurityRoutes(instance, svc.sanitizationStore)` in the `/api/conf
 
 | # | File Path | Purpose |
 |---|-----------|---------|
-| 1 | `database/migrations/011_sanitization_rules.sql` | DDL + seed data |
+| 1 | `database/migrations/015_sanitization_rules.sql` | DDL + seed data |
 | 2 | `packages/api/src/services/sanitization-store.ts` | Interface + types |
 | 3 | `packages/api/src/services/pg-sanitization-store.ts` | Postgres implementation |
 | 4 | `packages/api/src/services/sanitization-store.test.ts` | Service tests |
@@ -356,8 +356,8 @@ Wire `registerSecurityRoutes(instance, svc.sanitizationStore)` in the `/api/conf
 
 ## Dependencies
 
-- **Epic 16** (tenants table for account_id FK -- deferred)
-- **Epic 17** (JWT auth for API endpoints)
+- **Epic 17** (tenants table for account_id FK -- deferred)
+- **Epic 18** (JWT auth for API endpoints)
 
 ## Migration from Existing Code
 

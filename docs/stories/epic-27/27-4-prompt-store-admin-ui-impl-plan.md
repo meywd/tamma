@@ -24,7 +24,7 @@ export interface SystemPromptSummary {
   variableCount: number;
   updatedAt: string;
   source: 'system' | 'override';
-  accountId: string | null;
+  tenantId: string | null;
 }
 
 export interface SystemPromptDetail {

@@ -94,13 +94,13 @@ TS Engine (in-process)              Elsa Workflow (C#)
 - CREATE `packages/api/src/services/sanitization-store.ts` -- per-account sanitization rules
 - CREATE `packages/api/src/services/sanitization-store.test.ts`
 - MODIFY `packages/api/src/routes/settings/security-routes.ts` -- implement sanitization endpoints
-- CREATE `database/migrations/NNNN_create_sanitization_rules.sql`
+- CREATE `database/migrations/015_sanitization_rules.sql` (migration 015 -- see `/docs/stories/migration-ordering.md`)
 - No changes to `packages/shared/src/security/` (used as-is via service wrapper)
 
 ## Dependencies
 
-- **Epic 16** (tenants table for account_id FK)
-- **Epic 17** (JWT auth for API endpoints)
+- **Epic 17** (tenants table for account_id FK)
+- **Epic 18** (JWT auth for API endpoints)
 
 ## Effort Estimate
 

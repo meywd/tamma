@@ -93,13 +93,13 @@ Elsa's `ResolveAgentConfigActivity.cs` currently reads from the ELSA Agents DB. 
 - CREATE `packages/api/src/services/agent-config-store.ts` -- Postgres-backed config store
 - CREATE `packages/api/src/services/agent-config-store.test.ts`
 - MODIFY `packages/api/src/routes/settings/agents-routes.ts` -- implement CRUD endpoints
-- CREATE `database/migrations/NNNN_create_agent_configs.sql`
+- CREATE `database/migrations/012_agent_configs.sql` (migration 012 -- see `/docs/stories/migration-ordering.md`)
 - MODIFY `packages/cli/src/config.ts` -- ensure `mergeConfig()` propagates `agents`/`security`
 
 ## Dependencies
 
-- **Epic 16** (accounts/tenants table must exist for `account_id` FK)
-- **Epic 17** (JWT auth for API endpoints provides `accountId`)
+- **Epic 17** (tenants table must exist for `account_id` FK)
+- **Epic 18** (JWT auth for API endpoints provides `accountId`)
 
 ## Effort Estimate
 

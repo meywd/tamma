@@ -90,7 +90,7 @@ TS Engine                           Elsa Workflow
 - CREATE `packages/api/src/services/health-store.ts` -- Postgres-backed health service
 - CREATE `packages/api/src/services/health-store.test.ts`
 - MODIFY `packages/api/src/routes/settings/health-routes.ts` -- implement health endpoints
-- CREATE `database/migrations/NNNN_create_provider_health.sql`
+- CREATE `database/migrations/014_provider_health.sql` (migration 014 -- see `/docs/stories/migration-ordering.md`)
 - MODIFY `packages/providers/src/provider-health.ts` -- add optional persistence sync via `onCircuitChange`
 
 ## Dependencies

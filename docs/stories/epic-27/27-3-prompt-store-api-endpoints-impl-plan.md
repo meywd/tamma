@@ -2,7 +2,7 @@
 
 ## Overview
 
-Rewrite `packages/api/src/routes/prompts/prompt-routes.ts` to add account-scoped CRUD, system default management (admin-only), and backward-compatible unauthenticated access. Register `/api/prompts/system*` static routes before parametric `:role/:action` routes to avoid Fastify route conflicts.
+Rewrite `packages/api/src/routes/prompts/prompt-routes.ts` to add tenant-scoped CRUD, system default management (admin-only), and backward-compatible unauthenticated access. Register `/api/prompts/system*` static routes before parametric `:role/:action` routes to avoid Fastify route conflicts.
 
 ---
 
@@ -33,10 +33,10 @@ interface RenderBody {
   variables: Record<string, string>;
 }
 
-// Extend FastifyRequest to include account context (from auth middleware, Epic 16/17)
+// Extend FastifyRequest to include tenant context (from auth middleware, Epic 16/17)
 declare module 'fastify' {
   interface FastifyRequest {
-    accountId?: string;  // Set by auth middleware; undefined = unauthenticated
+    tenantId?: string;  // Set by auth middleware; undefined = unauthenticated
     userId?: string;     // Set by auth middleware
     userRole?: string;   // 'owner' | 'admin' | 'member' — set by auth middleware
   }
@@ -107,7 +107,7 @@ export async function registerPromptRoutes(
       return reply.send(restored);
     },
   );
-  // ... (account-scoped routes follow in Task 3)
+  // ... (tenant-scoped routes follow in Task 3)
 }
 ```
 
@@ -120,10 +120,10 @@ export async function registerPromptRoutes(
   // ACCOUNT-SCOPED ROUTES
   // =====================================================================
 
-  // GET /api/prompts — list resolved prompts for current account
+  // GET /api/prompts — list resolved prompts for current tenant
   app.get('/api/prompts', async (request, reply) => {
-    const accountId = request.accountId ?? null;
-    const summaries = await store.list(accountId);
+    const tenantId = request.tenantId ?? null;
+    const summaries = await store.list(tenantId);
     return reply.send({ templates: summaries, total: summaries.length });
   });
 
@@ -131,9 +131,9 @@ export async function registerPromptRoutes(
   app.get<{ Params: RoleActionParams }>(
     '/api/prompts/:role/:action',
     async (request, reply) => {
-      const accountId = request.accountId ?? null;
+      const tenantId = request.tenantId ?? null;
       const { role, action } = request.params;
-      const template = await store.get(accountId, role, action);
+      const template = await store.get(tenantId, role, action);
       if (template === undefined) {
         return reply.status(404).send({
           error: `Prompt not found for role="${role}", action="${action}"`,
@@ -143,14 +143,14 @@ export async function registerPromptRoutes(
     },
   );
 
-  // PUT /api/prompts/:role/:action — create/update account override
+  // PUT /api/prompts/:role/:action — create/update tenant override
   app.put<{ Params: RoleActionParams; Body: UpsertBody }>(
     '/api/prompts/:role/:action',
-    { preHandler: [requireAccountAdmin] },
+    { preHandler: [requireTenantAdmin] },
     async (request, reply) => {
-      const accountId = request.accountId;
-      if (!accountId) {
-        return reply.status(401).send({ error: 'Authentication required to create account overrides' });
+      const tenantId = request.tenantId;
+      if (!tenantId) {
+        return reply.status(401).send({ error: 'Authentication required to create tenant overrides' });
       }
       const { role, action } = request.params;
       const body = request.body as UpsertBody;
@@ -159,7 +159,7 @@ export async function registerPromptRoutes(
 
       try {
         const input = buildUpsertInput(body);
-        const updated = await store.upsert(accountId, role, action, input, request.userId);
+        const updated = await store.upsert(tenantId, role, action, input, request.userId);
         return reply.status(200).send(updated);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to update prompt';
@@ -168,32 +168,32 @@ export async function registerPromptRoutes(
     },
   );
 
-  // DELETE /api/prompts/:role/:action — delete account override
+  // DELETE /api/prompts/:role/:action — delete tenant override
   app.delete<{ Params: RoleActionParams }>(
     '/api/prompts/:role/:action',
-    { preHandler: [requireAccountAdmin] },
+    { preHandler: [requireTenantAdmin] },
     async (request, reply) => {
-      const accountId = request.accountId;
-      if (!accountId) {
+      const tenantId = request.tenantId;
+      if (!tenantId) {
         return reply.status(401).send({ error: 'Authentication required' });
       }
       const { role, action } = request.params;
-      const deleted = await store.delete(accountId, role, action, request.userId);
+      const deleted = await store.delete(tenantId, role, action, request.userId);
       if (!deleted) {
-        return reply.status(404).send({ error: 'No account override exists for this role+action' });
+        return reply.status(404).send({ error: 'No tenant override exists for this role+action' });
       }
       return reply.status(204).send();
     },
   );
 
-  // POST /api/prompts/:role/:action/render — render with account resolution
+  // POST /api/prompts/:role/:action/render — render with tenant resolution
   app.post<{ Params: RoleActionParams; Body: RenderBody }>(
     '/api/prompts/:role/:action/render',
     async (request, reply) => {
-      // Accept accountId from: auth session > X-Account-Id header > query param
-      const accountId = request.accountId
-        ?? (request.headers['x-account-id'] as string | undefined)
-        ?? (request.query as Record<string, string>)['accountId']
+      // Accept tenantId from: auth session > X-Tenant-Id header > query param
+      const tenantId = request.tenantId
+        ?? (request.headers['x-tenant-id'] as string | undefined)
+        ?? (request.query as Record<string, string>)['tenantId']
         ?? null;
 
       const { role, action } = request.params;
@@ -209,7 +209,7 @@ export async function registerPromptRoutes(
         }
       }
 
-      const result = await store.render(accountId, role, action, { variables: body.variables });
+      const result = await store.render(tenantId, role, action, { variables: body.variables });
       if (result === undefined) {
         return reply.status(404).send({ error: `Prompt not found for role="${role}", action="${action}"` });
       }
@@ -264,11 +264,11 @@ async function requirePlatformAdmin(request: FastifyRequest, reply: FastifyReply
   }
 }
 
-async function requireAccountAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+async function requireTenantAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   try {
     const decoded = await request.jwtVerify<{ role: string }>();
     if (decoded.role !== 'owner' && decoded.role !== 'admin') {
-      return reply.status(403).send({ error: 'Account admin access required' });
+      return reply.status(403).send({ error: 'Tenant admin access required' });
     }
   } catch {
     return reply.status(401).send({ error: 'Not authenticated' });
@@ -276,7 +276,7 @@ async function requireAccountAdmin(request: FastifyRequest, reply: FastifyReply)
 }
 ```
 
-**Note**: The `requirePlatformAdmin` and `requireAccountAdmin` hooks integrate with the JWT auth from Epic 16. If that middleware does not yet set `request.accountId`, a fallback extraction from the JWT payload or `X-Account-Id` header is used.
+**Note**: The `requirePlatformAdmin` and `requireTenantAdmin` hooks integrate with the JWT auth from Epic 16. If that middleware does not yet set `request.tenantId`, a fallback extraction from the JWT payload or `X-Tenant-Id` header is used.
 
 ---
 
@@ -314,7 +314,7 @@ await registerPromptRoutes(app, promptStore); // promptStore is now IPromptStore
       "variableCount": 6,
       "updatedAt": "2026-04-08T12:00:00.000Z",
       "source": "override",
-      "accountId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      "tenantId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     }
   ],
   "total": 80
@@ -382,7 +382,7 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 |---|------|----------|
 | 1 | `GET /api/prompts` — authenticated user | Returns merged list with source badges |
 | 2 | `GET /api/prompts` — unauthenticated | Returns system defaults only |
-| 3 | `GET /api/prompts/:role/:action` — with account override | Returns override |
+| 3 | `GET /api/prompts/:role/:action` — with tenant override | Returns override |
 | 4 | `GET /api/prompts/:role/:action` — no override | Returns system default |
 | 5 | `PUT /api/prompts/:role/:action` — valid body | Creates override, returns 200 |
 | 6 | `PUT /api/prompts/:role/:action` — invalid body | Returns 400 |
@@ -394,8 +394,8 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 | 12 | `PUT /api/prompts/system/:role/:action` — platform admin | Updates, returns 200 |
 | 13 | `PUT /api/prompts/system/:role/:action` — non-admin | Returns 403 |
 | 14 | `DELETE /api/prompts/system/:role/:action` — reset | Restores hardcoded default |
-| 15 | `POST /api/prompts/:role/:action/render` — with accountId | Account-scoped resolution |
-| 16 | `POST /api/prompts/:role/:action/render` — with X-Account-Id header | Elsa workflow path |
+| 15 | `POST /api/prompts/:role/:action/render` — with tenantId | Tenant-scoped resolution |
+| 16 | `POST /api/prompts/:role/:action/render` — with X-Tenant-Id header | Elsa workflow path |
 | 17 | Route priority: `/api/prompts/system` resolves before `:role` | "system" not treated as a role |
 
 ---
@@ -410,7 +410,7 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 
 | # | File Path | Change |
 |---|-----------|--------|
-| 1 | `packages/api/src/routes/prompts/prompt-routes.ts` | Complete rewrite with account-scoped + system routes |
+| 1 | `packages/api/src/routes/prompts/prompt-routes.ts` | Complete rewrite with tenant-scoped + system routes |
 | 2 | `packages/api/src/routes/prompts/prompt-routes.test.ts` | Complete rewrite with 17 test cases |
 | 3 | `packages/api/src/index.ts` | Update route registration to pass `IPromptStore` |
 
@@ -419,7 +419,7 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 ## Dependencies
 
 - **Story 27-2** (Prompt Store Service) — `IPromptStore` interface and `InMemoryPromptStore` must exist
-- **Epic 16** (Story 16.5: RBAC) — auth middleware for `request.accountId`, `request.userId`, `request.userRole`
+- **Epic 16** (Story 16.5: RBAC) — auth middleware for `request.tenantId`, `request.userId`, `request.userRole`
 
 ---
 
@@ -428,9 +428,9 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 | Risk | Mitigation |
 |------|------------|
 | Route conflict between `/api/prompts/system` and `/api/prompts/:role/:action` | Register system routes first; Fastify resolves static routes before parametric |
-| Auth middleware from Epic 16 may not yet set `request.accountId` | Add fallback extraction from JWT payload and `X-Account-Id` header |
-| Render endpoint used by Elsa (server-to-server) needs accountId without auth | Accept `X-Account-Id` header as fallback; validate UUID format |
-| Breaking change for existing unauthenticated callers | Unauthenticated requests default to `accountId = null`, resolving system defaults (same as before) |
+| Auth middleware from Epic 16 may not yet set `request.tenantId` | Add fallback extraction from JWT payload and `X-Tenant-Id` header |
+| Render endpoint used by Elsa (server-to-server) needs tenantId without auth | Accept `X-Tenant-Id` header as fallback; validate UUID format |
+| Breaking change for existing unauthenticated callers | Unauthenticated requests default to `tenantId = null`, resolving system defaults (same as before) |
 
 ---
 
@@ -440,7 +440,7 @@ Uses `InMemoryPromptStore` with seeded defaults. Tests auth by mocking JWT verif
 |------|-------|
 | Route types and schemas | 1 |
 | System default routes | 2 |
-| Account-scoped routes | 2.5 |
+| Tenant-scoped routes | 2.5 |
 | Validation and auth helpers | 1.5 |
 | Route registration wiring | 1 |
 | API contract documentation | 1 |

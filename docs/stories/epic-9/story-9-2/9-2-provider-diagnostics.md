@@ -105,14 +105,14 @@ TS Engine (in-process)              Elsa Workflow (C#)
 - CREATE `packages/api/src/services/diagnostics-store.test.ts`
 - MODIFY `packages/api/src/routes/settings/diagnostics-routes.ts` -- implement query/report/budget endpoints
 - CREATE `packages/api/src/routes/settings/diagnostics-ingest-routes.ts` -- POST endpoint for recording
-- CREATE `database/migrations/NNNN_create_provider_diagnostics.sql`
+- CREATE `database/migrations/013_provider_diagnostics.sql` (migration 013 -- see `/docs/stories/migration-ordering.md`)
 - MODIFY `packages/shared/src/telemetry/diagnostics-processor.ts` -- update to write to diagnostics service
 
 ## Dependencies
 
 - **Story 9-1** (account context for scoping)
-- **Epic 16** (tenants table)
-- **Epic 17** (JWT auth)
+- **Epic 17** (tenants table)
+- **Epic 18** (JWT auth)
 
 ## Effort Estimate
 

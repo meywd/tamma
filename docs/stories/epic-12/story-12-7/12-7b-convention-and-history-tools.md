@@ -108,3 +108,4 @@ LLM call results are recorded as events by `RecordDiagnosticsActivity` at `apps/
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-04-08 | 1.0 | Initial story creation | Architecture Team |
+| 2026-04-09 | 1.1 | Added note: convention templates may move to DB in a future story (see Epic 27 README) | Cross-epic review |

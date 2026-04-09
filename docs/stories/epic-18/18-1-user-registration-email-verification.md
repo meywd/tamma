@@ -27,7 +27,7 @@ so that I can create an account and start using the platform without admin inter
 
 - [ ] Task 1: Extend User model and persistence layer
   - [ ] Subtask 1.1: Add fields to `User` interface: `passwordHash: string | null`, `emailVerified: boolean`, `emailVerificationToken: string | null`, `emailVerificationExpiresAt: string | null`, `authMethod: 'email' | 'github' | 'both'`
-  - [ ] Subtask 1.2: Create database migration `20260401_add_user_auth_fields.sql` adding columns to `users` table
+  - [ ] Subtask 1.2: Create database migration `017_user_auth_fields.sql` adding columns to `users` table
   - [ ] Subtask 1.3: Add unique index on `email` column (case-insensitive using `LOWER(email)`)
   - [ ] Subtask 1.4: Update `IUserStore` interface with new methods: `createUserWithPassword()`, `getUserByEmail()`, `setEmailVerified()`, `updateVerificationToken()`
   - [ ] Subtask 1.5: Implement methods in `InMemoryUserStore` and `PgUserStore`
@@ -97,7 +97,7 @@ so that I can create an account and start using the platform without admin inter
 | `packages/api/src/services/email.ts` | Email service interface + nodemailer implementation |
 | `packages/api/src/services/email-templates/` | HTML/text email templates |
 | `packages/api/src/routes/auth/register.ts` | Registration + verification + resend endpoints |
-| `database/migrations/20260401_add_user_auth_fields.sql` | Migration for new user columns |
+| `database/migrations/017_user_auth_fields.sql` | Migration for new user columns |
 
 ### Dependencies (npm packages)
 
@@ -149,7 +149,7 @@ CREATE UNIQUE INDEX idx_users_email_lower ON users (LOWER(email)) WHERE email IS
 
 ## Dependencies
 
-- None (first story in Epic 18)
+- **Epic 17 Story 17-1** (Tenant Model): The `users` table must have the `tenant_id` column (nullable — see 17-1 update). New email-registered users are created with `tenant_id = NULL` until they join a tenant via Story 18-3.
 
 ## Estimated Effort
 

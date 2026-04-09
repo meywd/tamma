@@ -2,7 +2,7 @@
 
 ## Overview
 
-Replace the file-based `PromptStore` class with a PostgreSQL-backed `PgPromptStore` and an `InMemoryPromptStore` for testing. Both implement a new `IPromptStore` interface that adds `accountId` as the first parameter to all methods. The existing `PromptStore` class is retained for backward compatibility in CLI/standalone mode but the interface is extracted and exported.
+Replace the file-based `PromptStore` class with a PostgreSQL-backed `PgPromptStore` and an `InMemoryPromptStore` for testing. Both implement a new `IPromptStore` interface that adds `tenantId` as the first parameter to all methods. The existing `PromptStore` class is retained for backward compatibility in CLI/standalone mode but the interface is extracted and exported.
 
 ---
 
@@ -17,14 +17,14 @@ Replace the class-only export with an interface + class. Keep the existing `Prom
 ```typescript
 // packages/api/src/services/prompt-store.ts — additions at top of file
 
-/** Account-scoped prompt store interface. */
+/** Tenant-scoped prompt store interface. */
 export interface IPromptStore {
-  // --- Account-scoped operations ---
-  get(accountId: string | null, role: string, action: string): Promise<PromptTemplate | undefined>;
-  upsert(accountId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
-  delete(accountId: string, role: string, action: string, userId?: string): Promise<boolean>;
-  list(accountId: string | null): Promise<PromptSummary[]>;
-  render(accountId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined>;
+  // --- Tenant-scoped operations ---
+  get(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined>;
+  upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
+  delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean>;
+  list(tenantId: string | null): Promise<PromptSummary[]>;
+  render(tenantId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined>;
 
   // --- System default operations ---
   getSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined>;
@@ -33,8 +33,8 @@ export interface IPromptStore {
   listSystemDefaults(): Promise<PromptSummary[]>;
 
   // --- System prompts (role preambles) ---
-  getSystemPrompt(accountId: string | null, role: string): Promise<string | undefined>;
-  upsertSystemPrompt(accountId: string | null, role: string, prompt: string, userId?: string): Promise<void>;
+  getSystemPrompt(tenantId: string | null, role: string): Promise<string | undefined>;
+  upsertSystemPrompt(tenantId: string | null, role: string, prompt: string, userId?: string): Promise<void>;
 }
 ```
 
@@ -49,10 +49,10 @@ export interface PromptSummary {
   maxTokens: number;
   variableCount: number;
   updatedAt: string;
-  /** Whether this is an account override ('override') or system default ('system') */
+  /** Whether this is an tenant override ('override') or system default ('system') */
   source: 'system' | 'override';
-  /** The account_id if this is an override, null if system default */
-  accountId: string | null;
+  /** The tenant_id if this is an override, null if system default */
+  tenantId: string | null;
 }
 ```
 
@@ -136,7 +136,7 @@ export function interpolateTemplate(
 
 **File to create**: `packages/api/src/services/in-memory-prompt-store.ts`
 
-Port the existing in-memory logic with account awareness. Uses a `Map<string, PromptTemplate>` keyed by `"accountId|role:action"` (with `"null"` for system defaults).
+Port the existing in-memory logic with tenant awareness. Uses a `Map<string, PromptTemplate>` keyed by `"tenantId|role:action"` (with `"null"` for system defaults).
 
 ```typescript
 import type { PromptTemplate } from './default-prompts.js';
@@ -146,20 +146,20 @@ import { interpolateTemplate, extractVariables } from './prompt-interpolation.js
 
 export class InMemoryPromptStore implements IPromptStore {
   private readonly prompts: Map<string, PromptTemplate> = new Map();
-  private readonly systemPromptMap: Map<string, string> = new Map(); // "accountId|role" -> prompt text
+  private readonly systemPromptMap: Map<string, string> = new Map(); // "tenantId|role" -> prompt text
 
-  private _key(accountId: string | null, role: string, action: string): string {
-    return `${accountId ?? 'null'}|${role}:${action}`;
+  private _key(tenantId: string | null, role: string, action: string): string {
+    return `${tenantId ?? 'null'}|${role}:${action}`;
   }
 
-  private _systemPromptKey(accountId: string | null, role: string): string {
-    return `${accountId ?? 'null'}|${role}`;
+  private _systemPromptKey(tenantId: string | null, role: string): string {
+    return `${tenantId ?? 'null'}|${role}`;
   }
 
-  async get(accountId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
-    // 1. Try account override
-    if (accountId !== null) {
-      const override = this.prompts.get(this._key(accountId, role, action));
+  async get(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
+    // 1. Try tenant override
+    if (tenantId !== null) {
+      const override = this.prompts.get(this._key(tenantId, role, action));
       if (override !== undefined) return { ...override, variables: [...override.variables] };
     }
     // 2. Fall back to system default
@@ -168,8 +168,8 @@ export class InMemoryPromptStore implements IPromptStore {
     return undefined;
   }
 
-  async upsert(accountId: string | null, role: string, action: string, input: UpsertPromptInput, _userId?: string): Promise<PromptTemplate> {
-    const key = this._key(accountId, role, action);
+  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, _userId?: string): Promise<PromptTemplate> {
+    const key = this._key(tenantId, role, action);
     const existing = this.prompts.get(key);
     const ts = new Date().toISOString();
     const template: PromptTemplate = {
@@ -187,12 +187,12 @@ export class InMemoryPromptStore implements IPromptStore {
     return { ...template, variables: [...template.variables] };
   }
 
-  async delete(accountId: string, role: string, action: string, _userId?: string): Promise<boolean> {
-    return this.prompts.delete(this._key(accountId, role, action));
+  async delete(tenantId: string, role: string, action: string, _userId?: string): Promise<boolean> {
+    return this.prompts.delete(this._key(tenantId, role, action));
   }
 
-  async list(accountId: string | null): Promise<PromptSummary[]> {
-    // Collect system defaults, then overlay account overrides
+  async list(tenantId: string | null): Promise<PromptSummary[]> {
+    // Collect system defaults, then overlay tenant overrides
     const merged = new Map<string, PromptSummary>();
 
     // System defaults first
@@ -202,21 +202,21 @@ export class InMemoryPromptStore implements IPromptStore {
           role: t.role, action: t.action, version: t.version,
           enableTools: t.enableTools, maxTokens: t.maxTokens,
           variableCount: t.variables.length, updatedAt: t.updatedAt,
-          source: 'system', accountId: null,
+          source: 'system', tenantId: null,
         });
       }
     }
 
     // Account overrides (replace defaults)
-    if (accountId !== null) {
-      const prefix = `${accountId}|`;
+    if (tenantId !== null) {
+      const prefix = `${tenantId}|`;
       for (const [key, t] of this.prompts) {
         if (key.startsWith(prefix)) {
           merged.set(`${t.role}:${t.action}`, {
             role: t.role, action: t.action, version: t.version,
             enableTools: t.enableTools, maxTokens: t.maxTokens,
             variableCount: t.variables.length, updatedAt: t.updatedAt,
-            source: 'override', accountId,
+            source: 'override', tenantId,
           });
         }
       }
@@ -227,8 +227,8 @@ export class InMemoryPromptStore implements IPromptStore {
     return summaries;
   }
 
-  async render(accountId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined> {
-    const template = await this.get(accountId, role, action);
+  async render(tenantId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined> {
+    const template = await this.get(tenantId, role, action);
     if (template === undefined) return undefined;
 
     const unresolvedVariables: string[] = [];
@@ -243,7 +243,7 @@ export class InMemoryPromptStore implements IPromptStore {
     };
   }
 
-  // System default operations delegate to accountId=null
+  // System default operations delegate to tenantId=null
   async getSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined> {
     return this.get(null, role, action);
   }
@@ -267,15 +267,15 @@ export class InMemoryPromptStore implements IPromptStore {
   }
 
   // System prompt operations
-  async getSystemPrompt(accountId: string | null, role: string): Promise<string | undefined> {
-    if (accountId !== null) {
-      const override = this.systemPromptMap.get(this._systemPromptKey(accountId, role));
+  async getSystemPrompt(tenantId: string | null, role: string): Promise<string | undefined> {
+    if (tenantId !== null) {
+      const override = this.systemPromptMap.get(this._systemPromptKey(tenantId, role));
       if (override !== undefined) return override;
     }
     return this.systemPromptMap.get(this._systemPromptKey(null, role));
   }
-  async upsertSystemPrompt(accountId: string | null, role: string, prompt: string, _userId?: string): Promise<void> {
-    this.systemPromptMap.set(this._systemPromptKey(accountId, role), prompt);
+  async upsertSystemPrompt(tenantId: string | null, role: string, prompt: string, _userId?: string): Promise<void> {
+    this.systemPromptMap.set(this._systemPromptKey(tenantId, role), prompt);
   }
 
   /** Seed system defaults for testing */
@@ -314,35 +314,35 @@ export class PgPromptStore implements IPromptStore {
 
   // --- Key queries ---
 
-  async get(accountId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
-    // 1. Try account override
-    if (accountId !== null) {
+  async get(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
+    // 1. Try tenant override
+    if (tenantId !== null) {
       const override = await this.pool.query<Record<string, unknown>>(
-        `SELECT * FROM prompts WHERE account_id = $1 AND role = $2 AND action = $3`,
-        [accountId, role, action],
+        `SELECT * FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3`,
+        [tenantId, role, action],
       );
       if (override.rows.length > 0) return this._mapRow(override.rows[0]!);
     }
     // 2. Fall back to system default
     const system = await this.pool.query<Record<string, unknown>>(
-      `SELECT * FROM prompts WHERE account_id IS NULL AND role = $1 AND action = $2`,
+      `SELECT * FROM prompts WHERE tenant_id IS NULL AND role = $1 AND action = $2`,
       [role, action],
     );
     if (system.rows.length > 0) return this._mapRow(system.rows[0]!);
     return undefined;
   }
 
-  async upsert(accountId: string | null, role: string, action: string, input: UpsertPromptInput, _userId?: string): Promise<PromptTemplate> {
+  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, _userId?: string): Promise<PromptTemplate> {
     const variables = input.variables ?? extractVariables(input.template);
     const variablesJson = JSON.stringify(variables);
 
-    // Use different ON CONFLICT targets based on whether account_id is NULL
+    // Use different ON CONFLICT targets based on whether tenant_id is NULL
     let result: pg.QueryResult<Record<string, unknown>>;
-    if (accountId === null) {
+    if (tenantId === null) {
       result = await this.pool.query<Record<string, unknown>>(`
-        INSERT INTO prompts (account_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version, created_by, updated_by)
+        INSERT INTO prompts (tenant_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version, created_by, updated_by)
         VALUES (NULL, $1, $2, $3, COALESCE($4, ''), $5::jsonb, COALESCE($6, false), COALESCE($7, 4096), 1, $8, $8)
-        ON CONFLICT (role, action) WHERE account_id IS NULL
+        ON CONFLICT (role, action) WHERE tenant_id IS NULL
         DO UPDATE SET
           template = $3,
           system_prompt = COALESCE($4, prompts.system_prompt),
@@ -356,9 +356,9 @@ export class PgPromptStore implements IPromptStore {
       `, [role, action, input.template, input.systemPrompt, variablesJson, input.enableTools, input.maxTokens, _userId ?? null]);
     } else {
       result = await this.pool.query<Record<string, unknown>>(`
-        INSERT INTO prompts (account_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version, created_by, updated_by)
+        INSERT INTO prompts (tenant_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version, created_by, updated_by)
         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6::jsonb, COALESCE($7, false), COALESCE($8, 4096), 1, $9, $9)
-        ON CONFLICT (account_id, role, action) WHERE account_id IS NOT NULL
+        ON CONFLICT (tenant_id, role, action) WHERE tenant_id IS NOT NULL
         DO UPDATE SET
           template = $4,
           system_prompt = COALESCE($5, prompts.system_prompt),
@@ -369,34 +369,34 @@ export class PgPromptStore implements IPromptStore {
           updated_at = NOW(),
           updated_by = $9
         RETURNING *
-      `, [accountId, role, action, input.template, input.systemPrompt, variablesJson, input.enableTools, input.maxTokens, _userId ?? null]);
+      `, [tenantId, role, action, input.template, input.systemPrompt, variablesJson, input.enableTools, input.maxTokens, _userId ?? null]);
     }
 
     return this._mapRow(result.rows[0]!);
   }
 
-  async delete(accountId: string, role: string, action: string, _userId?: string): Promise<boolean> {
+  async delete(tenantId: string, role: string, action: string, _userId?: string): Promise<boolean> {
     const result = await this.pool.query(
-      `DELETE FROM prompts WHERE account_id = $1 AND role = $2 AND action = $3`,
-      [accountId, role, action],
+      `DELETE FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3`,
+      [tenantId, role, action],
     );
     return (result.rowCount ?? 0) > 0;
   }
 
-  async list(accountId: string | null): Promise<PromptSummary[]> {
+  async list(tenantId: string | null): Promise<PromptSummary[]> {
     let result: pg.QueryResult<Record<string, unknown>>;
-    if (accountId !== null) {
-      // Merged view: account overrides take precedence over system defaults
+    if (tenantId !== null) {
+      // Merged view: tenant overrides take precedence over system defaults
       result = await this.pool.query<Record<string, unknown>>(`
         SELECT DISTINCT ON (role, action) *
         FROM prompts
-        WHERE account_id IS NULL OR account_id = $1
+        WHERE tenant_id IS NULL OR tenant_id = $1
         ORDER BY role, action,
-          CASE WHEN account_id IS NOT NULL THEN 0 ELSE 1 END
-      `, [accountId]);
+          CASE WHEN tenant_id IS NOT NULL THEN 0 ELSE 1 END
+      `, [tenantId]);
     } else {
       result = await this.pool.query<Record<string, unknown>>(`
-        SELECT * FROM prompts WHERE account_id IS NULL ORDER BY role, action
+        SELECT * FROM prompts WHERE tenant_id IS NULL ORDER BY role, action
       `);
     }
 
@@ -408,13 +408,13 @@ export class PgPromptStore implements IPromptStore {
       maxTokens: Number(row['max_tokens']),
       variableCount: Array.isArray(row['variables']) ? (row['variables'] as unknown[]).length : 0,
       updatedAt: String(row['updated_at']),
-      source: (row['account_id'] !== null ? 'override' : 'system') as 'system' | 'override',
-      accountId: row['account_id'] !== null ? String(row['account_id']) : null,
+      source: (row['tenant_id'] !== null ? 'override' : 'system') as 'system' | 'override',
+      tenantId: row['tenant_id'] !== null ? String(row['tenant_id']) : null,
     }));
   }
 
-  async render(accountId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined> {
-    const template = await this.get(accountId, role, action);
+  async render(tenantId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined> {
+    const template = await this.get(tenantId, role, action);
     if (template === undefined) return undefined;
 
     const unresolvedVariables: string[] = [];
@@ -456,33 +456,33 @@ export class PgPromptStore implements IPromptStore {
   }
 
   // --- System prompts (role preambles) ---
-  async getSystemPrompt(accountId: string | null, role: string): Promise<string | undefined> {
-    if (accountId !== null) {
+  async getSystemPrompt(tenantId: string | null, role: string): Promise<string | undefined> {
+    if (tenantId !== null) {
       const override = await this.pool.query<Record<string, unknown>>(
-        `SELECT prompt FROM system_prompts WHERE account_id = $1 AND role = $2`, [accountId, role]);
+        `SELECT prompt FROM system_prompts WHERE tenant_id = $1 AND role = $2`, [tenantId, role]);
       if (override.rows.length > 0) return String(override.rows[0]!['prompt']);
     }
     const system = await this.pool.query<Record<string, unknown>>(
-      `SELECT prompt FROM system_prompts WHERE account_id IS NULL AND role = $1`, [role]);
+      `SELECT prompt FROM system_prompts WHERE tenant_id IS NULL AND role = $1`, [role]);
     if (system.rows.length > 0) return String(system.rows[0]!['prompt']);
     return undefined;
   }
 
-  async upsertSystemPrompt(accountId: string | null, role: string, prompt: string, userId?: string): Promise<void> {
-    if (accountId === null) {
+  async upsertSystemPrompt(tenantId: string | null, role: string, prompt: string, userId?: string): Promise<void> {
+    if (tenantId === null) {
       await this.pool.query(`
-        INSERT INTO system_prompts (account_id, role, prompt, created_by, updated_by)
+        INSERT INTO system_prompts (tenant_id, role, prompt, created_by, updated_by)
         VALUES (NULL, $1, $2, $3, $3)
-        ON CONFLICT (role) WHERE account_id IS NULL
+        ON CONFLICT (role) WHERE tenant_id IS NULL
         DO UPDATE SET prompt = $2, version = system_prompts.version + 1, updated_at = NOW(), updated_by = $3
       `, [role, prompt, userId ?? null]);
     } else {
       await this.pool.query(`
-        INSERT INTO system_prompts (account_id, role, prompt, created_by, updated_by)
+        INSERT INTO system_prompts (tenant_id, role, prompt, created_by, updated_by)
         VALUES ($1, $2, $3, $4, $4)
-        ON CONFLICT (account_id, role) WHERE account_id IS NOT NULL
+        ON CONFLICT (tenant_id, role) WHERE tenant_id IS NOT NULL
         DO UPDATE SET prompt = $3, version = system_prompts.version + 1, updated_at = NOW(), updated_by = $4
-      `, [accountId, role, prompt, userId ?? null]);
+      `, [tenantId, role, prompt, userId ?? null]);
     }
   }
 
@@ -529,28 +529,28 @@ if (pool) {
 
 **File to modify**: `packages/api/src/services/prompt-store.test.ts`
 
-Replace/augment existing tests to cover `InMemoryPromptStore` with account awareness.
+Replace/augment existing tests to cover `InMemoryPromptStore` with tenant awareness.
 
 Key test cases (from story acceptance criteria):
 
 | # | Test | Assertion |
 |---|------|-----------|
 | 1 | `get(null, role, action)` returns system default | Template matches seeded default |
-| 2 | `get(accountId, role, action)` returns account override | Override template returned |
-| 3 | `get(accountId, role, action)` falls back to system default | When no override exists, default returned |
-| 4 | `upsert(accountId, role, action, input)` creates new override | Version = 1, role/action match |
-| 5 | `upsert(accountId, role, action, input)` bumps version | Version increments |
-| 6 | `delete(accountId, role, action)` removes override | Subsequent get returns system default |
-| 7 | `delete(accountId, role, action)` returns false for missing | No error, returns false |
+| 2 | `get(tenantId, role, action)` returns tenant override | Override template returned |
+| 3 | `get(tenantId, role, action)` falls back to system default | When no override exists, default returned |
+| 4 | `upsert(tenantId, role, action, input)` creates new override | Version = 1, role/action match |
+| 5 | `upsert(tenantId, role, action, input)` bumps version | Version increments |
+| 6 | `delete(tenantId, role, action)` removes override | Subsequent get returns system default |
+| 7 | `delete(tenantId, role, action)` returns false for missing | No error, returns false |
 | 8 | `list(null)` returns all system defaults | All 80 defaults if seeded |
-| 9 | `list(accountId)` returns merged view | Override wins, defaults fill gaps |
+| 9 | `list(tenantId)` returns merged view | Override wins, defaults fill gaps |
 | 10 | `render()` interpolates variables | Correct substitution |
 | 11 | `render()` tracks unresolved variables | Listed in result |
 | 12 | `render()` truncates at 1 MB | Output capped |
 | 13 | Template injection safety | `{{secret}}` in value not re-expanded |
 | 14 | `resetSystemDefault()` restores hardcoded | Matches `getDefaultPrompts()` |
 | 15 | `getSystemPrompt(null, role)` returns role preamble | Correct string |
-| 16 | `getSystemPrompt(accountId, role)` returns override | Account override wins |
+| 16 | `getSystemPrompt(tenantId, role)` returns override | Account override wins |
 
 ---
 
@@ -563,7 +563,7 @@ Requires a test PostgreSQL database (set via `DATABASE_URL_TEST`).
 | # | Test | Assertion |
 |---|------|-----------|
 | 17 | Full CRUD against Postgres | Create, read, update, delete cycle |
-| 18 | `list(accountId)` merged results | Override + defaults correctly merged |
+| 18 | `list(tenantId)` merged results | Override + defaults correctly merged |
 | 19 | Concurrent `upsert()` calls | No duplicates (atomic UPSERT) |
 | 20 | `delete()` on non-existent row | Returns false, no error |
 | 21 | `render()` end-to-end | Postgres-backed resolution + interpolation |
@@ -583,7 +583,7 @@ Requires a test PostgreSQL database (set via `DATABASE_URL_TEST`).
 
 | # | File Path | Change |
 |---|-----------|--------|
-| 1 | `packages/api/src/services/prompt-store.ts` | Export `IPromptStore` interface; extend `PromptSummary` with `source` and `accountId` |
+| 1 | `packages/api/src/services/prompt-store.ts` | Export `IPromptStore` interface; extend `PromptSummary` with `source` and `tenantId` |
 | 2 | `packages/api/src/services/prompt-store.test.ts` | Update/augment tests for `InMemoryPromptStore` |
 | 3 | `packages/api/src/index.ts` (or equivalent) | Wire `PgPromptStore` when pool available |
 
@@ -602,8 +602,8 @@ Requires a test PostgreSQL database (set via `DATABASE_URL_TEST`).
 | Risk | Mitigation |
 |------|------------|
 | `DISTINCT ON` is PostgreSQL-specific | Tamma targets PostgreSQL exclusively; document this in code comments |
-| ON CONFLICT with partial indexes may need specific syntax | Use `ON CONFLICT (role, action) WHERE account_id IS NULL` — verified this works with PostgreSQL partial unique indexes |
-| Backward compatibility: callers using `store.get(role, action)` without accountId | The existing `PromptStore` class is kept for CLI mode; route handlers updated in Story 27-3 to pass accountId |
+| ON CONFLICT with partial indexes may need specific syntax | Use `ON CONFLICT (role, action) WHERE tenant_id IS NULL` — verified this works with PostgreSQL partial unique indexes |
+| Backward compatibility: callers using `store.get(role, action)` without tenantId | The existing `PromptStore` class is kept for CLI mode; route handlers updated in Story 27-3 to pass tenantId |
 | Large template text in `_mapRow` could consume memory | Template text is bounded at 500KB by validation in the API layer (Story 27-3) |
 
 ---

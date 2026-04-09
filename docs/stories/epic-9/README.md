@@ -60,12 +60,13 @@ The following in-process classes already exist in `packages/providers/src/` and 
 | 9-9 | [Engine Integration](story-9-9/9-9-engine-integration.md) | orchestrator | P0 | Planned |
 | 9-10 | [CLI Wiring](story-9-10/9-10-cli-wiring.md) | cli | P0 | Planned |
 | 9-11 | [Diagnostics Queue + Elsa Integration](story-9-11/9-11-diagnostics-queue-mcp-interceptors.md) | shared, api, tamma-elsa | P0 | Planned |
+| 9-12 | [Cross-Epic Integration Test](story-9-12/9-12-cross-epic-integration-test.md) | api | P1 | Planned |
 
 ## Dependency Graph
 
 ```
-Epic 16 (accounts/tenants) ──────────────────────────────────────────┐
-Epic 17 (multi-tenant auth) ──────────────────────────────────────── │
+Epic 17 (tenants) ──────────────────────────────────────────────────┐
+Epic 18 (multi-tenant auth) ──────────────────────────────────────── │
 Epic 27 (prompt store) ────────────── supersedes Story 9-6          │
                                                                      │
 Story 9-1 (config schema + API)  ────────────────────────────────── │─┐
@@ -93,8 +94,8 @@ Story 9-5 (chain API) ← needs 2,3,4     │        │                 ↓
 
 | Dependency | Direction | Notes |
 |-----------|-----------|-------|
-| Epic 16 (Accounts) | 9 depends on 16 | Account IDs for per-account config storage |
-| Epic 17 (Multi-tenant Auth) | 9 depends on 17 | JWT/session auth for API endpoints |
+| Epic 17 (Tenants) | 9 depends on 17 | Account/tenant IDs for per-account config storage |
+| Epic 18 (Multi-tenant Auth) | 9 depends on 18 | JWT/session auth for API endpoints |
 | Epic 27 (Prompt Store) | 27 supersedes 9-6 | Prompt resolution moved to Postgres-backed store with provider dimension |
 
 ## API Endpoints Summary
@@ -135,10 +136,34 @@ All endpoints are prefixed with `/api/v1/` and scoped to `accountId` from the JW
 | 9-8 Unified Agent Resolver API | 18 hours |
 | 9-9 Engine Integration | 14 hours |
 | 9-10 CLI Wiring | 12 hours |
-| 9-11 Diagnostics Queue + Elsa Integration | 20 hours |
-| **Total** | **156 hours** |
+| 9-11 Diagnostics Queue + Elsa Integration | 32 hours (revised from 20h -- 5 C# activities + TS wiring) |
+| 9-12 Cross-Epic Integration Test | 17 hours |
+| **Total** | **185 hours** |
+
+## Cross-Cutting Requirements
+
+### Rate Limiting
+
+All new API endpoints introduced by Epic 9 stories **must include rate limiting**. This is not a separate story -- it is a requirement on every story that adds an API route. Recommended defaults:
+
+- Read endpoints (`GET`): 100 requests/minute per account
+- Write endpoints (`POST`, `PUT`, `DELETE`): 30 requests/minute per account
+- Diagnostics recording (`POST /api/v1/diagnostics`): 300 requests/minute per account (high-frequency from Elsa)
+- Health check endpoints: 60 requests/minute per account
+
+Implementation: Use Fastify's `@fastify/rate-limit` plugin, configured per-route. Rate limit state stored in-memory (CLI mode) or Redis (SaaS mode).
+
+### OpenAPI / JSON Schema Definitions
+
+All new API endpoints **must have OpenAPI/JSON Schema definitions** for request/response bodies. These schemas serve as:
+
+1. Input validation (Fastify's built-in schema validation)
+2. TypeScript type generation for the API client
+3. C# client code generation for Elsa activities (via NSwag or similar)
+
+Each story's API routes must export their schemas so that a unified OpenAPI spec can be generated.
 
 ---
 
-**Last Updated**: 2026-04-08
+**Last Updated**: 2026-04-09
 **Epic Owner**: Platform Engineering

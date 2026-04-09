@@ -162,10 +162,14 @@ export function createDiagnosticsProcessor(
 
 ## Effort Estimate
 
-**20 hours**
+**32 hours** (revised from 20 hours -- 5 C# activities + TS wiring is more complex than initially estimated)
 
 - 4h: Update DiagnosticsProcessor to write to persistent store
-- 6h: Simplify C# activities to thin API callers (5 activities)
-- 3h: Create shared TammaApiClient for C# HTTP calls
-- 3h: Backward compatibility fallback logic
-- 4h: Tests (TS processor, C# integration, fallback behavior)
+- 10h: Simplify C# activities to thin API callers (5 activities x 2h each -- includes error handling, retry logic, and response mapping)
+- 4h: Create shared TammaApiClient for C# HTTP calls (including auth header forwarding, timeout config, logging)
+- 4h: Backward compatibility fallback logic (each activity needs local fallback when API unreachable)
+- 4h: TS processor tests + C# unit tests
+- 4h: Integration tests (end-to-end Elsa workflow -> API -> Postgres)
+- 2h: Documentation and deployment configuration
+
+> **Note**: Revised from 20h to 32h. The additional 12h accounts for: (1) each of the 5 C# activities needs careful error handling and backward compatibility, (2) TammaApiClient needs auth forwarding and proper timeout/retry configuration, and (3) end-to-end integration tests require both Elsa and the Fastify API running.

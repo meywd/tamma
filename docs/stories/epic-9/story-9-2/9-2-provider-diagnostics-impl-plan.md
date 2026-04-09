@@ -10,7 +10,7 @@ Replace the in-memory `DiagnosticsService` (capped at 500 events) with a Postgre
 
 ### Task 1: Create the Migration SQL File (2 hours)
 
-**File to create**: `database/migrations/009_provider_diagnostics.sql`
+**File to create**: `database/migrations/013_provider_diagnostics.sql`
 
 ```sql
 -- Provider diagnostics: per-call LLM/tool metrics
@@ -376,7 +376,7 @@ export interface SettingsServices {
 
 | # | File Path | Purpose |
 |---|-----------|---------|
-| 1 | `database/migrations/009_provider_diagnostics.sql` | DDL + indexes |
+| 1 | `database/migrations/013_provider_diagnostics.sql` | DDL + indexes |
 | 2 | `packages/api/src/services/diagnostics-store.ts` | Interface + types |
 | 3 | `packages/api/src/services/pg-diagnostics-store.ts` | Postgres implementation |
 | 4 | `packages/api/src/services/diagnostics-store.test.ts` | Service tests |
@@ -395,8 +395,8 @@ export interface SettingsServices {
 ## Dependencies
 
 - **Story 9-1** (account context for scoping; config store for budget limit)
-- **Epic 16** (tenants table for account_id FK -- deferred)
-- **Epic 17** (JWT auth for API endpoints)
+- **Epic 17** (tenants table for account_id FK -- deferred)
+- **Epic 18** (JWT auth for API endpoints)
 
 ## Migration from Existing Code
 
