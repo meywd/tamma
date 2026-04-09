@@ -15,6 +15,8 @@
 
 **Why Now**: The current `PromptStore` is an in-memory Map backed by a single JSON file. It has no concept of accounts, no database persistence, and no multi-tenant isolation. As Tamma moves to SaaS with multiple GitHub App installations (Epic 17), prompts must be scoped to accounts so that one customer's customizations do not affect another.
 
+**Supersedes Epic 9 Story 9-6**: This epic absorbs the original Epic 9 Story 9-6 (Agent Prompt Registry). The original story defined an in-process `AgentPromptRegistry` class with a 6-level resolution chain and `{{variable}}` template interpolation. Epic 27 subsumes that functionality with Postgres-backed storage, multi-tenant isolation, and a provider dimension on prompt resolution. The existing `AgentPromptRegistry` class at `packages/providers/src/agent-prompt-registry.ts` will be updated to delegate to the Prompt Store API (Story 27-2/27-3) instead of resolving from in-memory config. Epic 9 Story 9-8 (Unified Agent Resolver) depends on Epic 27 for prompt resolution.
+
 ## Architecture
 
 ### Data Model
@@ -97,6 +99,17 @@ Return 404
 | `prompts` | Role+action templates with full template body | 80 system defaults (8 roles x 10 actions) |
 | `system_prompts` | Role identity preambles (system prompt per role) | 8 system defaults |
 | `action_prompts` | Action-level default templates (no role specificity) | 10 system defaults |
+
+### Provider Dimension
+
+The `prompts` table supports a **provider dimension** inherited from the original Epic 9 Story 9-6 resolution chain. When resolving a prompt for `(accountId, role, action)`, the resolution can also consider the target provider (e.g., Anthropic prompts may differ from OpenAI prompts). This is implemented by allowing an optional `provider` column on the `prompts` table (NULL = provider-agnostic), with the resolution logic:
+
+1. Account override for (role, action, provider)
+2. Account override for (role, action) -- provider-agnostic
+3. System default for (role, action, provider)
+4. System default for (role, action) -- provider-agnostic
+
+This enables per-provider prompt tuning while maintaining backward compatibility with provider-agnostic prompts.
 
 ### Relationship to Existing Code
 
