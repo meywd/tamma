@@ -2132,6 +2132,145 @@ So that I can deploy the full platform without cloning the repository.
 
 ---
 
+## Epic 27: Prompt Store — Multi-Tenant Prompt Management
+
+**Goal:** Replace the file-based, single-tenant `PromptStore` with a PostgreSQL-backed, multi-tenant prompt management system that supports system defaults, account-level overrides, admin/account UIs, Elsa workflow integration, and full DCB event audit trail.
+
+**Value Delivered:** Multi-tenant prompt isolation, two-tier resolution (account override then system default), platform admin control over 80+ system default templates, account admin self-service for customization, full audit trail via DCB events, Elsa workflow per-account prompt resolution.
+
+**Estimated Stories:** 7 stories
+
+**Detailed Story Documentation:** See `docs/stories/epic-27/README.md`
+
+---
+
+### **Story 27-1: Prompt Store Database Schema + Migration**
+
+As a **platform engineer**,
+I want PostgreSQL tables for storing prompt templates, system prompts, and action prompts with multi-tenant support,
+So that prompts are persisted in the database with account-level isolation and two-tier fallback resolution.
+
+**Acceptance Criteria:**
+
+1. `prompts`, `system_prompts`, and `action_prompts` tables created with correct columns, types, and constraints
+2. Partial unique indexes handle NULL `account_id` correctly for system defaults
+3. Seed migration inserts 80 role+action templates, 8 system prompts, 10 action defaults from `default-prompts.ts`
+4. All seed inserts use `ON CONFLICT DO NOTHING` for idempotency
+5. B-tree indexes on lookup columns (`account_id`, `role`, `action`)
+
+**Prerequisites:** Epic 17 (Story 17-1: tenants table must exist for FK references)
+
+---
+
+### **Story 27-2: Prompt Store Service (TypeScript)**
+
+As a **backend developer**,
+I want a PostgreSQL-backed `PromptStore` class that resolves prompts using account-level overrides with system default fallback,
+So that each account gets its own prompt configuration while inheriting sensible defaults.
+
+**Acceptance Criteria:**
+
+1. `IPromptStore` interface defined with account-scoped methods: `get`, `upsert`, `delete`, `list`, `render`
+2. `PgPromptStore` implementation resolves account override then system default
+3. `InMemoryPromptStore` implementation for testing
+4. `resetSystemDefault()` restores hardcoded defaults from `default-prompts.ts`
+5. Backward compatible: existing callers without accountId resolve system defaults
+
+**Prerequisites:** Story 27-1
+
+---
+
+### **Story 27-3: Prompt Store API Endpoints**
+
+As an **API consumer**,
+I want REST API endpoints for prompt CRUD with account-scoped resolution and platform admin access to system defaults,
+So that prompts can be managed programmatically with proper authorization.
+
+**Acceptance Criteria:**
+
+1. Account-scoped routes: `GET/PUT/DELETE /api/prompts/:role/:action`, `GET /api/prompts`
+2. System default routes: `GET/PUT/DELETE /api/prompts/system/:role/:action`, `GET /api/prompts/system`
+3. Render endpoint: `POST /api/prompts/:role/:action/render` (account-aware)
+4. Platform admin required for system default mutations; account admin for account overrides
+5. Request body validation on all mutating endpoints
+
+**Prerequisites:** Story 27-2
+
+---
+
+### **Story 27-4: Prompt Store Admin UI**
+
+As a **platform administrator**,
+I want an admin panel page for managing system default prompts,
+So that I can view, edit, and reset the 80+ templates that ship with Tamma.
+
+**Acceptance Criteria:**
+
+1. Table of all system default prompts with role/action filtering and search
+2. Edit dialog with template editor, variable list, system prompt, tools toggle, max tokens
+3. Reset to hardcoded default button
+4. Convention template preview and copy
+5. Platform admin role required
+
+**Prerequisites:** Story 27-3, Epic 16 (Story 16.3: Admin Dashboard)
+
+---
+
+### **Story 27-5: Prompt Store Account UI**
+
+As an **account administrator**,
+I want a page to manage my organization's prompt overrides,
+So that I can customize how Tamma's AI agents behave for my team.
+
+**Acceptance Criteria:**
+
+1. Shows resolved prompts with account overrides visually highlighted
+2. Override any prompt — saves to account bucket
+3. Delete override — falls back to system default
+4. Convention template selector for quick setup
+5. Preview/test prompt rendering with sample variables
+6. Override count indicator
+
+**Prerequisites:** Story 27-3, Epic 16 (Story 16.1: OAuth, Story 16.5: RBAC)
+
+---
+
+### **Story 27-6: Elsa Workflow Integration**
+
+As a **workflow engine developer**,
+I want Elsa workflows to resolve prompts per-account from the PostgreSQL prompt store,
+So that different organizations get their own customized prompt templates.
+
+**Acceptance Criteria:**
+
+1. `ResolvePromptFromRegistryActivity` accepts `AccountId` input and passes it to the render API
+2. `LlmCallWorkflow` propagates `accountId` to prompt resolution
+3. `SingleIssueCycleWorkflow` propagates `accountId` to all sub-workflow dispatches
+4. Installation context maps `installation_id` to `tenant_id` to `accountId`
+5. Backward compatible when accountId is not provided
+
+**Prerequisites:** Story 27-2, Story 27-3, Epic 17 (Story 17-1: Tenant Model)
+
+---
+
+### **Story 27-7: Prompt Store Event Sourcing**
+
+As a **compliance officer / platform operator**,
+I want all prompt changes to emit DCB events with full audit metadata,
+So that I can trace who changed which prompts, when, and why.
+
+**Acceptance Criteria:**
+
+1. Events emitted: `PROMPT.CREATED.SUCCESS`, `PROMPT.UPDATED.SUCCESS`, `PROMPT.DELETED.SUCCESS`, `PROMPT.RESET.SUCCESS`
+2. Tags include: `accountId`, `role`, `action`, `userId`
+3. Data includes: version numbers, changed fields (diff summary)
+4. Best-effort emission (does not block prompt mutations)
+5. Events queryable via existing event store API
+
+**Prerequisites:** Story 27-2, Epic 4 (Event Sourcing)
+
+---
+
 ## Story Guidelines Reference
 
 **Story Format:**
