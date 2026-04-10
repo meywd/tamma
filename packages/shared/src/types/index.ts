@@ -18,6 +18,9 @@ export * from './agent-config.js';
 // Re-export security configuration types
 export * from './security-config.js';
 
+// Re-export tenant types
+export * from './tenant.js';
+
 // Re-export layered config types
 export type { IProvidersConfig, IProviderDefinition } from './providers-config.js';
 export type { IRepoConfig, IRepoRoleConfig } from './repo-config.js';

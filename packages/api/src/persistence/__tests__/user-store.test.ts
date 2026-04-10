@@ -206,4 +206,50 @@ describe('InMemoryUserStore', () => {
       expect(await store.getUserInstallations('nonexistent')).toEqual([]);
     });
   });
+
+  // -----------------------------------------------------------------------
+  // tenantId
+  // -----------------------------------------------------------------------
+
+  describe('tenantId', () => {
+    it('defaults to null when not provided', async () => {
+      const user = await store.upsertUser({
+        githubId: 2001,
+        githubLogin: 'no-tenant',
+        email: null,
+        role: 'member',
+      });
+
+      expect(user.tenantId).toBeNull();
+    });
+
+    it('stores and returns tenantId when provided', async () => {
+      const tenantId = '11111111-1111-1111-1111-111111111111';
+      const user = await store.upsertUser({
+        githubId: 2002,
+        githubLogin: 'has-tenant',
+        email: null,
+        role: 'member',
+        tenantId,
+      });
+
+      expect(user.tenantId).toBe(tenantId);
+
+      const found = await store.getUser(user.id);
+      expect(found).not.toBeNull();
+      expect(found!.tenantId).toBe(tenantId);
+    });
+
+    it('stores null tenantId explicitly', async () => {
+      const user = await store.upsertUser({
+        githubId: 2003,
+        githubLogin: 'explicit-null',
+        email: null,
+        role: 'member',
+        tenantId: null,
+      });
+
+      expect(user.tenantId).toBeNull();
+    });
+  });
 });

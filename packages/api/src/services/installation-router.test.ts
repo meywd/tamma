@@ -20,6 +20,10 @@ function createInstallation(overrides?: Partial<GitHubInstallation>): Omit<GitHu
     appId: 42,
     permissions: { issues: 'write', pull_requests: 'write' },
     suspendedAt: null,
+    apiKeyHash: null,
+    apiKeyPrefix: null,
+    apiKeyEncrypted: null,
+    tenantId: '00000000-0000-0000-0000-000000000000',
     ...overrides,
   };
 }

@@ -10,6 +10,7 @@ import type pg from 'pg';
 /** A user invitation record. */
 export interface UserInvite {
   id: string;
+  tenantId: string;
   email: string | null;
   role: 'owner' | 'admin' | 'member';
   inviteToken: string;
@@ -26,6 +27,7 @@ export interface CreateInviteInput {
   inviteToken: string;
   invitedBy: string;
   expiresAt: string;
+  tenantId?: string;
 }
 
 /** Interface for invite persistence. */
@@ -56,6 +58,7 @@ export class InMemoryInviteStore implements IInviteStore {
     const now = new Date().toISOString();
     const invite: UserInvite = {
       id,
+      tenantId: input.tenantId ?? '00000000-0000-0000-0000-000000000000',
       email: input.email,
       role: input.role,
       inviteToken: input.inviteToken,
@@ -103,11 +106,12 @@ export class PgInviteStore implements IInviteStore {
   constructor(private readonly pool: pg.Pool) {}
 
   async createInvite(input: CreateInviteInput): Promise<UserInvite> {
+    const tenantId = input.tenantId ?? '00000000-0000-0000-0000-000000000000';
     const result = await this.pool.query<Record<string, unknown>>(
-      `INSERT INTO user_invites (email, role, invite_token, invited_by, expires_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO user_invites (email, role, invite_token, invited_by, expires_at, tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [input.email, input.role, input.inviteToken, input.invitedBy, input.expiresAt],
+      [input.email, input.role, input.inviteToken, input.invitedBy, input.expiresAt, tenantId],
     );
     return this.mapInvite(result.rows[0]!);
   }
@@ -151,6 +155,7 @@ export class PgInviteStore implements IInviteStore {
   private mapInvite(row: Record<string, unknown>): UserInvite {
     return {
       id: String(row['id']),
+      tenantId: String(row['tenant_id'] ?? '00000000-0000-0000-0000-000000000000'),
       email: row['email'] !== null && row['email'] !== undefined ? String(row['email']) : null,
       role: String(row['role']) as 'owner' | 'admin' | 'member',
       inviteToken: String(row['invite_token']),

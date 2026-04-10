@@ -7,6 +7,7 @@ export interface User {
   githubLogin: string;
   email: string | null;
   role: 'owner' | 'admin' | 'member';
+  tenantId: string | null;
   settings: IProvidersConfig;
   createdAt: string;
   updatedAt: string;
@@ -20,8 +21,11 @@ export interface UserInstallation {
   createdAt: string;
 }
 
-/** Input type for upsertUser — settings is optional (defaults to empty). */
-export type UpsertUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'settings'> & { settings?: IProvidersConfig };
+/** Input type for upsertUser — settings and tenantId are optional. */
+export type UpsertUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'settings' | 'tenantId'> & {
+  settings?: IProvidersConfig;
+  tenantId?: string | null;
+};
 
 /** Options for listing users with pagination. */
 export interface ListUsersOptions {
@@ -85,6 +89,7 @@ export class InMemoryUserStore implements IUserStore {
     const id = String(this.nextId++);
     const newUser: User = {
       ...user,
+      tenantId: user.tenantId ?? null,
       settings: user.settings ?? structuredClone(DEFAULT_SETTINGS),
       id,
       createdAt: now,

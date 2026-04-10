@@ -11,6 +11,7 @@ import type pg from 'pg';
 export interface UserApiKey {
   id: string;
   userId: string;
+  tenantId: string;
   keyPrefix: string;
   label: string;
   lastUsedAt: string | null;
@@ -24,6 +25,7 @@ export interface CreateApiKeyInput {
   keyHash: string;
   keyPrefix: string;
   label: string;
+  tenantId?: string;
 }
 
 /** Interface for user API key persistence. */
@@ -58,6 +60,7 @@ export class InMemoryUserApiKeyStore implements IUserApiKeyStore {
     const record = {
       id,
       userId: input.userId,
+      tenantId: input.tenantId ?? '00000000-0000-0000-0000-000000000000',
       keyHash: input.keyHash,
       keyPrefix: input.keyPrefix,
       label: input.label,
@@ -116,11 +119,12 @@ export class PgUserApiKeyStore implements IUserApiKeyStore {
   constructor(private readonly pool: pg.Pool) {}
 
   async createApiKey(input: CreateApiKeyInput): Promise<UserApiKey> {
+    const tenantId = input.tenantId ?? '00000000-0000-0000-0000-000000000000';
     const result = await this.pool.query<Record<string, unknown>>(
-      `INSERT INTO user_api_keys (user_id, key_hash, key_prefix, label)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO user_api_keys (user_id, key_hash, key_prefix, label, tenant_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [input.userId, input.keyHash, input.keyPrefix, input.label],
+      [input.userId, input.keyHash, input.keyPrefix, input.label, tenantId],
     );
     return this.mapKey(result.rows[0]!);
   }
@@ -174,6 +178,7 @@ export class PgUserApiKeyStore implements IUserApiKeyStore {
     return {
       id: String(row['id']),
       userId: String(row['user_id']),
+      tenantId: String(row['tenant_id'] ?? '00000000-0000-0000-0000-000000000000'),
       keyPrefix: String(row['key_prefix']),
       label: String(row['label']),
       lastUsedAt: row['last_used_at'] !== null && row['last_used_at'] !== undefined

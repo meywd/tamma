@@ -33,7 +33,7 @@ import type { GitHubWebhookOptions } from './routes/github/github-webhook.js';
 import { registerSaaSRoutes } from './routes/saas/index.js';
 import type { SaaSRouteOptions } from './routes/saas/index.js';
 import { InMemoryInstallationStore } from './persistence/installation-store.js';
-import type { IGitHubInstallationStore, GitHubInstallation, GitHubInstallationRepo } from './persistence/installation-store.js';
+import type { IGitHubInstallationStore, GitHubInstallation, GitHubInstallationRepo, UpsertInstallationInput } from './persistence/installation-store.js';
 import { PgInstallationStore } from './persistence/pg-installation-store.js';
 import { InMemoryUserStore } from './persistence/user-store.js';
 import type { IUserStore, User, UserInstallation, UpsertUserInput } from './persistence/user-store.js';
@@ -52,6 +52,9 @@ import { InMemoryUserApiKeyStore, PgUserApiKeyStore } from './persistence/user-a
 import type { IUserApiKeyStore, UserApiKey, CreateApiKeyInput } from './persistence/user-api-key-store.js';
 import { InMemoryInviteStore, PgInviteStore } from './persistence/invite-store.js';
 import type { IInviteStore, UserInvite, CreateInviteInput } from './persistence/invite-store.js';
+import { InMemoryTenantStore } from './persistence/tenant-store.js';
+import type { ITenantStore, CreateTenantInput } from './persistence/tenant-store.js';
+import { PgTenantStore } from './persistence/pg-tenant-store.js';
 import { requireRole, requireSelfOrRole } from './middleware/require-role.js';
 import type { AuthenticatedUser } from './middleware/require-role.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
@@ -116,6 +119,8 @@ export {
   PgUserApiKeyStore,
   InMemoryInviteStore,
   PgInviteStore,
+  InMemoryTenantStore,
+  PgTenantStore,
   requireRole,
   requireSelfOrRole,
   registerAdminRoutes,
@@ -154,6 +159,7 @@ export type {
   IGitHubInstallationStore,
   GitHubInstallation,
   GitHubInstallationRepo,
+  UpsertInstallationInput,
   IUserStore,
   User,
   UserInstallation,
@@ -176,6 +182,8 @@ export type {
   IInviteStore,
   UserInvite,
   CreateInviteInput,
+  ITenantStore,
+  CreateTenantInput,
   AuthenticatedUser,
   AuthMeRouteOptions,
   AuthMeUser,

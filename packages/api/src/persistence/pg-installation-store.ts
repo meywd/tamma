@@ -3,21 +3,24 @@ import type {
   IGitHubInstallationStore,
   GitHubInstallation,
   GitHubInstallationRepo,
+  UpsertInstallationInput,
 } from './installation-store.js';
 
 /** PostgreSQL-backed installation store. */
 export class PgInstallationStore implements IGitHubInstallationStore {
   constructor(private readonly pool: pg.Pool) {}
 
-  async upsertInstallation(installation: Omit<GitHubInstallation, 'createdAt' | 'updatedAt'>): Promise<void> {
+  async upsertInstallation(installation: UpsertInstallationInput): Promise<void> {
+    const tenantId = installation.tenantId ?? '00000000-0000-0000-0000-000000000000';
     await this.pool.query(
-      `INSERT INTO github_installations (installation_id, account_login, account_type, app_id, permissions, suspended_at, api_key_hash, api_key_prefix, api_key_encrypted)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO github_installations (installation_id, account_login, account_type, app_id, permissions, suspended_at, api_key_hash, api_key_prefix, api_key_encrypted, tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (installation_id)
        DO UPDATE SET account_login = $2, account_type = $3, permissions = $5, suspended_at = $6,
                      api_key_hash = COALESCE($7, github_installations.api_key_hash),
                      api_key_prefix = COALESCE($8, github_installations.api_key_prefix),
                      api_key_encrypted = COALESCE($9, github_installations.api_key_encrypted),
+                     tenant_id = $10,
                      updated_at = NOW()`,
       [
         installation.installationId,
@@ -29,6 +32,7 @@ export class PgInstallationStore implements IGitHubInstallationStore {
         installation.apiKeyHash,
         installation.apiKeyPrefix,
         installation.apiKeyEncrypted,
+        tenantId,
       ],
     );
   }
@@ -168,6 +172,7 @@ export class PgInstallationStore implements IGitHubInstallationStore {
       apiKeyHash: row['api_key_hash'] !== null && row['api_key_hash'] !== undefined ? String(row['api_key_hash']) : null,
       apiKeyPrefix: row['api_key_prefix'] !== null && row['api_key_prefix'] !== undefined ? String(row['api_key_prefix']) : null,
       apiKeyEncrypted: row['api_key_encrypted'] !== null && row['api_key_encrypted'] !== undefined ? String(row['api_key_encrypted']) : null,
+      tenantId: String(row['tenant_id'] ?? '00000000-0000-0000-0000-000000000000'),
       createdAt: String(row['created_at']),
       updatedAt: String(row['updated_at']),
     };

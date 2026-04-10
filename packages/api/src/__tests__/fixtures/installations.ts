@@ -18,6 +18,7 @@ export function createTestInstallation(
     apiKeyHash: null,
     apiKeyPrefix: null,
     apiKeyEncrypted: null,
+    tenantId: '00000000-0000-0000-0000-000000000000',
     ...overrides,
   };
 }

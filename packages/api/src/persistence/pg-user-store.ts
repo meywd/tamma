@@ -10,13 +10,14 @@ export class PgUserStore implements IUserStore {
     // Note: settings is only set on INSERT (new user). On conflict (existing user),
     // settings are preserved — use updateUserSettings() to change them.
     const settings = user.settings ?? { providers: {} };
+    const tenantId = user.tenantId ?? null;
     const result = await this.pool.query<Record<string, unknown>>(
-      `INSERT INTO users (github_id, github_login, email, role, settings)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (github_id, github_login, email, role, settings, tenant_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (github_id)
        DO UPDATE SET github_login = $2, email = COALESCE($3, users.email), updated_at = NOW()
        RETURNING *`,
-      [user.githubId, user.githubLogin, user.email, user.role, JSON.stringify(settings)],
+      [user.githubId, user.githubLogin, user.email, user.role, JSON.stringify(settings), tenantId],
     );
     return this.mapUser(result.rows[0]!);
   }
@@ -157,6 +158,7 @@ export class PgUserStore implements IUserStore {
       githubLogin: String(row['github_login']),
       email: row['email'] !== null && row['email'] !== undefined ? String(row['email']) : null,
       role: String(row['role']) as 'owner' | 'admin' | 'member',
+      tenantId: row['tenant_id'] !== null && row['tenant_id'] !== undefined ? String(row['tenant_id']) : null,
       settings,
       createdAt: String(row['created_at']),
       updatedAt: String(row['updated_at']),

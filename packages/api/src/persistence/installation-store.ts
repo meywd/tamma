@@ -9,6 +9,7 @@ export interface GitHubInstallation {
   apiKeyHash: string | null;
   apiKeyPrefix: string | null;
   apiKeyEncrypted: string | null;
+  tenantId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,9 +24,14 @@ export interface GitHubInstallationRepo {
   isActive: boolean;
 }
 
+/** Input type for upsertInstallation — tenantId is optional (defaults to DEFAULT_TENANT_ID). */
+export type UpsertInstallationInput = Omit<GitHubInstallation, 'createdAt' | 'updatedAt' | 'tenantId'> & {
+  tenantId?: string;
+};
+
 /** Interface for installation persistence. */
 export interface IGitHubInstallationStore {
-  upsertInstallation(installation: Omit<GitHubInstallation, 'createdAt' | 'updatedAt'>): Promise<void>;
+  upsertInstallation(installation: UpsertInstallationInput): Promise<void>;
   removeInstallation(installationId: number): Promise<void>;
   getInstallation(installationId: number): Promise<GitHubInstallation | null>;
   listInstallations(): Promise<GitHubInstallation[]>;
@@ -41,16 +47,20 @@ export interface IGitHubInstallationStore {
   findByApiKeyHash(hash: string): Promise<GitHubInstallation | null>;
 }
 
+/** Default tenant ID for CLI/self-hosted mode. */
+const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000000';
+
 /** In-memory implementation for testing and development. */
 export class InMemoryInstallationStore implements IGitHubInstallationStore {
   private installations = new Map<number, GitHubInstallation>();
   private repos = new Map<number, GitHubInstallationRepo[]>();
 
-  async upsertInstallation(installation: Omit<GitHubInstallation, 'createdAt' | 'updatedAt'>): Promise<void> {
+  async upsertInstallation(installation: UpsertInstallationInput): Promise<void> {
     const now = new Date().toISOString();
     const existing = this.installations.get(installation.installationId);
     this.installations.set(installation.installationId, {
       ...installation,
+      tenantId: installation.tenantId ?? DEFAULT_TENANT_ID,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });

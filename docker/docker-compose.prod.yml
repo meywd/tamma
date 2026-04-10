@@ -135,6 +135,14 @@ services:
           cpus: "0.25"
           memory: 128M
 
+  oauth2-proxy:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
   nginx-proxy:
     restart: unless-stopped
     deploy:
