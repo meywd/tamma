@@ -75,6 +75,7 @@
 | 16.3 | Admin Dashboard | P1 (High) | Story 16.2 | Planned |
 | 16.4 | Unified Navigation Header | P1 (High) | Story 16.1 | Planned |
 | 16.5 | Role-Based Access Control Enforcement | P0 (Critical) | Story 16.1, 16.2 | Planned |
+| 16.7 | Service-to-Service Authentication | P0 (Critical) | Story 16.1, 16.2, 16.5, 17.1 | Planned |
 
 ## Dependency Graph
 
@@ -86,6 +87,11 @@ Story 16.1 (oauth2-proxy unified auth)
   |       +---> Story 16.3 (admin dashboard UI)
   |       |
   |       +---> Story 16.5 (RBAC enforcement)
+  |               |
+  |               +---> Story 16.7 (service-to-service auth)
+  |                       ^
+  |                       |
+  |                     Story 17.1 (tenants table)
   |
   +---> Story 16.4 (unified navigation header)
 ```
@@ -99,7 +105,8 @@ Story 16.1 (oauth2-proxy unified auth)
 | 16.3 Admin Dashboard | 24 hours |
 | 16.4 Unified Navigation Header | 12 hours |
 | 16.5 RBAC Enforcement | 16 hours |
-| **Total** | **88 hours** |
+| 16.7 Service-to-Service Authentication | 20 hours |
+| **Total** | **108 hours** |
 
 ## Host Constraints
 
@@ -109,5 +116,5 @@ Story 16.1 (oauth2-proxy unified auth)
 
 ---
 
-**Last Updated**: 2026-03-28
+**Last Updated**: 2026-04-09
 **Epic Owner**: Platform Engineering
