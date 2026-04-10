@@ -38,6 +38,11 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
     '001_github_installations.sql',
     '002_users.sql',
     '003_api_keys.sql',
+    '004_user_settings.sql',
+    '005_user_api_keys.sql',
+    '006_user_invites.sql',
+    '007_users_soft_delete.sql',
+    '008_tenants.sql',
   ];
 
   for (const file of migrationFiles) {
@@ -52,8 +57,14 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
  */
 export async function truncateTables(pool: pg.Pool): Promise<void> {
   await pool.query(
-    'TRUNCATE TABLE user_installations, users, github_installation_repos, github_installations CASCADE',
+    'TRUNCATE TABLE user_invites, user_api_keys, user_installations, users, github_installation_repos, github_installations, tenants CASCADE',
   );
+  // Re-insert default tenant sentinel (needed by FK constraints)
+  await pool.query(`
+    INSERT INTO tenants (id, name, slug, external_id, plan)
+    VALUES ('00000000-0000-0000-0000-000000000000', 'Default', 'default', NULL, 'free')
+    ON CONFLICT (id) DO NOTHING
+  `);
 }
 
 /**
@@ -61,9 +72,12 @@ export async function truncateTables(pool: pg.Pool): Promise<void> {
  */
 export async function dropTables(pool: pg.Pool): Promise<void> {
   await pool.query(`
+    DROP TABLE IF EXISTS user_invites CASCADE;
+    DROP TABLE IF EXISTS user_api_keys CASCADE;
     DROP TABLE IF EXISTS user_installations CASCADE;
     DROP TABLE IF EXISTS users CASCADE;
     DROP TABLE IF EXISTS github_installation_repos CASCADE;
     DROP TABLE IF EXISTS github_installations CASCADE;
+    DROP TABLE IF EXISTS tenants CASCADE;
   `);
 }
