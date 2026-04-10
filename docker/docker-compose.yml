@@ -342,9 +342,9 @@ services:
   # ---------------------------------------------------------------------------
   # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
   #
-  # Only hard-depends on tamma-api, tamma-dashboard, and oauth2-proxy (critical path).
-  # opensearch-dashboards is a soft dependency — nginx resolves it at
-  # request time and returns 502 if it is unavailable.
+  # Hard-depends on tamma-api and tamma-dashboard (critical path).
+  # oauth2-proxy and opensearch-dashboards are soft dependencies — nginx
+  # resolves them at request time and returns 502 if unavailable.
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine
@@ -361,8 +361,6 @@ services:
         condition: service_started
       tamma-dashboard:
         condition: service_started
-      oauth2-proxy:
-        condition: service_healthy
     networks:
       - tamma-net
 
