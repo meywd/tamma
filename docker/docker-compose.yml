@@ -354,8 +354,6 @@ services:
       - ./nav-header:/etc/nginx/nav-header:ro
       - ../secrets/origin-cert.pem:/etc/nginx/certs/origin-cert.pem:ro
       - ../secrets/origin-key.pem:/etc/nginx/certs/origin-key.pem:ro
-    environment:
-      ELSA_ADMIN_API_KEY: ${ELSA_ADMIN_API_KEY:-}
     depends_on:
       tamma-api:
         condition: service_started
