@@ -577,8 +577,8 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard elsa-studio && \
-              echo 'Starting nginx-proxy...' && \
-              \$COMPOSE up -d --force-recreate nginx-proxy && \
+              echo 'Starting oauth2-proxy + nginx-proxy...' && \
+              \$COMPOSE up -d --force-recreate oauth2-proxy nginx-proxy && \
               echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
               \$COMPOSE --profile observability run --rm opensearch-setup 2>/dev/null || echo 'OpenSearch setup skipped (observability not running)'
             "

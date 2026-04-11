@@ -234,14 +234,14 @@ jobs:
               echo 'FAILED: APIs not healthy' && \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && exit 1
             "
 
-      - name: "Start: engine + dashboard + nginx-proxy"
+      - name: "Start: engine + dashboard + oauth2-proxy + nginx-proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
-                up -d tamma-engine tamma-dashboard elsa-studio nginx-proxy && \
+                up -d tamma-engine tamma-dashboard elsa-studio oauth2-proxy nginx-proxy && \
               sleep 5 && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps && \
               echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
