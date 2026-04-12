@@ -35,22 +35,39 @@ async function readProjectFile(relativePath: string): Promise<string> {
 }
 
 /**
+ * Extract a brace-delimited block starting at the `{` at position `start`.
+ * Returns the substring from `start` to the matching `}` (inclusive).
+ */
+function extractBraceBlock(text: string, start: number): string {
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return text.slice(start);
+}
+
+/**
  * Extract server blocks from an nginx config by server_name.
  * Returns the raw text of each `server { ... }` block keyed by server_name.
- * This is a rough parser sufficient for structural assertions.
  */
 function extractServerBlocks(config: string): Map<string, string> {
   const blocks = new Map<string, string>();
-  // Match each server { ... } block (handles nested braces up to 3 levels)
-  const serverBlockRegex = /server\s*\{(?:[^{}]*|\{(?:[^{}]*|\{[^{}]*\})*\})*\}/g;
+  const re = /server\s*\{/g;
   let match: RegExpExecArray | null;
-  while ((match = serverBlockRegex.exec(config)) !== null) {
-    const block = match[0];
+  while ((match = re.exec(config)) !== null) {
+    const braceStart = config.indexOf('{', match.index);
+    const block = 'server ' + extractBraceBlock(config, braceStart);
     const nameMatch = /server_name\s+([^;]+);/.exec(block);
     if (nameMatch) {
       const name = nameMatch[1].trim();
       blocks.set(name, block);
     }
+    // Advance past this block to avoid re-matching nested content
+    re.lastIndex = match.index + block.length;
   }
   return blocks;
 }
@@ -61,13 +78,16 @@ function extractServerBlocks(config: string): Map<string, string> {
  */
 function extractLocationBlocks(serverBlock: string): Array<{ path: string; body: string }> {
   const locations: Array<{ path: string; body: string }> = [];
-  // Match location [modifier] path { ... } — handles nested braces
-  const locationRegex = /location\s+([^{]+?)\s*\{((?:[^{}]*|\{[^{}]*\})*)\}/g;
+  const re = /location\s+([^{]+?)\s*\{/g;
   let match: RegExpExecArray | null;
-  while ((match = locationRegex.exec(serverBlock)) !== null) {
+  while ((match = re.exec(serverBlock)) !== null) {
     const path = match[1].trim();
-    const body = match[2];
+    const braceStart = serverBlock.indexOf('{', match.index + match[0].length - 1);
+    const fullBlock = extractBraceBlock(serverBlock, braceStart);
+    // body is the content between the outer braces
+    const body = fullBlock.slice(1, -1);
     locations.push({ path, body });
+    re.lastIndex = braceStart + fullBlock.length;
   }
   return locations;
 }
