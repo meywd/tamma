@@ -1,5 +1,15 @@
 # =============================================================================
-# Tamma Reverse Proxy — nginx configuration
+# Tamma Reverse Proxy — nginx configuration template
+#
+# This is a template file processed by the nginx Docker image's built-in
+# envsubst support. Place at /etc/nginx/templates/default.conf.template
+# and nginx will output the processed file to /etc/nginx/conf.d/default.conf.
+#
+# Only variables defined as environment variables are substituted — nginx's
+# own variables ($host, $request_uri, $scheme, etc.) are left untouched.
+#
+# Substituted variables:
+#   $ELSA_ADMIN_API_KEY — injected into ELSA Server API proxy_set_header
 #
 # Listens on 443 (TLS with Cloudflare origin cert) and 80 (redirect to HTTPS).
 #
@@ -15,6 +25,9 @@
 #       (dashboard, ELSA Studio, Logs). API routes use JWT auth directly.
 #       Unauthenticated users are redirected to /oauth2/sign_in (GitHub login).
 #       The oauth2-proxy cookie (_oauth2_proxy) is shared across *.tamma.dev.
+#
+# Sign-out: /sign-out clears tamma_session JWT cookie, then redirects to
+#       oauth2-proxy /oauth2/sign_out to clear _oauth2_proxy cookie.
 #
 # Optional services: opensearch-dashboards and oauth2-proxy may not be running.
 #       We use variables for proxy_pass to defer DNS resolution to request time,
@@ -110,6 +123,12 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Content-Length "";
         proxy_pass_request_body off;
+    }
+
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
     }
 
     # ----- API routes: JWT-based auth (no oauth2-proxy) -----
@@ -221,6 +240,12 @@ server {
         proxy_pass_request_body off;
     }
 
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
+    }
+
     # ----- ELSA health check: skip auth -----
     location = /health {
         proxy_pass http://elsa-server:5000/health;
@@ -243,7 +268,7 @@ server {
         proxy_set_header Host $host;
     }
 
-    # ----- ELSA Server API: protected by oauth2-proxy -----
+    # ----- ELSA Server API: protected by oauth2-proxy, API key injected -----
     location /elsa/api/ {
         auth_request /oauth2/auth;
         error_page 401 = /oauth2/sign_in;
@@ -254,6 +279,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # Inject ELSA admin API key — $ELSA_ADMIN_API_KEY is substituted by
+        # envsubst at container startup from the environment variable.
+        proxy_set_header Authorization "ApiKey $ELSA_ADMIN_API_KEY";
     }
 
     # ----- ELSA Studio UI: protected by oauth2-proxy -----
@@ -311,6 +339,12 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Content-Length "";
         proxy_pass_request_body off;
+    }
+
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
     }
 
     # ----- Fallback: return 503 when opensearch-dashboards is unavailable -----
