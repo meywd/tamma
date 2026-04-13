@@ -67,6 +67,17 @@ export async function registerInviteRoutes(
 
     const inviteLink = `${dashboardUrl}/invite/${token}`;
 
+    const auditData: Record<string, unknown> = {
+      event: 'USER.INVITED.SUCCESS',
+      inviteId: invite.id,
+      role: inviteRole,
+      invitedBy: authUser.id,
+    };
+    if (email !== null) {
+      auditData['email'] = email;
+    }
+    request.log.info(auditData, 'User invitation created');
+
     return reply.status(201).send({
       id: invite.id,
       inviteLink,
@@ -88,12 +99,19 @@ export async function registerInviteRoutes(
     preHandler: [requireRole('admin')],
   }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const authUser = (request as FastifyRequest & { authUser: AuthenticatedUser }).authUser;
 
     try {
       await inviteStore.revokeInvite(id);
     } catch {
       return reply.status(404).send({ error: 'Invite not found' });
     }
+
+    request.log.info({
+      event: 'USER.INVITE_REVOKED.SUCCESS',
+      inviteId: id,
+      revokedBy: authUser.id,
+    }, 'User invitation revoked');
 
     return reply.send({ ok: true });
   });

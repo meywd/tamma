@@ -93,7 +93,17 @@ export async function registerUserRoutes(
       return reply.status(404).send({ error: 'User not found' });
     }
 
+    const oldRole = targetUser.role;
     const updated = await userStore.updateUserRole(id, role as 'owner' | 'admin' | 'member');
+
+    request.log.info({
+      event: 'USER.ROLE_CHANGED.SUCCESS',
+      targetUserId: id,
+      oldRole,
+      newRole: role,
+      changedBy: authUser.id,
+    }, 'User role changed');
+
     return reply.send({ user: updated });
   });
 
@@ -114,9 +124,16 @@ export async function registerUserRoutes(
       return reply.status(404).send({ error: 'User not found' });
     }
 
-    // Soft-delete user and revoke all their API keys
+    // Soft-delete user, revoke all API keys, and unlink installations
     await userStore.deleteUser(id);
     await apiKeyStore.revokeAllForUser(id);
+    await userStore.unlinkAllInstallations(id);
+
+    request.log.info({
+      event: 'USER.DELETED.SUCCESS',
+      targetUserId: id,
+      deletedBy: authUser.id,
+    }, 'User soft-deleted');
 
     return reply.send({ ok: true });
   });

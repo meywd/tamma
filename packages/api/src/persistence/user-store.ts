@@ -9,6 +9,7 @@ export interface User {
   role: 'owner' | 'admin' | 'member';
   tenantId: string | null;
   settings: IProvidersConfig;
+  lastActiveAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,8 +22,8 @@ export interface UserInstallation {
   createdAt: string;
 }
 
-/** Input type for upsertUser — settings and tenantId are optional. */
-export type UpsertUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'settings' | 'tenantId'> & {
+/** Input type for upsertUser — settings, tenantId, and lastActiveAt are optional/auto-managed. */
+export type UpsertUserInput = Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'settings' | 'tenantId' | 'lastActiveAt'> & {
   settings?: IProvidersConfig;
   tenantId?: string | null;
 };
@@ -61,6 +62,9 @@ export interface IUserStore {
 
   /** Update last_active_at timestamp. */
   updateLastActive(id: string): Promise<void>;
+
+  /** Remove all installation links for a user (e.g. on soft delete). */
+  unlinkAllInstallations(userId: string): Promise<void>;
 }
 
 /** Default empty provider settings. */
@@ -68,7 +72,7 @@ const DEFAULT_SETTINGS: IProvidersConfig = { providers: {} };
 
 /** In-memory implementation for testing and development. */
 export class InMemoryUserStore implements IUserStore {
-  private users = new Map<string, User & { deletedAt?: string; lastActiveAt?: string }>();
+  private users = new Map<string, User & { deletedAt?: string }>();
   private userInstallations = new Map<string, UserInstallation[]>();
   private nextId = 1;
 
@@ -87,10 +91,11 @@ export class InMemoryUserStore implements IUserStore {
 
     const now = new Date().toISOString();
     const id = String(this.nextId++);
-    const newUser: User = {
+    const newUser: User & { deletedAt?: string } = {
       ...user,
       tenantId: user.tenantId ?? null,
       settings: user.settings ?? structuredClone(DEFAULT_SETTINGS),
+      lastActiveAt: null,
       id,
       createdAt: now,
       updatedAt: now,
@@ -179,5 +184,9 @@ export class InMemoryUserStore implements IUserStore {
     const user = this.users.get(id);
     if (!user || user.deletedAt) return;
     user.lastActiveAt = new Date().toISOString();
+  }
+
+  async unlinkAllInstallations(userId: string): Promise<void> {
+    this.userInstallations.delete(userId);
   }
 }

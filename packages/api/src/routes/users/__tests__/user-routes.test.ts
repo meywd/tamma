@@ -11,17 +11,38 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { Writable } from 'node:stream';
 import { registerUserRoutes } from '../user-routes.js';
 import { InMemoryUserStore } from '../../../persistence/user-store.js';
 import { InMemoryUserApiKeyStore } from '../../../persistence/user-api-key-store.js';
 import type { User } from '../../../persistence/user-store.js';
 
+/** Collects structured log lines for audit verification. */
+function createLogCollector(): { stream: Writable; lines: Record<string, unknown>[] } {
+  const lines: Record<string, unknown>[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding: string, callback: () => void) {
+      try {
+        lines.push(JSON.parse(chunk.toString()) as Record<string, unknown>);
+      } catch {
+        // ignore non-JSON lines
+      }
+      callback();
+    },
+  });
+  return { stream, lines };
+}
+
 /**
  * Helper to inject an auth user into the request via the authUser decoration.
  * In production this is done by the JWT auth plugin; in tests we simulate it.
  */
-function createTestApp(authUser: { id: string; role: string } | null = null) {
-  const app = Fastify();
+function createTestApp(authUser: { id: string; role: string } | null = null, logStream?: Writable) {
+  const appOptions: Record<string, unknown> = {};
+  if (logStream) {
+    appOptions['logger'] = { stream: logStream, level: 'info' };
+  }
+  const app = Fastify(appOptions);
   const userStore = new InMemoryUserStore();
   const apiKeyStore = new InMemoryUserApiKeyStore();
 
@@ -270,6 +291,87 @@ describe('User Management Routes', () => {
 
       const res = await app.inject({ method: 'DELETE', url: '/api/admin/users/nonexistent' });
       expect(res.statusCode).toBe(404);
+    });
+
+    it('removes installation links on soft delete', async () => {
+      const { app, userStore, apiKeyStore } = createTestApp({ id: 'owner-1', role: 'owner' });
+      const target = await createUser(userStore, { githubId: 1, role: 'member' });
+      await userStore.linkUserToInstallation(target.id, 12345, 'member');
+      await userStore.linkUserToInstallation(target.id, 67890, 'member');
+      await setupRoutes(app, userStore, apiKeyStore);
+
+      // Verify links exist before delete
+      const beforeLinks = await userStore.getUserInstallations(target.id);
+      expect(beforeLinks).toHaveLength(2);
+
+      const res = await app.inject({ method: 'DELETE', url: `/api/admin/users/${target.id}` });
+      expect(res.statusCode).toBe(200);
+
+      // Verify links removed after delete
+      const afterLinks = await userStore.getUserInstallations(target.id);
+      expect(afterLinks).toHaveLength(0);
+    });
+  });
+
+  describe('Audit logging', () => {
+    it('emits USER.ROLE_CHANGED.SUCCESS on role change', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app, userStore, apiKeyStore } = createTestApp({ id: 'owner-1', role: 'owner' }, stream);
+      const target = await createUser(userStore, { githubId: 1, githubLogin: 'target', role: 'member' });
+      await setupRoutes(app, userStore, apiKeyStore);
+
+      await app.inject({
+        method: 'PUT',
+        url: `/api/admin/users/${target.id}/role`,
+        payload: { role: 'admin' },
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.ROLE_CHANGED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['targetUserId']).toBe(target.id);
+      expect(auditLine!['oldRole']).toBe('member');
+      expect(auditLine!['newRole']).toBe('admin');
+      expect(auditLine!['changedBy']).toBe('owner-1');
+    });
+
+    it('emits USER.DELETED.SUCCESS on soft delete', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app, userStore, apiKeyStore } = createTestApp({ id: 'owner-1', role: 'owner' }, stream);
+      const target = await createUser(userStore, { githubId: 1, role: 'member' });
+      await setupRoutes(app, userStore, apiKeyStore);
+
+      await app.inject({ method: 'DELETE', url: `/api/admin/users/${target.id}` });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.DELETED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['targetUserId']).toBe(target.id);
+      expect(auditLine!['deletedBy']).toBe('owner-1');
+    });
+  });
+
+  describe('lastActiveAt field', () => {
+    it('returns lastActiveAt in user response', async () => {
+      const { app, userStore, apiKeyStore } = createTestApp({ id: 'admin-1', role: 'admin' });
+      const user = await createUser(userStore, { githubId: 1, githubLogin: 'alice' });
+      await setupRoutes(app, userStore, apiKeyStore);
+
+      const res = await app.inject({ method: 'GET', url: `/api/admin/users/${user.id}` });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.user).toHaveProperty('lastActiveAt');
+      expect(body.user.lastActiveAt).toBeNull();
+    });
+
+    it('returns lastActiveAt after update', async () => {
+      const { app, userStore, apiKeyStore } = createTestApp({ id: 'admin-1', role: 'admin' });
+      const user = await createUser(userStore, { githubId: 1, githubLogin: 'alice' });
+      await userStore.updateLastActive(user.id);
+      await setupRoutes(app, userStore, apiKeyStore);
+
+      const res = await app.inject({ method: 'GET', url: `/api/admin/users/${user.id}` });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.user.lastActiveAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

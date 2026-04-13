@@ -10,11 +10,32 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { Writable } from 'node:stream';
 import { registerInviteRoutes } from '../invite-routes.js';
 import { InMemoryInviteStore } from '../../../persistence/invite-store.js';
 
-function createTestApp(authUser: { id: string; role: string } | null = null) {
-  const app = Fastify();
+/** Collects structured log lines for audit verification. */
+function createLogCollector(): { stream: Writable; lines: Record<string, unknown>[] } {
+  const lines: Record<string, unknown>[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding: string, callback: () => void) {
+      try {
+        lines.push(JSON.parse(chunk.toString()) as Record<string, unknown>);
+      } catch {
+        // ignore non-JSON lines
+      }
+      callback();
+    },
+  });
+  return { stream, lines };
+}
+
+function createTestApp(authUser: { id: string; role: string } | null = null, logStream?: Writable) {
+  const appOptions: Record<string, unknown> = {};
+  if (logStream) {
+    appOptions['logger'] = { stream: logStream, level: 'info' };
+  }
+  const app = Fastify(appOptions);
   const inviteStore = new InMemoryInviteStore();
 
   app.decorateRequest('authUser', null);
@@ -250,6 +271,69 @@ describe('Invite Routes', () => {
         url: '/api/admin/users/invites/nonexistent',
       });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('Audit logging', () => {
+    it('emits USER.INVITED.SUCCESS on invite creation', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app, inviteStore } = createTestApp({ id: 'admin-1', role: 'admin' }, stream);
+      await setupRoutes(app, inviteStore);
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/admin/users/invite',
+        payload: { email: 'new@example.com', role: 'member' },
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.INVITED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['inviteId']).toBeDefined();
+      expect(auditLine!['email']).toBe('new@example.com');
+      expect(auditLine!['role']).toBe('member');
+      expect(auditLine!['invitedBy']).toBe('admin-1');
+      // Must not log the invite token
+      expect(auditLine).not.toHaveProperty('token');
+      expect(auditLine).not.toHaveProperty('inviteToken');
+    });
+
+    it('does not include email in audit log when null', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app, inviteStore } = createTestApp({ id: 'admin-1', role: 'admin' }, stream);
+      await setupRoutes(app, inviteStore);
+
+      await app.inject({
+        method: 'POST',
+        url: '/api/admin/users/invite',
+        payload: { role: 'member' },
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.INVITED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine).not.toHaveProperty('email');
+    });
+
+    it('emits USER.INVITE_REVOKED.SUCCESS on invite revocation', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app, inviteStore } = createTestApp({ id: 'admin-1', role: 'admin' }, stream);
+      await setupRoutes(app, inviteStore);
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/admin/users/invite',
+        payload: { email: 'revoke@example.com' },
+      });
+      const inviteId = createRes.json().id;
+
+      await app.inject({
+        method: 'DELETE',
+        url: `/api/admin/users/invites/${inviteId}`,
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.INVITE_REVOKED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['inviteId']).toBe(inviteId);
+      expect(auditLine!['revokedBy']).toBe('admin-1');
     });
   });
 });

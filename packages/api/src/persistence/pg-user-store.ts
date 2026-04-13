@@ -146,6 +146,13 @@ export class PgUserStore implements IUserStore {
     );
   }
 
+  async unlinkAllInstallations(userId: string): Promise<void> {
+    await this.pool.query(
+      'DELETE FROM user_installations WHERE user_id = $1',
+      [userId],
+    );
+  }
+
   private mapUser(row: Record<string, unknown>): User {
     const rawSettings = row['settings'];
     const settings: IProvidersConfig = rawSettings && typeof rawSettings === 'object'
@@ -160,6 +167,9 @@ export class PgUserStore implements IUserStore {
       role: String(row['role']) as 'owner' | 'admin' | 'member',
       tenantId: row['tenant_id'] !== null && row['tenant_id'] !== undefined ? String(row['tenant_id']) : null,
       settings,
+      lastActiveAt: row['last_active_at'] !== null && row['last_active_at'] !== undefined
+        ? String(row['last_active_at'])
+        : null,
       createdAt: String(row['created_at']),
       updatedAt: String(row['updated_at']),
     };

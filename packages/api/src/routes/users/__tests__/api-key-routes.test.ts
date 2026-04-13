@@ -10,13 +10,34 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { Writable } from 'node:stream';
 import { registerApiKeyRoutes } from '../api-key-routes.js';
 import { InMemoryUserStore } from '../../../persistence/user-store.js';
 import { InMemoryUserApiKeyStore } from '../../../persistence/user-api-key-store.js';
 import type { User } from '../../../persistence/user-store.js';
 
-function createTestApp(authUser: { id: string; role: string } | null = null) {
-  const app = Fastify();
+/** Collects structured log lines for audit verification. */
+function createLogCollector(): { stream: Writable; lines: Record<string, unknown>[] } {
+  const lines: Record<string, unknown>[] = [];
+  const stream = new Writable({
+    write(chunk: Buffer, _encoding: string, callback: () => void) {
+      try {
+        lines.push(JSON.parse(chunk.toString()) as Record<string, unknown>);
+      } catch {
+        // ignore non-JSON lines
+      }
+      callback();
+    },
+  });
+  return { stream, lines };
+}
+
+function createTestApp(authUser: { id: string; role: string } | null = null, logStream?: Writable) {
+  const appOptions: Record<string, unknown> = {};
+  if (logStream) {
+    appOptions['logger'] = { stream: logStream, level: 'info' };
+  }
+  const app = Fastify(appOptions);
   const userStore = new InMemoryUserStore();
   const apiKeyStore = new InMemoryUserApiKeyStore();
 
@@ -220,6 +241,68 @@ describe('API Key Routes', () => {
         payload: { label: 'stolen-key' },
       });
       expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe('Audit logging', () => {
+    it('emits USER.API_KEY_CREATED.SUCCESS on key creation', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app: logApp, userStore: logStore, apiKeyStore: logAks } = createTestApp({ id: 'admin-1', role: 'admin' }, stream);
+      const user = await logStore.upsertUser({
+        githubId: 5001,
+        githubLogin: 'audit-user',
+        email: null,
+        role: 'member',
+      });
+      await registerApiKeyRoutes(logApp, { userStore: logStore, apiKeyStore: logAks });
+      await logApp.ready();
+
+      await logApp.inject({
+        method: 'POST',
+        url: `/api/admin/users/${user.id}/keys`,
+        payload: { label: 'audit-key' },
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.API_KEY_CREATED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['targetUserId']).toBe(user.id);
+      expect(auditLine!['keyPrefix']).toBeDefined();
+      expect(auditLine!['label']).toBe('audit-key');
+      expect(auditLine!['createdBy']).toBe('admin-1');
+      // Must not log the full key
+      expect(auditLine).not.toHaveProperty('key');
+      expect(auditLine).not.toHaveProperty('rawKey');
+    });
+
+    it('emits USER.API_KEY_REVOKED.SUCCESS on key revocation', async () => {
+      const { stream, lines } = createLogCollector();
+      const { app: logApp, userStore: logStore, apiKeyStore: logAks } = createTestApp({ id: 'admin-1', role: 'admin' }, stream);
+      const user = await logStore.upsertUser({
+        githubId: 5002,
+        githubLogin: 'revoke-user',
+        email: null,
+        role: 'member',
+      });
+      await registerApiKeyRoutes(logApp, { userStore: logStore, apiKeyStore: logAks });
+      await logApp.ready();
+
+      const createRes = await logApp.inject({
+        method: 'POST',
+        url: `/api/admin/users/${user.id}/keys`,
+        payload: { label: 'to-revoke' },
+      });
+      const keyId = createRes.json().id;
+
+      await logApp.inject({
+        method: 'DELETE',
+        url: `/api/admin/users/${user.id}/keys/${keyId}`,
+      });
+
+      const auditLine = lines.find((l) => l['event'] === 'USER.API_KEY_REVOKED.SUCCESS');
+      expect(auditLine).toBeDefined();
+      expect(auditLine!['targetUserId']).toBe(user.id);
+      expect(auditLine!['keyId']).toBe(keyId);
+      expect(auditLine!['revokedBy']).toBe('admin-1');
     });
   });
 });

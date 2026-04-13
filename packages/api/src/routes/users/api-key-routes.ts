@@ -7,11 +7,12 @@
  *   DELETE /api/admin/users/:id/keys/:keyId — revoke key
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { IUserStore } from '../../persistence/user-store.js';
 import type { IUserApiKeyStore } from '../../persistence/user-api-key-store.js';
 import { generateApiKey, hashApiKey, getApiKeyPrefix } from '../../auth/api-key.js';
 import { requireSelfOrRole } from '../../middleware/require-role.js';
+import type { AuthenticatedUser } from '../../middleware/require-role.js';
 
 export interface ApiKeyRouteOptions {
   userStore: IUserStore;
@@ -48,6 +49,16 @@ export async function registerApiKeyRoutes(
       keyPrefix,
       label,
     });
+
+    const authUser = (request as FastifyRequest & { authUser: AuthenticatedUser }).authUser;
+    request.log.info({
+      event: 'USER.API_KEY_CREATED.SUCCESS',
+      targetUserId: id,
+      keyId: record.id,
+      keyPrefix,
+      label,
+      createdBy: authUser.id,
+    }, 'API key created');
 
     // Return the full key ONCE — it cannot be retrieved again
     return reply.status(201).send({
@@ -92,6 +103,14 @@ export async function registerApiKeyRoutes(
     } catch {
       return reply.status(404).send({ error: 'API key not found' });
     }
+
+    const authUser = (request as FastifyRequest & { authUser: AuthenticatedUser }).authUser;
+    request.log.info({
+      event: 'USER.API_KEY_REVOKED.SUCCESS',
+      targetUserId: id,
+      keyId,
+      revokedBy: authUser.id,
+    }, 'API key revoked');
 
     return reply.send({ ok: true });
   });

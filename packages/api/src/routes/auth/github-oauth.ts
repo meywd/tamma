@@ -12,6 +12,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { IUserStore } from '../../persistence/user-store.js';
 import type { IGitHubInstallationStore } from '../../persistence/installation-store.js';
+import type { IInviteStore } from '../../persistence/invite-store.js';
 
 export interface GitHubOAuthOptions {
   /** GitHub OAuth App client ID (NOT the GitHub App ID). */
@@ -24,6 +25,8 @@ export interface GitHubOAuthOptions {
   userStore: IUserStore;
   /** Installation store — to check user's installation access. */
   installationStore: IGitHubInstallationStore;
+  /** Invite store — to process invite tokens during OAuth callback. */
+  inviteStore?: IInviteStore;
   /** Where to redirect after successful login. */
   dashboardUrl: string;
   /** Base URL for the API (used to build callback URL). */
@@ -42,6 +45,7 @@ export async function registerGitHubOAuthRoutes(
     jwtSecret,
     userStore,
     installationStore,
+    inviteStore,
     dashboardUrl,
     tokenExpiresIn = 86400,
   } = options;
@@ -67,16 +71,23 @@ export async function registerGitHubOAuthRoutes(
   // Accepts optional ?rd= param for post-login redirect (e.g. elsa.tamma.dev)
   // -------------------------------------------------------------------
   app.get<{
-    Querystring: { rd?: string };
-  }>('/api/auth/github', async (request: FastifyRequest<{ Querystring: { rd?: string } }>, reply: FastifyReply) => {
+    Querystring: { rd?: string; invite?: string };
+  }>('/api/auth/github', async (request: FastifyRequest<{ Querystring: { rd?: string; invite?: string } }>, reply: FastifyReply) => {
     const callbackUrl = `${dashboardUrl}/oauth2/callback`;
     const scope = 'read:user user:email';
 
-    // Encode redirect destination in OAuth state param.
+    // Encode redirect destination and optional invite token in OAuth state param.
     // Sanitize the URL upfront so only reconstructed (non-tainted) values are stored.
     const rd = request.query.rd;
+    const invite = request.query.invite;
     const sanitizedRd = rd ? sanitizeRedirectUrl(rd) : null;
-    const statePayload = sanitizedRd ? { rd: sanitizedRd } : {};
+    const statePayload: Record<string, string> = {};
+    if (sanitizedRd) {
+      statePayload['rd'] = sanitizedRd;
+    }
+    if (invite) {
+      statePayload['invite'] = invite;
+    }
     const state = Buffer.from(JSON.stringify(statePayload)).toString('base64url');
 
     const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${encodeURIComponent(scope)}&state=${encodeURIComponent(state)}`;
@@ -131,13 +142,53 @@ export async function registerGitHubOAuthRoutes(
       return reply.redirect(`${dashboardUrl}/login?error=github_user_fetch_failed`);
     }
 
+    // Parse OAuth state to extract redirect and invite token
+    let redirectTo: string | null = null;
+    let inviteToken: string | null = null;
+    if (state) {
+      try {
+        const parsed = JSON.parse(Buffer.from(state, 'base64url').toString()) as { rd?: string; invite?: string };
+        if (parsed.rd) {
+          redirectTo = sanitizeRedirectUrl(parsed.rd);
+        }
+        if (parsed.invite) {
+          inviteToken = parsed.invite;
+        }
+      } catch {
+        // Invalid state — fall back to defaults
+      }
+    }
+
+    // Determine role from invite token if present
+    let assignedRole: 'owner' | 'admin' | 'member' = 'member';
+    if (inviteToken && inviteStore) {
+      const invite = await inviteStore.getInviteByToken(inviteToken);
+      if (invite && invite.acceptedAt === null && invite.expiresAt > new Date().toISOString()) {
+        assignedRole = invite.role;
+        await inviteStore.acceptInvite(invite.id);
+        request.log.info({
+          event: 'USER.INVITE_ACCEPTED.SUCCESS',
+          inviteId: invite.id,
+          role: invite.role,
+          githubLogin: githubUser.login,
+        }, 'Invite accepted during OAuth callback');
+      }
+    }
+
     // Upsert user in our store
     const user = await userStore.upsertUser({
       githubId: githubUser.id,
       githubLogin: githubUser.login,
       email: githubUser.email,
-      role: 'member',
+      role: assignedRole,
     });
+
+    // If invite assigned a non-default role and user already existed with 'member',
+    // explicitly promote them (upsert may not change role on conflict)
+    if (assignedRole !== 'member' && user.role !== assignedRole) {
+      await userStore.updateUserRole(user.id, assignedRole);
+      user.role = assignedRole;
+    }
 
     // Check if user has access to any installation
     const installations = await userStore.getUserInstallations(user.id);
@@ -157,22 +208,6 @@ export async function registerGitHubOAuthRoutes(
       githubId: user.githubId,
       role: user.role,
     });
-
-    // Determine redirect target from OAuth state param.
-    // We use sanitizeRedirectUrl() to reconstruct the URL from parsed, validated
-    // components. This produces a new string (not the original user input), which
-    // breaks the taint chain for static analysis tools like CodeQL.
-    let redirectTo: string | null = null;
-    if (state) {
-      try {
-        const parsed = JSON.parse(Buffer.from(state, 'base64url').toString()) as { rd?: string };
-        if (parsed.rd) {
-          redirectTo = sanitizeRedirectUrl(parsed.rd);
-        }
-      } catch {
-        // Invalid state — fall back to default dashboard URL
-      }
-    }
 
     // Single cookie on parent domain — covers all *.tamma.dev subdomains.
     // Browsers reject Set-Cookie for domains that don't match the current origin,
