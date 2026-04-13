@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys (key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_scope_owner ON api_keys (scope, owner_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys (scope) WHERE revoked_at IS NULL OR revoked_at > NOW();
+CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys (scope) WHERE revoked_at IS NULL;
 
 -- 2. Copy existing user API keys into the unified table
 INSERT INTO api_keys (id, scope, owner_id, key_hash, key_prefix, label, tenant_id, created_at, last_used_at, revoked_at)
