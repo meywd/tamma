@@ -57,6 +57,7 @@ export interface IWorkflowStore {
     update: Partial<WorkflowInstance>,
   ): Promise<WorkflowInstance | null>;
   getInstance(id: string): Promise<WorkflowInstance | null>;
+  deleteInstance(id: string): Promise<boolean>;
   listInstances(
     options?: ListInstancesOptions,
   ): Promise<PaginatedResult<WorkflowInstance>>;
@@ -124,6 +125,10 @@ export class InMemoryWorkflowStore implements IWorkflowStore {
 
   async getInstance(id: string): Promise<WorkflowInstance | null> {
     return this.instances.get(id) ?? null;
+  }
+
+  async deleteInstance(id: string): Promise<boolean> {
+    return this.instances.delete(id);
   }
 
   async listInstances(

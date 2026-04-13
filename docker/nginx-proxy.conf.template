@@ -206,10 +206,12 @@ server {
 }
 
 # =============================================================================
-# elsa.tamma.dev — ELSA Studio + Server API (protected by oauth2-proxy)
+# elsa.tamma.dev — ELSA Studio + Server API (RBAC: admin/owner only)
 #
-# Auth: oauth2-proxy validates GitHub OAuth session. ELSA Studio handles
-# its own API key auth to ELSA Server — nginx only gates page access.
+# Auth: Role-check endpoint validates tamma_session JWT cookie and verifies
+# the user's role has 'elsa:access' permission (admin or owner).
+# Users without a valid session are redirected to GitHub OAuth login.
+# Users with insufficient role see a 403 page.
 #
 # Nav bar: ELSA Studio is our Blazor WASM app, nav script in its index.html.
 # =============================================================================
@@ -217,7 +219,14 @@ server {
     listen 443 ssl;
     server_name elsa.tamma.dev;
 
-    # ----- OAuth2 Proxy endpoints -----
+    # ----- Custom error pages -----
+    error_page 403 /403.html;
+    location = /403.html {
+        root /etc/nginx/error-pages;
+        internal;
+    }
+
+    # ----- OAuth2 Proxy endpoints (still needed for login redirect) -----
     location /oauth2/ {
         set $oauth2_upstream http://oauth2-proxy:4180;
         proxy_pass $oauth2_upstream;
@@ -228,14 +237,15 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 
-    location = /oauth2/auth {
+    # ----- RBAC auth_request: validates JWT + role via tamma-api -----
+    location = /auth/role-check {
         internal;
-        set $oauth2_upstream http://oauth2-proxy:4180;
-        proxy_pass $oauth2_upstream/oauth2/auth;
+        proxy_pass http://tamma-api:3100/api/auth/role-check?service=elsa;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Uri $request_uri;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Cookie $http_cookie;
         proxy_set_header Content-Length "";
         proxy_pass_request_body off;
     }
@@ -268,10 +278,11 @@ server {
         proxy_set_header Host $host;
     }
 
-    # ----- ELSA Server API: protected by oauth2-proxy, API key injected -----
+    # ----- ELSA Server API: RBAC-gated, API key injected -----
     location /elsa/api/ {
-        auth_request /oauth2/auth;
+        auth_request /auth/role-check;
         error_page 401 = /oauth2/sign_in;
+        error_page 403 /403.html;
 
         proxy_pass http://elsa-server:5000/elsa/api/;
         proxy_http_version 1.1;
@@ -284,15 +295,11 @@ server {
         proxy_set_header Authorization "ApiKey $ELSA_ADMIN_API_KEY";
     }
 
-    # ----- ELSA Studio UI: protected by oauth2-proxy -----
+    # ----- ELSA Studio UI: RBAC-gated (admin/owner only) -----
     location / {
-        auth_request /oauth2/auth;
+        auth_request /auth/role-check;
         error_page 401 = /oauth2/sign_in;
-
-        auth_request_set $auth_user $upstream_http_x_auth_request_user;
-        auth_request_set $auth_email $upstream_http_x_auth_request_email;
-        proxy_set_header X-Auth-Request-User $auth_user;
-        proxy_set_header X-Auth-Request-Email $auth_email;
+        error_page 403 /403.html;
 
         set $elsa_studio_upstream http://elsa-studio:80;
         proxy_pass $elsa_studio_upstream;
@@ -307,7 +314,12 @@ server {
 }
 
 # =============================================================================
-# logs.tamma.dev — OpenSearch Dashboards (protected by oauth2-proxy)
+# logs.tamma.dev — OpenSearch Dashboards (RBAC: admin/owner only)
+#
+# Auth: Role-check endpoint validates tamma_session JWT cookie and verifies
+# the user's role has 'logs:access' permission (admin or owner).
+# Users without a valid session are redirected to GitHub OAuth login.
+# Users with insufficient role see a 403 page.
 #
 # OpenSearch Dashboards is behind the "observability" profile and may not be
 # running. All proxy_pass directives use variables for deferred DNS resolution.
@@ -318,7 +330,14 @@ server {
     listen 443 ssl;
     server_name logs.tamma.dev;
 
-    # ----- OAuth2 Proxy endpoints -----
+    # ----- Custom error pages -----
+    error_page 403 /403.html;
+    location = /403.html {
+        root /etc/nginx/error-pages;
+        internal;
+    }
+
+    # ----- OAuth2 Proxy endpoints (still needed for login redirect) -----
     location /oauth2/ {
         set $oauth2_upstream http://oauth2-proxy:4180;
         proxy_pass $oauth2_upstream;
@@ -329,14 +348,15 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 
-    location = /oauth2/auth {
+    # ----- RBAC auth_request: validates JWT + role via tamma-api -----
+    location = /auth/role-check {
         internal;
-        set $oauth2_upstream http://oauth2-proxy:4180;
-        proxy_pass $oauth2_upstream/oauth2/auth;
+        proxy_pass http://tamma-api:3100/api/auth/role-check?service=logs;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Uri $request_uri;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Cookie $http_cookie;
         proxy_set_header Content-Length "";
         proxy_pass_request_body off;
     }
@@ -353,17 +373,13 @@ server {
         return 503 '<html><body><h1>Logs Dashboard Unavailable</h1><p>The observability stack is not currently running. Start it with: <code>docker compose --profile observability up -d</code></p></body></html>';
     }
 
-    # ----- OpenSearch Dashboards: protected by oauth2-proxy, nav bar injected -----
+    # ----- OpenSearch Dashboards: RBAC-gated, nav bar injected -----
     location / {
-        auth_request /oauth2/auth;
+        auth_request /auth/role-check;
         error_page 401 = /oauth2/sign_in;
+        error_page 403 /403.html;
         # If opensearch-dashboards is down, show unavailable page
         error_page 502 503 = @logs_unavailable;
-
-        auth_request_set $auth_user $upstream_http_x_auth_request_user;
-        auth_request_set $auth_email $upstream_http_x_auth_request_email;
-        proxy_set_header X-Auth-Request-User $auth_user;
-        proxy_set_header X-Auth-Request-Email $auth_email;
 
         set $osd_upstream http://opensearch-dashboards:5601;
         proxy_pass $osd_upstream;

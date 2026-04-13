@@ -2,21 +2,29 @@
  * Workflow Sync Routes
  *
  * Fastify plugin that bridges ELSA workflow definitions and instances:
- *   POST /api/workflows/definitions          - upsert a definition
- *   GET  /api/workflows/definitions          - list all definitions
- *   POST /api/workflows/instances            - register an instance
- *   PUT  /api/workflows/instances/:id        - update instance state
- *   GET  /api/workflows/instances            - list (paginated)
- *   GET  /api/workflows/instances/:id/events - SSE stream for an instance
+ *   POST   /api/workflows/definitions          - upsert a definition
+ *   GET    /api/workflows/definitions          - list all definitions
+ *   POST   /api/workflows/instances            - register an instance
+ *   PUT    /api/workflows/instances/:id        - update instance state
+ *   GET    /api/workflows/instances            - list (paginated)
+ *   GET    /api/workflows/instances/:id/events - SSE stream for an instance
+ *   POST   /api/workflows/instances/:id/cancel - cancel a running instance (admin+)
+ *   DELETE /api/workflows/instances/:id        - delete an instance (owner only)
+ *
+ * RBAC enforcement:
+ *   GET  (list/view)  -> requires 'workflows:view'   (member, admin, owner)
+ *   POST/PUT (manage) -> requires 'workflows:manage'  (admin, owner)
+ *   DELETE             -> requires 'workflows:delete'  (owner only)
  */
 
 import { z } from 'zod';
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import type {
   IWorkflowStore,
   WorkflowDefinition,
   WorkflowInstance,
 } from '../../persistence/workflow-store.js';
+import { requirePermission } from '../../auth/require-permission.js';
 
 // ---------------------------------------------------------------------------
 // Zod Schemas
@@ -58,14 +66,14 @@ export async function registerWorkflowRoutes(
   const { store } = opts;
 
   // ------------------------------------------------------------------
-  // POST /api/workflows/definitions
+  // POST /api/workflows/definitions  (admin+ -- manage)
   // ------------------------------------------------------------------
-  fastify.post(
+  fastify.post<{ Body: WorkflowDefinition }>(
     '/api/workflows/definitions',
-    async (
-      request: FastifyRequest<{ Body: WorkflowDefinition }>,
-      reply: FastifyReply,
-    ) => {
+    {
+      preHandler: [requirePermission('workflows:manage')],
+    },
+    async (request, reply) => {
       const parsed = WorkflowDefinitionSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: parsed.error.message });
@@ -79,22 +87,24 @@ export async function registerWorkflowRoutes(
   );
 
   // ------------------------------------------------------------------
-  // GET /api/workflows/definitions
+  // GET /api/workflows/definitions  (member+ -- view)
   // ------------------------------------------------------------------
-  fastify.get('/api/workflows/definitions', async (_request, reply) => {
+  fastify.get('/api/workflows/definitions', {
+    preHandler: [requirePermission('workflows:view')],
+  }, async (_request, reply) => {
     const defs = await store.listDefinitions();
     return reply.send(defs);
   });
 
   // ------------------------------------------------------------------
-  // POST /api/workflows/instances
+  // POST /api/workflows/instances  (admin+ -- manage)
   // ------------------------------------------------------------------
-  fastify.post(
+  fastify.post<{ Body: WorkflowInstance }>(
     '/api/workflows/instances',
-    async (
-      request: FastifyRequest<{ Body: WorkflowInstance }>,
-      reply: FastifyReply,
-    ) => {
+    {
+      preHandler: [requirePermission('workflows:manage')],
+    },
+    async (request, reply) => {
       const parsed = WorkflowInstanceCreateSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({ error: parsed.error.message });
@@ -107,17 +117,14 @@ export async function registerWorkflowRoutes(
   );
 
   // ------------------------------------------------------------------
-  // PUT /api/workflows/instances/:id
+  // PUT /api/workflows/instances/:id  (admin+ -- manage)
   // ------------------------------------------------------------------
-  fastify.put(
+  fastify.put<{ Params: { id: string }; Body: Partial<WorkflowInstance> }>(
     '/api/workflows/instances/:id',
-    async (
-      request: FastifyRequest<{
-        Params: { id: string };
-        Body: Partial<WorkflowInstance>;
-      }>,
-      reply: FastifyReply,
-    ) => {
+    {
+      preHandler: [requirePermission('workflows:manage')],
+    },
+    async (request, reply) => {
       const { id } = request.params;
       const parsed = WorkflowInstanceUpdateSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -140,20 +147,20 @@ export async function registerWorkflowRoutes(
   );
 
   // ------------------------------------------------------------------
-  // GET /api/workflows/instances
+  // GET /api/workflows/instances  (member+ -- view)
   // ------------------------------------------------------------------
-  fastify.get(
+  fastify.get<{
+    Querystring: {
+      page?: string;
+      pageSize?: string;
+      definitionId?: string;
+    };
+  }>(
     '/api/workflows/instances',
-    async (
-      request: FastifyRequest<{
-        Querystring: {
-          page?: string;
-          pageSize?: string;
-          definitionId?: string;
-        };
-      }>,
-      reply: FastifyReply,
-    ) => {
+    {
+      preHandler: [requirePermission('workflows:view')],
+    },
+    async (request, reply) => {
       const page = Math.max(
         1,
         parseInt(request.query.page ?? '1', 10) || 1,
@@ -174,14 +181,72 @@ export async function registerWorkflowRoutes(
   );
 
   // ------------------------------------------------------------------
-  // GET /api/workflows/instances/:id/events  (SSE)
+  // POST /api/workflows/instances/:id/cancel  (admin+ -- manage)
   // ------------------------------------------------------------------
-  fastify.get(
+  fastify.post<{ Params: { id: string } }>(
+    '/api/workflows/instances/:id/cancel',
+    {
+      preHandler: [requirePermission('workflows:manage')],
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      const instance = await store.getInstance(id);
+      if (instance === null) {
+        return reply.status(404).send({ error: 'Instance not found' });
+      }
+
+      if (instance.status === 'cancelled') {
+        return reply.send({ ...instance, message: 'Instance already cancelled' });
+      }
+
+      const updated = await store.updateInstance(id, { status: 'cancelled' });
+
+      request.log.info(
+        { instanceId: id, previousStatus: instance.status },
+        'Workflow instance cancelled',
+      );
+
+      return reply.send(updated);
+    },
+  );
+
+  // ------------------------------------------------------------------
+  // DELETE /api/workflows/instances/:id  (owner only -- delete)
+  // ------------------------------------------------------------------
+  fastify.delete<{ Params: { id: string } }>(
+    '/api/workflows/instances/:id',
+    {
+      preHandler: [requirePermission('workflows:delete')],
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      const instance = await store.getInstance(id);
+      if (instance === null) {
+        return reply.status(404).send({ error: 'Instance not found' });
+      }
+
+      await store.deleteInstance(id);
+
+      request.log.info(
+        { instanceId: id, definitionId: instance.definitionId },
+        'Workflow instance deleted',
+      );
+
+      return reply.send({ ok: true });
+    },
+  );
+
+  // ------------------------------------------------------------------
+  // GET /api/workflows/instances/:id/events  (SSE, member+ -- view)
+  // ------------------------------------------------------------------
+  fastify.get<{ Params: { id: string } }>(
     '/api/workflows/instances/:id/events',
-    async (
-      request: FastifyRequest<{ Params: { id: string } }>,
-      reply: FastifyReply,
-    ) => {
+    {
+      preHandler: [requirePermission('workflows:view')],
+    },
+    async (request, reply) => {
       const { id } = request.params;
 
       const instance = await store.getInstance(id);

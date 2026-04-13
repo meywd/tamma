@@ -358,6 +358,7 @@ services:
     volumes:
       - ./nginx-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ./nav-header:/etc/nginx/nav-header:ro
+      - ./error-pages:/etc/nginx/error-pages:ro
       - ../secrets/origin-cert.pem:/etc/nginx/certs/origin-cert.pem:ro
       - ../secrets/origin-key.pem:/etc/nginx/certs/origin-key.pem:ro
     depends_on:

@@ -187,6 +187,22 @@ describe('InMemoryWorkflowStore', () => {
     });
   });
 
+  describe('deleteInstance', () => {
+    it('deletes an existing instance and returns true', async () => {
+      await store.createInstance(createInstance());
+      const result = await store.deleteInstance('inst-1');
+      expect(result).toBe(true);
+
+      const found = await store.getInstance('inst-1');
+      expect(found).toBeNull();
+    });
+
+    it('returns false for nonexistent instance', async () => {
+      const result = await store.deleteInstance('nonexistent');
+      expect(result).toBe(false);
+    });
+  });
+
   describe('listInstances', () => {
     it('returns empty result when none exist', async () => {
       const result = await store.listInstances();

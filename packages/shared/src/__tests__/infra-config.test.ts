@@ -155,18 +155,18 @@ describe('nginx-proxy.conf.template', () => {
       expect(elsaBlock).not.toBe('');
     });
 
-    it('has auth_request on /elsa/api/ location', () => {
+    it('has auth_request on /elsa/api/ location (role-check for RBAC)', () => {
       const locations = extractLocationBlocks(elsaBlock);
       const elsaApiLoc = locations.find((l) => l.path === '/elsa/api/');
       expect(elsaApiLoc).toBeDefined();
-      expect(elsaApiLoc?.body).toContain('auth_request /oauth2/auth');
+      expect(elsaApiLoc?.body).toContain('auth_request /auth/role-check');
     });
 
-    it('has auth_request on the root / location (ELSA Studio)', () => {
+    it('has auth_request on the root / location (role-check for RBAC)', () => {
       const locations = extractLocationBlocks(elsaBlock);
       const rootLoc = locations.find((l) => l.path === '/');
       expect(rootLoc).toBeDefined();
-      expect(rootLoc?.body).toContain('auth_request /oauth2/auth');
+      expect(rootLoc?.body).toContain('auth_request /auth/role-check');
     });
 
     it('injects ELSA admin API key in /elsa/api/ location', () => {
@@ -195,11 +195,11 @@ describe('nginx-proxy.conf.template', () => {
       expect(logsBlock).not.toBe('');
     });
 
-    it('has auth_request on the root / location', () => {
+    it('has auth_request on the root / location (role-check for RBAC)', () => {
       const locations = extractLocationBlocks(logsBlock);
       const rootLoc = locations.find((l) => l.path === '/');
       expect(rootLoc).toBeDefined();
-      expect(rootLoc?.body).toContain('auth_request /oauth2/auth');
+      expect(rootLoc?.body).toContain('auth_request /auth/role-check');
     });
 
     it('has the /sign-out location that clears tamma_session', () => {

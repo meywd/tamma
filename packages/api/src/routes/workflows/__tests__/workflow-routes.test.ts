@@ -1,8 +1,8 @@
 /**
  * Workflow Route Tests
  *
- * Tests CRUD for workflow definitions and instances, including pagination
- * and SSE endpoint existence.
+ * Tests CRUD for workflow definitions and instances, including pagination,
+ * SSE endpoint existence, cancel, delete, and RBAC enforcement.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -270,6 +270,101 @@ describe('Workflow Routes', () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // Cancel
+  // -----------------------------------------------------------------------
+
+  describe('POST /api/workflows/instances/:id/cancel', () => {
+    it('cancels a running instance', async () => {
+      await store.createInstance({
+        id: 'inst-1',
+        definitionId: 'def-1',
+        status: 'running',
+        variables: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/workflows/instances/inst-1/cancel',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().status).toBe('cancelled');
+    });
+
+    it('returns already-cancelled message for already cancelled instance', async () => {
+      await store.createInstance({
+        id: 'inst-1',
+        definitionId: 'def-1',
+        status: 'cancelled',
+        variables: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/workflows/instances/inst-1/cancel',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().message).toBe('Instance already cancelled');
+    });
+
+    it('returns 404 for nonexistent instance', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/workflows/instances/nonexistent/cancel',
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Delete
+  // -----------------------------------------------------------------------
+
+  describe('DELETE /api/workflows/instances/:id', () => {
+    it('deletes an existing instance', async () => {
+      await store.createInstance({
+        id: 'inst-1',
+        definitionId: 'def-1',
+        status: 'completed',
+        variables: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/workflows/instances/inst-1',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().ok).toBe(true);
+
+      // Confirm it's gone
+      const inst = await store.getInstance('inst-1');
+      expect(inst).toBeNull();
+    });
+
+    it('returns 404 for nonexistent instance', async () => {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/api/workflows/instances/nonexistent',
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // SSE
+  // -----------------------------------------------------------------------
+
   describe('GET /api/workflows/instances/:id/events (SSE)', () => {
     it('returns 404 for nonexistent instance', async () => {
       const response = await app.inject({
@@ -279,5 +374,192 @@ describe('Workflow Routes', () => {
 
       expect(response.statusCode).toBe(404);
     });
+  });
+});
+
+// ================================================================
+// RBAC Enforcement Tests for Workflow Routes
+// ================================================================
+
+describe('Workflow Routes RBAC enforcement', () => {
+  let app: FastifyInstance;
+  let store: InMemoryWorkflowStore;
+
+  beforeEach(async () => {
+    store = new InMemoryWorkflowStore();
+    app = Fastify({ logger: false });
+
+    // Decorate request with authUser (simulates what the auth plugin does)
+    app.decorateRequest('authUser', null);
+
+    // Hook to set authUser from test headers
+    app.addHook('onRequest', async (request) => {
+      const roleHeader = request.headers['x-test-role'] as string | undefined;
+      const userIdHeader = request.headers['x-test-user-id'] as string | undefined;
+      if (roleHeader && userIdHeader) {
+        (request as unknown as { authUser: { id: string; role: string; username: string } }).authUser = {
+          id: userIdHeader,
+          role: roleHeader,
+          username: 'test-user',
+        };
+      }
+    });
+
+    await app.register(
+      async (instance) => {
+        await registerWorkflowRoutes(instance, { store });
+      },
+      { prefix: '' },
+    );
+    await app.ready();
+
+    // Seed test data
+    await store.createInstance({
+      id: 'inst-1',
+      definitionId: 'def-1',
+      status: 'running',
+      variables: {},
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  // ---- View (member+) ----
+  it('member can GET /api/workflows/instances', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/workflows/instances',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('member can GET /api/workflows/definitions', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/workflows/definitions',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  // ---- Manage (admin+) ----
+  it('member cannot POST /api/workflows/definitions', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/definitions',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+      payload: { id: 'def-x', name: 'Test' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('admin can POST /api/workflows/definitions', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/definitions',
+      headers: { 'x-test-role': 'admin', 'x-test-user-id': 'user-2' },
+      payload: { id: 'def-x', name: 'Test' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('member cannot POST /api/workflows/instances', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/instances',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+      payload: { definitionId: 'def-1' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('member cannot PUT /api/workflows/instances/:id', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/workflows/instances/inst-1',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+      payload: { status: 'completed' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  // ---- Cancel (admin+ via workflows:manage) ----
+  it('member cannot POST /api/workflows/instances/:id/cancel', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/instances/inst-1/cancel',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('admin can POST /api/workflows/instances/:id/cancel', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/instances/inst-1/cancel',
+      headers: { 'x-test-role': 'admin', 'x-test-user-id': 'user-2' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('cancelled');
+  });
+
+  it('owner can POST /api/workflows/instances/:id/cancel', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/instances/inst-1/cancel',
+      headers: { 'x-test-role': 'owner', 'x-test-user-id': 'user-3' },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  // ---- Delete (owner only via workflows:delete) ----
+  it('member cannot DELETE /api/workflows/instances/:id', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/workflows/instances/inst-1',
+      headers: { 'x-test-role': 'member', 'x-test-user-id': 'user-1' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('admin cannot DELETE /api/workflows/instances/:id', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/workflows/instances/inst-1',
+      headers: { 'x-test-role': 'admin', 'x-test-user-id': 'user-2' },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('owner can DELETE /api/workflows/instances/:id', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/workflows/instances/inst-1',
+      headers: { 'x-test-role': 'owner', 'x-test-user-id': 'user-3' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(true);
+  });
+
+  // ---- Unauthenticated ----
+  it('returns 401 for unauthenticated user on view endpoint', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/workflows/instances',
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 401 for unauthenticated user on manage endpoint', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workflows/instances/inst-1/cancel',
+    });
+    expect(res.statusCode).toBe(401);
   });
 });

@@ -57,6 +57,7 @@ import type { ITenantStore, CreateTenantInput } from './persistence/tenant-store
 import { PgTenantStore } from './persistence/pg-tenant-store.js';
 import { requireRole, requireSelfOrRole } from './middleware/require-role.js';
 import type { AuthenticatedUser } from './middleware/require-role.js';
+import { requirePermission } from './auth/require-permission.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
 import { GitHubRepoConfigReader } from './services/settings/repo-config-reader.js';
 import type { RepoConfigReader } from './services/settings/repo-config-reader.js';
@@ -282,16 +283,36 @@ export async function createApp(options?: CreateAppOptions) {
     await app.register(registerAuthPlugin, options.auth);
   }
 
-  // Knowledge Base Management routes
-  await registerKnowledgeBaseRoutes(app, options?.kbServices);
+  // Knowledge Base Management routes (admin+ — settings:view for GET, settings:manage for mutations)
+  await app.register(
+    async (instance) => {
+      instance.addHook('onRequest', async (request, reply) => {
+        if (request.method === 'GET') {
+          await requirePermission('settings:view')(request, reply);
+        } else {
+          await requirePermission('settings:manage')(request, reply);
+        }
+      });
+      await registerKnowledgeBaseRoutes(instance, options?.kbServices);
+    },
+    { prefix: '' },
+  );
 
   // Settings routes (config, health, diagnostics)
   await registerSettingsRoutes(app, options?.settingsServices);
 
   // Engine routes (if an engine is provided)
+  // GET endpoints require 'workflows:view' (member+), POST requires 'workflows:manage' (admin+)
   if (options?.engine !== undefined) {
     await app.register(
       async (instance) => {
+        instance.addHook('onRequest', async (request, reply) => {
+          if (request.method === 'GET') {
+            await requirePermission('workflows:view')(request, reply);
+          } else {
+            await requirePermission('workflows:manage')(request, reply);
+          }
+        });
         await registerEngineRoutes(instance, options.engine!);
       },
       { prefix: '' },
@@ -343,9 +364,17 @@ export async function createApp(options?: CreateAppOptions) {
     await registerUserManagementRoutes(app, options.userManagement);
   }
 
-  // Admin routes (system health)
+  // Admin routes (system health) — admin+ via 'admin:access'
   if (options?.admin !== undefined) {
-    await registerAdminRoutes(app, options.admin);
+    await app.register(
+      async (instance) => {
+        instance.addHook('onRequest', async (request, reply) => {
+          await requirePermission('admin:access')(request, reply);
+        });
+        await registerAdminRoutes(instance, options.admin);
+      },
+      { prefix: '' },
+    );
   }
 
   // Engine context routes (Elsa activity callbacks — always register when enabled)
@@ -365,18 +394,35 @@ export async function createApp(options?: CreateAppOptions) {
   }
 
   // Prompt Registry routes (always registered — uses default store if none provided)
+  // GET requires 'settings:view' (admin+), PUT/POST requires 'settings:manage' (owner)
   {
     const promptStore = options?.promptStore ?? new PromptStore();
-    await registerPromptRoutes(app, promptStore);
+    await app.register(
+      async (instance) => {
+        instance.addHook('onRequest', async (request, reply) => {
+          if (request.method === 'GET') {
+            await requirePermission('settings:view')(request, reply);
+          } else {
+            await requirePermission('settings:manage')(request, reply);
+          }
+        });
+        await registerPromptRoutes(instance, promptStore);
+      },
+      { prefix: '' },
+    );
   }
 
   // Convention template routes (always registered — read-only reference data)
   await registerConventionTemplateRoutes(app);
 
   // Dashboard routes (requires both engine registry and workflow store)
+  // All dashboard routes are read-only — require 'dashboard:view' (member+)
   if (options?.engineRegistry !== undefined && options?.workflowStore !== undefined) {
     await app.register(
       async (instance) => {
+        instance.addHook('onRequest', async (request, reply) => {
+          await requirePermission('dashboard:view')(request, reply);
+        });
         await registerDashboardRoutes(instance, {
           engineRegistry: options.engineRegistry!,
           workflowStore: options.workflowStore!,
