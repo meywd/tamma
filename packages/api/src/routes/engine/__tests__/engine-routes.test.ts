@@ -321,7 +321,7 @@ describe('Engine Routes', () => {
 
     it('filters by issueNumber', async () => {
       engine.getEventStore.mockReturnValue({
-        getEvents: vi.fn().mockImplementation((issueNumber?: number) => {
+        getEvents: vi.fn().mockImplementation((_tenantId: string, issueNumber?: number) => {
           if (issueNumber === 42) return [{ id: '1', type: 'EVENT', timestamp: Date.now() }];
           return [];
         }),

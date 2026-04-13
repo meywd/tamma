@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryEventStore } from './event-store.js';
 import { EngineEventType } from './types/index.js';
+import { DEFAULT_TENANT_ID } from './types/tenant.js';
+
+const T = DEFAULT_TENANT_ID; // shorthand for default tenant in tests
 
 describe('InMemoryEventStore', () => {
   let store: InMemoryEventStore;
@@ -13,6 +16,7 @@ describe('InMemoryEventStore', () => {
     it('should create events with id and timestamp', () => {
       const event = store.record({
         type: EngineEventType.ISSUE_SELECTED,
+        tenantId: T,
         issueNumber: 42,
         data: { title: 'Fix bug' },
       });
@@ -23,6 +27,7 @@ describe('InMemoryEventStore', () => {
       expect(event.timestamp).toBeDefined();
       expect(typeof event.timestamp).toBe('number');
       expect(event.type).toBe(EngineEventType.ISSUE_SELECTED);
+      expect(event.tenantId).toBe(T);
       expect(event.issueNumber).toBe(42);
       expect(event.data).toEqual({ title: 'Fix bug' });
     });
@@ -30,10 +35,12 @@ describe('InMemoryEventStore', () => {
     it('should assign unique ids to each event', () => {
       const e1 = store.record({
         type: EngineEventType.ISSUE_SELECTED,
+        tenantId: T,
         data: {},
       });
       const e2 = store.record({
         type: EngineEventType.ISSUE_ANALYZED,
+        tenantId: T,
         data: {},
       });
 
@@ -42,73 +49,73 @@ describe('InMemoryEventStore', () => {
   });
 
   describe('getEvents', () => {
-    it('should return all events when no issueNumber is provided', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, data: {} });
+    it('should return all events for the tenant when no issueNumber is provided', () => {
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
+      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
 
-      const events = store.getEvents();
+      const events = store.getEvents(T);
       expect(events).toHaveLength(3);
     });
 
     it('should return empty array when store is empty', () => {
-      expect(store.getEvents()).toEqual([]);
+      expect(store.getEvents(T)).toEqual([]);
     });
 
     it('should filter by issueNumber', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, issueNumber: 1, data: {} });
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
+      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, issueNumber: 1, data: {} });
 
-      const events = store.getEvents(1);
+      const events = store.getEvents(T, 1);
       expect(events).toHaveLength(2);
       expect(events.every((e) => e.issueNumber === 1)).toBe(true);
     });
 
     it('should return empty array when no events match issueNumber', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 1, data: {} });
-      expect(store.getEvents(999)).toEqual([]);
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      expect(store.getEvents(T, 999)).toEqual([]);
     });
 
     it('should return a copy of events (not a reference)', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, data: {} });
-      const events = store.getEvents();
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      const events = store.getEvents(T);
       events.pop();
-      expect(store.getEvents()).toHaveLength(1);
+      expect(store.getEvents(T)).toHaveLength(1);
     });
   });
 
   describe('getLastEvent', () => {
     it('should return the most recent event of the given type', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 1, data: { first: true } });
-      store.record({ type: EngineEventType.PLAN_GENERATED, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, issueNumber: 2, data: { second: true } });
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: { first: true } });
+      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: { second: true } });
 
-      const last = store.getLastEvent(EngineEventType.ISSUE_SELECTED);
+      const last = store.getLastEvent(T, EngineEventType.ISSUE_SELECTED);
       expect(last).toBeDefined();
       expect(last!.issueNumber).toBe(2);
       expect(last!.data).toEqual({ second: true });
     });
 
     it('should return undefined when no matching events exist', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, data: {} });
-      const last = store.getLastEvent(EngineEventType.ERROR_OCCURRED);
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      const last = store.getLastEvent(T, EngineEventType.ERROR_OCCURRED);
       expect(last).toBeUndefined();
     });
 
     it('should return undefined when store is empty', () => {
-      expect(store.getLastEvent(EngineEventType.ISSUE_SELECTED)).toBeUndefined();
+      expect(store.getLastEvent(T, EngineEventType.ISSUE_SELECTED)).toBeUndefined();
     });
   });
 
   describe('clear', () => {
-    it('should empty the store', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, data: {} });
-      expect(store.getEvents()).toHaveLength(2);
+    it('should remove only the specified tenant events', () => {
+      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
+      expect(store.getEvents(T)).toHaveLength(2);
 
-      store.clear();
-      expect(store.getEvents()).toHaveLength(0);
+      store.clear(T);
+      expect(store.getEvents(T)).toHaveLength(0);
     });
   });
 
@@ -123,10 +130,10 @@ describe('InMemoryEventStore', () => {
       ];
 
       for (const type of types) {
-        store.record({ type, data: {} });
+        store.record({ type, tenantId: T, data: {} });
       }
 
-      const events = store.getEvents();
+      const events = store.getEvents(T);
       expect(events).toHaveLength(5);
       expect(events.map((e) => e.type)).toEqual(types);
     });

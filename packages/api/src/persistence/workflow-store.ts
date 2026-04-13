@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { DEFAULT_TENANT_ID } from '@tamma/shared';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -24,6 +25,7 @@ export interface WorkflowDefinition {
 export interface WorkflowInstance {
   id: string;
   definitionId: string;
+  tenantId: string;
   status: string;
   currentActivity?: string;
   variables: Record<string, unknown>;
@@ -35,6 +37,7 @@ export interface ListInstancesOptions {
   page?: number;
   pageSize?: number;
   definitionId?: string;
+  tenantId?: string;
 }
 
 export interface PaginatedResult<T> {
@@ -98,6 +101,7 @@ export class InMemoryWorkflowStore implements IWorkflowStore {
     const record: WorkflowInstance = {
       ...instance,
       id: instance.id || randomUUID(),
+      tenantId: instance.tenantId || DEFAULT_TENANT_ID,
       createdAt: instance.createdAt || Date.now(),
       updatedAt: instance.updatedAt || Date.now(),
     };
@@ -135,6 +139,11 @@ export class InMemoryWorkflowStore implements IWorkflowStore {
     options?: ListInstancesOptions,
   ): Promise<PaginatedResult<WorkflowInstance>> {
     let items = [...this.instances.values()];
+
+    // Filter by tenantId when provided
+    if (options?.tenantId !== undefined) {
+      items = items.filter((i) => i.tenantId === options.tenantId);
+    }
 
     // Filter by definitionId when provided
     if (options?.definitionId !== undefined) {

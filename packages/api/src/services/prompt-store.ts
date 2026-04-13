@@ -1,14 +1,16 @@
 /**
  * Prompt Store
  *
- * In-memory store with file-based JSON persistence for prompt templates.
+ * Interface and in-memory implementation for prompt template management.
  * Templates are keyed by (role, action) and support CRUD operations,
  * version tracking, and {{variable}} interpolation.
  *
- * On first access, loads from JSON file if it exists, then seeds any
- * missing templates from the default prompt catalog.
+ * Supports multi-tenant resolution: tenant overrides fall back to
+ * system defaults (tenant_id IS NULL).
  *
  * Story 12-5: Prompt Engineering Framework
+ * Story 27-1: Prompt Store Database Schema
+ * Story 27-2: Prompt Store Service
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -46,6 +48,8 @@ export interface PromptSummary {
   maxTokens: number;
   variableCount: number;
   updatedAt: string;
+  /** Whether this is a tenant override or a system default */
+  isOverride?: boolean;
 }
 
 /** Result of rendering a prompt template */
@@ -62,20 +66,139 @@ export interface RenderedPrompt {
 }
 
 // ---------------------------------------------------------------------------
+// IPromptStore Interface
+// ---------------------------------------------------------------------------
+
+/**
+ * Multi-tenant prompt store interface.
+ *
+ * Resolution order for get(tenantId, role, action):
+ *   1. Tenant override (tenant_id = tenantId) if tenantId is not null
+ *   2. System default (tenant_id IS NULL)
+ *   3. undefined
+ */
+export interface IPromptStore {
+  // --- Tenant-scoped operations ---
+  get(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined>;
+  upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate>;
+  delete(tenantId: string, role: string, action: string): Promise<boolean>;
+  list(tenantId: string | null): Promise<PromptSummary[]>;
+  render(tenantId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined>;
+
+  // --- System default operations ---
+  getSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined>;
+  upsertSystemDefault(role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate>;
+  resetSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined>;
+  listSystemDefaults(): Promise<PromptSummary[]>;
+
+  // --- System prompts (role preambles) ---
+  getSystemPrompt(tenantId: string | null, role: string): Promise<string | undefined>;
+  upsertSystemPrompt(tenantId: string | null, role: string, prompt: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /** Maximum rendered template length (1 MB). */
-const MAX_TEMPLATE_LENGTH = 1_000_000;
+export const MAX_TEMPLATE_LENGTH = 1_000_000;
 
 /** Maximum variable value length (100 KB). */
-const MAX_VAR_VALUE_LENGTH = 100_000;
+export const MAX_VAR_VALUE_LENGTH = 100_000;
 
 /** Prototype pollution guard. */
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 // ---------------------------------------------------------------------------
-// PromptStore
+// Shared Utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract {{variable}} names from a template string.
+ */
+export function extractVariables(template: string): string[] {
+  const matches = template.matchAll(/\{\{([^}]{1,64})\}\}/g);
+  const vars = new Set<string>();
+  for (const match of matches) {
+    const varName = match[1];
+    if (varName !== undefined) {
+      vars.add(varName);
+    }
+  }
+  return [...vars];
+}
+
+/**
+ * Single-pass {{variable}} interpolation.
+ * Prevents recursive expansion (template injection safety).
+ * Tracks unresolved variables in the provided array.
+ */
+export function interpolateTemplate(
+  template: string,
+  vars: Record<string, string>,
+  unresolvedTracker: string[],
+  logger?: { warn: (obj: object, msg: string) => void },
+): string {
+  let result = template.replace(/\{\{([^}]{1,64})\}\}/g, (_match, key: string) => {
+    const value = vars[key];
+    if (value === undefined) {
+      unresolvedTracker.push(key);
+      return `{{${key}}}`;
+    }
+    if (value.length > MAX_VAR_VALUE_LENGTH) {
+      logger?.warn(
+        { key, valueLength: value.length, limit: MAX_VAR_VALUE_LENGTH },
+        'Variable value exceeds maximum length, leaving unresolved',
+      );
+      unresolvedTracker.push(key);
+      return `{{${key}}}`;
+    }
+    return value;
+  });
+
+  if (result.length > MAX_TEMPLATE_LENGTH) {
+    logger?.warn(
+      { length: result.length, limit: MAX_TEMPLATE_LENGTH },
+      'Rendered template exceeds maximum length, truncating',
+    );
+    result = result.slice(0, MAX_TEMPLATE_LENGTH);
+  }
+
+  return result;
+}
+
+/**
+ * Validate a role+action key pair.
+ * Throws if the key is forbidden, empty, or too long.
+ */
+export function validateKey(role: string, action: string): void {
+  if (FORBIDDEN_KEYS.has(role)) {
+    throw new Error(`Forbidden role name: ${role}`);
+  }
+  if (FORBIDDEN_KEYS.has(action)) {
+    throw new Error(`Forbidden action name: ${action}`);
+  }
+  if (role.length === 0 || role.length > 64) {
+    throw new Error(`Role name must be 1-64 characters (got ${role.length})`);
+  }
+  if (action.length === 0 || action.length > 64) {
+    throw new Error(`Action name must be 1-64 characters (got ${action.length})`);
+  }
+}
+
+/**
+ * Clone a template to prevent external mutation.
+ */
+export function cloneTemplate(t: PromptTemplate | undefined): PromptTemplate | undefined {
+  if (t === undefined) return undefined;
+  return {
+    ...t,
+    variables: [...t.variables],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PromptStore (legacy file-based implementation, kept for backward compat)
 // ---------------------------------------------------------------------------
 
 export interface PromptStoreOptions {

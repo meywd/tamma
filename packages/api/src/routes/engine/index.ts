@@ -20,6 +20,7 @@ import type {
   DevelopmentPlan,
   EngineEvent,
 } from '@tamma/shared';
+import { DEFAULT_TENANT_ID } from '@tamma/shared';
 
 // ---------------------------------------------------------------------------
 // Zod Schemas
@@ -189,9 +190,12 @@ export async function registerEngineRoutes(
   });
 
   // ---------- GET /api/engine/events/logs ----------
-  fastify.get('/api/engine/events/logs', async (_request, reply) => {
+  fastify.get('/api/engine/events/logs', async (request, reply) => {
     reply.hijack();
     sseHeaders(reply);
+
+    // Capture tenant before entering the interval callback
+    const tenantId = (request as FastifyRequest & { tenantId?: string }).tenantId ?? DEFAULT_TENANT_ID;
 
     // Stream event-store entries as they arrive (poll-based).
     // Use array index instead of timestamps to avoid same-millisecond races.
@@ -202,7 +206,7 @@ export async function registerEngineRoutes(
         const store = engine.getEventStore();
         if (store === undefined) return;
 
-        const events = store.getEvents();
+        const events = store.getEvents(tenantId);
         if (events.length > lastSeenIndex) {
           const newEvents = events.slice(lastSeenIndex);
           for (const evt of newEvents) {
@@ -263,7 +267,8 @@ export async function registerEngineRoutes(
         ? parseInt(request.query.issueNumber, 10)
         : undefined;
 
-      const allEvents: EngineEvent[] = store.getEvents(issueNumber);
+      const tenantId = (request as FastifyRequest & { tenantId?: string }).tenantId ?? DEFAULT_TENANT_ID;
+      const allEvents: EngineEvent[] = store.getEvents(tenantId, issueNumber);
       const total = allEvents.length;
       const start = (page - 1) * pageSize;
       const data = allEvents.slice(start, start + pageSize);

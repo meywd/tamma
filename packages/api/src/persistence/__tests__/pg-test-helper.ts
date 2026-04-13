@@ -43,6 +43,10 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
     '006_user_invites.sql',
     '007_users_soft_delete.sql',
     '008_tenants.sql',
+    '009_unified_api_keys.sql',
+    '010_rls_tenant_isolation.sql',
+    '011_tenant_scoped_stores.sql',
+    '012_prompt_store.sql',
   ];
 
   for (const file of migrationFiles) {
@@ -57,7 +61,7 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
  */
 export async function truncateTables(pool: pg.Pool): Promise<void> {
   await pool.query(
-    'TRUNCATE TABLE user_invites, user_api_keys, user_installations, users, github_installation_repos, github_installations, tenants CASCADE',
+    'TRUNCATE TABLE action_prompts, system_prompts, prompts, workflow_instances, engine_events, user_invites, user_api_keys, api_keys, user_installations, users, github_installation_repos, github_installations, tenants CASCADE',
   );
   // Re-insert default tenant sentinel (needed by FK constraints)
   await pool.query(`
@@ -68,10 +72,31 @@ export async function truncateTables(pool: pg.Pool): Promise<void> {
 }
 
 /**
+ * Set the PostgreSQL session variable for RLS tenant scoping.
+ * Must be called on each connection before running tenant-scoped queries.
+ */
+export async function setTenantContext(pool: pg.Pool, tenantId: string): Promise<void> {
+  await pool.query('SET app.current_tenant_id = $1', [tenantId]);
+}
+
+/**
+ * Reset the PostgreSQL session variable for RLS tenant scoping.
+ */
+export async function resetTenantContext(pool: pg.Pool): Promise<void> {
+  await pool.query('RESET app.current_tenant_id');
+}
+
+/**
  * Drop all test tables (for cleanup after all tests).
  */
 export async function dropTables(pool: pg.Pool): Promise<void> {
   await pool.query(`
+    DROP TABLE IF EXISTS action_prompts CASCADE;
+    DROP TABLE IF EXISTS system_prompts CASCADE;
+    DROP TABLE IF EXISTS prompts CASCADE;
+    DROP TABLE IF EXISTS workflow_instances CASCADE;
+    DROP TABLE IF EXISTS engine_events CASCADE;
+    DROP TABLE IF EXISTS api_keys CASCADE;
     DROP TABLE IF EXISTS user_invites CASCADE;
     DROP TABLE IF EXISTS user_api_keys CASCADE;
     DROP TABLE IF EXISTS user_installations CASCADE;
@@ -79,5 +104,6 @@ export async function dropTables(pool: pg.Pool): Promise<void> {
     DROP TABLE IF EXISTS github_installation_repos CASCADE;
     DROP TABLE IF EXISTS github_installations CASCADE;
     DROP TABLE IF EXISTS tenants CASCADE;
+    DROP FUNCTION IF EXISTS prevent_tenant_id_change() CASCADE;
   `);
 }

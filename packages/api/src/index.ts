@@ -69,6 +69,8 @@ import type { ITenantStore, CreateTenantInput } from './persistence/tenant-store
 import { PgTenantStore } from './persistence/pg-tenant-store.js';
 import { requireRole, requireSelfOrRole } from './middleware/require-role.js';
 import type { AuthenticatedUser } from './middleware/require-role.js';
+import { registerTenantContextPlugin } from './middleware/tenant-context.js';
+import type { TenantContextConfig } from './middleware/tenant-context.js';
 import { requirePermission } from './auth/require-permission.js';
 import { GitHubSecretsProvisioner } from './services/github-secrets-provisioner.js';
 import { GitHubRepoConfigReader } from './services/settings/repo-config-reader.js';
@@ -95,9 +97,21 @@ import { registerEngineTaskRoutes } from './routes/engine/engine-task-routes.js'
 import type { EngineTaskRouteOptions } from './routes/engine/engine-task-routes.js';
 import { registerPromptRoutes } from './routes/prompts/prompt-routes.js';
 import { PromptStore } from './services/prompt-store.js';
+import { InMemoryPromptStore } from './services/in-memory-prompt-store.js';
+import { PgPromptStore } from './services/pg-prompt-store.js';
 import { registerConventionTemplateRoutes } from './routes/convention-templates.js';
-import type { PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
+import type { IPromptStore, PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
 import type { PromptTemplate, PromptRole, PromptAction } from './services/default-prompts.js';
+import { registerAgentConfigApiRoutes } from './routes/agents/index.js';
+import type { AgentConfigRoutesOptions } from './routes/agents/index.js';
+import { InMemoryAgentConfigStore } from './persistence/agent-config-store.js';
+import type {
+  IAgentConfigStore,
+  AgentConfigDocument,
+  AgentConfigRow,
+  ResolvedAgentConfig,
+} from './persistence/agent-config-store.js';
+import { PgAgentConfigStore } from './persistence/pg-agent-config-store.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -144,11 +158,19 @@ export {
   registerPromptRoutes,
   registerConventionTemplateRoutes,
   PromptStore,
+  InMemoryPromptStore,
+  PgPromptStore,
   // Unified API key system (Story 16-7)
   InMemoryApiKeyStore,
   PgApiKeyStore,
   authenticateApiKey,
   requireScope,
+  // Agent config store (Story 9-1)
+  InMemoryAgentConfigStore,
+  PgAgentConfigStore,
+  registerAgentConfigApiRoutes,
+  // Tenant context middleware (Story 17-5)
+  registerTenantContextPlugin,
 };
 
 export { startApiServer } from './serve.js';
@@ -209,6 +231,7 @@ export type {
   UserManagementRouteOptions,
   EngineGitHubRouteOptions,
   EngineTaskRouteOptions,
+  IPromptStore,
   PromptStoreOptions,
   UpsertPromptInput,
   RenderInput,
@@ -225,6 +248,14 @@ export type {
   CreateUnifiedApiKeyInput,
   UnifiedAuthDeps,
   AuthPrincipal,
+  // Agent config store (Story 9-1)
+  IAgentConfigStore,
+  AgentConfigDocument,
+  AgentConfigRow,
+  ResolvedAgentConfig,
+  AgentConfigRoutesOptions,
+  // Tenant context middleware (Story 17-5)
+  TenantContextConfig,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -261,6 +292,10 @@ export interface CreateAppOptions {
   engineContext?: boolean | EngineContextRouteOptions;
   /** Prompt store for the prompt registry API (optional; creates default in-memory store if omitted). */
   promptStore?: PromptStore;
+  /** Agent config store for Postgres-backed config (optional; creates in-memory store if omitted). */
+  agentConfigStore?: IAgentConfigStore;
+  /** Tenant context middleware config (optional; registers tenant resolution from auth context). */
+  tenantContext?: TenantContextConfig;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
   /** Pre-built pino Logger instance (takes precedence over logger option). */
@@ -305,6 +340,11 @@ export async function createApp(options?: CreateAppOptions) {
   // Auth plugin (if configured)
   if (options?.auth !== undefined) {
     await app.register(registerAuthPlugin, options.auth);
+  }
+
+  // Tenant context middleware (if configured) — must run after auth
+  if (options?.tenantContext !== undefined) {
+    await app.register(registerTenantContextPlugin, options.tenantContext);
   }
 
   // Knowledge Base Management routes (admin+ — settings:view for GET, settings:manage for mutations)
@@ -434,6 +474,12 @@ export async function createApp(options?: CreateAppOptions) {
       },
       { prefix: '' },
     );
+  }
+
+  // Agent config API routes (always registered — uses in-memory store if none provided)
+  {
+    const agentConfigStore = options?.agentConfigStore ?? new InMemoryAgentConfigStore();
+    await registerAgentConfigApiRoutes(app, { store: agentConfigStore });
   }
 
   // Convention template routes (always registered — read-only reference data)

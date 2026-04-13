@@ -16,6 +16,7 @@ import {
   EngineState,
   EngineEventType,
   InMemoryEventStore,
+  DEFAULT_TENANT_ID,
   type TammaConfig,
   type IssueData,
   type DevelopmentPlan,
@@ -937,7 +938,7 @@ describe('TammaEngine', () => {
       const { engine } = createEngine({ agent, eventStore });
 
       await expect(engine.processOneIssue()).rejects.toThrow();
-      const events = eventStore.getEvents(42);
+      const events = eventStore.getEvents(DEFAULT_TENANT_ID, 42);
       const errorEvents = events.filter((e) => e.type === EngineEventType.ERROR_OCCURRED);
       expect(errorEvents.length).toBeGreaterThanOrEqual(1);
     });
@@ -1112,7 +1113,7 @@ describe('TammaEngine', () => {
       const { engine } = createEngine({ eventStore } as Partial<EngineContext>);
       await engine.processOneIssue();
 
-      const events = eventStore.getEvents();
+      const events = eventStore.getEvents(DEFAULT_TENANT_ID);
       expect(events.length).toBeGreaterThan(0);
 
       const eventTypes = events.map((e) => e.type);
@@ -1130,7 +1131,7 @@ describe('TammaEngine', () => {
       expect(eventTypes).toContain(EngineEventType.BRANCH_DELETED);
 
       // Verify issue-specific events can be retrieved
-      const issueEvents = eventStore.getEvents(42);
+      const issueEvents = eventStore.getEvents(DEFAULT_TENANT_ID, 42);
       expect(issueEvents.length).toBeGreaterThan(0);
     });
 

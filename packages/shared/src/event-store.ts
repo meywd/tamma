@@ -15,23 +15,25 @@ export class InMemoryEventStore implements IEventStore {
     return full;
   }
 
-  getEvents(issueNumber?: number): EngineEvent[] {
-    if (issueNumber === undefined) {
-      return [...this.events];
-    }
-    return this.events.filter((e) => e.issueNumber === issueNumber);
+  getEvents(tenantId: string, issueNumber?: number): EngineEvent[] {
+    return this.events.filter((e) => {
+      if (e.tenantId !== tenantId) return false;
+      if (issueNumber !== undefined && e.issueNumber !== issueNumber) return false;
+      return true;
+    });
   }
 
-  getLastEvent(type: EngineEventType): EngineEvent | undefined {
+  getLastEvent(tenantId: string, type: EngineEventType): EngineEvent | undefined {
     for (let i = this.events.length - 1; i >= 0; i--) {
-      if (this.events[i]!.type === type) {
-        return this.events[i];
+      const event = this.events[i];
+      if (event !== undefined && event.tenantId === tenantId && event.type === type) {
+        return event;
       }
     }
     return undefined;
   }
 
-  clear(): void {
-    this.events = [];
+  clear(tenantId: string): void {
+    this.events = this.events.filter((e) => e.tenantId !== tenantId);
   }
 }

@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { InMemoryWorkflowStore } from '../workflow-store.js';
 import type { IWorkflowStore, WorkflowDefinition, WorkflowInstance } from '../workflow-store.js';
+import { DEFAULT_TENANT_ID } from '@tamma/shared';
 
 function createDefinition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
   return {
@@ -24,6 +25,7 @@ function createInstance(overrides: Partial<WorkflowInstance> = {}): WorkflowInst
   return {
     id: 'inst-1',
     definitionId: 'def-1',
+    tenantId: DEFAULT_TENANT_ID,
     status: 'pending',
     variables: {},
     createdAt: Date.now(),

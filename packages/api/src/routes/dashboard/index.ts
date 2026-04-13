@@ -7,7 +7,8 @@
  *   GET /api/dashboard/workflows  - definitions with instance counts
  */
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { DEFAULT_TENANT_ID } from '@tamma/shared';
 import type { EngineRegistry } from '../../engine-registry.js';
 import type { IWorkflowStore } from '../../persistence/workflow-store.js';
 
@@ -25,18 +26,19 @@ export async function registerDashboardRoutes(
   // ------------------------------------------------------------------
   // GET /api/dashboard/summary
   // ------------------------------------------------------------------
-  fastify.get('/api/dashboard/summary', async (_request, reply) => {
+  fastify.get('/api/dashboard/summary', async (request, reply) => {
     const engines = engineRegistry.list();
     const definitions = await workflowStore.listDefinitions();
 
     // Gather the most recent engine events for "recentEvents"
+    const tenantId = (request as FastifyRequest & { tenantId?: string }).tenantId ?? DEFAULT_TENANT_ID;
     const recentEvents: unknown[] = [];
     for (const info of engines) {
       const engine = engineRegistry.get(info.id);
       if (engine === undefined) continue;
       const store = engine.getEventStore();
       if (store === undefined) continue;
-      const events = store.getEvents();
+      const events = store.getEvents(tenantId);
       // Take last 10 events per engine
       recentEvents.push(
         ...events.slice(-10).map((e) => ({ ...e, engineId: info.id })),

@@ -10,7 +10,7 @@ import type {
   IEventStore,
   WorkflowPhase,
 } from '@tamma/shared';
-import { EngineState, EngineEventType, sleep, slugify, extractIssueReferences } from '@tamma/shared';
+import { EngineState, EngineEventType, sleep, slugify, extractIssueReferences, DEFAULT_TENANT_ID } from '@tamma/shared';
 import { WorkflowError, EngineError } from '@tamma/shared';
 import type { IAgentProvider, AgentTaskConfig, IRoleBasedAgentResolver } from '@tamma/providers';
 import type { IGitPlatform } from '@tamma/platforms';
@@ -41,6 +41,8 @@ export interface EngineContext {
   onStateChange?: OnStateChangeCallback;
   approvalHandler?: ApprovalHandler;
   agentResolver?: IRoleBasedAgentResolver;
+  /** Tenant ID for event scoping. Defaults to DEFAULT_TENANT_ID. */
+  tenantId?: string;
 }
 
 /**
@@ -88,6 +90,7 @@ export class TammaEngine {
   private readonly engineId = randomUUID();
   private readonly logger: ILogger;
   private readonly eventStore: IEventStore | undefined;
+  private readonly tenantId: string;
   private readonly onStateChange: OnStateChangeCallback | undefined;
   private readonly approvalHandler: ApprovalHandler | undefined;
 
@@ -109,6 +112,7 @@ export class TammaEngine {
     }
     this.logger = ctx.logger;
     this.eventStore = ctx.eventStore;
+    this.tenantId = ctx.tenantId ?? DEFAULT_TENANT_ID;
     this.onStateChange = ctx.onStateChange;
     this.approvalHandler = ctx.approvalHandler;
     this.startedAt = Date.now();
@@ -1088,6 +1092,7 @@ Follow existing project conventions and patterns.`;
   private recordEvent(type: EngineEventType, issueNumber?: number, data: Record<string, unknown> = {}): void {
     this.eventStore?.record({
       type,
+      tenantId: this.tenantId,
       ...(issueNumber !== undefined ? { issueNumber } : {}),
       data,
     });

@@ -109,7 +109,7 @@ function makeTemplate(
 // System Prompts (role identity preambles)
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPTS: Record<string, string> = {
+export const SYSTEM_PROMPTS: Record<string, string> = {
   developer:
     'You are an expert software developer working on the Tamma project. You write production-quality TypeScript code that passes strict compilation, follows established conventions, and includes proper error handling. You have deep expertise in Node.js, Fastify, PostgreSQL, and event-driven architectures.',
 

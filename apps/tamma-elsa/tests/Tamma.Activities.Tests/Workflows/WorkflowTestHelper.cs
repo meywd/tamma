@@ -71,6 +71,8 @@ public static class WorkflowTestHelper
             .Returns((string varName, int defaultValue) => { var v = new Variable<int>(varName, defaultValue); variables.Add(v); return v; });
         mockBuilder.Setup(b => b.WithVariable<bool>(It.IsAny<string>(), It.IsAny<bool>()))
             .Returns((string varName, bool defaultValue) => { var v = new Variable<bool>(varName, defaultValue); variables.Add(v); return v; });
+        mockBuilder.Setup(b => b.WithVariable<Guid>(It.IsAny<string>(), It.IsAny<Guid>()))
+            .Returns((string varName, Guid defaultValue) => { var v = new Variable<Guid>(varName, defaultValue); variables.Add(v); return v; });
         mockBuilder.Setup(b => b.WithVariable<string[]>(It.IsAny<string>(), It.IsAny<string[]>()))
             .Returns((string varName, string[] defaultValue) => { var v = new Variable<string[]>(varName, defaultValue); variables.Add(v); return v; });
 

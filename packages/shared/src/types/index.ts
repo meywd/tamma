@@ -296,13 +296,14 @@ export interface EngineEvent {
   id: string;
   type: EngineEventType;
   timestamp: number;
+  tenantId: string;
   issueNumber?: number;
   data: Record<string, unknown>;
 }
 
 export interface IEventStore {
   record(event: Omit<EngineEvent, 'id' | 'timestamp'>): EngineEvent;
-  getEvents(issueNumber?: number): EngineEvent[];
-  getLastEvent(type: EngineEventType): EngineEvent | undefined;
-  clear(): void;
+  getEvents(tenantId: string, issueNumber?: number): EngineEvent[];
+  getLastEvent(tenantId: string, type: EngineEventType): EngineEvent | undefined;
+  clear(tenantId: string): void;
 }

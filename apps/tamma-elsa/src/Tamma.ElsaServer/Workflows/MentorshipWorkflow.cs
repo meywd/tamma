@@ -787,9 +787,11 @@ public class MentorshipWorkflow : WorkflowBase
                 // VALIDATE -> [Invalid] -> FAILED
                 // =============================================================
 
-                // 4. VALIDATE Valid -> ASSESS_JUNIOR_CAPABILITY directly
+                // 4. VALIDATE Valid -> Assessment sub-workflow -> Extract Skill Level -> ASSESS
+                // (Previously routed directly to assessJunior, skipping assessment and
+                //  leaving skillLevel at the hardcoded default of 3.)
                 new(new FlowEndpoint(validateStory, "Valid"),
-                    new FlowEndpoint(assessJunior)),
+                    new FlowEndpoint(assessmentWorkflow)),
 
                 // 5. Assessment sub-workflow -> Extract Skill Level -> ASSESS
                 new(assessmentWorkflow, extractSkillLevel),
