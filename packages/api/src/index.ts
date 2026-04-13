@@ -50,6 +50,18 @@ import { registerUserManagementRoutes } from './routes/users/index.js';
 import type { UserManagementRouteOptions } from './routes/users/index.js';
 import { InMemoryUserApiKeyStore, PgUserApiKeyStore } from './persistence/user-api-key-store.js';
 import type { IUserApiKeyStore, UserApiKey, CreateApiKeyInput } from './persistence/user-api-key-store.js';
+import { InMemoryApiKeyStore } from './persistence/api-key-store.js';
+import { PgApiKeyStore } from './persistence/pg-api-key-store.js';
+import type {
+  IApiKeyStore,
+  ApiKeyRecord,
+  ApiKeyScope,
+  CreateUnifiedApiKeyInput,
+} from './persistence/api-key-store.js';
+import { authenticateApiKey } from './auth/unified-auth.js';
+import type { UnifiedAuthDeps } from './auth/unified-auth.js';
+import { requireScope } from './auth/require-scope.js';
+import type { AuthPrincipal } from './auth/principal.js';
 import { InMemoryInviteStore, PgInviteStore } from './persistence/invite-store.js';
 import type { IInviteStore, UserInvite, CreateInviteInput } from './persistence/invite-store.js';
 import { InMemoryTenantStore } from './persistence/tenant-store.js';
@@ -132,6 +144,11 @@ export {
   registerPromptRoutes,
   registerConventionTemplateRoutes,
   PromptStore,
+  // Unified API key system (Story 16-7)
+  InMemoryApiKeyStore,
+  PgApiKeyStore,
+  authenticateApiKey,
+  requireScope,
 };
 
 export { startApiServer } from './serve.js';
@@ -201,6 +218,13 @@ export type {
   PromptRole,
   PromptAction,
   EngineContextRouteOptions,
+  // Unified API key system (Story 16-7)
+  IApiKeyStore,
+  ApiKeyRecord,
+  ApiKeyScope,
+  CreateUnifiedApiKeyInput,
+  UnifiedAuthDeps,
+  AuthPrincipal,
 };
 
 /** Options for creating the Fastify app with optional engine support. */

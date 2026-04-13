@@ -88,6 +88,8 @@ services:
       Elsa__Identity__SigningKey: ${ELSA_SIGNING_KEY:-sufficiently-long-secret-signing-key-for-elsa-jwt-tokens}
       Elsa__Identity__AdminUser__Password: ${ELSA_ADMIN_PASSWORD:-password}
       ELSA_SEED_FORCE: ${ELSA_SEED_FORCE:-false}
+      TAMMA_SERVICE_API_KEY: ${TAMMA_SERVICE_API_KEY:-}
+      TammaApi__BaseUrl: http://tamma-api:3100
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
       OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
       OpenSearch__IndexPrefix: tamma-elsa
@@ -136,6 +138,7 @@ services:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
       TammaServer__Url: http://tamma-api:3100
+      TAMMA_SERVICE_API_KEY: ${TAMMA_SERVICE_API_KEY:-}
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
       OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}

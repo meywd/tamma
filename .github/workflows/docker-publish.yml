@@ -369,6 +369,7 @@ jobs:
             "JWT_SECRET=${{ secrets.TAMMA_JWT_SECRET }}" \
             "OAUTH2_PROXY_COOKIE_SECRET=${{ secrets.TAMMA_OAUTH2_PROXY_COOKIE_SECRET }}" \
             "ELSA_ADMIN_API_KEY=${{ secrets.TAMMA_ELSA_ADMIN_API_KEY }}" \
+            "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
             "DASHBOARD_URL=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
