@@ -14,6 +14,8 @@ import {
   dropTables,
   setTenantContext,
   resetTenantContext,
+  setAppRole,
+  resetRole,
 } from './pg-test-helper.js';
 import type pg from 'pg';
 
@@ -51,23 +53,25 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // -----------------------------------------------------------------------
 
   it('prevents cross-tenant reads on github_installations', async () => {
-    // Insert installation for tenant A
+    // Insert as superuser
     await pool.query(`
       INSERT INTO github_installations (installation_id, account_login, account_type, app_id, tenant_id)
       VALUES (1001, 'acme', 'Organization', 1, $1)
     `, [TENANT_A_ID]);
 
-    // Set tenant context to B and query
+    // Switch to app role for RLS enforcement
+    await setAppRole(pool);
+
     await setTenantContext(pool, TENANT_B_ID);
     const result = await pool.query('SELECT * FROM github_installations');
     expect(result.rows).toHaveLength(0);
 
-    // Set tenant context to A and verify row is visible
     await setTenantContext(pool, TENANT_A_ID);
     const resultA = await pool.query('SELECT * FROM github_installations');
     expect(resultA.rows).toHaveLength(1);
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -80,12 +84,14 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
       VALUES (1002, 'same-tenant', 'Organization', 1, $1)
     `, [TENANT_A_ID]);
 
+    await setAppRole(pool);
     await setTenantContext(pool, TENANT_A_ID);
     const result = await pool.query('SELECT * FROM github_installations WHERE account_login = $1', ['same-tenant']);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].tenant_id).toBe(TENANT_A_ID);
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -93,9 +99,9 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // -----------------------------------------------------------------------
 
   it('rejects cross-tenant inserts', async () => {
+    await setAppRole(pool);
     await setTenantContext(pool, TENANT_B_ID);
 
-    // Try to insert with tenant_id = TENANT_A but session is TENANT_B
     await expect(
       pool.query(`
         INSERT INTO github_installations (installation_id, account_login, account_type, app_id, tenant_id)
@@ -104,6 +110,7 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     ).rejects.toThrow();
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -111,18 +118,18 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // -----------------------------------------------------------------------
 
   it('returns zero rows when app.current_tenant_id is not set', async () => {
-    // Insert data as superuser (no RLS bypass in test env, but via default tenant)
     await pool.query(`
       INSERT INTO github_installations (installation_id, account_login, account_type, app_id, tenant_id)
       VALUES (1004, 'fail-closed', 'Organization', 1, $1)
     `, [TENANT_A_ID]);
 
-    // Reset tenant context so it's unset
+    await setAppRole(pool);
     await resetTenantContext(pool);
 
-    // Query should return 0 rows (fail-closed via NULL comparison)
     const result = await pool.query('SELECT * FROM github_installations WHERE account_login = $1', ['fail-closed']);
     expect(result.rows).toHaveLength(0);
+
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -135,9 +142,9 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
       VALUES (1005, 'immutable-tenant', 'Organization', 1, $1)
     `, [TENANT_A_ID]);
 
+    await setAppRole(pool);
     await setTenantContext(pool, TENANT_A_ID);
 
-    // Attempt to change tenant_id — should be rejected by trigger
     await expect(
       pool.query(`
         UPDATE github_installations SET tenant_id = $1 WHERE account_login = 'immutable-tenant'
@@ -145,6 +152,7 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     ).rejects.toThrow(/cannot change tenant_id/i);
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -152,12 +160,14 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // -----------------------------------------------------------------------
 
   it('isolates tenants table by self-referencing policy', async () => {
+    await setAppRole(pool);
     await setTenantContext(pool, TENANT_A_ID);
     const result = await pool.query('SELECT * FROM tenants');
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].id).toBe(TENANT_A_ID);
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -165,12 +175,13 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // -----------------------------------------------------------------------
 
   it('isolates engine_events by tenant', async () => {
-    // Insert events for both tenants
     await pool.query(`
       INSERT INTO engine_events (type, tenant_id, data)
       VALUES ('ISSUE_SELECTED', $1, '{}'),
              ('PLAN_GENERATED', $2, '{}')
     `, [TENANT_A_ID, TENANT_B_ID]);
+
+    await setAppRole(pool);
 
     await setTenantContext(pool, TENANT_A_ID);
     const resultA = await pool.query('SELECT * FROM engine_events');
@@ -183,6 +194,7 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     expect(resultB.rows[0].type).toBe('PLAN_GENERATED');
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -196,6 +208,8 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
              ('def-1', $2, 'completed')
     `, [TENANT_A_ID, TENANT_B_ID]);
 
+    await setAppRole(pool);
+
     await setTenantContext(pool, TENANT_A_ID);
     const resultA = await pool.query('SELECT * FROM workflow_instances');
     expect(resultA.rows).toHaveLength(1);
@@ -207,6 +221,7 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     expect(resultB.rows[0].status).toBe('completed');
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 
   // -----------------------------------------------------------------------
@@ -220,6 +235,8 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
              (200, 'user-b', 'member', $2)
     `, [TENANT_A_ID, TENANT_B_ID]);
 
+    await setAppRole(pool);
+
     await setTenantContext(pool, TENANT_A_ID);
     const resultA = await pool.query('SELECT * FROM users');
     expect(resultA.rows).toHaveLength(1);
@@ -231,5 +248,6 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     expect(resultB.rows[0].github_login).toBe('user-b');
 
     await resetTenantContext(pool);
+    await resetRole(pool);
   });
 });

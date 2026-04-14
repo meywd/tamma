@@ -87,6 +87,21 @@ export async function resetTenantContext(pool: pg.Pool): Promise<void> {
 }
 
 /**
+ * Switch to the tamma_app role so RLS policies are enforced.
+ * The test DB superuser bypasses RLS — this is needed for RLS tests.
+ */
+export async function setAppRole(pool: pg.Pool): Promise<void> {
+  await pool.query('SET ROLE tamma_app');
+}
+
+/**
+ * Reset back to the superuser role (for data setup/teardown).
+ */
+export async function resetRole(pool: pg.Pool): Promise<void> {
+  await pool.query('RESET ROLE');
+}
+
+/**
  * Drop all test tables (for cleanup after all tests).
  */
 export async function dropTables(pool: pg.Pool): Promise<void> {
