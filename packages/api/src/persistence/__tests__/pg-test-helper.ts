@@ -76,7 +76,7 @@ export async function truncateTables(pool: pg.Pool): Promise<void> {
  * Must be called on each connection before running tenant-scoped queries.
  */
 export async function setTenantContext(pool: pg.Pool, tenantId: string): Promise<void> {
-  await pool.query('SET app.current_tenant_id = $1', [tenantId]);
+  await pool.query("SELECT set_config('app.current_tenant_id', $1, false)", [tenantId]);
 }
 
 /**
