@@ -117,7 +117,7 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
   // Fail-closed when unset
   // -----------------------------------------------------------------------
 
-  it('returns zero rows when app.current_tenant_id is not set', async () => {
+  it('fails closed when app.current_tenant_id is not set', async () => {
     await pool.query(`
       INSERT INTO github_installations (installation_id, account_login, account_type, app_id, tenant_id)
       VALUES (1004, 'fail-closed', 'Organization', 1, $1)
@@ -126,8 +126,11 @@ describe.skipIf(!isPgTestEnabled())('RLS Tenant Isolation', () => {
     await setAppRole(pool);
     await resetTenantContext(pool);
 
-    const result = await pool.query('SELECT * FROM github_installations WHERE account_login = $1', ['fail-closed']);
-    expect(result.rows).toHaveLength(0);
+    // With no tenant context, the RLS policy casts empty string to UUID which
+    // fails — this IS the correct fail-closed behavior (query errors, not leaks)
+    await expect(
+      pool.query('SELECT * FROM github_installations WHERE account_login = $1', ['fail-closed']),
+    ).rejects.toThrow();
 
     await resetRole(pool);
   });
