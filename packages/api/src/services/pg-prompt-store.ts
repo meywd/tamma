@@ -11,6 +11,7 @@
  *   3. undefined
  *
  * Story 27-2: Prompt Store Service
+ * Story 27-7: Prompt Store Event Sourcing
  */
 
 import type pg from 'pg';
@@ -29,6 +30,12 @@ import {
   interpolateTemplate,
   validateKey,
 } from './prompt-store.js';
+import type { IPromptEventStore } from './prompt-store-events.js';
+import {
+  PROMPT_EVENT_TYPES,
+  diffFields,
+  emitPromptEvent,
+} from './prompt-store-events.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +55,7 @@ export class PgPromptStore implements IPromptStore {
   constructor(
     private readonly pool: pg.Pool,
     private readonly logger?: LoggerLike,
+    private readonly eventStore?: IPromptEventStore,
   ) {}
 
   // -----------------------------------------------------------------------
@@ -78,15 +86,20 @@ export class PgPromptStore implements IPromptStore {
     return undefined;
   }
 
-  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate> {
+  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
     validateKey(role, action);
+
+    // Fetch existing row before mutation (for event diffing)
+    const existing = await this._getExact(tenantId, role, action);
 
     const variables = input.variables ?? extractVariables(input.template);
     const variablesJson = JSON.stringify(variables);
 
+    let result: PromptTemplate;
+
     if (tenantId === null) {
       // System default: use partial index for tenant_id IS NULL
-      const result = await this.pool.query<Record<string, unknown>>(
+      const queryResult = await this.pool.query<Record<string, unknown>>(
         `INSERT INTO prompts (tenant_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version)
          VALUES (NULL, $1, $2, $3, $4, $5::jsonb, $6, $7, 1)
          ON CONFLICT (role, action) WHERE tenant_id IS NULL
@@ -109,44 +122,100 @@ export class PgPromptStore implements IPromptStore {
           input.maxTokens ?? 4096,
         ],
       );
-      return this._mapRow(result.rows[0]!);
+      result = this._mapRow(queryResult.rows[0]!);
+    } else {
+      // Tenant override: use partial index for tenant_id IS NOT NULL
+      const queryResult = await this.pool.query<Record<string, unknown>>(
+        `INSERT INTO prompts (tenant_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 1)
+         ON CONFLICT (tenant_id, role, action) WHERE tenant_id IS NOT NULL
+         DO UPDATE SET
+           template = EXCLUDED.template,
+           system_prompt = COALESCE(NULLIF(EXCLUDED.system_prompt, ''), prompts.system_prompt),
+           variables = EXCLUDED.variables,
+           enable_tools = EXCLUDED.enable_tools,
+           max_tokens = EXCLUDED.max_tokens,
+           version = prompts.version + 1,
+           updated_at = NOW()
+         RETURNING *`,
+        [
+          tenantId,
+          role,
+          action,
+          input.template,
+          input.systemPrompt ?? '',
+          variablesJson,
+          input.enableTools ?? false,
+          input.maxTokens ?? 4096,
+        ],
+      );
+      result = this._mapRow(queryResult.rows[0]!);
     }
 
-    // Tenant override: use partial index for tenant_id IS NOT NULL
-    const result = await this.pool.query<Record<string, unknown>>(
-      `INSERT INTO prompts (tenant_id, role, action, template, system_prompt, variables, enable_tools, max_tokens, version)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, 1)
-       ON CONFLICT (tenant_id, role, action) WHERE tenant_id IS NOT NULL
-       DO UPDATE SET
-         template = EXCLUDED.template,
-         system_prompt = COALESCE(NULLIF(EXCLUDED.system_prompt, ''), prompts.system_prompt),
-         variables = EXCLUDED.variables,
-         enable_tools = EXCLUDED.enable_tools,
-         max_tokens = EXCLUDED.max_tokens,
-         version = prompts.version + 1,
-         updated_at = NOW()
-       RETURNING *`,
-      [
-        tenantId,
-        role,
-        action,
-        input.template,
-        input.systemPrompt ?? '',
-        variablesJson,
-        input.enableTools ?? false,
-        input.maxTokens ?? 4096,
-      ],
-    );
+    // Emit DCB event (best-effort)
+    if (this.eventStore !== undefined) {
+      const eventType = existing !== undefined
+        ? PROMPT_EVENT_TYPES.UPDATED
+        : PROMPT_EVENT_TYPES.CREATED;
 
-    return this._mapRow(result.rows[0]!);
+      const eventData: Record<string, unknown> = existing !== undefined
+        ? {
+            previousVersion: existing.version,
+            newVersion: result.version,
+            changedFields: diffFields(existing, result),
+          }
+        : {
+            version: result.version,
+            enableTools: result.enableTools,
+            maxTokens: result.maxTokens,
+          };
+
+      await emitPromptEvent(
+        this.eventStore,
+        eventType,
+        {
+          tenantId: tenantId ?? undefined,
+          role,
+          action,
+          userId,
+        },
+        eventData,
+        this.logger,
+      );
+    }
+
+    return result;
   }
 
-  async delete(tenantId: string, role: string, action: string): Promise<boolean> {
+  async delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean> {
+    // Fetch existing for version info before deletion
+    const existing = await this._getExact(tenantId, role, action);
+
     const result = await this.pool.query(
       'DELETE FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3',
       [tenantId, role, action],
     );
-    return (result.rowCount ?? 0) > 0;
+    const deleted = (result.rowCount ?? 0) > 0;
+
+    // Emit DCB event (best-effort)
+    if (deleted && this.eventStore !== undefined && existing !== undefined) {
+      await emitPromptEvent(
+        this.eventStore,
+        PROMPT_EVENT_TYPES.DELETED,
+        {
+          tenantId,
+          role,
+          action,
+          userId,
+        },
+        {
+          deletedVersion: existing.version,
+        },
+        this.logger,
+      );
+    }
+
+    return deleted;
   }
 
   async list(tenantId: string | null): Promise<PromptSummary[]> {
@@ -210,22 +279,47 @@ export class PgPromptStore implements IPromptStore {
     return this._mapRow(result.rows[0]!);
   }
 
-  async upsertSystemDefault(role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate> {
-    return this.upsert(null, role, action, input);
+  async upsertSystemDefault(role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
+    return this.upsert(null, role, action, input, userId);
   }
 
-  async resetSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined> {
+  async resetSystemDefault(role: string, action: string, userId?: string): Promise<PromptTemplate | undefined> {
+    // Fetch existing before reset (for event diffing)
+    const existing = await this._getExact(null, role, action);
+
     const defaults = getDefaultPrompts();
     const match = defaults.find((d) => d.role === role && d.action === action);
     if (match === undefined) return undefined;
 
-    return this.upsert(null, role, action, {
+    const result = await this.upsert(null, role, action, {
       template: match.template,
       variables: [...match.variables],
       systemPrompt: match.systemPrompt,
       enableTools: match.enableTools,
       maxTokens: match.maxTokens,
     });
+
+    // Emit RESET event (distinct from UPDATE for audit clarity)
+    if (this.eventStore !== undefined) {
+      await emitPromptEvent(
+        this.eventStore,
+        PROMPT_EVENT_TYPES.RESET,
+        {
+          role,
+          action,
+          userId,
+        },
+        {
+          previousVersion: existing?.version ?? 0,
+          newVersion: result.version,
+          resetFrom: 'custom',
+          resetTo: 'hardcoded',
+        },
+        this.logger,
+      );
+    }
+
+    return result;
   }
 
   async listSystemDefaults(): Promise<PromptSummary[]> {
@@ -293,6 +387,7 @@ export class PgPromptStore implements IPromptStore {
   /**
    * Seed 80 role+action system default templates into the prompts table.
    * Uses ON CONFLICT DO NOTHING for idempotency.
+   * Does NOT emit events (seed operations are not user-initiated).
    */
   async seedDefaults(): Promise<number> {
     const defaults = getDefaultPrompts();
@@ -343,6 +438,25 @@ export class PgPromptStore implements IPromptStore {
   // -----------------------------------------------------------------------
   // Private Helpers
   // -----------------------------------------------------------------------
+
+  /**
+   * Get the exact row for a tenantId+role+action (no fallback).
+   * Used for event diffing before mutations.
+   */
+  private async _getExact(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined> {
+    const result = tenantId === null
+      ? await this.pool.query<Record<string, unknown>>(
+          'SELECT * FROM prompts WHERE tenant_id IS NULL AND role = $1 AND action = $2',
+          [role, action],
+        )
+      : await this.pool.query<Record<string, unknown>>(
+          'SELECT * FROM prompts WHERE tenant_id = $1 AND role = $2 AND action = $3',
+          [tenantId, role, action],
+        );
+
+    if (result.rows.length === 0) return undefined;
+    return this._mapRow(result.rows[0]!);
+  }
 
   private _mapRow(row: Record<string, unknown>): PromptTemplate {
     const variables = row['variables'];

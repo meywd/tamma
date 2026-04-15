@@ -16,6 +16,9 @@ namespace Tamma.Activities.LlmCall;
 /// Calls: POST /api/prompts/{role}/{action}/render with variables.
 /// Falls back to the taskPrompt input if no action is specified
 /// or if the registry is unavailable.
+///
+/// When TenantId is provided, sends the X-Tenant-Id header for
+/// tenant-scoped prompt resolution (Story 27-6).
 /// </summary>
 [Activity(
     "Tamma.LlmCall",
@@ -41,6 +44,9 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
 
     [Input(Description = "Fallback prompt if registry unavailable or no action specified")]
     public Input<string> FallbackPrompt { get; set; } = new("");
+
+    [Input(Description = "Tenant ID for tenant-scoped prompt resolution (empty = system defaults)")]
+    public Input<string> TenantId { get; set; } = new("");
 
     [Output(Description = "Resolved prompt text")]
     public Output<string> ResolvedPrompt { get; set; } = default!;
@@ -73,6 +79,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         var action = Action.Get(context);
         var variablesJson = VariablesJson.Get(context);
         var fallback = FallbackPrompt.Get(context);
+        var tenantId = TenantId.Get(context);
 
         // If no action specified, use fallback prompt (legacy path)
         if (string.IsNullOrEmpty(action))
@@ -98,6 +105,13 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         try
         {
             var httpClient = _httpClientFactory?.CreateClient() ?? new HttpClient();
+
+            // Add tenant context header for tenant-scoped resolution
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                httpClient.DefaultRequestHeaders.Remove("X-Tenant-Id");
+                httpClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
+            }
 
             // Parse variables
             Dictionary<string, object>? variables = null;
@@ -127,8 +141,8 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
                 context.TransientProperties["resolvedPromptLength"] = rendered.Length;
                 context.TransientProperties["hasSystemPrompt"] = !string.IsNullOrEmpty(systemPrompt);
 
-                Logger?.LogInformation("Resolved prompt from registry: {Role}/{Action} ({Length} chars)",
-                    role, action, rendered.Length);
+                Logger?.LogInformation("Resolved prompt from registry: {Role}/{Action} ({Length} chars, tenantId={TenantId})",
+                    role, action, rendered.Length, string.IsNullOrEmpty(tenantId) ? "system" : tenantId);
                 return;
             }
 
@@ -154,6 +168,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
     {
         ["role"] = Role.Get(context),
         ["action"] = Action.Get(context),
+        ["tenantId"] = TenantId.Get(context),
     };
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
@@ -164,6 +179,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         {
             ["role"] = Role.Get(context),
             ["action"] = Action.Get(context),
+            ["tenantId"] = TenantId.Get(context),
             ["promptLength"] = promptLength,
             ["hasSystemPrompt"] = hasSystem,
         };

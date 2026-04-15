@@ -80,15 +80,15 @@ export interface RenderedPrompt {
 export interface IPromptStore {
   // --- Tenant-scoped operations ---
   get(tenantId: string | null, role: string, action: string): Promise<PromptTemplate | undefined>;
-  upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate>;
-  delete(tenantId: string, role: string, action: string): Promise<boolean>;
+  upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
+  delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean>;
   list(tenantId: string | null): Promise<PromptSummary[]>;
   render(tenantId: string | null, role: string, action: string, input: RenderInput): Promise<RenderedPrompt | undefined>;
 
   // --- System default operations ---
   getSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined>;
-  upsertSystemDefault(role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate>;
-  resetSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined>;
+  upsertSystemDefault(role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate>;
+  resetSystemDefault(role: string, action: string, userId?: string): Promise<PromptTemplate | undefined>;
   listSystemDefaults(): Promise<PromptSummary[]>;
 
   // --- System prompts (role preambles) ---

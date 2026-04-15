@@ -47,6 +47,12 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
     '010_rls_tenant_isolation.sql',
     '011_tenant_scoped_stores.sql',
     '012_prompt_store.sql',
+    '013_agent_configs.sql',
+    '014_provider_diagnostics.sql',
+    '015_provider_health.sql',
+    '016_sanitization_rules.sql',
+    '017_tenant_memberships.sql',
+    '018_user_auth_fields.sql',
   ];
 
   for (const file of migrationFiles) {
@@ -61,7 +67,7 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
  */
 export async function truncateTables(pool: pg.Pool): Promise<void> {
   await pool.query(
-    'TRUNCATE TABLE action_prompts, system_prompts, prompts, workflow_instances, engine_events, user_invites, user_api_keys, api_keys, user_installations, users, github_installation_repos, github_installations, tenants CASCADE',
+    'TRUNCATE TABLE password_reset_tokens, refresh_tokens, tenant_invites, tenant_memberships, action_prompts, system_prompts, prompts, workflow_instances, engine_events, user_invites, user_api_keys, api_keys, user_installations, users, github_installation_repos, github_installations, tenants CASCADE',
   );
   // Re-insert default tenant sentinel (needed by FK constraints)
   await pool.query(`
@@ -106,6 +112,10 @@ export async function resetRole(pool: pg.Pool): Promise<void> {
  */
 export async function dropTables(pool: pg.Pool): Promise<void> {
   await pool.query(`
+    DROP TABLE IF EXISTS password_reset_tokens CASCADE;
+    DROP TABLE IF EXISTS refresh_tokens CASCADE;
+    DROP TABLE IF EXISTS tenant_invites CASCADE;
+    DROP TABLE IF EXISTS tenant_memberships CASCADE;
     DROP TABLE IF EXISTS action_prompts CASCADE;
     DROP TABLE IF EXISTS system_prompts CASCADE;
     DROP TABLE IF EXISTS prompts CASCADE;

@@ -102,6 +102,8 @@ import { PgPromptStore } from './services/pg-prompt-store.js';
 import { registerConventionTemplateRoutes } from './routes/convention-templates.js';
 import type { IPromptStore, PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
 import type { PromptTemplate, PromptRole, PromptAction } from './services/default-prompts.js';
+import { PROMPT_EVENT_TYPES, diffFields, emitPromptEvent } from './services/prompt-store-events.js';
+import type { IPromptEventStore, PromptDomainEvent, PromptEventTags, PromptEventType } from './services/prompt-store-events.js';
 import { registerAgentConfigApiRoutes } from './routes/agents/index.js';
 import type { AgentConfigRoutesOptions } from './routes/agents/index.js';
 import { InMemoryAgentConfigStore } from './persistence/agent-config-store.js';
@@ -160,6 +162,10 @@ export {
   PromptStore,
   InMemoryPromptStore,
   PgPromptStore,
+  // Prompt event sourcing (Story 27-7)
+  PROMPT_EVENT_TYPES,
+  diffFields,
+  emitPromptEvent,
   // Unified API key system (Story 16-7)
   InMemoryApiKeyStore,
   PgApiKeyStore,
@@ -241,6 +247,11 @@ export type {
   PromptRole,
   PromptAction,
   EngineContextRouteOptions,
+  // Prompt event sourcing (Story 27-7)
+  IPromptEventStore,
+  PromptDomainEvent,
+  PromptEventTags,
+  PromptEventType,
   // Unified API key system (Story 16-7)
   IApiKeyStore,
   ApiKeyRecord,
@@ -291,7 +302,7 @@ export interface CreateAppOptions {
   /** Enable engine context routes (store-context, query-context, repo-config). Always registered when true. */
   engineContext?: boolean | EngineContextRouteOptions;
   /** Prompt store for the prompt registry API (optional; creates default in-memory store if omitted). */
-  promptStore?: PromptStore;
+  promptStore?: PromptStore | IPromptStore;
   /** Agent config store for Postgres-backed config (optional; creates in-memory store if omitted). */
   agentConfigStore?: IAgentConfigStore;
   /** Tenant context middleware config (optional; registers tenant resolution from auth context). */
@@ -458,9 +469,11 @@ export async function createApp(options?: CreateAppOptions) {
   }
 
   // Prompt Registry routes (always registered — uses default store if none provided)
-  // GET requires 'settings:view' (admin+), PUT/POST requires 'settings:manage' (owner)
+  // GET requires 'settings:view' (admin+), PUT/POST/DELETE requires 'settings:manage' (owner)
   {
-    const promptStore = options?.promptStore ?? new PromptStore();
+    const promptStore: IPromptStore = options?.promptStore instanceof PromptStore
+      ? new InMemoryPromptStore() // wrap legacy PromptStore into IPromptStore-compatible store
+      : (options?.promptStore ?? new InMemoryPromptStore());
     await app.register(
       async (instance) => {
         instance.addHook('onRequest', async (request, reply) => {

@@ -25,6 +25,12 @@ import {
   validateKey,
   cloneTemplate,
 } from './prompt-store.js';
+import type { IPromptEventStore } from './prompt-store-events.js';
+import {
+  PROMPT_EVENT_TYPES,
+  diffFields,
+  emitPromptEvent,
+} from './prompt-store-events.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,13 +58,17 @@ export class InMemoryPromptStore implements IPromptStore {
   private readonly systemPrompts = new Map<PromptMapKey, SystemPromptEntry>();
   private readonly logger?: LoggerLike;
   private readonly skipDefaults: boolean;
+  private readonly eventStore?: IPromptEventStore;
   private initialized = false;
 
-  constructor(options?: { logger?: LoggerLike; skipDefaults?: boolean }) {
+  constructor(options?: { logger?: LoggerLike; skipDefaults?: boolean; eventStore?: IPromptEventStore }) {
     if (options?.logger !== undefined) {
       this.logger = options.logger;
     }
     this.skipDefaults = options?.skipDefaults ?? false;
+    if (options?.eventStore !== undefined) {
+      this.eventStore = options.eventStore;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -107,7 +117,7 @@ export class InMemoryPromptStore implements IPromptStore {
     return cloneTemplate(systemDefault);
   }
 
-  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate> {
+  async upsert(tenantId: string | null, role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
     await this.initialize();
     validateKey(role, action);
 
@@ -135,13 +145,66 @@ export class InMemoryPromptStore implements IPromptStore {
       'Prompt template upserted',
     );
 
+    // Emit DCB event (best-effort)
+    if (this.eventStore !== undefined) {
+      const eventType = existing !== undefined
+        ? PROMPT_EVENT_TYPES.UPDATED
+        : PROMPT_EVENT_TYPES.CREATED;
+
+      const eventData: Record<string, unknown> = existing !== undefined
+        ? {
+            previousVersion: existing.version,
+            newVersion: template.version,
+            changedFields: diffFields(existing, template),
+          }
+        : {
+            version: template.version,
+            enableTools: template.enableTools,
+            maxTokens: template.maxTokens,
+          };
+
+      await emitPromptEvent(
+        this.eventStore,
+        eventType,
+        {
+          tenantId: tenantId ?? undefined,
+          role,
+          action,
+          userId,
+        },
+        eventData,
+        this.logger,
+      );
+    }
+
     return cloneTemplate(template)!;
   }
 
-  async delete(tenantId: string, role: string, action: string): Promise<boolean> {
+  async delete(tenantId: string, role: string, action: string, userId?: string): Promise<boolean> {
     await this.initialize();
     const key = this._templateKey(tenantId, role, action);
-    return this.templates.delete(key);
+    const existing = this.templates.get(key);
+    const deleted = this.templates.delete(key);
+
+    // Emit DCB event (best-effort)
+    if (deleted && this.eventStore !== undefined && existing !== undefined) {
+      await emitPromptEvent(
+        this.eventStore,
+        PROMPT_EVENT_TYPES.DELETED,
+        {
+          tenantId,
+          role,
+          action,
+          userId,
+        },
+        {
+          deletedVersion: existing.version,
+        },
+        this.logger,
+      );
+    }
+
+    return deleted;
   }
 
   async list(tenantId: string | null): Promise<PromptSummary[]> {
@@ -222,12 +285,15 @@ export class InMemoryPromptStore implements IPromptStore {
     return cloneTemplate(this.templates.get(this._templateKey(null, role, action)));
   }
 
-  async upsertSystemDefault(role: string, action: string, input: UpsertPromptInput): Promise<PromptTemplate> {
-    return this.upsert(null, role, action, input);
+  async upsertSystemDefault(role: string, action: string, input: UpsertPromptInput, userId?: string): Promise<PromptTemplate> {
+    return this.upsert(null, role, action, input, userId);
   }
 
-  async resetSystemDefault(role: string, action: string): Promise<PromptTemplate | undefined> {
+  async resetSystemDefault(role: string, action: string, userId?: string): Promise<PromptTemplate | undefined> {
     await this.initialize();
+
+    // Fetch existing before reset (for event data)
+    const existing = this.templates.get(this._templateKey(null, role, action));
 
     const defaults = getDefaultPrompts();
     const match = defaults.find((d) => d.role === role && d.action === action);
@@ -237,6 +303,26 @@ export class InMemoryPromptStore implements IPromptStore {
     // Reset to the hardcoded default (force version 1)
     const reset: PromptTemplate = { ...match, variables: [...match.variables] };
     this.templates.set(key, reset);
+
+    // Emit RESET event (best-effort)
+    if (this.eventStore !== undefined) {
+      await emitPromptEvent(
+        this.eventStore,
+        PROMPT_EVENT_TYPES.RESET,
+        {
+          role,
+          action,
+          userId,
+        },
+        {
+          previousVersion: existing?.version ?? 0,
+          newVersion: reset.version,
+          resetFrom: 'custom',
+          resetTo: 'hardcoded',
+        },
+        this.logger,
+      );
+    }
 
     return cloneTemplate(reset);
   }

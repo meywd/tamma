@@ -48,6 +48,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
+        var tenantId = builder.WithVariable<string>("TenantId", "");
 
         // Conventions (loaded from repo config)
         var conventions = builder.WithVariable<string>("Conventions", "");
@@ -86,6 +87,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 botAssignee.Set(ctx, ctx.GetInput<string>("botAssignee") ?? "tamma-bot");
                 baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 return (object)repo;
             }),
         };
@@ -129,6 +131,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -164,6 +167,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["reviewNotes"] = reviewNotes.Get(ctx),
                 ["revisionNumber"] = planRevisionCount.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -193,6 +197,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -280,6 +285,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -309,6 +315,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -415,6 +422,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -473,6 +481,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["contextIds"] = contextIds.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -497,6 +506,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(false), // fire & forget
         };

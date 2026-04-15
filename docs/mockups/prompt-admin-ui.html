@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tamma — Prompt Management Admin UI Mockup</title>
+<style>
+  /* ================================================================
+     Theme Variables
+     ================================================================ */
+  [data-theme="dark"] {
+    --bg: #0f0f1e;
+    --bg-card: #1a1a2e;
+    --bg-input: #12122a;
+    --bg-hover: #252542;
+    --bg-surface: #16162e;
+    --border: #2d2d4a;
+    --border-focus: #7c3aed;
+    --text: #e0e0e0;
+    --text-dim: #999;
+    --text-muted: #666;
+    --accent: #7c3aed;
+    --accent-hover: #6d28d9;
+    --accent-bg: rgba(124,58,237,0.12);
+    --green: #10b981;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --cyan: #06b6d4;
+    --orange: #f97316;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  [data-theme="light"] {
+    --bg: #f5f5f8;
+    --bg-card: #ffffff;
+    --bg-input: #f0f0f5;
+    --bg-hover: #eeeef4;
+    --bg-surface: #fafafd;
+    --border: #ddd;
+    --border-focus: #7c3aed;
+    --text: #1a1a2e;
+    --text-dim: #555;
+    --text-muted: #999;
+    --accent: #7c3aed;
+    --accent-hover: #6d28d9;
+    --accent-bg: rgba(124,58,237,0.06);
+    --green: #059669;
+    --yellow: #d97706;
+    --red: #dc2626;
+    --blue: #2563eb;
+    --cyan: #0891b2;
+    --orange: #ea580c;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  /* ================================================================
+     Reset & Base
+     ================================================================ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; transition: background 0.2s, color 0.2s; }
+  :root { --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', monospace; --radius: 8px; }
+
+  /* ================================================================
+     Layout
+     ================================================================ */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar { width: 220px; background: var(--bg-card); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; position: fixed; top: 0; bottom: 0; overflow-y: auto; z-index: 10; }
+  .main { flex: 1; margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* Sidebar */
+  .sidebar-brand { padding: 4px 16px 16px; font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
+  .sidebar-section { padding: 6px 16px; font-size: 10px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; margin-top: 14px; }
+  .sidebar-link { display: flex; align-items: center; gap: 8px; padding: 7px 16px; color: var(--text-dim); font-size: 13px; cursor: pointer; transition: all 0.1s; text-decoration: none; border-left: 3px solid transparent; }
+  .sidebar-link:hover { background: var(--bg-hover); color: var(--text); }
+  .sidebar-link.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-bg); font-weight: 500; }
+  .sidebar-icon { width: 16px; text-align: center; font-size: 13px; }
+
+  /* Topbar */
+  .topbar { height: 48px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0; }
+  .topbar-breadcrumb { font-size: 13px; color: var(--text-dim); }
+  .topbar-breadcrumb span { color: var(--text); font-weight: 500; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .theme-toggle { background: var(--bg-input); border: 1px solid var(--border); color: var(--text-dim); padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; }
+
+  .content { flex: 1; padding: 20px; overflow-y: auto; }
+
+  /* ================================================================
+     Tabs
+     ================================================================ */
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 16px; }
+  .tab { padding: 8px 16px; font-size: 13px; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.1s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+
+  /* ================================================================
+     Filters
+     ================================================================ */
+  .filters { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .filter-select, .filter-search { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+  .filter-select { min-width: 140px; }
+  .filter-search { flex: 1; max-width: 260px; }
+  .filter-search::placeholder { color: var(--text-muted); }
+  .filter-count { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+
+  /* ================================================================
+     Table
+     ================================================================ */
+  .table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); background: var(--bg-surface); font-weight: 600; }
+  td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr.clickable:hover td { background: var(--bg-hover); cursor: pointer; }
+  tr.selected td { background: var(--accent-bg); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .badge-role { background: rgba(124,58,237,0.12); color: #a78bfa; }
+  .badge-action { background: rgba(6,182,212,0.12); color: var(--cyan); }
+  .badge-green { background: rgba(16,185,129,0.12); color: var(--green); }
+  .badge-dim { background: rgba(136,136,136,0.1); color: var(--text-muted); }
+  [data-theme="light"] .badge-role { color: #6d28d9; }
+  [data-theme="light"] .badge-action { color: #0e7490; }
+  .version { color: var(--text-muted); font-size: 11px; }
+  .tokens { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .date { color: var(--text-muted); font-size: 11px; }
+  .wiki-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .wiki-dot.has { background: var(--green); }
+  .wiki-dot.no { background: var(--text-muted); }
+  .llm-cell { font-size: 11px; color: var(--text-dim); }
+
+  /* ================================================================
+     Detail View (replaces popup — inline split panel)
+     ================================================================ */
+  .detail-layout { display: grid; grid-template-columns: 1fr 340px; gap: 0; min-height: calc(100vh - 160px); }
+  .detail-editor { padding: 20px; border-right: 1px solid var(--border); overflow-y: auto; }
+  .detail-context { overflow-y: auto; background: var(--bg-surface); }
+
+  .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .detail-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+  .detail-actions { display: flex; gap: 8px; }
+
+  .btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid transparent; transition: all 0.1s; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-outline { background: transparent; color: var(--text-dim); border-color: var(--border); }
+  .btn-outline:hover { color: var(--text); border-color: var(--text-dim); }
+  .btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover { background: rgba(239,68,68,0.08); }
+  .btn-back { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 4px 0; display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+  .btn-back:hover { color: var(--text); }
+
+  /* Editor fields */
+  .field-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 6px; font-weight: 600; }
+  .editor-textarea { width: 100%; min-height: 260px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 12.5px; line-height: 1.65; padding: 12px 14px; border-radius: var(--radius); resize: vertical; transition: border-color 0.15s; }
+  .editor-textarea:focus { outline: none; border-color: var(--border-focus); }
+  .sysprompt-textarea { width: 100%; min-height: 70px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); font-size: 12.5px; padding: 8px 12px; border-radius: var(--radius); resize: vertical; line-height: 1.5; }
+  .sysprompt-textarea:focus { outline: none; border-color: var(--border-focus); }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+  .field input, .field select { width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+  .field label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+  .check-row { display: flex; gap: 16px; margin-top: 14px; }
+  .check-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); }
+  .check-item input[type="checkbox"] { accent-color: var(--accent); }
+
+  /* ================================================================
+     Context Panels (right sidebar)
+     ================================================================ */
+  .ctx-panel { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .ctx-panel:last-child { border-bottom: none; }
+  .ctx-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+  .ctx-title .ico { font-size: 12px; }
+
+  /* Wiki */
+  .wiki-section-label { font-size: 12px; font-weight: 500; margin-bottom: 3px; }
+  .wiki-section-label.role { color: #a78bfa; }
+  .wiki-section-label.action { color: var(--cyan); }
+  [data-theme="light"] .wiki-section-label.role { color: #6d28d9; }
+  [data-theme="light"] .wiki-section-label.action { color: #0e7490; }
+  .wiki-text { font-size: 12px; line-height: 1.55; color: var(--text-dim); margin-bottom: 10px; }
+  .wiki-text strong { color: var(--text); font-weight: 500; }
+  .wiki-oneliner { font-size: 11px; color: var(--text-dim); font-style: italic; padding: 6px 10px; background: var(--bg-input); border-radius: 6px; border-left: 3px solid var(--accent); line-height: 1.5; }
+
+  /* LLM */
+  .llm-name { font-size: 13px; font-weight: 500; }
+  .llm-model-id { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+  .llm-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; }
+  .llm-stat { font-size: 11px; color: var(--text-dim); }
+  .llm-stat b { color: var(--text); font-weight: 500; font-family: var(--mono); font-size: 11px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .tag { font-size: 10px; padding: 2px 7px; border-radius: 10px; }
+  .tag-hi { background: rgba(16,185,129,0.12); color: var(--green); border: 1px solid rgba(16,185,129,0.25); }
+  .tag-lo { background: rgba(136,136,136,0.08); color: var(--text-muted); }
+  .bench-row { display: flex; align-items: center; font-size: 11px; padding: 2px 0; }
+  .bench-name { width: 75px; color: var(--text-dim); flex-shrink: 0; }
+  .bench-bar { flex: 1; height: 4px; background: var(--border); border-radius: 2px; margin: 0 8px; overflow: hidden; }
+  .bench-fill { height: 100%; border-radius: 2px; }
+  .bench-score { width: 40px; text-align: right; font-family: var(--mono); color: var(--text); font-size: 11px; }
+  .llm-updated { font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+
+  /* Variables */
+  .var-list { max-height: 220px; overflow-y: auto; }
+  .var-item { display: flex; gap: 8px; padding: 5px 4px; cursor: pointer; border-radius: 4px; transition: background 0.1s; }
+  .var-item:hover { background: var(--bg-hover); }
+  .var-name { font-family: var(--mono); font-size: 11px; color: #a78bfa; white-space: nowrap; min-width: 100px; flex-shrink: 0; }
+  [data-theme="light"] .var-name { color: #7c3aed; }
+  .var-info { flex: 1; }
+  .var-desc { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+  .var-src { font-size: 10px; color: var(--text-muted); }
+  .var-hint { font-size: 10px; color: var(--text-muted); font-style: italic; margin-top: 6px; }
+
+  /* Keywords */
+  .kw-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kw { font-size: 10px; padding: 2px 8px; background: rgba(59,130,246,0.08); color: var(--blue); border-radius: 10px; cursor: pointer; transition: background 0.1s; }
+  .kw:hover { background: rgba(59,130,246,0.18); }
+
+  /* ================================================================
+     System Prompts Tab
+     ================================================================ */
+  .sp-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .sp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .sp-preview { font-size: 12px; color: var(--text-dim); line-height: 1.5; max-height: 48px; overflow: hidden; font-family: var(--mono); background: var(--bg-input); padding: 8px 10px; border-radius: 6px; }
+
+  /* ================================================================
+     Convention Grid
+     ================================================================ */
+  .conv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .conv-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; cursor: pointer; transition: border-color 0.15s; box-shadow: var(--shadow); }
+  .conv-card:hover { border-color: var(--accent); }
+  .conv-name { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+  .conv-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+
+  /* ================================================================
+     Screen Switcher (mockup navigation)
+     ================================================================ */
+  .screen { display: none; }
+  .screen.visible { display: block; }
+
+  .mock-nav { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; display: flex; gap: 6px; z-index: 200; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .mock-btn { padding: 5px 12px; font-size: 11px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 6px; cursor: pointer; transition: all 0.1s; }
+  .mock-btn:hover { background: var(--bg-hover); color: var(--text); }
+  .mock-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ================================================================
+     Responsive
+     ================================================================ */
+  @media (max-width: 1000px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .detail-layout { grid-template-columns: 1fr; }
+    .detail-context { border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============================================================ -->
+  <!-- Sidebar -->
+  <!-- ============================================================ -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">&#x2B21; Tamma</div>
+    <div class="sidebar-section">Overview</div>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9632;</span> Dashboard</a>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9881;</span> Workflows</a>
+    <div class="sidebar-section">System</div>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9734;</span> Users</a>
+    <a class="sidebar-link active"><span class="sidebar-icon">&#9998;</span> Prompts</a>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9906;</span> API Keys</a>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9635;</span> Tenants</a>
+    <div class="sidebar-section">Tools</div>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9850;</span> ELSA Studio</a>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9776;</span> Logs</a>
+    <a class="sidebar-link"><span class="sidebar-icon">&#9881;</span> Settings</a>
+  </nav>
+
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-breadcrumb">System &rsaquo; <span>Prompts</span></div>
+      <div class="topbar-right">
+        <button class="theme-toggle" onclick="toggleTheme()">&#9788; / &#9790;</button>
+        <div class="avatar">A</div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ============================================================ -->
+      <!-- SCREEN 1: Table View -->
+      <!-- ============================================================ -->
+      <div class="screen visible" id="s-table">
+        <div class="tabs">
+          <div class="tab active">Role + Action Templates</div>
+          <div class="tab" onclick="show('s-sysprompts')">System Prompts</div>
+          <div class="tab">Action Defaults</div>
+          <div class="tab" onclick="show('s-conv')">Conventions</div>
+        </div>
+
+        <div class="filters">
+          <select class="filter-select">
+            <option>All Roles (8)</option>
+            <option>developer</option><option>tester</option><option>security</option>
+            <option>devops</option><option>architect</option><option>product_owner</option>
+            <option>senior_developer</option><option>tech_writer</option>
+          </select>
+          <select class="filter-select">
+            <option>All Actions (10)</option>
+            <option>context-scan</option><option>plan</option><option>plan-review</option>
+            <option>implement</option><option>write-tests</option><option>refactor</option>
+            <option>code-review</option><option>triage</option><option>summarize</option><option>debug</option>
+          </select>
+          <input class="filter-search" placeholder="Search template content...">
+          <div class="filter-count">80 templates</div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Role</th><th>Action</th><th>Wiki</th><th>LLM</th><th>Ver</th><th>Tools</th><th>Tokens</th><th>Updated</th></tr>
+            </thead>
+            <tbody>
+              <tr class="clickable" onclick="show('s-detail')"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">implement</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v3</td><td><span class="badge badge-green">on</span></td><td class="tokens">16384</td><td class="date">Apr 12</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">plan</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v2</td><td><span class="badge badge-dim">off</span></td><td class="tokens">8192</td><td class="date">Apr 10</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">code-review</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v1</td><td><span class="badge badge-green">on</span></td><td class="tokens">8192</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">write-tests</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v2</td><td><span class="badge badge-green">on</span></td><td class="tokens">16384</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">context-scan</span></td><td><span class="wiki-dot no"></span><span style="font-size:11px;color:var(--text-muted)">None</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v1</td><td><span class="badge badge-dim">off</span></td><td class="tokens">4096</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">developer</span></td><td><span class="badge badge-action">debug</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v1</td><td><span class="badge badge-green">on</span></td><td class="tokens">8192</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">tester</span></td><td><span class="badge badge-action">implement</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">GPT-4o</td><td class="version">v1</td><td><span class="badge badge-green">on</span></td><td class="tokens">8192</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">security</span></td><td><span class="badge badge-action">code-review</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Sonnet 4</td><td class="version">v2</td><td><span class="badge badge-green">on</span></td><td class="tokens">8192</td><td class="date">Apr 9</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">architect</span></td><td><span class="badge badge-action">plan</span></td><td><span class="wiki-dot has"></span><span style="font-size:11px">Docs</span></td><td class="llm-cell">Claude Opus 4</td><td class="version">v1</td><td><span class="badge badge-dim">off</span></td><td class="tokens">16384</td><td class="date">Apr 8</td></tr>
+              <tr class="clickable"><td><span class="badge badge-role">architect</span></td><td><span class="badge badge-action">plan-review</span></td><td><span class="wiki-dot no"></span><span style="font-size:11px;color:var(--text-muted)">None</span></td><td class="llm-cell">Claude Opus 4</td><td class="version">v1</td><td><span class="badge badge-dim">off</span></td><td class="tokens">8192</td><td class="date">Apr 8</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- SCREEN 2: Detail / Edit View (inline, not popup) -->
+      <!-- ============================================================ -->
+      <div class="screen" id="s-detail">
+        <button class="btn-back" onclick="show('s-table')">&larr; Back to templates</button>
+
+        <div class="detail-layout">
+          <!-- Left: Editor -->
+          <div class="detail-editor">
+            <div class="detail-header">
+              <div class="detail-title">
+                <span class="badge badge-role">developer</span>
+                <span style="color:var(--text-muted)">/</span>
+                <span class="badge badge-action">implement</span>
+                <span class="version" style="margin-left:6px">v3</span>
+              </div>
+              <div class="detail-actions">
+                <button class="btn btn-danger">Reset to Default</button>
+                <button class="btn btn-primary">Save Changes</button>
+              </div>
+            </div>
+
+            <div class="field-label">Template</div>
+            <textarea class="editor-textarea">You are a {{role}} working on the {{repo_name}} repository.
+
+## Task
+Implement the changes described in the issue below. Follow the conventions strictly.
+
+## Issue
+{{issue_body}}
+
+## Conventions
+{{conventions}}
+
+## Plan
+{{plan}}
+
+## Files to Modify
+{{file_list}}
+
+## Rules
+- Write clean, idiomatic {{language}} code
+- Follow existing patterns in the codebase
+- Add appropriate error handling
+- Do NOT add features beyond the scope of the issue
+- Ensure backward compatibility</textarea>
+
+            <div class="field-label" style="margin-top:16px">System Prompt Override</div>
+            <textarea class="sysprompt-textarea" placeholder="Leave empty to use the role's default system prompt...">You are an expert software developer. You write clean, well-tested code that follows established patterns.</textarea>
+
+            <div class="field-row">
+              <div class="field">
+                <label>Max Tokens</label>
+                <input type="number" value="16384">
+              </div>
+              <div class="field">
+                <label>Provider Override</label>
+                <select>
+                  <option>Default (from agent config)</option>
+                  <option selected>anthropic / claude-sonnet-4</option>
+                  <option>openai / gpt-4o</option>
+                  <option>anthropic / claude-opus-4</option>
+                  <option>google / gemini-2.5-pro</option>
+                </select>
+              </div>
+            </div>
+            <div class="check-row">
+              <label class="check-item"><input type="checkbox" checked> Enable Tools</label>
+              <label class="check-item"><input type="checkbox"> Streaming</label>
+            </div>
+          </div>
+
+          <!-- Right: Context Panels -->
+          <div class="detail-context">
+
+            <!-- Wiki Docs -->
+            <div class="ctx-panel">
+              <div class="ctx-title"><span class="ico">&#128214;</span> Documentation</div>
+              <div class="wiki-section-label role">Role: Developer</div>
+              <div class="wiki-text"><strong>The developer role</strong> is the primary code-producing agent. It receives a plan from the architect/planner and translates it into working code changes. Triggered by <strong>SingleIssueCycleWorkflow</strong> &rarr; ImplementActivity.</div>
+              <div class="wiki-section-label action">Action: Implement</div>
+              <div class="wiki-text">Generates code changes for a single issue. Receives the plan, file list, and conventions. Expected output: a complete git-ready diff.</div>
+              <div class="wiki-oneliner">"Translates the approved plan into code changes following repo conventions and the specified file list."</div>
+            </div>
+
+            <!-- LLM Info -->
+            <div class="ctx-panel">
+              <div class="ctx-title"><span class="ico">&#129302;</span> LLM Info</div>
+              <div class="llm-name">Claude Sonnet 4</div>
+              <div class="llm-model-id">anthropic / claude-sonnet-4-20250514</div>
+              <div class="llm-stats">
+                <div class="llm-stat">Context: <b>200K</b></div>
+                <div class="llm-stat">Output: <b>64K</b></div>
+              </div>
+              <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Strengths (green = relevant to implement)</div>
+              <div class="tags">
+                <span class="tag tag-hi">code generation</span>
+                <span class="tag tag-hi">instruction following</span>
+                <span class="tag tag-lo">reasoning</span>
+                <span class="tag tag-lo">long context</span>
+              </div>
+              <div class="bench-row"><span class="bench-name">HumanEval</span><div class="bench-bar"><div class="bench-fill" style="width:92%;background:var(--green)"></div></div><span class="bench-score">92.1</span></div>
+              <div class="bench-row"><span class="bench-name">SWE-bench</span><div class="bench-bar"><div class="bench-fill" style="width:72%;background:var(--green)"></div></div><span class="bench-score">72.5</span></div>
+              <div class="bench-row"><span class="bench-name">GPQA</span><div class="bench-bar"><div class="bench-fill" style="width:68%;background:var(--yellow)"></div></div><span class="bench-score">68.4</span></div>
+              <div class="bench-row"><span class="bench-name">MMLU-Pro</span><div class="bench-bar"><div class="bench-fill" style="width:84%;background:var(--green)"></div></div><span class="bench-score">84.2</span></div>
+              <div class="llm-updated">Updated: Apr 14, 2026 &middot; Anthropic model card</div>
+            </div>
+
+            <!-- Variables -->
+            <div class="ctx-panel">
+              <div class="ctx-title"><span class="ico">{ }</span> Variables</div>
+              <div class="var-list">
+                <div class="var-item"><div class="var-name">{{role}}</div><div class="var-info"><div class="var-desc">Current agent role name</div><div class="var-src">agent config</div></div></div>
+                <div class="var-item"><div class="var-name">{{repo_name}}</div><div class="var-info"><div class="var-desc">Repository owner/name</div><div class="var-src">GitHub</div></div></div>
+                <div class="var-item"><div class="var-name">{{issue_body}}</div><div class="var-info"><div class="var-desc">Full markdown body of the issue</div><div class="var-src">GitHub issue</div></div></div>
+                <div class="var-item"><div class="var-name">{{conventions}}</div><div class="var-info"><div class="var-desc">Coding conventions from repo config</div><div class="var-src">.tamma/config.json</div></div></div>
+                <div class="var-item"><div class="var-name">{{plan}}</div><div class="var-info"><div class="var-desc">Approved development plan</div><div class="var-src">plan workflow output</div></div></div>
+                <div class="var-item"><div class="var-name">{{file_list}}</div><div class="var-info"><div class="var-desc">Files to modify with descriptions</div><div class="var-src">context scan</div></div></div>
+                <div class="var-item"><div class="var-name">{{language}}</div><div class="var-info"><div class="var-desc">Primary repo language</div><div class="var-src">repo config</div></div></div>
+                <div class="var-item"><div class="var-name">{{context}}</div><div class="var-info"><div class="var-desc">Gathered code context snippets</div><div class="var-src">context scan</div></div></div>
+                <div class="var-item"><div class="var-name">{{test_results}}</div><div class="var-info"><div class="var-desc">Previous test run output</div><div class="var-src">CI workflow</div></div></div>
+              </div>
+              <div class="var-hint">Click a variable to insert at cursor</div>
+            </div>
+
+            <!-- Keywords -->
+            <div class="ctx-panel">
+              <div class="ctx-title"><span class="ico">&#127991;</span> Keywords for "implement"</div>
+              <div class="kw-list">
+                <span class="kw">step-by-step</span>
+                <span class="kw">code only</span>
+                <span class="kw">no explanation</span>
+                <span class="kw">follow conventions</span>
+                <span class="kw">backward compatible</span>
+                <span class="kw">error handling</span>
+                <span class="kw">idiomatic</span>
+                <span class="kw">minimal changes</span>
+                <span class="kw">type safe</span>
+                <span class="kw">edge cases</span>
+              </div>
+              <div class="var-hint">Click to insert into template</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- SCREEN 3: System Prompts -->
+      <!-- ============================================================ -->
+      <div class="screen" id="s-sysprompts">
+        <div class="tabs">
+          <div class="tab" onclick="show('s-table')">Role + Action Templates</div>
+          <div class="tab active">System Prompts</div>
+          <div class="tab">Action Defaults</div>
+          <div class="tab" onclick="show('s-conv')">Conventions</div>
+        </div>
+        <p style="color:var(--text-dim);font-size:12px;margin-bottom:14px">Identity preambles prepended to every LLM call for each role.</p>
+
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">developer</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are an expert software developer working on the Tamma platform. You write clean, well-tested, production-quality code...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">tester</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are an expert software tester focused on comprehensive test coverage. You write tests that catch real bugs...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">security</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a security expert specializing in application security. You identify vulnerabilities following OWASP guidelines...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">devops</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a DevOps engineer focused on CI/CD pipelines, infrastructure as code, and deployment automation...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">architect</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a senior software architect. You design scalable, maintainable systems with clear boundaries...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">product_owner</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a product owner who understands user needs, business value, and technical tradeoffs...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">senior_developer</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a senior developer and technical lead. You mentor junior developers, review code, and make design decisions...</div></div>
+        <div class="sp-card"><div class="sp-header"><span class="badge badge-role">tech_writer</span><button class="btn btn-outline">Edit</button></div><div class="sp-preview">You are a technical writer who creates clear, accurate documentation for developers and end users...</div></div>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- SCREEN 4: Conventions -->
+      <!-- ============================================================ -->
+      <div class="screen" id="s-conv">
+        <div class="tabs">
+          <div class="tab" onclick="show('s-table')">Role + Action Templates</div>
+          <div class="tab" onclick="show('s-sysprompts')">System Prompts</div>
+          <div class="tab">Action Defaults</div>
+          <div class="tab active">Conventions</div>
+        </div>
+        <p style="color:var(--text-dim);font-size:12px;margin-bottom:14px">Language/framework coding standard templates. Users select one as a starting point for their repo's <code style="background:var(--bg-input);padding:1px 4px;border-radius:3px;font-size:11px">{{conventions}}</code> variable.</p>
+
+        <div class="conv-grid">
+          <div class="conv-card"><div class="conv-name">TypeScript + Node.js</div><div class="conv-desc">Strict TS, ESM, async/await, Vitest, Pino</div></div>
+          <div class="conv-card"><div class="conv-name">React + Next.js</div><div class="conv-desc">React 19, App Router, Server Components, Tailwind</div></div>
+          <div class="conv-card"><div class="conv-name">Python + FastAPI</div><div class="conv-desc">Type hints, Pydantic, pytest, black, ruff</div></div>
+          <div class="conv-card"><div class="conv-name">Go</div><div class="conv-desc">Stdlib, table-driven tests, gofmt, error wrapping</div></div>
+          <div class="conv-card"><div class="conv-name">Rust</div><div class="conv-desc">Ownership, Result types, clippy, cargo fmt</div></div>
+          <div class="conv-card"><div class="conv-name">C# + .NET</div><div class="conv-desc">Nullable refs, async/await, xUnit, EF Core</div></div>
+          <div class="conv-card"><div class="conv-name">Java + Spring Boot</div><div class="conv-desc">Records, virtual threads, JUnit 5</div></div>
+          <div class="conv-card"><div class="conv-name">Ruby on Rails</div><div class="conv-desc">Convention over config, RSpec, Rubocop</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Mockup screen switcher -->
+<div class="mock-nav">
+  <button class="mock-btn active" id="mb-table" onclick="show('s-table')">Table</button>
+  <button class="mock-btn" id="mb-detail" onclick="show('s-detail')">Edit View</button>
+  <button class="mock-btn" id="mb-sysprompts" onclick="show('s-sysprompts')">System Prompts</button>
+  <button class="mock-btn" id="mb-conv" onclick="show('s-conv')">Conventions</button>
+</div>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('visible'));
+  document.getElementById(id).classList.add('visible');
+  document.querySelectorAll('.mock-btn').forEach(b => b.classList.remove('active'));
+  const map = {'s-table':'mb-table','s-detail':'mb-detail','s-sysprompts':'mb-sysprompts','s-conv':'mb-conv'};
+  const btn = document.getElementById(map[id]);
+  if (btn) btn.classList.add('active');
+}
+function toggleTheme() {
+  const html = document.documentElement;
+  html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+}
+</script>
+</body>
+</html>
