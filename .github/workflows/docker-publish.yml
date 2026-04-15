@@ -453,7 +453,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d --force-recreate postgres rabbitmq chromadb
+                up -d postgres rabbitmq chromadb
             "
 
       - name: "Verify layer 1: postgres + rabbitmq healthy"
