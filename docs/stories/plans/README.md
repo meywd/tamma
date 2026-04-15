@@ -26,6 +26,7 @@ Rather than treating all 40+ stories as a single queue, work is organized into f
 | **Layer 3** | Parallel services — Epic 9 services, prompt store API/Elsa wiring, Epic 18 backend | 4 teams | Layer 2 |
 | **Layer 4** | Integration & UI — dashboards, Elsa integration, context tools, 12-5 sub-stories | 4 teams | Layer 3 |
 | **Layer 5** | Validation — cross-epic testing, security audit, staging deploy, release prep | 1 team | Layer 4 |
+| **Secret Management Track** | LLM-safe secret management — 30 stories (1.5-16 through 1.5-45): vault, broker, activities, workflows, mirrors, probes, leak detection, rotation cascade, auto-rotate, KMS, notifications, UI | 4 teams peak | Layer 1 complete |
 
 **Key principle**: A story never starts until *all* of its dependencies are merged to `main`. Teams within a layer work in parallel when their worktrees do not conflict on shared files.
 
@@ -39,6 +40,7 @@ Rather than treating all 40+ stories as a single queue, work is organized into f
 | [`layer-3-parallel-services.md`](./layer-3-parallel-services.md) | 4 teams: Epic 9 services, prompt store API/Elsa, Epic 18 backend, Epic 12 foundation |
 | [`layer-4-integration-ui.md`](./layer-4-integration-ui.md) | 4 teams: Epic 9 completion, prompt store UIs, Epic 18 dashboard, Epic 12-5/12-7 |
 | [`layer-5-validation.md`](./layer-5-validation.md) | Cross-epic tests, perf, security audit, staging, docs |
+| [`secret-management-track.md`](./secret-management-track.md) | Parallel track: 30 stories (1.5-16 through 1.5-45) covering vault, broker, workflows, mirrors, probes, leak detection, rotation, UI — gates behind Layer 1, otherwise independent |
 
 ## Cross-Epic Dependency Graph
 
