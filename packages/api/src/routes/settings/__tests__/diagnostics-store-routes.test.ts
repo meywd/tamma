@@ -5,10 +5,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createSettingsServices, registerSettingsRoutes } from '../index.js';
+import { createSettingsServices } from '../index.js';
+import { buildSettingsTestApp } from '../test-utils.js';
 import { InMemoryDiagnosticsStore } from '../../../services/diagnostics-store.js';
 import type { FastifyInstance } from 'fastify';
-import Fastify from 'fastify';
 
 describe('Diagnostics Store Routes', () => {
   let app: FastifyInstance;
@@ -18,15 +18,7 @@ describe('Diagnostics Store Routes', () => {
     store = new InMemoryDiagnosticsStore();
     const settingsServices = createSettingsServices();
     settingsServices.diagnosticsStore = store;
-    app = Fastify({ logger: false });
-    app.decorateRequest('authUser', null);
-    // Stub auth as owner — auth enforcement is tested in create-app-admin-auth.test.ts
-    app.addHook('onRequest', async (request) => {
-      (request as unknown as {
-        authUser: { id: string; role: string; username: string };
-      }).authUser = { id: 'test-owner', role: 'owner', username: 'test' };
-    });
-    await registerSettingsRoutes(app, settingsServices);
+    app = await buildSettingsTestApp(settingsServices);
   });
 
   afterAll(async () => {
