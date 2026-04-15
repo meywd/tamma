@@ -448,12 +448,17 @@ jobs:
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                up -d postgres rabbitmq chromadb
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d postgres rabbitmq chromadb && \
+              sleep 5 && \
+              RMQ_HEALTH=\$(docker inspect --format='{{.State.Health.Status}}' \$(\$COMPOSE ps -q rabbitmq 2>/dev/null) 2>/dev/null || echo 'none') && \
+              if [ \"\$RMQ_HEALTH\" != 'healthy' ]; then
+                echo 'RabbitMQ unhealthy, resetting volume...' && \
+                \$COMPOSE stop rabbitmq && \
+                \$COMPOSE rm -f rabbitmq && \
+                docker volume rm -f \$(docker volume ls -q | grep rmq-data) 2>/dev/null || true && \
+                \$COMPOSE up -d rabbitmq
+              fi
             "
 
       - name: "Verify layer 1: postgres + rabbitmq healthy"
