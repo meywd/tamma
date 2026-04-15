@@ -22,8 +22,14 @@ export interface PasswordResetRoutesOptions {
   emailService: IEmailService;
 }
 
-/** Email validation regex. */
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Simple email check — no regex backtracking. */
+function isValidEmail(e: string): boolean {
+  if (e.length > 254 || e.length < 5) return false;
+  const at = e.indexOf('@');
+  if (at < 1 || at > 64) return false;
+  const domain = e.slice(at + 1);
+  return domain.length >= 3 && domain.includes('.') && !e.includes(' ');
+}
 
 /** Rate limit tracking (email -> timestamps). */
 const resetRateLimit = new Map<string, number[]>();
@@ -50,7 +56,7 @@ export async function registerPasswordResetRoutes(
         return reply.status(400).send({ error: 'email is required' });
       }
 
-      if (!EMAIL_REGEX.test(email)) {
+      if (!isValidEmail(email)) {
         return reply.status(400).send({ error: 'Invalid email format' });
       }
 

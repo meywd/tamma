@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS provider_diagnostics (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_diagnostics_account_created ON provider_diagnostics (account_id, created_at DESC);
-CREATE INDEX idx_diagnostics_provider ON provider_diagnostics (provider_name, created_at DESC);
-CREATE INDEX idx_diagnostics_model ON provider_diagnostics (model, created_at DESC);
-CREATE INDEX idx_diagnostics_event_type ON provider_diagnostics (event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_account_created ON provider_diagnostics (account_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_provider ON provider_diagnostics (provider_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_model ON provider_diagnostics (model, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_event_type ON provider_diagnostics (event_type, created_at DESC);
 
 COMMIT;

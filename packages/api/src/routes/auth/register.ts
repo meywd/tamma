@@ -19,8 +19,14 @@ export interface RegisterRoutesOptions {
   emailService: IEmailService;
 }
 
-/** Email validation regex (simple but effective). */
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Simple email check — no regex backtracking. Real validation via verification email. */
+function isValidEmail(e: string): boolean {
+  if (e.length > 254 || e.length < 5) return false;
+  const at = e.indexOf('@');
+  if (at < 1 || at > 64) return false;
+  const domain = e.slice(at + 1);
+  return domain.length >= 3 && domain.includes('.') && !e.includes(' ');
+}
 
 /** Rate limit tracking for resend verification (email -> timestamps). */
 const resendRateLimit = new Map<string, number[]>();
@@ -51,7 +57,7 @@ export async function registerRegistrationRoutes(
         return reply.status(400).send({ error: 'Name must be between 2 and 100 characters' });
       }
 
-      if (!EMAIL_REGEX.test(email)) {
+      if (!isValidEmail(email)) {
         return reply.status(400).send({ error: 'Invalid email format' });
       }
 
