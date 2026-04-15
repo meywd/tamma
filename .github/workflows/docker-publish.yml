@@ -420,6 +420,30 @@ jobs:
             /tmp/docker-compose.images.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
 
+      - name: "Pre-deploy: check disk space and clean up"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              USAGE=\$(df / --output=pcent | tail -1 | tr -d ' %')
+              echo \"Disk usage: \${USAGE}%\"
+              if [ \"\$USAGE\" -gt 85 ]; then
+                echo 'Disk usage above 85%, running aggressive cleanup...'
+                docker image prune -a --filter 'until=4h' -f 2>/dev/null || true
+                docker builder prune -a -f 2>/dev/null || true
+                docker volume prune -f 2>/dev/null || true
+                journalctl --vacuum-size=200M 2>/dev/null || true
+                apt-get clean 2>/dev/null || true
+                USAGE_AFTER=\$(df / --output=pcent | tail -1 | tr -d ' %')
+                echo \"Disk usage after cleanup: \${USAGE_AFTER}%\"
+                if [ \"\$USAGE_AFTER\" -gt 95 ]; then
+                  echo '::error::Disk still above 95% after cleanup. Manual intervention needed.'
+                  df -h /
+                  exit 1
+                fi
+              fi
+            "
+
       - name: Pull images and stop old containers
         run: |
           ssh -i ~/.ssh/deploy_key \
@@ -440,7 +464,10 @@ jobs:
                 --env-file ../.env \
                 down --remove-orphans 2>/dev/null || true && \
               docker container prune -f 2>/dev/null || true && \
-              docker image prune -af 2>/dev/null || true && \
+              docker image prune -a --filter 'until=10m' -f 2>/dev/null || true && \
+              docker builder prune -a -f 2>/dev/null || true && \
+              docker volume prune -f 2>/dev/null || true && \
+              journalctl --vacuum-size=500M 2>/dev/null || true && \
               echo 'Disk usage after cleanup:' && df -h / | tail -1
             "
 
