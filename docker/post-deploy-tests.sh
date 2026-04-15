@@ -183,12 +183,14 @@ test_endpoint "POST /api/admin/service-keys without auth → 401" "api.tamma.dev
 # ---------------------------------------------------------------------------
 header "Story 9-1: Agent Config"
 
-test_endpoint "GET /api/v1/agents/config without auth → 200" "api.tamma.dev" "/api/v1/agents/config" "200"
+# Now RBAC-gated (settings:view). Unauth → 401.
+test_endpoint "GET /api/v1/agents/config without auth → 401" "api.tamma.dev" "/api/v1/agents/config" "401"
 
 # ---------------------------------------------------------------------------
 header "Story 27-3: Prompt Store API"
 
-test_endpoint "GET /api/prompts/system → 200" "api.tamma.dev" "/api/prompts/system" "200"
+# Now RBAC-gated (settings:view). Unauth → 401.
+test_endpoint "GET /api/prompts/system without auth → 401" "api.tamma.dev" "/api/prompts/system" "401"
 
 # ---------------------------------------------------------------------------
 header "Story 18-1/18-2: Auth Endpoints"
@@ -200,7 +202,8 @@ test_endpoint "POST /password-reset missing email → 400" "api.tamma.dev" "/api
 # ---------------------------------------------------------------------------
 header "Story 9-8: Agent Resolver"
 
-test_endpoint "GET /agents/developer/resolve → 200" "api.tamma.dev" "/api/v1/agents/developer/resolve" "200"
+# Now RBAC-gated (settings:view). Unauth → 401.
+test_endpoint "GET /agents/developer/resolve without auth → 401" "api.tamma.dev" "/api/v1/agents/developer/resolve" "401"
 
 # =============================================================================
 # Summary

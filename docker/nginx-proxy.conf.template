@@ -156,10 +156,20 @@ server {
         chunked_transfer_encoding off;
     }
 
+    # ----- Named redirect location for unauthenticated users -----
+    # Using `error_page 401 = /oauth2/sign_in` would do an *internal*
+    # rewrite and return oauth2-proxy's sign-in page with status 200 —
+    # clients would never see a real redirect. Using a named location
+    # with `return 302` produces a proper external redirect that browsers
+    # (and post-deploy tests) can follow.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
     # ----- Dashboard: protected by oauth2-proxy -----
     location / {
         auth_request /oauth2/auth;
-        error_page 401 = /oauth2/sign_in;
+        error_page 401 = @oauth2_redirect;
 
         auth_request_set $auth_user $upstream_http_x_auth_request_user;
         auth_request_set $auth_email $upstream_http_x_auth_request_email;
@@ -278,10 +288,17 @@ server {
         proxy_set_header Host $host;
     }
 
+    # ----- Named redirect location for unauthenticated users -----
+    # See app.tamma.dev section above for the rationale. Uses
+    # /oauth2/start so oauth2-proxy kicks off the GitHub OAuth flow.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
     # ----- ELSA Server API: RBAC-gated, API key injected -----
     location /elsa/api/ {
         auth_request /auth/role-check;
-        error_page 401 = /oauth2/sign_in;
+        error_page 401 = @oauth2_redirect;
         error_page 403 /403.html;
 
         proxy_pass http://elsa-server:5000/elsa/api/;
@@ -298,7 +315,7 @@ server {
     # ----- ELSA Studio UI: RBAC-gated (admin/owner only) -----
     location / {
         auth_request /auth/role-check;
-        error_page 401 = /oauth2/sign_in;
+        error_page 401 = @oauth2_redirect;
         error_page 403 /403.html;
 
         set $elsa_studio_upstream http://elsa-studio:80;
@@ -367,6 +384,12 @@ server {
         return 302 /oauth2/sign_out;
     }
 
+    # ----- Named redirect location for unauthenticated users -----
+    # See app.tamma.dev section above for the rationale.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
     # ----- Fallback: return 503 when opensearch-dashboards is unavailable -----
     location @logs_unavailable {
         default_type text/html;
@@ -376,7 +399,7 @@ server {
     # ----- OpenSearch Dashboards: RBAC-gated, nav bar injected -----
     location / {
         auth_request /auth/role-check;
-        error_page 401 = /oauth2/sign_in;
+        error_page 401 = @oauth2_redirect;
         error_page 403 /403.html;
         # If opensearch-dashboards is down, show unavailable page
         error_page 502 503 = @logs_unavailable;
