@@ -369,6 +369,17 @@ export async function createApp(options?: CreateAppOptions) {
   // Health check
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 
+  // Unconditionally decorate `authUser` so that requirePermission()'s
+  // escape hatch (`if (!('authUser' in request)) return`) never fires.
+  // Without this, unauthenticated requests to RBAC-gated routes would
+  // silently pass through in production (serve.ts does not register the
+  // legacy auth plugin). Routes still use onRequest hooks to populate
+  // authUser from JWT cookies / API keys — this decoration just ensures
+  // the property exists and is null by default.
+  if (!app.hasDecorator('authUser')) {
+    app.decorateRequest('authUser', null);
+  }
+
   // Auth plugin (if configured)
   if (options?.auth !== undefined) {
     await app.register(registerAuthPlugin, options.auth);

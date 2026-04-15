@@ -87,15 +87,31 @@ if [ "${TARGET}" = "localhost" ]; then
   printf "\n${DIM}=== Pre-test diagnostics ===${RESET}\n"
   NGINX_ID=$(docker ps -qf name=nginx-proxy 2>/dev/null | head -1)
   if [ -n "${NGINX_ID}" ]; then
-    printf "${DIM}Live nginx config (first/last 20 lines):${RESET}\n"
-    docker exec "${NGINX_ID}" sh -c 'head -20 /etc/nginx/conf.d/default.conf; echo "  ... (truncated) ..."; tail -20 /etc/nginx/conf.d/default.conf' 2>&1 | sed 's/^/    /'
     printf "${DIM}nginx server blocks:${RESET}\n"
-    docker exec "${NGINX_ID}" grep -E '^\s*(server_name|listen|auth_request)' /etc/nginx/conf.d/default.conf 2>&1 | sed 's/^/    /'
+    docker exec "${NGINX_ID}" grep -E '^\s*(server_name|listen|auth_request|error_page)' /etc/nginx/conf.d/default.conf 2>&1 | sed 's/^/    /'
+
+    # Probe oauth2-proxy /oauth2/auth from inside the nginx container —
+    # this is exactly what nginx's auth_request subrequest does. wget is
+    # available in nginx:alpine via busybox.
+    printf "${DIM}oauth2-proxy /oauth2/auth response (unauthenticated):${RESET}\n"
+    docker exec "${NGINX_ID}" wget -S --spider --tries=1 --timeout=3 \
+      http://oauth2-proxy:4180/oauth2/auth 2>&1 \
+      | grep -E 'HTTP/|Location|Content-Type|Content-Length|WWW-Authenticate|Set-Cookie|connect' \
+      | sed 's/^/    /' || true
+
+    printf "${DIM}oauth2-proxy /ping response:${RESET}\n"
+    docker exec "${NGINX_ID}" wget -S --spider --tries=1 --timeout=3 \
+      http://oauth2-proxy:4180/ping 2>&1 \
+      | grep -E 'HTTP/|connect' \
+      | sed 's/^/    /' || true
   fi
+
   OA_ID=$(docker ps -qf name=oauth2-proxy 2>/dev/null | head -1)
   if [ -n "${OA_ID}" ]; then
     OA_STATE=$(docker inspect --format='{{.State.Status}}' "${OA_ID}" 2>/dev/null || echo 'unknown')
     printf "${DIM}oauth2-proxy state: ${OA_STATE}${RESET}\n"
+    printf "${DIM}oauth2-proxy logs (last 10 lines):${RESET}\n"
+    docker logs --tail 10 "${OA_ID}" 2>&1 | sed 's/^/    /'
   fi
 fi
 

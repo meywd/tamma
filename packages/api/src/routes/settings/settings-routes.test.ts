@@ -3,16 +3,35 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createApp } from '../../index.js';
-import { createSettingsServices } from './index.js';
+import { createSettingsServices, registerSettingsRoutes } from './index.js';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
+
+/**
+ * Build a Fastify app that exposes only the settings routes and stubs
+ * auth as an owner. These tests cover settings-route behavior, not RBAC
+ * — auth enforcement is tested in create-app-admin-auth.test.ts and
+ * permissions.test.ts. The root-scope `onRequest` hook is registered
+ * BEFORE `registerSettingsRoutes`, so it propagates into the encapsulated
+ * plugin scopes that wrap the routes with `requirePermission`.
+ */
+async function buildSettingsTestApp(): Promise<FastifyInstance> {
+  const app = Fastify({ logger: false });
+  app.decorateRequest('authUser', null);
+  app.addHook('onRequest', async (request) => {
+    (request as unknown as {
+      authUser: { id: string; role: string; username: string };
+    }).authUser = { id: 'test-owner', role: 'owner', username: 'test' };
+  });
+  await registerSettingsRoutes(app, createSettingsServices());
+  return app;
+}
 
 describe('Settings API Routes', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    const settingsServices = createSettingsServices();
-    app = await createApp({ settingsServices });
+    app = await buildSettingsTestApp();
   });
 
   afterAll(async () => {

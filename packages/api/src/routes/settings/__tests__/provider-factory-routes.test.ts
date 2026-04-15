@@ -5,12 +5,12 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { createApp } from '../../../index.js';
-import { createSettingsServices } from '../index.js';
+import { createSettingsServices, registerSettingsRoutes } from '../index.js';
 import { ProviderSessionService } from '../../../services/provider-session.js';
 import type { IAgentProviderFactory, IAgentProvider } from '@tamma/providers';
 import type { AgentTaskResult } from '@tamma/shared';
 import type { FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 
 function createMockProvider(): IAgentProvider {
   return {
@@ -42,7 +42,15 @@ describe('Provider Factory Routes', () => {
     sessionService = new ProviderSessionService(factory, { autoCleanup: false });
     const settingsServices = createSettingsServices();
     settingsServices.providerSessionService = sessionService;
-    app = await createApp({ settingsServices });
+    app = Fastify({ logger: false });
+    app.decorateRequest('authUser', null);
+    // Stub auth as owner — auth enforcement is tested in create-app-admin-auth.test.ts
+    app.addHook('onRequest', async (request) => {
+      (request as unknown as {
+        authUser: { id: string; role: string; username: string };
+      }).authUser = { id: 'test-owner', role: 'owner', username: 'test' };
+    });
+    await registerSettingsRoutes(app, settingsServices);
   });
 
   afterAll(async () => {
