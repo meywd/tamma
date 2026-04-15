@@ -331,11 +331,11 @@ services:
       OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-}
     volumes:
       - ./oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    # Healthcheck disabled: v7.6.0+ uses a distroless base image with no shell,
+    # wget, or curl, so no CMD probe can work. We rely on `restart: unless-stopped`
+    # and verify reachability via nginx-proxy in post-deploy tests.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4180/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      disable: true
     depends_on:
       tamma-api:
         condition: service_started

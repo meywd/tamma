@@ -107,6 +107,13 @@ import type { IPromptEventStore, PromptDomainEvent, PromptEventTags, PromptEvent
 import { registerAgentConfigApiRoutes } from './routes/agents/index.js';
 import type { AgentConfigRoutesOptions } from './routes/agents/index.js';
 import { InMemoryAgentConfigStore } from './persistence/agent-config-store.js';
+import type { IAgentResolverService } from './services/agent-resolver.js';
+import { registerRegistrationRoutes } from './routes/auth/register.js';
+import type { RegisterRoutesOptions } from './routes/auth/register.js';
+import { registerLoginRoutes } from './routes/auth/login.js';
+import type { LoginRoutesOptions } from './routes/auth/login.js';
+import { registerPasswordResetRoutes } from './routes/auth/password-reset.js';
+import type { PasswordResetRoutesOptions } from './routes/auth/password-reset.js';
 import type {
   IAgentConfigStore,
   AgentConfigDocument,
@@ -305,6 +312,20 @@ export interface CreateAppOptions {
   promptStore?: PromptStore | IPromptStore;
   /** Agent config store for Postgres-backed config (optional; creates in-memory store if omitted). */
   agentConfigStore?: IAgentConfigStore;
+  /**
+   * Agent resolver service (Story 9-8). When provided, exposes
+   * GET /api/v1/agents/:role/resolve and POST /api/v1/agents/resolve-for-phase.
+   */
+  agentResolverService?: IAgentResolverService;
+  /**
+   * Register the v1 email/password auth endpoints (register, login, password reset).
+   * When provided, adds POST /api/v1/auth/{register,login,password-reset/*}.
+   */
+  authV1?: {
+    register: RegisterRoutesOptions;
+    login: LoginRoutesOptions;
+    passwordReset: PasswordResetRoutesOptions;
+  };
   /** Tenant context middleware config (optional; registers tenant resolution from auth context). */
   tenantContext?: TenantContextConfig;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
@@ -492,7 +513,20 @@ export async function createApp(options?: CreateAppOptions) {
   // Agent config API routes (always registered — uses in-memory store if none provided)
   {
     const agentConfigStore = options?.agentConfigStore ?? new InMemoryAgentConfigStore();
-    await registerAgentConfigApiRoutes(app, { store: agentConfigStore });
+    const agentConfigRoutesOptions: AgentConfigRoutesOptions = { store: agentConfigStore };
+    if (options?.agentResolverService) {
+      agentConfigRoutesOptions.resolverService = options.agentResolverService;
+    }
+    await registerAgentConfigApiRoutes(app, agentConfigRoutesOptions);
+  }
+
+  // Auth v1 routes (email/password register, login, password reset)
+  // Registered outside the saas/githubOAuth gate because they do not require
+  // GitHub App credentials — they use email+password.
+  if (options?.authV1 !== undefined) {
+    await registerRegistrationRoutes(app, options.authV1.register);
+    await registerLoginRoutes(app, options.authV1.login);
+    await registerPasswordResetRoutes(app, options.authV1.passwordReset);
   }
 
   // Convention template routes (always registered — read-only reference data)

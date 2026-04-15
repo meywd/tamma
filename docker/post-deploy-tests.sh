@@ -10,11 +10,27 @@
 #   bash post-deploy-tests.sh 204.168.x.x  # remote
 #
 # Exit code: 0 if all tests pass, 1 if any fail
+#
+# Notes on HTTPS + SNI:
+#   We use `curl --resolve` instead of `-H "Host: ..."` because nginx selects
+#   the server block from the TLS SNI, NOT the HTTP Host header. Sending
+#   `-H Host: app.tamma.dev` while curl uses SNI=localhost lands the request
+#   on the first 443 server block (not app.tamma.dev), which masks real config
+#   bugs. `--resolve host:443:ip` makes curl send SNI=host while connecting
+#   to `ip`, which is what we actually want.
 # =============================================================================
 
 set -uo pipefail
 
 TARGET="${1:-localhost}"
+
+# Resolve TARGET to an IP for `--resolve`. When TARGET is "localhost", use
+# 127.0.0.1; otherwise assume it is already an IP.
+if [ "${TARGET}" = "localhost" ]; then
+  TARGET_IP="127.0.0.1"
+else
+  TARGET_IP="${TARGET}"
+fi
 
 PASS=0
 FAIL=0
@@ -34,9 +50,12 @@ test_endpoint() {
   local label="$1" host="$2" path="$3" expected="$4"
   local method="${5:-GET}" data="${6:-}"
 
-  local curl_args=(-sk -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: ${host}" -X "${method}")
+  # Use --resolve so TLS SNI = $host, not TARGET.
+  local curl_args=(-sk -o /dev/null -w '%{http_code}' --max-time 5
+    --resolve "${host}:443:${TARGET_IP}"
+    -X "${method}")
   [ -n "${data}" ] && curl_args+=(-H 'Content-Type: application/json' -d "${data}")
-  curl_args+=("https://${TARGET}${path}")
+  curl_args+=("https://${host}${path}")
 
   local status
   status=$(curl "${curl_args[@]}" 2>/dev/null) || status="000"
@@ -62,34 +81,44 @@ test_endpoint() {
 header() { printf "\n${BOLD}--- %s ---${RESET}\n" "$1"; }
 
 # =============================================================================
+# Diagnostics — only when running on the VPS directly
+# =============================================================================
+if [ "${TARGET}" = "localhost" ]; then
+  printf "\n${DIM}=== Pre-test diagnostics ===${RESET}\n"
+  NGINX_ID=$(docker ps -qf name=nginx-proxy 2>/dev/null | head -1)
+  if [ -n "${NGINX_ID}" ]; then
+    printf "${DIM}Live nginx config (first/last 20 lines):${RESET}\n"
+    docker exec "${NGINX_ID}" sh -c 'head -20 /etc/nginx/conf.d/default.conf; echo "  ... (truncated) ..."; tail -20 /etc/nginx/conf.d/default.conf' 2>&1 | sed 's/^/    /'
+    printf "${DIM}nginx server blocks:${RESET}\n"
+    docker exec "${NGINX_ID}" grep -E '^\s*(server_name|listen|auth_request)' /etc/nginx/conf.d/default.conf 2>&1 | sed 's/^/    /'
+  fi
+  OA_ID=$(docker ps -qf name=oauth2-proxy 2>/dev/null | head -1)
+  if [ -n "${OA_ID}" ]; then
+    OA_STATE=$(docker inspect --format='{{.State.Status}}' "${OA_ID}" 2>/dev/null || echo 'unknown')
+    printf "${DIM}oauth2-proxy state: ${OA_STATE}${RESET}\n"
+  fi
+fi
+
+# =============================================================================
 # Tests — strict expected codes, no masking
 # =============================================================================
 
 header "Story 16-1: OAuth2 Proxy"
 
-# oauth2-proxy health
-if [ "${TARGET}" = "localhost" ]; then
-  PROXY_ID=$(docker ps -qf name=oauth2-proxy 2>/dev/null | head -1)
-  if [ -n "${PROXY_ID}" ]; then
-    if docker exec "${PROXY_ID}" curl -sf http://127.0.0.1:4180/ping >/dev/null 2>&1 || \
-       docker exec "${PROXY_ID}" wget -qO- http://127.0.0.1:4180/ping >/dev/null 2>&1; then
-      PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  ok\n" "oauth2-proxy health"
-    else
-      FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy /ping failed")
-      printf "  ${RED}FAIL${RESET}  %-55s  unhealthy\n" "oauth2-proxy health"
-    fi
-  else
-    FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy container not found")
-    printf "  ${RED}FAIL${RESET}  %-55s  not found\n" "oauth2-proxy health"
-  fi
+# oauth2-proxy reachability via nginx. The image is distroless (no curl/wget),
+# so we probe it by asking nginx to proxy /oauth2/sign_in to oauth2-proxy.
+# Success = any HTTP response that is not 000 (connection refused) or 502
+# (upstream unavailable).
+OA_PROBE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
+  --resolve "app.tamma.dev:443:${TARGET_IP}" \
+  "https://app.tamma.dev/oauth2/sign_in" 2>/dev/null) || OA_PROBE="000"
+if [ "${OA_PROBE}" != "000" ] && [ "${OA_PROBE}" != "502" ] && [ "${OA_PROBE}" != "504" ]; then
+  PASS=$((PASS + 1))
+  printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable via nginx" "${OA_PROBE}"
 else
-  OA_STATUS=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: app.tamma.dev" "https://${TARGET}/oauth2/sign_in" 2>/dev/null) || OA_STATUS="000"
-  if [ "${OA_STATUS}" != "000" ] && [ "${OA_STATUS}" != "502" ]; then
-    PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable" "${OA_STATUS}"
-  else
-    FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy unreachable (HTTP ${OA_STATUS})")
-    printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable" "${OA_STATUS}"
-  fi
+  FAIL=$((FAIL + 1))
+  RESULTS+=("oauth2-proxy unreachable (HTTP ${OA_PROBE})")
+  printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable via nginx" "${OA_PROBE}"
 fi
 
 # app.tamma.dev: unauthenticated should get 302 redirect to oauth2-proxy

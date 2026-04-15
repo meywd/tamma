@@ -24,10 +24,35 @@ import {
   PgUserApiKeyStore,
   InMemoryInviteStore,
   PgInviteStore,
+  InMemoryApiKeyStore,
+  PgApiKeyStore,
+  InMemoryAgentConfigStore,
+  PgAgentConfigStore,
   InstallationRouter,
   InMemoryTaskQueue,
   GitHubRepoConfigReader,
 } from './index.js';
+import {
+  InMemoryRefreshTokenStore,
+  PgRefreshTokenStore,
+} from './persistence/refresh-token-store.js';
+import {
+  InMemoryPasswordResetStore,
+  PgPasswordResetStore,
+} from './persistence/password-reset-store.js';
+import {
+  InMemoryTenantMembershipStore,
+  PgTenantMembershipStore,
+} from './persistence/tenant-membership-store.js';
+import { LoginLockoutService } from './auth/login-lockout.js';
+import { ConsoleEmailService } from './services/email.js';
+import { InMemoryHealthStore } from './services/health-store.js';
+import { PgHealthStore } from './services/pg-health-store.js';
+import { InMemorySanitizationStore } from './services/sanitization-store.js';
+import { PgSanitizationStore } from './services/pg-sanitization-store.js';
+import { InMemoryPromptStore } from './services/in-memory-prompt-store.js';
+import { PgPromptStore } from './services/pg-prompt-store.js';
+import { AgentResolverService } from './services/agent-resolver.js';
 
 export interface ApiServerOptions {
   port?: number;
@@ -73,6 +98,40 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     ? new PgInviteStore(pool)
     : new InMemoryInviteStore();
 
+  // Unified API key store (Story 16-7 — service keys + user keys under one table)
+  const unifiedApiKeyStore = pool
+    ? new PgApiKeyStore(pool)
+    : new InMemoryApiKeyStore();
+
+  // Auth v1 stores (Stories 18-1/18-2/18-6 — email+password auth)
+  const refreshTokenStore = pool
+    ? new PgRefreshTokenStore(pool)
+    : new InMemoryRefreshTokenStore();
+  const passwordResetStore = pool
+    ? new PgPasswordResetStore(pool)
+    : new InMemoryPasswordResetStore();
+  const tenantMembershipStore = pool
+    ? new PgTenantMembershipStore(pool)
+    : new InMemoryTenantMembershipStore();
+  const lockoutService = new LoginLockoutService();
+  const emailService = new ConsoleEmailService();
+
+  // Agent resolver dependencies (Story 9-8 — composes provider chain with health)
+  const healthStore = pool ? new PgHealthStore(pool) : new InMemoryHealthStore();
+  const sanitizationStore = pool
+    ? new PgSanitizationStore(pool)
+    : new InMemorySanitizationStore();
+  const agentConfigStore = pool
+    ? new PgAgentConfigStore(pool)
+    : new InMemoryAgentConfigStore();
+  const promptStore = pool ? new PgPromptStore(pool) : new InMemoryPromptStore();
+  const agentResolverService = new AgentResolverService({
+    configStore: agentConfigStore,
+    healthStore,
+    promptStore,
+    sanitizationStore,
+  });
+
   // GitHub App config
   const appIdStr = process.env['GITHUB_APP_ID'];
   const webhookSecret = process.env['GITHUB_WEBHOOK_SECRET'];
@@ -100,6 +159,9 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   // AND request/response logs are shipped to OpenSearch.
   const pinoLogger = createPinoLogger('tamma-api', logLevel);
 
+  // JWT secret used by both v1 auth login and GitHub OAuth routes.
+  const jwtSecret = process.env['JWT_SECRET'] ?? 'tamma-dev-jwt-secret';
+
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
     loggerInstance: pinoLogger,
@@ -111,6 +173,29 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     },
     admin: {
       pgPool: pool,
+      unifiedApiKeyStore,
+    },
+    agentConfigStore,
+    agentResolverService,
+    promptStore,
+    authV1: {
+      register: {
+        userStore,
+        emailService,
+      },
+      login: {
+        userStore,
+        refreshTokenStore,
+        membershipStore: tenantMembershipStore,
+        lockoutService,
+        jwtSecret,
+      },
+      passwordReset: {
+        userStore,
+        passwordResetStore,
+        refreshTokenStore,
+        emailService,
+      },
     },
   };
 
@@ -147,7 +232,6 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     // GitHub OAuth login (requires GITHUB_OAUTH_CLIENT_ID + SECRET)
     const oauthClientId = process.env['GITHUB_OAUTH_CLIENT_ID'];
     const oauthClientSecret = process.env['GITHUB_OAUTH_CLIENT_SECRET'];
-    const jwtSecret = process.env['JWT_SECRET'] ?? 'tamma-dev-jwt-secret';
     const apiBaseUrl = process.env['API_BASE_URL'] ?? `http://localhost:${port}`;
 
     if (oauthClientId && oauthClientSecret) {
