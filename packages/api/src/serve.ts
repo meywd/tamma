@@ -64,6 +64,27 @@ export interface ApiServerOptions {
 }
 
 /**
+ * Resolve the JWT secret used by v1 auth and GitHub OAuth routes.
+ *
+ * Fails fast in production when JWT_SECRET is unset to avoid silently
+ * booting with the predictable dev fallback (every token would be forgeable).
+ * In non-production environments the dev fallback is preserved so local
+ * development and tests keep working without extra setup.
+ */
+export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const secret = env['JWT_SECRET'];
+  if (secret && secret.length > 0) {
+    return secret;
+  }
+  if (env['NODE_ENV'] === 'production') {
+    throw new Error(
+      'JWT_SECRET environment variable is required in production. Refusing to start with the insecure dev fallback.',
+    );
+  }
+  return 'tamma-dev-jwt-secret';
+}
+
+/**
  * Start the Tamma API server in SaaS mode.
  * All deps (pg, Octokit) live in @tamma/api — callers don't need them.
  */
@@ -160,7 +181,8 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   const pinoLogger = createPinoLogger('tamma-api', logLevel);
 
   // JWT secret used by both v1 auth login and GitHub OAuth routes.
-  const jwtSecret = process.env['JWT_SECRET'] ?? 'tamma-dev-jwt-secret';
+  // Throws in production if JWT_SECRET is unset — see resolveJwtSecret.
+  const jwtSecret = resolveJwtSecret();
 
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,

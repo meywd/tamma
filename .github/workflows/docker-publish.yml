@@ -301,6 +301,7 @@ jobs:
           [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
           [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
           [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          [ -z "${{ secrets.TAMMA_JWT_SECRET }}" ] && missing+=("TAMMA_JWT_SECRET")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             exit 1

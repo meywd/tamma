@@ -50,6 +50,7 @@ export interface ILoginLockoutService {
  * For production, this could be replaced with a Redis-backed implementation
  * for shared state across multiple API instances.
  */
+// TODO(story-16-8): replace per-process Map with Valkey-backed shared session store for HA deployments.
 export class LoginLockoutService implements ILoginLockoutService {
   private attempts = new Map<string, AttemptRecord>();
   private readonly config: LockoutConfig;
