@@ -83,6 +83,28 @@ describe('InMemorySanitizationStore', () => {
       expect(rules.blockedCommandPatterns).toEqual(['rm\\s+-rf\\s+/']);
     });
 
+    // Regex DoS / injection guard (CodeQL rule js/regex-injection)
+    it('rejects patterns longer than the safety cap', async () => {
+      const longPattern = 'a'.repeat(500);
+      await expect(
+        store.upsertRules('acc-1', { extraInjectionPatterns: [longPattern] }),
+      ).rejects.toThrow(/too long/i);
+    });
+
+    it('rejects nested-quantifier patterns that enable catastrophic backtracking', async () => {
+      // Classic ReDoS payload: `(a+)+$` — triggers exponential backtracking
+      // on non-matching input like "aaaaaaaaaaaaX".
+      await expect(
+        store.upsertRules('acc-1', { extraInjectionPatterns: ['(a+)+$'] }),
+      ).rejects.toThrow(/unsafe|nested quantifier/i);
+    });
+
+    it('rejects nested-quantifier patterns in blockedCommandPatterns', async () => {
+      await expect(
+        store.upsertRules('acc-1', { blockedCommandPatterns: ['(.*)*DROP'] }),
+      ).rejects.toThrow(/unsafe|nested quantifier/i);
+    });
+
     it('rejects negative maxFetchSizeBytes', async () => {
       await expect(
         store.upsertRules('acc-1', { maxFetchSizeBytes: -1 }),

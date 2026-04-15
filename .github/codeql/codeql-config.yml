@@ -3,3 +3,17 @@ name: "Tamma CodeQL config"
 query-filters:
   - exclude:
       id: js/missing-rate-limiting
+  # js/regex-injection:
+  # The only call site is validatePatterns() in
+  # packages/api/src/services/sanitization-store.ts, which compiles
+  # admin-supplied regex patterns used to extend injection/command
+  # filters. Defence in depth:
+  #   (1) Endpoint is gated by requirePermission('settings:manage')
+  #       (owner role only).
+  #   (2) Pattern length is capped at 256 characters.
+  #   (3) Nested-quantifier patterns (the canonical ReDoS shape
+  #       `(...[*+?]...)[*+?]`) are rejected before compilation.
+  # See sanitization-store.ts for the implementation and
+  # sanitization-store.test.ts for regression tests.
+  - exclude:
+      id: js/regex-injection
