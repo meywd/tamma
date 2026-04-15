@@ -269,6 +269,18 @@ jobs:
               exit 1
             "
 
+      - name: "Post-deploy integration tests"
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            -P ${{ secrets.VPS_SSH_PORT || 22 }} \
+            docker/post-deploy-tests.sh \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh
+
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "chmod +x ${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh && bash ${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh"
+
       - name: "Verify: port 80 accessible and firewall"
         run: |
           ssh -i ~/.ssh/deploy_key \
