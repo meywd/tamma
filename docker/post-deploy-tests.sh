@@ -11,6 +11,9 @@
 
 set -uo pipefail
 
+# Target: localhost when running on VPS, or pass IP/hostname as $1
+TARGET="${1:-localhost}"
+
 PASS=0
 FAIL=0
 RESULTS=()
@@ -28,7 +31,7 @@ test_endpoint() {
 
   local curl_args=(-sk -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: ${host}" -X "${method}")
   [ -n "${data}" ] && curl_args+=(-H 'Content-Type: application/json' -d "${data}")
-  curl_args+=("https://localhost${path}")
+  curl_args+=("https://${TARGET}${path}")
 
   local status
   status=$(curl "${curl_args[@]}" 2>/dev/null) || status="000"
@@ -63,23 +66,30 @@ header() { printf "\n${BOLD}--- %s ---${RESET}\n" "$1"; }
 
 header "Story 16-1: OAuth2 Proxy"
 
-# oauth2-proxy health via docker exec (use curl, not wget)
-PROXY_ID=$(docker ps -qf name=oauth2-proxy | head -1)
-if [ -n "${PROXY_ID}" ]; then
-  if docker exec "${PROXY_ID}" curl -sf http://127.0.0.1:4180/ping >/dev/null 2>&1; then
-    PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  ok\n" "oauth2-proxy /ping (internal)"
-  else
-    # Try wget as fallback
-    if docker exec "${PROXY_ID}" wget -qO- http://127.0.0.1:4180/ping >/dev/null 2>&1; then
-      PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  ok (wget)\n" "oauth2-proxy /ping (internal)"
+# oauth2-proxy health — try docker exec if local, otherwise check via /oauth2/ path
+if [ "${TARGET}" = "localhost" ]; then
+  PROXY_ID=$(docker ps -qf name=oauth2-proxy 2>/dev/null | head -1)
+  if [ -n "${PROXY_ID}" ]; then
+    if docker exec "${PROXY_ID}" curl -sf http://127.0.0.1:4180/ping >/dev/null 2>&1 || \
+       docker exec "${PROXY_ID}" wget -qO- http://127.0.0.1:4180/ping >/dev/null 2>&1; then
+      PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  ok\n" "oauth2-proxy health"
     else
       FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy /ping failed")
-      printf "  ${RED}FAIL${RESET}  %-55s  unhealthy\n" "oauth2-proxy /ping (internal)"
+      printf "  ${RED}FAIL${RESET}  %-55s  unhealthy\n" "oauth2-proxy health"
     fi
+  else
+    FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy container not found")
+    printf "  ${RED}FAIL${RESET}  %-55s  not found\n" "oauth2-proxy health"
   fi
 else
-  FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy container not found")
-  printf "  ${RED}FAIL${RESET}  %-55s  container not found\n" "oauth2-proxy /ping (internal)"
+  # Remote: check that /oauth2/sign_in returns something (302 or 200)
+  OA_STATUS=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: app.tamma.dev" "https://${TARGET}/oauth2/sign_in" 2>/dev/null) || OA_STATUS="000"
+  if [ "${OA_STATUS}" != "000" ] && [ "${OA_STATUS}" != "502" ]; then
+    PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable (remote)" "${OA_STATUS}"
+  else
+    FAIL=$((FAIL + 1)); RESULTS+=("oauth2-proxy unreachable (HTTP ${OA_STATUS})")
+    printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable (remote)" "${OA_STATUS}"
+  fi
 fi
 
 # app.tamma.dev should redirect unauthenticated users (302) or return dashboard (200)
@@ -109,12 +119,16 @@ header "Story 16-5: RBAC"
 test_endpoint "elsa.tamma.dev requires auth" "elsa.tamma.dev" "/" "200|302|403"
 test_endpoint "logs.tamma.dev requires auth" "logs.tamma.dev" "/" "200|302|403|503"
 
-# 403 page on disk
-if find /opt/tamma -name "403.html" -path "*/error-pages/*" 2>/dev/null | grep -q .; then
-  PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  found\n" "Custom 403 page exists"
+# 403 page — check on disk if local, skip if remote
+if [ "${TARGET}" = "localhost" ]; then
+  if find /opt/tamma -name "403.html" -path "*/error-pages/*" 2>/dev/null | grep -q .; then
+    PASS=$((PASS + 1)); printf "  ${GREEN}PASS${RESET}  %-55s  found\n" "Custom 403 page exists"
+  else
+    FAIL=$((FAIL + 1)); RESULTS+=("403.html not found on disk")
+    printf "  ${RED}FAIL${RESET}  %-55s  not found\n" "Custom 403 page exists"
+  fi
 else
-  FAIL=$((FAIL + 1)); RESULTS+=("403.html not found")
-  printf "  ${RED}FAIL${RESET}  %-55s  not found\n" "Custom 403 page exists"
+  printf "  ${BOLD}SKIP${RESET}  %-55s  (remote, can't check disk)\n" "Custom 403 page exists"
 fi
 
 # ---------------------------------------------------------------------------
