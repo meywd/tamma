@@ -525,17 +525,31 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
     try
     {
-        bool freshDeploy;
-        try
+        // Detect whether this is a first-ever deploy by checking for the
+        // __TammaMigrationsHistory table via information_schema. Use a
+        // dedicated connection (not the EF-managed one) so disposing does
+        // not close the context's connection. A raw SQL probe never triggers
+        // EF's own history-table creation path, which is what crashed on the
+        // second deploy.
+        const string historyCheckSql = @"
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name = '__TammaMigrationsHistory'
+            );";
+
+        bool historyExists;
+        await using (var probeConn = new Npgsql.NpgsqlConnection(connectionString))
         {
-            freshDeploy = !dbContext.Database.GetAppliedMigrations().Any();
-        }
-        catch
-        {
-            freshDeploy = true; // __TammaMigrationsHistory does not exist yet
+            await probeConn.OpenAsync();
+            await using var cmd = probeConn.CreateCommand();
+            cmd.CommandText = historyCheckSql;
+            historyExists = (bool)(await cmd.ExecuteScalarAsync() ?? false);
         }
 
-        if (freshDeploy)
+        bool shouldMigrate = true;
+
+        if (!historyExists)
         {
             Log.Information("No Tamma EF migrations applied yet — wiping legacy public-schema tables before InitialSchema");
             dbContext.Database.ExecuteSqlRaw(@"
@@ -550,8 +564,23 @@ using (var scope = app.Services.CreateScope())
                     knex_migrations, knex_migrations_lock
                 CASCADE;");
         }
+        else
+        {
+            // History table exists → only apply pending migrations, never let
+            // Migrate() try to re-create the history table.
+            var pending = dbContext.Database.GetPendingMigrations().ToList();
+            Log.Information("Tamma EF migration history table present; {PendingCount} pending migration(s): {Pending}",
+                pending.Count, string.Join(", ", pending));
+            if (pending.Count == 0)
+            {
+                Log.Information("All migrations already applied — skipping Migrate()");
+                shouldMigrate = false;
+            }
+        }
 
-        dbContext.Database.Migrate();
+        if (shouldMigrate)
+            dbContext.Database.Migrate();
+
         Log.Information("Database migrations applied successfully ({Count} total)",
             dbContext.Database.GetAppliedMigrations().Count());
     }
