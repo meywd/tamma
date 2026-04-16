@@ -1,8 +1,9 @@
 <!--
   Tamma Unified Navigation Bar — Self-contained HTML/CSS/JS snippet.
+  Token source: docs/stories/epic-16/16-4-unified-navigation-impl-plan.md — keep in sync
 
-  Injected via nginx sub_filter into third-party dashboards (OpenSearch, etc.)
-  or included directly in ELSA Studio's index.html.
+  Injected via nginx sub_filter into third-party dashboards (OpenSearch, ELSA Studio)
+  or loaded by tamma-nav.js self-injecting script.
 
   Requirements:
   - No external dependencies
@@ -11,8 +12,9 @@
   - Active link highlighting based on hostname
   - Admin link visible only for admin/owner roles
   - Works as static HTML fallback if JS fails (links still render)
+  - Accessible: ARIA landmarks, skip link, keyboard navigation
 -->
-<div id="tamma-nav">
+<nav id="tamma-nav" role="navigation" aria-label="Tamma services">
   <style>
     #tamma-nav {
       position: fixed;
@@ -32,6 +34,29 @@
       box-sizing: border-box;
     }
     #tamma-nav * { box-sizing: border-box; }
+    /* Skip-to-content link — visible only on focus */
+    #tamma-nav .tn-skip {
+      position: absolute;
+      left: -9999px;
+      top: auto;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      z-index: 100001;
+      background: #fff;
+      color: #333;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    #tamma-nav .tn-skip:focus {
+      position: static;
+      width: auto;
+      height: auto;
+      overflow: visible;
+      margin-right: 8px;
+    }
     #tamma-nav .tn-logo {
       font-weight: 700;
       font-size: 16px;
@@ -69,12 +94,26 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      cursor: pointer;
-      padding: 4px 8px;
       border-radius: 6px;
       position: relative;
     }
-    #tamma-nav .tn-user:hover { background: rgba(255,255,255,0.15); }
+    #tamma-nav .tn-user-trigger {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: none;
+      border: none;
+      color: inherit;
+      font: inherit;
+    }
+    #tamma-nav .tn-user-trigger:hover { background: rgba(255,255,255,0.15); }
+    #tamma-nav .tn-user-trigger:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: 2px;
+    }
     #tamma-nav .tn-avatar {
       width: 28px;
       height: 28px;
@@ -109,7 +148,8 @@
     }
     #tamma-nav .tn-menu a:hover { background: #f3f0ff; }
     #tamma-nav .tn-admin { display: none; }
-    /* Push host page content below nav bar */
+    /* Push host page content below nav bar — needed because the nav is
+       position:fixed and would otherwise overlap the page's first content. */
     body { padding-top: 48px !important; }
     /* Mobile: hide labels, show condensed */
     @media (max-width: 640px) {
@@ -120,8 +160,10 @@
     }
   </style>
 
+  <a class="tn-skip" href="#main-content">Skip to main content</a>
+
   <a class="tn-logo" href="https://app.tamma.dev" style="display:flex;align-items:center;gap:8px">
-    <img src="https://app.tamma.dev/logo.png" alt="Tamma" style="width:24px;height:24px;border-radius:4px" />
+    <img src="https://app.tamma.dev/logo.png" alt="" style="width:24px;height:24px;border-radius:4px" />
     Tamma
   </a>
 
@@ -135,14 +177,17 @@
   <div class="tn-spacer"></div>
 
   <div class="tn-user" id="tamma-nav-user">
-    <img class="tn-avatar" id="tamma-nav-avatar" src="" alt="" style="display:none" />
-    <span class="tn-username" id="tamma-nav-username"></span>
-    <div class="tn-menu" id="tamma-nav-menu">
-      <a href="https://app.tamma.dev/account">Settings</a>
-      <a href="https://app.tamma.dev/api/auth/logout" id="tamma-nav-signout">Sign Out</a>
+    <button class="tn-user-trigger" id="tamma-nav-trigger" type="button"
+            aria-haspopup="menu" aria-expanded="false">
+      <img class="tn-avatar" id="tamma-nav-avatar" src="" alt="" style="display:none" />
+      <span class="tn-username" id="tamma-nav-username"></span>
+    </button>
+    <div class="tn-menu" id="tamma-nav-menu" role="menu">
+      <a href="https://app.tamma.dev/account" role="menuitem">Settings</a>
+      <a href="https://app.tamma.dev/api/auth/logout" role="menuitem" id="tamma-nav-signout">Sign Out</a>
     </div>
   </div>
-</div>
+</nav>
 
 <script>
 (function() {
@@ -151,25 +196,45 @@
 
   // Detect active service from hostname
   var host = window.location.hostname;
-  var svcMap = { 'app.tamma.dev': 'app', 'elsa.tamma.dev': 'elsa', 'logs.tamma.dev': 'logs' };
+  var svcMap = {
+    'app.tamma.dev': 'app',
+    'elsa.tamma.dev': 'elsa',
+    'logs.tamma.dev': 'logs',
+    'localhost': 'app'
+  };
   var active = svcMap[host] || '';
   var links = nav.querySelectorAll('.tn-links a[data-svc]');
   for (var i = 0; i < links.length; i++) {
     if (links[i].getAttribute('data-svc') === active) {
       links[i].classList.add('tn-active');
+      links[i].setAttribute('aria-current', 'page');
     }
   }
 
-  // Toggle user menu
-  var userEl = document.getElementById('tamma-nav-user');
+  // Toggle user menu via button
+  var triggerEl = document.getElementById('tamma-nav-trigger');
   var menuEl = document.getElementById('tamma-nav-menu');
-  if (userEl && menuEl) {
-    userEl.addEventListener('click', function(e) {
+  if (triggerEl && menuEl) {
+    triggerEl.addEventListener('click', function(e) {
       e.stopPropagation();
-      menuEl.classList.toggle('tn-open');
+      var isOpen = menuEl.classList.toggle('tn-open');
+      triggerEl.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     });
-    document.addEventListener('click', function() {
-      menuEl.classList.remove('tn-open');
+    // Close on outside click
+    document.addEventListener('mousedown', function(e) {
+      var userEl = document.getElementById('tamma-nav-user');
+      if (userEl && !userEl.contains(e.target)) {
+        menuEl.classList.remove('tn-open');
+        triggerEl.setAttribute('aria-expanded', 'false');
+      }
+    });
+    // Escape key closes menu and returns focus to trigger
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && menuEl.classList.contains('tn-open')) {
+        menuEl.classList.remove('tn-open');
+        triggerEl.setAttribute('aria-expanded', 'false');
+        triggerEl.focus();
+      }
     });
   }
 
@@ -193,7 +258,7 @@
       var name = document.getElementById('tamma-nav-username');
       if (avatar) {
         avatar.src = 'https://github.com/' + u.username + '.png?size=56';
-        avatar.alt = u.username;
+        avatar.alt = '';
         avatar.style.display = '';
       }
       if (name) name.textContent = u.username;
