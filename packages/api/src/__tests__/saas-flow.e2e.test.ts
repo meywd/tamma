@@ -174,6 +174,7 @@ describe('SaaS Flow E2E', () => {
     await workflowStore.createInstance({
       id: 'wf-e2e-1',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'pending',
       variables: {},
       createdAt: Date.now(),
@@ -216,6 +217,7 @@ describe('SaaS Flow E2E', () => {
     await workflowStore.createInstance({
       id: 'wf-e2e-2',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'running',
       variables: {},
       createdAt: Date.now(),
@@ -266,6 +268,7 @@ describe('SaaS Flow E2E', () => {
     await workflowStore.createInstance({
       id: 'wf-e2e-3',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'running',
       variables: {},
       createdAt: Date.now(),
@@ -308,6 +311,7 @@ describe('SaaS Flow E2E', () => {
     await workflowStore.createInstance({
       id: 'wf-full-flow',
       definitionId: 'issue-workflow',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'pending',
       variables: { issueNumber: 42 },
       createdAt: Date.now(),

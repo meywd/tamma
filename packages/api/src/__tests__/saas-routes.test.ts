@@ -189,6 +189,7 @@ describe('SaaS Routes - Workflow Status', () => {
     await workflowStore.createInstance({
       id: 'wf-1',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'running',
       variables: {},
       createdAt: Date.now(),
@@ -284,6 +285,7 @@ describe('SaaS Routes - Workflow Result', () => {
     await workflowStore.createInstance({
       id: 'wf-1',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'running',
       variables: {},
       createdAt: Date.now(),
@@ -312,6 +314,7 @@ describe('SaaS Routes - Workflow Result', () => {
     await workflowStore.createInstance({
       id: 'wf-2',
       definitionId: 'def-1',
+      tenantId: '00000000-0000-0000-0000-000000000000',
       status: 'running',
       variables: {},
       createdAt: Date.now(),
