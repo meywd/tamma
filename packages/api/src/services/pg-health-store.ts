@@ -187,4 +187,34 @@ export class PgHealthStore implements IHealthStore {
 
     return (result.rowCount ?? 0) > 0;
   }
+
+  async syncCircuitChange(key: string, state: 'open' | 'half-open' | 'closed', _metadata?: Record<string, unknown>): Promise<void> {
+    validateKey(key);
+
+    if (state === 'closed') {
+      await this.recordSuccess(key);
+    } else if (state === 'open') {
+      const openUntil = new Date(Date.now() + this.circuitOpenDurationMs).toISOString();
+      await this.pool.query(
+        `INSERT INTO provider_health (key, circuit_open, circuit_open_until, half_open_in_progress, updated_at)
+         VALUES ($1, true, $2, false, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           circuit_open = true,
+           circuit_open_until = $2,
+           half_open_in_progress = false,
+           updated_at = NOW()`,
+        [key, openUntil],
+      );
+    } else {
+      // half-open
+      await this.pool.query(
+        `INSERT INTO provider_health (key, circuit_open, half_open_in_progress, updated_at)
+         VALUES ($1, true, true, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           half_open_in_progress = true,
+           updated_at = NOW()`,
+        [key],
+      );
+    }
+  }
 }

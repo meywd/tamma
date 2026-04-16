@@ -174,4 +174,49 @@ describe('InMemoryHealthStore', () => {
       expect(status!.circuitOpen).toBe(false);
     });
   });
+
+  // ---- syncCircuitChange ----
+
+  describe('syncCircuitChange', () => {
+    it('persists open state', async () => {
+      await store.syncCircuitChange('sync:open', 'open');
+
+      const status = await store.get('sync:open');
+      expect(status).not.toBeNull();
+      expect(status!.circuitOpen).toBe(true);
+      expect(status!.halfOpen).toBe(false);
+    });
+
+    it('persists half-open state', async () => {
+      await store.syncCircuitChange('sync:half', 'half-open');
+
+      const status = await store.get('sync:half');
+      expect(status).not.toBeNull();
+      expect(status!.circuitOpen).toBe(true);
+      expect(status!.halfOpen).toBe(true);
+    });
+
+    it('persists closed state (resets to healthy)', async () => {
+      // First open the circuit
+      await store.syncCircuitChange('sync:close', 'open');
+
+      // Then close it
+      await store.syncCircuitChange('sync:close', 'closed');
+
+      const status = await store.get('sync:close');
+      // After recordSuccess, the record exists but is healthy
+      expect(status).not.toBeNull();
+      expect(status!.circuitOpen).toBe(false);
+      expect(status!.healthy).toBe(true);
+      expect(status!.failures).toBe(0);
+    });
+
+    it('creates entry for unknown key on sync open', async () => {
+      await store.syncCircuitChange('new:key', 'open');
+
+      const status = await store.get('new:key');
+      expect(status).not.toBeNull();
+      expect(status!.circuitOpen).toBe(true);
+    });
+  });
 });

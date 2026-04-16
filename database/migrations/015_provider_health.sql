@@ -17,4 +17,8 @@ CREATE TABLE IF NOT EXISTS provider_health (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_provider_health_open
+  ON provider_health (circuit_open)
+  WHERE circuit_open = true;
+
 COMMIT;

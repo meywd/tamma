@@ -66,6 +66,12 @@ export interface IHealthStore {
 
   /** Reset (delete) health state for a key. Admin operation. */
   reset(key: string): Promise<boolean>;
+
+  /**
+   * Sync a circuit state change from the in-process ProviderHealthTracker
+   * to the persistent store. Called via onCircuitChange callback.
+   */
+  syncCircuitChange(key: string, state: 'open' | 'half-open' | 'closed', metadata?: Record<string, unknown>): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,5 +226,46 @@ export class InMemoryHealthStore implements IHealthStore {
   async reset(key: string): Promise<boolean> {
     validateKey(key);
     return this.records.delete(key);
+  }
+
+  async syncCircuitChange(key: string, state: 'open' | 'half-open' | 'closed', _metadata?: Record<string, unknown>): Promise<void> {
+    validateKey(key);
+
+    if (state === 'closed') {
+      await this.recordSuccess(key);
+      return;
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    let record = this.records.get(key);
+
+    if (!record) {
+      record = {
+        key,
+        circuitOpen: false,
+        circuitOpenUntil: null,
+        failureCount: 0,
+        lastFailureAt: null,
+        lastSuccessAt: null,
+        halfOpenInProgress: false,
+        updatedAt: nowIso,
+      };
+      this.records.set(key, record);
+    }
+
+    if (state === 'open') {
+      record.circuitOpen = true;
+      record.circuitOpenUntil = new Date(now.getTime() + this.circuitOpenDurationMs).toISOString();
+      record.halfOpenInProgress = false;
+      record.updatedAt = nowIso;
+    } else {
+      // half-open: circuit is still open (awaiting probe), set circuitOpenUntil
+      // so get() correctly reports circuitOpen=true
+      record.circuitOpen = true;
+      record.circuitOpenUntil = new Date(now.getTime() + this.circuitOpenDurationMs).toISOString();
+      record.halfOpenInProgress = true;
+      record.updatedAt = nowIso;
+    }
   }
 }
