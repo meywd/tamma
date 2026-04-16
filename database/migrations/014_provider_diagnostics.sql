@@ -33,5 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_diagnostics_account_created ON provider_diagnosti
 CREATE INDEX IF NOT EXISTS idx_diagnostics_provider ON provider_diagnostics (provider_name, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_model ON provider_diagnostics (model, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_diagnostics_event_type ON provider_diagnostics (event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_engine ON provider_diagnostics (engine_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_diagnostics_correlation ON provider_diagnostics (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_diagnostics_budget ON provider_diagnostics (account_id, created_at) WHERE success = true;
 
 COMMIT;

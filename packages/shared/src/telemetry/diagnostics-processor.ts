@@ -72,6 +72,34 @@ export interface IDiagnosticsProcessor {
   process(events: DiagnosticsEvent[]): Promise<void>;
 }
 
+// --- Persistent Store Interface (optional) ---
+
+/**
+ * Minimal persistent diagnostics store interface for the processor.
+ * Mirrors IDiagnosticsStore.insert() from @tamma/api without creating
+ * a runtime import (avoids circular dependency).
+ */
+export interface IDiagnosticsPersistentStore {
+  /** Insert a batch of diagnostics record inputs. Returns count inserted. */
+  insert(records: ReadonlyArray<{
+    eventType: string;
+    providerName: string;
+    model?: string | null;
+    agentType?: string | null;
+    projectId?: string | null;
+    engineId?: string | null;
+    taskId?: string | null;
+    taskType?: string | null;
+    inputTokens?: number;
+    outputTokens?: number;
+    latencyMs?: number;
+    costUsd?: number;
+    success: boolean;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }>): Promise<number>;
+}
+
 // --- Processor Options ---
 
 /**
@@ -86,6 +114,8 @@ export interface DiagnosticsProcessorOptions {
   mapTaskType: TaskTypeMapper;
   /** Optional logger for warning on per-event errors */
   logger?: ILogger;
+  /** Optional persistent diagnostics store for API-backed mode. */
+  diagnosticsStore?: IDiagnosticsPersistentStore;
 }
 
 // --- Event type guards ---
@@ -124,9 +154,26 @@ function _isProviderEvent(event: DiagnosticsEvent): event is ProviderDiagnostics
 export function createDiagnosticsProcessor(
   options: DiagnosticsProcessorOptions,
 ): DiagnosticsEventProcessor {
-  const { costTracker, mapProviderName, mapTaskType, logger } = options;
+  const { costTracker, mapProviderName, mapTaskType, logger, diagnosticsStore } = options;
 
   return async (events: DiagnosticsEvent[]): Promise<void> => {
+    // Build persistent store records in parallel with cost tracker writes
+    const storeRecords: Array<{
+      eventType: string;
+      providerName: string;
+      model?: string | null;
+      agentType?: string | null;
+      projectId?: string | null;
+      engineId?: string | null;
+      taskId?: string | null;
+      taskType?: string | null;
+      inputTokens?: number;
+      outputTokens?: number;
+      latencyMs?: number;
+      success: boolean;
+      errorCode?: string | null;
+    }> = [];
+
     for (const event of events) {
       // Only record completion and error events
       if (!COMPLETION_EVENT_TYPES.has(event.type)) {
@@ -167,9 +214,43 @@ export function createDiagnosticsProcessor(
         }
 
         await costTracker.recordUsage(input);
+
+        // Collect record for persistent store batch write
+        if (diagnosticsStore) {
+          const record: typeof storeRecords[number] = {
+            eventType: event.type,
+            providerName: mapProviderName(providerName),
+            model,
+            agentType: event.agentType ?? null,
+            projectId: event.projectId ?? null,
+            engineId: event.engineId ?? null,
+            taskId: event.taskId ?? null,
+            taskType: event.taskType ?? null,
+            inputTokens: tokens?.input ?? 0,
+            outputTokens: tokens?.output ?? 0,
+            latencyMs: event.latencyMs ?? 0,
+            success: event.success ?? false,
+          };
+          if (event.errorCode !== undefined) {
+            record.errorCode = event.errorCode;
+          }
+          storeRecords.push(record);
+        }
       } catch (err: unknown) {
         logger?.warn('Diagnostics processor: failed to record usage', {
           type: event.type,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Batch write to persistent store if available
+    if (diagnosticsStore && storeRecords.length > 0) {
+      try {
+        await diagnosticsStore.insert(storeRecords);
+      } catch (err: unknown) {
+        logger?.warn('Diagnostics processor: failed to write to persistent store', {
+          count: storeRecords.length,
           error: err instanceof Error ? err.message : String(err),
         });
       }
