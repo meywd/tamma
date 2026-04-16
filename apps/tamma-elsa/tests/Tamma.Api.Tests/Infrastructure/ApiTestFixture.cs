@@ -9,7 +9,12 @@ using Respawn;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
-namespace Tamma.Api.Tests.Infrastructure;
+// NOTE: namespace is intentionally the root `Tamma.Api.Tests`, not
+// `...Infrastructure`. NUnit's [SetUpFixture] applies to its declared
+// namespace and sub-namespaces, so placing it at the root lets every test
+// file anywhere under Tamma.Api.Tests share the container + migrations
+// without needing a local delegate fixture.
+namespace Tamma.Api.Tests;
 
 /// <summary>
 /// Shared integration-test fixture: boots a Postgres container once per test
@@ -38,22 +43,41 @@ public class ApiTestFixture
 
         await Postgres.StartAsync();
 
+        // Program.cs reads `builder.Configuration.GetConnectionString(...)` at
+        // WebApplicationBuilder-composition time, BEFORE any callback passed to
+        // WithWebHostBuilder.ConfigureAppConfiguration runs. That means an
+        // in-memory override attached via ConfigureAppConfiguration is too
+        // late. The reliable override for .NET 8 minimal APIs is an env var
+        // (double-underscore path syntax), which is loaded automatically by
+        // the default configuration sources during CreateBuilder.
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
+
+        // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of
+        // three auth branches: real JWT (secret present), permissive dev
+        // (secret empty + Development env), or hard-fail (empty + non-dev).
+        // Tests use the permissive dev branch so they can exercise endpoints
+        // behind RequireAuthorization without minting tokens. Clear any stale
+        // value from earlier runs.
+        Environment.SetEnvironmentVariable("Jwt__Secret", null);
+        Environment.SetEnvironmentVariable("Jwt__Issuer", null);
+        Environment.SetEnvironmentVariable("Jwt__Audience", null);
+
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder =>
-            {
-                builder.UseEnvironment("Development");
-                builder.ConfigureAppConfiguration((_, config) =>
-                {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["ConnectionStrings:DefaultConnection"] = Postgres.GetConnectionString(),
-                        ["OpenSearch:Enabled"] = "false",
-                        ["Jwt:Secret"] = "test-secret-at-least-32-characters-long-for-hmac-signing",
-                        ["Jwt:Issuer"] = "tamma-test",
-                        ["Jwt:Audience"] = "tamma-api-test"
-                    });
-                });
-            });
+            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+
+        // The InitialSchema migration references uuid_generate_v4() (pre-existing
+        // mentorship schema) which lives in the uuid-ossp extension. Enable it
+        // before running migrations so the container image (stock postgres:17-alpine)
+        // can execute the migration bundle.
+        await using (var bootstrap = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString()))
+        {
+            await bootstrap.OpenAsync();
+            await using var cmd = bootstrap.CreateCommand();
+            cmd.CommandText = "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";";
+            await cmd.ExecuteNonQueryAsync();
+        }
 
         // Force service resolution so Program.cs migrations run against the container.
         using var scope = Factory.Services.CreateScope();
