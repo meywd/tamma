@@ -140,7 +140,7 @@ describe('TammaEngine Integration', () => {
     );
 
     // Verify event store recorded the full lifecycle
-    const events = eventStore.getEvents(DEFAULT_TENANT_ID, 1);
+    const events = await eventStore.getEvents(DEFAULT_TENANT_ID, 1);
     const eventTypes = events.map((e) => e.type);
     expect(eventTypes).toContain(EngineEventType.ISSUE_SELECTED);
     expect(eventTypes).toContain(EngineEventType.ISSUE_ANALYZED);

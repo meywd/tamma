@@ -9,7 +9,9 @@ public static class DependencyInjection
     public static IServiceCollection AddTammaData(this IServiceCollection services, string connectionString)
     {
         services.AddScoped<ITenantContext, TenantContext>();
-        services.AddDbContext<TammaDbContext>(options => options.UseNpgsql(connectionString));
+        services.AddDbContext<TammaDbContext>(options =>
+            options.UseNpgsql(connectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();

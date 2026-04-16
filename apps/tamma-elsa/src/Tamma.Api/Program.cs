@@ -514,10 +514,19 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
     try
     {
-        var applied = dbContext.Database.GetAppliedMigrations().ToList();
-        if (applied.Count == 0)
+        bool freshDeploy;
+        try
         {
-            Log.Information("No EF migrations applied yet — wiping legacy public-schema tables before InitialSchema");
+            freshDeploy = !dbContext.Database.GetAppliedMigrations().Any();
+        }
+        catch
+        {
+            freshDeploy = true; // __TammaMigrationsHistory does not exist yet
+        }
+
+        if (freshDeploy)
+        {
+            Log.Information("No Tamma EF migrations applied yet — wiping legacy public-schema tables before InitialSchema");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     api_keys, agent_configs, domain_events,
