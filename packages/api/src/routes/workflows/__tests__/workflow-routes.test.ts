@@ -1,15 +1,19 @@
 /**
  * Workflow Route Tests
  *
- * Tests CRUD for workflow definitions and instances, including pagination
- * and SSE endpoint existence.
+ * Tests CRUD for workflow definitions and instances, including pagination,
+ * tenant filtering, and SSE endpoint existence.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { DEFAULT_TENANT_ID } from '@tamma/shared';
 import { registerWorkflowRoutes } from '../index.js';
 import { InMemoryWorkflowStore } from '../../../persistence/workflow-store.js';
+
+const TENANT_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const TENANT_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
 describe('Workflow Routes', () => {
   let app: FastifyInstance;
@@ -134,6 +138,7 @@ describe('Workflow Routes', () => {
         url: '/api/workflows/instances',
         payload: {
           definitionId: 'def-1',
+          tenantId: DEFAULT_TENANT_ID,
           status: 'pending',
           variables: { issueNumber: 42 },
         },
@@ -142,6 +147,7 @@ describe('Workflow Routes', () => {
       expect(response.statusCode).toBe(201);
       const body = response.json();
       expect(body.definitionId).toBe('def-1');
+      expect(body.tenantId).toBe(DEFAULT_TENANT_ID);
       expect(body.status).toBe('pending');
       expect(body.id).toBeDefined();
     });
@@ -150,7 +156,7 @@ describe('Workflow Routes', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/workflows/instances',
-        payload: { status: 'pending' },
+        payload: { status: 'pending', tenantId: DEFAULT_TENANT_ID },
       });
 
       expect(response.statusCode).toBe(400);
@@ -162,6 +168,7 @@ describe('Workflow Routes', () => {
       await store.createInstance({
         id: 'inst-1',
         definitionId: 'def-1',
+        tenantId: DEFAULT_TENANT_ID,
         status: 'pending',
         variables: {},
         createdAt: Date.now(),
@@ -197,6 +204,7 @@ describe('Workflow Routes', () => {
       await store.createInstance({
         id: 'inst-1',
         definitionId: 'def-1',
+        tenantId: DEFAULT_TENANT_ID,
         status: 'pending',
         variables: {},
         createdAt: Date.now(),
@@ -231,6 +239,7 @@ describe('Workflow Routes', () => {
         await store.createInstance({
           id: `inst-${i}`,
           definitionId: 'def-1',
+          tenantId: DEFAULT_TENANT_ID,
           status: 'running',
           variables: {},
           createdAt: Date.now(),
@@ -253,11 +262,11 @@ describe('Workflow Routes', () => {
 
     it('filters by definitionId', async () => {
       await store.createInstance({
-        id: 'inst-1', definitionId: 'def-1', status: 'running', variables: {},
+        id: 'inst-1', definitionId: 'def-1', tenantId: DEFAULT_TENANT_ID, status: 'running', variables: {},
         createdAt: Date.now(), updatedAt: Date.now(),
       });
       await store.createInstance({
-        id: 'inst-2', definitionId: 'def-2', status: 'running', variables: {},
+        id: 'inst-2', definitionId: 'def-2', tenantId: DEFAULT_TENANT_ID, status: 'running', variables: {},
         createdAt: Date.now(), updatedAt: Date.now(),
       });
 
@@ -267,6 +276,46 @@ describe('Workflow Routes', () => {
       });
 
       expect(response.json().data).toHaveLength(1);
+    });
+
+    it('filters by tenantId', async () => {
+      await store.createInstance({
+        id: 'inst-a1', definitionId: 'def-1', tenantId: TENANT_A, status: 'running', variables: {},
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await store.createInstance({
+        id: 'inst-a2', definitionId: 'def-1', tenantId: TENANT_A, status: 'running', variables: {},
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+      await store.createInstance({
+        id: 'inst-b1', definitionId: 'def-1', tenantId: TENANT_B, status: 'running', variables: {},
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/workflows/instances?tenantId=${TENANT_A}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.data).toHaveLength(2);
+      expect(body.total).toBe(2);
+    });
+
+    it('returns zero results when filtering by tenant with no instances', async () => {
+      await store.createInstance({
+        id: 'inst-a1', definitionId: 'def-1', tenantId: TENANT_A, status: 'running', variables: {},
+        createdAt: Date.now(), updatedAt: Date.now(),
+      });
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/workflows/instances?tenantId=${TENANT_B}`,
+      });
+
+      expect(response.json().data).toEqual([]);
+      expect(response.json().total).toBe(0);
     });
   });
 

@@ -34,6 +34,7 @@ const WorkflowDefinitionSchema = z.object({
 const WorkflowInstanceCreateSchema = z.object({
   id: z.string().optional(),
   definitionId: z.string().min(1),
+  tenantId: z.string().min(1).optional(),
   status: z.string().optional(),
   currentActivity: z.string().optional(),
   variables: z.record(z.unknown()).optional(),
@@ -150,6 +151,7 @@ export async function registerWorkflowRoutes(
           page?: string;
           pageSize?: string;
           definitionId?: string;
+          tenantId?: string;
         };
       }>,
       reply: FastifyReply,
@@ -163,11 +165,16 @@ export async function registerWorkflowRoutes(
         Math.max(1, parseInt(request.query.pageSize ?? '50', 10) || 50),
       );
       const definitionId = request.query.definitionId || undefined;
+      // tenantId filtering: In SaaS mode, Story 17-5 middleware will inject
+      // this from the authenticated request context. For now, accept it
+      // as an explicit query parameter.
+      const tenantId = request.query.tenantId || undefined;
 
       const result = await store.listInstances({
         page,
         pageSize,
         ...(definitionId !== undefined ? { definitionId } : {}),
+        ...(tenantId !== undefined ? { tenantId } : {}),
       });
       return reply.send({ ...result, page, pageSize });
     },
