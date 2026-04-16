@@ -30,6 +30,7 @@ function createMockEngine() {
     getEventStore: vi.fn().mockReturnValue({
       getEvents: vi.fn().mockReturnValue([]),
     }),
+    getTenantId: vi.fn().mockReturnValue('00000000-0000-0000-0000-000000000000'),
     run: vi.fn().mockResolvedValue(undefined),
     dispose: vi.fn().mockResolvedValue(undefined),
   };
@@ -321,7 +322,7 @@ describe('Engine Routes', () => {
 
     it('filters by issueNumber', async () => {
       engine.getEventStore.mockReturnValue({
-        getEvents: vi.fn().mockImplementation((issueNumber?: number) => {
+        getEvents: vi.fn().mockImplementation((_tenantId: string, issueNumber?: number) => {
           if (issueNumber === 42) return [{ id: '1', type: 'EVENT', timestamp: Date.now() }];
           return [];
         }),

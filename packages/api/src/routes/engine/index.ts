@@ -202,7 +202,7 @@ export async function registerEngineRoutes(
         const store = engine.getEventStore();
         if (store === undefined) return;
 
-        const events = store.getEvents();
+        const events = store.getEvents(engine.getTenantId());
         if (events.length > lastSeenIndex) {
           const newEvents = events.slice(lastSeenIndex);
           for (const evt of newEvents) {
@@ -263,7 +263,7 @@ export async function registerEngineRoutes(
         ? parseInt(request.query.issueNumber, 10)
         : undefined;
 
-      const allEvents: EngineEvent[] = store.getEvents(issueNumber);
+      const allEvents: EngineEvent[] = store.getEvents(engine.getTenantId(), issueNumber);
       const total = allEvents.length;
       const start = (page - 1) * pageSize;
       const data = allEvents.slice(start, start + pageSize);

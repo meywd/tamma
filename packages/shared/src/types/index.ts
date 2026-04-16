@@ -266,6 +266,11 @@ export interface LaunchContext {
   logger: ILogger;
 }
 
+// --- Tenant Constants ---
+
+/** Sentinel tenant ID used in CLI/self-hosted mode (no multi-tenancy). */
+export const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000000';
+
 // --- Event Store (for audit trail) ---
 
 export enum EngineEventType {
@@ -293,13 +298,14 @@ export interface EngineEvent {
   id: string;
   type: EngineEventType;
   timestamp: number;
+  tenantId: string;
   issueNumber?: number;
   data: Record<string, unknown>;
 }
 
 export interface IEventStore {
   record(event: Omit<EngineEvent, 'id' | 'timestamp'>): EngineEvent;
-  getEvents(issueNumber?: number): EngineEvent[];
-  getLastEvent(type: EngineEventType): EngineEvent | undefined;
-  clear(): void;
+  getEvents(tenantId: string, issueNumber?: number): EngineEvent[];
+  getLastEvent(tenantId: string, type: EngineEventType): EngineEvent | undefined;
+  clear(tenantId: string): void;
 }
