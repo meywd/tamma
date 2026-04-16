@@ -1,143 +1,301 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Prompts;
+using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
-using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
 
+/// <summary>
+/// Minimal-API handlers for <c>/api/prompts</c>. These are the single-line
+/// delegates wired in <c>Program.cs</c>; the heavy lifting lives in
+/// <see cref="PromptStoreService"/> and <see cref="PromptEventsService"/>.
+/// </summary>
 public static class PromptEndpoints
 {
+    // =======================================================================
+    // List
+    // =======================================================================
+
     public static async Task<IResult> ListAll(
-        IPromptRepository promptRepo,
+        PromptStoreService store,
         ClaimsPrincipal principal)
     {
-        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var prompts = await promptRepo.ListAsync(userId is not null ? Guid.Parse(userId) : null);
-        return Results.Ok(prompts.Select(p =>
-            new PromptResponse(p.Role, p.Action, p.Template, p.SystemPrompt, p.Variables, p.EnableTools, p.MaxTokens, "user")));
+        var userId = TryGetUserId(principal);
+        var overrides = await store.ListUserOverridesAsync(userId);
+        var response = overrides.Select(p => new PromptResponse(
+            p.Role,
+            p.Action,
+            p.Template,
+            p.SystemPrompt,
+            p.Variables,
+            p.EnableTools,
+            p.MaxTokens,
+            "user")).ToList();
+        return Results.Ok(response);
     }
+
+    // =======================================================================
+    // System defaults (read-only)
+    // =======================================================================
 
     public static Task<IResult> ListSystemDefaults()
     {
-        return Task.FromResult(Results.Ok(new { message = "System defaults - stub" }));
+        var roleAction = SystemPrompts.RoleActionTemplates
+            .Select(t => new PromptResponse(
+                t.Role,
+                t.Action,
+                t.Template,
+                t.SystemPrompt,
+                t.Variables.ToArray(),
+                t.EnableTools,
+                t.MaxTokens,
+                "system"))
+            .ToList();
+
+        var actionDefaults = SystemPrompts.ActionDefaults.ToDictionary(
+            kv => kv.Key,
+            kv => new PromptResponse(
+                kv.Value.Role,
+                kv.Value.Action,
+                kv.Value.Template,
+                kv.Value.SystemPrompt,
+                kv.Value.Variables.ToArray(),
+                kv.Value.EnableTools,
+                kv.Value.MaxTokens,
+                "system"));
+
+        var response = new SystemDefaultsResponse(
+            RoleActionTemplates: roleAction,
+            SystemPrompts: SystemPrompts.RoleSystemPrompts,
+            ActionDefaults: actionDefaults);
+
+        return Task.FromResult(Results.Ok(response));
     }
 
     public static Task<IResult> GetSystemDefault(string role, string action)
     {
+        var template = SystemPrompts.GetRoleAction(role, action);
+        if (template is null)
+        {
+            return Task.FromResult(Results.NotFound(new { error = "No system default for this role/action" }));
+        }
+
         return Task.FromResult(Results.Ok(new PromptResponse(
-            role, action,
-            $"Default template for {role}/{action}",
-            $"You are a {role} assistant.",
-            Array.Empty<string>(), false, 4096, "system")));
+            template.Role,
+            template.Action,
+            template.Template,
+            template.SystemPrompt,
+            template.Variables.ToArray(),
+            template.EnableTools,
+            template.MaxTokens,
+            "system")));
     }
+
+    // =======================================================================
+    // User role+action overrides
+    // =======================================================================
 
     public static async Task<IResult> GetPrompt(
         string role,
         string action,
-        IPromptRepository promptRepo,
+        PromptStoreService store,
         ClaimsPrincipal principal)
     {
-        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var prompt = await promptRepo.GetAsync(
-            userId is not null ? Guid.Parse(userId) : null,
-            "role-action", role, action);
+        var userId = TryGetUserId(principal);
+        var resolved = await store.ResolveRoleActionAsync(userId, role, action);
 
-        if (prompt is null)
-            return Results.Ok(new PromptResponse(
-                role, action,
-                $"Default template for {role}/{action}",
-                $"You are a {role} assistant.",
-                Array.Empty<string>(), false, 4096, "system"));
+        if (resolved is null)
+        {
+            return Results.NotFound(new { error = "No prompt available for this role/action" });
+        }
 
         return Results.Ok(new PromptResponse(
-            prompt.Role, prompt.Action, prompt.Template, prompt.SystemPrompt,
-            prompt.Variables, prompt.EnableTools, prompt.MaxTokens, "user"));
+            resolved.Role,
+            resolved.Action,
+            resolved.Template,
+            resolved.SystemPrompt,
+            resolved.Variables.ToArray(),
+            resolved.EnableTools,
+            resolved.MaxTokens,
+            resolved.Source == PromptSource.UserOverride || resolved.Source == PromptSource.UserActionDefault
+                ? "user"
+                : "system"));
     }
 
     public static async Task<IResult> UpsertPrompt(
         string role,
         string action,
         UpsertPromptRequest req,
-        IPromptRepository promptRepo,
+        PromptStoreService store,
+        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext)
     {
-        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var prompt = await promptRepo.UpsertAsync(new PromptOverride
-        {
-            UserId = userId is not null ? Guid.Parse(userId) : null,
-            TenantId = tenantContext.TenantId,
-            Scope = "role-action",
-            Role = role,
-            Action = action,
-            Template = req.Template,
-            SystemPrompt = req.SystemPrompt,
-            Variables = req.Variables ?? [],
-            EnableTools = req.EnableTools ?? false,
-            MaxTokens = req.MaxTokens ?? 4096
-        });
+        var userId = TryGetUserId(principal);
+        var input = new UpsertPromptInput(
+            Template: req.Template,
+            SystemPrompt: req.SystemPrompt,
+            Variables: req.Variables,
+            EnableTools: req.EnableTools,
+            MaxTokens: req.MaxTokens);
+
+        var saved = await store.UpsertRoleActionAsync(userId, tenantContext.TenantId, role, action, input);
+
+        await events.EmitUpdatedAsync(
+            tenantContext.TenantId,
+            userId,
+            role,
+            action,
+            new Dictionary<string, object?>
+            {
+                ["templateLength"] = saved.Template.Length,
+                ["enableTools"] = saved.EnableTools,
+                ["maxTokens"] = saved.MaxTokens,
+            });
 
         return Results.Ok(new PromptResponse(
-            prompt.Role, prompt.Action, prompt.Template, prompt.SystemPrompt,
-            prompt.Variables, prompt.EnableTools, prompt.MaxTokens, "user"));
+            saved.Role,
+            saved.Action,
+            saved.Template,
+            saved.SystemPrompt,
+            saved.Variables,
+            saved.EnableTools,
+            saved.MaxTokens,
+            "user"));
     }
 
     public static async Task<IResult> DeletePrompt(
         string role,
         string action,
-        IPromptRepository promptRepo,
-        ClaimsPrincipal principal)
+        PromptStoreService store,
+        PromptEventsService events,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext)
     {
-        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var deleted = await promptRepo.DeleteAsync(
-            userId is not null ? Guid.Parse(userId) : null,
-            "role-action", role, action);
-        return deleted
-            ? Results.Ok(new { message = "Prompt override deleted" })
-            : Results.NotFound(new { error = "Prompt override not found" });
+        var userId = TryGetUserId(principal);
+        var deleted = await store.DeleteRoleActionAsync(userId, role, action);
+
+        if (!deleted)
+        {
+            return Results.NotFound(new { error = "Prompt override not found" });
+        }
+
+        await events.EmitDeletedAsync(tenantContext.TenantId, userId, role, action);
+
+        return Results.Ok(new { message = "Prompt override deleted" });
     }
+
+    // =======================================================================
+    // System prompt overrides (scope = role-system)
+    // =======================================================================
 
     public static async Task<IResult> UpsertSystemPrompt(
         string role,
         string action,
         UpsertPromptRequest req,
-        IPromptRepository promptRepo,
+        PromptStoreService store,
+        PromptEventsService events,
+        ClaimsPrincipal principal,
         ITenantContext tenantContext)
     {
-        var prompt = await promptRepo.UpsertAsync(new PromptOverride
-        {
-            UserId = null, // System-level
-            TenantId = tenantContext.TenantId,
-            Scope = "role-system",
-            Role = role,
-            Action = action,
-            Template = req.Template,
-            SystemPrompt = req.SystemPrompt,
-            Variables = req.Variables ?? [],
-            EnableTools = req.EnableTools ?? false,
-            MaxTokens = req.MaxTokens ?? 4096
-        });
-        return Results.Ok(new { message = "System prompt updated" });
+        var userId = TryGetUserId(principal);
+        var input = new UpsertPromptInput(
+            Template: req.Template,
+            SystemPrompt: req.SystemPrompt,
+            Variables: req.Variables,
+            EnableTools: req.EnableTools,
+            MaxTokens: req.MaxTokens);
+
+        var saved = await store.UpsertRoleSystemAsync(userId, tenantContext.TenantId, role, input);
+
+        await events.EmitUpdatedAsync(
+            tenantContext.TenantId,
+            userId,
+            role,
+            action,
+            new Dictionary<string, object?>
+            {
+                ["scope"] = "role-system",
+                ["templateLength"] = saved.Template.Length,
+            });
+
+        return Results.Ok(new { message = "System prompt updated", scope = "role-system", role });
     }
 
     public static async Task<IResult> DeleteSystemPrompt(
         string role,
         string action,
-        IPromptRepository promptRepo)
+        PromptStoreService store,
+        PromptEventsService events,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext)
     {
-        await promptRepo.DeleteAsync(null, "role-system", role, action);
+        var userId = TryGetUserId(principal);
+        var deleted = await store.DeleteRoleSystemAsync(userId, role);
+
+        if (!deleted)
+        {
+            return Results.NotFound(new { error = "System prompt override not found" });
+        }
+
+        await events.EmitDeletedAsync(tenantContext.TenantId, userId, role, action);
+
         return Results.Ok(new { message = "System prompt deleted" });
     }
 
-    public static Task<IResult> RenderPrompt(
+    // =======================================================================
+    // Render
+    // =======================================================================
+
+    public static async Task<IResult> RenderPrompt(
         string role,
         string action,
-        RenderPromptRequest req)
+        RenderPromptRequest req,
+        PromptStoreService store,
+        PromptEventsService events,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext)
     {
-        // Stub render
-        return Task.FromResult(Results.Ok(new RenderedPromptResponse(
-            $"System prompt for {role}",
-            $"User prompt for {action}")));
+        var userId = TryGetUserId(principal);
+        var resolved = await store.ResolveRoleActionAsync(userId, role, action);
+
+        if (resolved is null)
+        {
+            return Results.NotFound(new { error = "No prompt available for this role/action" });
+        }
+
+        // Ensure the role variable is always available if missing from the request
+        var variables = new Dictionary<string, string>(req.Variables ?? new Dictionary<string, string>());
+        variables.TryAdd("role", role);
+
+        var rendered = PromptStoreService.RenderFull(
+            systemTemplate: resolved.SystemPrompt,
+            userTemplate: resolved.Template,
+            variables: variables);
+
+        await events.EmitRenderedAsync(
+            tenantContext.TenantId,
+            userId,
+            role,
+            action,
+            variableCount: variables.Count,
+            unresolvedCount: rendered.Unresolved.Count);
+
+        return Results.Ok(new RenderedPromptResponse(
+            SystemPrompt: rendered.SystemPrompt,
+            UserPrompt: rendered.UserPrompt,
+            Unresolved: rendered.Unresolved.ToArray()));
+    }
+
+    // =======================================================================
+    // Helpers
+    // =======================================================================
+
+    private static Guid? TryGetUserId(ClaimsPrincipal principal)
+    {
+        var raw = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return Guid.TryParse(raw, out var id) ? id : null;
     }
 }
