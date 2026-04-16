@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data.Entities;
 
@@ -62,5 +63,35 @@ public class AgentConfigRepository(TammaDbContext db) : IAgentConfigRepository
 
         // Return empty default
         return (new AgentConfig { Config = "{}" }, "default");
+    }
+
+    /// <inheritdoc />
+    public async Task<JsonDocument?> GetTenantConfigAsync(Guid? tenantId)
+    {
+        var row = await db.AgentConfigs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.TenantId == tenantId);
+        if (row is null || string.IsNullOrWhiteSpace(row.Config))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonDocument.Parse(row.Config);
+        }
+        catch (JsonException)
+        {
+            // Corrupt JSON in DB — treat as "no override" and let the resolver
+            // fall back to platform defaults.
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<AgentConfig> UpdateTenantConfigAsync(
+        Guid tenantId, JsonDocument config, Guid? userId = null)
+    {
+        var json = JsonSerializer.Serialize(config.RootElement);
+        return await UpsertAsync(tenantId, json, userId);
     }
 }
