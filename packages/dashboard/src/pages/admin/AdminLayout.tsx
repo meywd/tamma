@@ -9,8 +9,9 @@ import { UsersTab } from './UsersTab.js';
 import { ApiKeysTab } from './ApiKeysTab.js';
 import { HealthTab } from './HealthTab.js';
 import { QuickLinksTab } from './QuickLinksTab.js';
+import { AuditLogTab } from './AuditLogTab.js';
 
-type AdminTab = 'users' | 'api-keys' | 'health' | 'links';
+type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log';
 
 interface TabDef {
   id: AdminTab;
@@ -22,6 +23,7 @@ const TABS: TabDef[] = [
   { id: 'api-keys', label: 'API Keys' },
   { id: 'health', label: 'System Health' },
   { id: 'links', label: 'Quick Links' },
+  { id: 'audit-log', label: 'Audit Log' },
 ];
 
 export function AdminLayout(): JSX.Element {
@@ -57,6 +59,7 @@ export function AdminLayout(): JSX.Element {
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'health' && <HealthTab />}
         {activeTab === 'links' && <QuickLinksTab />}
+        {activeTab === 'audit-log' && <AuditLogTab />}
       </div>
     </div>
   );

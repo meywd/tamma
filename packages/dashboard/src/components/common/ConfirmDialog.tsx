@@ -1,3 +1,5 @@
+import { useEffect, useRef, useCallback } from 'react';
+
 interface ConfirmDialogProps {
   open: boolean;
   title: string;
@@ -19,6 +21,35 @@ export function ConfirmDialog({
   onCancel,
   variant = 'default',
 }: ConfirmDialogProps): JSX.Element | null {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<Element | null>(null);
+
+  // Capture previously focused element when dialog opens
+  useEffect(() => {
+    if (open) {
+      previousFocusRef.current = document.activeElement;
+      // Focus the dialog on open
+      requestAnimationFrame(() => {
+        dialogRef.current?.focus();
+      });
+    } else if (previousFocusRef.current instanceof HTMLElement) {
+      // Return focus when closing
+      previousFocusRef.current.focus();
+      previousFocusRef.current = null;
+    }
+  }, [open]);
+
+  // Handle Escape key
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCancel();
+      }
+    },
+    [onCancel],
+  );
+
   if (!open) return null;
 
   const confirmClasses =
@@ -30,10 +61,13 @@ export function ConfirmDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="presentation">
       <div className="fixed inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 outline-none"
       >
         <h3 id="confirm-dialog-title" className="text-lg font-semibold text-gray-900 mb-2">
           {title}

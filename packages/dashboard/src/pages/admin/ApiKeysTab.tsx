@@ -6,7 +6,7 @@
  * Create new key (per-user, shown once in dialog) and revoke existing keys.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApiKeys } from '../../hooks/admin/useApiKeys.js';
 import { useUsers } from '../../hooks/admin/useUsers.js';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
@@ -48,6 +48,25 @@ function CreateApiKeyDialog({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus dialog on mount
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      dialogRef.current?.focus();
+    });
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    },
+    [onClose],
+  );
+
   const handleCreate = async () => {
     if (!label.trim()) {
       setError('Label is required');
@@ -81,10 +100,13 @@ function CreateApiKeyDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="presentation">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-key-dialog-title"
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4 outline-none"
       >
         <h3 id="create-key-dialog-title" className="text-lg font-semibold text-gray-900 mb-4">
           {generatedKey ? 'API Key Created' : 'Create API Key'}
