@@ -111,6 +111,15 @@ public class DiagnosticsSetUpFixture
         Factory?.Dispose();
         if (Postgres is not null)
             await Postgres.DisposeAsync();
+
+        // Restore env var to the root ApiTestFixture's container so tests in
+        // sibling namespaces running after us can resolve their connection.
+        if (ApiTestFixture.Postgres is not null)
+        {
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__DefaultConnection",
+                ApiTestFixture.Postgres.GetConnectionString());
+        }
     }
 
     /// <summary>Reset tenant-scoped data to a clean state between tests.</summary>

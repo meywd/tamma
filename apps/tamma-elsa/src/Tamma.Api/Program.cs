@@ -8,6 +8,7 @@ using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Api.Auth;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Extensions;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
 using Tamma.Core.Interfaces;
@@ -120,6 +121,15 @@ builder.Services.AddHostedService<WorkflowSyncService>();
 // Auth services
 builder.Services.AddSingleton<IPasswordService, PasswordService>();
 builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
+
+// Hardening workstreams — ported from the deleted TS API services.
+// Each extension method owns its own service registrations.
+builder.Services.AddPromptStoreServices();
+builder.Services.AddProviderHealthServices();
+builder.Services.AddDiagnosticsServices();
+builder.Services.AddSanitizationServices();
+builder.Services.AddAgentResolverServices();
+builder.Services.AddGitHubInstallationServices();
 
 // Controllers (for existing mentorship controller)
 builder.Services.AddControllers();
@@ -398,6 +408,7 @@ providers.MapGet("/health/providers/{key}", ProviderEndpoints.GetProviderHealth)
 providers.MapPost("/health/providers/{key}/failure", ProviderEndpoints.RecordFailure).RequireAuthorization("SettingsManage");
 providers.MapPost("/health/providers/{key}/success", ProviderEndpoints.RecordSuccess).RequireAuthorization("SettingsManage");
 providers.MapPost("/health/providers/{key}/reset", ProviderEndpoints.ResetProvider).RequireAuthorization("SettingsManage");
+providers.MapPost("/chain/resolve", ProviderEndpoints.ResolveChain);
 providers.MapGet("/diagnostics", ProviderEndpoints.GetDiagnostics);
 providers.MapGet("/diagnostics/query", ProviderEndpoints.QueryDiagnostics);
 providers.MapGet("/diagnostics/report", ProviderEndpoints.GetReport);
