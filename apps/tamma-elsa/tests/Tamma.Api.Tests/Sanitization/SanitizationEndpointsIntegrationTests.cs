@@ -2,8 +2,11 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
+using Tamma.Api.Extensions;
 using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Tamma.Data.Repositories;
@@ -18,19 +21,30 @@ namespace Tamma.Api.Tests.Sanitization;
 [TestFixture]
 public class SanitizationEndpointsIntegrationTests
 {
+    /// <summary>
+    /// Per-class factory that layers <see cref="SanitizationServiceCollectionExtensions.AddSanitizationServices"/>
+    /// on top of the shared <see cref="ApiTestFixture.Factory"/>. The parent
+    /// composition root (Program.cs) is owned by another stream and doesn't
+    /// yet call <c>AddSanitizationServices</c>; tests register it locally so
+    /// they're independent of that wiring decision.
+    /// </summary>
+    private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
 
     [SetUp]
     public async Task SetUp()
     {
         await ApiTestFixture.ResetDatabaseAsync();
-        _client = ApiTestFixture.CreateClient();
+        _factory = ApiTestFixture.Factory.WithWebHostBuilder(b =>
+            b.ConfigureTestServices(s => s.AddSanitizationServices()));
+        _client = _factory.CreateClient();
     }
 
     [TearDown]
     public void TearDown()
     {
         _client.Dispose();
+        _factory.Dispose();
     }
 
     [Test]
@@ -84,10 +98,10 @@ public class SanitizationEndpointsIntegrationTests
     {
         // Seed a tenant-scoped custom rule via the repository directly (the
         // PUT /rules endpoint exercises the write path in a later assertion).
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ISanitizationRepository>();
 
-        var custom = new Tamma.Api.Services.Sanitization.SanitizationRuleDefinition(
+        var custom = new Tamma.Data.Entities.SanitizationRuleDefinition(
             Name: "custom-token",
             Pattern: @"TK-[A-Z0-9]{6}",
             Replacement: "[CUSTOM_REDACTED]",

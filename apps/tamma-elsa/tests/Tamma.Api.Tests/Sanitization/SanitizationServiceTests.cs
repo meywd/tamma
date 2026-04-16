@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Sanitization;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.Sanitization;
@@ -234,7 +235,8 @@ public class SanitizationServiceTests
 
         var result = await _svc.SanitizeAsync("xxxyx", null);
 
-        result.SanitizedText.Should().Be("----y-");
+        // Four 'x' tokens, each replaced with a single '-'.
+        result.SanitizedText.Should().Be("---y-");
         result.Hits.Should().ContainSingle(h => h.RuleName == "x" && h.Count == 4);
     }
 

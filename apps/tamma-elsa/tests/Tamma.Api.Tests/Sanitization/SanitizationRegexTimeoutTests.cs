@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Sanitization;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.Sanitization;
