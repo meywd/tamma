@@ -38,10 +38,30 @@ public class SanitizationRepository : ISanitizationRepository
     private readonly TammaDbContext _db;
     private readonly ISanitizationDefaultsProvider _defaults;
 
-    public SanitizationRepository(TammaDbContext db, ISanitizationDefaultsProvider defaults)
+    /// <summary>
+    /// DI-friendly constructor. <paramref name="defaults"/> is injected as an
+    /// <see cref="IEnumerable{T}"/> so the container does not fail activation
+    /// when the downstream <c>AddSanitizationServices</c> has not yet been
+    /// called. If nothing is registered, we fall back to
+    /// <see cref="EmptyDefaultsProvider"/>.
+    /// </summary>
+    public SanitizationRepository(TammaDbContext db, IEnumerable<ISanitizationDefaultsProvider> defaults)
     {
         _db = db;
-        _defaults = defaults;
+        _defaults = defaults?.FirstOrDefault() ?? EmptyDefaultsProvider.Instance;
+    }
+
+    /// <summary>
+    /// Fallback for when no <see cref="ISanitizationDefaultsProvider"/> is
+    /// registered. Returning an empty default list means the tenant sees only
+    /// their own overrides — safe and predictable rather than throwing at
+    /// service-provider validation time.
+    /// </summary>
+    private sealed class EmptyDefaultsProvider : ISanitizationDefaultsProvider
+    {
+        public static readonly EmptyDefaultsProvider Instance = new();
+        public IReadOnlyList<SanitizationRuleDefinition> DefaultRules { get; }
+            = Array.Empty<SanitizationRuleDefinition>();
     }
 
     /// <inheritdoc />

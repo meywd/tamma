@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Dtos.Settings;
 using Tamma.Api.Services.Sanitization;
 using Tamma.Data;
@@ -43,9 +44,9 @@ public static class SettingsEndpoints
     /// this rewrite so the cut-over doesn't break anyone.
     /// </remarks>
     public static async Task<IResult> Sanitize(
-        SanitizeEndpointRequest req,
-        ISanitizationService sanitizer,
-        ITenantContext tc)
+        [FromBody] SanitizeEndpointRequest req,
+        [FromServices] ISanitizationService sanitizer,
+        [FromServices] ITenantContext tc)
     {
         var input = req.Text ?? req.Content ?? string.Empty;
         var result = await sanitizer.SanitizeAsync(input, tc.TenantId);

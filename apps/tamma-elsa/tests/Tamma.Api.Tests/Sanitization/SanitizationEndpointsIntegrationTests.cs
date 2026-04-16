@@ -7,7 +7,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Tamma.Api.Extensions;
-using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Tamma.Data.Repositories;
 
