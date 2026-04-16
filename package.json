@@ -21,7 +21,7 @@
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
-    "typecheck": "tsc --build packages/shared packages/platforms packages/providers packages/orchestrator packages/api packages/cli",
+    "typecheck": "tsc --build packages/shared packages/platforms packages/providers packages/orchestrator packages/cli",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "migrate:latest": "pnpm --filter @tamma/orchestrator run migrate:latest",
     "migrate:rollback": "pnpm --filter @tamma/orchestrator run migrate:rollback",
