@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Dtos.Settings;
+using Tamma.Api.Services.Providers;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -8,43 +10,169 @@ namespace Tamma.Api.Endpoints;
 
 public static class ProviderEndpoints
 {
-    public static async Task<IResult> GetHealthSummary(IProviderHealthRepository repo, ITenantContext tc)
+    // ── Health / circuit-breaker endpoints ───────────────────────────────────
+
+    public static async Task<IResult> GetHealthSummary(
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] ITenantContext tc)
     {
-        var all = await repo.GetAllAsync(tc.TenantId);
-        return Results.Ok(new { providers = all.Select(h => new { h.ProviderKey, h.Status, h.FailureCount, h.LastSuccess, h.LastFailure }) });
+        var all = await breaker.ListAsync(tc.TenantId);
+        return Results.Ok(new
+        {
+            providers = all.Select(s => new
+            {
+                providerKey = s.ProviderKey,
+                state = s.State.ToString(),
+                status = MapLegacyStatus(s.State),
+                failureCount = s.FailureCount,
+                lastSuccess = s.LastSuccess,
+                lastFailure = s.LastFailure,
+                circuitOpenUntil = s.CircuitOpenUntil,
+                halfOpenInProgress = s.HalfOpenInProgress,
+            }),
+        });
     }
 
-    public static async Task<IResult> ListProviderHealth(IProviderHealthRepository repo, ITenantContext tc)
+    public static async Task<IResult> ListProviderHealth(
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] ITenantContext tc)
     {
-        var all = await repo.GetAllAsync(tc.TenantId);
-        return Results.Ok(all.Select(h => new { h.ProviderKey, h.Status, h.FailureCount, h.LastSuccess, h.LastFailure }));
+        var all = await breaker.ListAsync(tc.TenantId);
+        return Results.Ok(all.Select(s => new
+        {
+            providerKey = s.ProviderKey,
+            state = s.State.ToString(),
+            status = MapLegacyStatus(s.State),
+            failureCount = s.FailureCount,
+            lastSuccess = s.LastSuccess,
+            lastFailure = s.LastFailure,
+            circuitOpenUntil = s.CircuitOpenUntil,
+            halfOpenInProgress = s.HalfOpenInProgress,
+        }));
     }
 
-    public static async Task<IResult> GetProviderHealth(string key, IProviderHealthRepository repo, ITenantContext tc)
+    public static async Task<IResult> GetProviderHealth(
+        string key,
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] IProviderHealthRepository repo,
+        [FromServices] ITenantContext tc)
     {
-        var health = await repo.GetStatusAsync(key, tc.TenantId);
-        return health is not null
-            ? Results.Ok(new { health.ProviderKey, health.Status, health.FailureCount, health.LastSuccess, health.LastFailure })
-            : Results.NotFound(new { error = "Provider not found" });
+        // Require an existing row; unseen keys return 404 for parity with the prior API.
+        var row = await repo.GetStatusAsync(key, tc.TenantId);
+        if (row is null) return Results.NotFound(new { error = "Provider not found" });
+
+        var s = await breaker.GetStateAsync(key, tc.TenantId);
+        return Results.Ok(new
+        {
+            providerKey = s.ProviderKey,
+            state = s.State.ToString(),
+            status = MapLegacyStatus(s.State),
+            failureCount = s.FailureCount,
+            lastSuccess = s.LastSuccess,
+            lastFailure = s.LastFailure,
+            circuitOpenUntil = s.CircuitOpenUntil,
+            halfOpenInProgress = s.HalfOpenInProgress,
+        });
     }
 
-    public static async Task<IResult> RecordFailure(string key, IProviderHealthRepository repo, ITenantContext tc)
+    public static async Task<IResult> RecordFailure(
+        string key,
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] ITenantContext tc)
     {
-        await repo.RecordFailureAsync(key, tc.TenantId);
-        return Results.Ok(new { message = "Failure recorded" });
+        var s = await breaker.RecordFailureAsync(key, tc.TenantId);
+        return Results.Ok(new
+        {
+            message = "Failure recorded",
+            state = s.State.ToString(),
+            failureCount = s.FailureCount,
+            circuitOpenUntil = s.CircuitOpenUntil,
+        });
     }
 
-    public static async Task<IResult> RecordSuccess(string key, IProviderHealthRepository repo, ITenantContext tc)
+    public static async Task<IResult> RecordSuccess(
+        string key,
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] ITenantContext tc)
     {
-        await repo.RecordSuccessAsync(key, tc.TenantId);
-        return Results.Ok(new { message = "Success recorded" });
+        var s = await breaker.RecordSuccessAsync(key, tc.TenantId);
+        return Results.Ok(new
+        {
+            message = "Success recorded",
+            state = s.State.ToString(),
+            failureCount = s.FailureCount,
+        });
     }
 
-    public static async Task<IResult> ResetProvider(string key, IProviderHealthRepository repo, ITenantContext tc)
+    public static async Task<IResult> ResetProvider(
+        string key,
+        [FromServices] ICircuitBreakerService breaker,
+        [FromServices] ITenantContext tc)
     {
-        await repo.ResetAsync(key, tc.TenantId);
-        return Results.Ok(new { message = "Provider health reset" });
+        var s = await breaker.ResetAsync(key, tc.TenantId);
+        return Results.Ok(new
+        {
+            message = "Provider health reset",
+            state = s.State.ToString(),
+        });
     }
+
+    public static async Task<IResult> ResolveChain(
+        ResolveChainRequest req,
+        [FromServices] IProviderChainResolver resolver,
+        [FromServices] ITenantContext tc)
+    {
+        if (req is null || string.IsNullOrWhiteSpace(req.Role) || string.IsNullOrWhiteSpace(req.Action))
+        {
+            return Results.BadRequest(new { error = "role and action are required" });
+        }
+
+        var result = await resolver.ResolveAsync(tc.TenantId, req.Role, req.Action);
+        if (!result.HasCandidates)
+        {
+            return Results.Ok(new
+            {
+                ordered = Array.Empty<object>(),
+                skipped = result.Skipped.Select(e => new
+                {
+                    provider = e.Provider.Provider,
+                    model = e.Provider.Model,
+                    key = e.Provider.Key,
+                    reason = e.Reason.ToString(),
+                }),
+                error = result.ErrorCode,
+                message = result.ErrorMessage,
+            });
+        }
+
+        return Results.Ok(new
+        {
+            ordered = result.Ordered.Select(e => new
+            {
+                provider = e.Provider.Provider,
+                model = e.Provider.Model,
+                key = e.Provider.Key,
+                reason = e.Reason.ToString(),
+            }),
+            skipped = result.Skipped.Select(e => new
+            {
+                provider = e.Provider.Provider,
+                model = e.Provider.Model,
+                key = e.Provider.Key,
+                reason = e.Reason.ToString(),
+            }),
+        });
+    }
+
+    private static string MapLegacyStatus(CircuitBreakerState state) => state switch
+    {
+        CircuitBreakerState.Closed => "healthy",
+        CircuitBreakerState.HalfOpen => "degraded",
+        CircuitBreakerState.Open => "down",
+        _ => "unknown",
+    };
+
+    // ── Diagnostics endpoints (owned by Agent 3 — do not modify) ─────────────
 
     public static async Task<IResult> GetDiagnostics(IDiagnosticsRepository repo, int? limit, int? offset)
     {
@@ -105,3 +233,6 @@ public static class ProviderEndpoints
     public static Task<IResult> ListSessions() =>
         Task.FromResult(Results.Ok(Array.Empty<object>()));
 }
+
+/// <summary>Request body for <c>POST /api/providers/chain/resolve</c>.</summary>
+public sealed record ResolveChainRequest(string Role, string Action);
