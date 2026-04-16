@@ -127,9 +127,9 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # Tamma .NET REST API (ELSA management)
+  # Tamma C# REST API (consolidated — replaces TS Fastify + .NET ELSA mgmt)
   # ---------------------------------------------------------------------------
-  tamma-api-dotnet:
+  tamma-api:
     build:
       context: ../apps/tamma-elsa/src
       dockerfile: Tamma.Api/Dockerfile
@@ -137,59 +137,25 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ElsaServer__Url: http://elsa-server:5000
-      TammaServer__Url: http://tamma-api:3100
       TAMMA_SERVICE_API_KEY: ${TAMMA_SERVICE_API_KEY:-}
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
+      GitHub__AppId: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
+      GitHub__PrivateKeyPath: /etc/tamma/private-key.pem
+      GitHub__WebhookSecret: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
+      GitHub__OAuthClientId: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GitHub__OAuthClientSecret: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
+      ChromaDb__Url: http://chromadb:8000
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
       OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
-      OpenSearch__IndexPrefix: tamma-api-dotnet
-    depends_on:
-      elsa-server:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 15s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
-    networks:
-      - tamma-net
-
-  # ---------------------------------------------------------------------------
-  # Tamma TypeScript API (Fastify)
-  # ---------------------------------------------------------------------------
-  tamma-api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.ts
-      target: tamma-api
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-tamma}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tamma}"
-      CHROMADB_URL: http://chromadb:8000
-      RABBITMQ_USER: ${RABBITMQ_USER:-tamma}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-tamma}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
-      GITHUB_APP_PRIVATE_KEY_PATH: /etc/tamma/private-key.pem
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
-      JWT_SECRET: ${JWT_SECRET:-tamma-dev-jwt-secret}
-      API_BASE_URL: ${API_BASE_URL:-https://api.tamma.dev}
-      DASHBOARD_URL: ${DASHBOARD_URL:-https://app.tamma.dev}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-http://opensearch:9200}
-      OPENSEARCH_ENABLED: ${OPENSEARCH_ENABLED:-true}
-      LOG_INDEX_PREFIX: tamma-ts
-      SERVICE_NAME: tamma-api
+      OpenSearch__IndexPrefix: tamma-api
     volumes:
       - ../secrets/private-key.pem:/etc/tamma/private-key.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3100/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
       interval: 15s
       timeout: 5s
       start_period: 15s

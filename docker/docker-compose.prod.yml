@@ -12,14 +12,13 @@
 #   RabbitMQ:       512M
 #   ChromaDB:         1G
 #   elsa-server:      1G
-#   tamma-api-dotnet: 512M
-#   tamma-api:        512M
+#   tamma-api:        768M  (consolidated C# API)
 #   tamma-engine:     1G
 #   tamma-dashboard:  256M
 #   elsa-studio:      128M
 #   nginx-proxy:      128M
 #   ─────────────────────
-#   Total:          ~7.1G  (leaves ~8.9G for OS, Docker, and headroom)
+#   Total:          ~6.8G  (leaves ~9.2G for OS, Docker, and headroom)
 #
 # With observability profile (+opensearch +dashboards):
 #   opensearch:       3G
@@ -62,21 +61,13 @@ services:
           cpus: "1.0"
           memory: 1G
 
-  tamma-api-dotnet:
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-
   tamma-api:
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "1.0"
+          memory: 768M
     # No exposed ports — reachable via nginx-proxy only
 
   tamma-engine:

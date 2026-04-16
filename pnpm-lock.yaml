@@ -424,9 +424,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@tamma/api':
-        specifier: workspace:*
-        version: link:../api
       '@tamma/cost-monitor':
         specifier: workspace:*
         version: link:../cost-monitor

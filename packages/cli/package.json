@@ -20,7 +20,6 @@
     "test:smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
-    "@tamma/api": "workspace:*",
     "@tamma/shared": "workspace:*",
     "@tamma/orchestrator": "workspace:*",
     "@tamma/observability": "workspace:*",
