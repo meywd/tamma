@@ -155,6 +155,7 @@ export async function registerWorkflowRoutes(
       page?: string;
       pageSize?: string;
       definitionId?: string;
+      tenantId?: string;
     };
   }>(
     '/api/workflows/instances',

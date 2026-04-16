@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { renderHook } from '@testing-library/react';
 import { useCurrentUser } from '../useCurrentUser.js';
 import { useAdminStore } from '../../../stores/admin/store.js';

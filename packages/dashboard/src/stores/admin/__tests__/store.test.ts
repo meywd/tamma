@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { useAdminStore, type AdminState } from '../store.js';
 import { ADMIN_USERS, API_KEYS, HEALTHY_SERVICES, OWNER_USER } from '../../../test/fixtures.js';
 

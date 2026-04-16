@@ -7,7 +7,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['packages/**/*.{test,spec}.{ts,tsx}'],
-    exclude: ['**/node_modules/**', 'node_modules', 'dist', '**/*.integration.test.ts', '**/*.e2e.test.ts'],
+    exclude: [
+      '**/node_modules/**', 'node_modules', 'dist',
+      '**/*.integration.test.ts', '**/*.e2e.test.ts',
+      // Dashboard has its own vitest.config.ts with jsdom + jest-dom setup.
+      // Run via: pnpm --filter @tamma/dashboard test
+      'packages/dashboard/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],

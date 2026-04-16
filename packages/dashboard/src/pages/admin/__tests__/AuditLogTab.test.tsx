@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 
 // We need to test both feature flag states. We do this by mocking the module twice.
