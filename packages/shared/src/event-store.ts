@@ -5,7 +5,7 @@ import { monotonicNow } from './utils/index.js';
 export class InMemoryEventStore implements IEventStore {
   private events: EngineEvent[] = [];
 
-  record(event: Omit<EngineEvent, 'id' | 'timestamp'>): EngineEvent {
+  async record(event: Omit<EngineEvent, 'id' | 'timestamp'>): Promise<EngineEvent> {
     const full: EngineEvent = {
       ...event,
       id: randomUUID(),
@@ -15,7 +15,7 @@ export class InMemoryEventStore implements IEventStore {
     return full;
   }
 
-  getEvents(tenantId: string, issueNumber?: number): EngineEvent[] {
+  async getEvents(tenantId: string, issueNumber?: number): Promise<EngineEvent[]> {
     return this.events.filter((e) => {
       if (e.tenantId !== tenantId) return false;
       if (issueNumber !== undefined && e.issueNumber !== issueNumber) return false;
@@ -23,7 +23,7 @@ export class InMemoryEventStore implements IEventStore {
     });
   }
 
-  getLastEvent(tenantId: string, type: EngineEventType): EngineEvent | undefined {
+  async getLastEvent(tenantId: string, type: EngineEventType): Promise<EngineEvent | undefined> {
     for (let i = this.events.length - 1; i >= 0; i--) {
       const event = this.events[i];
       if (event !== undefined && event.tenantId === tenantId && event.type === type) {
@@ -33,7 +33,7 @@ export class InMemoryEventStore implements IEventStore {
     return undefined;
   }
 
-  clear(tenantId: string): void {
+  async clear(tenantId: string): Promise<void> {
     this.events = this.events.filter((e) => e.tenantId !== tenantId);
   }
 }

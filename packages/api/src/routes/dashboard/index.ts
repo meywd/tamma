@@ -38,7 +38,7 @@ export async function registerDashboardRoutes(
       if (engine === undefined) continue;
       const store = engine.getEventStore();
       if (store === undefined) continue;
-      const events = store.getEvents(tenantId);
+      const events = await store.getEvents(tenantId);
       // Take last 10 events per engine
       recentEvents.push(
         ...events.slice(-10).map((e) => ({ ...e, engineId: info.id })),

@@ -125,6 +125,8 @@ import type {
   ResolvedAgentConfig,
 } from './persistence/agent-config-store.js';
 import { PgAgentConfigStore } from './persistence/pg-agent-config-store.js';
+import { PgEventStore } from './persistence/pg-event-store.js';
+import { withTenantContext } from './persistence/with-tenant-context.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -188,6 +190,9 @@ export {
   registerAgentConfigApiRoutes,
   // Tenant context middleware (Story 17-5)
   registerTenantContextPlugin,
+  // Tenant-scoped event store (Story 17-3)
+  PgEventStore,
+  withTenantContext,
   // Organization / tenant routes (Story 18-3)
   registerOrgRoutes,
   ensurePersonalTenant,

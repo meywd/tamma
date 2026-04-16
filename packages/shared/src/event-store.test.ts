@@ -13,8 +13,8 @@ describe('InMemoryEventStore', () => {
   });
 
   describe('record', () => {
-    it('should create events with id and timestamp', () => {
-      const event = store.record({
+    it('should create events with id and timestamp', async () => {
+      const event = await store.record({
         type: EngineEventType.ISSUE_SELECTED,
         tenantId: T,
         issueNumber: 42,
@@ -32,13 +32,13 @@ describe('InMemoryEventStore', () => {
       expect(event.data).toEqual({ title: 'Fix bug' });
     });
 
-    it('should assign unique ids to each event', () => {
-      const e1 = store.record({
+    it('should assign unique ids to each event', async () => {
+      const e1 = await store.record({
         type: EngineEventType.ISSUE_SELECTED,
         tenantId: T,
         data: {},
       });
-      const e2 = store.record({
+      const e2 = await store.record({
         type: EngineEventType.ISSUE_ANALYZED,
         tenantId: T,
         data: {},
@@ -49,78 +49,78 @@ describe('InMemoryEventStore', () => {
   });
 
   describe('getEvents', () => {
-    it('should return all events for the tenant when no issueNumber is provided', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
+    it('should return all events for the tenant when no issueNumber is provided', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
 
-      const events = store.getEvents(T);
+      const events = await store.getEvents(T);
       expect(events).toHaveLength(3);
     });
 
-    it('should return empty array when store is empty', () => {
-      expect(store.getEvents(T)).toEqual([]);
+    it('should return empty array when store is empty', async () => {
+      expect(await store.getEvents(T)).toEqual([]);
     });
 
-    it('should filter by issueNumber', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, issueNumber: 1, data: {} });
+    it('should filter by issueNumber', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, issueNumber: 1, data: {} });
 
-      const events = store.getEvents(T, 1);
+      const events = await store.getEvents(T, 1);
       expect(events).toHaveLength(2);
       expect(events.every((e) => e.issueNumber === 1)).toBe(true);
     });
 
-    it('should return empty array when no events match issueNumber', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
-      expect(store.getEvents(T, 999)).toEqual([]);
+    it('should return empty array when no events match issueNumber', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: {} });
+      expect(await store.getEvents(T, 999)).toEqual([]);
     });
 
-    it('should return a copy of events (not a reference)', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
-      const events = store.getEvents(T);
+    it('should return a copy of events (not a reference)', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      const events = await store.getEvents(T);
       events.pop();
-      expect(store.getEvents(T)).toHaveLength(1);
+      expect(await store.getEvents(T)).toHaveLength(1);
     });
   });
 
   describe('getLastEvent', () => {
-    it('should return the most recent event of the given type', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: { first: true } });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: { second: true } });
+    it('should return the most recent event of the given type', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 1, data: { first: true } });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, issueNumber: 2, data: { second: true } });
 
-      const last = store.getLastEvent(T, EngineEventType.ISSUE_SELECTED);
+      const last = await store.getLastEvent(T, EngineEventType.ISSUE_SELECTED);
       expect(last).toBeDefined();
       expect(last!.issueNumber).toBe(2);
       expect(last!.data).toEqual({ second: true });
     });
 
-    it('should return undefined when no matching events exist', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
-      const last = store.getLastEvent(T, EngineEventType.ERROR_OCCURRED);
+    it('should return undefined when no matching events exist', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      const last = await store.getLastEvent(T, EngineEventType.ERROR_OCCURRED);
       expect(last).toBeUndefined();
     });
 
-    it('should return undefined when store is empty', () => {
-      expect(store.getLastEvent(T, EngineEventType.ISSUE_SELECTED)).toBeUndefined();
+    it('should return undefined when store is empty', async () => {
+      expect(await store.getLastEvent(T, EngineEventType.ISSUE_SELECTED)).toBeUndefined();
     });
   });
 
   describe('clear', () => {
-    it('should remove only the specified tenant events', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
-      expect(store.getEvents(T)).toHaveLength(2);
+    it('should remove only the specified tenant events', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: T, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: T, data: {} });
+      expect(await store.getEvents(T)).toHaveLength(2);
 
-      store.clear(T);
-      expect(store.getEvents(T)).toHaveLength(0);
+      await store.clear(T);
+      expect(await store.getEvents(T)).toHaveLength(0);
     });
   });
 
   describe('ordering', () => {
-    it('should retrieve events in the order they were recorded', () => {
+    it('should retrieve events in the order they were recorded', async () => {
       const types = [
         EngineEventType.ISSUE_SELECTED,
         EngineEventType.ISSUE_ANALYZED,
@@ -130,10 +130,10 @@ describe('InMemoryEventStore', () => {
       ];
 
       for (const type of types) {
-        store.record({ type, tenantId: T, data: {} });
+        await store.record({ type, tenantId: T, data: {} });
       }
 
-      const events = store.getEvents(T);
+      const events = await store.getEvents(T);
       expect(events).toHaveLength(5);
       expect(events.map((e) => e.type)).toEqual(types);
     });

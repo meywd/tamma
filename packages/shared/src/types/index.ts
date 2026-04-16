@@ -302,8 +302,8 @@ export interface EngineEvent {
 }
 
 export interface IEventStore {
-  record(event: Omit<EngineEvent, 'id' | 'timestamp'>): EngineEvent;
-  getEvents(tenantId: string, issueNumber?: number): EngineEvent[];
-  getLastEvent(tenantId: string, type: EngineEventType): EngineEvent | undefined;
-  clear(tenantId: string): void;
+  record(event: Omit<EngineEvent, 'id' | 'timestamp'>): Promise<EngineEvent>;
+  getEvents(tenantId: string, issueNumber?: number): Promise<EngineEvent[]>;
+  getLastEvent(tenantId: string, type: EngineEventType): Promise<EngineEvent | undefined>;
+  clear(tenantId: string): Promise<void>;
 }

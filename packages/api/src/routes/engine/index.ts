@@ -202,22 +202,24 @@ export async function registerEngineRoutes(
     let lastSeenIndex = 0;
 
     const interval = setInterval(() => {
-      try {
-        const store = engine.getEventStore();
-        if (store === undefined) return;
+      void (async () => {
+        try {
+          const store = engine.getEventStore();
+          if (store === undefined) return;
 
-        const events = store.getEvents(tenantId);
-        if (events.length > lastSeenIndex) {
-          const newEvents = events.slice(lastSeenIndex);
-          for (const evt of newEvents) {
-            sendSSE(reply, 'log', evt);
+          const events = await store.getEvents(tenantId);
+          if (events.length > lastSeenIndex) {
+            const newEvents = events.slice(lastSeenIndex);
+            for (const evt of newEvents) {
+              sendSSE(reply, 'log', evt);
+            }
+            lastSeenIndex = events.length;
           }
-          lastSeenIndex = events.length;
+        } catch {
+          clearInterval(interval);
+          clearInterval(heartbeat);
         }
-      } catch {
-        clearInterval(interval);
-        clearInterval(heartbeat);
-      }
+      })();
     }, 500);
 
     // Heartbeat to keep connection alive through reverse proxies
@@ -268,7 +270,7 @@ export async function registerEngineRoutes(
         : undefined;
 
       const tenantId = (request as FastifyRequest & { tenantId?: string }).tenantId ?? DEFAULT_TENANT_ID;
-      const allEvents: EngineEvent[] = store.getEvents(tenantId, issueNumber);
+      const allEvents: EngineEvent[] = await store.getEvents(tenantId, issueNumber);
       const total = allEvents.length;
       const start = (page - 1) * pageSize;
       const data = allEvents.slice(start, start + pageSize);

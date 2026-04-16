@@ -23,8 +23,8 @@ describe('InMemoryEventStore — tenant scoping', () => {
   // -----------------------------------------------------------------------
 
   describe('record', () => {
-    it('stores event with correct tenantId', () => {
-      const event = store.record({
+    it('stores event with correct tenantId', async () => {
+      const event = await store.record({
         type: EngineEventType.ISSUE_SELECTED,
         tenantId: TENANT_A,
         issueNumber: 1,
@@ -36,13 +36,13 @@ describe('InMemoryEventStore — tenant scoping', () => {
       expect(event.timestamp).toBeGreaterThan(0);
     });
 
-    it('stores events from multiple tenants interleaved', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, data: {} });
+    it('stores events from multiple tenants interleaved', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, data: {} });
 
-      const eventsA = store.getEvents(TENANT_A);
-      const eventsB = store.getEvents(TENANT_B);
+      const eventsA = await store.getEvents(TENANT_A);
+      const eventsB = await store.getEvents(TENANT_B);
 
       expect(eventsA).toHaveLength(2);
       expect(eventsB).toHaveLength(1);
@@ -54,35 +54,35 @@ describe('InMemoryEventStore — tenant scoping', () => {
   // -----------------------------------------------------------------------
 
   describe('getEvents', () => {
-    it('returns only the specified tenant events', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, issueNumber: 1, data: {} });
+    it('returns only the specified tenant events', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 1, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, issueNumber: 2, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, issueNumber: 1, data: {} });
 
-      const eventsA = store.getEvents(TENANT_A);
+      const eventsA = await store.getEvents(TENANT_A);
       expect(eventsA).toHaveLength(2);
       expect(eventsA.every((e) => e.tenantId === TENANT_A)).toBe(true);
     });
 
-    it('filters by both tenant and issue number', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 1, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 2, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, issueNumber: 1, data: {} });
+    it('filters by both tenant and issue number', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 1, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, issueNumber: 2, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, issueNumber: 1, data: {} });
 
-      const events = store.getEvents(TENANT_A, 1);
+      const events = await store.getEvents(TENANT_A, 1);
       expect(events).toHaveLength(1);
       expect(events[0]!.issueNumber).toBe(1);
       expect(events[0]!.tenantId).toBe(TENANT_A);
     });
 
-    it('returns empty array for tenant with no events', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      const events = store.getEvents(TENANT_B);
+    it('returns empty array for tenant with no events', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      const events = await store.getEvents(TENANT_B);
       expect(events).toEqual([]);
     });
 
-    it('returns empty array for empty store', () => {
-      expect(store.getEvents(TENANT_A)).toEqual([]);
+    it('returns empty array for empty store', async () => {
+      expect(await store.getEvents(TENANT_A)).toEqual([]);
     });
   });
 
@@ -91,26 +91,26 @@ describe('InMemoryEventStore — tenant scoping', () => {
   // -----------------------------------------------------------------------
 
   describe('getLastEvent', () => {
-    it('returns last event of the given type for the specified tenant', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: { order: 1 } });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: { order: 2 } });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: { order: 3 } });
+    it('returns last event of the given type for the specified tenant', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: { order: 1 } });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: { order: 2 } });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: { order: 3 } });
 
-      const last = store.getLastEvent(TENANT_A, EngineEventType.ISSUE_SELECTED);
+      const last = await store.getLastEvent(TENANT_A, EngineEventType.ISSUE_SELECTED);
       expect(last).toBeDefined();
       expect(last!.data['order']).toBe(3);
       expect(last!.tenantId).toBe(TENANT_A);
     });
 
-    it('returns undefined when tenant has no events of the given type', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      const last = store.getLastEvent(TENANT_B, EngineEventType.ISSUE_SELECTED);
+    it('returns undefined when tenant has no events of the given type', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      const last = await store.getLastEvent(TENANT_B, EngineEventType.ISSUE_SELECTED);
       expect(last).toBeUndefined();
     });
 
-    it('returns undefined for non-matching type', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      const last = store.getLastEvent(TENANT_A, EngineEventType.PR_MERGED);
+    it('returns undefined for non-matching type', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      const last = await store.getLastEvent(TENANT_A, EngineEventType.PR_MERGED);
       expect(last).toBeUndefined();
     });
   });
@@ -120,25 +120,25 @@ describe('InMemoryEventStore — tenant scoping', () => {
   // -----------------------------------------------------------------------
 
   describe('clear', () => {
-    it('removes only the specified tenant events', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: {} });
-      store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, data: {} });
+    it('removes only the specified tenant events', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_B, data: {} });
+      await store.record({ type: EngineEventType.PLAN_GENERATED, tenantId: TENANT_A, data: {} });
 
-      store.clear(TENANT_A);
+      await store.clear(TENANT_A);
 
-      expect(store.getEvents(TENANT_A)).toHaveLength(0);
-      expect(store.getEvents(TENANT_B)).toHaveLength(1);
+      expect(await store.getEvents(TENANT_A)).toHaveLength(0);
+      expect(await store.getEvents(TENANT_B)).toHaveLength(1);
     });
 
-    it('is safe to call on empty store', () => {
-      expect(() => store.clear(TENANT_A)).not.toThrow();
+    it('is safe to call on empty store', async () => {
+      await expect(store.clear(TENANT_A)).resolves.toBeUndefined();
     });
 
-    it('is safe to call for tenant with no events', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
-      store.clear(TENANT_B);
-      expect(store.getEvents(TENANT_A)).toHaveLength(1);
+    it('is safe to call for tenant with no events', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: TENANT_A, data: {} });
+      await store.clear(TENANT_B);
+      expect(await store.getEvents(TENANT_A)).toHaveLength(1);
     });
   });
 
@@ -147,9 +147,9 @@ describe('InMemoryEventStore — tenant scoping', () => {
   // -----------------------------------------------------------------------
 
   describe('DEFAULT_TENANT_ID backward compatibility', () => {
-    it('CLI mode events use DEFAULT_TENANT_ID', () => {
-      store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: DEFAULT_TENANT_ID, issueNumber: 42, data: {} });
-      const events = store.getEvents(DEFAULT_TENANT_ID, 42);
+    it('CLI mode events use DEFAULT_TENANT_ID', async () => {
+      await store.record({ type: EngineEventType.ISSUE_SELECTED, tenantId: DEFAULT_TENANT_ID, issueNumber: 42, data: {} });
+      const events = await store.getEvents(DEFAULT_TENANT_ID, 42);
       expect(events).toHaveLength(1);
     });
   });
