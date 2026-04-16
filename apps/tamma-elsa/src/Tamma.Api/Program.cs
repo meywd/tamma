@@ -525,33 +525,26 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
     try
     {
-        // Detect whether this is a first-ever deploy by checking for the
-        // __TammaMigrationsHistory table via information_schema. Use a
-        // dedicated connection (not the EF-managed one) so disposing does
-        // not close the context's connection. A raw SQL probe never triggers
-        // EF's own history-table creation path, which is what crashed on the
-        // second deploy.
-        const string historyCheckSql = @"
-            SELECT EXISTS (
-                SELECT 1 FROM information_schema.tables
-                WHERE table_schema = 'public'
-                  AND table_name = '__TammaMigrationsHistory'
-            );";
+        // Per the Epic 19 wipe-and-recreate directive ("nothing exists
+        // important, wipe and recreate"): drop all Tamma-managed tables
+        // including the EF migration history on every deploy, then let
+        // Migrate() rebuild from InitialSchema + all subsequent migrations.
+        //
+        // This is destructive. Do NOT adopt this pattern in an environment
+        // with user data you care about. It exists to unstick the EF Core
+        // + Npgsql history-table race that crashed two consecutive deploys
+        // with SqlState=42P07 on __TammaMigrationsHistory.
+        //
+        // TAMMA_PRESERVE_DB=1 opts out — Migrate() runs incrementally,
+        // preserving data but risking the 42P07 collision until EF/Npgsql
+        // resolves it.
+        var preserveDb = string.Equals(
+            Environment.GetEnvironmentVariable("TAMMA_PRESERVE_DB"),
+            "1", StringComparison.Ordinal);
 
-        bool historyExists;
-        await using (var probeConn = new Npgsql.NpgsqlConnection(connectionString))
+        if (!preserveDb)
         {
-            await probeConn.OpenAsync();
-            await using var cmd = probeConn.CreateCommand();
-            cmd.CommandText = historyCheckSql;
-            historyExists = (bool)(await cmd.ExecuteScalarAsync() ?? false);
-        }
-
-        bool shouldMigrate = true;
-
-        if (!historyExists)
-        {
-            Log.Information("No Tamma EF migrations applied yet — wiping legacy public-schema tables before InitialSchema");
+            Log.Information("Wiping Tamma-managed public-schema tables (TAMMA_PRESERVE_DB not set)");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     api_keys, agent_configs, domain_events,
@@ -561,26 +554,12 @@ using (var scope = app.Services.CreateScope())
                     provider_diagnostics, provider_health, refresh_tokens,
                     sanitization_rules, stories, tenant_memberships, tenants,
                     user_invites, users, workflow_definitions, workflow_instances,
-                    knex_migrations, knex_migrations_lock
+                    knex_migrations, knex_migrations_lock,
+                    ""__TammaMigrationsHistory""
                 CASCADE;");
         }
-        else
-        {
-            // History table exists → only apply pending migrations, never let
-            // Migrate() try to re-create the history table.
-            var pending = dbContext.Database.GetPendingMigrations().ToList();
-            Log.Information("Tamma EF migration history table present; {PendingCount} pending migration(s): {Pending}",
-                pending.Count, string.Join(", ", pending));
-            if (pending.Count == 0)
-            {
-                Log.Information("All migrations already applied — skipping Migrate()");
-                shouldMigrate = false;
-            }
-        }
 
-        if (shouldMigrate)
-            dbContext.Database.Migrate();
-
+        dbContext.Database.Migrate();
         Log.Information("Database migrations applied successfully ({Count} total)",
             dbContext.Database.GetAppliedMigrations().Count());
     }
