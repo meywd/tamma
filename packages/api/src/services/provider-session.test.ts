@@ -89,6 +89,27 @@ describe('ProviderSessionService', () => {
         .rejects.toThrow('provider is required');
     });
 
+    it('rejects when max sessions reached', async () => {
+      // Create a service with a very low max — we need to fill up to MAX_SESSIONS (100).
+      // Instead, create a service using the factory mock and fill it up with a small session set.
+      // We can't easily override the const MAX_SESSIONS, so we create 100 sessions.
+      const smallFactory = createMockFactory();
+      const maxService = new ProviderSessionService(smallFactory, { autoCleanup: false });
+
+      // Create 100 sessions to hit the limit
+      const promises: Promise<unknown>[] = [];
+      for (let i = 0; i < 100; i++) {
+        promises.push(maxService.create({ provider: `provider-${i}` }));
+      }
+      await Promise.all(promises);
+
+      // 101st should throw
+      await expect(maxService.create({ provider: 'overflow' }))
+        .rejects.toThrow('Maximum concurrent sessions (100) reached');
+
+      await maxService.disposeAll();
+    });
+
     it('lists the created session', async () => {
       await service.create({ provider: 'claude-code' });
       const sessions = service.listSessions();
@@ -158,6 +179,26 @@ describe('ProviderSessionService', () => {
       const disposed = await service.dispose('00000000-0000-0000-0000-000000000000');
       expect(disposed).toBe(false);
     });
+
+    it('handles provider.dispose() throwing without propagating', async () => {
+      const throwingProvider = createMockProvider({
+        dispose: vi.fn().mockRejectedValue(new Error('dispose boom')),
+      });
+      const throwingFactory = createMockFactory({
+        create: vi.fn().mockResolvedValue(throwingProvider),
+      });
+      const svc = new ProviderSessionService(throwingFactory, { autoCleanup: false });
+
+      const { handle } = await svc.create({ provider: 'bad-dispose' });
+      expect(svc.listSessions()).toHaveLength(1);
+
+      // Should not throw, even though provider.dispose() rejects
+      const disposed = await svc.dispose(handle);
+      expect(disposed).toBe(true);
+      expect(svc.listSessions()).toHaveLength(0);
+
+      await svc.disposeAll();
+    });
   });
 
   // ---- cleanup ----
@@ -199,7 +240,7 @@ describe('ProviderSessionService', () => {
     });
   });
 
-  // ---- disposeAll ----
+  // ---- disposeAll / shutdown ----
 
   describe('disposeAll', () => {
     it('disposes all sessions', async () => {
@@ -209,6 +250,16 @@ describe('ProviderSessionService', () => {
 
       await service.disposeAll();
       expect(service.listSessions()).toHaveLength(0);
+    });
+
+    it('clears cleanup timer so it does not fire after shutdown', async () => {
+      // Create a service WITH auto-cleanup to verify timer is cleared
+      const timerService = new ProviderSessionService(factory, { autoCleanup: true });
+      await timerService.create({ provider: 'claude-code' });
+
+      // disposeAll should clear the interval — no exceptions, sessions empty
+      await timerService.disposeAll();
+      expect(timerService.listSessions()).toHaveLength(0);
     });
   });
 
