@@ -82,6 +82,16 @@ import { PromptStore } from './services/prompt-store.js';
 import { registerConventionTemplateRoutes } from './routes/convention-templates.js';
 import type { PromptStoreOptions, UpsertPromptInput, RenderInput, PromptSummary, RenderedPrompt } from './services/prompt-store.js';
 import type { PromptTemplate, PromptRole, PromptAction } from './services/default-prompts.js';
+import { InMemoryTenantStore, PgTenantStore } from './persistence/tenant-store.js';
+import type { ITenantStore, Tenant, CreateTenantInput, UpdateTenantInput } from './persistence/tenant-store.js';
+import { InMemoryTenantMembershipStore, PgTenantMembershipStore, generateToken as generateInviteToken, hashToken as hashInviteToken } from './persistence/tenant-membership-store.js';
+import type { ITenantMembershipStore, TenantMembership, TenantInvite, CreateTenantInviteInput } from './persistence/tenant-membership-store.js';
+import { registerOrgRoutes } from './routes/orgs/index.js';
+import type { OrgRoutesOptions } from './routes/orgs/index.js';
+import { ConsoleEmailService, buildTenantInviteEmail } from './services/email.js';
+import type { IEmailService, EmailMessage } from './services/email.js';
+import { createEnsurePersonalTenant } from './middleware/ensure-personal-tenant.js';
+import type { EnsurePersonalTenantOptions } from './middleware/ensure-personal-tenant.js';
 
 export {
   registerKnowledgeBaseRoutes,
@@ -126,6 +136,17 @@ export {
   registerPromptRoutes,
   registerConventionTemplateRoutes,
   PromptStore,
+  // Story 18-3: Tenant/Org management
+  InMemoryTenantStore,
+  PgTenantStore,
+  InMemoryTenantMembershipStore,
+  PgTenantMembershipStore,
+  generateInviteToken,
+  hashInviteToken,
+  registerOrgRoutes,
+  ConsoleEmailService,
+  buildTenantInviteEmail,
+  createEnsurePersonalTenant,
 };
 
 export { startApiServer } from './serve.js';
@@ -192,6 +213,19 @@ export type {
   PromptRole,
   PromptAction,
   EngineContextRouteOptions,
+  // Story 18-3: Tenant/Org types
+  ITenantStore,
+  Tenant,
+  CreateTenantInput,
+  UpdateTenantInput,
+  ITenantMembershipStore,
+  TenantMembership,
+  TenantInvite,
+  CreateTenantInviteInput,
+  OrgRoutesOptions,
+  IEmailService,
+  EmailMessage,
+  EnsurePersonalTenantOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -228,6 +262,8 @@ export interface CreateAppOptions {
   engineContext?: boolean | EngineContextRouteOptions;
   /** Prompt store for the prompt registry API (optional; creates default in-memory store if omitted). */
   promptStore?: PromptStore;
+  /** Organization routes options (optional; enables /api/v1/orgs/* routes). */
+  orgRoutes?: OrgRoutesOptions;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
   /** Pre-built pino Logger instance (takes precedence over logger option). */
@@ -328,6 +364,11 @@ export async function createApp(options?: CreateAppOptions) {
       },
       { prefix: '' },
     );
+  }
+
+  // Organization (tenant) routes
+  if (options?.orgRoutes !== undefined) {
+    await registerOrgRoutes(app, options.orgRoutes);
   }
 
   // User management routes (admin panel)
