@@ -223,7 +223,9 @@ server {
 # Users without a valid session are redirected to GitHub OAuth login.
 # Users with insufficient role see a 403 page.
 #
-# Nav bar: ELSA Studio is our Blazor WASM app, nav script in its index.html.
+# Nav bar: Injected via nginx sub_filter from app.tamma.dev (Story 16.4).
+# Blazor WASM serves index.html once; the nav is position:fixed outside
+# Blazor's render root, so it survives client-side routing.
 # =============================================================================
 server {
     listen 443 ssl;
@@ -327,6 +329,14 @@ server {
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+
+        # --- Tamma Nav Bar Injection (Story 16.4) ---
+        # Disable upstream compression so sub_filter can operate on the body.
+        proxy_set_header Accept-Encoding "";
+        # Inject the self-injecting nav script before </head>.
+        sub_filter '</head>' '<script src="https://app.tamma.dev/tamma-nav.js" defer></script></head>';
+        sub_filter_once on;
+        sub_filter_types text/html;
     }
 }
 

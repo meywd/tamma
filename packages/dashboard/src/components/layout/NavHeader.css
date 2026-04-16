@@ -1,4 +1,15 @@
-/* NavHeader — Unified cross-service navigation bar (Story 16.4) */
+/*
+ * NavHeader — Unified cross-service navigation bar (Story 16.4)
+ * Token source: docs/stories/epic-16/16-4-unified-navigation-impl-plan.md — keep in sync
+ *
+ * --tn-bg:        #7B61FF   (Tamma purple)
+ * --tn-bg-hover:  rgba(255,255,255,0.15)
+ * --tn-bg-active: rgba(255,255,255,0.20)
+ * --tn-fg:        #ffffff
+ * --tn-fg-muted:  rgba(255,255,255,0.80)
+ * --tn-menu-bg:   #ffffff
+ * --tn-menu-fg:   #333333
+ */
 
 .tamma-nav-bar {
   position: fixed;
@@ -20,6 +31,31 @@
 
 .tamma-nav-bar * {
   box-sizing: border-box;
+}
+
+/* Skip-to-content link — visible only on focus for keyboard users */
+.tamma-nav-bar .tn-skip {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 100001;
+  background: #fff;
+  color: #333;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.tamma-nav-bar .tn-skip:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  margin-right: 8px;
 }
 
 .tamma-nav-bar .tn-logo {
@@ -67,14 +103,30 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
-  padding: 4px 8px;
   border-radius: 6px;
   position: relative;
 }
 
-.tamma-nav-bar .tn-user:hover {
+.tamma-nav-bar .tn-user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+}
+
+.tamma-nav-bar .tn-user-trigger:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.tamma-nav-bar .tn-user-trigger:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 .tamma-nav-bar .tn-avatar {
