@@ -38,7 +38,8 @@ Rather than treating all 40+ stories as a single queue, work is organized into f
 | [`layer-1-foundation.md`](./layer-1-foundation.md) | Serial: 16-1, 17-1, 16-2, 16-5, 16-7 |
 | [`layer-2-parallel-infra.md`](./layer-2-parallel-infra.md) | 5 teams: Tenant scoping, prompt store, agent API, admin UI, quick wins |
 | [`layer-3-parallel-services.md`](./layer-3-parallel-services.md) | 4 teams: Epic 9 services, prompt store API/Elsa, Epic 18 backend, Epic 12 foundation |
-| [`layer-4-integration-ui.md`](./layer-4-integration-ui.md) | 4 teams: Epic 9 completion, prompt store UIs, Epic 18 dashboard, Epic 12-5/12-7 |
+| [`layer-2-3-status-post-epic-19.md`](./layer-2-3-status-post-epic-19.md) | **Post–Epic 19 status of Layers 2 and 3** + 60h hardening punch list. Read this before starting Layer 4. |
+| [`layer-4-integration-ui.md`](./layer-4-integration-ui.md) | 4 teams: Epic 9 completion, prompt store UIs, Epic 18 dashboard, Epic 12-5/12-7 — revised 2026-04-16 to target the C# API |
 | [`layer-5-validation.md`](./layer-5-validation.md) | Cross-epic tests, perf, security audit, staging, docs |
 | [`secret-management-track.md`](./secret-management-track.md) | Parallel track: 30 stories (1.5-16 through 1.5-45) covering vault, broker, workflows, mirrors, probes, leak detection, rotation, UI — gates behind Layer 1, otherwise independent |
 

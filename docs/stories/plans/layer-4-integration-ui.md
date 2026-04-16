@@ -1,19 +1,54 @@
 # Layer 4: Integration & UI
 
-**Duration**: wall-clock ~140 hours (Team D critical path), ~343 total hours
+**Status**: Revised 2026-04-16 for post–Epic 19 reality.
+**Duration**: wall-clock ~156 hours (Team D critical path), ~411 total hours (343 original + 60 hardening + 8 Team A rebalance + 16 bridge)
 **Teams**: 4 parallel teams (A, B, C, D)
 **Goal**: Complete Epic 9 end-to-end (chain, resolver, engine integration, CLI wiring, Elsa integration, integration test), build the prompt store UIs, finish Epic 18 with onboarding + user dashboard, and deliver Epic 12 prompt-engineering + context-tool features.
 
-**Prerequisite**: Layer 3 merged to `main`. All Epic 9 foundations + Prompt Store API + Epic 18 backend live.
+**Prerequisites** (both required):
+
+1. PR #328 (`feat/auth-foundation`) merged to `main`.
+2. The ~60h hardening punch list in
+   [`layer-2-3-status-post-epic-19.md`](./layer-2-3-status-post-epic-19.md)
+   completed. Epic 19 replaced the TS `packages/api/` with a thinner C# API,
+   so every Layer 3 "done" story has a shallower implementation than the
+   original Layer 4 plan assumed. Tasks 1–3 of that punch list (system
+   prompts, agent resolver, provider chain) are **hard** blockers for
+   Team A; tasks 6–7 (prompt render, sanitization rules) are hard blockers
+   for Team B and Team D.
+
+## Post–Epic 19 architecture delta
+
+The pre-Epic-19 plan targeted a TypeScript `packages/api/` (Fastify) as the
+single backend. Epic 19 Phase 3 deleted that package and replaced it with a
+C# Minimal API at `apps/tamma-elsa/src/Tamma.Api/`. All "API" work in Layer
+4 now means C#. The TypeScript side still hosts:
+
+- `packages/orchestrator/` — engine (14-step autonomous loop)
+- `packages/intelligence/` — vector DB, context tools, conventions
+- `packages/providers/` — 8 AI provider implementations
+- `packages/platforms/` — 7 Git platform implementations
+- `packages/cli/` — Ink-based CLI
+- `packages/dashboard/` — admin dashboard (React)
+- `packages/dashboard-user/` — user dashboard (to be created by 18-5)
+
+Cross-language integration points:
+
+- TS engine → C# API: HTTP (service JWT). Replaces in-process factory calls.
+- Elsa C# activities → C# API: HTTP on the same host (was "→ Fastify API").
+- Elsa C# activities → TS context tools: via a new `/api/v1/context/tools/*`
+  proxy on the C# API, which itself calls into a lightweight TS sidecar
+  that wraps `packages/intelligence`. (See Team D section for the delta.)
 
 ## Team Overview
 
 | Team | Focus | Stories | Worktree | Hours |
 |------|-------|---------|----------|-------|
-| **A** | Epic 9 completion | 9-5, 9-9, 9-10, 9-11, 9-12 | `layer-4-team-a-epic-9-completion` | 89 |
-| **B** | Prompt Store UIs | 27-4, 27-5 | `layer-4-team-b-prompt-ui` | 32 |
-| **C** | Epic 18 completion | 18-4, 18-5 | `layer-4-team-c-epic-18-ui` | 64 |
-| **D** | Epic 12 (prompt engineering + context tools) | 12-5a, 12-5b, 12-5d, 12-7a, 12-7b, 12-7c, 12-7d, 12-7e | `layer-4-team-d-epic-12` | 140 |
+| **A** | Epic 9 completion | 9-5, 9-9, 9-10, 9-11, 9-12 | `layer-4-team-a-epic-9-completion` | 97 (was 89; +8 net after Epic 19 rebalance) |
+| **B** | Prompt Store UIs | 27-4, 27-5 | `layer-4-team-b-prompt-ui` | 34 (was 32) |
+| **C** | Epic 18 completion | 18-4, 18-5 | `layer-4-team-c-epic-18-ui` | 64 (unchanged) |
+| **D** | Epic 12 + cross-language bridge | 12-5a, 12-5b, 12-5d, 12-7a, 12-7b, 12-7c, 12-7d, 12-7e, bridge | `layer-4-team-d-epic-12` | 156 (was 140; +16 bridge) |
+| **Hardening** | pre-Layer-4 C# backend depth restoration | punch list in `layer-2-3-status-post-epic-19.md` | — | 60 |
 
 ## Parallelism Notes
 
@@ -31,72 +66,61 @@
 
 ## Team A: Epic 9 Completion
 
-**Agent**: 1 (or 2 to pipeline 9-5 + 9-9 after 9-8)
-**Order**: 9-5 → 9-9 → 9-10 (CLI) || 9-11 (Elsa) → 9-12 (integration test)
+**Agent**: 1 (or 2 to pipeline 9-5 + 9-9 after 9-8 is hardened)
+**Order**: hardening punch list tasks 2–5 → 9-5 → 9-9 → 9-10 (CLI) || 9-11 (Elsa) → 9-12 (integration test)
+**Language target**: all API work in C# (`apps/tamma-elsa/src/Tamma.Api/`). TS work only in `packages/orchestrator/`, `packages/cli/`, `packages/providers/`.
 
 ### Story 9-5: Provider Chain API
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | `POST /api/v1/providers/chain/resolve` — returns ordered list of providers to try based on health state and config. |
-| **Depends on** | 9-2, 9-3, 9-4, 9-8 |
+| **Description** | `POST /api/v1/providers/chain/resolve` in C# — returns ordered list of providers to try based on health state and config. Builds on hardening punch list task 3 (which provides the minimum viable endpoint) + task 4 (real circuit breaker). This story adds config-aware ordering, fallback chain, per-tenant overrides. |
+| **Depends on** | hardening tasks 3, 4; 9-2 (hardened), 9-3 (hardened) |
 | **Blocks** | 9-9, 9-11, 9-12 |
-| **Estimated hours** | 14 |
+| **Estimated hours** | 14 (unchanged — builds on hardening foundation) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-a-9-5-chain` |
 | **Branch** | `feat/story-9-5-provider-chain-api` |
-| **Deploy** | NO |
-| **Story file** | `docs/stories/epic-9/story-9-5/9-5-provider-chain.md` |
+| **Key files** | `apps/tamma-elsa/src/Tamma.Api/Endpoints/ProviderEndpoints.cs` (add `ResolveChain`), `.../Services/ProviderChainResolver.cs` (new) |
+| **Deploy** | NO (C# API hot-reloads on CI deploy) |
 
 ### Story 9-9: Engine Integration
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | TypeScript engine (`packages/orchestrator/`) calls `/api/v1/agents/*/resolve` instead of in-process factory. |
-| **Depends on** | 9-8, 9-5 |
+| **Description** | TypeScript engine (`packages/orchestrator/`) calls C# API `/api/v1/agents/{role}/resolve` and `/api/v1/providers/chain/resolve` instead of the in-process factory. Requires a TS `TammaApiClient` with service-JWT auth. |
+| **Depends on** | 9-5, 9-8 (= hardening task 2) |
 | **Blocks** | 9-10 |
-| **Estimated hours** | 14 |
+| **Estimated hours** | 18 (+4h vs original — service-JWT token acquisition + retry/backoff client needed) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-a-9-9-engine` |
 | **Branch** | `feat/story-9-9-engine-integration` |
+| **Key files** | `packages/orchestrator/src/api-client.ts` (new), `packages/orchestrator/src/engine.ts` (swap resolver call), `packages/shared/src/auth/service-jwt.ts` (token acquisition) |
 | **Deploy** | NO |
-| **Story file** | `docs/stories/epic-9/story-9-9/9-9-engine-integration.md` |
 
 ### Story 9-10: CLI Wiring
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | CLI mode uses in-memory/file fallbacks per `cli-fallback-behavior.md`. Auto-detects Postgres availability. |
-| **Depends on** | 9-1, 9-9, 9-11 |
+| **Description** | CLI mode uses in-memory/file fallbacks per `cli-fallback-behavior.md`. Auto-detects C# API availability (HTTP probe); falls back to in-process resolver when offline. |
+| **Depends on** | 9-1 (hardened), 9-9 |
 | **Blocks** | 9-12 |
-| **Estimated hours** | 12 |
+| **Estimated hours** | 14 (+2h — API detection probe + two-code-path tests) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-a-9-10-cli` |
 | **Branch** | `feat/story-9-10-cli-wiring` |
+| **Key files** | `packages/cli/src/config.ts` — API detection + fallback; `packages/cli/src/bootstrap.ts` — wire HTTP client vs. in-process shim |
 | **Deploy** | NO |
-| **Story file** | `docs/stories/epic-9/story-9-10/9-10-cli-wiring.md` |
-
-**Key files**:
-- `packages/cli/src/config.ts` — fallback detection logic
-- `packages/cli/src/bootstrap.ts` — service container wiring per `cli-fallback-behavior.md`
 
 ### Story 9-11: Diagnostics Queue + Elsa Integration
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | Replace 5 C# activities (`CheckCircuitBreakerActivity`, `RecordDiagnosticsActivity`, `ResolveAgentConfigActivity`, `CheckBudgetActivity`, `CallLlmActivity`) with HTTP calls to the Fastify API. Revised to 32h from 20h for 5-activity scope. |
-| **Depends on** | 9-2, 9-3, 9-5, 9-8, 16-7 |
+| **Description** | Five Elsa C# activities (`CheckCircuitBreakerActivity`, `RecordDiagnosticsActivity`, `ResolveAgentConfigActivity`, `CheckBudgetActivity`, `CallLlmActivity`) must delegate to the C# API. Since both live in the same solution (`Tamma.sln`) and the same container, the delegation is an in-process HTTP call via `HttpClient` pointing at `http://localhost:5000` — simpler than the pre-Epic-19 plan assumed. |
+| **Depends on** | 9-2 (hardened), 9-3 (hardened), 9-5, 9-8 (hardened), 16-7 |
 | **Blocks** | 9-12 |
-| **Estimated hours** | 32 |
+| **Estimated hours** | 24 (−8h — no cross-container auth handshake) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-a-9-11-elsa` |
 | **Branch** | `feat/story-9-11-diagnostics-queue-elsa` |
-| **Deploy** | YES (Elsa container redeploy) |
-| **Story file** | `docs/stories/epic-9/story-9-11/9-11-diagnostics-queue-mcp-interceptors.md` |
-
-**Key files**:
-- `apps/tamma-elsa/.../Activities/CheckCircuitBreakerActivity.cs` (simplified)
-- `apps/tamma-elsa/.../Activities/RecordDiagnosticsActivity.cs` (simplified)
-- `apps/tamma-elsa/.../Activities/ResolveAgentConfigActivity.cs` (simplified)
-- `apps/tamma-elsa/.../Activities/CheckBudgetActivity.cs` (simplified)
-- `apps/tamma-elsa/.../Activities/CallLlmActivity.cs` (HTTP delegated)
-- `apps/tamma-elsa/.../HttpClients/TammaApiClient.cs` — shared client with service JWT auth
+| **Key files** | `apps/tamma-elsa/src/Tamma.Activities/Diagnostics/*.cs` (rewrite), `apps/tamma-elsa/src/Tamma.Activities/Shared/TammaApiClient.cs` (new — wraps `HttpClient` + service-JWT) |
+| **Deploy** | YES (single `tamma-api` container rebuild includes both activities and endpoints) |
 
 ### Story 9-12: Cross-Epic Integration Test
 
@@ -121,10 +145,10 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | Platform admin UI in `app.tamma.dev/admin/prompts` to manage the 80+8+10 system default prompts. Diff view, version history, import/export. |
-| **Depends on** | 27-3, 16-3 |
+| **Description** | Platform admin UI in `app.tamma.dev/admin/prompts` to manage the 80+8+10 system default prompts. Diff view, version history, import/export. Targets the C# prompt store endpoints (`/api/prompts/*`) — unchanged URL surface, but response shapes were regenerated in C# so verify DTO alignment. |
+| **Depends on** | hardening task 1 (system defaults in C#), hardening task 6 (prompt render), 16-3 |
 | **Blocks** | — |
-| **Estimated hours** | 16 |
+| **Estimated hours** | 18 (+2h — DTO-shape alignment sweep across admin + user UIs) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-b-27-4-admin-ui` |
 | **Branch** | `feat/story-27-4-prompt-store-admin-ui` |
 | **Deploy** | NO |
@@ -134,8 +158,8 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | Tenant admin UI in `dash.tamma.dev/prompts` (user-facing) to override system defaults for their tenant. Read-only view of system defaults; editable overrides. |
-| **Depends on** | 27-3, 18-5 (preferred shell) |
+| **Description** | Tenant admin UI in `dash.tamma.dev/prompts` (user-facing) to override system defaults for their tenant. Read-only view of system defaults; editable overrides. Shares the DTO-alignment work done by 27-4. |
+| **Depends on** | 27-4 (DTO alignment), 18-5 (shell) |
 | **Blocks** | — |
 | **Estimated hours** | 16 |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-b-27-5-tenant-ui` |
@@ -155,43 +179,54 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | Onboarding flow after org creation: redirect user to GitHub to install the Tamma GitHub App, select repos, callback links installation to tenant. |
-| **Depends on** | 18-3 |
+| **Description** | Onboarding flow after org creation: redirect user to GitHub to install the Tamma GitHub App, select repos, callback links installation to tenant. Endpoints live in C#; React UI calls them from the user dashboard. The C# stub `GitHubEndpoints.Callback` + webhook already exist — this story fills in the real flow (exchange installation_id → InstallationRepo row → tenant link). |
+| **Depends on** | 18-3 (C# `OrgEndpoints` — already in) |
 | **Blocks** | 18-5 |
-| **Estimated hours** | M (~24) |
+| **Estimated hours** | 24 (unchanged) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-c-18-4-github-app` |
 | **Branch** | `feat/story-18-4-github-app-onboarding` |
-| **Deploy** | YES (GitHub App webhook URL, callback URL configuration) |
+| **Key files** | `apps/tamma-elsa/src/Tamma.Api/Endpoints/GitHubEndpoints.cs` (flesh out Callback), `apps/tamma-elsa/src/Tamma.Data/Repositories/InstallationRepository.cs` (link-to-tenant method), `packages/dashboard-user/src/pages/onboarding/github.tsx` (UI) |
+| **Deploy** | YES (GitHub App webhook URL, callback URL configuration in GitHub + `.env` on VPS) |
 | **Story file** | `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` |
-
-**Key files**:
-- `packages/api/src/routes/onboarding/github-app.ts`
-- `packages/api/src/persistence/installation-store.ts` — link to tenant
 
 ### Story 18-5: User-Facing Dashboard Shell
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | New React app at `dash.tamma.dev` — user-facing dashboard. Separate from admin dashboard at `app.tamma.dev`. Navigation, tenant switcher, profile, workflow run list, API key management. |
-| **Depends on** | 18-2, 18-3 |
+| **Description** | New React app at `dash.tamma.dev` — user-facing dashboard. Separate from admin dashboard at `app.tamma.dev`. Navigation, tenant switcher, profile, workflow run list, API key management. Backed entirely by the C# API. |
+| **Depends on** | 18-2 (C# `AuthEndpoints` — already in), 18-3 (already in), hardening task 8 (email) for the profile flow |
 | **Blocks** | 27-5 |
-| **Estimated hours** | L (~40) |
+| **Estimated hours** | 40 (unchanged) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-c-18-5-user-dashboard` |
 | **Branch** | `feat/story-18-5-user-dashboard` |
-| **Deploy** | YES (new dashboard subdomain + nginx config + oauth2-proxy binding for dash.tamma.dev) |
+| **Key files** | `packages/dashboard-user/` (new package), `nginx-proxy/conf.d/dash.tamma.dev.conf`, `docker/docker-compose.yml` (new dashboard-user service + oauth2-proxy upstream), `apps/tamma-elsa/src/Tamma.Api/Endpoints/Dashboard*.cs` (add user-scoped variants if admin-only ones don't fit) |
+| **Deploy** | YES (new dashboard subdomain + nginx config + oauth2-proxy binding for `dash.tamma.dev`) |
 | **Story file** | `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md` |
-
-**Key files**:
-- `packages/dashboard-user/` — new package
-- `nginx-proxy/conf.d/dash.tamma.dev.conf`
-- `docker-compose.yml` — new dashboard service + oauth2-proxy binding
 
 ---
 
 ## Team D: Epic 12 (Prompt Engineering + Context Tools)
 
 **Agent**: 1 (preferably 2 — split 12-5 track from 12-7 track)
-**Hours**: 140 total
+**Hours**: 156 total (+16 for C#/TS bridge)
+
+### Cross-language bridge (pre-12-7e)
+
+Context tools live in `packages/intelligence/` (TS). Elsa activities are C#.
+Two viable bridges:
+
+**Option A — HTTP proxy on C# API (recommended)**: add a `/api/v1/context/tools/*`
+group on the C# API. Handlers forward to a lightweight TS sidecar
+(`packages/intelligence-server/`) over localhost HTTP. The sidecar wraps
+`packages/intelligence`. One extra hop on every tool call, but keeps the
+vector DB code in TS where it lives today.
+
+**Option B — port tools to C# (8h per tool × 5 tools = 40h)**. Rejected:
+too much rewrite for features that already work in TS.
+
+Option A is blessed. 12-7e (Elsa tool loop integration) consumes the proxy
+endpoints. Budget: 16h for the proxy + sidecar skeleton, counted once and
+amortized across 12-7a through 12-7e.
 
 ### Story 12-5a: Context Priority-Based Truncation
 
@@ -288,13 +323,14 @@
 
 | Attribute | Value |
 |-----------|-------|
-| **Description** | Wire the tool loop into Elsa's `CallLlmInlineActivity`. When `EnableToolLoop=true`, the activity runs the loop calling the context tools. |
-| **Depends on** | 12-7a, 12-7b, 12-7c, 12-7d |
+| **Description** | Wire the tool loop into Elsa's `CallLlmInlineActivity`. When `EnableToolLoop=true`, the activity calls the C# API `/api/v1/context/tools/*` proxy endpoints (see "Cross-language bridge" above), which forwards to the TS sidecar wrapping `packages/intelligence`. |
+| **Depends on** | 12-7a, 12-7b, 12-7c, 12-7d, **cross-language bridge** |
 | **Blocks** | — |
-| **Estimated hours** | 20 |
+| **Estimated hours** | 28 (+8h — bridge integration + fallback behavior when sidecar is offline) |
 | **Git worktree** | `/home/meywd/tamma-worktrees/layer-4-team-d-12-7e-elsa-loop` |
 | **Branch** | `feat/story-12-7e-elsa-tool-loop` |
-| **Deploy** | YES (Elsa container redeploy) |
+| **Key files** | `apps/tamma-elsa/src/Tamma.Activities/LlmCall/AgenticToolLoop*.cs` (already exists — add bridge-aware tool invocation), `apps/tamma-elsa/src/Tamma.Api/Endpoints/ContextEndpoints.cs` (new proxy), `packages/intelligence-server/` (new TS sidecar package) |
+| **Deploy** | YES (C# container rebuild + new sidecar service in `docker-compose.yml`) |
 | **Story file** | `docs/stories/epic-12/story-12-7/12-7e-elsa-tool-loop-integration.md` |
 
 ---
