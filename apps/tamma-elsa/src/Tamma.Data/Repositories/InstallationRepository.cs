@@ -91,4 +91,78 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
             await db.SaveChangesAsync();
         }
     }
+
+    // ── Router-service additions ────────────────────────────────────────────
+
+    public async Task<GitHubInstallation> CreateAsync(GitHubInstallation install)
+    {
+        install.CreatedAt = DateTime.UtcNow;
+        install.UpdatedAt = DateTime.UtcNow;
+        db.GitHubInstallations.Add(install);
+        await db.SaveChangesAsync();
+        return install;
+    }
+
+    public async Task SoftDeleteAsync(long installationId)
+    {
+        var installation = await db.GitHubInstallations
+            .FirstOrDefaultAsync(i => i.InstallationId == installationId);
+        if (installation is not null)
+        {
+            // Use SuspendedAt as the soft-delete marker — keeps the row for audit.
+            installation.SuspendedAt = DateTime.UtcNow;
+            installation.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    public async Task SetSuspendedAsync(long installationId, bool suspended)
+    {
+        var installation = await db.GitHubInstallations
+            .FirstOrDefaultAsync(i => i.InstallationId == installationId);
+        if (installation is not null)
+        {
+            installation.SuspendedAt = suspended ? DateTime.UtcNow : null;
+            installation.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    public async Task AddRepoAsync(Guid installationEntityId, long repoId, string repoFullName)
+    {
+        var existing = await db.GitHubInstallationRepos
+            .FirstOrDefaultAsync(r =>
+                r.InstallationEntityId == installationEntityId && r.RepoId == repoId);
+
+        if (existing is not null)
+        {
+            // Reactivate + refresh name if it changed.
+            existing.IsActive = true;
+            existing.RepoFullName = repoFullName;
+        }
+        else
+        {
+            db.GitHubInstallationRepos.Add(new GitHubInstallationRepo
+            {
+                InstallationEntityId = installationEntityId,
+                RepoId = repoId,
+                RepoFullName = repoFullName,
+                IsActive = true
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public async Task RemoveRepoAsync(Guid installationEntityId, long repoId)
+    {
+        var repo = await db.GitHubInstallationRepos
+            .FirstOrDefaultAsync(r =>
+                r.InstallationEntityId == installationEntityId && r.RepoId == repoId);
+        if (repo is not null)
+        {
+            repo.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+    }
 }
