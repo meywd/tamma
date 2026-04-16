@@ -72,6 +72,7 @@ public static class EventTypes
     public const string ContextGathered = "context_gathered";
     public const string MergeCompleted = "merge_completed";
     public const string SkillLevelUpdated = "skill_level_updated";
+    public const string SkillLevelAdjusted = "skill_level_adjusted";
 
     // Phase 3 event types (Story 7-1A workflow states)
     public const string SessionStarted = "session_started";
