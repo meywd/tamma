@@ -4,7 +4,6 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
-using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.Agents;
