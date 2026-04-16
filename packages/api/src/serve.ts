@@ -184,6 +184,17 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
   // Throws in production if JWT_SECRET is unset — see resolveJwtSecret.
   const jwtSecret = resolveJwtSecret();
 
+  // Organization / tenant management routes (Story 18-3)
+  const orgRoutesOptions = {
+    tenantStore: pool
+      ? new (await import('./persistence/pg-tenant-store.js')).PgTenantStore(pool)
+      : new (await import('./persistence/tenant-store.js')).InMemoryTenantStore(),
+    userStore,
+    membershipStore: tenantMembershipStore,
+    emailService,
+    jwtSecret,
+  };
+
   const appOptions: Parameters<typeof createApp>[0] = {
     workflowStore,
     loggerInstance: pinoLogger,
@@ -200,6 +211,7 @@ export async function startApiServer(options: ApiServerOptions = {}): Promise<vo
     agentConfigStore,
     agentResolverService,
     promptStore,
+    orgRoutes: orgRoutesOptions,
     authV1: {
       register: {
         userStore,

@@ -80,6 +80,12 @@ export interface ITenantMembershipStore {
   listPendingInvites(tenantId: string): Promise<TenantInvite[]>;
   /** Revoke (delete) an invite. */
   revokeInvite(id: string): Promise<void>;
+
+  /** Look up an invite by its primary key. */
+  getInviteById(id: string): Promise<TenantInvite | null>;
+
+  /** List all tenants a user belongs to with their membership info. */
+  listTenantsWithMembership(userId: string): Promise<Array<TenantMembership & { tenant?: { id: string; name: string; slug: string; plan: string } }>>;
 }
 
 /** In-memory implementation for testing. */
@@ -178,6 +184,16 @@ export class InMemoryTenantMembershipStore implements ITenantMembershipStore {
   async revokeInvite(id: string): Promise<void> {
     if (!this.invites.has(id)) throw new Error('Invite not found');
     this.invites.delete(id);
+  }
+
+  async getInviteById(id: string): Promise<TenantInvite | null> {
+    return this.invites.get(id) ?? null;
+  }
+
+  async listTenantsWithMembership(userId: string): Promise<Array<TenantMembership & { tenant?: { id: string; name: string; slug: string; plan: string } }>> {
+    return this.memberships
+      .filter((m) => m.userId === userId)
+      .map((m) => ({ ...m }));
   }
 }
 
@@ -301,6 +317,35 @@ export class PgTenantMembershipStore implements ITenantMembershipStore {
     if (result.rowCount === 0) {
       throw new Error('Invite not found');
     }
+  }
+
+  async getInviteById(id: string): Promise<TenantInvite | null> {
+    const result = await this.pool.query<Record<string, unknown>>(
+      'SELECT * FROM tenant_invites WHERE id = $1',
+      [id],
+    );
+    if (result.rows.length === 0) return null;
+    return this.mapInvite(result.rows[0]!);
+  }
+
+  async listTenantsWithMembership(userId: string): Promise<Array<TenantMembership & { tenant?: { id: string; name: string; slug: string; plan: string } }>> {
+    const result = await this.pool.query<Record<string, unknown>>(
+      `SELECT tm.*, t.id AS t_id, t.name AS t_name, t.slug AS t_slug, t.plan AS t_plan
+       FROM tenant_memberships tm
+       JOIN tenants t ON t.id = tm.tenant_id AND t.deleted_at IS NULL
+       WHERE tm.user_id = $1
+       ORDER BY tm.joined_at`,
+      [userId],
+    );
+    return result.rows.map((r) => ({
+      ...this.mapMembership(r),
+      tenant: {
+        id: String(r['t_id']),
+        name: String(r['t_name']),
+        slug: String(r['t_slug']),
+        plan: String(r['t_plan']),
+      },
+    }));
   }
 
   private mapMembership(row: Record<string, unknown>): TenantMembership {

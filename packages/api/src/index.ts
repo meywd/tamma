@@ -114,6 +114,10 @@ import { registerLoginRoutes } from './routes/auth/login.js';
 import type { LoginRoutesOptions } from './routes/auth/login.js';
 import { registerPasswordResetRoutes } from './routes/auth/password-reset.js';
 import type { PasswordResetRoutesOptions } from './routes/auth/password-reset.js';
+import { registerOrgRoutes } from './routes/orgs/index.js';
+import type { OrgRoutesOptions } from './routes/orgs/index.js';
+import { ensurePersonalTenant } from './middleware/ensure-personal-tenant.js';
+import type { EnsurePersonalTenantOptions } from './middleware/ensure-personal-tenant.js';
 import type {
   IAgentConfigStore,
   AgentConfigDocument,
@@ -184,6 +188,9 @@ export {
   registerAgentConfigApiRoutes,
   // Tenant context middleware (Story 17-5)
   registerTenantContextPlugin,
+  // Organization / tenant routes (Story 18-3)
+  registerOrgRoutes,
+  ensurePersonalTenant,
 };
 
 export { startApiServer } from './serve.js';
@@ -274,6 +281,9 @@ export type {
   AgentConfigRoutesOptions,
   // Tenant context middleware (Story 17-5)
   TenantContextConfig,
+  // Organization / tenant routes (Story 18-3)
+  OrgRoutesOptions,
+  EnsurePersonalTenantOptions,
 };
 
 /** Options for creating the Fastify app with optional engine support. */
@@ -328,6 +338,8 @@ export interface CreateAppOptions {
   };
   /** Tenant context middleware config (optional; registers tenant resolution from auth context). */
   tenantContext?: TenantContextConfig;
+  /** Organization / tenant management routes (Story 18-3). */
+  orgRoutes?: OrgRoutesOptions;
   /** Enable Fastify logger (boolean, pino options object, or pino Logger instance). */
   logger?: boolean | object;
   /** Pre-built pino Logger instance (takes precedence over logger option). */
@@ -538,6 +550,11 @@ export async function createApp(options?: CreateAppOptions) {
     await registerRegistrationRoutes(app, options.authV1.register);
     await registerLoginRoutes(app, options.authV1.login);
     await registerPasswordResetRoutes(app, options.authV1.passwordReset);
+  }
+
+  // Organization / tenant routes (Story 18-3)
+  if (options?.orgRoutes !== undefined) {
+    await registerOrgRoutes(app, options.orgRoutes);
   }
 
   // Convention template routes (always registered — read-only reference data)

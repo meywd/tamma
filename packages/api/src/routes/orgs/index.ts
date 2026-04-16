@@ -15,9 +15,12 @@
  *   DELETE /api/v1/orgs/:tenantId/invites/:inviteId   — Revoke invite
  *   POST   /api/v1/orgs/invites/accept                — Accept invite
  *   POST   /api/v1/auth/switch-org                    — Switch active tenant
+ *   GET    /api/v1/tenants                            — List user's tenants
+ *   POST   /api/v1/orgs/:tenantId/transfer-ownership  — Transfer ownership
+ *   DELETE /api/v1/orgs/:tenantId                     — Soft / hard delete tenant
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { ITenantStore } from '../../persistence/tenant-store.js';
 import type { IUserStore } from '../../persistence/user-store.js';
@@ -663,4 +666,238 @@ export async function registerOrgRoutes(
       });
     },
   );
+
+  // -------------------------------------------------------------------
+  // GET /api/v1/tenants — List user's tenants
+  // -------------------------------------------------------------------
+  app.get(
+    '/api/v1/tenants',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const jwt = await getAuthenticatedUser(request, reply);
+      if (!jwt) return;
+
+      const memberships = await membershipStore.getUserTenants(jwt.sub);
+
+      const tenants = await Promise.all(
+        memberships.map(async (m) => {
+          const tenant = await tenantStore.getTenant(m.tenantId);
+          return {
+            id: m.tenantId,
+            name: tenant?.name ?? 'Unknown',
+            slug: tenant?.slug ?? '',
+            plan: tenant?.plan ?? 'free',
+            role: m.role,
+            joinedAt: m.joinedAt,
+            isActive: m.tenantId === jwt.tenantId,
+          };
+        }),
+      );
+
+      return reply.send({ tenants });
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // POST /api/v1/orgs/:tenantId/transfer-ownership — Transfer ownership
+  // -------------------------------------------------------------------
+  app.post<{
+    Params: { tenantId: string };
+    Body: { newOwnerUserId?: string };
+  }>(
+    '/api/v1/orgs/:tenantId/transfer-ownership',
+    async (request: FastifyRequest<{ Params: { tenantId: string }; Body: { newOwnerUserId?: string } }>, reply: FastifyReply) => {
+      const jwt = await getAuthenticatedUser(request, reply);
+      if (!jwt) return;
+
+      const { tenantId } = request.params;
+      const { newOwnerUserId } = request.body ?? {};
+
+      if (!newOwnerUserId) {
+        return reply.status(400).send({ error: 'newOwnerUserId is required' });
+      }
+
+      // Verify requester is owner
+      const requesterMembership = await membershipStore.getMembership(tenantId, jwt.sub);
+      if (!requesterMembership || requesterMembership.role !== 'owner') {
+        return reply.status(403).send({ error: 'Only the owner can transfer ownership' });
+      }
+
+      // Cannot transfer to self
+      if (newOwnerUserId === jwt.sub) {
+        return reply.status(400).send({ error: 'same_user' });
+      }
+
+      // Verify tenant is not soft-deleted
+      const tenant = await tenantStore.getTenant(tenantId);
+      if (!tenant) {
+        return reply.status(404).send({ error: 'Tenant not found or deleted' });
+      }
+
+      // Verify new owner is a member
+      const newOwnerMembership = await membershipStore.getMembership(tenantId, newOwnerUserId);
+      if (!newOwnerMembership) {
+        return reply.status(400).send({ error: 'not_a_member' });
+      }
+
+      // Transfer: demote old owner to admin, promote new owner to owner
+      await membershipStore.updateMemberRole(tenantId, jwt.sub, 'admin');
+      await membershipStore.updateMemberRole(tenantId, newOwnerUserId, 'owner');
+
+      request.log.info({
+        event: 'TENANT.OWNERSHIP_TRANSFERRED.SUCCESS',
+        tenantId,
+        previousOwnerId: jwt.sub,
+        newOwnerId: newOwnerUserId,
+      }, 'Tenant ownership transferred');
+
+      return reply.send({
+        tenantId,
+        previousOwnerId: jwt.sub,
+        newOwnerId: newOwnerUserId,
+      });
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // DELETE /api/v1/orgs/:tenantId — Soft-delete or hard-delete tenant
+  //
+  // Without ?confirm: soft-delete, returns 202 with HMAC confirmation token
+  // With ?confirm=<token>: hard-delete (cascade), returns 204
+  // -------------------------------------------------------------------
+  app.delete<{
+    Params: { tenantId: string };
+    Querystring: { confirm?: string; force?: string };
+  }>(
+    '/api/v1/orgs/:tenantId',
+    async (request: FastifyRequest<{ Params: { tenantId: string }; Querystring: { confirm?: string; force?: string } }>, reply: FastifyReply) => {
+      const jwt = await getAuthenticatedUser(request, reply);
+      if (!jwt) return;
+
+      const { tenantId } = request.params;
+      const confirmToken = request.query.confirm;
+
+      // Verify requester is owner
+      const requesterMembership = await membershipStore.getMembership(tenantId, jwt.sub);
+      if (!requesterMembership || requesterMembership.role !== 'owner') {
+        return reply.status(403).send({ error: 'Only the owner can delete the organization' });
+      }
+
+      // Guard: cannot delete the last tenant the user belongs to
+      const userTenants = await membershipStore.getUserTenants(jwt.sub);
+      if (userTenants.length <= 1) {
+        return reply.status(409).send({ error: 'last_tenant', message: 'Cannot delete your only organization. Create a replacement first.' });
+      }
+
+      const tenant = await tenantStore.getTenant(tenantId);
+      if (!tenant) {
+        return reply.status(404).send({ error: 'Tenant not found' });
+      }
+
+      if (confirmToken) {
+        // Hard-delete path: verify HMAC token
+        const isValid = verifyDeleteConfirmation(confirmToken, tenantId, jwt.sub, options.jwtSecret);
+        if (!isValid) {
+          return reply.status(400).send({ error: 'confirmation_expired', message: 'Invalid or expired confirmation token' });
+        }
+
+        // Hard delete: remove memberships, invites, then tenant
+        // In a real Pg setup, ON DELETE CASCADE handles this.
+        // For in-memory stores, we manually clean up.
+        const members = await membershipStore.listMembers({ tenantId, limit: 10000, offset: 0 });
+        for (const member of members.members) {
+          await membershipStore.removeMember(tenantId, member.userId);
+          // If this was the user's active tenant, clear it
+          const memberUser = await userStore.getUser(member.userId);
+          if (memberUser && memberUser.tenantId === tenantId) {
+            await userStore.updateActiveTenant(member.userId, null);
+          }
+        }
+
+        // Delete the tenant (soft-delete in store, but we've cascaded memberships)
+        await tenantStore.deleteTenant(tenantId);
+
+        request.log.info({
+          event: 'TENANT.PURGED.SUCCESS',
+          tenantId,
+          userId: jwt.sub,
+        }, 'Tenant hard-deleted');
+
+        return reply.status(204).send();
+      }
+
+      // Soft-delete path
+      await tenantStore.deleteTenant(tenantId);
+
+      // Generate HMAC confirmation token for potential hard-delete (10-minute TTL)
+      const confirmation = generateDeleteConfirmation(tenantId, jwt.sub, options.jwtSecret);
+
+      // If the user's active tenant was this one, switch to another
+      const user = await userStore.getUser(jwt.sub);
+      if (user && user.tenantId === tenantId) {
+        const otherTenant = userTenants.find((t) => t.tenantId !== tenantId);
+        if (otherTenant) {
+          await userStore.updateActiveTenant(jwt.sub, otherTenant.tenantId);
+        }
+      }
+
+      request.log.info({
+        event: 'TENANT.DELETED.SUCCESS',
+        tenantId,
+        userId: jwt.sub,
+      }, 'Tenant soft-deleted');
+
+      return reply.status(202).send({
+        message: 'Organization has been soft-deleted',
+        confirmationToken: confirmation.token,
+        expiresAt: confirmation.expiresAt,
+      });
+    },
+  );
+}
+
+// -------------------------------------------------------------------
+// HMAC-based delete confirmation helpers
+// -------------------------------------------------------------------
+
+const DELETE_CONFIRM_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function generateDeleteConfirmation(tenantId: string, userId: string, secret: string): { token: string; expiresAt: string } {
+  const issuedAt = Date.now();
+  const payload = `${tenantId}:${userId}:${issuedAt}`;
+  const hmac = createHmac('sha256', secret).update(payload).digest('hex');
+  const token = `${issuedAt}.${hmac}`;
+  return {
+    token,
+    expiresAt: new Date(issuedAt + DELETE_CONFIRM_TTL_MS).toISOString(),
+  };
+}
+
+function verifyDeleteConfirmation(token: string, tenantId: string, userId: string, secret: string): boolean {
+  const dotIndex = token.indexOf('.');
+  if (dotIndex === -1) return false;
+
+  const issuedAtStr = token.substring(0, dotIndex);
+  const providedHmac = token.substring(dotIndex + 1);
+
+  const issuedAt = parseInt(issuedAtStr, 10);
+  if (isNaN(issuedAt)) return false;
+
+  // Check TTL
+  if (Date.now() - issuedAt > DELETE_CONFIRM_TTL_MS) return false;
+
+  // Verify HMAC
+  const payload = `${tenantId}:${userId}:${issuedAt}`;
+  const expectedHmac = createHmac('sha256', secret).update(payload).digest('hex');
+
+  // Constant-time comparison
+  if (providedHmac.length !== expectedHmac.length) return false;
+  const a = Buffer.from(providedHmac, 'hex');
+  const b = Buffer.from(expectedHmac, 'hex');
+  if (a.length !== b.length) return false;
+
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  }
+  return diff === 0;
 }
