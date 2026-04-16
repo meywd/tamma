@@ -200,7 +200,10 @@ public static class AuthEndpoints
         IPasswordResetRepository resetRepo,
         IUserRepository userRepo)
     {
-        // Always return same response to prevent email enumeration
+        if (string.IsNullOrWhiteSpace(req.Email))
+            return Task.FromResult(Results.BadRequest(new { error = "Email is required" }));
+
+        // Anti-enumeration: return the same response whether the email exists or not
         return Task.FromResult(Results.Ok(new { message = "If the email exists, a reset link has been sent" }));
     }
 

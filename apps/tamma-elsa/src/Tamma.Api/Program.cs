@@ -502,18 +502,43 @@ kb.MapGet("/analytics/costs", KbEndpoints.GetKbCosts);
 
 // ────────────────────────────────────────────────────────────────────────────
 // Database Migration
+//
+// On first-ever deploy (no EF migration history), any legacy tables from the
+// previous TypeScript API / raw-SQL mentorship schema would collide with the
+// InitialSchema migration. Drop them before applying migrations — per the
+// Epic 19 wipe-and-recreate directive. Subsequent deploys apply migrations
+// incrementally without any cleanup.
 // ────────────────────────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
     try
     {
+        var applied = dbContext.Database.GetAppliedMigrations().ToList();
+        if (applied.Count == 0)
+        {
+            Log.Information("No EF migrations applied yet — wiping legacy public-schema tables before InitialSchema");
+            dbContext.Database.ExecuteSqlRaw(@"
+                DROP TABLE IF EXISTS
+                    api_keys, agent_configs, domain_events,
+                    github_installation_repos, github_installations,
+                    junior_developers, mentorship_events, mentorship_sessions,
+                    password_reset_tokens, prompt_overrides,
+                    provider_diagnostics, provider_health, refresh_tokens,
+                    sanitization_rules, stories, tenant_memberships, tenants,
+                    user_invites, users, workflow_definitions, workflow_instances,
+                    knex_migrations, knex_migrations_lock
+                CASCADE;");
+        }
+
         dbContext.Database.Migrate();
-        Log.Information("Database migrations applied successfully");
+        Log.Information("Database migrations applied successfully ({Count} total)",
+            dbContext.Database.GetAppliedMigrations().Count());
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "Error applying migrations, database may already be up to date");
+        Log.Error(ex, "Fatal: database migration failed");
+        throw;
     }
 }
 
