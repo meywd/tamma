@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
@@ -12,9 +13,11 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations
 {
     [DbContext(typeof(TammaDbContext))]
-    partial class TammaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260417010625_TaskQueue")]
+    partial class TaskQueue
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

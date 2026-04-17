@@ -150,8 +150,23 @@ public static class GitHubEndpoints
         {
             var result = await router.HandleWebhookAsync(eventType, payload);
             logger.LogInformation(
-                "Webhook {Event} (action={Action}) processed, skipped={Skipped}",
-                result.EventType, result.Action, result.Skipped);
+                "Webhook {Event} (action={Action}) processed, skipped={Skipped}, taskId={TaskId}",
+                result.EventType, result.Action, result.Skipped, result.TaskId);
+
+            // Events queued for async processing advertise queued:true + taskId
+            // so the webhook sender can correlate later observability.
+            if (result.TaskId is not null)
+            {
+                return Results.Ok(new
+                {
+                    received = true,
+                    @event = result.EventType,
+                    action = result.Action,
+                    skipped = false,
+                    queued = true,
+                    taskId = result.TaskId.Value.ToString()
+                });
+            }
 
             return Results.Ok(new
             {
