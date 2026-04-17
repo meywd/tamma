@@ -72,18 +72,34 @@ public sealed class SmtpEmailService : IEmailService
             await client.SendAsync(mime, ct).ConfigureAwait(false);
             await client.DisconnectAsync(quit: true, ct).ConfigureAwait(false);
 
-            // DO NOT log full body — may contain one-time tokens that land in
-            // log aggregators. Surface only the routing metadata.
+            // DO NOT log full body, recipient address, or subject — they may
+            // contain one-time tokens or PII that land in log aggregators.
+            // Surface only the recipient DOMAIN and the SMTP host so ops can
+            // see "N failures to outlook.com" without leaking identities.
             _logger.LogInformation(
-                "Email delivered via SMTP: to={To} subject={Subject} host={Host}",
-                LogSanitizer.Clean(message.To), LogSanitizer.Clean(message.Subject), host);
+                "Email delivered via SMTP: domain={Domain} host={Host}",
+                RecipientDomain(message.To), host);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "SMTP send failed: to={To} subject={Subject} host={Host}",
-                LogSanitizer.Clean(message.To), LogSanitizer.Clean(message.Subject), host);
+                "SMTP send failed: domain={Domain} host={Host}",
+                RecipientDomain(message.To), host);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Returns the domain portion of an email address (e.g. "example.com"),
+    /// or "&lt;invalid&gt;" when no '@' is present. The local part is dropped so
+    /// operational logs do not carry PII. CRLF/control chars are still stripped
+    /// defensively via <see cref="LogSanitizer"/>.
+    /// </summary>
+    private static string RecipientDomain(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return "<empty>";
+        var at = email.LastIndexOf('@');
+        if (at < 0 || at == email.Length - 1) return "<invalid>";
+        return LogSanitizer.Clean(email[(at + 1)..]);
     }
 }
