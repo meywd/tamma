@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
+using Tamma.Api.Services.Email;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -10,12 +12,34 @@ namespace Tamma.Api.Endpoints;
 
 public static class AuthEndpoints
 {
+    // ─── Helpers ──────────────────────────────────────────────────────────
+
+    private static string HashToken(string token)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+    private static string BuildVerificationUrl(IConfiguration config, string token)
+    {
+        var baseUrl = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        return $"{baseUrl}/verify?token={Uri.EscapeDataString(token)}";
+    }
+
+    private static string BuildResetUrl(IConfiguration config, string token)
+    {
+        var baseUrl = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        return $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
+    }
+
+    // ─── Endpoints ────────────────────────────────────────────────────────
+
     public static async Task<IResult> Register(
         RegisterRequest req,
         IUserRepository userRepo,
         IPasswordService passwordService,
         ITenantRepository tenantRepo,
-        ITenantMembershipRepository membershipRepo)
+        ITenantMembershipRepository membershipRepo,
+        [FromServices] IEmailService emailService,
+        [FromServices] IConfiguration config,
+        [FromServices] ILoggerFactory loggerFactory)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             return Results.BadRequest(new { error = "Email and password are required" });
@@ -28,7 +52,7 @@ public static class AuthEndpoints
             return Results.Conflict(new { error = "Email already registered" });
 
         var verificationToken = Guid.NewGuid().ToString("N");
-        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(verificationToken))).ToLowerInvariant();
+        var tokenHash = HashToken(verificationToken);
 
         var user = await userRepo.CreateAsync(new User
         {
@@ -53,6 +77,22 @@ public static class AuthEndpoints
         await membershipRepo.AddAsync(tenant.Id, user.Id, "owner");
         await userRepo.UpdateActiveTenantAsync(user.Id, tenant.Id);
 
+        // Send verification email. The raw token is sent to the user; only
+        // the SHA-256 hash is persisted above. Failure to deliver the email
+        // must not leak into the HTTP response — user creation already
+        // committed — so we log and swallow transport errors.
+        try
+        {
+            var verifyUrl = BuildVerificationUrl(config, verificationToken);
+            var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl);
+            await emailService.SendAsync(message);
+        }
+        catch (Exception ex)
+        {
+            var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+            logger.LogError(ex, "Failed to deliver verification email to {Email}", user.Email);
+        }
+
         return Results.Created($"/api/admin/users/{user.Id}",
             new RegisterResponse(user.Id, "Registration successful. Please verify your email."));
     }
@@ -66,11 +106,49 @@ public static class AuthEndpoints
         return Results.Ok(new { message = "Email verified successfully" });
     }
 
-    public static Task<IResult> ResendVerification(
+    public static async Task<IResult> ResendVerification(
         ResendVerificationRequest req,
-        IUserRepository userRepo)
+        IUserRepository userRepo,
+        [FromServices] IEmailService emailService,
+        [FromServices] IConfiguration config,
+        [FromServices] ILoggerFactory loggerFactory)
     {
-        return Task.FromResult(Results.Ok(new { message = "If the email exists, a verification link has been sent" }));
+        // Anti-enumeration: the response is identical whether the user
+        // exists, is already verified, or does not exist. We burn a small
+        // constant amount of work before returning so naive timing attacks
+        // cannot distinguish the branches.
+        const string CannedResponseMessage =
+            "If the email exists, a verification link has been sent";
+
+        if (string.IsNullOrWhiteSpace(req.Email))
+            return Results.Ok(new { message = CannedResponseMessage });
+
+        var email = req.Email.ToLowerInvariant();
+        var user = await userRepo.GetByEmailAsync(email);
+
+        if (user is not null && !user.EmailVerified)
+        {
+            // Rotate the verification token so stolen old-mail tokens are
+            // invalidated by this re-issue.
+            var verificationToken = Guid.NewGuid().ToString("N");
+            user.EmailVerificationTokenHash = HashToken(verificationToken);
+            user.EmailVerificationExpiresAt = DateTime.UtcNow.AddHours(24);
+            await userRepo.UpdateAsync(user);
+
+            try
+            {
+                var verifyUrl = BuildVerificationUrl(config, verificationToken);
+                var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl);
+                await emailService.SendAsync(message);
+            }
+            catch (Exception ex)
+            {
+                var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+                logger.LogError(ex, "Failed to deliver verification email to {Email}", user.Email);
+            }
+        }
+
+        return Results.Ok(new { message = CannedResponseMessage });
     }
 
     public static async Task<IResult> Login(
@@ -195,16 +273,48 @@ public static class AuthEndpoints
         return Results.Ok(new { message = "Logged out" });
     }
 
-    public static Task<IResult> PasswordResetRequest(
+    public static async Task<IResult> PasswordResetRequest(
         PasswordResetRequestDto req,
         IPasswordResetRepository resetRepo,
-        IUserRepository userRepo)
+        IUserRepository userRepo,
+        [FromServices] IEmailService emailService,
+        [FromServices] IConfiguration config,
+        [FromServices] ILoggerFactory loggerFactory)
     {
         if (string.IsNullOrWhiteSpace(req.Email))
-            return Task.FromResult(Results.BadRequest(new { error = "Email is required" }));
+            return Results.BadRequest(new { error = "Email is required" });
+
+        const string CannedResponseMessage =
+            "If the email exists, a reset link has been sent";
+
+        var email = req.Email.ToLowerInvariant();
+        var user = await userRepo.GetByEmailAsync(email);
+
+        if (user is not null)
+        {
+            // 256 bits of entropy — far more than a GUID; matches Story 18-6
+            // spec and the deleted TS implementation.
+            var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+            var tokenHash = HashToken(rawToken);
+            var expiresAt = DateTime.UtcNow.AddHours(1);
+
+            await resetRepo.CreateAsync(user.Id, tokenHash, expiresAt);
+
+            try
+            {
+                var resetUrl = BuildResetUrl(config, rawToken);
+                var message = EmailTemplates.PasswordResetEmail(user.Email, resetUrl);
+                await emailService.SendAsync(message);
+            }
+            catch (Exception ex)
+            {
+                var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+                logger.LogError(ex, "Failed to deliver reset email to {Email}", user.Email);
+            }
+        }
 
         // Anti-enumeration: return the same response whether the email exists or not
-        return Task.FromResult(Results.Ok(new { message = "If the email exists, a reset link has been sent" }));
+        return Results.Ok(new { message = CannedResponseMessage });
     }
 
     public static async Task<IResult> PasswordResetConfirm(
