@@ -73,6 +73,35 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Intelligence sidecar (TypeScript Fastify bridge to @tamma/intelligence)
+  #
+  # The C# API delegates its 30 /api/kb/* knowledge-base endpoints here over
+  # HTTP instead of porting the entire vector-DB / RAG / MCP stack to C#.
+  # Stateless except for the vector-store client configured via env.
+  # ---------------------------------------------------------------------------
+  intelligence-server:
+    build:
+      context: ..
+      dockerfile: packages/intelligence-server/Dockerfile
+    restart: unless-stopped
+    environment:
+      INTELLIGENCE_PORT: "4100"
+      INTELLIGENCE_HOST: "0.0.0.0"
+      CHROMADB_URL: http://chromadb:8000
+      LOG_LEVEL: ${INTELLIGENCE_LOG_LEVEL:-info}
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4100/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # ELSA .NET Workflow Engine
   # ---------------------------------------------------------------------------
   elsa-server:
@@ -146,6 +175,8 @@ services:
       GitHub__OAuthClientSecret: ${GITHUB_OAUTH_CLIENT_SECRET:-}
       Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
       ChromaDb__Url: http://chromadb:8000
+      IntelligenceServer__Url: http://intelligence-server:4100
+      IntelligenceServer__TimeoutSeconds: "10"
       OpenSearch__Url: ${OPENSEARCH_URL:-http://opensearch:9200}
       OpenSearch__Enabled: ${OPENSEARCH_ENABLED:-true}
       OpenSearch__IndexPrefix: tamma-api
@@ -154,6 +185,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      intelligence-server:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
       interval: 15s
