@@ -18,6 +18,11 @@ public static class ConventionTemplates
     // Do not edit the body text without a strong reason; LLM behaviour
     // depends on exact wording.
     //
+    // Key naming mirrors the TS source: bare language keys (csharp, rust,
+    // go, java) even though the bodies mention .NET, cargo, goroutines,
+    // Spring Boot — the first port added framework suffixes which diverged
+    // from the TS contract, so those were renamed back.
+    //
     // NOTE: The private template fields MUST be declared above the public
     // `All` / `ByKey` aggregates below — C# runs field initializers in
     // declaration order, so if the aggregates came first they would see
@@ -113,6 +118,98 @@ public static class ConventionTemplates
 ## Date/Time
 - dayjs with UTC plugin; always ISO 8601 with millisecond precision");
 
+    private static readonly ConventionTemplate TypescriptReactNative = new(
+        Key: "typescript-react-native",
+        Name: "TypeScript + React Native/Expo",
+        Description: "TypeScript + React Native with Expo SDK, navigation, native modules",
+        Conventions: @"# TypeScript + React Native/Expo Conventions
+
+## Framework
+- Expo SDK (latest) with expo-router for file-based navigation
+- TypeScript strict mode; .tsx for components, .ts for utilities
+- Use Expo modules first; eject to bare workflow only when truly needed
+
+## Components & Navigation
+- Functional components with hooks; no class components
+- expo-router with file-based routing in app/ directory
+- Use Stack, Tabs, and Drawer layouts from expo-router
+- Platform-specific files: Component.ios.tsx / Component.android.tsx when needed
+
+## Styling
+- StyleSheet.create() for all styles — never inline style objects
+- Use platform-specific styling via Platform.select() or Platform.OS checks
+- Responsive design: use useWindowDimensions, percentage-based layouts, or flexbox
+- No web CSS libraries; use react-native compatible styling only
+
+## State & Data
+- React Query (TanStack Query) for server state with offline persistence
+- Zustand or useReducer for complex client state
+- AsyncStorage for simple key-value persistence; expo-secure-store for secrets
+- Never store sensitive data in plain AsyncStorage
+
+## Testing
+- Jest with @testing-library/react-native
+- Test component behavior and accessibility
+- Use detox for E2E testing on real devices/simulators
+- Mock native modules in jest.setup.ts
+
+## Performance
+- Use FlatList/FlashList for long lists — never ScrollView with many children
+- Memoize expensive renders with React.memo and useMemo
+- Use Hermes engine (default with Expo)
+- Optimize images: use expo-image, proper sizing, caching
+
+## Error Handling
+- Global error boundary for uncaught render errors
+- Structured error handling for API calls with retry logic
+- Use Sentry or Bugsnag for crash reporting");
+
+    private static readonly ConventionTemplate Python = new(
+        Key: "python",
+        Name: "Python 3.11+",
+        Description: "Python 3.11+ with type hints, pytest, ruff, black, asyncio",
+        Conventions: @"# Python Conventions
+
+## Language
+- Python 3.11+ required; use latest language features (match/case, ExceptionGroup, tomllib)
+- Type hints on ALL function signatures (params and return types)
+- Use from __future__ import annotations for forward references
+
+## Code Style
+- Formatter: black (line length 88); Linter: ruff
+- Files: snake_case.py; Classes: PascalCase; Functions/vars: snake_case; Constants: SCREAMING_SNAKE_CASE
+- Docstrings: Google style on all public functions, classes, and modules
+- Prefer dataclasses or Pydantic models over plain dicts for structured data
+- Use pathlib.Path over os.path; use f-strings over .format()
+
+## Async
+- asyncio for I/O-bound concurrency; prefer async def over threading
+- Use asyncio.gather() for concurrent tasks; asyncio.TaskGroup for structured concurrency
+- Use async context managers (async with) for resource management
+- Never mix sync and async code without explicit bridge (asyncio.to_thread)
+
+## Error Handling
+- Custom exception hierarchy inheriting from a base project exception
+- Use specific exception types; never bare except:
+- Context managers (with statement) for resource cleanup
+- Logging with structlog or stdlib logging; never print() in production
+
+## Testing
+- pytest with fixtures; colocated tests/ directory or test_ prefix files
+- pytest-asyncio for async tests; pytest-cov for coverage
+- Use factories (factory_boy) or fixtures for test data
+- Mock external services with responses or aioresponses libraries
+- Coverage target: 80%+ line coverage
+
+## Dependencies
+- pyproject.toml for project config; uv or pip-tools for dependency management
+- Pin all dependencies; use virtual environments always
+- Separate dev dependencies from production
+
+## Imports
+- Order: 1) stdlib 2) third-party 3) local; one blank line between groups
+- Use absolute imports; avoid wildcard imports (from x import *)");
+
     private static readonly ConventionTemplate PythonFastApi = new(
         Key: "python-fastapi",
         Name: "Python + FastAPI",
@@ -203,8 +300,8 @@ public static class ConventionTemplates
 - Management commands for admin operations
 - Custom middleware for request logging, performance monitoring");
 
-    private static readonly ConventionTemplate CsharpAspnet = new(
-        Key: "csharp-aspnet",
+    private static readonly ConventionTemplate Csharp = new(
+        Key: "csharp",
         Name: "C# .NET 8+",
         Description: "C# 12 with .NET 8+, records, pattern matching, async/await, xUnit, EF Core",
         Conventions: @"# C# .NET Conventions
@@ -252,8 +349,8 @@ public static class ConventionTemplates
 - Options pattern (IOptions<T>) for configuration
 - Minimal APIs for simple endpoints; controllers for complex domains");
 
-    private static readonly ConventionTemplate RustActix = new(
-        Key: "rust-actix",
+    private static readonly ConventionTemplate Rust = new(
+        Key: "rust",
         Name: "Rust",
         Description: "Rust with cargo, clippy, thiserror/anyhow error handling, async with tokio",
         Conventions: @"# Rust Conventions
@@ -299,8 +396,8 @@ public static class ConventionTemplates
 - Feature flags for optional functionality
 - Workspace (Cargo.toml) for multi-crate projects");
 
-    private static readonly ConventionTemplate GoStdlib = new(
-        Key: "go-stdlib",
+    private static readonly ConventionTemplate Go = new(
+        Key: "go",
         Name: "Go 1.21+",
         Description: "Go 1.21+ with modules, error handling, goroutines, standard library",
         Conventions: @"# Go Conventions
@@ -346,8 +443,8 @@ public static class ConventionTemplates
 - log/slog (stdlib) for structured logging; never fmt.Println in production
 - Log at appropriate levels: Debug, Info, Warn, Error");
 
-    private static readonly ConventionTemplate JavaSpring = new(
-        Key: "java-spring",
+    private static readonly ConventionTemplate Java = new(
+        Key: "java",
         Name: "Java 21+",
         Description: "Java 21+ with records, sealed classes, Spring Boot 3, JUnit 5, Maven/Gradle",
         Conventions: @"# Java Conventions
@@ -390,6 +487,283 @@ public static class ConventionTemplates
 - Multi-module projects for large codebases
 - Dependency management via BOM (Spring Boot parent POM)
 - CI: build, test, SpotBugs/PMD static analysis, OWASP dependency check");
+
+    private static readonly ConventionTemplate Kotlin = new(
+        Key: "kotlin",
+        Name: "Kotlin",
+        Description: "Kotlin with coroutines, Ktor/Spring, JUnit 5, idiomatic patterns",
+        Conventions: @"# Kotlin Conventions
+
+## Language
+- Kotlin 1.9+; use data classes, sealed classes, extension functions idiomatically
+- Prefer val over var; prefer immutable collections (listOf, mapOf)
+- Use null safety: avoid !!, use ?.let, ?:, and safe casts (as?)
+- Scope functions: let for null checks, apply for object configuration, run for transformations
+- Use when expressions for exhaustive matching on sealed hierarchies
+
+## Framework
+- Ktor or Spring Boot 3 (Kotlin-first with coroutines support)
+- Coroutines for all async operations; structured concurrency with coroutineScope
+- Use Flow for reactive streams; suspend functions for one-shot async operations
+- Dependency injection: Koin (lightweight) or Spring DI
+
+## Code Style
+- Kotlin Coding Conventions (official); ktlint or detekt for linting
+- Files: PascalCase.kt for single class, camelCase.kt for top-level functions
+- Classes: PascalCase; functions/properties: camelCase; constants: SCREAMING_SNAKE_CASE
+- Extension functions in separate files grouped by receiver type
+- Use named arguments for functions with 3+ parameters
+
+## Error Handling
+- Result<T> for operations that may fail; runCatching for exception wrapping
+- Custom sealed class hierarchies for domain errors
+- Never throw exceptions for expected control flow
+- CoroutineExceptionHandler for top-level coroutine error handling
+
+## Testing
+- JUnit 5 with kotlin.test assertions
+- MockK for mocking (Kotlin-native); Kotest for property-based testing
+- Use runTest for coroutine tests; TestDispatcher for time control
+- Test naming: `should do X when Y` (backtick function names)
+
+## Database
+- Exposed (Kotlin SQL framework) or Spring Data JPA
+- Flyway for migrations; connection pooling with HikariCP");
+
+    private static readonly ConventionTemplate Swift = new(
+        Key: "swift",
+        Name: "Swift 5.9+ (SwiftUI)",
+        Description: "Swift 5.9+ with SwiftUI, async/await, Combine, XCTest, SPM",
+        Conventions: @"# Swift (SwiftUI) Conventions
+
+## Language
+- Swift 5.9+ with strict concurrency checking enabled
+- Use async/await for all asynchronous operations
+- Prefer value types (struct, enum) over reference types (class) unless identity needed
+- Use Swift's result builders for declarative APIs
+
+## SwiftUI
+- Declarative UI with SwiftUI Views; one View per file
+- MVVM architecture: View observes @Observable ViewModel
+- Use @State for local view state; @Binding for child → parent communication
+- @Environment for app-wide dependencies (injected at root)
+- Extract reusable view components; keep View body under 30 lines
+
+## Code Style
+- Swift API Design Guidelines (official); SwiftLint for enforcement
+- Types: PascalCase; functions/properties: camelCase; protocols: PascalCase (-able, -ible suffix)
+- Use trailing closures; omit argument labels where natural
+- Prefer guard for early exits over nested if-let
+- Mark classes final by default; use access control (private, internal, public) explicitly
+
+## Error Handling
+- Use Swift's typed throws (throws(MyError)) when available
+- Define error enums conforming to Error and LocalizedError
+- Result<Success, Failure> for synchronous operations that can fail
+- Never force-unwrap (!) in production code; use guard let, if let, or nil coalescing
+
+## Data & Networking
+- Codable for JSON serialization; custom CodingKeys when API names differ
+- URLSession with async/await for networking
+- SwiftData or Core Data for persistence; UserDefaults for simple settings
+- Keychain for secrets (use a wrapper library)
+
+## Testing
+- XCTest framework; test naming: test_method_condition_expectedResult
+- Use @MainActor for tests touching UI state
+- Mock protocols for dependency injection in tests
+- XCUITest for UI tests; snapshot testing for layout verification
+
+## Package Management
+- Swift Package Manager (SPM) for dependencies
+- Minimal dependencies; prefer Apple frameworks when sufficient");
+
+    private static readonly ConventionTemplate SwiftUikit = new(
+        Key: "swift-uikit",
+        Name: "Swift + UIKit",
+        Description: "Swift + UIKit with MVVM, delegates, programmatic UI or Storyboard",
+        Conventions: @"# Swift + UIKit Conventions
+
+## Architecture
+- MVVM pattern: ViewController → ViewModel → Model/Service
+- Coordinator pattern for navigation flow management
+- Protocol-oriented design for dependency injection and testability
+- Separate networking, persistence, and UI into distinct layers
+
+## UIKit Patterns
+- Prefer programmatic UI over Storyboards for better merge conflict handling
+- Use Auto Layout with NSLayoutConstraint or SnapKit
+- UITableView/UICollectionView with DiffableDataSource for list management
+- Custom UIView subclasses for reusable components; override layoutSubviews sparingly
+
+## Code Style
+- Swift API Design Guidelines; SwiftLint for enforcement
+- Types: PascalCase; functions/properties: camelCase
+- ViewControllers: {Feature}ViewController; Views: {Feature}View; Cells: {Feature}Cell
+- Delegate/DataSource protocols in extensions on the ViewController
+- Mark sections with // MARK: - for organization
+
+## Memory Management
+- Use [weak self] in closures that capture self to prevent retain cycles
+- Prefer value types; use class only for UIKit subclasses and reference identity
+- Invalidate timers and remove observers in deinit
+- Use Instruments (Leaks, Allocations) to verify memory behavior
+
+## Async & Networking
+- async/await for modern concurrency; Combine for reactive streams
+- URLSession with async/await; Alamofire only if justified
+- DispatchQueue.main.async for UI updates from background threads
+- Operation/OperationQueue for complex task dependencies
+
+## Testing
+- XCTest for unit tests; protocol mocks for DI
+- Separate UI logic into ViewModels for testability
+- XCUITest for integration/UI tests
+- Test ViewModels independently from ViewControllers");
+
+    private static readonly ConventionTemplate DartFlutter = new(
+        Key: "dart-flutter",
+        Name: "Dart 3 + Flutter",
+        Description: "Dart 3 + Flutter with Riverpod/Bloc, widget testing, null safety",
+        Conventions: @"# Dart + Flutter Conventions
+
+## Language
+- Dart 3 with sound null safety; use records, patterns, sealed classes
+- Prefer final for local variables; const for compile-time constants
+- Use named parameters for functions with 2+ optional parameters
+- Prefer expression bodies for simple one-line functions/getters
+
+## Flutter Architecture
+- Feature-first folder structure: lib/features/{feature}/{data,domain,presentation}/
+- State management: Riverpod (preferred) or Bloc/Cubit
+- Use go_router for declarative routing
+- Separate business logic from widgets; keep build() methods lean
+
+## Widgets
+- Prefer StatelessWidget; use StatefulWidget only when widget lifecycle is needed
+- Extract widgets into separate files when they exceed ~50 lines
+- Use const constructors wherever possible for performance
+- Key parameter on list items and conditionally rendered widgets
+
+## Code Style
+- dart format for formatting; dart analyze with strict rules
+- Files: snake_case.dart; Classes: PascalCase; functions/vars: camelCase; constants: camelCase
+- Private members: _ prefix; library-private: no prefix with part/part of
+- Effective Dart guidelines for documentation comments (///)
+
+## Error Handling
+- Custom exception classes for domain errors; use sealed classes for error types
+- try/catch at service boundaries; propagate typed errors to UI
+- Use Either<Failure, Success> pattern (from dartz/fpdart) for functional error handling
+- Never swallow exceptions silently
+
+## Testing
+- widget tests with flutter_test (WidgetTester, pumpWidget, find.*)
+- Unit tests for services, repositories, and state management
+- mockito for mocking; mocktail as alternative
+- Golden tests for visual regression; integration_test for E2E
+- Test naming: test('should do X when Y')
+
+## Performance
+- Use const widgets; avoid unnecessary rebuilds
+- ListView.builder for long lists; never build all items eagerly
+- Optimize images: cached_network_image, proper sizing
+- Profile with Flutter DevTools; check for jank in release mode");
+
+    private static readonly ConventionTemplate C = new(
+        Key: "c",
+        Name: "C (C11/C17)",
+        Description: "C11/C17 with manual memory management, valgrind, CMake, assert",
+        Conventions: @"# C Conventions
+
+## Language
+- C11 or C17 standard; compile with -std=c17 -Wall -Wextra -Werror -pedantic
+- Use stdint.h fixed-width types (uint32_t, int64_t) over plain int for sizes
+- Use stdbool.h for bool type; use stddef.h for size_t, NULL
+- Prefer stack allocation; heap allocation only when size is dynamic or lifetime exceeds scope
+
+## Memory Management
+- Every malloc/calloc MUST have a corresponding free; document ownership in comments
+- Check return value of malloc (never assume success)
+- Set pointers to NULL after free to prevent use-after-free
+- Use valgrind (memcheck) and AddressSanitizer (-fsanitize=address) in CI
+- Prefer arena/pool allocators for groups of related allocations
+
+## Code Style
+- Files: snake_case.c/.h; Functions: snake_case; Types: PascalCase_t or snake_case_t
+- Macros: SCREAMING_SNAKE_CASE; prefix with project name to avoid collisions
+- Header guards: #ifndef PROJECT_MODULE_H / #define PROJECT_MODULE_H / #endif
+- One function per logical operation; keep functions under 50 lines when practical
+- Declare variables at the top of the block or at point of first use (C99+)
+
+## Error Handling
+- Return error codes (int/enum); 0 for success, negative for errors
+- Use errno for system call errors; document error codes in header comments
+- assert() for programming errors (invariants); return codes for runtime errors
+- Goto for cleanup patterns (goto cleanup; with labels at function end)
+
+## Build System
+- CMake 3.20+ as build system; define targets with target_* functions
+- Separate public headers (include/) from implementation (src/)
+- Static analysis with clang-tidy; compile with both GCC and Clang
+
+## Testing
+- Unity or CMocka for unit testing; CTest for test orchestration
+- Test each module independently; mock external dependencies
+- Fuzz testing with AFL or libFuzzer for input parsing code
+
+## Security
+- Use snprintf over sprintf; strncpy over strcpy; bounds-check all array access
+- Validate all external input (sizes, indices, format strings)
+- Compile with stack protection (-fstack-protector-strong)");
+
+    private static readonly ConventionTemplate Cpp = new(
+        Key: "cpp",
+        Name: "C++ (C++20)",
+        Description: "C++20 with RAII, smart pointers, STL, CMake, Google Test",
+        Conventions: @"# C++ Conventions
+
+## Language
+- C++20 standard; use concepts, ranges, std::format, coroutines where applicable
+- RAII for all resource management (files, memory, locks, sockets)
+- Smart pointers: unique_ptr for ownership, shared_ptr for shared ownership, never raw new/delete
+- Prefer value semantics; move semantics for expensive-to-copy types
+- Use std::optional, std::variant, std::expected for nullable/sum types
+
+## Code Style
+- Google C++ Style Guide or C++ Core Guidelines
+- Files: snake_case.cpp/.h or .cc/.hpp; Classes: PascalCase; Functions: PascalCase or camelCase
+- Namespaces: lowercase (project::module); avoid using namespace std; in headers
+- Use constexpr and consteval for compile-time computation
+- Prefer auto for complex types; explicit types in function signatures
+
+## STL & Libraries
+- Use STL containers (vector, unordered_map, string_view) as defaults
+- ranges and views for lazy, composable data pipelines
+- std::span for non-owning array references
+- Prefer algorithms (std::sort, std::find_if) over raw loops
+
+## Error Handling
+- Exceptions for exceptional situations; std::expected<T, E> for expected failures
+- noexcept on functions that cannot throw (destructors, move operations)
+- Never throw in destructors; catch exceptions at module boundaries
+- Custom exception hierarchy inheriting from std::runtime_error
+
+## Build System
+- CMake 3.20+ with modern target-based approach (target_compile_features, target_link_libraries)
+- vcpkg or Conan for dependency management
+- Compile with -Wall -Wextra -Werror; enable sanitizers in debug builds
+
+## Testing
+- Google Test (gtest) + Google Mock (gmock) for unit testing
+- CTest for test orchestration; benchmarks with Google Benchmark
+- Test public interfaces; mock at interface boundaries
+- Fuzz testing with libFuzzer for parsers and serializers
+
+## Performance
+- Profile before optimizing (perf, Instruments, VTune)
+- Cache-friendly data layout (SoA over AoS when appropriate)
+- Avoid premature virtual dispatch; prefer templates for static polymorphism");
 
     private static readonly ConventionTemplate RubyRails = new(
         Key: "ruby-rails",
@@ -439,6 +813,57 @@ public static class ConventionTemplates
 - Brakeman for static security analysis
 - Use Rails security defaults; parameterize all user input
 - Credentials: Rails encrypted credentials or environment variables");
+
+    private static readonly ConventionTemplate PhpLaravel = new(
+        Key: "php-laravel",
+        Name: "PHP 8.2+ + Laravel",
+        Description: "PHP 8.2+ with Laravel, Eloquent ORM, PHPUnit/Pest, PSR-12 standards",
+        Conventions: @"# PHP + Laravel Conventions
+
+## Language
+- PHP 8.2+ with typed properties, enums, readonly classes, fibers
+- Strict types: declare(strict_types=1); in every file
+- Use union types, intersection types, and null-safe operator (?->)
+- Prefer readonly properties and constructor promotion
+
+## Framework
+- Laravel 11+ with service container, facades, and middleware
+- Follow Laravel directory conventions (app/Models, app/Http/Controllers, etc.)
+- Use Form Requests for validation; Resources for API responses
+- Artisan commands for admin operations; Queues for background work
+
+## Eloquent ORM
+- Models in app/Models; one model per table
+- Use relationships, scopes, casts, accessors/mutators
+- Eager load relationships (with()) to prevent N+1
+- Database migrations: always reversible; use schema builder
+- Seeders and factories for test data
+
+## Code Style
+- PSR-12 coding standard; Laravel Pint for formatting
+- PHPStan or Larastan at level 8+ for static analysis
+- Classes: PascalCase; methods/vars: camelCase; constants: SCREAMING_SNAKE_CASE
+- Prefer dependency injection over facades in classes
+- Single-action controllers for focused endpoints (InvokableController)
+
+## Testing
+- Pest (preferred) or PHPUnit for testing
+- Feature tests for HTTP endpoints; Unit tests for isolated classes
+- Database testing with RefreshDatabase trait
+- Mock external services; use Http::fake() for API mocking
+- Test naming: it('should create a user with valid data')
+
+## Security
+- Validate ALL input via Form Requests; never trust user data
+- Use Laravel's built-in CSRF, XSS, SQL injection protections
+- Encrypt sensitive data; use Laravel's encrypted attributes
+- Rate limiting on authentication and API endpoints
+
+## Architecture
+- Service classes for business logic (not in controllers)
+- Repository pattern optional (Eloquent is already repository-like)
+- Events and listeners for decoupled side effects
+- Jobs for async processing; Horizon for queue monitoring");
 
     private static readonly ConventionTemplate ElixirPhoenix = new(
         Key: "elixir-phoenix",
@@ -492,25 +917,86 @@ public static class ConventionTemplates
 - Config: config/runtime.exs for runtime configuration
 - Health check endpoint; telemetry for observability");
 
+    private static readonly ConventionTemplate Scala = new(
+        Key: "scala",
+        Name: "Scala 3",
+        Description: "Scala 3 with ZIO/Cats Effect, sbt, ScalaTest, functional programming",
+        Conventions: @"# Scala 3 Conventions
+
+## Language
+- Scala 3 with new syntax (indentation-based, enum, extension methods, given/using)
+- Prefer immutable data (val, case class, sealed trait hierarchies)
+- Use opaque types for domain primitives (UserId, Email)
+- Union types (A | B) and intersection types (A & B) for precise modeling
+- Prefer match expressions over if/else chains for ADT handling
+
+## Functional Programming
+- ZIO or Cats Effect for pure functional I/O and effect management
+- Use for-comprehensions for sequential effect composition
+- Prefer type classes over inheritance for ad-hoc polymorphism
+- Avoid side effects: IO/Task for all external interactions
+- Use refined types or smart constructors for validated data
+
+## Code Style
+- scalafmt for formatting; scalafix for linting and rewrites
+- Files: PascalCase.scala matching primary type; packages: lowercase dot-separated
+- Types: PascalCase; methods/vals: camelCase; constants: PascalCase
+- Prefer given instances over implicit vals; using clauses over implicit parameters
+- Extension methods over implicit classes
+
+## Error Handling
+- Typed errors: ZIO[R, E, A] or EitherT/IO with custom error ADTs
+- Never throw exceptions in pure code; use Either or ZIO error channel
+- Accumulate errors with Validated (Cats) or ZIO.validate for parallel validation
+- mapError/catchAll for error transformation at boundaries
+
+## Testing
+- ScalaTest (FlatSpec/WordSpec style) or ZIO Test
+- Mocking with ZIO mock layers or ScalaMock
+- Property-based testing with ScalaCheck or zio-test check
+- Test naming: ""should produce X when given Y""
+- In-memory test implementations over mocking when practical
+
+## Build
+- sbt with multi-project builds; dependencies in build.sbt
+- Publish with sbt-ci-release; cross-compile for multiple Scala versions
+- Wartremover or Scalafix for additional compile-time checks
+
+## Architecture
+- Layered ZIO: Repositories → Services → API (with ZLayer for DI)
+- Tapir for type-safe HTTP endpoint definitions
+- Circe or zio-json for JSON serialization");
+
     // ────────────────────────────────────────────────────────────────────
     // Aggregates
     // ────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// All shipped templates, in a stable listing order.
+    /// All shipped templates, in a stable listing order (matches the TS
+    /// source insertion order from the deleted packages/api file).
     /// </summary>
     public static IReadOnlyList<ConventionTemplate> All { get; } = new ConventionTemplate[]
     {
-        TypescriptReact,
         TypescriptNode,
-        PythonFastApi,
+        TypescriptReact,
+        TypescriptReactNative,
+        Python,
         PythonDjango,
-        CsharpAspnet,
-        RustActix,
-        GoStdlib,
-        JavaSpring,
+        PythonFastApi,
+        Go,
+        Rust,
+        Java,
+        Kotlin,
+        Csharp,
+        Swift,
+        SwiftUikit,
+        DartFlutter,
+        C,
+        Cpp,
         RubyRails,
-        ElixirPhoenix
+        PhpLaravel,
+        ElixirPhoenix,
+        Scala,
     };
 
     private static readonly IReadOnlyDictionary<string, ConventionTemplate> ByKey =
