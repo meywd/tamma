@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Logging;
 using Tamma.Api.Services.GitHub;
 
 namespace Tamma.Api.Endpoints;
@@ -151,7 +152,7 @@ public static class GitHubEndpoints
             var result = await router.HandleWebhookAsync(eventType, payload);
             logger.LogInformation(
                 "Webhook {Event} (action={Action}) processed, skipped={Skipped}, taskId={TaskId}",
-                result.EventType, result.Action, result.Skipped, result.TaskId);
+                LogSanitizer.Clean(result.EventType), LogSanitizer.Clean(result.Action), result.Skipped, result.TaskId);
 
             // Events queued for async processing advertise queued:true + taskId
             // so the webhook sender can correlate later observability.
@@ -178,7 +179,7 @@ public static class GitHubEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Webhook {Event} handler threw", eventType);
+            logger.LogError(ex, "Webhook {Event} handler threw", LogSanitizer.Clean(eventType));
             return Results.Problem(
                 "Internal error processing webhook",
                 statusCode: StatusCodes.Status500InternalServerError);

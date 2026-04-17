@@ -130,7 +130,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
             default:
                 _logger.LogDebug(
                     "Webhook event {Event} (action={Action}) skipped (not handled)",
-                    eventType, action);
+                    Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
                 return new WebhookResult(eventType, action, Skipped: true);
         }
     }
@@ -148,7 +148,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         {
             _logger.LogDebug(
                 "Webhook event {Event} (action={Action}) skipped: task queue not registered",
-                eventType, action);
+                Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
             return new WebhookResult(eventType, action, Skipped: true);
         }
 
@@ -180,7 +180,8 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
         _logger.LogInformation(
             "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId})",
-            eventType, action, task.Id, installationId, tenantId);
+            Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action),
+            task.Id, installationId, tenantId);
 
         return new WebhookResult(eventType, action, Skipped: false, TaskId: task.Id);
     }

@@ -1,6 +1,7 @@
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
+using Tamma.Api.Logging;
 
 namespace Tamma.Api.Services.Email;
 
@@ -75,13 +76,13 @@ public sealed class SmtpEmailService : IEmailService
             // log aggregators. Surface only the routing metadata.
             _logger.LogInformation(
                 "Email delivered via SMTP: to={To} subject={Subject} host={Host}",
-                message.To, message.Subject, host);
+                LogSanitizer.Clean(message.To), LogSanitizer.Clean(message.Subject), host);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
                 "SMTP send failed: to={To} subject={Subject} host={Host}",
-                message.To, message.Subject, host);
+                LogSanitizer.Clean(message.To), LogSanitizer.Clean(message.Subject), host);
             throw;
         }
     }
