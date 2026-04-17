@@ -111,14 +111,30 @@ public class OutboxSmtpSenderTests
             t => t.SendAsync(It.Is<EmailOutboxMessage>(m => m.Id == enq.Id), It.IsAny<CancellationToken>()),
             Times.Once);
 
+        // Row is deleted after successful delivery — audit trail lives in the
+        // event store (EMAIL.SENT.SUCCESS below), so recipient/subject/body
+        // don't persist in the outbox past the successful-send moment.
         var stored = await FreshOutbox().GetByIdAsync(enq.Id);
-        stored!.Status.Should().Be("sent");
-        stored.SentAt.Should().NotBeNull();
+        stored.Should().BeNull();
 
         var sent = await FreshEvents().QueryAsync(null, EmailEventTypes.Sent, null, 10);
         sent.Should().ContainSingle();
         JsonSerializer.Deserialize<Dictionary<string, string?>>(sent[0].Tags)!["txn_id"]
             .Should().Be(enq.Id.ToString());
+    }
+
+    [Test]
+    public async Task ProcessOnceAsync_SuccessfulDelivery_PurgesRowFromOutbox()
+    {
+        var enq = await FreshOutbox().EnqueueAsync(NewRow());
+        _transport.Setup(t => t.SendAsync(It.IsAny<EmailOutboxMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _sender.ProcessOnceAsync(CancellationToken.None);
+
+        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        stored.Should().BeNull("the sent row must be purged so the recipient " +
+                              "address and body don't linger beyond delivery");
     }
 
     [Test]

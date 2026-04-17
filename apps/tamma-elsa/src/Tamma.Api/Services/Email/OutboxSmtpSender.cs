@@ -132,6 +132,14 @@ public sealed class OutboxSmtpSender : BackgroundService
             await transport.SendAsync(claimed, ct);
             await outbox.MarkSentAsync(claimed.Id, ct);
             await EmitSentAsync(events, claimed);
+
+            // Purge the row now that the event store has the permanent audit.
+            // Recipient address, subject, and body don't need to persist beyond
+            // delivery — EMAIL.SENT.SUCCESS holds txn id + template metadata.
+            // Failed rows (MarkFailedAsync → Status=failed) are NOT deleted;
+            // operators need them for inspection.
+            await outbox.DeleteAsync(claimed.Id, ct);
+
             _logger.LogInformation(
                 "Email delivered txn={TxnId} host={Host}", claimed.Id, host);
             return true;

@@ -222,4 +222,23 @@ public class EmailOutboxRepositoryTests
     [Test]
     public async Task GetByIdAsync_ReturnsNull_ForUnknownId()
         => (await _repo.GetByIdAsync(Guid.NewGuid())).Should().BeNull();
+
+    // ── DeleteAsync ──
+
+    [Test]
+    public async Task DeleteAsync_RemovesRow()
+    {
+        var msg = await _repo.EnqueueAsync(NewMessage());
+
+        await _repo.DeleteAsync(msg.Id);
+
+        (await _repo.GetByIdAsync(msg.Id)).Should().BeNull();
+    }
+
+    [Test]
+    public async Task DeleteAsync_Noop_WhenRowMissing()
+    {
+        // No exception on deleting a non-existent id.
+        await _repo.DeleteAsync(Guid.NewGuid());
+    }
 }

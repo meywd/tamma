@@ -54,4 +54,13 @@ public interface IEmailOutboxRepository
 
     /// <summary>Load a single row by id, or <c>null</c> if missing.</summary>
     Task<EmailOutboxMessage?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Permanently remove a row. Used by the sender after a successful delivery
+    /// so recipient address, subject, and body don't linger in the DB — the
+    /// audit trail lives in the event store (<c>EMAIL.SENT.SUCCESS</c>)
+    /// which holds only txn id + template metadata. Failed rows are kept for
+    /// operator inspection and are NOT deleted by this method.
+    /// </summary>
+    Task DeleteAsync(Guid id, CancellationToken ct = default);
 }

@@ -132,4 +132,12 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
 
     public async Task<EmailOutboxMessage?> GetByIdAsync(Guid id, CancellationToken ct = default)
         => await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var row = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        if (row is null) return;
+        db.EmailOutbox.Remove(row);
+        await db.SaveChangesAsync(ct);
+    }
 }
