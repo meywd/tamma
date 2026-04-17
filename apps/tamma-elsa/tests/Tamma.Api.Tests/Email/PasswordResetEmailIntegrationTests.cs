@@ -59,7 +59,7 @@ public class PasswordResetEmailIntegrationTests
             password = "Sup3rSecure!",
         });
         register.StatusCode.Should().Be(HttpStatusCode.Created);
-        _inbox.SentMessages.Clear();
+        _inbox.Clear();
 
         var response = await client.PostAsJsonAsync("/api/v1/auth/password-reset/request", new
         {
@@ -85,7 +85,7 @@ public class PasswordResetEmailIntegrationTests
             email = "pwpersist@example.com",
             password = "Sup3rSecure!",
         });
-        _inbox.SentMessages.Clear();
+        _inbox.Clear();
 
         var response = await client.PostAsJsonAsync("/api/v1/auth/password-reset/request", new
         {
