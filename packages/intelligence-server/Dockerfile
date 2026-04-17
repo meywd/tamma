@@ -47,7 +47,10 @@ COPY packages/intelligence-server packages/intelligence-server
 # skip its pre-existing strict-mode build errors.
 RUN pnpm --filter @tamma/shared --filter @tamma/intelligence-server run build
 
-RUN pnpm prune --prod --filter @tamma/intelligence-server...
+# `pnpm prune --prod --filter` isn't supported in pnpm 9; re-install prod-only
+# deps for the sidecar subtree instead. This trims node_modules without
+# affecting the workspace symlinks the runtime image relies on.
+RUN pnpm install --prod --frozen-lockfile --filter @tamma/intelligence-server...
 
 # ---- Stage 3: Runtime -----------------------------------------------------
 FROM node:22-alpine AS runtime
