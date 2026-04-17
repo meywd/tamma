@@ -1,24 +1,27 @@
 namespace Tamma.Api.Services.Email;
 
 /// <summary>
-/// Abstraction over transactional email delivery. Register a single
-/// implementation per environment:
-/// <list type="bullet">
-///   <item><description><see cref="SmtpEmailService"/> — production / staging</description></item>
-///   <item><description><see cref="InMemoryEmailService"/> — local dev + tests</description></item>
-/// </list>
-/// The concrete choice lives behind the
-/// <c>AddEmailServices</c> composition-root extension so callers depend
-/// only on this interface.
+/// Transport-agnostic email delivery abstraction with a transaction-id return
+/// value for end-to-end correlation.
+///
+/// <para>
+/// Implementations (<see cref="SmtpEmailService"/>, <c>ResendEmailService</c>,
+/// <see cref="InMemoryEmailService"/>) are responsible for emitting an
+/// <see cref="EmailEventTypes.Queued"/> event for every accepted message so
+/// the event store is the authoritative record of "did we ever try to send
+/// this?". Transport success/failure surfaces as a later
+/// <see cref="EmailEventTypes.Sent"/> or <see cref="EmailEventTypes.Failed"/>
+/// event, emitted by the SMTP sender or the HTTP provider itself.
+/// </para>
 /// </summary>
 public interface IEmailService
 {
     /// <summary>
-    /// Deliver the email. Implementations should be idempotent-safe at the
-    /// caller level — callers are responsible for de-duplication if they
-    /// retry.
+    /// Accept <paramref name="message"/> for delivery. Returns the transaction
+    /// id (<c>Guid</c>) that correlates the event stream and any log lines the
+    /// caller writes. Implementations must <b>not</b> throw for transport
+    /// failures — those surface via the domain-event stream — but may still
+    /// throw for programmer errors like a null message.
     /// </summary>
-    /// <param name="message">The composed message.</param>
-    /// <param name="ct">Cancellation for the underlying network call.</param>
-    Task SendAsync(EmailMessage message, CancellationToken ct = default);
+    Task<Guid> SendAsync(EmailMessage message, CancellationToken ct = default);
 }

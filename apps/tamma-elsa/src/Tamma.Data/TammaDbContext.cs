@@ -45,6 +45,7 @@ public class TammaDbContext : DbContext
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
     public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
     public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
+    public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -400,6 +401,38 @@ public class TammaDbContext : DbContext
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+        });
+
+        // ── EmailOutboxMessage ──
+        // Store-and-forward outbox for the SMTP sender. The SMTP IEmailService
+        // enqueues here; OutboxSmtpSender polls, claims, delivers, and records
+        // the outcome. Resend provider does NOT use this table — it is an
+        // HTTP-synchronous path that writes straight to the event store.
+        //
+        // No query filter: the outbox is shared infrastructure. Tenant scoping
+        // is explicit via repository APIs, matching the QueuedTask pattern.
+        modelBuilder.Entity<EmailOutboxMessage>(entity =>
+        {
+            entity.ToTable("email_outbox");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Template).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.ToAddress).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.Subject).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.HtmlBody).IsRequired();
+            entity.Property(e => e.TextBody).IsRequired();
+            entity.Property(e => e.FromAddress).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.Property(e => e.MaxAttempts).HasDefaultValue(5);
+            entity.Property(e => e.NextAttemptAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Drives the sender's claim query: "next pending row due for send".
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+            // Tenant-scoped reporting.
+            entity.HasIndex(e => e.TenantId);
         });
     }
 
