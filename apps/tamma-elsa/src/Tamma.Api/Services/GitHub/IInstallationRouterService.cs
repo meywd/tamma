@@ -14,11 +14,15 @@ public sealed record CallbackResult(
 
 /// <summary>
 /// Result of dispatching a GitHub webhook payload to the appropriate handler.
+/// <see cref="TaskId"/> is populated when the dispatcher deferred the event to
+/// the task queue (push, issues, pull_request); null for inline-handled or
+/// skipped events.
 /// </summary>
 public sealed record WebhookResult(
     string EventType,
     string? Action,
-    bool Skipped);
+    bool Skipped,
+    Guid? TaskId = null);
 
 /// <summary>
 /// Orchestrates GitHub App installation lifecycle:

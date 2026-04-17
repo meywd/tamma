@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Tamma.Api.Services.TaskQueue;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -16,6 +17,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly IEventRepository _events;
     private readonly ITenantRepository _tenants;
     private readonly IUserRepository _users;
+    private readonly ITaskQueue? _taskQueue;
     private readonly ILogger<InstallationRouterService> _logger;
 
     public InstallationRouterService(
@@ -23,12 +25,14 @@ public sealed class InstallationRouterService : IInstallationRouterService
         IEventRepository events,
         ITenantRepository tenants,
         IUserRepository users,
-        ILogger<InstallationRouterService> logger)
+        ILogger<InstallationRouterService> logger,
+        ITaskQueue? taskQueue = null)
     {
         _installations = installations;
         _events = events;
         _tenants = tenants;
         _users = users;
+        _taskQueue = taskQueue;
         _logger = logger;
     }
 
@@ -116,12 +120,69 @@ public sealed class InstallationRouterService : IInstallationRouterService
             case "installation_repositories":
                 return await HandleInstallationRepositoriesEventAsync(payload, action);
 
+            // Deferred events — enqueue for async processing so the webhook
+            // handler can return quickly. Ported from the TS queueing path.
+            case "push":
+            case "issues":
+            case "pull_request":
+                return await EnqueueDeferredEventAsync(eventType, action, payload);
+
             default:
                 _logger.LogDebug(
                     "Webhook event {Event} (action={Action}) skipped (not handled)",
                     eventType, action);
                 return new WebhookResult(eventType, action, Skipped: true);
         }
+    }
+
+    /// <summary>
+    /// Push/issues/pull_request events are deferred to the task queue so the
+    /// webhook handler returns fast. When the task queue is not wired (tests
+    /// that only register the installation router) the event falls through to
+    /// <c>skipped = true</c> so old behaviour remains observable.
+    /// </summary>
+    private async Task<WebhookResult> EnqueueDeferredEventAsync(
+        string eventType, string? action, JsonElement payload)
+    {
+        if (_taskQueue is null)
+        {
+            _logger.LogDebug(
+                "Webhook event {Event} (action={Action}) skipped: task queue not registered",
+                eventType, action);
+            return new WebhookResult(eventType, action, Skipped: true);
+        }
+
+        long? installationId = null;
+        if (payload.TryGetProperty("installation", out var installationEl))
+        {
+            installationId = GetInstallationId(installationEl);
+        }
+
+        // Bind to the tenant that owns this installation (if any). Unknown
+        // installations are still enqueued with a null tenant — callers can
+        // decide at handler-time whether to drop them.
+        Guid? tenantId = null;
+        if (installationId is not null)
+        {
+            var install = await _installations.GetByInstallationIdAsync(installationId.Value);
+            tenantId = install?.TenantId;
+        }
+
+        var taskType = string.IsNullOrEmpty(action)
+            ? $"github.{eventType}"
+            : $"github.{eventType}.{action}";
+
+        var task = await _taskQueue.EnqueueAsync(
+            type: taskType,
+            payloadJson: payload.GetRawText(),
+            installationId: installationId,
+            tenantIdOverride: tenantId);
+
+        _logger.LogInformation(
+            "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId})",
+            eventType, action, task.Id, installationId, tenantId);
+
+        return new WebhookResult(eventType, action, Skipped: false, TaskId: task.Id);
     }
 
     private async Task<WebhookResult> HandleInstallationEventAsync(
