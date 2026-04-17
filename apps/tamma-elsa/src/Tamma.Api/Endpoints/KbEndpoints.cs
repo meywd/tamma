@@ -1,49 +1,204 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Dtos.KnowledgeBase;
+using Tamma.Api.Services.KnowledgeBase;
+
 namespace Tamma.Api.Endpoints;
 
+/// <summary>
+/// Minimal-API handlers for the 30 /api/kb/* routes.
+///
+/// <para>
+/// Each handler is a method-group-compatible delegate invoked by Program.cs'
+/// <c>MapGet/MapPost/...</c> calls. They take <see cref="IIntelligenceHttpClient"/>
+/// from DI and forward to the TS sidecar, returning the sidecar's response
+/// verbatim to the caller. This keeps Program.cs wiring unchanged — the only
+/// edit needed on the parent side is calling <c>AddKnowledgeBaseServices()</c>
+/// (see the extension class of the same name).
+/// </para>
+/// </summary>
 public static class KbEndpoints
 {
-    // Index endpoints (6)
-    public static Task<IResult> GetIndexStatus() => Stub(new { status = "idle", indexed = 0, pending = 0 });
-    public static Task<IResult> TriggerIndex() => Stub(new { message = "Indexing triggered (stub)" });
-    public static Task<IResult> GetIndexConfig() => Stub(new { configured = false });
-    public static Task<IResult> UpdateIndexConfig() => Stub(new { message = "Index config updated (stub)" });
-    public static Task<IResult> GetIndexStats() => Stub(new { documents = 0, chunks = 0, lastIndexed = (DateTime?)null });
-    public static Task<IResult> ClearIndex() => Stub(new { message = "Index cleared (stub)" });
+    // ── Index (6) ────────────────────────────────────────────────────────
 
-    // Vector DB endpoints (6)
-    public static Task<IResult> GetVectorDbStatus() => Stub(new { status = "not_configured" });
-    public static Task<IResult> SearchVectors() => Stub(new { results = Array.Empty<object>() });
-    public static Task<IResult> UpsertVectors() => Stub(new { message = "Vectors upserted (stub)", count = 0 });
-    public static Task<IResult> DeleteVectors() => Stub(new { message = "Vectors deleted (stub)" });
-    public static Task<IResult> GetVectorCollections() => Stub(Array.Empty<object>());
-    public static Task<IResult> GetVectorStats() => Stub(new { totalVectors = 0, dimensions = 0 });
+    public static async Task<IResult> GetIndexStatus(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetIndexStatusAsync(ct));
 
-    // RAG endpoints (4)
-    public static Task<IResult> GetRagConfig() => Stub(new { enabled = false });
-    public static Task<IResult> UpdateRagConfig() => Stub(new { message = "RAG config updated (stub)" });
-    public static Task<IResult> QueryRag() => Stub(new { answer = "", sources = Array.Empty<object>() });
-    public static Task<IResult> GetRagMetrics() => Stub(new { queries = 0, avgLatencyMs = 0 });
+    public static async Task<IResult> TriggerIndex(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] TriggerIndexRequest? body,
+        CancellationToken ct)
+        => Results.Ok(await client.TriggerIndexAsync(body, ct));
 
-    // MCP endpoints (8)
-    public static Task<IResult> ListMcpServers() => Stub(Array.Empty<object>());
-    public static Task<IResult> GetMcpServer(string id) => Stub(new { id, status = "not_found" });
-    public static Task<IResult> StartMcpServer(string id) => Stub(new { message = $"MCP server {id} start requested (stub)" });
-    public static Task<IResult> StopMcpServer(string id) => Stub(new { message = $"MCP server {id} stop requested (stub)" });
-    public static Task<IResult> GetMcpConfig() => Stub(new { servers = Array.Empty<object>() });
-    public static Task<IResult> UpdateMcpConfig() => Stub(new { message = "MCP config updated (stub)" });
-    public static Task<IResult> ListMcpTools() => Stub(Array.Empty<object>());
-    public static Task<IResult> InvokeMcpTool() => Stub(new { message = "Tool invoked (stub)" });
+    public static async Task<IResult> GetIndexConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetIndexConfigAsync(ct));
 
-    // Context endpoints (3)
-    public static Task<IResult> GetContextHistory() => Stub(new { history = Array.Empty<object>() });
-    public static Task<IResult> PostContextFeedback() => Stub(new { message = "Feedback recorded (stub)" });
-    public static Task<IResult> GetContextConfig() => Stub(new { maxTokens = 100000, strategy = "sliding_window" });
+    public static async Task<IResult> UpdateIndexConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] UpdateIndexConfigRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.UpdateIndexConfigAsync(body, ct));
 
-    // Analytics endpoints (3)
-    public static Task<IResult> GetKbAnalytics() => Stub(new { queries = 0, indexedDocs = 0, hitRate = 0.0 });
-    public static Task<IResult> GetKbUsage() => Stub(new { daily = Array.Empty<object>() });
-    public static Task<IResult> GetKbCosts() => Stub(new { totalCost = 0.0, breakdown = Array.Empty<object>() });
+    public static async Task<IResult> GetIndexStats(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetIndexStatsAsync(ct));
 
-    private static Task<IResult> Stub(object response) =>
-        Task.FromResult(Results.Ok(response));
+    public static async Task<IResult> ClearIndex(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.ClearIndexAsync(ct));
+
+    // ── Vector DB (6) ────────────────────────────────────────────────────
+
+    public static async Task<IResult> GetVectorDbStatus(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetVectorDbStatusAsync(ct));
+
+    public static async Task<IResult> SearchVectors(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] VectorSearchRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.SearchVectorsAsync(body, ct));
+
+    public static async Task<IResult> UpsertVectors(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] VectorUpsertRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.UpsertVectorsAsync(body, ct));
+
+    public static async Task<IResult> DeleteVectors(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] VectorDeleteRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.DeleteVectorsAsync(body, ct));
+
+    public static async Task<IResult> GetVectorCollections(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetVectorCollectionsAsync(ct));
+
+    public static async Task<IResult> GetVectorStats(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetVectorStatsAsync(ct));
+
+    // ── RAG (4) ──────────────────────────────────────────────────────────
+
+    public static async Task<IResult> GetRagConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetRagConfigAsync(ct));
+
+    public static async Task<IResult> UpdateRagConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] UpdateRagConfigRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.UpdateRagConfigAsync(body, ct));
+
+    public static async Task<IResult> QueryRag(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] RagQueryRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.QueryRagAsync(body, ct));
+
+    public static async Task<IResult> GetRagMetrics(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetRagMetricsAsync(ct));
+
+    // ── MCP (8) ──────────────────────────────────────────────────────────
+
+    public static async Task<IResult> ListMcpServers(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.ListMcpServersAsync(ct));
+
+    public static async Task<IResult> GetMcpServer(
+        [FromServices] IIntelligenceHttpClient client,
+        string id,
+        CancellationToken ct)
+        => Results.Ok(await client.GetMcpServerAsync(id, ct));
+
+    public static async Task<IResult> StartMcpServer(
+        [FromServices] IIntelligenceHttpClient client,
+        string id,
+        CancellationToken ct)
+        => Results.Ok(await client.StartMcpServerAsync(id, ct));
+
+    public static async Task<IResult> StopMcpServer(
+        [FromServices] IIntelligenceHttpClient client,
+        string id,
+        CancellationToken ct)
+        => Results.Ok(await client.StopMcpServerAsync(id, ct));
+
+    public static async Task<IResult> GetMcpConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetMcpConfigAsync(ct));
+
+    public static async Task<IResult> UpdateMcpConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] UpdateMcpConfigRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.UpdateMcpConfigAsync(body, ct));
+
+    public static async Task<IResult> ListMcpTools(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromQuery(Name = "serverName")] string? serverName,
+        CancellationToken ct)
+        => Results.Ok(await client.ListMcpToolsAsync(serverName, ct));
+
+    public static async Task<IResult> InvokeMcpTool(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] McpInvokeRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.InvokeMcpToolAsync(body, ct));
+
+    // ── Context (3) ──────────────────────────────────────────────────────
+
+    public static async Task<IResult> GetContextHistory(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromQuery(Name = "limit")] int? limit,
+        CancellationToken ct)
+        => Results.Ok(await client.GetContextHistoryAsync(limit, ct));
+
+    public static async Task<IResult> PostContextFeedback(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromBody] ContextFeedbackRequest body,
+        CancellationToken ct)
+        => Results.Ok(await client.PostContextFeedbackAsync(body, ct));
+
+    public static async Task<IResult> GetContextConfig(
+        [FromServices] IIntelligenceHttpClient client,
+        CancellationToken ct)
+        => Results.Ok(await client.GetContextConfigAsync(ct));
+
+    // ── Analytics (3) ────────────────────────────────────────────────────
+
+    public static async Task<IResult> GetKbAnalytics(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromQuery(Name = "start")] string? start,
+        [FromQuery(Name = "end")] string? end,
+        CancellationToken ct)
+        => Results.Ok(await client.GetAnalyticsAsync(start, end, ct));
+
+    public static async Task<IResult> GetKbUsage(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromQuery(Name = "start")] string? start,
+        [FromQuery(Name = "end")] string? end,
+        CancellationToken ct)
+        => Results.Ok(await client.GetUsageAsync(start, end, ct));
+
+    public static async Task<IResult> GetKbCosts(
+        [FromServices] IIntelligenceHttpClient client,
+        [FromQuery(Name = "start")] string? start,
+        [FromQuery(Name = "end")] string? end,
+        CancellationToken ct)
+        => Results.Ok(await client.GetCostsAsync(start, end, ct));
 }
