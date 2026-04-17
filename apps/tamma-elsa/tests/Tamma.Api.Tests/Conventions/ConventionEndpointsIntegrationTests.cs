@@ -9,21 +9,18 @@ namespace Tamma.Api.Tests.Conventions;
 [TestFixture]
 public class ConventionEndpointsIntegrationTests
 {
-    private ApiTestFixture _factory = null!;
     private HttpClient _client = null!;
 
     [OneTimeSetUp]
     public void OneTimeSetUp()
     {
-        _factory = new ApiTestFixture();
-        _client = _factory.CreateClient();
+        _client = ApiTestFixture.CreateClient();
     }
 
     [OneTimeTearDown]
     public void OneTimeTearDown()
     {
         _client.Dispose();
-        _factory.Dispose();
     }
 
     [Test]

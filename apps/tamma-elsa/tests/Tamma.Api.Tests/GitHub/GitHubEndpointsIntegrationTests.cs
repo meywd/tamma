@@ -282,9 +282,12 @@ public class GitHubEndpointsIntegrationTests
     [Test]
     public async Task Webhook_IgnoredEvent_ReturnsOkWithSkipped()
     {
+        // After the task-queue workstream merged, `issues`/`push`/`pull_request`
+        // events are now queued (not skipped). Pick an event that has no
+        // dispatch branch — `meta` — to assert the skipped path.
         using var client = CreateClient();
-        var body = """{"action":"opened","issue":{"number":1}}""";
-        var response = await client.SendAsync(BuildWebhookRequest("issues", body));
+        var body = """{"action":"deleted","hook_id":1}""";
+        var response = await client.SendAsync(BuildWebhookRequest("meta", body));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var json = await response.Content.ReadAsStringAsync();
         json.Should().Contain("\"skipped\":true");

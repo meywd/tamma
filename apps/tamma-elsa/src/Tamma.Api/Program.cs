@@ -130,6 +130,13 @@ builder.Services.AddDiagnosticsServices();
 builder.Services.AddSanitizationServices();
 builder.Services.AddAgentResolverServices();
 builder.Services.AddGitHubInstallationServices();
+// Wave 2
+builder.Services.AddConventionServices();
+builder.Services.AddEmailServices();
+builder.Services.AddTaskQueue();
+builder.Services.AddProviderSessionServices();
+builder.Services.AddSaaSServices();
+builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)
 builder.Services.AddControllers();
