@@ -145,6 +145,9 @@ jobs:
             tamma-api-dotnet:
               image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
               build: !reset null
+            intelligence-server:
+              image: ghcr.io/${OWNER}/intelligence-server:${IMAGE_TAG}
+              build: !reset null
           YAML
 
           rsync -az \
