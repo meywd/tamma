@@ -31,6 +31,10 @@ RUN pnpm install --frozen-lockfile --filter @tamma/intelligence-server...
 
 # ---- Stage 2: Build -------------------------------------------------------
 FROM deps AS build
+# Root tsconfig.json is extended by every package (e.g. packages/shared's
+# tsconfig has `"extends": "../../tsconfig.json"`). Without it, `tsc --build`
+# errors with TS5083 "Cannot read file '/app/tsconfig.json'".
+COPY tsconfig.json ./
 COPY packages/shared packages/shared
 COPY packages/observability packages/observability
 COPY packages/providers packages/providers
