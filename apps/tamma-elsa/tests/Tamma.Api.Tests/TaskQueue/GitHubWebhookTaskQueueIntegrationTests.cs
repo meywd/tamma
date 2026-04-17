@@ -206,11 +206,11 @@ public class GitHubWebhookTaskQueueIntegrationTests
     [Test]
     public async Task Webhook_PushEvent_BindsTenant_WhenInstallationHasTenant()
     {
-        // Seed must happen through the same factory graph the webhook uses —
-        // Program.cs wipes the schema when a NEW factory boots, which the first
-        // CreateClient() in this assembly triggers. Creating the client first
-        // (which may or may not boot the host depending on factory state) and
-        // then seeding guarantees the rows survive the webhook call.
+        // Program.cs runs the Tamma-tables wipe-and-migrate whenever the web
+        // host boots; WithWebHostBuilder may trigger a fresh boot even when the
+        // parent factory already started. Seeding AFTER CreateClient() has
+        // forced that boot guarantees the seeded rows survive to the webhook
+        // call, regardless of factory caching semantics.
         using var client = CreateClient();
 
         var tenantId = Guid.NewGuid();
