@@ -77,21 +77,24 @@ public static class AuthEndpoints
         await membershipRepo.AddAsync(tenant.Id, user.Id, "owner");
         await userRepo.UpdateActiveTenantAsync(user.Id, tenant.Id);
 
-        // Send verification email. The raw token is sent to the user; only
-        // the SHA-256 hash is persisted above. Failure to deliver the email
-        // must not leak into the HTTP response — user creation already
-        // committed — so we log and swallow transport errors.
-        try
+        // Queue the verification email. SendAsync accepts the message for
+        // delivery, emits an EMAIL.QUEUED.SUCCESS event to the event store,
+        // and returns a transaction id. It does NOT throw for transport
+        // failures — those surface later as EMAIL.SENT.FAILED events — so
+        // there is no try/catch here. Only programmer errors (null args)
+        // would surface, and those SHOULD crash the request.
+        var verifyUrl = BuildVerificationUrl(config, verificationToken);
+        var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl) with
         {
-            var verifyUrl = BuildVerificationUrl(config, verificationToken);
-            var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl);
-            await emailService.SendAsync(message);
-        }
-        catch (Exception ex)
-        {
-            var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
-            logger.LogError(ex, "Failed to deliver verification email to {Email}", user.Email);
-        }
+            Template = "verification",
+            TenantId = tenant.Id,
+            UserId = user.Id,
+        };
+        var txnId = await emailService.SendAsync(message);
+
+        var regLogger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+        regLogger.LogInformation(
+            "Email dispatch scheduled txn={TxnId} template={Template}", txnId, "verification");
 
         return Results.Created($"/api/admin/users/{user.Id}",
             new RegisterResponse(user.Id, "Registration successful. Please verify your email."));
@@ -135,17 +138,18 @@ public static class AuthEndpoints
             user.EmailVerificationExpiresAt = DateTime.UtcNow.AddHours(24);
             await userRepo.UpdateAsync(user);
 
-            try
+            var verifyUrl = BuildVerificationUrl(config, verificationToken);
+            var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl) with
             {
-                var verifyUrl = BuildVerificationUrl(config, verificationToken);
-                var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl);
-                await emailService.SendAsync(message);
-            }
-            catch (Exception ex)
-            {
-                var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
-                logger.LogError(ex, "Failed to deliver verification email to {Email}", user.Email);
-            }
+                Template = "verification",
+                TenantId = user.TenantId,
+                UserId = user.Id,
+            };
+            var txnId = await emailService.SendAsync(message);
+
+            var resendLogger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+            resendLogger.LogInformation(
+                "Email dispatch scheduled txn={TxnId} template={Template}", txnId, "verification");
         }
 
         return Results.Ok(new { message = CannedResponseMessage });
@@ -300,17 +304,18 @@ public static class AuthEndpoints
 
             await resetRepo.CreateAsync(user.Id, tokenHash, expiresAt);
 
-            try
+            var resetUrl = BuildResetUrl(config, rawToken);
+            var message = EmailTemplates.PasswordResetEmail(user.Email, resetUrl) with
             {
-                var resetUrl = BuildResetUrl(config, rawToken);
-                var message = EmailTemplates.PasswordResetEmail(user.Email, resetUrl);
-                await emailService.SendAsync(message);
-            }
-            catch (Exception ex)
-            {
-                var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
-                logger.LogError(ex, "Failed to deliver reset email to {Email}", user.Email);
-            }
+                Template = "password-reset",
+                TenantId = user.TenantId,
+                UserId = user.Id,
+            };
+            var txnId = await emailService.SendAsync(message);
+
+            var resetLogger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+            resetLogger.LogInformation(
+                "Email dispatch scheduled txn={TxnId} template={Template}", txnId, "password-reset");
         }
 
         // Anti-enumeration: return the same response whether the email exists or not
