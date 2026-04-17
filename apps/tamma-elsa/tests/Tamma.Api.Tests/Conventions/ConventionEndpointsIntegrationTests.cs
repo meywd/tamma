@@ -27,7 +27,7 @@ public class ConventionEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task ListAll_Returns200WithTenEntries()
+    public async Task ListAll_Returns200WithTwentyEntries()
     {
         var response = await _client.GetAsync("/api/convention-templates");
 
@@ -35,18 +35,28 @@ public class ConventionEndpointsIntegrationTests
 
         var items = await response.Content.ReadFromJsonAsync<List<ConventionTemplateSummaryDto>>();
         items.Should().NotBeNull();
-        items!.Should().HaveCount(10);
-        items.Select(i => i.Key).Should().Contain(new[]
+        items!.Should().HaveCount(20);
+        items.Select(i => i!.Key).Should().Contain(new[]
         {
             "typescript-react",
             "typescript-node",
+            "typescript-react-native",
+            "python",
             "python-fastapi",
             "python-django",
-            "csharp-aspnet",
-            "rust-actix",
-            "go-stdlib",
-            "java-spring",
+            "csharp",
+            "rust",
+            "go",
+            "java",
+            "kotlin",
+            "scala",
+            "swift",
+            "swift-uikit",
+            "dart-flutter",
+            "c",
+            "cpp",
             "ruby-rails",
+            "php-laravel",
             "elixir-phoenix"
         });
         items.Should().AllSatisfy(i =>
@@ -90,9 +100,9 @@ public class ConventionEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task GetByKey_CsharpAspnet_ReturnsFullBody()
+    public async Task GetByKey_Csharp_ReturnsFullBody()
     {
-        var response = await _client.GetAsync("/api/convention-templates/csharp-aspnet");
+        var response = await _client.GetAsync("/api/convention-templates/csharp");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var template = await response.Content.ReadFromJsonAsync<ConventionTemplateDetailDto>();
