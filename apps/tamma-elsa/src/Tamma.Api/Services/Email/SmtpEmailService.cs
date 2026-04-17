@@ -72,34 +72,18 @@ public sealed class SmtpEmailService : IEmailService
             await client.SendAsync(mime, ct).ConfigureAwait(false);
             await client.DisconnectAsync(quit: true, ct).ConfigureAwait(false);
 
-            // DO NOT log full body, recipient address, or subject — they may
-            // contain one-time tokens or PII that land in log aggregators.
-            // Surface only the recipient DOMAIN and the SMTP host so ops can
-            // see "N failures to outlook.com" without leaking identities.
-            _logger.LogInformation(
-                "Email delivered via SMTP: domain={Domain} host={Host}",
-                RecipientDomain(message.To), host);
+            // DO NOT log recipient address, subject, or body — any bytes
+            // derived from message.* are tracked by CodeQL as private data
+            // (even the domain substring is still tainted). Log only the
+            // SMTP relay host, which comes from configuration not user
+            // input. Per-recipient/per-domain analytics belong in a metrics
+            // counter, not a log-indexed PII sink.
+            _logger.LogInformation("Email delivered via SMTP: host={Host}", host);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "SMTP send failed: domain={Domain} host={Host}",
-                RecipientDomain(message.To), host);
+            _logger.LogError(ex, "SMTP send failed: host={Host}", host);
             throw;
         }
-    }
-
-    /// <summary>
-    /// Returns the domain portion of an email address (e.g. "example.com"),
-    /// or "&lt;invalid&gt;" when no '@' is present. The local part is dropped so
-    /// operational logs do not carry PII. CRLF/control chars are still stripped
-    /// defensively via <see cref="LogSanitizer"/>.
-    /// </summary>
-    private static string RecipientDomain(string? email)
-    {
-        if (string.IsNullOrWhiteSpace(email)) return "<empty>";
-        var at = email.LastIndexOf('@');
-        if (at < 0 || at == email.Length - 1) return "<invalid>";
-        return LogSanitizer.Clean(email[(at + 1)..]);
     }
 }
