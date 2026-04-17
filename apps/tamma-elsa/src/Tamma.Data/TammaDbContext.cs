@@ -341,6 +341,7 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("pending");
             entity.Property(e => e.Variables).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Result).HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
