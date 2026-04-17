@@ -6,6 +6,13 @@ public interface IInstallationRepository
 {
     Task<GitHubInstallation> UpsertAsync(GitHubInstallation installation);
     Task<GitHubInstallation?> GetByInstallationIdAsync(long installationId);
+
+    /// <summary>
+    /// Lookup by the <c>github_installations.Id</c> (C# entity primary key),
+    /// not the GitHub-issued <c>InstallationId</c>. Callers that only have
+    /// the entity-id (e.g. from <c>api_keys.OwnerId</c>) use this overload.
+    /// </summary>
+    Task<GitHubInstallation?> GetByEntityIdAsync(Guid entityId);
     Task<List<GitHubInstallation>> ListAsync();
     Task<List<GitHubInstallation>> ListActiveAsync();
     Task DeleteAsync(long installationId);

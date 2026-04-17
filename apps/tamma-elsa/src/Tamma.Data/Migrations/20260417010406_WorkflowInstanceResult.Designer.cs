@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
@@ -12,9 +13,11 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations
 {
     [DbContext(typeof(TammaDbContext))]
-    partial class TammaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260417010406_WorkflowInstanceResult")]
+    partial class WorkflowInstanceResult
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -756,64 +759,6 @@ namespace Tamma.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("provider_health", (string)null);
-                });
-
-            modelBuilder.Entity("Tamma.Data.Entities.QueuedTask", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<string>("Error")
-                        .HasColumnType("text");
-
-                    b.Property<long?>("InstallationId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("jsonb")
-                        .HasDefaultValueSql("'{}'::jsonb");
-
-                    b.Property<int>("RetryCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("pending");
-
-                    b.Property<Guid?>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Status", "CreatedAt");
-
-                    b.HasIndex("TenantId", "Status");
-
-                    b.ToTable("queued_tasks", (string)null);
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.RefreshToken", b =>

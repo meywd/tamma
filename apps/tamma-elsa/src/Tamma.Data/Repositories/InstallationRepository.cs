@@ -34,6 +34,11 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
             .Include(i => i.Repos)
             .FirstOrDefaultAsync(i => i.InstallationId == installationId);
 
+    public async Task<GitHubInstallation?> GetByEntityIdAsync(Guid entityId)
+        => await db.GitHubInstallations
+            .Include(i => i.Repos)
+            .FirstOrDefaultAsync(i => i.Id == entityId);
+
     public async Task<List<GitHubInstallation>> ListAsync()
         => await db.GitHubInstallations.Include(i => i.Repos).ToListAsync();
 
