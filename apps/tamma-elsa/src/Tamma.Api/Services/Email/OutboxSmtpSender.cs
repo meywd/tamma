@@ -67,8 +67,7 @@ public sealed class OutboxSmtpSender : BackgroundService
         var provider = (_config["Email:Provider"] ?? "smtp").Trim().ToLowerInvariant();
         if (provider != "smtp")
         {
-            _logger.LogInformation(
-                "OutboxSmtpSender disabled: Email:Provider={Provider}", provider);
+            _logger.LogInformation("OutboxSmtpSender disabled (non-smtp provider)");
             return;
         }
 
@@ -79,10 +78,9 @@ public sealed class OutboxSmtpSender : BackgroundService
             _options.PollInterval = TimeSpan.FromSeconds(seconds);
         }
 
-        var host = _config["Email:Smtp:Host"];
         _logger.LogInformation(
-            "OutboxSmtpSender started. Poll interval={Interval}, host={Host}",
-            _options.PollInterval, host ?? "(unconfigured)");
+            "OutboxSmtpSender started. Poll interval={Interval}",
+            _options.PollInterval);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -122,7 +120,6 @@ public sealed class OutboxSmtpSender : BackgroundService
         var outbox = scope.ServiceProvider.GetRequiredService<IEmailOutboxRepository>();
         var transport = scope.ServiceProvider.GetRequiredService<ISmtpTransport>();
         var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
-        var host = _config["Email:Smtp:Host"];
 
         var claimed = await outbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
         if (claimed is null) return false;
@@ -140,13 +137,12 @@ public sealed class OutboxSmtpSender : BackgroundService
             // operators need them for inspection.
             await outbox.DeleteAsync(claimed.Id, ct);
 
-            _logger.LogInformation(
-                "Email delivered txn={TxnId} host={Host}", claimed.Id, host);
+            _logger.LogInformation("Email delivered txn={TxnId}", claimed.Id);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // NEVER log recipient / subject / body — only the txn id + host.
+            // NEVER log recipient / subject / body / host — only the txn id.
             var attempt = claimed.Attempts + 1;
             var backoff = PickBackoff(attempt);
             var updated = await outbox.MarkFailedAsync(claimed.Id, ex.Message, backoff, ct);
@@ -154,15 +150,22 @@ public sealed class OutboxSmtpSender : BackgroundService
             if (updated is not null && updated.Status == "failed")
             {
                 _logger.LogError(ex,
-                    "Email permanently failed txn={TxnId} attempts={Attempts} host={Host}",
-                    claimed.Id, updated.Attempts, host);
+                    "Email permanently failed txn={TxnId} attempts={Attempts}",
+                    claimed.Id, updated.Attempts);
                 await EmitFailedAsync(events, claimed, ex);
+
+                // Inbox is a retry buffer only — once retries are exhausted,
+                // the audit lives in the event store (EMAIL.SENT.FAILED with
+                // txn id + error class). The row carries recipient / subject
+                // / body which aren't needed after the terminal outcome, so
+                // delete it too.
+                await outbox.DeleteAsync(claimed.Id, ct);
             }
             else
             {
                 _logger.LogWarning(ex,
-                    "Email transient failure txn={TxnId} attempt={Attempt} host={Host}",
-                    claimed.Id, attempt, host);
+                    "Email transient failure txn={TxnId} attempt={Attempt}",
+                    claimed.Id, attempt);
             }
 
             return true;

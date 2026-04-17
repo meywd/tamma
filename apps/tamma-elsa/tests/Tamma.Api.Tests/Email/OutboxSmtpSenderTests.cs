@@ -189,12 +189,14 @@ public class OutboxSmtpSenderTests
             await db.SaveChangesAsync();
         }
 
-        // Attempt 2 — hits ceiling, flips to failed.
+        // Attempt 2 — hits ceiling, flips to failed, then row is purged.
+        // Inbox is a retry buffer only: once retries exhaust, the audit lives
+        // in the event store (EMAIL.SENT.FAILED below). Keeping failed rows
+        // would mean recipient/subject/body lingering in the DB indefinitely.
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
         var stored = await FreshOutbox().GetByIdAsync(enq.Id);
-        stored!.Status.Should().Be("failed");
-        stored.Attempts.Should().Be(2);
+        stored.Should().BeNull("terminal failure purges the row — event store holds the audit");
 
         var failed = await FreshEvents().QueryAsync(null, EmailEventTypes.Failed, null, 10);
         failed.Should().ContainSingle();
