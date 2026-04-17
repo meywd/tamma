@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Dtos.Providers;
 using Tamma.Api.Dtos.Settings;
 using Tamma.Api.Services.Diagnostics;
 using Tamma.Api.Services.Diagnostics.Models;
@@ -300,18 +301,113 @@ public static class ProviderEndpoints
         };
     }
 
-    // Provider session stubs
-    public static Task<IResult> CreateProvider(CreateProviderRequest req) =>
-        Task.FromResult(Results.Ok(new { handle = Guid.NewGuid().ToString(), type = req.Type }));
+    // ── Provider session endpoints (Story 9-4 — ported from TS) ─────────────
 
-    public static Task<IResult> ExecuteProvider(string handle, ExecuteProviderRequest req) =>
-        Task.FromResult(Results.Ok(new { handle, response = "Provider execution stub" }));
+    private static readonly System.Text.RegularExpressions.Regex HandleUuidRegex =
+        new("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    public static Task<IResult> DeleteProvider(string handle) =>
-        Task.FromResult(Results.Ok(new { message = $"Provider session {handle} deleted" }));
+    /// <summary>
+    /// Create a provider session and return its handle. Mirrors the TS
+    /// <c>POST /providers/create</c> contract.
+    /// </summary>
+    public static async Task<IResult> CreateProvider(
+        CreateProviderSessionRequest req,
+        [FromServices] IProviderSessionService sessions,
+        [FromServices] ITenantContext tc)
+    {
+        if (req is null || string.IsNullOrWhiteSpace(req.Provider))
+        {
+            return Results.BadRequest(new { error = "provider is required" });
+        }
 
-    public static Task<IResult> ListSessions() =>
-        Task.FromResult(Results.Ok(Array.Empty<object>()));
+        var model = string.IsNullOrWhiteSpace(req.Model) ? "default" : req.Model;
+        var session = await sessions.CreateAsync(req.Provider, model, tc.TenantId);
+        return Results.Created(
+            $"/api/providers/providers/{session.Handle}",
+            new CreateProviderSessionResponse(session.Handle, session.Provider, session.Model));
+    }
+
+    /// <summary>
+    /// Execute an invocation against the session identified by
+    /// <paramref name="handle"/>. Tenant-scoped — a handle created under
+    /// tenant A is not executable by tenant B (returns 404).
+    /// </summary>
+    public static async Task<IResult> ExecuteProvider(
+        string handle,
+        ExecuteProviderSessionRequest req,
+        [FromServices] IProviderSessionService sessions,
+        [FromServices] ITenantContext tc)
+    {
+        if (!HandleUuidRegex.IsMatch(handle))
+        {
+            return Results.BadRequest(new { error = "Invalid session handle format" });
+        }
+
+        var prompt = req?.Input ?? req?.Prompt;
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return Results.BadRequest(new { error = "input (or legacy 'prompt') is required" });
+        }
+
+        try
+        {
+            var result = await sessions.ExecuteTenantScopedAsync(
+                callerTenantId: tc.TenantId,
+                handle: handle,
+                req: new ExecuteRequest(
+                    Handle: handle,
+                    Input: prompt!,
+                    MaxTokens: req?.MaxTokens,
+                    Temperature: req?.Temperature));
+
+            return Results.Ok(new ExecuteProviderSessionResponse(
+                Content: result.Content,
+                TokenUsage: result.TokenUsage,
+                CostUsd: result.CostUsd,
+                DurationMs: result.DurationMs));
+        }
+        catch (ProviderSessionNotFoundException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Dispose a session. Returns 404 if the handle does not belong to the
+    /// caller's tenant.
+    /// </summary>
+    public static async Task<IResult> DeleteProvider(
+        string handle,
+        [FromServices] IProviderSessionService sessions,
+        [FromServices] ITenantContext tc)
+    {
+        if (!HandleUuidRegex.IsMatch(handle))
+        {
+            return Results.BadRequest(new { error = "Invalid session handle format" });
+        }
+
+        var disposed = await sessions.DeleteTenantScopedAsync(tc.TenantId, handle);
+        if (!disposed)
+        {
+            return Results.NotFound(new { error = $"Session not found: {handle}" });
+        }
+        return Results.Ok(new { disposed = true });
+    }
+
+    /// <summary>
+    /// List active sessions scoped to the caller's tenant.
+    /// </summary>
+    public static async Task<IResult> ListSessions(
+        [FromServices] IProviderSessionService sessions,
+        [FromServices] ITenantContext tc)
+    {
+        var list = await sessions.ListAsync(tc.TenantId);
+        var dto = list.Select(s => new ProviderSessionDto(
+            s.Handle, s.Provider, s.Model, s.CreatedAt, s.LastUsed, s.TenantId)).ToList();
+        return Results.Ok(new { sessions = dto, count = dto.Count });
+    }
 }
 
 /// <summary>Request body for <c>POST /api/providers/chain/resolve</c>.</summary>
