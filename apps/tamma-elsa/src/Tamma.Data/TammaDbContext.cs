@@ -44,6 +44,7 @@ public class TammaDbContext : DbContext
     public DbSet<WorkflowDefinition> WorkflowDefinitions => Set<WorkflowDefinition>();
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
     public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
+    public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -354,6 +355,31 @@ public class TammaDbContext : DbContext
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+        });
+
+        // ── QueuedTask ──
+        // Multi-tenant task queue. Webhook dispatcher enqueues here so the
+        // handler returns fast; TaskQueueProcessor polls for pending rows.
+        modelBuilder.Entity<QueuedTask>(entity =>
+        {
+            entity.ToTable("queued_tasks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Type).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Payload).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.RetryCount).HasDefaultValue(0);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Index drives the processor's "next pending task" query.
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
+            // Index for tenant-scoped listings.
+            entity.HasIndex(e => new { e.TenantId, e.Status });
+
+            // No query filter: the task queue is shared infrastructure; tenant
+            // scoping is explicit via repository APIs. This mirrors the TS
+            // InMemoryTaskQueue, which never bound to a tenant context.
         });
 
         // ── DomainEvent ──
