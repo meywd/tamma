@@ -96,11 +96,15 @@ Per Doc 01 §7.1 exact matrix:
 - [ ] Implementation at
       `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/AesGcmSecretsService.cs`
       (also from Story 28-4; extend, do not rewrite):
-  - Derive a per-tenant **Data Encryption Key (DEK)** from the
-    master KEK via HKDF-SHA256 with `info = "tenant-dek:" ||
-    tenantId.ToString("N")` and a 16-byte static salt from
-    configuration (`Tamma:Secrets:HkdfSalt`).
-  - Encrypt with AES-256-GCM, 12-byte random nonce per operation.
+  - **The KEK directly encrypts the connection string** — no DEK
+    derivation, no HKDF, no per-tenant key material. Per Doc 01
+    §8.2: "Derived per-tenant DEKs are not used — the KEK encrypts
+    the connection string directly. Acceptable because the
+    connection string is the only thing being encrypted and the
+    data volume is tiny."
+  - Encrypt with AES-256-GCM using the KEK fetched from
+    `KekProvider` for the requested slot, 12-byte random nonce per
+    operation.
   - Ciphertext envelope format (per Doc 01 §8.1):
 
         [1 byte version=0x01]
@@ -109,11 +113,13 @@ Per Doc 01 §7.1 exact matrix:
         [ciphertext N bytes]
         [16 bytes GCM tag]
 
-  - **Version byte `0x01`** is reserved for this scheme. Future
-    format changes (e.g. KMS-backed) bump the version byte and the
-    code switches on it. Version-byte routing lives in
+  - **Version byte `0x01`** is reserved for the direct-KEK scheme.
+    Future format changes (e.g. OpenBao/KMS-backed per Story
+    28-13, or any DEK layer added later) bump the version byte and
+    the decrypt path switches on it. Version-byte routing lives in
     `DecryptTenantConnectionString` so the envelope can evolve
-    without a breaking change.
+    without a breaking change. Reserving the byte today costs
+    nothing.
 - [ ] Encrypt path: fetches `KekVersion=1` from primary slot unless
       overridden by the caller (the re-encrypt task in AC5 passes
       `KekVersion=2` to force encryption under the new key).
@@ -167,9 +173,10 @@ Per Doc 01 §7.1 exact matrix:
      KekVersion FROM tenants WHERE KekVersion=1 AND Status IN
      ('active', 'failed') LIMIT 100 FOR UPDATE SKIP LOCKED`.
   2. For each row: decrypt with primary (slot 0x01 per envelope),
-     re-encrypt with the same DEK derivation but under secondary
-     (slot 0x02), write back `EncryptedConnectionString` +
-     `EncryptedElsaConnectionString` + `KekVersion=2`.
+     re-encrypt under secondary (slot 0x02) — same direct-KEK
+     AES-256-GCM, fresh random nonce, write back
+     `EncryptedConnectionString` + `EncryptedElsaConnectionString`
+     + `KekVersion=2`.
   3. Commit the CP transaction. Loop until zero rows remain.
 - [ ] Idempotency: a failure mid-loop leaves some rows at
       `KekVersion=1` and some at `KekVersion=2` — restarting the
@@ -296,7 +303,8 @@ this story ships these specific negative tests:
   - `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/ISecretsService.cs`
     — modified; add tenant-string methods.
   - `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/AesGcmSecretsService.cs`
-    — modified; envelope format + HKDF DEK derivation.
+    — modified; envelope format (version/slot/nonce/ct/tag) +
+    direct-KEK AES-256-GCM encrypt/decrypt.
   - `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/KekProvider.cs`
     — new; two-slot KEK loader + zeroing.
   - `apps/tamma-elsa/src/Tamma.ElsaServer.Global/Workflows/RekeyTenantConnectionStringsWorkflow.cs`
@@ -345,8 +353,9 @@ this story ships these specific negative tests:
     `ApplicationStopping`).
 - `AesGcmSecretsServiceTests`:
   - Encrypt → decrypt round-trip for 100 different tenant ids
-    → asserts DEK derivation differs per tenant (same plaintext
-    produces different ciphertexts for different tenants).
+    → asserts ciphertexts differ per encryption (distinct random
+    nonces produce distinct ciphertexts even for the same
+    plaintext + tenant).
   - Tamper with one byte of the ciphertext → decrypt fails at
     the GCM auth tag.
   - Decrypt envelope with `kek_slot=0x02` when secondary is
@@ -410,23 +419,24 @@ this story ships these specific negative tests:
       around KEKs — must not survive past the scope of one call)
 - [ ] Gitleaks CI gate passes with the new custom rule
 - [ ] Design-doc references updated if the impl deviated
-      (expected: confirm Doc 01 §8.1 envelope format matches
-      the implemented bytes; note the HKDF per-tenant DEK
-      derivation which Doc 01 §8.2 left open)
+      (expected: confirm Doc 01 §8.1 envelope format + §8.2
+      direct-KEK-encrypt match the implemented bytes exactly —
+      no DEK layer, no HKDF)
 - [ ] Reviewed by a second engineer (cross-stream)
 
 ## Risks / Open Questions
 
-- **HKDF DEK derivation is stricter than Doc 01 §8.2.** Doc 01
-  §8.2 says "the KEK encrypts the connection string directly" and
-  rejects deterministic DEK derivation. This story **deviates**:
-  it derives a per-tenant DEK via HKDF(KEK, "tenant-dek:" ||
-  tenantId). Rationale: per-tenant DEKs mean a cryptanalytic
-  attack against one tenant's ciphertext doesn't weaken the KEK's
-  protection of other tenants. HKDF cost is ~10µs per decrypt —
-  negligible versus the 5ms of pool-cache misses. The deviation
-  is recorded in Doc 01's next revision; Story 28-4's resolver
-  does not care (the seam is behind `ISecretsService`).
+- **Direct-KEK design is intentional.** An earlier draft of this
+  story added HKDF-derived per-tenant DEKs. That was reverted on
+  2026-04-17 to match Doc 01 §8.2 exactly: the KEK encrypts the
+  connection string directly. Rationale: no KMS on the roadmap
+  today, so the DEK layer's main benefit (clean KMS-migration
+  seam) doesn't justify its complexity cost. If/when Tamma adopts
+  a KMS, **Story 28-13** (OpenBao backend, deferred) swaps the
+  backend via the `ISecretsService` seam — envelope version byte
+  `0x01` is reserved for today's direct-KEK scheme and a future
+  `0x02` can introduce a DEK layer or Transit-wrapped ciphertext
+  without a breaking migration.
 - **`max_connections` threshold is ops-sensitive.** T_MAX_CONNECTIONS
   in AC8 enforces `max_connections ≥ 10100` at startup. On a dev
   laptop with a shared Postgres 17 default of 100, this would

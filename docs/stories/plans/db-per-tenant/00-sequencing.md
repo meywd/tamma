@@ -195,7 +195,7 @@ paths and can be worked by a different agent / engineer.
   #3 in the Epic 28 README): measure idle orchestrator instances at
   1k / 5k / 10k and file a follow-up if any threshold trips.
 
-**Files owned**: `Workflows/PlatformAnalyticsRollupWorkflow.cs`, `Migrations/04x_platform_analytics_hourly.cs`, dashboard pages under `apps/tamma-dashboard/.../admin/tenants/*`, admin API routes under `Endpoints/Admin/TenantsEndpoints.cs`.
+**Files owned**: `Workflows/PlatformAnalyticsRollupWorkflow.cs`, `Migrations/04x_platform_analytics_hourly.cs`, dashboard pages under `packages/dashboard/src/pages/admin/` + admin components under `packages/dashboard/src/components/admin/`, admin API routes under `Endpoints/Admin/TenantsEndpoints.cs`.
 
 ### Wall-clock arithmetic
 

@@ -99,34 +99,55 @@ typo-proof**.
 
 ### AC4: Admin tenants list page
 
-Build in the existing Blazor dashboard at
-`apps/tamma-elsa/src/Tamma.Studio/`. (Note: the Epic 28 sequencing
-doc occasionally references a hypothetical
-`apps/tamma-dashboard/` React app; the actual codebase is Blazor in
-Tamma.Studio — this story builds there. The ambiguity was resolved
-in favour of the existing codebase; no new frontend stack is
-introduced by Epic 28.)
+Build in the existing React dashboard at `packages/dashboard/`
+(Vite + React 18 + Tailwind + TypeScript + Vitest). The admin area
+already lives at `packages/dashboard/src/pages/admin/` as a tabbed
+layout (`AdminLayout.tsx` wraps `UsersTab`, `HealthTab`,
+`AuditLogTab`, `ApiKeysTab`, `QuickLinksTab`) — this story adds a
+new **Tenants tab** alongside them plus a full-page tenant detail
+route.
 
-- [ ] New page `Tamma.Studio/Pages/Admin/Tenants/Index.razor` at
-      route `/admin/tenants`, gated by an `[Authorize(Policy =
-      "PlatformAdmin")]` attribute.
+**Framework note**: The Blazor `Tamma.Studio` project under
+`apps/tamma-elsa/src/Tamma.Studio/` remains the internal /
+developer-facing studio for Elsa workflow design and is **not**
+where admin tenant UX lives. End-user and platform-admin UI is
+the React dashboard; this story follows that convention.
+
+- [ ] New component `packages/dashboard/src/pages/admin/TenantsTab.tsx`
+      mounted inside `AdminLayout` at `/admin/tenants`, gated by the
+      same `PlatformAdmin` role check the other admin tabs use
+      (via the `useCurrentUser()` hook — reject with "Not
+      authorized" view if the user lacks the platform-admin
+      claim).
 - [ ] Table view with sortable columns: `Slug`, `Name`, `Status`
       (badge), `Plan`, `Owner`, `CreatedAt`, `Provisioned /
-      Requested` (relative time), `Actions`.
+      Requested` (relative time), `Actions`. Table markup uses the
+      existing common patterns from `UsersTab.tsx` (semantic
+      `<table>`, role-based cell rendering, relative-time
+      formatter).
 - [ ] Filters above the table: status multi-select, plan
-      multi-select, search input (debounced 300ms), date range.
-      Filter state is bound to URL query params so a page reload
-      preserves the view and admins can share links.
+      multi-select, search input (debounced 300ms via
+      `useDebounce` hook), date range pickers. Filter state is
+      bound to URL query params via `useSearchParams` from
+      `react-router-dom` v7 so a page reload preserves the view
+      and admins can share links.
 - [ ] Pagination controls at the bottom. Page size picker (10 / 50
-      / 100 / 200).
-- [ ] Each row has a click-through to the detail page (AC5) and
-      a trailing action menu with state-machine-gated actions
-      (AC6).
+      / 100 / 200). Page number is also in the URL query string.
+- [ ] Each row has a click-through to the detail page (AC5) via
+      `<Link>` and a trailing action-menu button
+      (`components/common/DropdownMenu.tsx` if it exists, else a
+      small new one) with state-machine-gated actions (AC6).
+- [ ] Data fetching: new hook
+      `packages/dashboard/src/hooks/admin/useTenants.ts` wrapping
+      the AC1 endpoint, modelled on the existing `useUsers` hook.
+      Supports the filter/page query-param inputs and returns
+      `{ data, isLoading, error, refetch }`.
 
 ### AC5: Admin tenant detail page
 
-- [ ] Page `Tamma.Studio/Pages/Admin/Tenants/Detail.razor` at
-      route `/admin/tenants/{id:guid}`.
+- [ ] Page `packages/dashboard/src/pages/admin/TenantDetailPage.tsx`
+      at route `/admin/tenants/:id` (full page outside the tabbed
+      `AdminLayout`, with its own back-to-list breadcrumb).
 - [ ] Layout, top to bottom:
   1. **Header** — slug + name + status badge + owner email.
   2. **Actions bar** — state-machine-gated buttons per AC6.
@@ -190,9 +211,10 @@ valid. Each action requires a confirmation dialog.
 ### AC7: Accessibility + resilience
 
 - [ ] **WCAG AA** colour contrast on all status badges. Validated
-      with `axe-core` (the Tamma.Studio project uses Blazor-axe via
-      `BlazorAxeCore` if present, else a bUnit render snapshot +
-      manual audit). Status badges carry a text label alongside the
+      via `jest-axe` (add to `packages/dashboard/package.json`
+      devDeps if not already present) asserting zero axe-core
+      violations on rendered pages in Vitest + React Testing
+      Library. Status badges carry a text label alongside the
       color (not color-only).
 - [ ] Keyboard navigation: every action button reachable with Tab;
       confirmation dialogs trap focus per ARIA guidelines.
@@ -234,20 +256,28 @@ valid. Each action requires a confirmation dialog.
   - `apps/tamma-elsa/src/Tamma.Api/Dtos/Admin/AdminTenantDtos.cs` —
     modified; new `AdminTenantListItemDto`, `AdminTenantDetailDto`,
     `ForceDeleteRequestDto`, `ReprovisionRequestDto`.
-  - `apps/tamma-elsa/src/Tamma.Studio/Pages/Admin/Tenants/Index.razor`
-    — new.
-  - `apps/tamma-elsa/src/Tamma.Studio/Pages/Admin/Tenants/Detail.razor`
-    — new.
-  - `apps/tamma-elsa/src/Tamma.Studio/Components/Admin/TenantStatusBadge.razor`
+  - `packages/dashboard/src/pages/admin/TenantsTab.tsx` — new;
+    list view mounted inside `AdminLayout` at `/admin/tenants`.
+  - `packages/dashboard/src/pages/admin/TenantDetailPage.tsx` —
+    new; full-page detail route at `/admin/tenants/:id`.
+  - `packages/dashboard/src/components/admin/TenantStatusBadge.tsx`
     — new; WCAG-AA badge component reused on both pages.
-  - `apps/tamma-elsa/src/Tamma.Studio/Components/Admin/ConfirmBySlugDialog.razor`
-    — new; the "type the slug" confirmation modal.
-  - `apps/tamma-elsa/src/Tamma.Studio/Components/Admin/StepLadder.razor`
-    — new; reusable workflow-step-ladder component (shared with
+  - `packages/dashboard/src/components/admin/ConfirmBySlugDialog.tsx`
+    — new; the "type the slug" confirmation modal (extends
+    existing `ConfirmDialog` pattern from `components/common/`).
+  - `packages/dashboard/src/components/admin/StepLadder.tsx` —
+    new; reusable workflow-step-ladder component (shared with
     Story 28-5's user-facing status page if ever promoted).
-  - `apps/tamma-elsa/src/Tamma.Studio/Services/AdminTenantsApiClient.cs`
-    — new; HTTP client wrapping the AC1–6 endpoints with
-    typed responses.
+  - `packages/dashboard/src/hooks/admin/useTenants.ts` — new;
+    list-query hook modelled on `useUsers.ts`.
+  - `packages/dashboard/src/hooks/admin/useTenant.ts` — new;
+    detail-query hook with SSE subscription + polling fallback
+    (AC3).
+  - `packages/dashboard/src/services/admin/admin-tenants-api-client.ts`
+    — new; typed fetch wrapper around the AC1–6 endpoints,
+    sibling of the existing `admin-api-client.ts`.
+  - `packages/dashboard/src/router.tsx` — modified; add
+    `/admin/tenants/:id` route entry.
 
 ## Dependencies
 
@@ -256,9 +286,11 @@ valid. Each action requires a confirmation dialog.
   28-6 (`platform_events` table backs the AC2 `recentEvents` and
   AC3 SSE), 28-9 (the `PlatformAdmin` policy + impersonation), 28-10
   (`platform_analytics_hourly` powers the AC5 resource summary).
-- **External**: existing Blazor / Tamma.Studio stack, the existing
-  SSE conventions in the codebase, `BlazorAxeCore` (or a bUnit
-  snapshot test) for accessibility validation.
+- **External**: existing React dashboard stack at
+  `packages/dashboard/` (Vite + React 18 + Tailwind + TypeScript +
+  Vitest + React Testing Library), the existing SSE conventions
+  in the codebase, `jest-axe` for accessibility validation (add
+  to dashboard devDeps if not already present).
 
 ## Test Plan
 
@@ -273,13 +305,19 @@ valid. Each action requires a confirmation dialog.
   - AC6 action gating: for each `Status` value, assert the set of
     actions returned in the detail payload matches the table in
     AC6.
-- `AdminTenantsApiClientTests` (bUnit / HttpClient mock): typed
-  client serialisation round-trips.
-- `ConfirmBySlugDialogTests` (bUnit): submit button disabled until
-  typed slug matches exactly (case-sensitive); whitespace is
-  rejected.
-- `StepLadderTests`: given a fold-rule trace from Doc 03 §6.4,
-  renders the expected step states.
+- `admin-tenants-api-client.test.ts` (Vitest + `msw` or fetch
+  mock): typed client serialisation + error-mapping round-trips.
+- `ConfirmBySlugDialog.test.tsx` (Vitest + React Testing Library
+  + user-event): submit button disabled until typed slug matches
+  exactly (case-sensitive); whitespace is rejected; Escape
+  dismisses.
+- `StepLadder.test.tsx`: given a fold-rule trace from Doc 03
+  §6.4 as props, renders the expected step states and
+  transitions between them when props update.
+- `TenantStatusBadge.test.tsx`: every status value renders with
+  the expected Tailwind color class + text label.
+- `useTenants.test.ts`: hook correctly encodes filter params,
+  handles loading/error/success states, `refetch` works.
 
 ### Integration tests (Testcontainers.PostgreSQL + RabbitMQ)
 
@@ -307,9 +345,9 @@ valid. Each action requires a confirmation dialog.
   impersonation" banner → returns to admin view.
 - **T7 PlatformAdmin gating**: non-admin user hits
   `/admin/tenants` → 403. Admin hits → 200.
-- **T8 Accessibility snapshot**: `cypress-axe`-equivalent test
-  (or bUnit + axe-core) runs on each page variant (empty list,
-  populated list, provisioning detail, failed detail) → zero
+- **T8 Accessibility snapshot**: `jest-axe` runs on each page
+  variant (empty list, populated list, provisioning detail,
+  failed detail) rendered via React Testing Library → zero
   violations at WCAG AA level.
 - **T9 Fallback polling**: open detail page with
   `?fallback=poll` → AC2 is called every 2s → no SSE request
@@ -340,13 +378,16 @@ valid. Each action requires a confirmation dialog.
 
 ## Risks / Open Questions
 
-- **Blazor vs React ambiguity.** The Epic 28 README and
-  sequencing plan occasionally reference `apps/tamma-dashboard/`
-  as a React app, but the actual codebase only has Blazor
-  `Tamma.Studio`. This story resolves the ambiguity by building
-  in Blazor. If a future epic introduces a React dashboard, the
-  admin UX would be ported — the API surface in AC1–3 is
-  framework-agnostic.
+- **Dashboard location resolution.** The Epic 28 README /
+  sequencing plan drafts occasionally referenced a hypothetical
+  `apps/tamma-dashboard/`. The **canonical React dashboard lives
+  at `packages/dashboard/`** (monorepo package, not an
+  app-directory project). This story targets that path. The
+  Blazor `apps/tamma-elsa/src/Tamma.Studio/` project is kept for
+  Elsa workflow design / internal developer tooling only and is
+  not extended here. API surface in AC1–3 is framework-agnostic
+  — if the frontend ever moves again, the backend endpoints are
+  reusable unchanged.
 - **SSE scale at 100+ admins monitoring different tenants.** Each
   SSE connection holds a DB listener (the CP listens on `LISTEN
   platform_events` and fans out to subscribers). At 100 admins

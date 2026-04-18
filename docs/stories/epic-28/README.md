@@ -80,8 +80,12 @@ graph TB
 | [28-10](./28-10-platform-analytics-rollup.md) | `platform_analytics_hourly` rollup workflow | L (28h) | Operations |
 | [28-11](./28-11-admin-tenant-status-ux.md) | Admin UX for `tenants.Status` state machine | L (22h) | Operations |
 | [28-12](./28-12-postgres-roles-kek-rotation.md) | Roles (`admin`/`provisioner`/`app`) + KEK rotation | L (20h) | Operations |
+| [28-13](./story-28-13/28-13-openbao-kms-backend.md) | **DEFERRED** — OpenBao KMS backend for tenant KEK (replaces env-var KEK when a trigger condition fires — see story) | L–XL (30–45h) | Operations / Security |
 
-**Total effort**: 265 hours.
+**Total effort in scope**: 265 hours. Story 28-13 is deferred and
+**not counted** — it lands only if a trigger condition (paying
+tenants with breach clauses, compliance finding, threat-model change,
+or OpenBao LF-graduation) is met.
 
 ## Dependency graph
 
