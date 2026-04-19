@@ -26,6 +26,14 @@ public abstract class TaskHandlerBase : ITaskHandler
 {
     private readonly IServiceProvider _services;
 
+    /// <summary>
+    /// Expose the scoped <see cref="IServiceProvider"/> to derived handlers
+    /// so they can resolve additional scoped collaborators (per-task fresh
+    /// scope created by <see cref="TaskQueueProcessor"/>) without taking
+    /// a constructor dep on the root provider.
+    /// </summary>
+    protected IServiceProvider Services => _services;
+
     protected TaskHandlerBase(IServiceProvider services)
     {
         _services = services;

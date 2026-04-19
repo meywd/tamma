@@ -265,6 +265,12 @@ builder.Services.AddEmailServices();
 builder.Services.AddTaskQueue();
 builder.Services.AddProviderSessionServices();
 builder.Services.AddSaaSServices();
+// Per-tenant provisioning (Cranl). When Cranl:ApiKey + Cranl:OrganizationId
+// are both configured, the Cranl-backed provisioner + workflow + queue
+// handler are wired; otherwise the Null seam keeps every tenant on the
+// shared central Postgres via RLS. See docs/vendors/cranl/README.md for
+// the per-tenant provisioning flow.
+builder.Services.AddTenantProvisioning(builder.Configuration);
 
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
