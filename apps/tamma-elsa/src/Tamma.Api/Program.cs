@@ -121,6 +121,18 @@ builder.Services.AddHostedService<WorkflowSyncService>();
 // Auth services
 builder.Services.AddSingleton<IPasswordService, PasswordService>();
 builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
+builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
+    Tamma.Api.Services.RateLimit.InMemoryRateLimitService>();
+builder.Services.AddHttpContextAccessor();
+// GitHub OAuth http client (token exchange + profile fetch). User-Agent
+// header is required by the GitHub API.
+builder.Services.AddHttpClient("github-oauth", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent", "Tamma-API");
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+builder.Services.AddScoped<Tamma.Api.Services.OAuth.IGitHubOAuthService,
+    Tamma.Api.Services.OAuth.GitHubOAuthService>();
 
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
@@ -178,6 +190,7 @@ if (!string.IsNullOrEmpty(jwtSecret))
     })
     .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
     {
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -186,12 +199,35 @@ if (!string.IsNullOrEmpty(jwtSecret))
             ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "tamma",
             ValidateAudience = true,
             ValidAudience = builder.Configuration["Jwt:Audience"] ?? "tamma-api",
-            ClockSkew = TimeSpan.Zero
+            ClockSkew = TimeSpan.Zero,
+            // sub claim is the user id; role claim is the bare string "role".
+            // Without these, ClaimsPrincipal.Identity.Name and IsInRole
+            // would look at the long URI claim names — see audit finding 002.
+            NameClaimType = System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub,
+            RoleClaimType = "role",
+        };
+        // Cookie fallback: if no Authorization header, read the JWT from
+        // the tamma_session cookie. Mirrors TS where the cookie is the
+        // primary auth source for cross-subdomain dashboard requests
+        // (audit finding 011 / 010).
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                if (string.IsNullOrEmpty(ctx.Token) &&
+                    ctx.Request.Cookies.TryGetValue("tamma_session", out var cookieJwt) &&
+                    !string.IsNullOrEmpty(cookieJwt))
+                {
+                    ctx.Token = cookieJwt;
+                }
+                return Task.CompletedTask;
+            }
         };
     })
     .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthHandler>("ApiKey", null);
 
     builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
+    builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -245,6 +281,27 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("apikeys:manage"));
         });
+        // Self-or-permission policies — mirror TS requireSelfOrRole. Allow a
+        // member-role user to manage their OWN API keys / read their OWN
+        // profile, while still gating cross-user access by the underlying
+        // permission. Audit finding 016.
+        options.AddPolicy("SelfOrApiKeysManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new SelfOrPermissionRequirement("apikeys:manage"));
+        });
+        options.AddPolicy("SelfOrUsersView", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new SelfOrPermissionRequirement("users:view"));
+        });
+        // RoleCheck policy: cookie or bearer JWT, must be authenticated. Used
+        // by nginx auth_request to gate cross-subdomain access (finding 010).
+        options.AddPolicy("AuthenticatedAny", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.RequireAuthenticatedUser();
+        });
     });
 }
 else if (builder.Environment.IsDevelopment())
@@ -273,7 +330,8 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "WorkflowsView", "WorkflowsManage", "DashboardView", "ApiKeysManage" })
+            "SettingsManage", "WorkflowsView", "WorkflowsManage", "DashboardView", "ApiKeysManage",
+            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
         }
@@ -348,8 +406,12 @@ auth.MapPost("/password-reset/request", AuthEndpoints.PasswordResetRequest);
 auth.MapPost("/password-reset/confirm", AuthEndpoints.PasswordResetConfirm);
 auth.MapPost("/switch-org", OrgEndpoints.SwitchOrg).RequireAuthorization("MemberAccess");
 
-app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("MemberAccess");
-app.MapGet("/api/auth/role-check", AuthEndpoints.RoleCheck).RequireAuthorization("MemberAccess");
+app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("AuthenticatedAny");
+// /api/auth/role-check is the nginx auth_request gate — must accept either
+// the JWT cookie or the Authorization header and return 200/401/403 by
+// status alone (audit finding 010). AuthenticatedAny enforces auth; the
+// endpoint itself returns 403 for insufficient role.
+app.MapGet("/api/auth/role-check", AuthEndpoints.RoleCheck).RequireAuthorization("AuthenticatedAny");
 app.MapGet("/api/auth/github", AuthEndpoints.GitHubAuth);
 app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback);
 
@@ -364,15 +426,19 @@ admin.MapGet("/service-keys", AdminEndpoints.ListServiceKeys).RequireAuthorizati
 admin.MapPost("/service-keys/{id}/rotate", AdminEndpoints.RotateServiceKey).RequireAuthorization("SettingsManage");
 admin.MapDelete("/service-keys/{id}", AdminEndpoints.DeleteServiceKey).RequireAuthorization("SettingsManage");
 admin.MapGet("/users", AdminEndpoints.ListUsers);
-admin.MapGet("/users/{id}", AdminEndpoints.GetUser);
+// SelfOrUsersView allows a regular member to GET their own profile via the
+// admin-prefixed route (audit finding 016 — TS requireSelfOrRole behavior).
+admin.MapGet("/users/{id}", AdminEndpoints.GetUser).RequireAuthorization("SelfOrUsersView");
 admin.MapPut("/users/{id}/role", AdminEndpoints.UpdateUserRole).RequireAuthorization("OwnerAccess");
 admin.MapDelete("/users/{id}", AdminEndpoints.DeleteUser).RequireAuthorization("OwnerAccess");
 admin.MapPost("/users/invite", AdminEndpoints.InviteUser);
 admin.MapGet("/users/invites", AdminEndpoints.ListInvites);
 admin.MapDelete("/users/invites/{id}", AdminEndpoints.DeleteInvite);
-admin.MapPost("/users/{id}/keys", AdminEndpoints.CreateUserApiKey).RequireAuthorization("ApiKeysManage");
-admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("ApiKeysManage");
-admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("ApiKeysManage");
+// SelfOrApiKeysManage: a regular member can manage their own keys; admins
+// can manage anyone's. Audit finding 016.
+admin.MapPost("/users/{id}/keys", AdminEndpoints.CreateUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
+admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("SelfOrApiKeysManage");
+admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
 
 // ── Orgs / Tenants ──
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");

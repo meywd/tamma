@@ -25,15 +25,30 @@ public class LoginLockoutService : ILoginLockoutService
 
         lock (entry)
         {
-            // Clean old attempts
-            var cutoff = DateTime.UtcNow.AddMinutes(-WindowMinutes);
+            var now = DateTime.UtcNow;
+
+            // If a previous lockout has expired, clear it AND the residual
+            // timestamps so the new attempt starts a fresh window.
+            // Mirrors TS login-lockout.ts:78-82 — audit finding 017.
+            if (entry.LockedUntil.HasValue && entry.LockedUntil.Value <= now)
+            {
+                entry.LockedUntil = null;
+                entry.Attempts.Clear();
+            }
+
+            // Still locked? Don't add more attempts; just signal locked.
+            if (entry.LockedUntil.HasValue && entry.LockedUntil.Value > now)
+                return true;
+
+            // Clean old attempts outside the rolling window.
+            var cutoff = now.AddMinutes(-WindowMinutes);
             entry.Attempts.RemoveAll(a => a < cutoff);
 
-            entry.Attempts.Add(DateTime.UtcNow);
+            entry.Attempts.Add(now);
 
             if (entry.Attempts.Count >= MaxAttempts)
             {
-                entry.LockedUntil = DateTime.UtcNow.AddMinutes(LockoutMinutes);
+                entry.LockedUntil = now.AddMinutes(LockoutMinutes);
                 return true;
             }
         }

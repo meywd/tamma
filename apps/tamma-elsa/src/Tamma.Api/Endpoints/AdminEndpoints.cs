@@ -1,5 +1,7 @@
-using System.Security.Cryptography;
-using System.Text;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Services;
 using Tamma.Data;
@@ -10,6 +12,8 @@ namespace Tamma.Api.Endpoints;
 
 public static class AdminEndpoints
 {
+    private static readonly string[] AllowedRoles = { "owner", "admin", "member" };
+
     /// <summary>
     /// Aggregates infrastructure health probes (Postgres + 4 HTTP services) in
     /// parallel. Mirrors the TS <c>/api/admin/health</c> envelope shape:
@@ -22,10 +26,9 @@ public static class AdminEndpoints
     }
 
     /// <summary>
-    /// Service-key creator. ServiceName is required (persisted as OwnerId so
-    /// each consuming service has its own row, independently revocable).
-    /// TenantId is intentionally null — service keys are platform-level
-    /// credentials and must work cross-tenant.
+    /// Service-key creator. Uses centralized <see cref="ApiKeyHasher"/> so
+    /// service / user / installation keys share the <c>tamma_sk_</c> prefix +
+    /// base64url + SHA-256 hash format. Audit findings 003 / 020.
     /// </summary>
     public static async Task<IResult> CreateServiceKey(
         CreateServiceKeyRequest req,
@@ -34,9 +37,9 @@ public static class AdminEndpoints
         if (string.IsNullOrWhiteSpace(req.ServiceName))
             return Results.BadRequest(new { error = "serviceName is required" });
 
-        var rawKey = $"tamma_sk_{Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}";
-        var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))).ToLowerInvariant();
-        var prefix = rawKey[..16];
+        var rawKey = ApiKeyHasher.NewKey();
+        var keyHash = ApiKeyHasher.Hash(rawKey);
+        var prefix = ApiKeyHasher.Prefix(rawKey);
 
         var apiKey = await apiKeyRepo.CreateAsync(new ApiKey
         {
@@ -80,22 +83,15 @@ public static class AdminEndpoints
         return Results.Ok(response);
     }
 
-    /// <summary>
-    /// Rotate a service key. Old key remains valid for a 24h grace period
-    /// (RevokedAt = now+24h) so dependent services can roll over without an
-    /// outage. The response includes a warning advertising the grace window
-    /// and the rotated-from id so the caller can track the rotation chain.
-    /// Returns 404 when the source id does not exist.
-    /// </summary>
     public static async Task<IResult> RotateServiceKey(Guid id, IApiKeyRepository apiKeyRepo)
     {
         var existing = await apiKeyRepo.GetByIdAsync(id);
         if (existing is null)
             return Results.NotFound(new { error = "Service key not found" });
 
-        var rawKey = $"tamma_sk_{Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}";
-        var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))).ToLowerInvariant();
-        var prefix = rawKey[..16];
+        var rawKey = ApiKeyHasher.NewKey();
+        var keyHash = ApiKeyHasher.Hash(rawKey);
+        var prefix = ApiKeyHasher.Prefix(rawKey);
         var newKey = await apiKeyRepo.RotateAsync(id, keyHash, prefix);
         return Results.Ok(new ServiceKeyResponse(
             newKey.Id,
@@ -144,23 +140,85 @@ public static class AdminEndpoints
         UpdateUserRoleRequest req,
         IUserRepository userRepo,
         ITenantMembershipRepository membershipRepo,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
     {
+        // Audit finding 018: full guard set.
+        if (string.IsNullOrEmpty(req.Role) || !AllowedRoles.Contains(req.Role))
+            return Results.BadRequest(new
+            {
+                error = "Invalid role. Must be one of: owner, admin, member"
+            });
+
+        var callerSub = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(callerSub, out var callerId) && callerId == id)
+            return Results.BadRequest(new { error = "Cannot change your own role" });
+
+        var callerRole = principal.FindFirst("role")?.Value
+            ?? principal.FindFirst(ClaimTypes.Role)?.Value
+            ?? "member";
+
+        // Owner-only promotions: route is gated OwnerAccess in Program.cs so
+        // this is mostly defense-in-depth — but it makes the policy explicit
+        // for readers.
+        if ((req.Role == "owner" || req.Role == "admin") && callerRole != "owner")
+            return Results.Json(
+                new { error = "Only owners can promote to admin or owner" },
+                statusCode: 403);
+
         var user = await userRepo.GetByIdAsync(id);
         if (user is null) return Results.NotFound(new { error = "User not found" });
 
+        var oldRole = user.Role;
         if (tenantContext.TenantId.HasValue)
             await membershipRepo.UpdateRoleAsync(tenantContext.TenantId.Value, id, req.Role);
 
         user.Role = req.Role;
         await userRepo.UpdateAsync(user);
+
+        loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
+            .LogInformation(
+                "USER.ROLE_CHANGED.SUCCESS targetUserId={TargetUserId} oldRole={OldRole} newRole={NewRole} changedBy={ChangedBy}",
+                id, oldRole, req.Role, callerSub ?? "(unknown)");
+
         return Results.Ok(new { message = "Role updated" });
     }
 
-    public static async Task<IResult> DeleteUser(Guid id, IUserRepository userRepo)
+    public static async Task<IResult> DeleteUser(
+        Guid id,
+        IUserRepository userRepo,
+        IApiKeyRepository apiKeyRepo,
+        ITenantMembershipRepository membershipRepo,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
     {
+        // Audit finding 019: cascade + self-protection + audit log.
+        var callerSub = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(callerSub, out var callerId) && callerId == id)
+            return Results.BadRequest(new { error = "Cannot delete yourself" });
+
+        var user = await userRepo.GetByIdAsync(id);
+        if (user is null)
+            return Results.NotFound(new { error = "User not found" });
+
         await userRepo.SoftDeleteAsync(id);
-        return Results.Ok(new { message = "User deactivated" });
+        await apiKeyRepo.RevokeAllByOwnerAsync(id.ToString());
+
+        // Note: TS unlinked from user_installations; admin-db ruled that
+        // table is folded into tenant_memberships. Removing all
+        // memberships would also remove the user's tenant ownership, which
+        // can leave tenants without an owner — defer that semantic to a
+        // future story (see audit findings 019 / 023).
+
+        loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
+            .LogInformation(
+                "USER.DELETED.SUCCESS targetUserId={TargetUserId} deletedBy={DeletedBy}",
+                id, callerSub ?? "(unknown)");
+
+        return Results.Ok(new { ok = true });
     }
 
     public static async Task<IResult> InviteUser(
@@ -172,16 +230,14 @@ public static class AdminEndpoints
         if (!tenantContext.TenantId.HasValue)
             return Results.BadRequest(new { error = "No tenant context" });
 
-        // Reject the Guid.Empty fallback the previous implementation used
-        // when no NameIdentifier claim was present. With FK on InvitedBy
-        // (post-finding 019 hardening), a synthetic empty guid would either
-        // FK-violate or pollute audit history. Demand a real caller id.
-        var userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var userId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId) || !Guid.TryParse(userId, out var inviterId))
             return Results.BadRequest(new { error = "Authenticated user identity required" });
 
         var token = Guid.NewGuid().ToString("N");
-        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+        var tokenHash = Convert.ToHexString(System.Security.Cryptography.SHA256
+            .HashData(System.Text.Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
         var invite = await inviteRepo.CreateAsync(new UserInvite
         {
@@ -217,9 +273,11 @@ public static class AdminEndpoints
         IApiKeyRepository apiKeyRepo,
         ITenantContext tenantContext)
     {
-        var rawKey = $"tamma_uk_{Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}";
-        var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))).ToLowerInvariant();
-        var prefix = rawKey[..16];
+        // Centralized via ApiKeyHasher — same prefix / encoding / hash as
+        // service keys. Audit findings 003 / 020.
+        var rawKey = ApiKeyHasher.NewKey();
+        var keyHash = ApiKeyHasher.Hash(rawKey);
+        var prefix = ApiKeyHasher.Prefix(rawKey);
 
         var apiKey = await apiKeyRepo.CreateAsync(new ApiKey
         {

@@ -35,6 +35,18 @@ public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
         }
     }
 
+    public async Task RevokeAllByOwnerAsync(string ownerId)
+    {
+        var now = DateTime.UtcNow;
+        var keys = await db.ApiKeys
+            .Where(k => k.OwnerId == ownerId && k.RevokedAt == null)
+            .ToListAsync();
+        foreach (var key in keys)
+            key.RevokedAt = now;
+        if (keys.Count > 0)
+            await db.SaveChangesAsync();
+    }
+
     public async Task<ApiKey> RotateAsync(Guid oldId, string newKeyHash, string newKeyPrefix)
     {
         var old = await db.ApiKeys.FindAsync(oldId)
