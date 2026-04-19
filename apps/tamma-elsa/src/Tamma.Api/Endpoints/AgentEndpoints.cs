@@ -213,12 +213,13 @@ public static class AgentEndpoints
                         errors.Add($"Forbidden role key: '{prop.Name}'.");
                         continue;
                     }
-                    if (!RolePhaseMap.ValidRoles.Contains(prop.Name))
-                    {
-                        errors.Add(
-                            $"Unknown role '{prop.Name}'. Valid: " +
-                            string.Join(", ", RolePhaseMap.ValidRoles) + ".");
-                    }
+                    if (RolePhaseMap.ValidRoles.Contains(prop.Name)) continue;
+                    // Legacy TS role names — accept and document migration
+                    // path rather than 400-ing on existing rows. Finding 001.
+                    if (RolePhaseMap.LegacyRoleAliases.ContainsKey(prop.Name)) continue;
+                    errors.Add(
+                        $"Unknown role '{prop.Name}'. Valid: " +
+                        string.Join(", ", RolePhaseMap.ValidRoles) + ".");
                 }
             }
         }

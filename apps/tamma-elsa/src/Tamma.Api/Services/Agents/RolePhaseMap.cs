@@ -61,6 +61,71 @@ public static class RolePhaseMap
         "prototype",
     }.ToFrozenSet();
 
+    /// <summary>
+    /// Legacy TS role keys (Story 9-1 / 9-8) mapped onto current C# roles —
+    /// see audit finding 001. Old <c>agent_configs.config</c> JSONB rows
+    /// written by the deleted TS engine still use these names; instead of
+    /// 400-ing, we accept them transparently and translate to the canonical
+    /// C# role at validation / resolution time. Unmapped entries
+    /// (<c>analyst</c>, <c>scrum_master</c>, <c>researcher</c>) fall back to
+    /// <c>product_owner</c>, the closest equivalent in the new grid.
+    /// </summary>
+    public static readonly FrozenDictionary<string, string> LegacyRoleAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["implementer"] = "developer",
+            ["reviewer"] = "senior_developer",
+            ["tester"] = "tester",
+            ["architect"] = "architect",
+            ["documenter"] = "tech_writer",
+            ["analyst"] = "product_owner",
+            ["scrum_master"] = "product_owner",
+            ["planner"] = "senior_developer",
+            ["researcher"] = "product_owner",
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Legacy TS workflow phase keys (UPPER_SNAKE) mapped onto the C#
+    /// hyphen-lowercase action vocabulary. Keeps Elsa workflows that still
+    /// emit TS-era phase identifiers compatible with the new resolver.
+    /// </summary>
+    public static readonly FrozenDictionary<string, string> LegacyPhaseAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["ISSUE_SELECTION"] = "triage",
+            ["CONTEXT_ANALYSIS"] = "context-scan",
+            ["PLAN_GENERATION"] = "plan",
+            ["CODE_GENERATION"] = "implement",
+            ["PR_CREATION"] = "implement",
+            ["CODE_REVIEW"] = "code-review",
+            ["TEST_EXECUTION"] = "write-tests",
+            ["STATUS_MONITORING"] = "triage",
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolve a possibly-legacy role to the canonical C# role. Returns
+    /// <paramref name="role"/> unchanged if it's already canonical or not in
+    /// the alias table.
+    /// </summary>
+    public static string NormalizeRole(string role)
+    {
+        if (string.IsNullOrWhiteSpace(role)) return role;
+        if (ValidRoles.Contains(role)) return role;
+        return LegacyRoleAliases.TryGetValue(role, out var canonical) ? canonical : role;
+    }
+
+    /// <summary>
+    /// Resolve a possibly-legacy phase identifier to the canonical action.
+    /// Returns <paramref name="phase"/> unchanged if it's already canonical
+    /// or not in the alias table.
+    /// </summary>
+    public static string NormalizePhase(string phase)
+    {
+        if (string.IsNullOrWhiteSpace(phase)) return phase;
+        if (ValidActions.Contains(phase)) return phase;
+        return LegacyPhaseAliases.TryGetValue(phase, out var canonical) ? canonical : phase;
+    }
+
     // -----------------------------------------------------------------------
     // Role → primary phase
     // -----------------------------------------------------------------------

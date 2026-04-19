@@ -16,14 +16,15 @@ namespace Tamma.Api.Services.Providers;
 /// logic to dispatch a provider-specific payload and parse a provider-
 /// specific response. It is <em>not</em> a full LLM SDK — complete
 /// streaming, tool-calling, and context management live in the TS engine
-/// and will be ported separately.
+/// and will be ported separately (see audit finding 003).
 /// </para>
 /// <para>
-/// When the mapped <see cref="HttpClient"/> is not configured (e.g. the
-/// API key is missing for a given provider), the client falls back to a
-/// deterministic stub response rather than 500-ing, so local/test flows
-/// work without network credentials. Production deployments should set
-/// the provider credentials at startup so this branch is never taken.
+/// Cost enrichment: the response parser splits input vs output tokens (TS
+/// migration 014) and looks up the per-token rate in
+/// <see cref="IProviderPricingService"/>. Unknown <c>(provider, model)</c>
+/// tuples land at <c>cost = 0</c>; this matches the TS
+/// <c>CostCalculator.calculate</c> happy path for local / un-priced models.
+/// Wired in for finding 004.
 /// </para>
 /// </remarks>
 public sealed class HttpProviderClient : IProviderClient
@@ -36,14 +37,45 @@ public sealed class HttpProviderClient : IProviderClient
             ["openai"] = "openai",
             ["github-copilot"] = "github-copilot",
             ["gemini"] = "gemini",
+            ["openrouter"] = "openrouter",
+            ["z.ai"] = "z.ai",
+            ["zai"] = "z.ai",
+            ["local"] = "local",
+            ["ollama"] = "local",
+            ["lmstudio"] = "local",
+        };
+
+    /// <summary>
+    /// Provider keys that require a non-HTTP transport (subprocess for CLI
+    /// agents, MCP for Zen). They cannot be served by this client and surface
+    /// a stable <c>PROVIDER_NOT_SUPPORTED</c> error so callers don't get an
+    /// opaque <c>InvalidOperationException</c> from a missing
+    /// <see cref="HttpClient.BaseAddress"/>. Tracked separately as part of
+    /// finding 003 — Tamma needs a CLI-agent + MCP adapter port before these
+    /// can be answered.
+    /// </summary>
+    private static readonly HashSet<string> NonHttpProviders =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "claude-code",
+            "claude-code-cli",
+            "opencode",
+            "opencode-cli",
+            "zen-mcp",
+            "zen",
         };
 
     private readonly IHttpClientFactory _factory;
+    private readonly IProviderPricingService _pricing;
     private readonly ILogger<HttpProviderClient> _logger;
 
-    public HttpProviderClient(IHttpClientFactory factory, ILogger<HttpProviderClient> logger)
+    public HttpProviderClient(
+        IHttpClientFactory factory,
+        IProviderPricingService pricing,
+        ILogger<HttpProviderClient> logger)
     {
         _factory = factory;
+        _pricing = pricing;
         _logger = logger;
     }
 
@@ -51,12 +83,38 @@ public sealed class HttpProviderClient : IProviderClient
     public async Task<ProviderInvocationResult> InvokeAsync(
         string provider, string model, ExecuteRequest req, CancellationToken ct = default)
     {
+        if (NonHttpProviders.Contains(provider))
+        {
+            throw new ProviderNotSupportedException(provider,
+                $"Provider '{provider}' requires a non-HTTP transport " +
+                "(CLI subprocess or MCP) that is not yet ported to C#. " +
+                "See audit finding 003.");
+        }
+
         if (!ProviderHttpClientMap.TryGetValue(provider, out var clientName))
         {
-            clientName = provider.ToLowerInvariant();
+            // Unknown provider — surface a typed error rather than blindly
+            // dispatching against a default HttpClient with no BaseAddress
+            // (which would 404 or NRE deep inside HttpRequestMessage).
+            throw new ProviderNotSupportedException(provider,
+                $"Provider '{provider}' is not registered with the HTTP " +
+                "dispatch layer. Add a named HttpClient + entry to " +
+                $"{nameof(HttpProviderClient)}.{nameof(ProviderHttpClientMap)} " +
+                "to enable it.");
         }
 
         var client = _factory.CreateClient(clientName);
+        if (client.BaseAddress is null)
+        {
+            // Defensive: even when an entry exists, a missing BaseAddress
+            // means the named client wasn't configured (e.g. forgot to call
+            // AddHttpClient(name, ...)). Fail fast with a clear message
+            // instead of producing an opaque "invalid request URI" deep in
+            // HttpRequestMessage.
+            throw new ProviderNotSupportedException(provider,
+                $"Named HttpClient '{clientName}' has no BaseAddress. " +
+                "Verify the provider's section is configured in appsettings.");
+        }
         var stopwatch = Stopwatch.StartNew();
 
         // Anthropic is the only provider with a first-class request shape
@@ -70,7 +128,7 @@ public sealed class HttpProviderClient : IProviderClient
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             stopwatch.Stop();
-            return ParseResponse(provider, body, stopwatch.ElapsedMilliseconds);
+            return ParseResponse(provider, model, body, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -112,8 +170,8 @@ public sealed class HttpProviderClient : IProviderClient
         });
     }
 
-    private static ProviderInvocationResult ParseResponse(
-        string provider, JsonElement body, long durationMs)
+    private ProviderInvocationResult ParseResponse(
+        string provider, string model, JsonElement body, long durationMs)
     {
         if (provider.StartsWith("anthropic", StringComparison.OrdinalIgnoreCase))
         {
@@ -131,21 +189,23 @@ public sealed class HttpProviderClient : IProviderClient
                 }
             }
 
-            int tokens = 0;
+            int inputTokens = 0;
+            int outputTokens = 0;
             if (body.TryGetProperty("usage", out var usage))
             {
                 if (usage.TryGetProperty("input_tokens", out var input))
-                    tokens += input.GetInt32();
+                    inputTokens = input.GetInt32();
                 if (usage.TryGetProperty("output_tokens", out var output))
-                    tokens += output.GetInt32();
+                    outputTokens = output.GetInt32();
             }
 
-            // Anthropic doesn't return cost; leave at 0 — the cost-monitor
-            // service is responsible for enrichment (Epic 9).
-            return new ProviderInvocationResult(content, tokens, 0m, durationMs);
+            var cost = _pricing.Compute(provider, model, inputTokens, outputTokens);
+            return new ProviderInvocationResult(
+                content, inputTokens + outputTokens, cost, durationMs,
+                inputTokens, outputTokens);
         }
 
-        // OpenAI-style: { choices: [{ message: { content } }], usage: { total_tokens } }
+        // OpenAI-style: { choices: [{ message: { content } }], usage: { prompt_tokens, completion_tokens, total_tokens } }
         var choicesContent = string.Empty;
         if (body.TryGetProperty("choices", out var choices) &&
             choices.ValueKind == JsonValueKind.Array &&
@@ -159,13 +219,35 @@ public sealed class HttpProviderClient : IProviderClient
             }
         }
 
+        int promptTokens = 0;
+        int completionTokens = 0;
         int totalTokens = 0;
-        if (body.TryGetProperty("usage", out var uOpenAi) &&
-            uOpenAi.TryGetProperty("total_tokens", out var tt))
+        if (body.TryGetProperty("usage", out var uOpenAi))
         {
-            totalTokens = tt.GetInt32();
+            if (uOpenAi.TryGetProperty("prompt_tokens", out var pt))
+                promptTokens = pt.GetInt32();
+            if (uOpenAi.TryGetProperty("completion_tokens", out var ct))
+                completionTokens = ct.GetInt32();
+            if (uOpenAi.TryGetProperty("total_tokens", out var tt))
+                totalTokens = tt.GetInt32();
+        }
+        // OpenAI sometimes returns only total_tokens; if so, attribute it all
+        // to "input" so per-token cost still tracks. The pricing service treats
+        // input/output rates as separate columns so this is the right default
+        // for unknown splits — it will be a small over-estimate vs the true
+        // billed cost when output rates are higher than input rates.
+        if (totalTokens == 0)
+        {
+            totalTokens = promptTokens + completionTokens;
+        }
+        else if (promptTokens == 0 && completionTokens == 0)
+        {
+            promptTokens = totalTokens;
         }
 
-        return new ProviderInvocationResult(choicesContent, totalTokens, 0m, durationMs);
+        var openAiCost = _pricing.Compute(provider, model, promptTokens, completionTokens);
+        return new ProviderInvocationResult(
+            choicesContent, totalTokens, openAiCost, durationMs,
+            promptTokens, completionTokens);
     }
 }

@@ -88,6 +88,58 @@ builder.Services.AddHttpClient("anthropic", client =>
     if (!string.IsNullOrEmpty(apiKey))
         client.DefaultRequestHeaders.Add("x-api-key", apiKey);
 });
+// HTTP-based providers used by HttpProviderClient (finding 003). Each named
+// client carries its own base URL + auth header so the dispatch layer doesn't
+// have to know the provider details. CLI-agent providers (claude-code,
+// opencode) and the Zen MCP provider are NOT registered here — they require
+// subprocess / MCP transports that are tracked separately.
+builder.Services.AddHttpClient("openai", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["OpenAI:BaseUrl"] ?? "https://api.openai.com");
+    var apiKey = builder.Configuration["OpenAI:ApiKey"];
+    if (!string.IsNullOrEmpty(apiKey))
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+});
+builder.Services.AddHttpClient("github-copilot", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["Copilot:BaseUrl"] ?? "https://api.githubcopilot.com");
+    var apiKey = builder.Configuration["Copilot:ApiKey"];
+    if (!string.IsNullOrEmpty(apiKey))
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+});
+builder.Services.AddHttpClient("gemini", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["Gemini:BaseUrl"] ?? "https://generativelanguage.googleapis.com");
+    // Gemini accepts the API key via X-Goog-Api-Key header on v1beta.
+    var apiKey = builder.Configuration["Gemini:ApiKey"];
+    if (!string.IsNullOrEmpty(apiKey))
+        client.DefaultRequestHeaders.Add("X-Goog-Api-Key", apiKey);
+});
+builder.Services.AddHttpClient("openrouter", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai");
+    var apiKey = builder.Configuration["OpenRouter:ApiKey"];
+    if (!string.IsNullOrEmpty(apiKey))
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+});
+builder.Services.AddHttpClient("z.ai", client =>
+{
+    client.BaseAddress = new Uri(
+        builder.Configuration["ZAi:BaseUrl"] ?? "https://api.z.ai");
+    var apiKey = builder.Configuration["ZAi:ApiKey"];
+    if (!string.IsNullOrEmpty(apiKey))
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+});
+builder.Services.AddHttpClient("local", client =>
+{
+    // Local model server (Ollama / LM Studio default). Configurable per-deploy.
+    var baseUrl = builder.Configuration["LocalLLM:BaseUrl"] ?? "http://localhost:11434";
+    client.BaseAddress = new Uri(baseUrl);
+});
 builder.Services.AddHttpClient("github", client =>
 {
     var baseUrl = builder.Configuration["GitHub:ApiBaseUrl"] ?? "https://api.github.com";
@@ -532,6 +584,7 @@ providers.MapGet("/diagnostics", ProviderEndpoints.GetDiagnostics);
 providers.MapGet("/diagnostics/query", ProviderEndpoints.QueryDiagnostics);
 providers.MapGet("/diagnostics/report", ProviderEndpoints.GetReport);
 providers.MapGet("/diagnostics/budget/{accountId}", ProviderEndpoints.GetBudget);
+providers.MapPut("/diagnostics/budget/{accountId}", ProviderEndpoints.UpdateBudget).RequireAuthorization("SettingsManage");
 providers.MapPost("/diagnostics", ProviderEndpoints.IngestDiagnostic).RequireAuthorization("SettingsManage");
 providers.MapPost("/providers/create", ProviderEndpoints.CreateProvider).RequireAuthorization("SettingsManage");
 providers.MapPost("/providers/{handle}/execute", ProviderEndpoints.ExecuteProvider).RequireAuthorization("SettingsManage");

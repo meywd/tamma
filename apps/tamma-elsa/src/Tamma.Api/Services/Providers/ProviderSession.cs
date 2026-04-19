@@ -56,11 +56,21 @@ public sealed record ExecuteResult(
 /// service layer wraps this in <see cref="ExecuteResult"/> after adding
 /// timing / diagnostic side effects.
 /// </summary>
+/// <param name="Content">Textual output from the provider.</param>
+/// <param name="TokensUsed">Total tokens consumed (input + output). Equal to
+/// <paramref name="InputTokens"/> + <paramref name="OutputTokens"/>.</param>
+/// <param name="CostUsd">Computed USD cost via
+/// <see cref="IProviderPricingService"/>; <c>0m</c> for unknown models.</param>
+/// <param name="DurationMs">Wall-clock latency in milliseconds.</param>
+/// <param name="InputTokens">Prompt / input token count, billed at the input rate.</param>
+/// <param name="OutputTokens">Completion / output token count, billed at the output rate.</param>
 public sealed record ProviderInvocationResult(
     string Content,
     int TokensUsed,
     decimal CostUsd,
-    long DurationMs);
+    long DurationMs,
+    int InputTokens = 0,
+    int OutputTokens = 0);
 
 /// <summary>
 /// Thrown when a handle does not resolve to a session (or resolves to a
@@ -70,4 +80,21 @@ public sealed class ProviderSessionNotFoundException : Exception
 {
     public ProviderSessionNotFoundException(string handle)
         : base($"Provider session not found: {handle}") { }
+}
+
+/// <summary>
+/// Thrown when an <see cref="IProviderClient"/> implementation can't service
+/// the requested provider (CLI agent / MCP transport not yet ported, or
+/// caller passed an unknown provider key). Surfaces as <c>400 Bad Request</c>
+/// at the endpoint layer so callers don't see an opaque <c>500</c> from a
+/// missing <see cref="HttpClient.BaseAddress"/>.
+/// </summary>
+public sealed class ProviderNotSupportedException : Exception
+{
+    public string Provider { get; }
+    public ProviderNotSupportedException(string provider, string message)
+        : base(message)
+    {
+        Provider = provider;
+    }
 }

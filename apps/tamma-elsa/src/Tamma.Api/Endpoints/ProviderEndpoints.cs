@@ -8,6 +8,7 @@ using Tamma.Api.Services.Providers;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using BudgetConfigModel = Tamma.Api.Services.Diagnostics.Models.BudgetConfig;
 
 namespace Tamma.Api.Endpoints;
 
@@ -265,6 +266,51 @@ public static class ProviderEndpoints
     }
 
     /// <summary>
+    /// Replace the budget configuration for an account. Implements the
+    /// missing PUT side of finding 005 — without this endpoint there was no
+    /// way for an admin to set <c>LimitUsd</c> on a per-tenant basis, so
+    /// budget enforcement could never fire.
+    /// </summary>
+    /// <remarks>
+    /// Persistence is in-memory in the current build; a multi-replica
+    /// deployment requires the Postgres-backed provider tracked in the
+    /// budget-persistence story. <c>SettingsManage</c> gated at the route.
+    /// </remarks>
+    public static IResult UpdateBudget(
+        string accountId,
+        UpdateBudgetRequest req,
+        [FromServices] IBudgetConfigProvider provider)
+    {
+        if (!Guid.TryParse(accountId, out var id))
+            return Results.BadRequest(new { error = "accountId must be a GUID." });
+        if (req is null)
+            return Results.BadRequest(new { error = "Request body required." });
+        if (req.LimitUsd < 0)
+            return Results.BadRequest(new { error = "limitUsd must be >= 0." });
+        if (req.AlertThreshold is < 0 or > 1)
+            return Results.BadRequest(new { error = "alertThreshold must be in [0,1]." });
+        if (req.PeriodDays is < 1 or > 366)
+            return Results.BadRequest(new { error = "periodDays must be in [1,366]." });
+
+        var now = DateTime.UtcNow;
+        var period = TimeSpan.FromDays(req.PeriodDays);
+        var cfg = new BudgetConfigModel(
+            LimitUsd: req.LimitUsd,
+            AlertThreshold: req.AlertThreshold,
+            PeriodStart: now - period,
+            PeriodEnd: now + period);
+
+        provider.SetConfig(id, cfg);
+        return Results.Ok(new
+        {
+            accountId = id,
+            limitUsd = cfg.LimitUsd,
+            alertThreshold = cfg.AlertThreshold,
+            periodDays = req.PeriodDays,
+        });
+    }
+
+    /// <summary>
     /// Accept a new diagnostic event. Writes through
     /// <see cref="IDiagnosticsService.RecordEventAsync"/> so the recent-events
     /// cache is kept warm for the settings UI.
@@ -372,6 +418,15 @@ public static class ProviderEndpoints
         {
             return Results.NotFound(new { error = ex.Message });
         }
+        catch (ProviderNotSupportedException ex)
+        {
+            // 501 (Not Implemented) is the most accurate code for "provider
+            // is registered but the transport adapter isn't ported yet".
+            return Results.Problem(
+                title: "PROVIDER_NOT_SUPPORTED",
+                detail: ex.Message,
+                statusCode: 501);
+        }
     }
 
     /// <summary>
@@ -412,3 +467,13 @@ public static class ProviderEndpoints
 
 /// <summary>Request body for <c>POST /api/providers/chain/resolve</c>.</summary>
 public sealed record ResolveChainRequest(string Role, string Action);
+
+/// <summary>
+/// Request body for <c>PUT /api/providers/diagnostics/budget/{accountId}</c>.
+/// Limits cap the rolling-window USD spend for the tenant; alerts fire at
+/// <c>AlertThreshold</c> (e.g. 0.8 = 80%).
+/// </summary>
+public sealed record UpdateBudgetRequest(
+    decimal LimitUsd,
+    double AlertThreshold = 0.8,
+    int PeriodDays = 30);

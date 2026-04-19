@@ -21,7 +21,12 @@ public static class DiagnosticsServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddDiagnosticsServices(this IServiceCollection services)
     {
-        services.AddSingleton<IBudgetConfigProvider, InMemoryBudgetConfigProvider>();
+        // Resolve IConfiguration through DI so the budget provider can pick up
+        // Budget:LimitUsd / Budget:AlertThreshold / Budget:PeriodDays at startup
+        // (finding 005). Per-tenant overrides land via SetConfig from the
+        // PUT /api/providers/budget/{tenantId} endpoint.
+        services.AddSingleton<IBudgetConfigProvider>(sp =>
+            new InMemoryBudgetConfigProvider(sp.GetService<IConfiguration>()));
         services.AddSingleton<IDiagnosticsService, DiagnosticsService>();
         return services;
     }

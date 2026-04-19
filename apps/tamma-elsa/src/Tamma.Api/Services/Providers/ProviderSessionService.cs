@@ -119,6 +119,8 @@ public sealed class ProviderSessionService : IProviderSessionService
                 Model = session.Model,
                 RequestDurationMs = durationMs,
                 TokensUsed = invocation.TokensUsed,
+                InputTokens = invocation.InputTokens,
+                OutputTokens = invocation.OutputTokens,
                 Cost = invocation.CostUsd,
                 TenantId = session.TenantId,
                 Success = true,

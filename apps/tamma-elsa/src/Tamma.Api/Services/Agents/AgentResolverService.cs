@@ -32,6 +32,9 @@ public sealed class AgentResolverService : IAgentResolverService
     /// <inheritdoc />
     public async Task<ResolvedAgentConfig> ResolveAsync(Guid? tenantId, string role)
     {
+        // Translate any legacy TS role identifier (implementer, reviewer, …)
+        // before strict validation. Finding 001.
+        role = RolePhaseMap.NormalizeRole(role);
         RolePhaseMap.AssertValidRole(role);
 
         // 1) Platform default (fresh mutable copy)
@@ -56,6 +59,11 @@ public sealed class AgentResolverService : IAgentResolverService
     public async Task<ResolvedAgentConfig> ResolveForPhaseAsync(
         Guid? tenantId, string phase, string role)
     {
+        // Legacy alias normalisation runs before strict validation so
+        // workflows still emitting CODE_GENERATION / implementer keep working
+        // through the migration window. Finding 001.
+        phase = RolePhaseMap.NormalizePhase(phase);
+        role = RolePhaseMap.NormalizeRole(role);
         RolePhaseMap.AssertValidPhase(phase);
         RolePhaseMap.AssertValidRole(role);
 
@@ -93,6 +101,9 @@ public sealed class AgentResolverService : IAgentResolverService
     /// <summary>
     /// Look up the per-role object inside a tenant config JsonDocument.
     /// Expected shape: <c>{ "roles": { "developer": { ... }, ... } }</c>.
+    /// Falls back to legacy TS role keys when the canonical key isn't
+    /// present, so a row written as <c>roles.implementer</c> still resolves
+    /// for caller asking for <c>developer</c>. Finding 001.
     /// </summary>
     private static bool TryGetRoleOverride(
         JsonDocument doc, string role, out JsonElement roleOverride)
@@ -108,13 +119,26 @@ public sealed class AgentResolverService : IAgentResolverService
         {
             return false;
         }
-        if (!roles.TryGetProperty(role, out var value) ||
-            value.ValueKind != JsonValueKind.Object)
+        // Try the canonical key first.
+        if (roles.TryGetProperty(role, out var value) &&
+            value.ValueKind == JsonValueKind.Object)
         {
-            return false;
+            roleOverride = value;
+            return true;
         }
-        roleOverride = value;
-        return true;
+        // Walk legacy aliases that map to the requested canonical role.
+        foreach (var (legacy, canonical) in RolePhaseMap.LegacyRoleAliases)
+        {
+            if (!string.Equals(canonical, role, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (roles.TryGetProperty(legacy, out var legacyValue) &&
+                legacyValue.ValueKind == JsonValueKind.Object)
+            {
+                roleOverride = legacyValue;
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

@@ -24,6 +24,7 @@ public static class ProviderSessionServiceCollectionExtensions
     {
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddSingleton(new ProviderSessionOptions());
+        services.TryAddSingleton<IProviderPricingService, ProviderPricingService>();
         services.TryAddSingleton<IProviderClient, HttpProviderClient>();
         services.TryAddSingleton<IProviderSessionService, ProviderSessionService>();
         services.AddHostedService<ProviderSessionCleanupService>();
