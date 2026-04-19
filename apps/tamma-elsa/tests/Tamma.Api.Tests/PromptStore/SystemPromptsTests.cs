@@ -166,4 +166,84 @@ public class SystemPromptsTests
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Audit prompts/001 — lock the role-tailored review-lens shape.
+    // The C# port emits a single role-tailored bullet block (or a generic
+    // fallback for the four roles without a matching switch arm) instead
+    // of TS's four parallel ternaries. This is a deliberate LLM-quality
+    // improvement; these tests guard against silent regressions either way.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public void PlanReview_SecurityRole_EmitsSecurityBullets()
+    {
+        var template = SystemPrompts.GetRoleAction("security", "plan-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Check for security implications in each task");
+        template.Template.Should().Contain("Verify input validation and auth concerns are addressed");
+    }
+
+    [Test]
+    public void PlanReview_TesterRole_EmitsTestingBullets()
+    {
+        var template = SystemPrompts.GetRoleAction("tester", "plan-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Check that testing strategy is comprehensive");
+    }
+
+    [Test]
+    public void PlanReview_ArchitectRole_EmitsArchitectureBullets()
+    {
+        var template = SystemPrompts.GetRoleAction("architect", "plan-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Check that architectural patterns are followed");
+    }
+
+    [Test]
+    public void PlanReview_DevopsRole_EmitsDevopsBullets()
+    {
+        var template = SystemPrompts.GetRoleAction("devops", "plan-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Check for deployment and infrastructure impact");
+    }
+
+    [TestCase("developer")]
+    [TestCase("product_owner")]
+    [TestCase("senior_developer")]
+    [TestCase("tech_writer")]
+    public void PlanReview_RoleWithoutMatchingArm_EmitsGenericFallback(string role)
+    {
+        // Audit prompts/001: roles without a dedicated switch arm get a single
+        // explicit fallback line instead of TS's four blank indented lines.
+        var template = SystemPrompts.GetRoleAction(role, "plan-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Apply your role-specific expertise to the plan");
+    }
+
+    [Test]
+    public void CodeReview_SecurityRole_EmitsSecurityBullets()
+    {
+        var template = SystemPrompts.GetRoleAction("security", "code-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Look for credential leaks");
+    }
+
+    [TestCase("developer")]
+    [TestCase("product_owner")]
+    [TestCase("senior_developer")]
+    [TestCase("tech_writer")]
+    public void CodeReview_RoleWithoutMatchingArm_EmitsGenericFallback(string role)
+    {
+        var template = SystemPrompts.GetRoleAction(role, "code-review");
+
+        template.Should().NotBeNull();
+        template!.Template.Should().Contain("Apply your role-specific expertise to the diff");
+    }
 }

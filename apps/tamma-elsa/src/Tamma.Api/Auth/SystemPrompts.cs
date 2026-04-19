@@ -240,9 +240,21 @@ public static class SystemPrompts
 
     // -----------------------------------------------------------------------
     // Individual action templates
-    // Templates are byte-for-byte equivalent to default-prompts.ts, aside from
-    // the role-specific review bullet conditionals (inlined here as literal text
-    // appropriate to each role).
+    // Templates mirror default-prompts.ts, with one deliberate divergence
+    // (port-gap audit prompts/001):
+    //
+    //   plan-review and code-review templates emit a single role-tailored
+    //   review-lens block via RoleReviewLens / RoleReviewLensForCodeReview.
+    //   The TS source used four parallel ternaries — three of which collapsed
+    //   to whitespace-only lines for the matching role and to four blank
+    //   indented lines for unmatched roles. The C# port emits a concrete
+    //   instruction in either case (the role's specific bullets, or a generic
+    //   "Apply your role-specific expertise" fallback). This is a deliberate
+    //   LLM-quality improvement; the contract drift is documented in the
+    //   prompts-scope audit and locked by tests in
+    //   tests/Tamma.Api.Tests/PromptStore/SystemPromptsTests.cs.
+    //
+    // All other templates are byte-for-byte equivalent to default-prompts.ts.
     // -----------------------------------------------------------------------
 
     private static PromptTemplate ContextScan(string role) => new(

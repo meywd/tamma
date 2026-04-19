@@ -24,6 +24,9 @@ public enum PromptSource
 /// <summary>
 /// A resolved prompt template bundled with its source layer.
 /// </summary>
+/// <param name="Version">Override version (from <c>prompt_overrides.Version</c>) when the
+/// resolution layer is user-scoped; defaults to 1 for system-shipped templates which are
+/// unversioned in the in-memory registry.</param>
 public sealed record ResolvedPrompt(
     string Role,
     string Action,
@@ -32,7 +35,8 @@ public sealed record ResolvedPrompt(
     IReadOnlyList<string> Variables,
     bool EnableTools,
     int MaxTokens,
-    PromptSource Source);
+    PromptSource Source,
+    int Version = 1);
 
 /// <summary>
 /// Rendering result for a template — the substituted text and any variables
@@ -186,8 +190,13 @@ public sealed class PromptStoreService
     // Mutations (scope = role-action)
     // -----------------------------------------------------------------------
 
-    /// <summary>Upsert a user role+action override.</summary>
-    public async Task<PromptOverride> UpsertRoleActionAsync(
+    /// <summary>
+    /// Upsert a user role+action override. Returns the persisted entity and
+    /// a <c>wasCreated</c> flag the endpoint uses to choose between the
+    /// <c>PROMPT.CREATED.SUCCESS</c> and <c>PROMPT.UPDATED.SUCCESS</c> event
+    /// types (audit prompts/007).
+    /// </summary>
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleActionAsync(
         Guid? userId,
         Guid? tenantId,
         string role,
@@ -216,7 +225,7 @@ public sealed class PromptStoreService
     // Mutations (scope = role-system)
     // -----------------------------------------------------------------------
 
-    public async Task<PromptOverride> UpsertRoleSystemAsync(
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleSystemAsync(
         Guid? userId,
         Guid? tenantId,
         string role,
@@ -244,7 +253,7 @@ public sealed class PromptStoreService
     // Mutations (scope = action-default)
     // -----------------------------------------------------------------------
 
-    public async Task<PromptOverride> UpsertActionDefaultAsync(
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertActionDefaultAsync(
         Guid? userId,
         Guid? tenantId,
         string action,
@@ -354,5 +363,6 @@ public sealed class PromptStoreService
             Variables: o.Variables,
             EnableTools: o.EnableTools,
             MaxTokens: o.MaxTokens,
-            Source: source);
+            Source: source,
+            Version: o.Version);
 }

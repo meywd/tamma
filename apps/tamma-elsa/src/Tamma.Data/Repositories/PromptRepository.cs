@@ -9,7 +9,7 @@ public class PromptRepository(TammaDbContext db) : IPromptRepository
         => await db.PromptOverrides
             .FirstOrDefaultAsync(p => p.UserId == userId && p.Scope == scope && p.Role == role && p.Action == action);
 
-    public async Task<PromptOverride> UpsertAsync(PromptOverride prompt)
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertAsync(PromptOverride prompt, Guid? actingUserId = null)
     {
         var existing = await db.PromptOverrides
             .FirstOrDefaultAsync(p =>
@@ -23,14 +23,22 @@ public class PromptRepository(TammaDbContext db) : IPromptRepository
             existing.EnableTools = prompt.EnableTools;
             existing.MaxTokens = prompt.MaxTokens;
             existing.UpdatedAt = DateTime.UtcNow;
+            // Bump optimistic-concurrency version (audit prompts/010) and
+            // record who edited (defaults to the row's UserId for self-edit
+            // when no separate acting user is provided).
+            existing.Version += 1;
+            existing.UpdatedBy = actingUserId ?? prompt.UserId;
             await db.SaveChangesAsync();
-            return existing;
+            return (existing, false);
         }
         prompt.CreatedAt = DateTime.UtcNow;
         prompt.UpdatedAt = DateTime.UtcNow;
+        prompt.Version = 1;
+        prompt.CreatedBy = actingUserId ?? prompt.UserId;
+        prompt.UpdatedBy = actingUserId ?? prompt.UserId;
         db.PromptOverrides.Add(prompt);
         await db.SaveChangesAsync();
-        return prompt;
+        return (prompt, true);
     }
 
     public async Task<bool> DeleteAsync(Guid? userId, string scope, string? role, string? action)

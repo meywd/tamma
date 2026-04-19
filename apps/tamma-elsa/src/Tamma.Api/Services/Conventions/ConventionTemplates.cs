@@ -735,7 +735,7 @@ public static class ConventionTemplates
 - Files: snake_case.cpp/.h or .cc/.hpp; Classes: PascalCase; Functions: PascalCase or camelCase
 - Namespaces: lowercase (project::module); avoid using namespace std; in headers
 - Use constexpr and consteval for compile-time computation
-- Prefer auto for complex types; explicit types in function signatures
+- Prefer auto for complex types; explicit types for readability in function signatures
 
 ## STL & Libraries
 - Use STL containers (vector, unordered_map, string_view) as defaults

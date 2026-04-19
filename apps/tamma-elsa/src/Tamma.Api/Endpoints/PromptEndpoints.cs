@@ -93,6 +93,32 @@ public static class PromptEndpoints
             "system")));
     }
 
+    /// <summary>
+    /// Get the system action-default template for an action (Layer-4 safety net
+    /// in the 4-layer resolution model). Per CLAUDE.md API spec
+    /// <c>GET /api/prompts/defaults/:action</c>. The template's Role is null
+    /// because action-defaults are role-agnostic; the <c>{{role}}</c>
+    /// placeholder in the body is interpolated at render time.
+    /// </summary>
+    public static Task<IResult> GetActionDefault(string action)
+    {
+        var template = SystemPrompts.GetActionDefault(action);
+        if (template is null)
+        {
+            return Task.FromResult(Results.NotFound(new { error = "No action default for this action" }));
+        }
+
+        return Task.FromResult(Results.Ok(new PromptResponse(
+            template.Role,
+            template.Action,
+            template.Template,
+            template.SystemPrompt,
+            template.Variables.ToArray(),
+            template.EnableTools,
+            template.MaxTokens,
+            "system")));
+    }
+
     // =======================================================================
     // User role+action overrides
     // =======================================================================
@@ -141,19 +167,24 @@ public static class PromptEndpoints
             EnableTools: req.EnableTools,
             MaxTokens: req.MaxTokens);
 
-        var saved = await store.UpsertRoleActionAsync(userId, tenantContext.TenantId, role, action, input);
+        // Repository tells us whether this was a CREATE or UPDATE so we can
+        // emit the right DCB event type (audit prompts/007).
+        var (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, tenantContext.TenantId, role, action, input);
 
-        await events.EmitUpdatedAsync(
-            tenantContext.TenantId,
-            userId,
-            role,
-            action,
-            new Dictionary<string, object?>
-            {
-                ["templateLength"] = saved.Template.Length,
-                ["enableTools"] = saved.EnableTools,
-                ["maxTokens"] = saved.MaxTokens,
-            });
+        var emitData = new Dictionary<string, object?>
+        {
+            ["templateLength"] = saved.Template.Length,
+            ["enableTools"] = saved.EnableTools,
+            ["maxTokens"] = saved.MaxTokens,
+        };
+        if (wasCreated)
+        {
+            await events.EmitCreatedAsync(tenantContext.TenantId, userId, role, action, emitData);
+        }
+        else
+        {
+            await events.EmitUpdatedAsync(tenantContext.TenantId, userId, role, action, emitData);
+        }
 
         return Results.Ok(new PromptResponse(
             saved.Role,
@@ -166,6 +197,12 @@ public static class PromptEndpoints
             "user"));
     }
 
+    /// <summary>
+    /// Delete a user's role+action override. Per CLAUDE.md ("delete user
+    /// override — falls back to system default"), this is semantically a
+    /// reset-to-default operation, so we emit <c>PROMPT.RESET.SUCCESS</c>
+    /// rather than a generic delete (audit prompts/007).
+    /// </summary>
     public static async Task<IResult> DeletePrompt(
         string role,
         string action,
@@ -182,18 +219,21 @@ public static class PromptEndpoints
             return Results.NotFound(new { error = "Prompt override not found" });
         }
 
-        await events.EmitDeletedAsync(tenantContext.TenantId, userId, role, action);
+        await events.EmitResetAsync(tenantContext.TenantId, userId, role, action);
 
         return Results.Ok(new { message = "Prompt override deleted" });
     }
 
     // =======================================================================
     // System prompt overrides (scope = role-system)
+    // CLAUDE.md "Prompt Store Architecture" defines role-system overrides as
+    // keyed by (userId, role) only — there is no action axis. The earlier port
+    // accepted an {action} URL segment but silently ignored it (audit prompts/
+    // 005); the route is now {role}-only to match the data model.
     // =======================================================================
 
     public static async Task<IResult> UpsertSystemPrompt(
         string role,
-        string action,
         UpsertPromptRequest req,
         PromptStoreService store,
         PromptEventsService events,
@@ -208,25 +248,27 @@ public static class PromptEndpoints
             EnableTools: req.EnableTools,
             MaxTokens: req.MaxTokens);
 
-        var saved = await store.UpsertRoleSystemAsync(userId, tenantContext.TenantId, role, input);
+        var (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, tenantContext.TenantId, role, input);
 
-        await events.EmitUpdatedAsync(
-            tenantContext.TenantId,
-            userId,
-            role,
-            action,
-            new Dictionary<string, object?>
-            {
-                ["scope"] = "role-system",
-                ["templateLength"] = saved.Template.Length,
-            });
+        var emitData = new Dictionary<string, object?>
+        {
+            ["scope"] = "role-system",
+            ["templateLength"] = saved.Template.Length,
+        };
+        if (wasCreated)
+        {
+            await events.EmitCreatedAsync(tenantContext.TenantId, userId, role, string.Empty, emitData);
+        }
+        else
+        {
+            await events.EmitUpdatedAsync(tenantContext.TenantId, userId, role, string.Empty, emitData);
+        }
 
         return Results.Ok(new { message = "System prompt updated", scope = "role-system", role });
     }
 
     public static async Task<IResult> DeleteSystemPrompt(
         string role,
-        string action,
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
@@ -240,7 +282,7 @@ public static class PromptEndpoints
             return Results.NotFound(new { error = "System prompt override not found" });
         }
 
-        await events.EmitDeletedAsync(tenantContext.TenantId, userId, role, action);
+        await events.EmitResetAsync(tenantContext.TenantId, userId, role, string.Empty);
 
         return Results.Ok(new { message = "System prompt deleted" });
     }
@@ -283,10 +325,18 @@ public static class PromptEndpoints
             variableCount: variables.Count,
             unresolvedCount: rendered.Unresolved.Count);
 
+        // Version is sourced from the resolved override row when present, else 1
+        // (system-shipped templates are unversioned in the SystemPrompts registry).
+        // Field names match the TS RenderedPrompt contract (audit prompts/003).
         return Results.Ok(new RenderedPromptResponse(
-            SystemPrompt: rendered.SystemPrompt,
-            UserPrompt: rendered.UserPrompt,
-            Unresolved: rendered.Unresolved.ToArray()));
+            Role: resolved.Role,
+            Action: resolved.Action,
+            Version: resolved.Version,
+            RenderedTemplate: rendered.UserPrompt,
+            RenderedSystemPrompt: rendered.SystemPrompt,
+            EnableTools: resolved.EnableTools,
+            MaxTokens: resolved.MaxTokens,
+            UnresolvedVariables: rendered.Unresolved.ToArray()));
     }
 
     // =======================================================================

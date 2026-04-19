@@ -71,6 +71,20 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// JSON wire format — explicit lock on camelCase to prevent silent regressions
+// (port-gap audit prompts/013). ASP.NET Core's JsonSerializerDefaults.Web
+// already enables CamelCase by default, but configuring it explicitly here
+// guarantees the contract survives any future re-binding of JsonOptions and
+// is documented at the composition root.
+// ────────────────────────────────────────────────────────────────────────────
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.PropertyNameCaseInsensitive = true;
+    options.SerializerOptions.DictionaryKeyPolicy = null; // preserve dict keys verbatim (role names, action names)
+});
+
 // HTTP clients
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient("elsa", client =>
@@ -587,15 +601,29 @@ agents.MapGet("/{role}/resolve", AgentEndpoints.ResolveAgent);
 agents.MapPost("/resolve-for-phase", AgentEndpoints.ResolveForPhase);
 
 // ── Prompts ──
+// CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
+// read-only system-default URL. Both /system (legacy TS naming) and /defaults
+// (CLAUDE.md naming) are wired so existing dashboard/CLI clients keep working
+// while new integrators can follow the spec verbatim. POST /reset is a
+// documented alias for DELETE (see CLAUDE.md).
 var prompts = app.MapGroup("/api/prompts").RequireAuthorization("SettingsView");
 prompts.MapGet("/", PromptEndpoints.ListAll);
+// System-default reads — both naming conventions point to the same handler
 prompts.MapGet("/system", PromptEndpoints.ListSystemDefaults);
+prompts.MapGet("/defaults", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/system/{role}/{action}", PromptEndpoints.GetSystemDefault);
+prompts.MapGet("/defaults/{role}/{action}", PromptEndpoints.GetSystemDefault);
+prompts.MapGet("/defaults/{action}", PromptEndpoints.GetActionDefault);
+// Resolved (per-user) reads + mutations
 prompts.MapGet("/{role}/{action}", PromptEndpoints.GetPrompt);
 prompts.MapPut("/{role}/{action}", PromptEndpoints.UpsertPrompt).RequireAuthorization("SettingsManage");
 prompts.MapDelete("/{role}/{action}", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
-prompts.MapPut("/system/{role}/{action}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("SettingsManage");
-prompts.MapDelete("/system/{role}/{action}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("SettingsManage");
+prompts.MapPost("/{role}/{action}/reset", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
+// Role-system overrides (preamble) — CLAUDE.md role-system scope is keyed by
+// (userId, role) only; no action axis. Dropped the {action} URL segment to
+// match (audit prompts/005).
+prompts.MapPut("/system/{role}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("SettingsManage");
+prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("SettingsManage");
 prompts.MapPost("/{role}/{action}/render", PromptEndpoints.RenderPrompt);
 
 // ── Convention Templates (no auth) ──

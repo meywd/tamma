@@ -235,4 +235,105 @@ public class PromptStoreServiceTests
 
         deleted.Should().BeFalse();
     }
+
+    // ------------------------------------------------------------------
+    // Audit prompts/007 — wasCreated discriminator drives CREATED vs UPDATED
+    // event emission at the endpoint layer.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task UpsertRoleActionAsync_FirstCall_ReportsWasCreatedTrue()
+    {
+        var userId = Guid.NewGuid();
+
+        var (entity, wasCreated) = await _service.UpsertRoleActionAsync(
+            userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "T1"));
+
+        wasCreated.Should().BeTrue();
+        entity.Template.Should().Be("T1");
+        entity.Version.Should().Be(1);
+    }
+
+    [Test]
+    public async Task UpsertRoleActionAsync_SecondCall_ReportsWasCreatedFalse()
+    {
+        var userId = Guid.NewGuid();
+        await _service.UpsertRoleActionAsync(userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "T1"));
+
+        var (entity, wasCreated) = await _service.UpsertRoleActionAsync(
+            userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "T2"));
+
+        wasCreated.Should().BeFalse();
+        entity.Template.Should().Be("T2");
+        entity.Version.Should().Be(2, "audit prompts/010: version bumps on update");
+    }
+
+    [Test]
+    public async Task UpsertRoleActionAsync_SetsCreatedByAndUpdatedBy_ToOwnerByDefault()
+    {
+        var userId = Guid.NewGuid();
+        var (entity, _) = await _service.UpsertRoleActionAsync(
+            userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "T1"));
+
+        entity.CreatedBy.Should().Be(userId);
+        entity.UpdatedBy.Should().Be(userId);
+    }
+
+    // ------------------------------------------------------------------
+    // Audit prompts/008 — Layer 4 fallback for arbitrary roles is locked.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task ResolveRoleActionAsync_UnknownRole_KnownAction_ResolvesToActionDefault()
+    {
+        var result = await _service.ResolveRoleActionAsync(null, "data_engineer", "plan");
+
+        result.Should().NotBeNull();
+        result!.Source.Should().Be(PromptSource.SystemActionDefault);
+        // The action-default body keeps the {{role}} placeholder for runtime interpolation
+        result.Template.Should().Contain("{{role}}");
+    }
+
+    [Test]
+    public async Task ResolveRoleActionAsync_UnknownRole_UnknownAction_ReturnsNull()
+    {
+        var result = await _service.ResolveRoleActionAsync(null, "data_engineer", "scaffold");
+
+        result.Should().BeNull();
+    }
+
+    // ------------------------------------------------------------------
+    // Audit prompts/003 — Resolved.Version flows through to the render
+    // response. Defaults to 1 for system templates.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task ResolveRoleActionAsync_SystemDefault_HasVersionOne()
+    {
+        var result = await _service.ResolveRoleActionAsync(null, "developer", "plan");
+
+        result.Should().NotBeNull();
+        result!.Version.Should().Be(1);
+    }
+
+    [Test]
+    public async Task ResolveRoleActionAsync_UserOverride_BumpsVersionOnEachUpdate()
+    {
+        var userId = Guid.NewGuid();
+        await _service.UpsertRoleActionAsync(userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "v1"));
+        await _service.UpsertRoleActionAsync(userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "v2"));
+        await _service.UpsertRoleActionAsync(userId, null, "developer", "plan",
+            new UpsertPromptInput(Template: "v3"));
+
+        var resolved = await _service.ResolveRoleActionAsync(userId, "developer", "plan");
+
+        resolved.Should().NotBeNull();
+        resolved!.Version.Should().Be(3);
+    }
 }

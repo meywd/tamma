@@ -280,6 +280,20 @@ public class ConventionTemplatesTests
     }
 
     [Test]
+    public void GetByKey_Cpp_IncludesReadabilityClause()
+    {
+        // Audit prompts/002: the TS source's auto-vs-explicit-types bullet
+        // ends with "for readability in function signatures". An earlier
+        // port dropped those two words; this test prevents regression.
+        var service = new ConventionTemplateService();
+
+        var template = service.GetByKey("cpp");
+
+        template.Should().NotBeNull();
+        template!.Conventions.Should().Contain("explicit types for readability in function signatures");
+    }
+
+    [Test]
     public void GetByKey_RubyRails_MentionsActiveRecord()
     {
         var service = new ConventionTemplateService();
