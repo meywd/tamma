@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `Phase1` migration adds (a) `ck_provider_health_status CHECK Status IN ('healthy','degraded','down','unknown')` matching what `CircuitBreakerService` actually writes (NOT TS's open/closed/half-open), (b) `ix_provider_health_open ON ProviderKey WHERE Status = 'down'` partial index, (c) replaces the plain unique on `(ProviderKey, TenantId)` with a partial unique `WHERE TenantId IS NOT NULL` plus a companion `ix_provider_health_system_default ON ProviderKey WHERE TenantId IS NULL` enforcing one global row per provider key.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/015_provider_health.sql`.

@@ -64,10 +64,39 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
         var existing = await db.GitHubInstallationRepos
             .Where(r => r.InstallationEntityId == installationEntityId).ToListAsync();
         db.GitHubInstallationRepos.RemoveRange(existing);
+        var now = DateTime.UtcNow;
         foreach (var repo in repos)
+        {
             repo.InstallationEntityId = installationEntityId;
+            EnsureOwnerNameFromFullName(repo);
+            if (repo.CreatedAt == default) repo.CreatedAt = now;
+            repo.UpdatedAt = now;
+        }
         db.GitHubInstallationRepos.AddRange(repos);
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Backfill Owner / Name from RepoFullName so callers that previously only
+    /// supplied <c>RepoFullName</c> still produce well-formed rows after the
+    /// hardening migration (finding 018) requires both columns to be NOT NULL.
+    /// </summary>
+    private static void EnsureOwnerNameFromFullName(GitHubInstallationRepo repo)
+    {
+        if (string.IsNullOrEmpty(repo.RepoFullName)) return;
+        if (!string.IsNullOrEmpty(repo.Owner) && !string.IsNullOrEmpty(repo.Name)) return;
+        var slash = repo.RepoFullName.IndexOf('/');
+        if (slash > 0 && slash < repo.RepoFullName.Length - 1)
+        {
+            repo.Owner = repo.RepoFullName[..slash];
+            repo.Name = repo.RepoFullName[(slash + 1)..];
+        }
+        else
+        {
+            // Fallback: avoid NOT NULL violation when full_name has no slash.
+            repo.Owner = repo.RepoFullName;
+            repo.Name = repo.RepoFullName;
+        }
     }
 
     public async Task<List<GitHubInstallationRepo>> ListReposAsync(Guid installationEntityId)
@@ -139,21 +168,28 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
             .FirstOrDefaultAsync(r =>
                 r.InstallationEntityId == installationEntityId && r.RepoId == repoId);
 
+        var now = DateTime.UtcNow;
         if (existing is not null)
         {
             // Reactivate + refresh name if it changed.
             existing.IsActive = true;
             existing.RepoFullName = repoFullName;
+            existing.UpdatedAt = now;
+            EnsureOwnerNameFromFullName(existing);
         }
         else
         {
-            db.GitHubInstallationRepos.Add(new GitHubInstallationRepo
+            var repo = new GitHubInstallationRepo
             {
                 InstallationEntityId = installationEntityId,
                 RepoId = repoId,
                 RepoFullName = repoFullName,
-                IsActive = true
-            });
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            EnsureOwnerNameFromFullName(repo);
+            db.GitHubInstallationRepos.Add(repo);
         }
 
         await db.SaveChangesAsync();

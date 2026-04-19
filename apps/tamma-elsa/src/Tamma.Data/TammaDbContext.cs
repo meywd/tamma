@@ -67,9 +67,16 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Role).IsRequired().HasMaxLength(20).HasDefaultValue("member");
             entity.Property(e => e.AuthMethod).IsRequired().HasMaxLength(20).HasDefaultValue("email");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            // GitHubId widened to bigint (long) — see entity comment.
+            entity.Property(e => e.GitHubId).HasColumnType("bigint");
+            // Per-user provider settings (jsonb). Restored from TS migration 004.
+            entity.Property(e => e.Settings).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
+            // Case-sensitive unique kept for back-compat; the case-insensitive
+            // partial unique on LOWER(email) is added by the Phase-1 hardening
+            // migration and is the canonical lookup path.
             entity.HasIndex(e => e.Email).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.GitHubId).IsUnique().HasFilter("\"GitHubId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.TenantId);
@@ -208,11 +215,17 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.AccountLogin).IsRequired().HasMaxLength(255);
             entity.Property(e => e.AccountType).IsRequired().HasMaxLength(50);
+            // AppId widened to bigint to match the GitHub API.
+            entity.Property(e => e.AppId).HasColumnType("bigint");
             entity.Property(e => e.Permissions).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => e.InstallationId).IsUnique();
+            // Lookup-by-account-login (webhook → UI flow). Restored from TS.
+            entity.HasIndex(e => e.AccountLogin);
+            // Tenant-scoped listings.
+            entity.HasIndex(e => e.TenantId);
         });
 
         // ── GitHubInstallationRepo ──
@@ -221,10 +234,15 @@ public class TammaDbContext : DbContext
             entity.ToTable("github_installation_repos");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Owner).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
             entity.Property(e => e.RepoFullName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.InstallationEntityId, e.RepoId }).IsUnique();
+            entity.HasIndex(e => e.RepoFullName);
 
             entity.HasOne(e => e.Installation)
                 .WithMany(i => i.Repos)
@@ -243,7 +261,16 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.TenantId).IsUnique();
+            // Plain unique on a nullable column allows multiple NULL rows in
+            // Postgres, which would permit several "system default" rows to
+            // coexist. The Phase-1 hardening migration replaces this with
+            // two partial unique indexes (NULL vs NOT NULL).
+            entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
+
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
@@ -259,6 +286,7 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Template).IsRequired();
             entity.Property(e => e.Variables).HasColumnType("text[]");
             entity.Property(e => e.MaxTokens).HasDefaultValue(4096);
+            entity.Property(e => e.Version).HasDefaultValue(1);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
@@ -279,7 +307,11 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique();
+            // Plain unique on a nullable-TenantId tuple permits multiple
+            // global rows per provider key in Postgres. The Phase-1
+            // hardening migration replaces this with split partial uniques.
+            entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique()
+                .HasFilter("\"TenantId\" IS NOT NULL");
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
@@ -297,6 +329,21 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.ProviderKey, e.CreatedAt });
+            // Per-tenant billing reports (TS migration 014).
+            entity.HasIndex(e => new { e.TenantId, e.CreatedAt });
+            // Per-engine usage breakdown.
+            entity.HasIndex(e => new { e.EngineId, e.CreatedAt });
+            // Per-model usage breakdown.
+            entity.HasIndex(e => new { e.Model, e.CreatedAt });
+            // Per-event-type breakdown.
+            entity.HasIndex(e => new { e.RequestType, e.CreatedAt });
+            // Cross-step trace stitching.
+            entity.HasIndex(e => e.CorrelationId).HasFilter("\"CorrelationId\" IS NOT NULL");
+
+            // No FK on TenantId — see migration note for finding 032.
+            // Diagnostics is a write-once event sink; the tenant row may not
+            // exist yet at ingest time. Tenant isolation is enforced at the
+            // query-filter layer.
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
@@ -311,6 +358,15 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Rules).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One row per tenant. Partial unique allows the system-default row
+            // (TenantId IS NULL) to coexist with per-tenant overrides.
+            entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
+
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
@@ -349,6 +405,9 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.DefinitionId, e.Status });
             entity.HasIndex(e => e.TenantId);
+            // Per-tenant-per-definition listings (TS migration 011).
+            entity.HasIndex(e => new { e.TenantId, e.DefinitionId });
+            entity.HasIndex(e => new { e.TenantId, e.Status });
 
             entity.HasOne(e => e.Definition)
                 .WithMany(d => d.Instances)
@@ -398,6 +457,10 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
             entity.HasIndex(e => e.TenantId);
+            // Per-issue replay (dominant query on the engine replay path).
+            // Partial — most events have no issue number.
+            entity.HasIndex(e => new { e.TenantId, e.IssueNumber })
+                .HasFilter("\"IssueNumber\" IS NOT NULL");
 
             var tenantId = _tenantContext?.TenantId;
             entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);

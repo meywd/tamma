@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (intentional simplification preserved)
+- **Notes**: The C# port routes user-to-installation linkage through `tenant_memberships` + `github_installations.TenantId`. Per finding's own "What's needed to finish": this is a product-decision-pending question. Per CLAUDE.md "No migration anxiety: App is not in production with users", reintroducing a separate `user_installations` table absent a confirmed multi-install-per-user requirement is premature. Story 18-4 should be updated separately; the schema change is deferred until product confirms the per-installation role distinct from per-tenant role.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/002_users.sql`.

@@ -65,7 +65,9 @@ public class AgentEndpointsIntegrationTests
     [Test]
     public async Task ResolveAgent_Developer_WithTenantOverride_Returns_MergedConfig()
     {
-        // Seed a tenant-scoped override via repository
+        // Seed a tenant-scoped override via repository.
+        // Phase-1 hardening (finding 031) added an FK on agent_configs.TenantId
+        // → tenants.Id, so the tenant row must exist before the override insert.
         var tenantId = Guid.NewGuid();
         var configJson = """
             {
@@ -81,6 +83,16 @@ public class AgentEndpointsIntegrationTests
 
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
+            var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.TammaDbContext>();
+            db.Tenants.Add(new Tamma.Data.Entities.Tenant
+            {
+                Id = tenantId,
+                Name = $"Test {tenantId:N}",
+                Slug = $"t-{tenantId:N}",
+                Plan = "free"
+            });
+            await db.SaveChangesAsync();
+
             var repo = scope.ServiceProvider.GetRequiredService<IAgentConfigRepository>();
             await repo.UpsertAsync(tenantId, configJson, null);
         }

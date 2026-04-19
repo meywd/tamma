@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (intentional collapse — single-table approach matches C# port model)
+- **Notes**: Both `AdminEndpoints.InviteUser` and `OrgEndpoints.CreateInvite` use the same `user_invites` table with explicit `TenantId` (NOT NULL after migration). The finding's own assessment is "intentional simplification" pending a product decision. Splitting back to two tables would break the unified `IInviteRepository` contract. Story 18-3 should be updated to reflect the canonical approach. Adding role CHECK and InvitedBy FK on `user_invites` (finding 019) closes the safety gap that motivated `tenant_invites` originally.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/017_tenant_memberships.sql`.

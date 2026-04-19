@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (CHECK added; surrogate PK retained)
+- **Notes**: `Phase1` migration adds `ck_tenant_memberships_role`. Surrogate PK kept — same convention as the rest of the C# port; the unique compound index on `(TenantId, UserId)` enforces the same uniqueness invariant.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/017_tenant_memberships.sql`.

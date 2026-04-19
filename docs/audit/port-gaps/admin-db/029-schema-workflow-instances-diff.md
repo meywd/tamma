@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial — compound index added, RLS deferred)
+- **Notes**: `Phase1` migration adds `IX_workflow_instances_TenantId_DefinitionId` and `IX_workflow_instances_TenantId_Status` compound indexes matching TS. **Not done**: revert `DefinitionId uuid → text` — the C# port treats workflow definitions as first-class entities with an FK; supporting external string IDs would require a parallel `ExternalDefinitionId TEXT` column. Documented as intentional design divergence. **Not done**: RLS — Phase-2 work.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/011_tenant_scoped_stores.sql`.

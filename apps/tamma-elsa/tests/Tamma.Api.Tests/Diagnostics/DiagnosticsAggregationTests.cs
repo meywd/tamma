@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Tamma.Api.Services.Diagnostics;
@@ -231,6 +232,10 @@ public class DiagnosticsAggregationTests
         bool success = true,
         int tokensUsed = 0)
     {
+        // Phase-1 hardening (finding 032) added an FK on TenantId → tenants.Id.
+        // Materialise the tenant before the diagnostic insert.
+        await EnsureTenantAsync(tenantId);
+
         // Bypass global query filter — insert raw entity.
         var row = new ProviderDiagnostic
         {
@@ -244,6 +249,21 @@ public class DiagnosticsAggregationTests
             CreatedAt = DateTime.SpecifyKind(createdAt, DateTimeKind.Utc)
         };
         _db.ProviderDiagnostics.Add(row);
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task EnsureTenantAsync(Guid tenantId)
+    {
+        if (await _db.Tenants.IgnoreQueryFilters()
+                .AnyAsync(t => t.Id == tenantId))
+            return;
+        _db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"Test {tenantId:N}",
+            Slug = $"t-{tenantId:N}",
+            Plan = "free"
+        });
         await _db.SaveChangesAsync();
     }
 }

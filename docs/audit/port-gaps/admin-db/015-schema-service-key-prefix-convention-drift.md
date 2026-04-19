@@ -5,6 +5,12 @@
 **Status**: Behavioral drift (documentation only)
 **Estimated port effort**: 1h (documentation reconciliation)
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (TS and C# are consistent; CLAUDE.md prose mismatch is a docs-team task)
+- **Notes**: Both implementations use `tamma_sk_` (service) and `tamma_uk_` (user). The finding's own conclusion is that no code-level regression exists; the only outstanding work is reconciling CLAUDE.md prose, which is outside the admin-db scope and requires a security/product decision. Deferred to a docs-only PR.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/auth/api-key.ts`.

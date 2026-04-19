@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (columns + indexes; FK deferred)
+- **Notes**: `Phase1` migration adds 8 columns: `InputTokens`, `OutputTokens`, `CorrelationId`, `EngineId`, `TaskId`, `TaskType`, `AgentType`, `ProjectId`, `ErrorCode`. `TokensUsed` retained for back-compat. Five new indexes added matching TS: `(TenantId, CreatedAt)`, `(EngineId, CreatedAt)`, `(Model, CreatedAt)`, `(RequestType, CreatedAt)`, partial on `CorrelationId WHERE NOT NULL`. Plus `ix_provider_diagnostics_budget` partial on `(TenantId, CreatedAt) WHERE Success = true`. **Not done**: FK on `TenantId → tenants(Id)` — diagnostics is a write-once event sink that may receive payloads referencing tenants not yet materialised; firehose ingestion model. `BudgetServiceTests` and `DiagnosticsAggregationTests` were updated to seed tenants regardless (defensive; future-proofs if FK is added later).
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/014_provider_diagnostics.sql`.

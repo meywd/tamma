@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial — Permissions kept as text[])
+- **Notes**: `Phase1` migration adds (a) `ck_api_keys_scope` CHECK on Scope, (b) `ix_api_keys_active` partial index on `Scope WHERE RevokedAt IS NULL`, (c) `fk_api_keys_rotated_from` self-FK ON DELETE SET NULL. **Not done**: `Permissions text[] → jsonb` migration — the repository / service-key code reads/writes `string[]` everywhere, switching to `JsonDocument` is invasive and out of scope. **Not done**: FK on `TenantId → tenants(Id)` — the orgs/SaaS code path mints API keys before the tenant exists in some flows; documented divergence. The TS migration's array-containment queries (`@>`) are not used by any current C# code path so the column-type regression is currently moot.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/009_unified_api_keys.sql`.

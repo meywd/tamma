@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (Option 1 — explicit DROP, no copy-migration)
+- **Notes**: Per CLAUDE.md "No migration anxiety", the cold-install approach is canonical. `Program.cs` wipe-list now includes `user_api_keys`, `user_installations`, `tenant_invites`, `email_outbox`, and `queued_tasks` so stray legacy tables don't persist as dead weight. No copy-in migration is added — Option 2 in the finding is explicitly out of scope.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/005_user_api_keys.sql` and `009_unified_api_keys.sql`.

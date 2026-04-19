@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `Phase1` migration replaces the plain unique on `TenantId` with two partial uniques: (a) `IX_agent_configs_TenantId WHERE TenantId IS NOT NULL` for one row per tenant, (b) `ix_agent_configs_system_default ((1)) WHERE TenantId IS NULL` for at most one system-default row. FK on `TenantId → tenants(Id) ON DELETE CASCADE` added. `AgentEndpointsIntegrationTests` was updated to seed the tenant before inserting a tenant-scoped override.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/013_agent_configs.sql`.

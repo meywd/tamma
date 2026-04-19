@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 30min
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `ix_refresh_tokens_active_expires` partial index added in `20260419015726_SchemaHardeningPhase1` via `migrationBuilder.Sql`. Reaper queries `WHERE RevokedAt IS NULL AND ExpiresAt < NOW()` will hit it.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/018_user_auth_fields.sql`.

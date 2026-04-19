@@ -577,12 +577,14 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     api_keys, agent_configs, domain_events,
+                    email_outbox,
                     github_installation_repos, github_installations,
                     junior_developers, mentorship_events, mentorship_sessions,
                     password_reset_tokens, prompt_overrides,
-                    provider_diagnostics, provider_health, refresh_tokens,
-                    sanitization_rules, stories, tenant_memberships, tenants,
-                    user_invites, users, workflow_definitions, workflow_instances,
+                    provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
+                    sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
+                    user_api_keys, user_installations, user_invites, users,
+                    workflow_definitions, workflow_instances,
                     knex_migrations, knex_migrations_lock,
                     ""__TammaMigrationsHistory""
                 CASCADE;");

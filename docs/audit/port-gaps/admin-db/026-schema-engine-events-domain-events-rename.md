@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial — index added, RLS deferred)
+- **Notes**: `Phase1` migration adds `IX_domain_events_TenantId_IssueNumber` partial compound index `WHERE IssueNumber IS NOT NULL` matching TS `idx_engine_events_tenant_issue`. **Not done**: re-add `timestamp BIGINT` — `created_at TIMESTAMPTZ` satisfies CLAUDE.md's millisecond requirement and downstream queries are already migrated. **Not done**: FK on `TenantId → tenants(Id)` — engine event-sink ingestion writes faster than tenant materialisation in some paths (same firehose argument as finding 016/017). **Not done**: RLS — see findings 020-022 (Phase-2 work).
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/011_tenant_scoped_stores.sql`.

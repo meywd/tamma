@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (uniqueness + FK restored; JSONB shape kept)
+- **Notes**: `Phase1` migration adds (a) partial unique on `TenantId WHERE NOT NULL`, (b) partial unique `((1)) WHERE TenantId IS NULL` (one system default), (c) FK to `tenants(Id) ON DELETE CASCADE`. The flattened `Rules jsonb` shape is intentional per the C# port — it follows the same in-code default-rules pattern as `agent_configs` and `prompt_overrides`. Restoring the 6 typed columns would require rewriting `SanitizationService` for marginal benefit; the audit's "decide" question is answered as "keep JSONB".
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/016_sanitization_rules.sql`.

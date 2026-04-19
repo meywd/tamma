@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial)
+- **Notes**: `Phase1` migration adds `ck_user_invites_role` CHECK constraint. `AdminEndpoints.InviteUser` now rejects requests with no `NameIdentifier` claim (returns 400 instead of inserting `Guid.Empty`). **Not done**: hard FK on `InvitedBy → users(Id)` — same firehose-orphan-rows reasoning as findings 016/017. The Guid.Empty-rejection above closes the synthetic-id hazard the audit flagged. The hashed `InviteTokenHash` is preserved as a security improvement vs TS.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/006_user_invites.sql` + `008_tenants.sql`.

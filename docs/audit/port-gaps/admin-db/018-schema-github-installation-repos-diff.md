@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `Phase1` migration adds `Owner`, `Name`, `CreatedAt`, `UpdatedAt` columns + `IX_github_installation_repos_RepoFullName` index, and backfills Owner/Name from `SPLIT_PART(RepoFullName, '/', N)`. `InstallationRepository` was updated to populate Owner/Name on insert via a new `EnsureOwnerNameFromFullName` helper. PK remains uuid (intentional — surrogate PK pattern is consistent across the C# port).
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/001_github_installations.sql`.

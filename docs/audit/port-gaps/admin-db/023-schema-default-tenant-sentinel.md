@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (intentional design divergence — `EnsurePersonalTenantMiddleware` replaces the sentinel)
+- **Notes**: Finding's own analysis acknowledges C# diverged to per-user personal tenants on first request. No table column in the C# schema declares `DEFAULT '00000000-…'` or relies on the sentinel; the divergence is consistent end-to-end. Per CLAUDE.md "No migration anxiety", this is the canonical approach and reseeding the sentinel would re-introduce the dual-pattern complexity the port deliberately removed.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/008_tenants.sql`.

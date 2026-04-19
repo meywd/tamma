@@ -5,6 +5,12 @@
 **Status**: Semantic rewrite
 **Estimated port effort**: 2h (documentation + safety net)
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (CHECK + version + audit columns; FK still deferred)
+- **Notes**: `Phase1` migration adds (a) `ck_prompt_overrides_max_tokens_positive`, (b) `ck_prompt_overrides_version_positive`, (c) `Version int DEFAULT 1` for optimistic concurrency, (d) `CreatedBy / UpdatedBy uuid` audit columns. **Not done**: FK on `UserId / TenantId → users / tenants` per CLAUDE.md spec ("system defaults remain in code"). The collapse to `prompt_overrides` is intentional and CLAUDE.md-compliant; no regression vs current spec.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/012_prompt_store.sql`.

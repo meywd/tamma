@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial — Email kept NOT NULL)
+- **Notes**: `Phase1` migration (a) widens `GitHubId` from int to bigint (matches GitHub's bigint), (b) adds `Settings jsonb DEFAULT '{}'` (per-user provider config from TS migration 004), (c) adds `ck_users_role` and `ck_users_auth_method` CHECK constraints, (d) adds `ix_users_email_lower` partial unique on `LOWER(Email) WHERE DeletedAt IS NULL`. `IUserRepository.GetByGitHubIdAsync` widened to `long`. **Kept**: `Email NOT NULL` — making it nullable would cascade through JWT claims, AdminUserResponse, EnsurePersonalTenantMiddleware, and several auth flows that all assume non-null email. OAuth-only users with no public email synthesize a placeholder via the registration flow today; that pattern is preserved.
+
 ## 1. What's in TS
 
 Archived across `database/archived-sql-migrations/002_users.sql`, `004_user_settings.sql`, `007_users_soft_delete.sql`, `008_tenants.sql`, `018_user_auth_fields.sql`.

@@ -20,7 +20,7 @@ public class UserRepository(TammaDbContext db) : IUserRepository
     public async Task<User?> GetByEmailAsync(string email)
         => await db.Users.FirstOrDefaultAsync(u => u.Email == email);
 
-    public async Task<User?> GetByGitHubIdAsync(int githubId)
+    public async Task<User?> GetByGitHubIdAsync(long githubId)
         => await db.Users.FirstOrDefaultAsync(u => u.GitHubId == githubId);
 
     public async Task<(List<User> Users, int Total)> ListAsync(int limit, int offset, string? role)

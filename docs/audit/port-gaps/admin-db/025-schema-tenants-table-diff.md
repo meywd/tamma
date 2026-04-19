@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (CHECK + partial index; sentinel skipped per finding 023)
+- **Notes**: `Phase1` migration adds `ck_tenants_plan CHECK Plan IN ('free','pro','enterprise')` and `ix_tenants_deleted_at` partial soft-delete index. The sentinel seed is intentionally NOT done — see finding 023 (the C# port uses `EnsurePersonalTenantMiddleware` instead).
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/008_tenants.sql`.

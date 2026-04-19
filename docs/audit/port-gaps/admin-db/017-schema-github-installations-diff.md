@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial)
+- **Notes**: `Phase1` migration adds (a) `ck_github_installations_account_type` CHECK, (b) widens `AppId` from `int` to `bigint` (matches GitHub's bigint), (c) `IX_github_installations_AccountLogin` and `IX_github_installations_TenantId` indexes. **Not done**: FK on `TenantId → tenants(Id)` — the webhook handler installs rows before the tenant is materialised in some flows (a known C# design divergence vs TS sentinel default). **Not done**: re-adding `api_key_hash/api_key_prefix/api_key_encrypted` columns — those served TS migration 005→009 copy-in only and have no consumer in the C# port (per CLAUDE.md "no migration anxiety"). **Not done**: revisiting natural-vs-surrogate PK — explicit decision per the finding's own remediation section.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/001_github_installations.sql`, `003_api_keys.sql`, `008_tenants.sql`.
