@@ -669,6 +669,18 @@ admin.MapPost("/users/{id}/keys", AdminEndpoints.CreateUserApiKey).RequireAuthor
 admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("SelfOrApiKeysManage");
 admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
 
+// Tenant provisioning (audit cranl/003). Platform-owner-only — these flip
+// per-tenant Cranl resources into existence (POST), report status (GET), or
+// tear them down (POST /deprovision). When Cranl:ApiKey is unset the Null
+// provisioner short-circuits to "shared infra" and these endpoints still
+// work — they just mark the tenant Ready without external API calls.
+admin.MapPost("/tenants/{tenantId:guid}/provision", AdminEndpoints.ProvisionTenant)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/tenants/{tenantId:guid}/provisioning", AdminEndpoints.GetTenantProvisioning)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/tenants/{tenantId:guid}/deprovision", AdminEndpoints.DeprovisionTenant)
+    .RequireAuthorization("OwnerAccess");
+
 // ── Orgs / Tenants ──
 // Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the
 // RequireTenantMembershipFilter so the handler body can trust the route

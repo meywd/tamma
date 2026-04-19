@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Services;
+using Tamma.Api.Services.Provisioning;
+using Tamma.Api.Services.Provisioning.Cranl;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -346,5 +348,68 @@ public static class AdminEndpoints
     {
         await apiKeyRepo.RevokeAsync(keyId);
         return Results.Ok(new { message = "API key revoked" });
+    }
+
+    // ─── Tenant provisioning (audit cranl/003) ─────────────────────────────
+    //
+    // Platform-owner-only endpoints that drive per-tenant Cranl provisioning.
+    // ITenantProvisioner is wired by ProvisioningServiceCollectionExtensions:
+    // the Cranl-backed impl runs when Cranl:ApiKey is set, otherwise the Null
+    // impl flips the row to Ready immediately (shared infrastructure mode).
+
+    public static async Task<IResult> ProvisionTenant(
+        Guid tenantId,
+        ProvisionTenantRequest? req,
+        ITenantProvisioner provisioner,
+        CranlOptions cranlOptions,
+        CancellationToken ct)
+    {
+        var region = !string.IsNullOrWhiteSpace(req?.Region)
+            ? req!.Region!
+            : cranlOptions.DefaultRegion;
+        var status = await provisioner.ProvisionAsync(
+            tenantId,
+            new ProvisioningOptions(region, req?.CustomName),
+            ct);
+        return Results.Accepted(
+            $"/api/admin/tenants/{tenantId}/provisioning",
+            new TenantProvisioningResponse(
+                tenantId,
+                status.State.ToStorageString(),
+                status.Detail,
+                status.AppDefaultDomain,
+                status.UpdatedAt));
+    }
+
+    public static async Task<IResult> GetTenantProvisioning(
+        Guid tenantId,
+        ITenantProvisioner provisioner,
+        CancellationToken ct)
+    {
+        var status = await provisioner.GetStatusAsync(tenantId, ct);
+        return Results.Ok(
+            new TenantProvisioningResponse(
+                tenantId,
+                status.State.ToStorageString(),
+                status.Detail,
+                status.AppDefaultDomain,
+                status.UpdatedAt));
+    }
+
+    public static async Task<IResult> DeprovisionTenant(
+        Guid tenantId,
+        ITenantProvisioner provisioner,
+        CancellationToken ct)
+    {
+        await provisioner.DeprovisionAsync(tenantId, ct);
+        var status = await provisioner.GetStatusAsync(tenantId, ct);
+        return Results.Accepted(
+            $"/api/admin/tenants/{tenantId}/provisioning",
+            new TenantProvisioningResponse(
+                tenantId,
+                status.State.ToStorageString(),
+                status.Detail,
+                status.AppDefaultDomain,
+                status.UpdatedAt));
     }
 }

@@ -39,6 +39,12 @@ public static class ProvisioningServiceCollectionExtensions
         var options = BuildOptions(configuration);
         services.TryAddSingleton(options);
 
+        // Connection resolver. Stub impl always returns the central
+        // connection; the cascade to wire per-tenant routing through
+        // every repository is deferred (see
+        // ITenantConnectionResolver doc-comment for scope).
+        services.TryAddSingleton<ITenantConnectionResolver, CentralOnlyTenantConnectionResolver>();
+
         if (options.IsConfigured)
         {
             // Real Cranl path — needs the typed HttpClient, the workflow,
