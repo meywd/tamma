@@ -585,6 +585,41 @@ GET /api/convention-templates/:key     — get full template with conventions st
 
 User selects a starter, customizes it, saves to `.tamma/config.json` in their repo as `conventions` field. LlmCallWorkflow injects it into every prompt via `{{conventions}}`.
 
+## Multi-tenant provisioning (Cranl)
+
+The C# port supports two infra modes per tenant:
+
+- **Shared infrastructure (default)**: tenant rides on the central Postgres on Hetzner via Phase-3 RLS. No external resources. This is the dev / self-hosted default and what every tenant gets when Cranl is not configured.
+- **Per-tenant Cranl resources**: each tenant gets one Cranl Project + one Postgres Database + one Application (the Elsa engine, deployed from the Tamma GitHub repo). Central Tamma stays the control plane (auth, orgs, tenant registry, routing); Cranl is the data + compute plane.
+
+**Enable Cranl provisioning** by setting:
+```
+Cranl:ApiKey                — cranl_sk_<32 chars> (org-scoped)
+Cranl:OrganizationId         — Cranl org id that owns Tamma's resources
+Cranl:RepositoryId           — Cranl's id for the Tamma engine repo (registered via their GitHub App)
+Cranl:DefaultRegion          — e.g. germany-1 (default)
+Cranl:DefaultBuildType       — dockerfile (default) or nixpacks
+Cranl:AppBuildPath           — /apps/tamma-elsa (default)
+Cranl:EncryptionKey          — base64-encoded 32 random bytes (production: REQUIRED)
+Tamma:ControlPlaneUrl        — https://api.tamma.dev (used as TAMMA_CONTROL_PLANE_URL on each engine)
+Tamma:TenantSharedSecret     — HMAC secret pushed as TAMMA_SHARED_SECRET to each engine
+```
+
+When `Cranl:ApiKey` is unset the Null seam wins (`NullTenantProvisioner`) and tenants stay on the shared central DB. The admin endpoints still work — they just mark tenants Ready immediately.
+
+**Admin endpoints** (platform-owner only — `OwnerAccess` policy):
+```
+POST  /api/admin/tenants/{tenantId}/provision     body: { region, customName? }
+GET   /api/admin/tenants/{tenantId}/provisioning
+POST  /api/admin/tenants/{tenantId}/deprovision
+```
+
+`POST /provision` returns `202 Accepted` immediately; the long-running Cranl polling (db ready ≈ 1-3 min, app deploy ≈ 3-8 min) runs on the existing `TaskQueueProcessor` thread. Subsequent `GET /provisioning` calls report state transitions: `pending → database_provisioning → database_ready → app_provisioning → app_deploying → ready`.
+
+**Routing** (current state — STUBBED): per-request DB connection switching by tenant is **not yet wired**. `ITenantConnectionResolver` defaults to `CentralOnlyTenantConnectionResolver` so every tenant still hits the central DB even when provisioned-on-Cranl. The `cranl_database_url_encrypted` column IS populated correctly during provisioning, so flipping the routing on later is a no-op for already-provisioned tenants. The cascade (extending `TammaAppDbContext` to use `IDbContextFactory` + per-request connection resolution) is the next milestone once a real Cranl-provisioned tenant exists to test against.
+
+**Encryption**: tenant `DATABASE_URL` is AES-GCM-encrypted at rest via `TenantSecretProtector`. Key source: `Cranl:EncryptionKey` (base64, 32 bytes) — required in production. Without it, a key is derived from `Cranl:ApiKey` via HKDF and a warning logged. TODO: migrate to OpenBao via `IKeyProtector` once Story 28-13 lands.
+
 ## Notes for Claude Code
 
 - **Story-driven development**: Each story in `docs/stories/` has comprehensive technical context and acceptance criteria.
