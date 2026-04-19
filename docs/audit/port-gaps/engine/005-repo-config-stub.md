@@ -150,18 +150,18 @@ Error paths:
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Fixed (partial — graceful degradation; full impl deferred)
-- **Commit**: ff581af
-- **Notes**: Endpoint reworked to (a) bind the correct query / body shape
-  (renames `Repo`→`Repository`; restored missing fields like `Assignees`,
-  `BranchName`, `WorkflowFile`, `Inputs`); (b) parse `owner/repo`,
-  validate with 400 on bad format / missing required fields; (c) delegate
-  to the new `IGitHubEngineCallbackService`. The default
-  `NullGitHubEngineCallbackService` short-circuits to a 503
-  `github_client_not_configured` (matches the TS contract for the
-  unwired-reader path) so the deployed Elsa activities see the documented
-  soft-fail instead of a bogus 200 with a stub body. Real Octokit-backed
-  implementation lands when the GitHub App client wires up
-  (cross-ref github audit scope + finding 021). The repo-config endpoint
-  preserves the TS graceful-degradation 200 `{}` so the conventions
-  injection path keeps working on un-configured installations.
+- **Outcome**: Fixed
+- **Commit**: `2c2cdfa` (engine wiring); depends on `4e1e0e4` (Octokit client)
+- **Notes**: Real `OctokitGitHubEngineCallbackService.ReadRepoConfigAsync`
+  now runs when the GitHub App is configured. Reads `.tamma/config.yaml`,
+  `.tamma/config.yml`, `.tamma/config.json` in order via
+  `Repository.Content.GetAllContentsByRef(owner, repo, path, branch)` using
+  an installation-authenticated Octokit client. Returns parsed JSON for the
+  `.json` variant, a `{rawYaml}` envelope for YAML, and the TS-parity
+  graceful-degradation `{}` when no file exists or read fails — so the
+  conventions injection path keeps working on unconfigured repos. Repo →
+  installation id resolution goes through `InstallationRepoResolver` which
+  queries `github_installation_repos` by `RepoFullName`; unknown repos fall
+  through to the 503 `github_client_not_configured` path (Null impl
+  parity). The endpoint still preserves the soft-fail 200 `{}` contract on
+  503 so Elsa activities never break the workflow.

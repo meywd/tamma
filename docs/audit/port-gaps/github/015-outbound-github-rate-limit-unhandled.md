@@ -112,6 +112,6 @@ Cross-cutting hardening story needed (same one as Finding 014 could own this).
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Deferred (requires GitHub App client port)
-- **Commit**: n/a
-- **Notes**: There is no outbound GitHub-calling code in the github scope today (the `IGitHubAppClient` is the `NullGitHubAppClient` returning `github_client_not_configured`). Outbound rate-limit handling is a layer that goes around the real HTTP client — it must be added when (and only when) the real Octokit/HttpClient impl lands. Track as part of the GitHub App client port story.
+- **Outcome**: Fixed
+- **Commit**: `4e1e0e4`
+- **Notes**: Outbound rate-limit handling is now layered over `OctokitGitHubAppClient` + `OctokitGitHubEngineCallbackService` + `LibsodiumGitHubSecretsProvisioner`. Octokit.NET surfaces `RateLimitExceededException` (populated with `Limit`/`Remaining`/`Reset` from the `X-RateLimit-*` headers) and `AbuseException` (with `RetryAfterSeconds`) as typed exceptions; both services catch them explicitly and log structured warnings including `resetAt`, the installation id, and the owner/repo tuple. Callers receive a typed `GitHubAppResult.Failed("github_rate_limited")` / `GitHubCallbackResult.Failed("github_rate_limited")` rather than an uncaught 500 — enough context for the caller or retry-policy layer to back off. `AuthorizationException` additionally invalidates the cached installation token so the next request re-mints fresh credentials. A dedicated Polly delegating handler (the `GitHubRateLimitHandler` proposed in §5) is deferred to a cross-cutting hardening story — Octokit's typed exceptions + structured logging cover the observability requirement today and the actual backoff retry behaviour lives in the workers that call these services (the caller decides policy, which matches the TS posture of "let the retry plugin be opt-in").

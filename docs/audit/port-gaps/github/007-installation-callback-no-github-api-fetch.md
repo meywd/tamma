@@ -186,6 +186,6 @@ Error paths:
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Deferred (requires GitHub App client port) — seam wired
-- **Commit**: `6dead62`
-- **Notes**: Introduced `IGitHubAppClient` interface with `GetInstallationAsync` + `ListInstallationReposAsync`. `InstallationRouterService.HandleCallbackAsync` now calls both and uses the returned `GitHubInstallationDetails` (real account login, type, app_id, permissions, suspended_at) when available. With the `NullGitHubAppClient` wired by default, the callback degrades to the previous local-only behaviour (uses `user.GitHubLogin ?? tenant.Slug` placeholders) without throwing. Once a real Octokit/HttpClient implementation is registered ahead of the Null fallback (via `services.AddSingleton<IGitHubAppClient, RealImpl>()` before `AddGitHubInstallationServices`), the install populates real values automatically. The actual Octokit wiring is the responsibility of the dedicated GitHub App client port story.
+- **Outcome**: Fixed
+- **Commit**: `4e1e0e4`
+- **Notes**: Real `OctokitGitHubAppClient` landed (Octokit 14.0.0 + `System.IdentityModel.Tokens.Jwt` for RS256 App-JWT generation). On install callback the service now (a) signs a 9-min JWT with `GitHub:AppId` as issuer, (b) calls `GitHubApps.GetInstallationForCurrent(installationId)` to fetch the real `AccountLogin`/`AccountType`/`AppId`/`Permissions`/`SuspendedAt`, (c) mints a 60-min installation access token (cached in-process for 55 min), (d) calls `GitHubApps.Installation.GetAllRepositoriesForCurrent` with `per_page=100` and persists every repo. DI extension `AddGitHubInstallationServices` switches on whether `GitHub:AppId` + `GitHub:PrivateKey` are both set in config — when unset the `NullGitHubAppClient` remains the dev-mode default so local / test flows keep degrading gracefully. Covered by `OctokitGitHubAppClientTests` (JWT claims, installation fetch, token caching, rate-limit error mapping).

@@ -122,18 +122,12 @@ Error paths:
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Fixed (partial — graceful degradation; full impl deferred)
-- **Commit**: ff581af
-- **Notes**: Endpoint reworked to (a) bind the correct query / body shape
-  (renames `Repo`→`Repository`; restored missing fields like `Assignees`,
-  `BranchName`, `WorkflowFile`, `Inputs`); (b) parse `owner/repo`,
-  validate with 400 on bad format / missing required fields; (c) delegate
-  to the new `IGitHubEngineCallbackService`. The default
-  `NullGitHubEngineCallbackService` short-circuits to a 503
-  `github_client_not_configured` (matches the TS contract for the
-  unwired-reader path) so the deployed Elsa activities see the documented
-  soft-fail instead of a bogus 200 with a stub body. Real Octokit-backed
-  implementation lands when the GitHub App client wires up
-  (cross-ref github audit scope + finding 021). The repo-config endpoint
-  preserves the TS graceful-degradation 200 `{}` so the conventions
-  injection path keeps working on un-configured installations.
+- **Outcome**: Fixed
+- **Commit**: `2c2cdfa` (engine wiring); depends on `4e1e0e4` (Octokit client)
+- **Notes**: `OctokitGitHubEngineCallbackService.PostIssueCommentAsync`
+  calls `Octokit.Issue.Comment.Create(owner, repo, issueNumber, body)` and
+  returns `{id, htmlUrl}` (matches the TS shape). DTO drift was already
+  fixed in `ff581af` (`Repo` → `Repository`) — this commit adds the real
+  Octokit call behind it. `UpdateIssueStatusActivity` and
+  `ApplyTriageResultActivity` now post real comments that appear on the
+  issue instead of disappearing silently.

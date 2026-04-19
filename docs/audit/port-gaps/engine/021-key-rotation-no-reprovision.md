@@ -152,15 +152,19 @@ Also, finding #30 in the audit summary notes the `api_keys` table has no `ApiKey
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Partial (shape preserved; real provisioning deferred)
-- **Commit**: a3d2e7e
-- **Notes**: `KeyRotationResult` extended with a
-  `KeyRotationProvisioningSummary` member; the SaaS endpoint surfaces it
-  as the documented `{total, success, failed, results[]}` shape. Until a
-  GitHub App / Octokit client + `ApiKeyEncrypted` column land (cross-ref
-  findings 005-011 + admin-db audit), every per-repo entry is flagged
-  `success: false, error: "github_client_not_configured"`, telling the
-  operator that secrets must be updated by hand after this rotation. The
-  contract shape is preserved so SDK clients written against the TS
-  endpoint don't break on a missing field. Real LibSodium sealed-box
-  + actions/secrets PUT lands once the GitHub App client is wired.
+- **Outcome**: Fixed
+- **Commit**: `4e1e0e4` (Libsodium provisioner); prior `a3d2e7e` wired the result shape
+- **Notes**: `LibsodiumGitHubSecretsProvisioner` now lands when the GitHub
+  App is configured, so `ApiKeyRotationService.RotateInternalAsync`'s
+  `_provisioner.ProvisionSecretAsync(...)` call re-provisions the new
+  plaintext to every active repo via libsodium sealed-box + Octokit's
+  `Repository.Actions.Secrets.CreateOrUpdate`. Per-repo outcomes surface
+  in the documented `{total, success, failed, results[]}` summary; the
+  rotation still commits the new DB hash even when some repos fail (same
+  posture as TS), and per-repo error strings include archived-repo /
+  forbidden / rate-limit detail so operators know which repos need
+  manual attention. The `ApiKeyEncrypted`-column follow-up (to permit
+  re-provisioning without the user re-supplying the plaintext) is
+  still deferred — rotation re-provisions the fresh plaintext from the
+  rotation request itself, which matches TS and covers the
+  compromised-key-response use case.
