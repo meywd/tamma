@@ -84,6 +84,15 @@ services:
       - ASPNETCORE_ENVIRONMENT=Development
       - ELSA_SERVER_URL=http://elsa-server:5000
       - DATABASE_URL=postgresql://${DB_USER:-tamma}:${DB_PASSWORD:-tamma_dev_123}@postgres:5432/${DB_NAME:-tamma}
+      # Phase-3 dual connection strings. TammaDb = admin / migrations /
+      # background services; TammaAppDb = per-request endpoints connecting
+      # as the tamma_app role so RLS policies enforce isolation. The
+      # Phase-2 migration creates tamma_app with password 'changeme';
+      # rotate it via `ALTER ROLE tamma_app WITH PASSWORD ...` and wire
+      # the rotated value via TAMMA_APP_DB_PASSWORD below. Until then
+      # TammaAppDb falls back to TammaDb with a warning.
+      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${DB_USER:-tamma};Password=${DB_PASSWORD:-tamma_dev_123};
+      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-changeme};
       - SLACK_WEBHOOK=${SLACK_WEBHOOK:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     depends_on:
