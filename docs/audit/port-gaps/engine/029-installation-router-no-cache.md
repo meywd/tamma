@@ -94,3 +94,17 @@ For dashboard observability (p95 webhook dispatch latency): TS ~10ms, C# ~30-50m
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/InstallationRouterService.cs`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md`
 - Related findings: `030-installation-soft-delete-vs-hard.md`, cross-ref `docs/audit/port-gaps/github/` on webhook handling
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: a3d2e7e
+- **Notes**: `InstallationRouterService` now wraps
+  `GetByInstallationIdAsync` in an `IMemoryCache` lookup with a 60-second
+  TTL on the webhook hot path (`EnqueueDeferredEventAsync`). Cache is
+  invalidated on every `installation.created`/`deleted`/`suspend`/`unsuspend`
+  webhook so state changes propagate within one webhook tick. Drop of
+  `.Include(i => i.Repos)` deferred — the deferred-event path only needs
+  `TenantId` so the cache hit is cheap, and other callers still want
+  the includes; left as a stretch optimisation.

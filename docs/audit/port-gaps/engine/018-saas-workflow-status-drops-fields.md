@@ -109,3 +109,18 @@ Follow-on: the dashboard relies on `currentActivity` to render "what is this wor
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/SaaSEndpoints.cs:87-111`, `Services/SaaS/WorkflowLifecycleService.cs`
 - Story: `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md`, `docs/stories/epic-19/19-1-api-consolidation-to-csharp.md`
 - Related findings: `019-saas-workflow-result-tri-to-binary.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: `WorkflowStatusRequestDto` extended with
+  `Step` (required, 400 on missing), `Progress` (0–100, 400 on out of
+  range), and `Message`. `Step` is mapped onto `WorkflowInstance.CurrentActivity`
+  via the new `currentActivity` parameter on
+  `IWorkflowLifecycleService.UpdateStatusAsync`; progress + message are
+  merged into the persisted JSONB `Variables` alongside any
+  caller-supplied variables. Response includes `step` to match the TS
+  contract. Tests updated to send `step` and assert
+  `CurrentActivity` round-trips.

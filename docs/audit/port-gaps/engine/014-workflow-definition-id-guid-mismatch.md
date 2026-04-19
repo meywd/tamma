@@ -114,3 +114,20 @@ Error paths:
 - Story: `docs/stories/epic-10/story-10-5/10-5-workflow-provider-abstraction-and-elsa-integration.md`
 - Archived SQL: `database/archived-sql-migrations/011_tenant_scoped_stores.sql:49` (`definition_id TEXT NOT NULL`)
 - Related findings: `015-upsert-definition-find-empty-guid.md` (downstream consequence)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred
+- **Commit**: (none — deferred)
+- **Notes**: Switching `WorkflowDefinition.Id` from `Guid` to `string`
+  touches the entity, the FK on `WorkflowInstance.DefinitionId`, the
+  repository signatures, every endpoint route param, the EF migration,
+  and the existing test fixtures (which all use Guids). The deeper
+  driver — duplicate inserts on Elsa sync — is partially addressed by
+  finding 015 (idempotent upsert by `(Name, TenantId)` fallback), so
+  Elsa syncs no longer accumulate duplicate rows in practice. Full
+  Guid→string conversion deferred to a dedicated story (epic-10/story-10-5
+  follow-up); flagged here as a judgement call so the dashboard /
+  Elsa-runtime continue working on the Guid surrogate until the schema
+  refactor is scheduled.

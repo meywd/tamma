@@ -171,3 +171,20 @@ For a user clicking "Stop engine" in the dashboard:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:10-44`
 - Story: `docs/stories/epic-10/story-10-1/10-1-engine-static-workflow-and-brain.md`, `docs/stories/epic-5/5-3-real-time-dashboard-system-health.md`
 - Related findings: `013-engine-registry-missing.md`, `023-dashboard-engines-empty.md`, `022-dashboard-summary-shape-drift.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Partial / Deferred
+- **Commit**: ff581af
+- **Notes**: `/api/engine/events/state` and `/api/engine/events/logs` now
+  emit a single `text/event-stream`-shaped frame
+  (`event: {state|log}\ndata: {...}\n\n`). Browser/EventSource clients
+  parse one tick instead of failing content negotiation, but live
+  streaming + lifecycle command dispatch require porting the
+  `TammaEngine` abstraction (no engine exists in C# today; the
+  endpoints are still event-store shims for the rest). Marked TODO in
+  source. Full remediation: epic-10/story-10-1 (TammaEngine port) plus
+  finding 013 (engine registry). Rebuilding lifecycle from scratch is
+  out of scope for this sprint — would block on the wholesale agent /
+  provider port.

@@ -106,3 +106,14 @@ Additional issue: the C# version has a **fixed** page size of 20 and no paginati
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/DashboardEndpoints.cs:26-30`
 - Story: `docs/stories/epic-5/5-3-real-time-dashboard-system-health.md`, `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md`
 - Related findings: `014-workflow-definition-id-guid-mismatch.md`, `022-dashboard-summary-shape-drift.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: a3d2e7e
+- **Notes**: `DashboardEndpoints.GetWorkflows` restored to the TS semantics:
+  one row per workflow DEFINITION, each annotated with an
+  `instanceCount`. Implementation uses a single `GROUP BY DefinitionId`
+  query (no N+1) scoped to the ambient tenant. The old "first 20
+  instances under the same URL" semantic is dropped.

@@ -112,3 +112,15 @@ The two APIs cover disjoint URL spaces. Every pre-existing key-rotation automati
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md`
 - Archived SQL: `database/archived-sql-migrations/001_github_installations.sql:5` (`installation_id BIGINT PRIMARY KEY`)
 - Related findings: `021-key-rotation-no-reprovision.md` (the more-severe sibling), `030-installation-soft-delete-vs-hard.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: Route param flipped from `Guid id` to `long id` to match the
+  GitHub-issued numeric installation id (TS contract). Server-side resolves
+  to the entity Guid via `IInstallationRepository.GetByInstallationIdAsync`
+  using the new `IApiKeyRotationService.RotateByInstallationIdAsync`
+  method. Internal `RotateAsync(Guid)` retained for callers that already
+  hold the entity Guid. Tests updated to use a numeric id in the URL.

@@ -93,3 +93,20 @@ None of these are enforced structurally. It's a correctness-by-convention setup.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/TaskQueue/TaskQueueProcessor.cs:98-146`, `ITaskQueue.cs:42-46` (doc-comment)
 - Story: `docs/stories/epic-17/17-2-row-level-security-tenant-isolation.md`
 - Related findings: `028-eventrepo-rls-bypass.md`, `016-instance-events-cross-tenant-leak.md`, `025-task-queue-pull-to-push.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (structural guard added; existing handlers still
+  need to inherit before the safety actually fires)
+- **Commit**: a3d2e7e
+- **Notes**: New `TaskHandlerBase` resolves `ITenantContext` from the
+  scoped DI provider, sets it to `task.TenantId` before invoking
+  `HandleCoreAsync`, and clears in `finally`. Future handlers should
+  inherit instead of implementing `ITaskHandler` directly. Existing
+  handlers (the `InstallationRouterService` deferred-event path is the
+  primary consumer and goes through `ITaskQueue.EnqueueAsync` with an
+  explicit `tenantIdOverride`, so the row already carries the right
+  tenant) are not yet refactored to inherit — they would benefit from
+  the safety net but are not currently observed to leak. Left as a
+  follow-up; the safety mechanism exists for new handlers from now on.

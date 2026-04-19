@@ -133,3 +133,15 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:96-112`, `Dtos/Engine/EngineDtos.cs:11`
 - Story: `docs/stories/epic-6/story-6-11/6-11-context-api-wiring.md`
 - Related findings: `001-execute-task-stub.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ff581af
+- **Notes**: `CycleResultRequest` rewritten as
+  `(string ExitReason, int? IssueNumber, string? Repository, string? Error,
+  long? DurationMs, JsonElement? Metadata)`. Endpoint validates
+  `ExitReason` non-empty (400 otherwise) and persists every field as a
+  typed object under `DomainEvent.Data`. `GetCycleResults` parses the
+  stored JSON back into a structured response.

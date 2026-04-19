@@ -118,3 +118,15 @@ Note: `totalEvents` caps at 1000 due to the `QueryAsync(..., 1000)` limit. It's 
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/DashboardEndpoints.cs:8-21`
 - Story: `docs/stories/epic-5/5-3-real-time-dashboard-system-health.md`, `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md`
 - Related findings: `013-engine-registry-missing.md`, `023-dashboard-engines-empty.md`, `024-dashboard-workflows-semantics.md`, `028-eventrepo-rls-bypass.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: a3d2e7e
+- **Notes**: `DashboardEndpoints.GetSummary` returns the TS-shaped
+  `{engineCount, workflowDefinitions, totalWorkflows, totalEvents,
+  recentEvents[20], timestamp}`. `totalEvents` uses `db.DomainEvents.CountAsync`
+  rather than the prior 1000-row cap. `recentEvents` is the 20 most-recent
+  events scoped to the ambient tenant via `IEventRepository.QueryAsync`.
+  `engineCount` reads from the new `IEngineRegistry` (finding 013).

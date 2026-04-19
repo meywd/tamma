@@ -124,3 +124,19 @@ Note that **no deployed Elsa activity currently calls this endpoint** — all LL
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/SaaSEndpoints.cs:35-82`, `Services/SaaS/LlmProxyService.cs`
 - Story: `docs/stories/epic-19/19-1-api-consolidation-to-csharp.md`
 - Related findings: `001-execute-task-stub.md` (alternative LLM surface used by Elsa activities)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: `SaaSEndpoints.LlmChat` now wraps the Anthropic response in
+  the OpenAI Chat Completions shape `{id, model, choices: [{index,
+  message: {role, content}, finishReason}], usage}` so SDK clients
+  written against the TS contract / OpenAI compatibility layers don't
+  break on `choices[0].message.content` access. Tamma-specific
+  extension fields (`text`, `costUsd`, `meta`) are retained as a
+  superset. Tenant resolution rewritten to honour the same priority
+  the rest of the platform uses: ambient `ITenantContext` →
+  `AuthPrincipal` tagged-union → JWT `tenantId|tid` claim. Closes the
+  drift orgs flagged at line 202.

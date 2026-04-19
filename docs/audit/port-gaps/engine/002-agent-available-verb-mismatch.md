@@ -102,3 +102,14 @@ The semantic drift is worse than the verb mismatch. The C# handler's name ("Agen
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:114-115`
 - Story: `docs/stories/epic-6/story-6-11/6-11-context-api-wiring.md`
 - Related findings: `013-engine-registry-missing.md` (the correct home for registration), `001-execute-task-stub.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ff581af
+- **Notes**: Route flipped from `MapPost` → `MapGet`. `AgentAvailableRequest`
+  DTO deleted. Handler signature is now parameter-free and returns
+  `{available: bool}` derived from whether `Anthropic:ApiKey` is configured
+  (a minimal availability check; the full `IAgentProvider.IsAvailableAsync()`
+  port can refine this once the provider layer ports).

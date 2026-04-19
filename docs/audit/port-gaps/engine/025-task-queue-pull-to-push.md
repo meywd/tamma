@@ -115,3 +115,22 @@ Consequences:
 - Story: `docs/stories/epic-10/story-10-4/10-4-smart-queue-with-state-based-deduplication.md`
 - Related findings: `026-task-queue-no-visibility-timeout.md`, `027-task-queue-cross-tenant-processor.md`
 - CLAUDE.md section: "Hybrid Architecture" / "CLI modes"
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (deliberate architecture decision; documented)
+- **Commit**: (none — by design)
+- **Notes**: The push model is intentional and documented in
+  `ITaskQueue.cs` line 11-15 ("drops the in-memory dequeue helper because
+  atomic pending→processing transitions now happen in
+  TaskQueueProcessor"). The C# deployment model collapses
+  "engine + worker" into the API process; there is no current need to
+  expose `dequeue` over HTTP. CLAUDE.md "Hybrid Architecture" still
+  reads "standalone CLI, orchestrator service, or distributed worker
+  pool" but the worker pool today runs as additional API replicas, not
+  separate processes. If self-hosted hybrid worker-pull becomes a
+  requirement, the right fix is to expose the existing repo's
+  `MarkProcessingAsync` over a `POST /api/tasks/dequeue` endpoint —
+  that is the ~4h follow-up the finding flags as Option A. No code
+  change in this sprint.

@@ -111,3 +111,17 @@ For typed fields:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/SaaSEndpoints.cs:115-151`
 - Story: `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md`, `docs/stories/epic-19/19-1-api-consolidation-to-csharp.md`
 - Related findings: `018-saas-workflow-status-drops-fields.md` (sister endpoint)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: `WorkflowResultRequestDto` now exposes
+  `(Status, PrNumber?, Error?, Duration?, Result?)` with `Status`
+  validated against `{completed, failed, cancelled}` (400 on anything
+  else). `IWorkflowLifecycleService.RecordResultAsync(string
+  terminalStatus)` replaces the bool overload; service emits
+  `WORKFLOW.{COMPLETED|FAILED|CANCELLED}` event types and persists the
+  tri-state status verbatim on `WorkflowInstance.Status`. Cancelled
+  runs no longer inflate the failure-rate SLA metric.

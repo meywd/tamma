@@ -129,3 +129,17 @@ This is a straightforward cross-tenant data leak. A customer in tenant A can obs
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/WorkflowEndpoints.cs:101-105`, `Tamma.Data/Repositories/EventRepository.cs:19-29`
 - Story: `docs/stories/epic-17/17-2-row-level-security-tenant-isolation.md`, `17-4-tenant-scoped-workflow-instances.md`
 - Related findings: `028-eventrepo-rls-bypass.md`, cross-ref `docs/audit/port-gaps/orgs/` findings on tenant isolation
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: `WorkflowEndpoints.GetInstanceEvents` now (a) loads the
+  instance via `IWorkflowRepository.GetInstanceAsync`, 404s when not
+  found; (b) compares the instance's tenant against the ambient
+  `ITenantContext.TenantId` and 404s on mismatch (the TS RBAC
+  middleware-equivalent); (c) passes the instance's tenant to
+  `IEventRepository.QueryAsync` so the query is scoped even if the
+  global EF filter is bypassed downstream. Cross-tenant data leak
+  closed.

@@ -149,3 +149,20 @@ Observable instances:
 - Story: `docs/stories/epic-17/17-2-row-level-security-tenant-isolation.md`, `17-1-tenant-model-database-schema.md`
 - Archived SQL: `database/archived-sql-migrations/011_tenant_scoped_stores.sql:31-42`
 - Related findings: `016-instance-events-cross-tenant-leak.md` (observable consequence), `027-task-queue-cross-tenant-processor.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (EF query-filter level; Postgres RLS deferred to Phase-3)
+- **Commit**: c9dd51e
+- **Notes**: `EventRepository.QueryAsync` and `GetLastByTypeAsync` no
+  longer call `IgnoreQueryFilters()` on the default path — they honour
+  the global query filter on `DomainEvent`
+  (`e => tenantId == null || e.TenantId == tenantId`) so the ambient
+  `ITenantContext` scopes by default. `ClearAsync` keeps the explicit
+  bypass since it carries an authoritative `tenantId` argument. The
+  Postgres RLS / `FORCE ROW LEVEL SECURITY` half lands at the
+  Phase-3 connection-string split (per project status: RLS dormant
+  until the `tamma_app` role connection string ships). Combined with
+  finding 016 (which fixed the observable cross-tenant leak), the
+  default path is now safe.

@@ -198,3 +198,20 @@ Impact: this is the single highest-impact regression in the port. It breaks ever
   - `002-agent-available-verb-mismatch.md` (sister endpoint)
   - `017-saas-llm-proxy-shape-drift.md` (alternate implementation vector)
 - CLAUDE.md section: "Story 6-11: Context API Wiring" per the original TS file headers.
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ff581af
+- **Notes**: `ExecuteTaskRequest` DTO rebuilt to match the deployed Elsa
+  payloads (`{prompt, role?, analysisType?, repository?, enableTools?, model?,
+  maxBudgetUsd?, cwd?}`). New `IExecuteTaskService` /
+  `ExecuteTaskService` delegates to the existing `ILlmProxyService`
+  (per the finding's short-term recommendation) and returns the documented
+  `{success, output, tokensUsed, costUsd, durationMs, toolCalls, error?}`
+  shape on every path so the 11 deployed activities can read `output`
+  without crashing. Role→system-prompt mapping is a placeholder until the
+  full `IRoleBasedAgentResolver` ports from `@tamma/providers` (TODO marked
+  in source: requires running Elsa engine for E2E, plus epic-1/story-1-10
+  for the real role-based provider chain).

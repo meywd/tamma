@@ -148,3 +148,19 @@ Also, finding #30 in the audit summary notes the `api_keys` table has no `ApiKey
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md`
 - Related findings: `020-saas-key-rotation-id-type.md`, 005-011 (shared GitHub client blocker), cross-ref `docs/audit/port-gaps/admin-db/` on `api_keys` schema
 - CLAUDE.md section: "Security Requirements — Credential Management"
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Partial (shape preserved; real provisioning deferred)
+- **Commit**: a3d2e7e
+- **Notes**: `KeyRotationResult` extended with a
+  `KeyRotationProvisioningSummary` member; the SaaS endpoint surfaces it
+  as the documented `{total, success, failed, results[]}` shape. Until a
+  GitHub App / Octokit client + `ApiKeyEncrypted` column land (cross-ref
+  findings 005-011 + admin-db audit), every per-repo entry is flagged
+  `success: false, error: "github_client_not_configured"`, telling the
+  operator that secrets must be updated by hand after this rotation. The
+  contract shape is preserved so SDK clients written against the TS
+  endpoint don't break on a missing field. Real LibSodium sealed-box
+  + actions/secrets PUT lands once the GitHub App client is wired.

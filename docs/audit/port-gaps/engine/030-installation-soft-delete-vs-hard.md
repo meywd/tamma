@@ -124,3 +124,16 @@ Note the audit summary phrasing: "Installation soft-delete vs hard-delete on `gi
 - Archived SQL: `database/archived-sql-migrations/001_github_installations.sql`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md`
 - Related findings: `020-saas-key-rotation-id-type.md`, `029-installation-router-no-cache.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (Option A — match TS hard delete)
+- **Commit**: a3d2e7e
+- **Notes**: `installation.deleted` webhook now calls
+  `IInstallationRepository.DeleteAsync(installationId)` (hard delete). The
+  `INSTALLATION.DELETED.SUCCESS` event preserves audit. The
+  reuse-`SuspendedAt`-as-soft-delete-marker collision is gone — an
+  `unsuspend` webhook can no longer resurrect a deleted record because
+  the row no longer exists. Cache also invalidated on delete so the
+  next webhook lookup correctly returns null.

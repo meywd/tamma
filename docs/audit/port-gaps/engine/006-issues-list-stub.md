@@ -119,3 +119,22 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:72-73`
 - Story: `docs/stories/epic-6/story-6-11/6-11-context-api-wiring.md`
 - Related findings: `007-security-alerts-stub.md`, `008-issue-comment-stub.md`, `009-issue-labels-stub.md`, `010-create-issue-stub.md`, `011-trigger-ci-stub.md` (all share the same GitHub-client blocker)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (partial — graceful degradation; full impl deferred)
+- **Commit**: ff581af
+- **Notes**: Endpoint reworked to (a) bind the correct query / body shape
+  (renames `Repo`→`Repository`; restored missing fields like `Assignees`,
+  `BranchName`, `WorkflowFile`, `Inputs`); (b) parse `owner/repo`,
+  validate with 400 on bad format / missing required fields; (c) delegate
+  to the new `IGitHubEngineCallbackService`. The default
+  `NullGitHubEngineCallbackService` short-circuits to a 503
+  `github_client_not_configured` (matches the TS contract for the
+  unwired-reader path) so the deployed Elsa activities see the documented
+  soft-fail instead of a bogus 200 with a stub body. Real Octokit-backed
+  implementation lands when the GitHub App client wires up
+  (cross-ref github audit scope + finding 021). The repo-config endpoint
+  preserves the TS graceful-degradation 200 `{}` so the conventions
+  injection path keeps working on un-configured installations.

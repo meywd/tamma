@@ -116,3 +116,14 @@ Combined with finding 014 (Guid vs string), this is the mechanism by which the t
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Repositories/WorkflowRepository.cs:8-28`
 - Story: `docs/stories/epic-10/story-10-5/10-5-workflow-provider-abstraction-and-elsa-integration.md`
 - Related findings: `014-workflow-definition-id-guid-mismatch.md` (blocker)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: c9dd51e
+- **Notes**: `UpsertDefinitionAsync` now falls back to a `(Name, TenantId)`
+  lookup when the supplied `Id` is `Guid.Empty`. Prior behaviour effectively
+  ran `Insert` on every call because `FindAsync(Guid.Empty)` always missed.
+  Idempotency restored without the larger Guid→string entity refactor
+  (which is finding 014 and remains deferred).

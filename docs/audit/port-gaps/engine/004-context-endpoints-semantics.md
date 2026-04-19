@@ -169,3 +169,18 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:46-67`, `Dtos/Engine/EngineDtos.cs:4-5`
 - Story: `docs/stories/epic-6/story-6-11/6-11-context-api-wiring.md`
 - Related findings: `005-repo-config-stub.md` (sister endpoint from the same routes file), `001-execute-task-stub.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ff581af
+- **Notes**: `IContextStore` + thread-safe `InMemoryContextStore` port the
+  TS keyed-map store. `StoreContext` accepts both the
+  `StoreFindingsActivity` payload `{repository, issueNumber, findings}` and
+  the `StoreRoleFindingActivity` shape `{repository, issueNumber, role,
+  finding}`, normalising both to `{role: content}`. `GetContext` honours
+  the optional `?repository=` query and falls back to issue-number scan
+  otherwise. `QueryContext` implements the term-match scoring loop with
+  optional role filter and 4-char-per-token budget. Real RAG pipeline
+  (`@tamma/intelligence` port) is the long-term replacement.

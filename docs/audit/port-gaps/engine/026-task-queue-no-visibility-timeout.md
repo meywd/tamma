@@ -104,3 +104,19 @@ Minor sibling issue: `ListPendingAsync` does not use `FOR UPDATE SKIP LOCKED`, s
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/TaskQueue/TaskQueueProcessor.cs:98-146`
 - Story: `docs/stories/epic-10/story-10-4/10-4-smart-queue-with-state-based-deduplication.md`
 - Related findings: `025-task-queue-pull-to-push.md`, `027-task-queue-cross-tenant-processor.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: a3d2e7e
+- **Notes**: Added `QueuedTask.ClaimedAt` (with EF migration
+  `TaskQueueClaimedAt`) — `MarkProcessingAsync` stamps it. New
+  `IQueuedTaskRepository.ReapStaleProcessingAsync(visibilityTimeout,
+  maxRetries)` resets stale `processing` rows back to `pending` (or
+  flips to `failed` when retry budget exhausted).
+  `TaskQueueProcessorOptions.VisibilityTimeout` defaults to 10 minutes
+  and is invoked at the head of every poll. Logs reaped counts at
+  WARN. `SELECT ... FOR UPDATE SKIP LOCKED` for the claim path is
+  noted as a stretch and not implemented (current `FindAsync + check`
+  pattern already handles the replica race correctly, just wastefully).

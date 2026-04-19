@@ -133,3 +133,15 @@ For a deployment that ran two engines (one for `acme/webapp`, one for `acme/api`
 - C# source: absent
 - Story: (no direct story — registry was a TS-era layered abstraction)
 - Related findings: `012-engine-lifecycle-sse-to-json.md`, `022-dashboard-summary-shape-drift.md`, `023-dashboard-engines-empty.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (minimal abstraction; deeper port deferred)
+- **Commit**: a3d2e7e
+- **Notes**: Added `IEngineRegistry` + `InMemoryEngineRegistry`. Until the
+  real `TammaEngine` ports (finding 012), the registry materialises
+  synthetic per-tenant `EngineInfo` rows from the workflow store so the
+  dashboard `/engines` tile is no longer hard-coded `[]`. State is
+  derived (`running` if any instance is in running state, else `idle`).
+  Real explicit register/dispose lifecycle waits for the TammaEngine port.

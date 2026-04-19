@@ -78,3 +78,13 @@ Compounding: even when a user has three engines actively running workflows, the 
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/DashboardEndpoints.cs:23-24`
 - Story: `docs/stories/epic-5/5-3-real-time-dashboard-system-health.md`, `docs/stories/epic-18/18-5-user-facing-dashboard-shell.md`
 - Related findings: `013-engine-registry-missing.md` (blocker), `022-dashboard-summary-shape-drift.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: a3d2e7e
+- **Notes**: `DashboardEndpoints.GetEngines` now enumerates
+  `IEngineRegistry.ListAsync(tc.TenantId)` (finding 013). Until the real
+  `TammaEngine` ports the registry serves a synthetic per-tenant entry
+  derived from workflow data so the tile is no longer blank.
