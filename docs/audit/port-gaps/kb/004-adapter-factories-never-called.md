@@ -139,3 +139,18 @@ The decision to split intelligence into a sidecar (rather than a native C# port)
 - Sidecar exports: `packages/intelligence-server/src/index.ts`
 - Real impls: `packages/intelligence/src/vector-store/providers/chromadb.ts`, `.../rag/rag-pipeline.ts`
 - Related findings: #001, #003, #005, #014, #015
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`adapters.ts`, `adaptVectorStore()` and `adaptRagPipeline()` are TypeScript
+modules in `packages/intelligence-server/src/`. Adding the missing
+`createVectorStoreFromEnv()` / `createRagPipelineFromEnv()` factories and
+wiring them into the sidecar bootstrap is a TypeScript change. There is no
+C# port surface to fix — the C# side never sees the adapter layer; it talks
+HTTP to the sidecar.
+
+**To unblock:** bundled with finding 001 (composition root) and finding 014
+(strict-mode unblock for `@tamma/intelligence` static imports). 1-2h once
+014 clears.

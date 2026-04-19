@@ -124,3 +124,17 @@ Story alignment:
 - C# endpoint: `apps/tamma-elsa/src/Tamma.Api/Endpoints/KbEndpoints.cs:69-73`
 - Story: `docs/stories/epic-6/story-6-2/6-2-vector-database-integration.md` AC1 (partial)
 - Related findings: #001, #002, #008 (sibling delete endpoint)
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`VectorDbManagementService.upsert` is in `packages/intelligence-server/`
+(TypeScript). Both the misleading-success body and the silent-data-loss
+behavior (the worst failure mode called out in this finding) need to be
+fixed at the sidecar service layer. The C# `KbEndpoints.UpsertVectors`
+forwards the request body and returns the sidecar's JSON unchanged — there
+is no inspection point in the C# layer that could distinguish a real
+success from a stub success without violating the passthrough contract.
+
+**To unblock:** 15-minute sidecar change as part of the finding-002 sweep.

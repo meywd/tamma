@@ -129,3 +129,18 @@ Story alignment:
 - Strict-mode policy: CLAUDE.md § "TypeScript Strict Mode"
 - Strict-mode gotchas: `MEMORY.md` § "TypeScript Strict Mode Gotchas"
 - Related findings: #001, #003, #004, #005, #015 — all blocked by this one.
+
+## Remediation status
+
+**Status (2026-04-18):** Invalid for the C# port pass — TypeScript-only debt.
+
+This is `@tamma/intelligence` (TypeScript) accumulated strict-mode debt that
+blocks `packages/intelligence-server/` from doing static imports of the
+real backends. C# strict equivalents (nullable reference types, etc.) on
+the C# port are already enforced and clean. There is no analogous C#
+work item.
+
+**To unblock:** TypeScript work in `packages/intelligence/` — run
+`pnpm --filter @tamma/intelligence run build`, fix the strict-mode errors,
+then remove the Dockerfile skip at `packages/intelligence-server/Dockerfile:48`.
+Estimated 5-10h (size unknown without running the build).

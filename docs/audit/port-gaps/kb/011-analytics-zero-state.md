@@ -198,3 +198,23 @@ Story alignment:
 - Sidecar source: `packages/intelligence-server/src/services/AnalyticsService.ts`
 - Story: `docs/stories/epic-6/story-6-7/6-7-llm-cost-monitoring.md`
 - Related findings: #001, #014
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`AnalyticsService` is in `packages/intelligence-server/src/services/`. The
+zero-state fallback, the missing `ICostTracker` wiring, and the
+`indexedDocs` / `hitRate` plumbing all live in TypeScript and depend on
+either `@tamma/providers` (cost tracker) or `IRagPipeline.getCacheStats()`.
+The schema drift between TS (`avgLatencyMs`, `sourceBreakdown`) and the
+sidecar (`hitRate`, `indexedDocs`, `totalTokens`) is also a sidecar
+contract decision — once made, the C# DTOs would be regenerated from the
+sidecar response shape (currently the C# client returns `JsonElement`
+unchanged so the dashboard sees the sidecar shape directly).
+
+The user-visible behavior is unchanged from TS, so this is honest zero
+state — not a port regression.
+
+**To unblock:** sidecar work — wire cost-tracker bridge, query indexer for
+docs, query RAG cache for hit rate. 3-4h.

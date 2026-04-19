@@ -177,3 +177,17 @@ Story alignment:
 - Real impl: `packages/intelligence/src/rag/rag-pipeline.ts`
 - Story: `docs/stories/epic-6/story-6-3/6-3-rag-pipeline.md`
 - Related findings: #001, #002, #004, #014
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`RagManagementService.query` is in `packages/intelligence-server/src/services/`.
+The blank-answer fallback, the always-`enabled: false` defaults, and the
+proposed throw-instead-of-blank semantics all need to be changed inside
+the TypeScript sidecar service. The C# `KbEndpoints.QueryRag` correctly
+forwards the `RagQueryRequest` body to the sidecar — there is nothing in
+the C# layer to inspect or rewrite.
+
+**To unblock:** sidecar composition root (finding 001) + `createRagPipelineFromEnv()`
+factory (finding 004). 2-3h.

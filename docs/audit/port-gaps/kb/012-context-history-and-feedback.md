@@ -161,3 +161,22 @@ Story alignment:
 - Real aggregator: `packages/intelligence/src/context/` (exists, not wired)
 - Stories: `docs/stories/epic-6/story-6-5/6-5-context-aggregator.md`, `docs/stories/epic-12/12-3-context-compaction.md`
 - Related findings: #001, #014
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`ContextTestingService` is in `packages/intelligence-server/src/services/`.
+The three sub-issues (empty history, in-process feedback Map,
+hard-coded config) all need to be fixed inside the sidecar, and the new
+`POST /kb/context/test` and `PUT /kb/context/config` routes need to be
+introduced sidecar-first before C# forwarding endpoints can be added. The
+proposed Postgres tables (`context_feedback`, history) belong to the
+sidecar's data plane (the sidecar already has its own Postgres
+connectivity for RAG caching); writing them from the C# host would split
+ownership of KB persistence across two services and create the same
+"contract drift" problem the C# layer was specifically designed to avoid.
+
+**To unblock:** sidecar work — Postgres schema + store + aggregator
+wiring + new routes. 4-5h. The two new C# forwarding endpoints would be
+a 30-minute follow-up once the sidecar contract is finalised.

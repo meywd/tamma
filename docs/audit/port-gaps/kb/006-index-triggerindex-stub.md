@@ -162,3 +162,20 @@ Story alignment:
 - Sidecar source: `packages/intelligence-server/src/services/IndexManagementService.ts:121-126`
 - Story: `docs/stories/epic-6/story-6-1/6-1-codebase-indexer.md` AC6
 - Related findings: #001, #002 (general stub-string pattern), #015
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+The literal stub string `Indexing triggered (stub — no indexer configured)`
+is emitted from `packages/intelligence-server/src/services/IndexManagementService.ts:121-126`,
+a TypeScript module the C# port has no access to. The C#
+`KbEndpoints.TriggerIndex` correctly forwards body and returns whatever the
+sidecar replies with — translating the message in C# would violate the
+documented passthrough contract and silently mask the underlying sidecar
+bug, not fix it. The directory-traversal guard (a separate sub-issue called
+out in the finding) is also a sidecar-side concern: the path string is
+opaque to C# and is consumed by `IndexProject` inside the sidecar.
+
+**To unblock:** part of the finding-002 sweep (replace stub strings with
+503s) — 15 min sidecar change.

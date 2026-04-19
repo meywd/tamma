@@ -139,3 +139,17 @@ Each sidecar service has a matching real implementation that is currently orphan
 - Dockerfile (copies real impl but skips build): `packages/intelligence-server/Dockerfile:41,48`
 - Adapter rationale: `packages/intelligence-server/src/adapters.ts:1-18`
 - Related findings: #001 (root wiring), #004 (factories), #014 (strict-mode blocker)
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+The real implementations live in `packages/intelligence/` (TypeScript) and
+the orphan-imports are inside `packages/intelligence-server/src/` (TypeScript).
+The cross-reference table in this finding makes the situation clear:
+every real impl is in TS, and every sidecar service that should import it
+is in TS. There is no C# analog — the entire intelligence stack is owned
+by the TS sidecar by design.
+
+**To unblock:** subsumed by finding 001's composition-root work — no
+additional effort. Blocked on finding 014 for static imports.

@@ -188,3 +188,24 @@ Story alignment:
 - Sidecar source: `packages/intelligence-server/src/services/*.ts`
 - CLAUDE.md section: "Error Handling" — custom `TammaError` with `retryable` and `severity`.
 - Related findings: #001 (makes this dead code once wired), #006 (index-specific detail), #007, #008 (vector-db-specific detail), #009 (MCP-specific detail)
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+The literal `(stub …)` strings are emitted from inside the TypeScript sidecar
+(`packages/intelligence-server/src/services/{Index,VectorDb,Mcp}ManagementService.ts`),
+not from any C# code. The C# layer is a verbatim passthrough: it cannot
+detect the substring without inspecting JSON bodies (which the audit
+explicitly says it should not do — see `IntelligenceHttpClient.cs` doc
+comment) and it cannot rewrite responses without breaking the
+"contract-faithful passthrough" property. Translating these into 503
+responses requires changes inside the sidecar's Fastify route handlers and
+service classes. No C# work would fix the user-visible regression.
+
+**To unblock:** addressed naturally by the sidecar composition-root work
+(finding 001) — once real backends are wired the stub branches become dead
+code. Until then, a 2h sidecar-side fix can replace the literal strings
+with `503 service_unavailable` responses (the C# `IntelligenceHttpClient`
+already returns a `degraded=true` envelope on 5xx, so this would surface
+correctly upstream without further C# changes).

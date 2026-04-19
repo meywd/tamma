@@ -57,3 +57,66 @@ Two consequences:
 - Unused adapters: `packages/intelligence-server/src/adapters.ts`
 - Real impls: `packages/intelligence/src/{vector-store,rag,indexer,context,knowledge-base}/`
 - TS pre-delete snapshot: `git show 9e9a57c~1:packages/api/src/{routes,services,schemas}/knowledge-base/`
+
+## Remediation status (2026-04-18)
+
+**All 16 findings: Deferred — out of scope for the C# port-gap pass.**
+
+| #   | Status   | Reason                                                      |
+|-----|----------|-------------------------------------------------------------|
+| 001 | Deferred | TS sidecar composition root — no C# analog                  |
+| 002 | Deferred | Stub strings emitted from TS sidecar service classes        |
+| 003 | Deferred | Sidecar (Node) env vars; C# already reads its own scoped config |
+| 004 | Deferred | TS adapter factories in `packages/intelligence-server/`     |
+| 005 | Invalid  | TypeScript-only call site (`server.ts:210`)                 |
+| 006 | Deferred | TS sidecar service                                          |
+| 007 | Deferred | TS sidecar service                                          |
+| 008 | Deferred | TS sidecar service                                          |
+| 009 | Deferred | TS sidecar service                                          |
+| 010 | Deferred | TS sidecar service + missing MCP discovery contract         |
+| 011 | Deferred | TS sidecar service                                          |
+| 012 | Deferred | TS sidecar service + sidecar Postgres schema                |
+| 013 | Deferred | TS sidecar service                                          |
+| 014 | Invalid  | `@tamma/intelligence` TypeScript strict-mode debt           |
+| 015 | Deferred | TS sidecar import wiring                                    |
+| 016 | Deferred | Mocked HTTP boundary is correct for the C# layer; live-compose smoke is forbidden by the remediation pass constraints AND blocked on 001 |
+
+### Why this scope is not a C# port-gap scope
+
+The Knowledge Base subsystem is, by Epic 19's explicit architectural
+decision, **not a C# port**. It is delegated to a TypeScript sidecar
+(`packages/intelligence-server/`) that the C# API talks to over HTTP. The
+C# port surface for KB is exactly:
+
+1. `apps/tamma-elsa/src/Tamma.Api/Endpoints/KbEndpoints.cs` — 30
+   forwarding handlers (verified 1-to-1 against the sidecar contract).
+2. `apps/tamma-elsa/src/Tamma.Api/Services/KnowledgeBase/IntelligenceHttpClient.cs` —
+   typed HTTP client with degraded-payload fallback on 5xx/timeout.
+3. `apps/tamma-elsa/src/Tamma.Api/Extensions/KnowledgeBaseServiceCollectionExtensions.cs` —
+   reads `IntelligenceServer:Url` and `IntelligenceServer:TimeoutSeconds`.
+4. `apps/tamma-elsa/tests/Tamma.Api.Tests/KnowledgeBase/` — integration
+   tests exercising the C# → sidecar contract with a mocked
+   `HttpMessageHandler` (the correct boundary for a passthrough layer).
+
+The audit explicitly classifies (1)-(3) as "Not-a-gap" and confirms
+"Contract layer is fine". All 16 findings target work outside this
+surface area: the TS sidecar's own composition root, its services, its
+adapter factories, and its strict-mode build debt. A C# port-gap pass
+cannot remediate any of them without leaving the C# port and rewriting
+TypeScript.
+
+### How to actually close these findings
+
+The shortest path is a dedicated TypeScript work item against
+`packages/intelligence-server/` covering findings 001/003/004/005/014/015
+together (one composition-root chain, ~13-22h). Once landed,
+findings 002/006/007/008/009 become dead code, and 010/011/012/013/016
+fall out as ~10-13h of follow-up.
+
+### Build / test impact of this pass
+
+No C# code changes were made. Build remains green
+(`Tamma.sln` 0 errors, 6 warnings — all pre-existing CVE warnings on
+`MailKit` and `System.Text.Json` 8.0.0 unchanged from baseline). Test
+count baseline preserved: 1608 passing (7 + 882 + 719) across
+`Tamma.Core.Tests`, `Tamma.Activities.Tests`, `Tamma.Api.Tests`.

@@ -161,3 +161,28 @@ Story alignment:
 - Real impls: `packages/intelligence/src/vector-store/providers/chromadb.ts`, `packages/intelligence/src/rag/rag-pipeline.ts`
 - CLAUDE.md section: "Testing Strategy"
 - Related findings: #001, #006-#013 — all would have been caught by the missing tests this finding describes.
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — meaningful coverage requires sidecar
+composition root first.
+
+The C# integration tests in `KbEndpointsIntegrationTests.cs` correctly cover
+the C# layer's actual responsibilities: path/verb/body mapping,
+JSON-element passthrough, degraded-payload semantics on 5xx. Mocking
+`HttpMessageHandler` is the right test boundary for a passthrough layer —
+the alternative (running a real sidecar) would test the sidecar, not the
+C# port. The audit's own finding text concedes the proposed
+`KbSmokeTests.cs` would be "meaningless until #001 lands (no composition
+root → no real backend to test against)".
+
+The proposed work — testcontainers ChromaDB, full docker-compose smoke,
+new CI job `kb-compose-smoke` — is also explicitly excluded by the
+remediation pass's hard constraints ("DO NOT try to bring up ChromaDB or
+run integration tests against live external services") and is blocked on
+finding 001 for any actual signal.
+
+**To unblock:** sidecar testcontainers test in TS first
+(`packages/intelligence-server/tests/integration/chromadb.integration.test.ts`)
+once finding 001 lands. C#-side smoke test then becomes a 1h follow-up
+opt-in test using `[Category("Smoke")]` gating.

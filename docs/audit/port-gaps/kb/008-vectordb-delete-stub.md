@@ -125,3 +125,16 @@ Story alignment:
 - C# client: `apps/tamma-elsa/src/Tamma.Api/Services/KnowledgeBase/IntelligenceHttpClient.cs:68-69` and `DeleteAsync` helper at `196-212`.
 - Story: `docs/stories/epic-6/story-6-2/6-2-vector-database-integration.md` AC1 (partial)
 - Related findings: #001, #002, #007 (sibling upsert)
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+Same root cause as finding 007: the stub-string return is in
+`packages/intelligence-server/src/services/VectorDbManagementService.ts:100-106`.
+The C# DELETE handler and `IntelligenceHttpClient.DeleteAsync` correctly
+forward the body and verb (DELETE-with-body is uncommon but properly
+implemented with `HttpRequestMessage`). The "destructive verb returning
+silent success" semantics can only be fixed at the sidecar service layer.
+
+**To unblock:** 15-minute sidecar change as part of the finding-002 sweep.

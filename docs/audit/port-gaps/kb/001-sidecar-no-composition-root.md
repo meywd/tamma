@@ -155,3 +155,27 @@ Story alignment:
 - Real impls: `packages/intelligence/src/vector-store/`, `packages/intelligence/src/rag/`, `packages/intelligence/src/indexer/`
 - Story: `docs/stories/epic-6/story-6-1/` through `story-6-5/`
 - Related findings: #003, #004, #005, #014, #015
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+The composition-root gap lives entirely in the TypeScript sidecar
+(`packages/intelligence-server/src/server.ts`) and depends on the
+TypeScript `@tamma/intelligence` package being wired in. The C# port
+surface is correctly limited to a pass-through HTTP client
+(`apps/tamma-elsa/src/Tamma.Api/Services/KnowledgeBase/IntelligenceHttpClient.cs`)
+plus the 30 `KbEndpoints` handlers that forward verbatim and a degraded-payload
+fallback envelope when the sidecar is 5xx/unreachable — which the audit explicitly
+acknowledges is "fine" (see `index.md` "Not-a-gap"). There is no C# code that
+could meaningfully wire ChromaDB, embedders, RAG pipelines, indexers, MCP
+clients, or cost trackers; the sidecar owns all of that. Remediation requires
+either (a) doing the TypeScript composition-root work in
+`packages/intelligence-server/`, or (b) porting the entire intelligence
+sidecar stack to C# as a substantive new project. Both are explicitly out of
+the scope and time-budget for this port-gap remediation pass.
+
+**To unblock:** open a dedicated TypeScript work item against
+`packages/intelligence-server/` covering findings 001/003/004/005/014/015
+together (they're a single composition-root chain). Estimated 8-12h per the
+finding's own scoping.

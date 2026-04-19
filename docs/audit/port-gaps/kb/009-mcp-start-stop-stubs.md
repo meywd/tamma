@@ -158,3 +158,21 @@ Story alignment:
 - Sidecar source: `packages/intelligence-server/src/services/McpManagementService.ts:111-125`
 - Story: `docs/stories/epic-6/story-6-4/6-4-mcp-client-integration.md`
 - Related findings: #001, #002, #010 (invoke) — all same root cause.
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`McpManagementService.startServer` / `stopServer` and the proposed
+`logs: Map<string, McpLogEntry[]>` reintroduction live in
+`packages/intelligence-server/src/services/McpManagementService.ts`. The
+proposed new `GET /kb/mcp/servers/:id/logs` route would need to be added
+to the sidecar first, then mirrored as a 31st C# forwarding endpoint —
+but the contract change must originate in the sidecar, not the C# port.
+The C# `StartMcpServer` / `StopMcpServer` handlers correctly POST to
+`/kb/mcp/servers/{id}/start|stop` and return whatever the sidecar replies.
+
+**To unblock:** sidecar work — replace stub returns with 503s and reinstate
+the in-memory log map (or delegate to the real `IMCPClientService` once
+finding 001 wires it). Add the logs route once a sidecar reinstatement
+plan exists.

@@ -140,3 +140,20 @@ Story alignment:
 - Real impl: `packages/intelligence/src/vector-store/providers/chromadb.ts`
 - Story: `docs/stories/epic-6/story-6-2/6-2-vector-database-integration.md`
 - Related findings: #001, #004, #005, #014
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`CHROMADB_URL`, `OPENAI_API_KEY`, `EMBEDDING_MODEL` are sidecar-process env
+vars consumed by code that lives in `packages/intelligence-server/` (Node).
+The C# host process has no business reading them: ChromaDB is connected to
+by the sidecar, not by Tamma.Api. The C# side already correctly reads its
+own scoped sidecar config (`IntelligenceServer:Url`,
+`IntelligenceServer:TimeoutSeconds`) in
+`apps/tamma-elsa/src/Tamma.Api/Extensions/KnowledgeBaseServiceCollectionExtensions.cs`,
+which is the only KB-related configuration legitimately in the C# port's
+domain.
+
+**To unblock:** TypeScript sidecar work — add a `config.ts` (Zod-validated
+env loader) and use it from the composition root (finding 001).

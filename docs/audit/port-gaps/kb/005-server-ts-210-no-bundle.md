@@ -136,3 +136,16 @@ Story alignment:
 - Dockerfile CMD: `packages/intelligence-server/Dockerfile:78`
 - Related findings: #001 (root cause), #003 (env-var gap), #004 (factory gap), #014 (strict-mode blocker)
 - CLAUDE.md: "Self-Maintenance Goal" section requires 100% coverage of critical paths.
+
+## Remediation status
+
+**Status (2026-04-18):** Invalid for the C# port pass — TypeScript-only call site.
+
+`server.ts:210` is the entrypoint of the Node.js sidecar process; there is
+no equivalent code path in the C# port. The C# `Tamma.Api.Program.cs` and
+`KnowledgeBaseServiceCollectionExtensions.AddKnowledgeBaseServices()`
+correctly bootstrap the C# side (typed HTTP client → sidecar URL); they do
+not — and structurally cannot — boot the sidecar's intelligence services.
+
+**To unblock:** trivial 5-minute follow-up to findings 001/004 once those
+land.

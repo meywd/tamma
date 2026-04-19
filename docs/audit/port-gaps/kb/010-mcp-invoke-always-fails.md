@@ -175,3 +175,20 @@ Story alignment:
 - Story: `docs/stories/epic-6/story-6-4/6-4-mcp-client-integration.md`
 - CLAUDE.md section: "Self-Maintenance Goal" — requires MCP tools for Tamma's own workflow autonomy.
 - Related findings: #001, #002, #009
+
+## Remediation status
+
+**Status (2026-04-18):** Deferred — out of scope for the C# port pass.
+
+`McpManagementService.invokeTool` and the missing MCP-server discovery
+config loader (e.g. `.tamma/mcp-servers.json`) are TypeScript sidecar
+concerns. The C# `KbEndpoints.InvokeMcpTool` correctly forwards the
+`McpInvokeRequest` body to `/kb/mcp/tools/invoke`. The sidecar always
+returning `success: false` is the symptom; the cause is that no
+`IMCPClientService` is constructed in the sidecar's composition root — the
+same chain as finding 001. The Self-Maintenance Goal impact noted in this
+finding is real but cannot be addressed in a C# port pass: every MCP tool
+call would still hit a sidecar with a null client.
+
+**To unblock:** depends on sidecar composition root (finding 001) plus an
+MCP-server discovery contract (new spec work). 3-4h once 001 is done.
