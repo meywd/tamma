@@ -153,3 +153,10 @@ Story 18-2 should be amended to explicitly include `rd` and `invite` handling, o
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:377-385`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md`
 - Related findings: `009-oauth-start-no-csrf-state.md`, `012-oauth-callback-literal-stub.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d` (auth scope, finding 009)
+- **Notes**: `AuthEndpoints.GitHubAuth` accepts `[FromQuery] string? rd, [FromQuery] string? invite`. `rd` is sanitized via `RedirectUrlSanitizer.Sanitize(rd, allowedDomain)` (only `tamma.dev` + subdomains over HTTPS); the `invite` token is forwarded raw. Both ride into the OAuth state via `OAuthStateCodec.Encode` alongside the CSRF nonce. The callback (auth scope) consumes both: invite-by-token-hash lookup applies the role to the invited tenant; sanitized `rd` becomes the final post-login redirect target.

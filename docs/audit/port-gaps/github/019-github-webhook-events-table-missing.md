@@ -93,3 +93,10 @@ Error paths: see Finding 003.
 - Archived SQL migration: none — this is a new table.
 - Story: spec gap — same as Finding 003.
 - Related findings: `003-webhook-idempotency-missing.md` (the behavior that needs this table)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: Added `GitHubWebhookDelivery` entity (PK `DeliveryId uuid`, columns `ReceivedAt timestamptz`, `EventType varchar(100)`, `Action varchar(100)?`, `InstallationId bigint?`), `IGitHubWebhookDeliveryRepository` + EF impl with `TryRecordAsync` (returns true on first insert, false on conflict — handles the race via `DbUpdateException` catch) and `CleanupOlderThanAsync(cutoff)`. Migration `GitHubWebhookDeliveries` creates the table with indexes on `(ReceivedAt)` and `(InstallationId, ReceivedAt)`. Background cleanup hosted-service intentionally deferred (finding 003 notes manual SQL pruning is sufficient today; rows are <1KB and growth is bounded by GitHub's ~8h retry window).

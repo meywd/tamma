@@ -114,3 +114,10 @@ Same as Finding 014.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Program.cs:465-468`
 - Story: no story — cross-cutting
 - Related findings: `014-no-inbound-rate-limit-webhook-oauth.md` (parent)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: `Program.cs` now registers `github.MapPost("/webhooks", ...).RequireRateLimiting("GitHubWebhook")` (300/min). The middleware is enabled by `app.UseRateLimiter()` upstream of route mapping. Companion finding 014 supplies the policy definition; this finding's per-route binding ensures the policy actually engages on the webhook route.

@@ -135,3 +135,10 @@ The story explicitly authorizes the TS "accept-and-orphan" behavior; C# lost it.
   - `apps/tamma-elsa/src/Tamma.Api/Program.cs:467`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` Implementation Notes + Task 2.2, 2.5
 - Related findings: `007-installation-callback-no-github-api-fetch.md`, `012-oauth-callback-literal-stub.md`, `021-installation-id-bigint-pk-vs-guid.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: `IInstallationRouterService.HandleCallbackAsync(installationId, setupActionId, Guid? callingUserId)` now accepts a nullable user. The endpoint passes `null` when no Tamma session is present; the router persists the row with `TenantId=null`, emits `INSTALLATION.ORPHAN_PERSISTED.SUCCESS`, and returns `Success=true` with `TenantId=null` so the endpoint can redirect to `{dashboard}/onboarding/success?orphan=1&installation_id=...` (the claim-installation flow). Existing-row safety: the upsert branch only overwrites `TenantId` when the orphan resolution turns up a real tenant — orphan callbacks never clobber an existing tenant binding. Authenticated path is unchanged: still returns `INSTALLATION.LINKED.SUCCESS` with the bound tenant.

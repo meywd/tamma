@@ -159,3 +159,10 @@ There is an implicit gap: the story 18-4 AC list never mentions libsodium, seale
   - `apps/tamma-elsa/src/Tamma.Api/Services/SaaS/ApiKeyRotationService.cs:13-16` (comment admitting the drop)
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (missing AC for key provisioning)
 - Related findings: `007-installation-callback-no-github-api-fetch.md`, `008-installation-callback-no-api-key-generation.md`, `013-secrets-provisioner-libsodium-missing.md`, `018-schema-installation-no-apikey-columns.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (degraded fidelity until GitHub App client lands)
+- **Commit**: `6dead62`
+- **Notes**: The webhook upsert + repo seed path is unchanged (already correct). The end-to-end install flow now generates an installation API key on the callback leg (finding 008) and provisions it via `IGitHubSecretsProvisioner` (finding 013). With the Null impl wired by default, per-repo summary surfaces `github_client_not_configured` so operators see exactly which repos still need manual `TAMMA_API_KEY` updates. Once the real Octokit-backed `IGitHubAppClient` ships, both legs become fully autonomous without further code changes.

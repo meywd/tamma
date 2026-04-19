@@ -108,3 +108,10 @@ Cross-cutting hardening story needed (same one as Finding 014 could own this).
 - Story: spec gap
 - Related findings: `007-installation-callback-no-github-api-fetch.md`, `013-secrets-provisioner-libsodium-missing.md`, `014-no-inbound-rate-limit-webhook-oauth.md`
 - GitHub docs: [Best practices for using GitHub REST API — rate limiting](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api?apiVersion=2022-11-28#handle-rate-limit-errors-appropriately)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred (requires GitHub App client port)
+- **Commit**: n/a
+- **Notes**: There is no outbound GitHub-calling code in the github scope today (the `IGitHubAppClient` is the `NullGitHubAppClient` returning `github_client_not_configured`). Outbound rate-limit handling is a layer that goes around the real HTTP client — it must be added when (and only when) the real Octokit/HttpClient impl lands. Track as part of the GitHub App client port story.

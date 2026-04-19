@@ -141,3 +141,10 @@ Note: story 18-2 talks about `/api/v1/auth/github` (end-user route) while the cu
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC #5, Task 4.2, Security Considerations)
 - Related findings: `010-oauth-start-missing-read-user-scope.md`, `011-oauth-start-no-rd-invite.md`, `012-oauth-callback-literal-stub.md`
 - CLAUDE.md section: `Security Requirements → Input Validation`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d` (auth scope, finding 009)
+- **Notes**: `AuthEndpoints.GitHubAuth` generates a 32-byte CSRF nonce, persists it in the short-lived (10 min, HttpOnly+Secure+SameSite=Lax) `tamma_oauth_csrf` cookie, encodes it alongside `rd` and `invite` via `OAuthStateCodec`, and includes the state in the GitHub authorize URL. The callback (also delivered in auth scope) verifies the cookie ↔ state.csrf match with constant-time comparison and burns the cookie on use. No further work in github scope.

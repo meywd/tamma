@@ -125,3 +125,10 @@ This is a performance / architecture concern that the story correctly leaves to 
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/InstallationRouterService.cs:268-295`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md`
 - Related findings: `016-installation-router-no-60s-ttl-cache.md` (the cache itself), `004-installation-deleted-soft-vs-hard.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `a3d2e7e` (engine scope, finding 029)
+- **Notes**: The 60s `IMemoryCache` lookup landed in engine scope, and every mutate branch (`created`, `deleted`, `suspend`, `unsuspend`) calls `InvalidateInstallationCache(installationId)`. The callback path also invalidates after upsert (added in this commit alongside finding 007). No additional work required.

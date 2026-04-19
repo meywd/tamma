@@ -143,3 +143,10 @@ These are real spec gaps and must be resolved before declaring this finding clos
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (Task 3.4)
 - Related findings: `005-no-cache-invalidation-hook.md`, `006-installation-created-no-provisioning.md`, `021-installation-id-bigint-pk-vs-guid.md`
 - Archived SQL migration: `database/archived-sql-migrations/001_github_installations.sql`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `a3d2e7e` (engine scope, finding 030)
+- **Notes**: Engine-scope remediation already switched `installation.deleted` to hard-delete via `_installations.DeleteAsync(installationId)` (matches TS contract). The `INSTALLATION.DELETED.SUCCESS` event preserves the audit trail. The ambiguous SuspendedAt overload concern is resolved by the hard-delete path; suspend/unsuspend remain on `SuspendedAt`. No additional schema work required.

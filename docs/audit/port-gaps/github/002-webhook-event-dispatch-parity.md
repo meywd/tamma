@@ -133,3 +133,10 @@ The dispatch surface itself is ported cleanly. File this finding as documentatio
   - `docs/audit/port-gaps/github/004-installation-deleted-soft-vs-hard.md`
   - `docs/audit/port-gaps/github/005-no-cache-invalidation-hook.md`
   - `docs/audit/port-gaps/github/006-installation-created-no-provisioning.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: n/a (positive finding — port already matches TS)
+- **Notes**: Documented parity confirmed; no action needed. The dispatch topology in `InstallationRouterService.HandleWebhookAsync` matches TS's 5-event branching. Optional regression test pinning the unknown-event skip path is already covered by `Webhook_IgnoredEvent_ReturnsOkWithSkipped` in `GitHubEndpointsIntegrationTests`.

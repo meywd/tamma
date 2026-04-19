@@ -182,3 +182,10 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/InstallationRouterService.cs:41-107`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (AC #3, #4; Task 4.1)
 - Related findings: `006-installation-created-no-provisioning.md`, `008-installation-callback-no-api-key-generation.md`, `013-secrets-provisioner-libsodium-missing.md`, `015-outbound-github-rate-limit-unhandled.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred (requires GitHub App client port) — seam wired
+- **Commit**: `6dead62`
+- **Notes**: Introduced `IGitHubAppClient` interface with `GetInstallationAsync` + `ListInstallationReposAsync`. `InstallationRouterService.HandleCallbackAsync` now calls both and uses the returned `GitHubInstallationDetails` (real account login, type, app_id, permissions, suspended_at) when available. With the `NullGitHubAppClient` wired by default, the callback degrades to the previous local-only behaviour (uses `user.GitHubLogin ?? tenant.Slug` placeholders) without throwing. Once a real Octokit/HttpClient implementation is registered ahead of the Null fallback (via `services.AddSingleton<IGitHubAppClient, RealImpl>()` before `AddGitHubInstallationServices`), the install populates real values automatically. The actual Octokit wiring is the responsibility of the dedicated GitHub App client port story.

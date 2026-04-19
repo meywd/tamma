@@ -116,3 +116,10 @@ Also governed by CLAUDE.md `Security Requirements → Network Security`: "Webhoo
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (Task 3)
 - Related findings: `docs/audit/port-gaps/github/014-no-inbound-rate-limit-webhook-oauth.md` (also webhook-surface hardening)
 - CLAUDE.md section: `Security Requirements → Network Security`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: `GitHubEndpoints.Webhooks` now rejects every webhook with 401 when `GitHub:WebhookSecret` is missing/empty (logged at Error level). Verification runs unconditionally otherwise. Test `Webhook_NoSecretConfigured_Returns401` boots the factory with an empty secret and asserts 401.

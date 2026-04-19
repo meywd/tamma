@@ -114,3 +114,10 @@ Performance concern; architecture.md (if it discussed caching) would be the gove
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/InstallationRouterService.cs`
 - Story: no story; performance concern
 - Related findings: `005-no-cache-invalidation-hook.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `a3d2e7e` (engine scope, finding 029)
+- **Notes**: Engine scope added `IMemoryCache`-backed 60s TTL via `GetInstallationCachedAsync` keyed by `install:{installationId}`. All mutate branches (created, deleted, suspend, unsuspend) call `InvalidateInstallationCache(installationId)`. The callback path also invalidates after upsert (added in this commit alongside finding 007). No additional work required.

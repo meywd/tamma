@@ -172,3 +172,10 @@ Story 18-4 needs a new AC (e.g. AC #11): "On successful GitHub App installation,
   - `apps/tamma-elsa/src/Tamma.Api/Services/SaaS/ApiKeyRotationService.cs:13-16` (explicit admission)
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (missing AC)
 - Related findings: `007-installation-callback-no-github-api-fetch.md`, `013-secrets-provisioner-libsodium-missing.md`, `018-schema-installation-no-apikey-columns.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (degraded fidelity until libsodium provisioner lands)
+- **Commit**: `6dead62`
+- **Notes**: `InstallationRouterService.HandleCallbackAsync` now invokes `IssueInstallationKeyAsync` after the install row + repo list are persisted. The helper generates a `tamma_sk_*` key (32 bytes via `RandomNumberGenerator`), writes hash + prefix + scope=installation to the `api_keys` table, and calls `IGitHubSecretsProvisioner.ProvisionSecretAsync` to push `TAMMA_API_KEY` to every active repo. Plaintext is never logged. When a key already exists for the installation, the helper returns `Issued=false` and skips re-issuance — the callback is rerunnable. Per-repo provisioning failures do not fail the callback; the linked event records `apiKeyIssued`, `apiKeyId`, `reposProvisioned`, `reposFailed` for audit. Real key push to repos requires the libsodium provisioner (finding 013).

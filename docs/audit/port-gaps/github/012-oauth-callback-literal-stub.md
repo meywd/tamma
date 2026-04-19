@@ -265,3 +265,10 @@ Additionally CLAUDE.md's `Security Requirements → Credential Management` deman
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC #5, Task 4, Security Considerations)
 - Related findings: `009-oauth-start-no-csrf-state.md`, `010-oauth-start-missing-read-user-scope.md`, `011-oauth-start-no-rd-invite.md`
 - CLAUDE.md section: `Security Requirements`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d` (auth scope)
+- **Notes**: `AuthEndpoints.GitHubCallback` is fully implemented in auth scope: parses `code`/`state`/`error`, verifies CSRF cookie ↔ state.csrf, exchanges the code via `IGitHubOAuthService.ExchangeCodeForTokenAsync`, fetches the profile via `GetUserProfileAsync`, applies invite role via `IInviteRepository`, upserts user (matching by GitHub id then email for account-linking), generates JWT + refresh token, sets the `tamma_session` cookie on the configured cookie domain, and redirects to the sanitized `rd` (or dashboard default). One contract drift to flag: the C# uses `IGitHubOAuthService` (token exchange + `/user` only) and does not also fetch `/user/emails` for verified email; non-public-email GitHub users get a placeholder `<id>+<login>@users.noreply.github.com`. This matches Story 18-1 AC 26 (Email NOT NULL) but is a slight functional drift from TS that fetched `/user/emails`. Acceptable trade-off.

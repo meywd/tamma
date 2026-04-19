@@ -119,3 +119,15 @@ CLAUDE.md `Security Requirements` is the governing doc — but it does not expli
 - Story: no story exists — spec gap
 - Related findings: `015-outbound-github-rate-limit-unhandled.md` (outbound), `017-webhook-route-no-rate-limit-plugin.md` (same surface, different angle)
 - ASP.NET docs: [Rate limiting middleware](https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: Added two named ASP.NET Core RateLimiter policies in `Program.cs`: `GitHubWebhook` (300/min) and `OAuthStart` (60/min), both fixed-window. Bound to:
+  - `POST /api/github/webhooks` → `GitHubWebhook`
+  - `GET  /api/github/callback` → `OAuthStart`
+  - `GET  /api/auth/github` → `OAuthStart`
+  - `GET  /api/auth/github/callback` → `OAuthStart`
+  Per-IP partitioning is the framework default; 429 returned with `RejectionStatusCode = 429`.

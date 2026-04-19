@@ -266,3 +266,10 @@ This needs a dedicated follow-up story. Proposed: "Story 18-4.1: API key auto-pr
 - Story: **missing** — needs backfill (proposed 18-4.1)
 - Related findings: `006-installation-created-no-provisioning.md`, `007-installation-callback-no-github-api-fetch.md`, `008-installation-callback-no-api-key-generation.md`, `018-schema-installation-no-apikey-columns.md`
 - GitHub docs: [Encrypting secrets for the REST API](https://docs.github.com/en/rest/actions/secrets?apiVersion=2022-11-28#get-a-repository-public-key)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred (requires libsodium binding + GitHub App client) — seam wired
+- **Commit**: `6dead62`
+- **Notes**: Introduced `IGitHubSecretsProvisioner` with `ProvisionSecretAsync(installationId, repos, secretName, secretValue)` returning `IReadOnlyList<SecretProvisionResult>`. The default `NullGitHubSecretsProvisioner` returns one `Success=false, Error="github_client_not_configured"` per repo so callers — `InstallationRouterService.IssueInstallationKeyAsync` and `ApiKeyRotationService.RotateInternalAsync` — emit accurate per-repo summaries. Once a real implementation is registered ahead of the Null fallback (libsodium via `NSec.Cryptography` + Octokit `actions.getRepoPublicKey` + `actions.createOrUpdateRepoSecret`), both call sites push automatically without code changes. Real implementation is the responsibility of the GitHub App client port story (which must also add the NuGet `NSec.Cryptography` reference).

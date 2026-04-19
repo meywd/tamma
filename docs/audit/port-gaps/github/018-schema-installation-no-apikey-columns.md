@@ -153,3 +153,10 @@ Story needed: "Key rotation and re-provisioning" as an explicit 18-4.x or cross-
 - Archived SQL migration: `database/archived-sql-migrations/001_github_installations.sql` (original schema without these columns — they were added later in TS migrations that predate the port)
 - Story: spec gap — needs backfill (proposed 18-4.1)
 - Related findings: `006`, `007`, `008`, `013`, `021-installation-id-bigint-pk-vs-guid.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (column added; encryptor wiring deferred)
+- **Commit**: `6dead62`
+- **Notes**: Added `ApiKey.EncryptedPlaintext byte[]?` (column type `bytea`, nullable) via migration `ApiKeyEncryptedPlaintext`. Architectural direction confirmed (multi-key per owner via `api_keys` table is correct). The actual encrypt-on-issue path is intentionally deferred: an `IApiKeyEncryptor` abstraction (to wrap `IDataProtectionProvider` or a config-loaded AES key) is the natural next step but has no consumers today since the provisioner re-push path is itself deferred (finding 013). When the GitHub App client port lands and wires a real provisioner, this finding's "encrypt before persist + decrypt for re-push" loop closes in one focused commit on `ApiKeyRotationService` + the new `IssueInstallationKeyAsync` helper.

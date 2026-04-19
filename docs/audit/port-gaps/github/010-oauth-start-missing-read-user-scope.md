@@ -97,3 +97,10 @@ The story mentions "user profile" — which requires `read:user` to be complete.
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (Task 4.4)
 - Related findings: `009-oauth-start-no-csrf-state.md`, `011-oauth-start-no-rd-invite.md`, `012-oauth-callback-literal-stub.md`
 - GitHub docs: [OAuth scopes — read:user vs user:email](https://docs.github.com/en/developers/apps/building-oauth-apps/scopes-for-oauth-apps)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d` (auth scope)
+- **Notes**: `AuthEndpoints.GitHubAuth` requests `scope=read:user user:email` (URL-encoded) per the auth-scope OAuth-start rewrite. Verified in source at `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs`.

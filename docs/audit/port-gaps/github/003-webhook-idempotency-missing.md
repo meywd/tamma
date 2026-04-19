@@ -118,3 +118,10 @@ Spec gap: idempotency policy for GitHub webhooks must be added to story 18-4 (or
   - `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/InstallationRouterService.cs:144-187`
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (AC lacks idempotency clause)
 - Related findings: `docs/audit/port-gaps/github/019-github-webhook-events-table-missing.md` (same table from schema angle), `docs/audit/port-gaps/github/017-webhook-route-no-rate-limit-plugin.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `6dead62`
+- **Notes**: Webhook endpoint now reads `X-GitHub-Delivery`, parses it as a Guid, and calls `IGitHubWebhookDeliveryRepository.TryRecordAsync` before dispatch. Duplicates short-circuit with `200 {received:true, skipped:true, reason:"duplicate_delivery"}`. Non-UUID headers fall through with a warn log (backward-compat for replayed historical payloads). Companion table delivered as finding 019; cleanup hosted-service deferred (manual SQL pruning is sufficient for now since rows are <1KB and growth is bounded by GitHub's ~8h retry window).

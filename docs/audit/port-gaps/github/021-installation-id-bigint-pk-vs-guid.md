@@ -140,3 +140,10 @@ Error paths:
 - Archived SQL migration: `database/archived-sql-migrations/001_github_installations.sql`
 - Related findings: `004-installation-deleted-soft-vs-hard.md`, `018-schema-installation-no-apikey-columns.md`, `020-github-callback-auth-model-redirect-vs-401.md`
 - CLAUDE.md: "No migration anxiety: App is not in production with users"
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (architectural shift confirmed; uniqueness present)
+- **Commit**: n/a (ratified existing schema)
+- **Notes**: The Guid surrogate PK + bigint `InstallationId` natural-key model is the deliberate target architecture. `TammaDbContext.OnModelCreating` already declares `entity.HasIndex(e => e.InstallationId).IsUnique()` so the natural-key uniqueness constraint is enforced at the DB level (`UNIQUE INDEX "IX_github_installations_InstallationId"`). Repository methods are explicitly named (`GetByInstallationIdAsync(long)` vs `GetByEntityIdAsync(Guid)`) so callers cannot mistakenly pass the wrong identifier — type system catches it. The two-ID contract is documented in the `GitHubInstallation` entity comments and the `IInstallationRepository` summary. No code change required; the audit's "regression" classification is accurate as a documentation-of-shift rather than a defect to revert.
