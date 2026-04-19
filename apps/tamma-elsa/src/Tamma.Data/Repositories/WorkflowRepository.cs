@@ -7,7 +7,22 @@ public class WorkflowRepository(TammaDbContext db) : IWorkflowRepository
 {
     public async Task<WorkflowDefinition> UpsertDefinitionAsync(WorkflowDefinition def)
     {
-        var existing = await db.WorkflowDefinitions.FindAsync(def.Id);
+        // Audit finding 015: when Id was Guid.Empty (the default for any DTO
+        // that doesn't carry an explicit id — every Elsa sync), FindAsync
+        // missed and the function effectively became Insert. Fall back to a
+        // (Name, TenantId) lookup so the upsert is idempotent across syncs.
+        WorkflowDefinition? existing = null;
+        if (def.Id != Guid.Empty)
+        {
+            existing = await db.WorkflowDefinitions.FindAsync(def.Id);
+        }
+        if (existing is null)
+        {
+            existing = await db.WorkflowDefinitions
+                .FirstOrDefaultAsync(d =>
+                    d.Name == def.Name && d.TenantId == def.TenantId);
+        }
+
         if (existing is not null)
         {
             existing.Name = def.Name;

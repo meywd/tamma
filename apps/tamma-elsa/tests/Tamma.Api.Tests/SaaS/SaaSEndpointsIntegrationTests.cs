@@ -134,7 +134,9 @@ public class SaaSEndpointsIntegrationTests
             new
             {
                 status = "running",
-                variables = new { progress = 50, message = "half-way" }
+                step = "CodeGeneration",
+                progress = 50,
+                message = "half-way"
             });
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -145,6 +147,7 @@ public class SaaSEndpointsIntegrationTests
             .FirstOrDefaultAsync(i => i.Id == instanceId);
         instance.Should().NotBeNull();
         instance!.Status.Should().Be("running");
+        instance.CurrentActivity.Should().Be("CodeGeneration");
         var vars = JsonDocument.Parse(instance.Variables).RootElement;
         vars.GetProperty("progress").GetInt32().Should().Be(50);
         vars.GetProperty("message").GetString().Should().Be("half-way");
@@ -158,7 +161,7 @@ public class SaaSEndpointsIntegrationTests
 
         var resp = await client.PostAsJsonAsync(
             $"/api/v1/workflows/{Guid.NewGuid()}/status",
-            new { status = "running" });
+            new { status = "running", step = "Init" });
 
         resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -173,12 +176,15 @@ public class SaaSEndpointsIntegrationTests
         using var client = CreateClientWithCannedAnthropic(
             new CannedHandler(HttpStatusCode.OK, "{}"));
 
+        // Audit finding 019: typed fields are now first-class on the DTO; the
+        // endpoint stores them at the top level of the persisted result blob.
         var resp = await client.PostAsJsonAsync(
             $"/api/v1/workflows/{instanceId}/result",
             new
             {
                 status = "completed",
-                result = new { prNumber = 42, duration = 1234 }
+                prNumber = 42,
+                duration = 1234
             });
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -192,6 +198,7 @@ public class SaaSEndpointsIntegrationTests
         instance.Result.Should().NotBeNull();
         var payload = JsonDocument.Parse(instance.Result!).RootElement;
         payload.GetProperty("prNumber").GetInt32().Should().Be(42);
+        payload.GetProperty("duration").GetInt64().Should().Be(1234);
 
         var events = await db.DomainEvents.IgnoreQueryFilters()
             .Where(e => e.Type == "WORKFLOW.COMPLETED")
@@ -212,7 +219,7 @@ public class SaaSEndpointsIntegrationTests
             new
             {
                 status = "failed",
-                result = new { error = "timed out" }
+                error = "timed out"
             });
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -239,8 +246,10 @@ public class SaaSEndpointsIntegrationTests
         using var client = CreateClientWithCannedAnthropic(
             new CannedHandler(HttpStatusCode.OK, "{}"));
 
+        // Audit finding 020 — route param is now `long` (the GitHub-issued
+        // installation id), not the internal Guid.
         var resp = await client.PostAsync(
-            $"/api/v1/installations/{Guid.NewGuid()}/rotate-key",
+            $"/api/v1/installations/12345678/rotate-key",
             new StringContent("{}", Encoding.UTF8, "application/json"));
 
         resp.StatusCode.Should().Be(HttpStatusCode.Unauthorized);

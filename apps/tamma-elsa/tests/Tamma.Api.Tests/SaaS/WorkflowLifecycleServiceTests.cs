@@ -156,7 +156,7 @@ public class WorkflowLifecycleServiceTests
             });
 
         var result = JsonDocument.Parse("{\"prNumber\":42,\"duration\":12345}");
-        var outcome = await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), success: true);
+        var outcome = await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), terminalStatus: "completed");
 
         outcome.Success.Should().BeTrue();
         captured.Should().NotBeNull();
@@ -191,7 +191,7 @@ public class WorkflowLifecycleServiceTests
             });
 
         var result = JsonDocument.Parse("{\"error\":\"timed out\"}");
-        var outcome = await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), success: false);
+        var outcome = await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), terminalStatus: "failed");
 
         outcome.Success.Should().BeTrue();
         captured!.Status.Should().Be("failed");
@@ -209,7 +209,7 @@ public class WorkflowLifecycleServiceTests
             .ReturnsAsync((WorkflowInstance?)null);
 
         var result = await _service.RecordResultAsync(instanceId,
-            JsonDocument.Parse("{}").RootElement.Clone(), success: true);
+            JsonDocument.Parse("{}").RootElement.Clone(), terminalStatus: "completed");
 
         result.Success.Should().BeFalse();
         result.ErrorReason.Should().Be("not_found");
@@ -239,7 +239,7 @@ public class WorkflowLifecycleServiceTests
             .ReturnsAsync((DomainEvent e) => e);
 
         var result = JsonDocument.Parse("{\"x\":1}");
-        await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), success: true);
+        await _service.RecordResultAsync(instanceId, result.RootElement.Clone(), terminalStatus: "completed");
 
         captured.Should().NotBeNull();
         var data = JsonDocument.Parse(captured!.Data).RootElement;

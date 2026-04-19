@@ -32,7 +32,8 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
     public async Task<WorkflowLifecycleResult> UpdateStatusAsync(
         Guid instanceId,
         string status,
-        JsonElement? variables)
+        JsonElement? variables,
+        string? currentActivity = null)
     {
         if (string.IsNullOrWhiteSpace(status))
             return new WorkflowLifecycleResult(false, "invalid_status");
@@ -41,6 +42,10 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
         {
             inst.Status = status;
             inst.Variables = MergeVariables(inst.Variables, variables);
+            // Finding 018 — caller-supplied step replaces CurrentActivity so
+            // the dashboard "current step" tile updates per worker poll.
+            if (!string.IsNullOrWhiteSpace(currentActivity))
+                inst.CurrentActivity = currentActivity;
         });
 
         if (updated is null)
@@ -50,15 +55,24 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
         }
 
         _logger.LogInformation(
-            "Workflow {InstanceId} status={Status}", instanceId, status);
+            "Workflow {InstanceId} status={Status} step={Step}",
+            instanceId, status, currentActivity);
         return new WorkflowLifecycleResult(true, null);
     }
 
     public async Task<WorkflowLifecycleResult> RecordResultAsync(
         Guid instanceId,
         JsonElement result,
-        bool success)
+        string terminalStatus)
     {
+        // Finding 019: validate the three-way state up front so cancelled
+        // workflows are never misclassified as failed.
+        var normalised = (terminalStatus ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalised is not ("completed" or "failed" or "cancelled"))
+        {
+            return new WorkflowLifecycleResult(false, "invalid_status");
+        }
+
         var resultJson = result.ValueKind switch
         {
             JsonValueKind.Undefined => "null",
@@ -66,12 +80,9 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
             _ => result.GetRawText()
         };
 
-        var finalStatus = success ? "completed" : "failed";
-        WorkflowInstance? updated = null;
-
-        updated = await _workflows.UpdateInstanceAsync(instanceId, inst =>
+        var updated = await _workflows.UpdateInstanceAsync(instanceId, inst =>
         {
-            inst.Status = finalStatus;
+            inst.Status = normalised;
             inst.CompletedAt = DateTime.UtcNow;
             inst.Result = resultJson;
         });
@@ -82,9 +93,16 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
             return new WorkflowLifecycleResult(false, "not_found");
         }
 
+        var eventType = normalised switch
+        {
+            "completed" => "WORKFLOW.COMPLETED",
+            "cancelled" => "WORKFLOW.CANCELLED",
+            _ => "WORKFLOW.FAILED"
+        };
+
         await _events.AppendAsync(new DomainEvent
         {
-            Type = success ? "WORKFLOW.COMPLETED" : "WORKFLOW.FAILED",
+            Type = eventType,
             TenantId = updated.TenantId,
             Tags = JsonSerializer.Serialize(new Dictionary<string, object?>
             {
@@ -97,11 +115,11 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
                 ["eventSource"] = "system",
                 ["workflowVersion"] = "1.0.0"
             }),
-            Data = BuildResultEventData(instanceId, updated, resultJson, success)
+            Data = BuildResultEventData(instanceId, updated, resultJson, normalised)
         });
 
         _logger.LogInformation(
-            "Workflow {InstanceId} terminal status={Status}", instanceId, finalStatus);
+            "Workflow {InstanceId} terminal status={Status}", instanceId, normalised);
         return new WorkflowLifecycleResult(true, null);
     }
 
@@ -149,7 +167,7 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
     }
 
     private static string BuildResultEventData(
-        Guid instanceId, WorkflowInstance instance, string resultJson, bool success)
+        Guid instanceId, WorkflowInstance instance, string resultJson, string terminalStatus)
     {
         using var ms = new MemoryStream();
         using (var writer = new Utf8JsonWriter(ms))
@@ -157,7 +175,12 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
             writer.WriteStartObject();
             writer.WriteString("instanceId", instanceId.ToString());
             writer.WriteString("definitionId", instance.DefinitionId.ToString());
-            writer.WriteBoolean("success", success);
+            // Both for backward-compat and for SLA dashboards: emit both the
+            // tri-state status and the boolean equivalent so consumers don't
+            // have to pivot. (Finding 019.)
+            writer.WriteString("status", terminalStatus);
+            writer.WriteBoolean("success",
+                string.Equals(terminalStatus, "completed", StringComparison.OrdinalIgnoreCase));
             writer.WritePropertyName("result");
             using (var resDoc = JsonDocument.Parse(resultJson))
             {

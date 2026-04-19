@@ -33,9 +33,20 @@ public sealed record KeyRotationResult(
 public interface IApiKeyRotationService
 {
     /// <summary>
-    /// Rotate the installation's API key.
+    /// Rotate the installation's API key, addressed by the internal entity Guid
+    /// (the row's primary key on <c>github_installations</c>).
     /// </summary>
     /// <param name="installationEntityId">Primary key of the <c>github_installations</c> row.</param>
     /// <param name="callerUserId">Authenticated user attempting the rotation.</param>
     Task<KeyRotationResult> RotateAsync(Guid installationEntityId, Guid callerUserId);
+
+    /// <summary>
+    /// Rotate the installation's API key, addressed by the GitHub-issued
+    /// numeric installation id (the value GitHub puts in webhook payloads
+    /// and the value that's stored on <c>github_installations.installation_id</c>).
+    ///
+    /// <para>Audit finding 020 — this is the URL contract every TS-era SaaS
+    /// client speaks. The caller need not know the internal entity Guid.</para>
+    /// </summary>
+    Task<KeyRotationResult> RotateByInstallationIdAsync(long installationId, Guid callerUserId);
 }

@@ -23,22 +23,32 @@ public interface IWorkflowLifecycleService
     /// <param name="instanceId">Workflow instance id.</param>
     /// <param name="status">New status (e.g. <c>running</c>, <c>queued</c>).</param>
     /// <param name="variables">Optional JSON object merged over existing variables. Non-object values are ignored.</param>
+    /// <param name="currentActivity">
+    /// Optional new value for <see cref="Tamma.Data.Entities.WorkflowInstance.CurrentActivity"/>.
+    /// Audit finding 018 — the SaaS <c>step</c> field maps here so the
+    /// dashboard "current step" tile reflects worker progress.
+    /// </param>
     Task<WorkflowLifecycleResult> UpdateStatusAsync(
         Guid instanceId,
         string status,
-        JsonElement? variables);
+        JsonElement? variables,
+        string? currentActivity = null);
 
     /// <summary>
     /// Record a terminal result for a workflow instance. Marks it
-    /// <c>completed</c> or <c>failed</c>, persists the full result payload to
-    /// the new <c>Result</c> JSONB column, and emits a
-    /// <c>WORKFLOW.COMPLETED</c> / <c>WORKFLOW.FAILED</c> audit event.
+    /// <c>completed</c>, <c>failed</c>, or <c>cancelled</c>, persists the full
+    /// result payload to the new <c>Result</c> JSONB column, and emits a
+    /// <c>WORKFLOW.COMPLETED</c> / <c>WORKFLOW.FAILED</c> / <c>WORKFLOW.CANCELLED</c>
+    /// audit event.
+    ///
+    /// <para>Audit finding 019: the bool-only signature collapsed
+    /// <c>completed | failed | cancelled</c> into a single boolean and the
+    /// dashboard could no longer distinguish cancellations from failures
+    /// (which inflated the failure-rate SLA metric). The string overload
+    /// preserves the three-way state.</para>
     /// </summary>
-    /// <param name="instanceId">Workflow instance id.</param>
-    /// <param name="result">Result payload (arbitrary JSON).</param>
-    /// <param name="success">True if the workflow succeeded.</param>
     Task<WorkflowLifecycleResult> RecordResultAsync(
         Guid instanceId,
         JsonElement result,
-        bool success);
+        string terminalStatus);
 }

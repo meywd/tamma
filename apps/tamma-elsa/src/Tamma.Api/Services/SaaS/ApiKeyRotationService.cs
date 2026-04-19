@@ -45,16 +45,25 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
         _logger = logger;
     }
 
-    public async Task<KeyRotationResult> RotateAsync(Guid installationEntityId, Guid callerUserId)
+    public Task<KeyRotationResult> RotateAsync(Guid installationEntityId, Guid callerUserId)
+        => RotateInternalAsync(() => _installations.GetByEntityIdAsync(installationEntityId), callerUserId);
+
+    public Task<KeyRotationResult> RotateByInstallationIdAsync(long installationId, Guid callerUserId)
+        => RotateInternalAsync(() => _installations.GetByInstallationIdAsync(installationId), callerUserId);
+
+    private async Task<KeyRotationResult> RotateInternalAsync(
+        Func<Task<GitHubInstallation?>> resolveInstallation, Guid callerUserId)
     {
-        var installation = await _installations.GetByEntityIdAsync(installationEntityId);
+        var installation = await resolveInstallation();
         if (installation is null)
         {
             _logger.LogWarning(
-                "Rotate rejected: unknown installation entity {InstallationEntityId}",
-                installationEntityId);
+                "Rotate rejected: installation not found for caller {UserId}",
+                callerUserId);
             return Fail("not_found");
         }
+
+        var installationEntityId = installation.Id;
 
         if (installation.TenantId is null)
         {
