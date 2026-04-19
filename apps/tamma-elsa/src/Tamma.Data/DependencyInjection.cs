@@ -50,27 +50,40 @@ public static class DependencyInjection
     {
         services.AddScoped<ITenantContext, TenantContext>();
 
+        // Interceptor that runs SELECT set_config('app.current_tenant_id', ...)
+        // on connection open so the Phase-2 RLS policies evaluate against the
+        // current request's tenant. Registered as scoped because it reads
+        // ITenantContext (scoped). EF Core's internal service provider
+        // resolves DbContextOptions extensions via the application service
+        // provider, so the scoped binding is correctly honored per-request.
+        services.AddScoped<TenantContextInterceptor>();
+
         // Admin / platform-root context. Registered first so migrations run
-        // against it at startup (see Program.cs).
-        services.AddDbContext<TammaDbContext>(options =>
+        // against it at startup (see Program.cs). Uses the admin connection
+        // (superuser-equivalent) and therefore bypasses RLS. The EF query
+        // filter stays permissive (null tenant → all rows) on this context
+        // so background services (TaskQueueProcessor, OutboxSmtpSender) and
+        // migrations continue to work unchanged.
+        //
+        // The interceptor is STILL attached so:
+        //   (a) raw-SQL queries that touch current_setting() see the right
+        //       tenant when a request scope is active;
+        //   (b) when individual repositories migrate to the app-role
+        //       context, the binding is already plumbed end-to-end and we
+        //       only need to flip the injected context type.
+        services.AddDbContext<TammaDbContext>((sp, options) =>
+        {
             options.UseNpgsql(adminConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
+                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
+            options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
+        });
 
         // App-role context. If no dedicated connection string is supplied
         // (e.g. dev laptop hitting a single-role local Postgres) we silently
         // fall back to the admin connection. Production must override this
         // via ConnectionStrings:TammaAppDb. The TenantContextInterceptor is
-        // still installed so the SET app.current_tenant_id plumbing is
-        // exercised and the fail-closed EF filter kicks in — only the
-        // role-separation layer degrades.
-        //
-        // The interceptor is registered as Scoped because it reads
-        // ITenantContext (scoped). EF Core's internal service provider
-        // resolves DbContextOptions extensions including interceptors via
-        // the application service provider, so the scoped binding is
-        // correctly honored per-request.
-        services.AddScoped<TenantContextInterceptor>();
-
+        // installed so the SET app.current_tenant_id plumbing exercises
+        // RLS as soon as the connection is tamma_app.
         services.AddDbContext<TammaAppDbContext>((sp, options) =>
         {
             var cs = string.IsNullOrWhiteSpace(appConnectionString)

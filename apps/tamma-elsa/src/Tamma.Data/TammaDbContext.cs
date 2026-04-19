@@ -43,15 +43,22 @@ public class TammaDbContext : DbContext
     /// <c>TenantId == _tenantContext.TenantId</c> (fail-closed: a null
     /// tenant context returns zero rows — the correct TS-parity
     /// behavior). When <c>false</c>, filters use the legacy permissive
-    /// form (<c>tenantId == null || TenantId == tenantId</c>) so admin
-    /// paths that deliberately read cross-tenant (migrations, task queue,
-    /// outbox, workflow sync) continue to work without touching every
-    /// repository call site.
+    /// form (<c>tenantId == null || TenantId == tenantId</c>) so
+    /// background services and admin paths that deliberately read
+    /// cross-tenant (migrations, <c>TaskQueueProcessor</c>,
+    /// <c>OutboxSmtpSender</c>, <c>EnsurePersonalTenantMiddleware</c>)
+    /// keep working without manual <c>.IgnoreQueryFilters()</c> at
+    /// every call site.
     ///
-    /// <para>The base class (admin) returns <c>false</c>. The
-    /// <see cref="TammaAppDbContext"/> subclass overrides to <c>true</c>.
-    /// This closes finding orgs/002 by making the per-request runtime
-    /// path fail-closed while preserving admin escape hatches.</para>
+    /// <para>The base class (admin) returns <c>false</c> to preserve
+    /// current behavior while the connection-string split lands. The
+    /// <see cref="TammaAppDbContext"/> subclass overrides to
+    /// <c>true</c> — per-request endpoints that bind to the app-role
+    /// connection pick up the fail-closed + RLS-enforced plane.
+    /// Closes finding orgs/002 on the app-role path specifically;
+    /// migrating individual repositories from <see cref="TammaDbContext"/>
+    /// to <see cref="TammaAppDbContext"/> is a follow-up per-finding
+    /// audit.</para>
     /// </summary>
     protected virtual bool EnforceTenantFilter => false;
 
