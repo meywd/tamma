@@ -216,7 +216,7 @@ builder.Services.AddProviderHealthServices();
 builder.Services.AddDiagnosticsServices();
 builder.Services.AddSanitizationServices();
 builder.Services.AddAgentResolverServices();
-builder.Services.AddGitHubInstallationServices();
+builder.Services.AddGitHubInstallationServices(builder.Configuration);
 // Wave 2
 builder.Services.AddConventionServices();
 builder.Services.AddEmailServices();

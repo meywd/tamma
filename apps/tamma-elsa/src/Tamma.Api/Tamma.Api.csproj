@@ -28,6 +28,18 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
     <PackageReference Include="MailKit" Version="4.15.1" />
+    <!-- GitHub App client (audit: github 007/015, engine 005-011, 021). Octokit
+         gives us typed JWT/installation-token auth + rate-limit headers via
+         GetLastApiInfo(); Sodium.Core is libsodium-backed sealed-box encryption
+         required by GitHub Actions secrets (audit: github 013). -->
+    <PackageReference Include="Octokit" Version="14.0.0" />
+    <PackageReference Include="Sodium.Core" Version="1.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internal helpers (e.g. sealed-box encryption) to the test
+         project without widening the public API surface. -->
+    <InternalsVisibleTo Include="Tamma.Api.Tests" />
   </ItemGroup>
 
   <ItemGroup>
