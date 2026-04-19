@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
+using Tamma.Api.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -72,7 +73,9 @@ public class ApiKeyAuthHandler(
         {
             Logger.LogWarning(
                 "Auth failure: invalid API key prefix={Prefix} method={Method} path={Path}",
-                keyPrefix, Request.Method, Request.Path.Value);
+                LogSanitizer.Clean(keyPrefix),
+                LogSanitizer.Clean(Request.Method),
+                LogSanitizer.Clean(Request.Path.Value));
             return AuthenticateResult.Fail("Invalid API key");
         }
 
@@ -85,12 +88,14 @@ public class ApiKeyAuthHandler(
             {
                 Logger.LogWarning(
                     "Auth failure: revoked key keyId={KeyId} prefix={Prefix} path={Path}",
-                    apiKey.Id, keyPrefix, Request.Path.Value);
+                    apiKey.Id,
+                    LogSanitizer.Clean(keyPrefix),
+                    LogSanitizer.Clean(Request.Path.Value));
                 return AuthenticateResult.Fail("API key has been revoked");
             }
             Logger.LogWarning(
                 "rotating-key-still-in-use keyId={KeyId} scope={Scope} gracePeriodEnd={GracePeriodEnd}",
-                apiKey.Id, apiKey.Scope, apiKey.RevokedAt.Value);
+                apiKey.Id, LogSanitizer.Clean(apiKey.Scope), apiKey.RevokedAt.Value);
         }
 
         // Build the typed principal first so we can also enforce
@@ -148,7 +153,7 @@ public class ApiKeyAuthHandler(
                         {
                             Logger.LogWarning(
                                 "Auth failure: malformed X-Tenant-Id={Value} keyId={KeyId}",
-                                raw, apiKey.Id);
+                                LogSanitizer.Clean(raw), apiKey.Id);
                             return AuthenticateResult.Fail("Invalid X-Tenant-Id");
                         }
                         var tenantRepo = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
@@ -170,7 +175,7 @@ public class ApiKeyAuthHandler(
             }
             default:
                 Logger.LogWarning("Auth failure: unknown scope={Scope} keyId={KeyId}",
-                    apiKey.Scope, apiKey.Id);
+                    LogSanitizer.Clean(apiKey.Scope), apiKey.Id);
                 return AuthenticateResult.Fail("Invalid API key scope");
         }
 
@@ -213,8 +218,12 @@ public class ApiKeyAuthHandler(
 
         Logger.LogInformation(
             "Authenticated request keyId={KeyId} scope={Scope} ownerId={OwnerId} tenantId={TenantId} method={Method} path={Path}",
-            apiKey.Id, apiKey.Scope, apiKey.OwnerId,
-            effectiveTenantId, Request.Method, Request.Path.Value);
+            apiKey.Id,
+            LogSanitizer.Clean(apiKey.Scope),
+            LogSanitizer.Clean(apiKey.OwnerId),
+            effectiveTenantId,
+            LogSanitizer.Clean(Request.Method),
+            LogSanitizer.Clean(Request.Path.Value));
 
         return AuthenticateResult.Success(ticket);
     }
