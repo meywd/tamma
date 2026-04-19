@@ -85,6 +85,12 @@ public static class EngineEndpoints
 
         SseWriter.WriteHeaders(response);
 
+        // Force the HTTP headers to flush before any heavier work so
+        // clients that requested <c>ResponseHeadersRead</c> (dashboards +
+        // tests) don't block waiting for first body bytes when the
+        // initial snapshot query returns empty.
+        await SseWriter.WriteCommentAsync(response, "open", ct).ConfigureAwait(false);
+
         // Initial snapshot — recent events give the client an instant paint
         // even when no live events have fired since connect.
         var seed = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 20);
@@ -119,6 +125,9 @@ public static class EngineEndpoints
         var tenantId = tc.TenantId ?? Guid.Empty;
 
         SseWriter.WriteHeaders(response);
+
+        // Force early header flush (see state endpoint for rationale).
+        await SseWriter.WriteCommentAsync(response, "open", ct).ConfigureAwait(false);
 
         // Initial backlog so the logs panel is not blank on connect.
         var seed = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 50);
