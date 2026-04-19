@@ -19,4 +19,25 @@ public interface ITenantMembershipRepository
 
     /// <summary>Returns every membership row for the tenant (no paging).</summary>
     Task<List<TenantMembership>> ListAllByTenantAsync(Guid tenantId);
+
+    /// <summary>
+    /// Returns the ids + names of every tenant where the given user is the
+    /// sole owner-role member. Drives the admin <c>DeleteUser</c> sole-owner
+    /// guard (audit finding auth/019). An empty list means the user can be
+    /// deleted safely; a non-empty list means the caller must transfer or
+    /// promote another member first.
+    /// </summary>
+    Task<List<SoleOwnedTenant>> ListSoleOwnedTenantsAsync(Guid userId);
+
+    /// <summary>
+    /// Soft-delete every membership row for the user in a single DB
+    /// round-trip. Used by the admin <c>DeleteUser</c> cascade — the row
+    /// count is irrelevant so no return value.
+    /// </summary>
+    Task RemoveAllForUserAsync(Guid userId);
 }
+
+/// <summary>
+/// Projection used by <see cref="ITenantMembershipRepository.ListSoleOwnedTenantsAsync"/>.
+/// </summary>
+public sealed record SoleOwnedTenant(Guid TenantId, string Name, string Slug);

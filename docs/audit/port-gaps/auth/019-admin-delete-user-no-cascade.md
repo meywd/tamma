@@ -155,6 +155,6 @@ Error paths:
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Fixed
-- **Commit**: `e56b04d`
-- **Notes**: DeleteUser now blocks self-delete (400), 404s on unknown id, calls RevokeAllByOwnerAsync to revoke every key owned by the user, emits USER.DELETED.SUCCESS log. Installation-unlink skipped per admin-db ruling — tenant_memberships replaces user_installations and an automated tenant-ownership unwind is out-of-scope for this finding.
+- **Outcome**: Fixed (incl. membership cascade + sole-owner guard)
+- **Commit**: `e56b04d` (initial); sole-owner guard + membership cascade in a follow-up commit.
+- **Notes**: DeleteUser now blocks self-delete (400), 404s on unknown id, calls RevokeAllByOwnerAsync to revoke every key owned by the user, emits USER.DELETED.SUCCESS log. **Sole-owner guard**: before the cascade runs we enumerate tenants where the target is the only owner-role member via `ITenantMembershipRepository.ListSoleOwnedTenantsAsync`; if any exist, return 409 Conflict with `{ error: "user_is_sole_owner", message, soleOwnedTenants[] }` so the caller can transfer ownership or promote another owner first. **Membership cascade**: when the guard passes, `RemoveAllForUserAsync` soft-deletes every membership row in a single round-trip. The existing `POST /api/v1/orgs/{tenantId}/transfer-ownership` endpoint is the canonical remediation path.

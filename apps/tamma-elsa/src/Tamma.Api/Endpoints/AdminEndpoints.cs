@@ -194,7 +194,8 @@ public static class AdminEndpoints
         ClaimsPrincipal principal,
         [FromServices] ILoggerFactory loggerFactory)
     {
-        // Audit finding 019: cascade + self-protection + audit log.
+        // Audit finding 019: cascade + self-protection + audit log +
+        // sole-owner guard.
         var callerSub = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
             ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (Guid.TryParse(callerSub, out var callerId) && callerId == id)
@@ -204,14 +205,35 @@ public static class AdminEndpoints
         if (user is null)
             return Results.NotFound(new { error = "User not found" });
 
+        // Sole-owner guard (audit finding auth/019 follow-up). If this user
+        // is the only owner of ANY tenant, refuse the delete with a 409 +
+        // remediation hint — the caller must first promote another member
+        // or invoke POST /api/v1/orgs/{tenantId}/transfer-ownership.
+        // Otherwise the cascade below would orphan those tenants.
+        var soleOwned = await membershipRepo.ListSoleOwnedTenantsAsync(id);
+        if (soleOwned.Count > 0)
+        {
+            return Results.Json(
+                new
+                {
+                    error = "user_is_sole_owner",
+                    message = "Cannot delete a user who is the sole owner of one or more organizations. "
+                        + "Promote another member to owner first, or transfer ownership to an existing member.",
+                    soleOwnedTenants = soleOwned.Select(t => new
+                    {
+                        tenantId = t.TenantId,
+                        name = t.Name,
+                        slug = t.Slug,
+                    }).ToList(),
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         await userRepo.SoftDeleteAsync(id);
         await apiKeyRepo.RevokeAllByOwnerAsync(id.ToString());
-
-        // Note: TS unlinked from user_installations; admin-db ruled that
-        // table is folded into tenant_memberships. Removing all
-        // memberships would also remove the user's tenant ownership, which
-        // can leave tenants without an owner — defer that semantic to a
-        // future story (see audit findings 019 / 023).
+        // Cascade: remove all tenant memberships. Safe because the
+        // sole-owner guard above ruled out orphaning any tenant.
+        await membershipRepo.RemoveAllForUserAsync(id);
 
         loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
             .LogInformation(
