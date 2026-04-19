@@ -8,9 +8,14 @@
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Deferred to Phase-3
-- **Commit**: n/a
-- **Notes**: Pre-positioned by admin-db Phase-2: the RLS policies that this hook would activate are already installed (`current_setting('app.current_tenant_id', true)::uuid` references in `Phase2RlsAndTriggers`). Phase-3 will land (a) the connection-string split to `tamma_app`, (b) an Npgsql `DbConnectionInterceptor` that runs `SELECT set_config('app.current_tenant_id', @id, false)` on `ConnectionOpenedAsync`, and (c) the EF query-filter tightening (finding 002). Shipping the interceptor today would do nothing useful (superuser bypasses RLS), so the work is sequenced behind the connection-string split.
+- **Outcome**: Fixed
+- **Commit**: e53c5a1 (Phase-3 connection-string split + TenantContextInterceptor), 9e20e05 (interceptor wired to both contexts), 159f12a (fail-closed filter + integration tests)
+- **Notes**: Phase-3 landed `Tamma.Data.Interceptors.TenantContextInterceptor` — an EF Core `DbConnectionInterceptor` that runs `SELECT set_config('app.current_tenant_id', @tenantId, false)` on `ConnectionOpenedAsync` (and its sync twin). Registered as scoped so it reads the current request's `ITenantContext`; attached to BOTH `TammaDbContext` (admin) and `TammaAppDbContext` (app-role subclass) so the binding lands whichever context the caller resolves. Third arg `false` = session-scope (not transaction-scope), matching the pool-lifetime semantics of Npgsql pooled connections (which issue `DISCARD ALL` on release, so the binding is re-applied the next time the interceptor runs). Non-Postgres providers (EF InMemory / SQLite — test path) are no-oped. Integration tests (`QueryFilterAndInterceptorTests`) verify:
+  - `current_setting('app.current_tenant_id', true)` returns the bound GUID after the first query.
+  - Empty string marker when no tenant is bound (so RLS NULLIF → NULL → fail-closed).
+  - Direct Npgsql read as `tamma_app` only sees the bound tenant's rows under RLS.
+  - Superuser connection bypasses policies (expected admin behavior).
+- **Deployment note**: Activating RLS requires the app to connect as `tamma_app`. Operators must (a) rotate the `tamma_app` password via `ALTER ROLE tamma_app WITH PASSWORD …`, (b) set `ConnectionStrings:TammaAppDb` / `TAMMA_APP_DB_PASSWORD` in the deployment env, (c) restart the API container. If `TammaAppDb` is unset the app falls back to the admin connection with a startup warning — the interceptor still runs (so raw-SQL paths still see the binding) but RLS remains bypassed because the superuser role skips policies. This is the day-1 bring-up shape.
 
 ## 1. What's in TS
 

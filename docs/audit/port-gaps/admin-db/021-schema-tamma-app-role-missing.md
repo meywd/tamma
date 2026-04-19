@@ -8,8 +8,15 @@
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Fixed partial (role created; connection-string split deferred to Phase-3)
-- **Notes**: `Phase2RlsAndTriggers` migration creates `tamma_app` role idempotently via `pg_roles` probe + grants `CONNECT`, `USAGE` on schema, `SELECT/INSERT/UPDATE/DELETE` on all current and future tables, `USAGE/SELECT` on sequences. Password is a placeholder; production deploys must `ALTER ROLE tamma_app PASSWORD '<secret>'` before swap. **Not done in this scope**: connection-string split (`MigrationConnection` privileged vs `DefaultConnection` as `tamma_app`) — touches DI, appsettings, docker-compose, deployment manifests; landed as a dedicated Phase-3 follow-up to keep this PR scoped. Without the swap RLS is dormant (bypassed by superuser).
+- **Outcome**: Fixed (role created in Phase-2 + actively used by Phase-3 connection split)
+- **Notes**: `Phase2RlsAndTriggers` migration creates `tamma_app` role idempotently via `pg_roles` probe + grants `CONNECT`, `USAGE` on schema, `SELECT/INSERT/UPDATE/DELETE` on all current and future tables, `USAGE/SELECT` on sequences. Password is a placeholder; production deploys must `ALTER ROLE tamma_app PASSWORD '<secret>'` before activation. **Phase-3 update (2026-04-18, commits e53c5a1 / 9e20e05 / 159f12a)**: the role is now the login identity for the new `TammaAppDbContext` (registered via `ConnectionStrings:TammaAppDb`). `TammaDbContext` keeps using the admin connection for migrations and background services (`TaskQueueProcessor`, `OutboxSmtpSender`, `WorkflowSyncService`, `EnsurePersonalTenantMiddleware`). Fallback: if `TammaAppDb` is unset, `AddTammaData` logs a warning and points the app context at the admin connection — day-1 bring-up works without operator action but RLS stays inactive until the app-role password is rotated and the connection string wired.
+
+### Deployment runbook (operator-driven)
+
+1. SSH to the Postgres host (or run via `psql -U tamma`): `ALTER ROLE tamma_app WITH PASSWORD '<new-strong-password>';`
+2. Set `TAMMA_APP_DB_PASSWORD=<same-password>` in the API deployment env (docker-compose `.env` or Kubernetes secret).
+3. Recreate the API service so the new connection string is picked up. Watch the startup log — the "ConnectionStrings:TammaAppDb is not configured" warning should be GONE.
+4. Verify via integration probe: a per-request endpoint that reads a tenant-scoped table should still return rows for an authenticated user. If it returns zero, the interceptor didn't bind (check `set_config` command logs with Npgsql logging at debug level).
 
 ## 1. What's in TS
 
