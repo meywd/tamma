@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Tamma.Api.Services.Engine.Lifecycle;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -111,6 +112,11 @@ public sealed class TaskQueueProcessor : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IQueuedTaskRepository>();
         var registry = scope.ServiceProvider.GetRequiredService<ITaskHandlerRegistry>();
+        // Lifecycle bus is singleton but resolved via scope to avoid an
+        // awkward ctor-injected singleton on the hosted service (the
+        // processor would otherwise need both service-provider + bus).
+        // Finding 012 — drives dashboard SSE task-lifecycle tile.
+        var bus = scope.ServiceProvider.GetService<IEngineLifecycleBus>();
 
         // Audit finding 026 — reap orphaned `processing` rows before claiming
         // new work, so a worker that died mid-task does not leave the row
@@ -148,6 +154,15 @@ public sealed class TaskQueueProcessor : BackgroundService
                 continue;
             }
 
+            if (bus is not null)
+            {
+                await bus.PublishAsync(new EngineLifecycleEvent(
+                    Type: "task.claimed",
+                    TenantId: claimed.TenantId,
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Payload: new { id = claimed.Id, type = claimed.Type, retryCount = claimed.RetryCount }));
+            }
+
             var handler = registry.ResolveFor(claimed.Type);
             if (handler is null)
             {
@@ -155,6 +170,14 @@ public sealed class TaskQueueProcessor : BackgroundService
                     claimed.Id,
                     $"no handler registered for task type '{claimed.Type}'",
                     ct);
+                if (bus is not null)
+                {
+                    await bus.PublishAsync(new EngineLifecycleEvent(
+                        Type: "task.failed",
+                        TenantId: claimed.TenantId,
+                        Timestamp: DateTimeOffset.UtcNow,
+                        Payload: new { id = claimed.Id, type = claimed.Type, reason = "no_handler" }));
+                }
                 processed++;
                 continue;
             }
@@ -163,10 +186,26 @@ public sealed class TaskQueueProcessor : BackgroundService
             {
                 await handler.HandleAsync(claimed, ct);
                 await repo.MarkCompletedAsync(claimed.Id, ct);
+                if (bus is not null)
+                {
+                    await bus.PublishAsync(new EngineLifecycleEvent(
+                        Type: "task.completed",
+                        TenantId: claimed.TenantId,
+                        Timestamp: DateTimeOffset.UtcNow,
+                        Payload: new { id = claimed.Id, type = claimed.Type }));
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 await HandleFailureAsync(repo, claimed, ex, ct);
+                if (bus is not null)
+                {
+                    await bus.PublishAsync(new EngineLifecycleEvent(
+                        Type: "task.failed",
+                        TenantId: claimed.TenantId,
+                        Timestamp: DateTimeOffset.UtcNow,
+                        Payload: new { id = claimed.Id, type = claimed.Type, error = ex.Message }));
+                }
             }
 
             processed++;

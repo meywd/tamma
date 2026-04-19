@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Tamma.Api.Services.Engine.Lifecycle;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -18,15 +19,21 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
     private readonly IWorkflowRepository _workflows;
     private readonly IEventRepository _events;
     private readonly ILogger<WorkflowLifecycleService> _logger;
+    private readonly IEngineLifecycleBus? _bus;
 
     public WorkflowLifecycleService(
         IWorkflowRepository workflows,
         IEventRepository events,
-        ILogger<WorkflowLifecycleService> logger)
+        ILogger<WorkflowLifecycleService> logger,
+        IEngineLifecycleBus? bus = null)
     {
         _workflows = workflows;
         _events = events;
         _logger = logger;
+        // Optional so existing tests that mint this service without DI
+        // don't have to register a bus. In production the bus is a singleton
+        // and is always resolved. Finding 012.
+        _bus = bus;
     }
 
     public async Task<WorkflowLifecycleResult> UpdateStatusAsync(
@@ -57,6 +64,24 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
         _logger.LogInformation(
             "Workflow {InstanceId} status={Status} step={Step}",
             instanceId, status, currentActivity);
+
+        // Finding 012 — surface status transitions on the engine lifecycle
+        // SSE stream so dashboard "current step" tiles animate live.
+        if (_bus is not null)
+        {
+            await _bus.PublishAsync(new EngineLifecycleEvent(
+                Type: $"workflow.{status.ToLowerInvariant()}",
+                TenantId: updated.TenantId,
+                Timestamp: DateTimeOffset.UtcNow,
+                Payload: new
+                {
+                    instanceId = updated.Id,
+                    definitionId = updated.DefinitionId,
+                    status,
+                    currentActivity
+                }));
+        }
+
         return new WorkflowLifecycleResult(true, null);
     }
 
@@ -120,6 +145,22 @@ public sealed class WorkflowLifecycleService : IWorkflowLifecycleService
 
         _logger.LogInformation(
             "Workflow {InstanceId} terminal status={Status}", instanceId, normalised);
+
+        // Finding 012 — terminal-state fanout to the lifecycle SSE bus.
+        if (_bus is not null)
+        {
+            await _bus.PublishAsync(new EngineLifecycleEvent(
+                Type: $"workflow.{normalised}",
+                TenantId: updated.TenantId,
+                Timestamp: DateTimeOffset.UtcNow,
+                Payload: new
+                {
+                    instanceId = updated.Id,
+                    definitionId = updated.DefinitionId,
+                    status = normalised
+                }));
+        }
+
         return new WorkflowLifecycleResult(true, null);
     }
 

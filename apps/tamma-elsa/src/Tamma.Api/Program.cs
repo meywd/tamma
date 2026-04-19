@@ -256,6 +256,16 @@ else
 // workflow store so the dashboard /engines tile is not blank.
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
     Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
+
+// Engine lifecycle SSE bus (audit finding 012). In-process pub/sub that
+// fans workflow / task-queue / engine-registry events to dashboard
+// EventSource clients subscribed on /api/engine/events/state and
+// /api/engine/events/logs. Singleton — the bus IS the fanout plane.
+builder.Services.AddSingleton<Tamma.Api.Services.Engine.Lifecycle.IEngineLifecycleBus,
+    Tamma.Api.Services.Engine.Lifecycle.InMemoryEngineLifecycleBus>();
+builder.Services.Configure<Tamma.Api.Services.Engine.Lifecycle.EngineLifecycleOptions>(
+    builder.Configuration.GetSection("EngineLifecycle"));
+builder.Services.AddHostedService<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatService>();
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)

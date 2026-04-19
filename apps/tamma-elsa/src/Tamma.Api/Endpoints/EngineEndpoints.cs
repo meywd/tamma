@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Engine;
 using Tamma.Api.Services.Engine;
+using Tamma.Api.Services.Engine.Lifecycle;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -48,51 +50,178 @@ public static class EngineEndpoints
     }
 
     /// <summary>
-    /// Audit finding 012: TS streamed lifecycle events as SSE; the C# port
-    /// returns one-shot JSON. Real SSE depends on porting the
-    /// <c>TammaEngine</c> abstraction (finding 013). This endpoint advertises
-    /// itself as SSE in the <c>Content-Type</c> header but emits a single
-    /// snapshot frame followed by an EOF terminator — dashboards that open
-    /// EventSource against this URL will at least parse one frame instead of
-    /// failing to negotiate.
+    /// Audit finding 012: streams engine / workflow / task-queue lifecycle
+    /// events as continuous Server-Sent Events, backed by
+    /// <see cref="IEngineLifecycleBus"/>. Publishers (workflow domain-event
+    /// writes, engine registry heartbeats, task-queue processor) push
+    /// frames into the bus; this endpoint fans them out to all live
+    /// dashboard <c>EventSource</c> clients filtered by the caller's
+    /// tenant.
     ///
-    /// TODO(epic-10/story-10-1): full live SSE once TammaEngine ports.
+    /// <para>An immediate snapshot frame (<c>event: state</c>) is written
+    /// on connect so a just-opened dashboard tile paints without waiting
+    /// for the next publisher signal. A keep-alive comment frame
+    /// (<c>:heartbeat</c>) is written every
+    /// <see cref="EngineLifecycleOptions.HeartbeatInterval"/> while idle
+    /// so reverse proxies and client socket timers don't tear the
+    /// connection down.</para>
+    ///
+    /// <para>Tenant scoping mirrors finding 016: the bus filter rejects
+    /// events whose <c>TenantId</c> doesn't match the resolved request
+    /// tenant. Unauthenticated requests are rejected by the
+    /// <c>WorkflowsView</c> policy before this handler ever runs.</para>
     /// </summary>
     public static async Task<IResult> GetEventsState(
+        HttpContext ctx,
         HttpResponse response,
+        IEngineLifecycleBus bus,
         IEventRepository eventRepo,
         ITenantContext tc,
+        IOptions<EngineLifecycleOptions> opts,
+        CancellationToken ct,
         int? limit)
     {
-        var events = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 20);
-        return await WriteSseSnapshotAsync(response, "state",
-            events.Select(e => new { e.Id, e.Type, e.CreatedAt }));
-    }
+        var tenantId = tc.TenantId ?? Guid.Empty;
 
-    /// <summary>Audit finding 012 — same SSE-snapshot treatment as state.</summary>
-    public static async Task<IResult> GetEventsLogs(
-        HttpResponse response,
-        IEventRepository eventRepo,
-        ITenantContext tc,
-        int? limit)
-    {
-        var events = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 50);
-        return await WriteSseSnapshotAsync(response, "log",
-            events.Select(e => new { e.Id, e.Type, e.Data, e.CreatedAt }));
-    }
+        SseWriter.WriteHeaders(response);
 
-    private static async Task<IResult> WriteSseSnapshotAsync(
-        HttpResponse response, string eventName, object payload)
-    {
-        response.StatusCode = StatusCodes.Status200OK;
-        response.ContentType = "text/event-stream";
-        response.Headers.Append("Cache-Control", "no-cache");
-        response.Headers.Append("X-Accel-Buffering", "no");
-        var json = JsonSerializer.Serialize(payload);
-        await response.WriteAsync($"event: {eventName}\n");
-        await response.WriteAsync($"data: {json}\n\n");
-        await response.Body.FlushAsync();
+        // Initial snapshot — recent events give the client an instant paint
+        // even when no live events have fired since connect.
+        var seed = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 20);
+        await SseWriter.WriteEventAsync(response, "state",
+            new { events = seed.Select(e => new { e.Id, e.Type, e.CreatedAt }) },
+            ct).ConfigureAwait(false);
+
+        await StreamLifecycleAsync(
+            ctx, response, bus, tenantId,
+            filter: null, // state stream surfaces every frame
+            opts.Value.HeartbeatInterval, ct).ConfigureAwait(false);
+
         return Results.Empty;
+    }
+
+    /// <summary>
+    /// Audit finding 012 — logs variant. Streams the raw event-store rows
+    /// as they arrive via <see cref="IEngineLifecycleBus"/> workflow /
+    /// task publishers, plus an initial backlog snapshot. Heartbeat and
+    /// tenant-scoping are identical to state.
+    /// </summary>
+    public static async Task<IResult> GetEventsLogs(
+        HttpContext ctx,
+        HttpResponse response,
+        IEngineLifecycleBus bus,
+        IEventRepository eventRepo,
+        ITenantContext tc,
+        IOptions<EngineLifecycleOptions> opts,
+        CancellationToken ct,
+        int? limit)
+    {
+        var tenantId = tc.TenantId ?? Guid.Empty;
+
+        SseWriter.WriteHeaders(response);
+
+        // Initial backlog so the logs panel is not blank on connect.
+        var seed = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 50);
+        foreach (var e in seed)
+        {
+            await SseWriter.WriteEventAsync(response, "log",
+                new { id = e.Id, type = e.Type, data = SafeParseJson(e.Data), createdAt = e.CreatedAt },
+                ct).ConfigureAwait(false);
+        }
+
+        await StreamLifecycleAsync(
+            ctx, response, bus, tenantId,
+            // The logs stream only surfaces workflow / task events (not
+            // engine registry heartbeats), so the log tile isn't flooded
+            // with heartbeat noise.
+            filter: evt => evt.Type.StartsWith("workflow.", StringComparison.Ordinal)
+                        || evt.Type.StartsWith("task.", StringComparison.Ordinal),
+            opts.Value.HeartbeatInterval, ct).ConfigureAwait(false);
+
+        return Results.Empty;
+    }
+
+    /// <summary>
+    /// Shared SSE loop: pumps bus events to the response while a separate
+    /// heartbeat timer writes keep-alive comment frames. Exits when the
+    /// client disconnects (cancellation) or the bus subscription completes.
+    /// </summary>
+    private static async Task StreamLifecycleAsync(
+        HttpContext ctx,
+        HttpResponse response,
+        IEngineLifecycleBus bus,
+        Guid tenantId,
+        Func<EngineLifecycleEvent, bool>? filter,
+        TimeSpan heartbeatInterval,
+        CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct, ctx.RequestAborted);
+        var linked = cts.Token;
+
+        // Heartbeat timer loop — writes per-subscriber keep-alive frames
+        // directly to this response rather than publishing through the bus
+        // (which would fan the same heartbeat out to every subscriber).
+        var heartbeatTask = HeartbeatLoopAsync(response, heartbeatInterval, linked);
+
+        // Event pump loop — drains the bus subscription into the response.
+        var eventsTask = EventLoopAsync(bus, tenantId, response, filter, linked);
+
+        // First one to finish (either because the socket closed, the loop
+        // threw, or cancellation fired) cancels the other.
+        try
+        {
+            await Task.WhenAny(heartbeatTask, eventsTask).ConfigureAwait(false);
+        }
+        finally
+        {
+            cts.Cancel();
+            // Swallow benign exceptions from the cancelled sibling. A
+            // genuine failure will have already bubbled through WhenAny.
+            try { await Task.WhenAll(heartbeatTask, eventsTask).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+            catch (IOException) { /* peer disconnect */ }
+            catch (ObjectDisposedException) { /* response body torn down */ }
+        }
+    }
+
+    private static async Task HeartbeatLoopAsync(
+        HttpResponse response, TimeSpan interval, CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(interval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                await SseWriter.WriteCommentAsync(response, "heartbeat", ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { /* expected on disconnect */ }
+    }
+
+    private static async Task EventLoopAsync(
+        IEngineLifecycleBus bus,
+        Guid tenantId,
+        HttpResponse response,
+        Func<EngineLifecycleEvent, bool>? filter,
+        CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var evt in bus.SubscribeAsync(tenantId, ct).ConfigureAwait(false))
+            {
+                if (filter is not null && !filter(evt)) continue;
+
+                await SseWriter.WriteEventAsync(response, evt.Type,
+                    new
+                    {
+                        type = evt.Type,
+                        tenantId = evt.TenantId,
+                        timestamp = evt.Timestamp,
+                        payload = evt.Payload
+                    }, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { /* expected on disconnect */ }
     }
 
     // ─── Context endpoints (store / get / query) — finding 004 ────────────────
