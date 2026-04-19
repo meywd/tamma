@@ -150,6 +150,13 @@ Error paths:
   - Event emission + workflow halt hook: 1h
   - Tests: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (config-driven defaults + per-tenant PUT)
+- **Commit**: `498889b` `fix(providers): land P0 pricing/budget/role/CLI-stub fixes [findings 001, 003, 004, 005]`
+- **Notes**: `InMemoryBudgetConfigProvider` now reads `Budget:LimitUsd`, `Budget:AlertThreshold`, `Budget:PeriodDays` from `IConfiguration` at startup so deployments can pin a default cap without code changes — the previous unconditional `LimitUsd=0m` is gone. Added `PUT /api/providers/diagnostics/budget/{accountId}` (`SettingsManage` + `ConfigWrite` rate-limit) that calls `IBudgetConfigProvider.SetConfig` for per-tenant overrides; validates `LimitUsd >= 0`, `AlertThreshold ∈ [0,1]`, `PeriodDays ∈ [1,366]`. **Deferred**: persistence to a `budget_configs` table (in-memory only — overrides clear on redeploy). Documented in finding remediation; tracked as a follow-up story rather than a port-gap blocker. Combined with finding 004, budget enforcement now works end-to-end for any tenant whose admin sets a non-zero limit.
+
 ## References
 
 - TS source: `packages/api/src/services/pg-diagnostics-store.ts:219-232`, `packages/api/src/routes/settings/diagnostics-routes.ts:168-183` (commit `9e9a57c~1`)

@@ -103,6 +103,13 @@ Error paths:
   - `DiagnosticsRepository_CorrelationIdLookup_UsesPartialIndex`
 - Estimated effort: 1h (mostly EF boilerplate; depends on finding 008).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed at the schema level
+- **Commit**: schema hardening migration `20260419015726_SchemaHardeningPhase1` (landed before this sweep).
+- **Notes**: `TammaDbContext.cs:331-341` declares the missing indexes — `(ProviderKey, CreatedAt)` (was already there), `(TenantId, CreatedAt)`, `(EngineId, CreatedAt)`, `(Model, CreatedAt)`, `(RequestType, CreatedAt)`, partial `CorrelationId` (filter `"CorrelationId" IS NOT NULL`). The TS partial budget index `(account_id, created_at) WHERE success = true` is **deferred** as the application path uses the `(TenantId, CreatedAt)` index already and `Success` is part of the standard sort/filter set; can be added later if EXPLAIN ANALYZE shows the budget query is slow on production volume.
+
 ## References
 
 - TS source: archived `database/archived-sql-migrations/014_provider_diagnostics.sql:32-38`, `packages/api/src/services/pg-diagnostics-store.ts:102-232` (commit `9e9a57c~1`)

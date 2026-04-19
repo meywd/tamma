@@ -119,6 +119,13 @@ Informational. No code change required. One downstream action:
   - `CircuitBreaker_TryProbeWhileOpen_ReturnsFalse`
 - Estimated effort: 0h (verification + downstream integration work is separate).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed (positive finding)
+- **Commit**: n/a — `CircuitBreakerService.TryProbeAsync` and the `EffectiveStateNoWrite` helper already implement the atomic HalfOpen claim. Per-tenant partitioning + `ISystemClock` injection are intact.
+- **Notes**: Verified at `apps/tamma-elsa/src/Tamma.Api/Services/Providers/CircuitBreakerService.cs:131-149`. No downstream Elsa activity changes required — the audit's "use TryProbeAsync from probe call sites" note is for future workflow authors, not a current regression.
+
 ## References
 
 - TS source: `packages/api/src/services/pg-health-store.ts:117-218`, `health-store.ts:231-270` (commit `9e9a57c~1`)

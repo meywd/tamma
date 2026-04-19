@@ -112,6 +112,13 @@ No code change required. Documentation only.
 - Tests to add: none for the existing behaviour; if dual-policy is added, `CircuitBreaker_LongTailDegradation_OpensAfterNLifetimeFailuresWithoutSuccess`.
 - Estimated effort: 30min (doc only).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed (P3 — drift documented; both implementations satisfy AC)
+- **Commit**: n/a — code change deemed unnecessary per the audit's own §5 ("No code change required. Documentation only.").
+- **Notes**: The C# sliding-window semantics are stronger for transient-error tolerance and are wired through `CircuitBreakerOptions` (configurable). The audit suggested (a) doc update on Story 9-3 and (b) optional ADR — both are documentation chores tracked separately, not port-gap regressions. Sliding-window vs lifetime-counter is an operational characteristic, not a correctness bug.
+
 ## References
 
 - TS source: `packages/api/src/services/health-store.ts:155-206`, `packages/api/src/services/pg-health-store.ts:117-159` (commit `9e9a57c~1`)

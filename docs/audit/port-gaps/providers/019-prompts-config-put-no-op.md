@@ -110,6 +110,13 @@ Error paths:
   - `Settings_UpdatePromptsConfig_InvalidRole_Returns400`
 - Estimated effort: 1h (Option A) / 3h (Option B).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (Option A — deprecated with 410 Gone)
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: `GET /api/config/prompts` and `PUT /api/config/prompts/{role}` now return `410 Gone` with a clear pointer to the canonical `GET/PUT /api/prompts/{role}/{action}` (Story 12-5 / `PromptStore`). Eliminates the silent-success failure mode (callers used to think saves succeeded). Route registrations kept so the 410 is observable; deletion would yield a confusing 404.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/prompts-routes.ts`, `packages/api/src/services/settings/ConfigService.ts:118-168` (commit `9e9a57c~1`)

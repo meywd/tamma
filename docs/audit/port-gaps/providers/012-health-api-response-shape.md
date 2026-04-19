@@ -122,6 +122,13 @@ Error paths:
   - `ProviderHealthSummary_ReturnsKeyedMapForTsParity`
 - Estimated effort: 3h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: `GET /api/providers/health/providers/{key}` now returns 200 with a synthesized Closed/healthy body for unseen keys (TS parity); the previous 404 regression is gone. Response carries both the new C# fields (`state`, `failureCount`, `halfOpenInProgress`, `lastSuccess`, `lastFailure`) and the TS-compat scalar shorthand (`healthy`, `circuitOpen`, `halfOpen`, `failures`) so dashboards on either shape work. `GET /api/providers/health` adds `byKey` map alongside `providers` array. Existing test `GetProviderHealth_UnknownKey_Returns404` flipped to assert the new 200-with-healthy-body behaviour.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/health-routes.ts:51-71`, `packages/api/src/services/health-store.ts:30-37` (commit `9e9a57c~1`)

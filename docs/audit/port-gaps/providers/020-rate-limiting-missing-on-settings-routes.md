@@ -99,6 +99,13 @@ Error paths:
   - `ProvidersCreate_FloodTest_RejectsAt50InAMinute`
 - Estimated effort: 2h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `32bba50` `fix(providers): land P1 sanitizer/clamping/chain/rate-limit fixes [findings 006, 007, 011, 020]`
+- **Notes**: Wired `AddRateLimiter` + `UseRateLimiter` in `Program.cs` with four named fixed-window policies: `ConfigRead` (100/min), `ConfigWrite` (30/min), `ProviderIngest` (500/min for Elsa-batched diagnostics), `ProviderExecute` (50/min for expensive provider dispatch). `RejectionStatusCode = 429`. Applied per-route via `RequireRateLimiting` on `/api/v1/agents`, `/api/config`, `/api/providers` route groups — read endpoints inherit the group default, write endpoints override on the verb. Note: this stream's `RateLimitService` is a per-key counter for auth flows (registration/reset), not for HTTP throttling — the new `AddRateLimiter` integration is the right primitive for per-IP HTTP rate limits.
+
 ## References
 
 - TS source: `packages/api/src/routes/agents/index.ts:37-44`, `packages/api/src/routes/agents/agent-config-routes.ts:113-138`, `packages/api/src/routes/settings/index.ts` (commit `9e9a57c~1`)

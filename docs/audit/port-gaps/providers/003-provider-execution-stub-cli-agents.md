@@ -135,6 +135,13 @@ Error paths:
   - Registry + DI wiring: 2h
   - Regression + integration suite: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (HTTP-only providers + explicit `PROVIDER_NOT_SUPPORTED` for CLI/MCP)
+- **Commit**: `498889b` `fix(providers): land P0 pricing/budget/role/CLI-stub fixes [findings 001, 003, 004, 005]`
+- **Notes**: Added named `HttpClient` registrations for `openai`, `github-copilot`, `gemini`, `openrouter`, `z.ai`, `local` in `Program.cs` — each with configurable base URL + auth header from `IConfiguration`. Extended `HttpProviderClient.ProviderHttpClientMap` to cover the new provider keys plus the `local`/`ollama`/`lmstudio` aliases. Introduced `ProviderNotSupportedException` and a `NonHttpProviders` set so calls to `claude-code` / `opencode` / `zen-mcp` surface as **501 Not Implemented** with a clear message instead of opaque 500s. Defensive guard fails fast if a configured client has no `BaseAddress`. **Deferred**: full CLI-agent subprocess + MCP transport adapters (the ≈25-40h portion). The HTTP-supported providers now work end-to-end; the failure mode for the others is now actionable.
+
 ## References
 
 - TS source: `packages/api/src/services/provider-session.ts`, `packages/providers/src/agent-provider-factory.ts`, `packages/providers/src/*-provider.ts` (commit `9e9a57c~1`)

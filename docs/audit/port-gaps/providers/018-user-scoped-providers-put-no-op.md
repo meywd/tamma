@@ -129,6 +129,13 @@ Error paths:
   - `UpdateUserProviders_UnauthenticatedOther_Forbidden`
 - Estimated effort: 7h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: `users.settings JSONB` column already exists (added by the schema-hardening migration to satisfy this exact gap). `IUserRepository` already exposed `GetUserSettingsAsync` / `UpdateUserSettingsAsync`. Rewrote `SettingsEndpoints.GetProvidersConfig` and `UpdateProvidersConfig` to be **user-scoped**: read/write `users.settings` for the calling principal (resolved from `ClaimTypes.NameIdentifier`/`sub`). `PUT` rejects non-object bodies with 400, returns `200 {message, persisted: true}` on success. Reuses the existing `SettingsView` / `SettingsManage` policies — no separate `/api/users/me/providers` route added since the existing `/api/config/providers` URL was the documented one and dashboards already point at it.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/providers-routes.ts`, `packages/api/src/services/settings/ConfigService.ts:176-215`, `packages/api/src/persistence/user-store.ts` (commit `9e9a57c~1`)

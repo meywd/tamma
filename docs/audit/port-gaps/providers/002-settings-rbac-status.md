@@ -110,6 +110,13 @@ Error paths:
   - `Program_DevMode_LogsExplicitAnonymousOverride`
 - Estimated effort: 3h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed
+- **Commit**: n/a — no code change needed. Per the audit's own analysis the C# RBAC layer was already wired correctly via `RequireAuthorization("SettingsView" | "SettingsManage")` policies; the original `/tmp/tamma-audit/31-providers.md` claim of "no RBAC" was overstated. The minor matrix drift (`POST /providers/chain/resolve` is `SettingsView`, `POST /sanitize` is `SettingsManage`) is acceptable per the audit's own §5 recommendation.
+- **Notes**: Dev-mode anonymous override at `Program.cs:313-346` remains as documented; pre-launch checklist item.
+
 ## References
 
 - TS source: `packages/api/src/routes/agents/index.ts`, `packages/api/src/routes/settings/index.ts`, `packages/api/src/auth/require-permission.ts` (commit `9e9a57c~1`)

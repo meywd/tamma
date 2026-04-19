@@ -99,6 +99,13 @@ If no story: `CLAUDE.md` § "Key Architectural Decisions" does not mention the c
   - HttpProviderClient wiring + regression: 1h
   - Tests: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `498889b` `fix(providers): land P0 pricing/budget/role/CLI-stub fixes [findings 001, 003, 004, 005]`
+- **Notes**: Ported the TS pricing table from `packages/cost-monitor/src/pricing-config.ts` (`9e9a57c~1`) into `Tamma.Api.Services.Providers.ProviderPricingService`. Per-token rates stored as `decimal` (1M-token TS rate ÷ 1,000,000) so EF round-trips don't lose precision. Six providers covered: anthropic, openai, google (`gemini` alias), openrouter, claude-code (uses anthropic rates), local (zero). Provider alias map normalises `anthropic-claude` / `gemini` / `claude-code` etc. Wired into `HttpProviderClient.ParseResponse` for both Anthropic and OpenAI-style branches; OpenAI-style now reads `prompt_tokens` + `completion_tokens` separately so the `(input, output)` token split also reaches the diagnostics row. `ProviderInvocationResult` extended with `InputTokens` / `OutputTokens`; `ProviderSessionService` persists them onto `ProviderDiagnostic.InputTokens` / `OutputTokens` columns (already present from the schema-hardening migration). Unknown `(provider, model)` tuples cleanly return `0m` — same as the TS happy path. 10 unit tests added covering known rates, alias resolution, prefix matching, negative-clamp.
+
 ## References
 
 - TS source: `packages/providers/src/instrumented-agent-provider.ts`, `packages/providers/src/pricing.ts`, `packages/shared/src/telemetry/diagnostics-processor.ts` (commit `9e9a57c~1`)

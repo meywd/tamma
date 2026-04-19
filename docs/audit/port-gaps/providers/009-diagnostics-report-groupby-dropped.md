@@ -119,6 +119,13 @@ Error paths:
   - Endpoint + validation: 1h
   - Tests: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (both axes available)
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: Added `IDiagnosticsService.GetDimensionReportAsync(provider|model|agentType)` with EF GroupBy aggregation (`ProviderKey`, `Model`, `AgentType` columns — `AgentType` exists thanks to finding 008 schema work). Returns a `DimensionReport { Groups: DimensionBucket[] }` with `{Key, TotalCalls, SuccessCount, ErrorRate, TotalCost, TotalTokens, AvgLatencyMs}` per bucket, ordered by `TotalCalls DESC`. `GET /api/providers/diagnostics/report` now accepts `?groupBy=provider|model|agentType` (TS shape) AND keeps the existing `?bucketSize=5m|hour|day` (time-bucketed) — both axes supported, neither deletes the other. Invalid `groupBy` returns `400` with the valid values listed.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/diagnostics-routes.ts:137-162`, `packages/api/src/services/pg-diagnostics-store.ts:155-217` (commit `9e9a57c~1`)

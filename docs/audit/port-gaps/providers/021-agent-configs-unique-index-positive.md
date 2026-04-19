@@ -91,6 +91,13 @@ If the system-default-singleton polish is pursued:
 - Tests to add: `AgentConfigRepository_UpsertSystemDefaultTwice_ResultsInOneRow`
 - Estimated effort: 1h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed (positive finding — kickoff binding clause: "agent_config schema has unique-index hardening from admin-db finding 031. Don't undo.")
+- **Commit**: n/a — schema state at `TammaDbContext.cs:268` matches the audit's positive finding (`HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL")`).
+- **Notes**: Verified the partial unique index is intact. The system-default-singleton edge case the audit flagged (multiple NULL rows possible) remains as a polish item but is harmless in current usage — defaults are seeded by the migration, not at runtime.
+
 ## References
 
 - TS source: archived `database/archived-sql-migrations/013_agent_configs.sql:20-28`, `packages/api/src/persistence/pg-agent-config-store.ts:75-101` (commit `9e9a57c~1`)

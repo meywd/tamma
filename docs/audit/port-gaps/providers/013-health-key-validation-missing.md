@@ -92,6 +92,13 @@ Error paths:
   - `ProviderHealth_KeyWithInvalidChar_Returns400`
 - Estimated effort: 1h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: Added `IsValidProviderKey` helper at `ProviderEndpoints` (regex `^[a-zA-Z0-9._\-:/]+$`, ≤256 chars). Applied at every health endpoint: `GET /health/providers/{key}`, `POST /health/providers/{key}/failure`, `POST /health/providers/{key}/success`, `POST /health/providers/{key}/reset`. Defence in depth: `CircuitBreakerService.ValidateKey` also enforces the regex so non-HTTP callers (Elsa activities) get the same protection. Bad keys produce `400 {error: "key contains invalid characters"}` instead of being silently persisted as garbage.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/health-routes.ts:14-22`, `packages/api/src/services/pg-health-store.ts:26-36` (commit `9e9a57c~1`)

@@ -146,6 +146,13 @@ Error paths:
   - DTO rewire + endpoint rewire: 1h
   - Tests: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (all six Story 9-1 AC 6 rules)
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: New `Tamma.Api.Services.Security.ReDosGuard` ports the TS `NESTED_QUANTIFIER` heuristic (`\([^)]*[*+?{][^)]*\)[*+?{]`) plus the max-pattern-length / max-pattern-count caps (500 chars, 100 patterns). `ValidateConfigShape` extended with: provider-name regex `/^[a-z0-9][a-z0-9_-]{0,63}$/` (Story 9-1 AC 6), `maxBudgetUsd ∈ [0, 100]` (finite), `permissionMode ∈ {default, acceptEdits, bypassPermissions}` whitelist, `providerChain` non-empty + per-entry provider regex, `security.maxFetchSizeBytes ∈ [0, 1 GiB]`, `security.blockedCommandPatterns` ReDoS-guarded + count cap. Validates both legacy `roles.<r>.providerChain` and canonical `chains.<r>.<a>` shapes. Forbidden prototype-pollution keys (`__proto__`, `constructor`, `prototype`) rejected on every nested object. **Deferred**: separating `agents` and `security` payloads into typed DTO fields (audit step 4–6 of §5) — kept the existing single-blob shape since callers already work that way.
+
 ## References
 
 - TS source: `packages/api/src/routes/agents/agent-config-routes.ts:63-95`, `packages/shared/src/config/validate-agents.ts`, `packages/shared/src/config/validate-security.ts` (commit `9e9a57c~1`)

@@ -151,6 +151,13 @@ Error paths:
   - Report groupBy wiring: 1.5h
   - Tests: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (schema already done; DTO + endpoint mapping added now)
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: The `ProviderDiagnostic` entity and `provider_diagnostics` table already carry the seven restored columns + `InputTokens`/`OutputTokens` split (added by the schema-hardening migration `20260419015726_SchemaHardeningPhase1`). The remediation here was the application-layer plumbing: `IngestDiagnosticRequest` extended with all seven optional fields plus `InputTokens`/`OutputTokens`/`ErrorCode`/`CorrelationId`. `MapDiagnostic` helper routes the new fields onto the entity columns; back-compat default attributes legacy `TokensUsed`-only payloads to `InputTokens` so per-token cost recomputation still works. Combined with finding 004 the cost pipeline now writes accurate per-input/per-output billing rows.
+
 ## References
 
 - TS source: `packages/api/src/services/diagnostics-store.ts:16-36`, `packages/api/src/services/pg-diagnostics-store.ts:65-99` (commit `9e9a57c~1`)

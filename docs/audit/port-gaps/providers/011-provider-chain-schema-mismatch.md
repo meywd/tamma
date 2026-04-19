@@ -135,6 +135,13 @@ Error paths:
   - `ValidateConfigShape_AcceptsBothLegacyAnd2DChainShapes`
 - Estimated effort: 5h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (dual-shape: canonical 2D + legacy 1D fallbacks)
+- **Commit**: `32bba50` `fix(providers): land P1 sanitizer/clamping/chain/rate-limit fixes [findings 006, 007, 011, 020]`
+- **Notes**: `ProviderChainResolver.LoadChainAsync` now reads the canonical `chains.<role>.<action>` grid first (unchanged), then falls back to the TS legacy shape `roles.<role>.providerChain`, then `defaults.providerChain`. Walks the role alias map (finding 001) so a row written as `roles.implementer.providerChain` resolves for callers asking for `developer`. `EMPTY_PROVIDER_CHAIN` no longer fires for cold tenants whose JSONB was migrated from TS. `ValidateConfigShape` (finding 014) recognises both shapes and validates each entry's provider name against the regex.
+
 ## References
 
 - TS source: `packages/api/src/services/agent-resolver.ts:343-350`, `packages/shared/src/types/agent-config.ts:123` (commit `9e9a57c~1`)

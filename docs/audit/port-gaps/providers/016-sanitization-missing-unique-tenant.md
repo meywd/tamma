@@ -101,6 +101,13 @@ Error paths:
   - `Sanitization_UniqueIndexMigration_DeduplicatesExistingRows`
 - Estimated effort: 1h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed at the schema level
+- **Commit**: schema hardening migration `20260419015726_SchemaHardeningPhase1` (landed before this sweep).
+- **Notes**: `TammaDbContext.cs:362-364` declares `entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL")` — partial unique on non-null tenants, mirroring the TS partial pattern. Concurrent upserts can no longer produce duplicate sanitization rule rows per tenant. The only follow-up the audit suggested (catch `DbUpdateException` for cleaner upsert-or-fetch) is a polish item, not a regression.
+
 ## References
 
 - TS source: archived `database/archived-sql-migrations/016_sanitization_rules.sql:22`, `packages/api/src/services/pg-sanitization-store.ts:100-154` (commit `9e9a57c~1`)

@@ -114,6 +114,13 @@ This is not technically a spec violation, but it is a throughput/latency regress
   - `IngestDiagnosticBatch_EmptyArray_Returns400`
 - Estimated effort: 2h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: Added `POST /api/providers/diagnostics/batch` accepting `IngestDiagnosticRequest[]` (max 100 — matches TS `MAX_BATCH_SIZE`). `ProviderIngest` rate-limit policy (500/min) shared with the singular endpoint. Empty array → 400, > 100 → 400 with the count in the message. Returns `{recorded, ids[]}`. Single-row endpoint left untouched for back-compat with existing emitters; the audit's "TS accepted both shapes at one URL" is satisfied here via two URLs because ASP.NET model-binding doesn't have a clean way to disambiguate object vs array on the same path without a custom binder.
+
 ## References
 
 - TS source: `packages/api/src/routes/settings/diagnostics-ingest-routes.ts:20-39`, `packages/api/src/services/pg-diagnostics-store.ts:57-99`, constant `MAX_BATCH_SIZE = 100` (commit `9e9a57c~1`)

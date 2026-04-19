@@ -165,6 +165,14 @@ Which Epic / story file describes what this surface SHOULD be?
   - Story + ADR writes: 2h
   - Regression tests: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (soft-acceptance + alias normalisation)
+- **Commit**: `498889b` `fix(providers): land P0 pricing/budget/role/CLI-stub fixes [findings 001, 003, 004, 005]`
+  - Follow-up `32bba50` extended `ProviderChainResolver` to also walk legacy aliases when reading the JSONB chain.
+- **Notes**: Kept the C# 8-role × 10-action grid as the canonical taxonomy (matches `DefaultAgentConfig` + `RolePhaseMap` wiring). Added `LegacyRoleAliases` (`implementer→developer`, `reviewer→senior_developer`, `analyst→product_owner`, …) and `LegacyPhaseAliases` (`CODE_GENERATION→implement`, …) plus `NormalizeRole`/`NormalizePhase`. `AgentResolverService.ResolveAsync` and `ResolveForPhaseAsync` translate before strict validation; `ValidateConfigShape` no longer 400s on legacy keys; `TryGetRoleOverride` and `ProviderChainResolver` walk the alias map when looking up tenant JSONB. Story doc updates and a one-shot data migration are still pending — flagged as drift in the section-5 status (item 1 done, item 2 deferred).
+
 ## References
 
 - TS source: `packages/shared/src/types/knowledge.ts`, `packages/shared/src/types/agent-config.ts`, `packages/api/src/services/agent-resolver.ts:308-322` (commit `9e9a57c~1`)

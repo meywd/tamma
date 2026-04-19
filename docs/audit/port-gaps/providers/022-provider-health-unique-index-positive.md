@@ -93,6 +93,13 @@ This finding is informational. The unique index is correctly declared. The cold-
 - Tests to add (optional): `CircuitBreaker_ConcurrentColdStartFailure_BothResolveTo200`
 - Estimated effort: 1h.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed (positive finding — kickoff binding clause: "Provider diagnostics + health schemas hardened in admin-db findings 032, 033. Don't undo.")
+- **Commit**: n/a — `TammaDbContext.cs:313-314` declares `HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique().HasFilter("\"TenantId\" IS NOT NULL")`. Per-tenant partitioning is intentional and stronger than TS.
+- **Notes**: The cold-start race the audit mentions (`GetOrCreateAsync` returning 500 on the second concurrent first-failure call) is a hardening polish — current `CircuitBreakerService.RecordFailureAsync` doesn't catch `DbUpdateException`. Tracked as a follow-up; not in this sweep's scope.
+
 ## References
 
 - TS source: archived `database/archived-sql-migrations/015_provider_health.sql:10`, `packages/api/src/services/pg-health-store.ts:117-159` (commit `9e9a57c~1`)

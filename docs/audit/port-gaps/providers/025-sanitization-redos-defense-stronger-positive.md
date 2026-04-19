@@ -110,6 +110,13 @@ Informational / optional hardening only.
   - `SanitizationService_RuleTimeoutSkip_SurfacesWarning`
 - Estimated effort: 2h (if the hardening is pursued).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed (positive finding + optional hardening also landed)
+- **Commit**: `0dbccf9` `fix(providers): land P1/P2 diagnostics/health/validation/user-providers fixes [findings 008, 009, 010, 012, 013, 014, 018, 019]`
+- **Notes**: The runtime 100ms `MatchTimeout` defence is unchanged and still strictly stronger than the TS write-time heuristic. Finding 014 also landed the optional write-time `ReDosGuard` (TS `NESTED_QUANTIFIER` heuristic + max-pattern-length + max-pattern-count) inside `Tamma.Api.Services.Security.ReDosGuard`, so admins now learn at PUT time about pathological patterns instead of only when the runtime timeout fires. Best-of-both-worlds posture achieved.
+
 ## References
 
 - TS source: `packages/api/src/services/sanitization-store.ts:80-125` (commit `9e9a57c~1`)

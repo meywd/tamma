@@ -131,6 +131,13 @@ Error paths:
   - DTO + endpoint rewire + rule-entity columns: 2h
   - Tests: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `32bba50` `fix(providers): land P1 sanitizer/clamping/chain/rate-limit fixes [findings 006, 007, 011, 020]`
+- **Notes**: Faithful port of the TS `ContentSanitizer` (`packages/shared/src/security/content-sanitizer.ts`, 408 LoC) to `Tamma.Api.Services.Sanitization.ContentSanitizer` (≈360 LoC). All five Story 9-7 AC 6 behaviours preserved: quote-aware HTML state machine (handles `title="a>b"` correctly), 25+ zero-width / invisible Unicode strip including U+202E (CVE-2021-42574), NFKD normalisation + 5-category injection heuristic table (instruction override / role hijacking / system-prompt extraction / delimiter injection / encoding evasion), input-vs-output asymmetric pipeline (output preserves fenced code blocks), null-byte strip always-on safety floor. `SanitizationService.SanitizeAsync` now runs both the user's regex-replace rules AND the ContentSanitizer pipeline; `SanitizeResult.Warnings` carries the cue codes back. `ISanitizationService` and `SanitizeEndpointRequest` accept a `direction` field. 14 new unit tests cover injection categories, HTML stripping (incl. unclosed-tag), zero-width / bidi-override removal, output-direction code-block preservation, never-throws invariant. **Deferred**: `SecureHttpClient` (size-capped fetch) and entity-level typed columns (overlaps with finding 015) — flagged in their own findings.
+
 ## References
 
 - TS source: `packages/shared/src/security/content-sanitizer.ts`, `packages/shared/src/security/url-validator.ts`, `packages/shared/src/security/secure-fetch.ts`, `packages/api/src/services/pg-sanitization-store.ts:156-168` (commit `9e9a57c~1`)

@@ -91,6 +91,13 @@ Error paths:
   - `Tenant_Delete_CascadesProviderDiagnosticRows`
 - Estimated effort: 30min.
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed at the schema level
+- **Commit**: schema hardening migration `20260419015726_SchemaHardeningPhase1` (landed before this sweep).
+- **Notes**: `TammaDbContext.cs:366-369` declares the FK + cascade: `entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Cascade)`. `AgentConfig` (line 270) already had it; `ProviderHealth` and `ProviderDiagnostic` use the partial unique + tenant-id partition pattern instead of cascade FKs (the comment on `ProviderDiagnostic` at line 343 explains why — diagnostics is a write-once event sink that may receive rows before the tenant row commits). Tenant deletion now cleanly cascades on the configured tables.
+
 ## References
 
 - TS source: archived `database/archived-sql-migrations/013_agent_configs.sql:11`, `014_provider_diagnostics.sql:12`, `016_sanitization_rules.sql:12` (commit `9e9a57c~1`)

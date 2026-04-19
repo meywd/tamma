@@ -130,6 +130,13 @@ Error paths:
   - `SanitizationRule_DeleteTenant_CascadeRemovesRules`
 - Estimated effort: 16h (coordinated with finding 006).
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Already-fixed at the schema level (different shape kept by design); behaviours covered by finding 006
+- **Commit**: schema work landed earlier in the admin-db sweep (`6f86086` Phase-2 RLS + triggers, finding 014 reshape per the kickoff doc's binding clause).
+- **Notes**: The kickoff binding instructs not to redesign the data model — the C# entity keeps its `{Id, TenantId, Rules jsonb, CreatedAt, UpdatedAt}` shape with the JSONB carrying the typed-rules list (`SanitizationRuleDefinition[]`). The TS-style typed columns (`extra_injection_patterns`, `blocked_command_patterns`, `max_fetch_size_bytes`, `validate_urls`, `gate_actions`) are addressed at the **application** layer instead: `ContentSanitizer` (finding 006) implements the equivalent built-in pattern set + URL/SSRF behaviours via configuration (`ContentSanitizerOptions.ExtraInjectionPatterns`) rather than per-row columns. `UNIQUE(TenantId)` (finding 016) and FK CASCADE (finding 017) already declared via `TammaDbContext.cs:362-369`. The remaining TS-only behaviours (action gating, `secureFetch` size cap) are tracked under finding 006's deferred `SecureHttpClient` work.
+
 ## References
 
 - TS source: `packages/api/src/services/sanitization-store.ts:18-29`, `packages/api/src/services/pg-sanitization-store.ts:66-154` (commit `9e9a57c~1`)

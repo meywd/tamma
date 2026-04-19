@@ -144,6 +144,13 @@ Error paths:
   - Three clamping impls + env-var read: 2h
   - Tests: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-19 by agent
+- **Outcome**: Fixed
+- **Commit**: `32bba50` `fix(providers): land P1 sanitizer/clamping/chain/rate-limit fixes [findings 006, 007, 011, 020]`
+- **Notes**: Added `Dtos.Agents.TaskOverrides` (`MaxBudgetUsd`, `AllowedTools`, `PermissionMode`, `Model`) and a fourth optional field on `ResolveForPhaseRequest`. Extended `ResolvedAgentConfig` with `MaxBudgetUsd`, `PermissionMode`, `AllowedTools`. New `IAgentResolverService.ResolveForPhaseAsync(tenantId, phase, role, overrides)` overload applies the three TS clamping rules: budget = `Math.Min`, tools intersected (cannot expand), `bypassPermissions` requires `TAMMA_ALLOW_BYPASS_PERMISSIONS=true` (env var OR `Tamma:AllowBypassPermissions=true` in appsettings — checked via `IConfiguration` so staging can flip it without redeploying). `AgentEndpoints.ResolveForPhase` plumbs the override through. Rejected overrides log a warning so misconfigured workflows are observable.
+
 ## References
 
 - TS source: `packages/api/src/services/agent-resolver.ts:361-435`, `packages/api/src/routes/agents/agent-resolver-routes.ts:38-46` (commit `9e9a57c~1`)
