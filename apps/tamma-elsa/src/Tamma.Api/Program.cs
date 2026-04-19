@@ -221,6 +221,19 @@ builder.Services.AddEmailServices();
 builder.Services.AddTaskQueue();
 builder.Services.AddProviderSessionServices();
 builder.Services.AddSaaSServices();
+
+// Engine callback services (audit findings 001, 004, 005-011). Context store
+// is in-memory (single-instance only) until the real RAG pipeline ports.
+// IGitHubEngineCallbackService falls through to the Null impl until a real
+// GitHub App / Octokit client is wired (cross-ref github audit scope) — the
+// Null impl returns 503 with `github_client_not_configured` so the deployed
+// Elsa activities see the documented soft-fail instead of bogus 200s.
+builder.Services.AddSingleton<Tamma.Api.Services.Engine.IContextStore,
+    Tamma.Api.Services.Engine.InMemoryContextStore>();
+builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
+    Tamma.Api.Services.Engine.ExecuteTaskService>();
+builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
+    Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)
@@ -713,7 +726,10 @@ engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("W
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
 engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
-engine.MapPost("/agent-available", EngineEndpoints.AgentAvailable).RequireAuthorization("WorkflowsManage");
+// Audit finding 002 — `agent-available` is a GET liveness probe (no body),
+// not a POST registration call. The previous wiring as POST silently drifted
+// from the TS contract.
+engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 
 // ── Workflows ──
 var workflows = app.MapGroup("/api/workflows").RequireAuthorization("WorkflowsView");
