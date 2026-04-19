@@ -62,6 +62,19 @@ public class TammaDbContext : DbContext
     /// </summary>
     protected virtual bool EnforceTenantFilter => false;
 
+    /// <summary>
+    /// Exposes the current request's tenant id through a DbContext property
+    /// so EF query-filter expressions can read <c>this.CurrentTenantId</c>
+    /// and have the value re-evaluated at query-execution time. The closure
+    /// capture pattern used elsewhere (<c>var tenantId = _tenantContext?.TenantId</c>
+    /// followed by <c>e.TenantId == tenantId</c>) does NOT work reliably
+    /// across multiple scopes — EF caches the compiled model per
+    /// DbContext type and the captured local only gets the value from the
+    /// first scope's construction. Reading the value via an instance
+    /// property each query parameterises correctly.
+    /// </summary>
+    public Guid? CurrentTenantId => _tenantContext?.TenantId;
+
     // Existing mentorship entities
     public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
     public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
@@ -130,14 +143,19 @@ public class TammaDbContext : DbContext
             // Permissive (admin/base context): null tenant returns ALL rows
             // so background services + migrations keep working without
             // manual .IgnoreQueryFilters() at every call site.
-            var tenantId = _tenantContext?.TenantId;
+            //
+            // The filter references `this.CurrentTenantId` (a DbContext
+            // property) so the value is re-evaluated per query rather than
+            // baked into the compiled model. Closure capture of a local
+            // variable stops working across scopes because EF caches the
+            // model per context type.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.DeletedAt == null && e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.DeletedAt == null && e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => e.DeletedAt == null && (tenantId == null || e.TenantId == tenantId));
+                entity.HasQueryFilter(e => e.DeletedAt == null && (CurrentTenantId == null || e.TenantId == CurrentTenantId));
             }
         });
 
@@ -342,14 +360,18 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -369,14 +391,18 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -397,14 +423,18 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique()
                 .HasFilter("\"TenantId\" IS NOT NULL");
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -436,14 +466,18 @@ public class TammaDbContext : DbContext
             // exist yet at ingest time. Tenant isolation is enforced at the
             // query-filter layer.
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -466,14 +500,18 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -492,14 +530,18 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => e.TenantId);
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -526,14 +568,18 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.DefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
@@ -581,14 +627,18 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => new { e.TenantId, e.IssueNumber })
                 .HasFilter("\"IssueNumber\" IS NOT NULL");
 
-            var tenantId = _tenantContext?.TenantId;
+            // See Users entity filter above for why this reads
+            // CurrentTenantId (DbContext property) instead of a closure
+            // local — EF caches the compiled model per context type, so
+            // per-scope closure-local values get frozen to the first
+            // request's tenant.
             if (EnforceTenantFilter)
             {
-                entity.HasQueryFilter(e => e.TenantId == tenantId);
+                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
             }
             else
             {
-                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
         });
 
