@@ -214,11 +214,26 @@ public sealed class CircuitBreakerService : ICircuitBreakerService
             h.HalfOpenInProgress);
     }
 
+    /// <summary>
+    /// Charset regex matching the TS validator at
+    /// <c>packages/api/src/routes/settings/health-routes.ts:14-22</c>. Defence
+    /// in depth — finding 013. The endpoint layer also validates so callers
+    /// see a 400; this layer protects activities / non-HTTP callers.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex KeyPattern =
+        new("^[a-zA-Z0-9._\\-:/]+$",
+            System.Text.RegularExpressions.RegexOptions.Compiled |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     private static void ValidateKey(string providerKey)
     {
         if (string.IsNullOrWhiteSpace(providerKey))
             throw new ArgumentException("Provider key must not be empty.", nameof(providerKey));
         if (providerKey.Length > 256)
             throw new ArgumentException("Provider key too long (max 256).", nameof(providerKey));
+        if (!KeyPattern.IsMatch(providerKey))
+            throw new ArgumentException(
+                "Provider key contains invalid characters (allowed: a-zA-Z0-9._-:/).",
+                nameof(providerKey));
     }
 }

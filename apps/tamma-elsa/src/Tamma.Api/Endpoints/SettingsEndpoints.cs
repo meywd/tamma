@@ -148,25 +148,90 @@ public static class SettingsEndpoints
         }
     }
 
-    public static async Task<IResult> GetPromptsConfig(IAgentConfigRepository configRepo, ITenantContext tc)
+    /// <summary>
+    /// GET /api/config/prompts — deprecated alias kept for dashboards that
+    /// still call this URL. Returns a stable 410 Gone with a pointer to the
+    /// canonical Prompt Store. Finding 019 / Story 12-5.
+    /// </summary>
+    public static IResult GetPromptsConfig() => Results.Json(
+        new
+        {
+            error = "Deprecated endpoint",
+            message = "Use GET /api/prompts and GET /api/prompts/{role}/{action} (Story 12-5)",
+        },
+        statusCode: StatusCodes.Status410Gone);
+
+    /// <summary>
+    /// PUT /api/config/prompts/{role} — was a no-op stub (finding 019).
+    /// Now returns 410 Gone instead of pretending to succeed; callers must
+    /// migrate to PUT /api/prompts/{role}/{action} which actually persists
+    /// to the prompt_overrides table.
+    /// </summary>
+    public static IResult UpdatePromptsConfig(string role) => Results.Json(
+        new
+        {
+            error = "Deprecated endpoint",
+            message =
+                $"PUT /api/config/prompts/{role} is deprecated and was previously a no-op. " +
+                $"Use PUT /api/prompts/{role}/{{action}} (Story 12-5) which persists to " +
+                "prompt_overrides.",
+        },
+        statusCode: StatusCodes.Status410Gone);
+
+    /// <summary>
+    /// GET /api/config/providers — returns the caller's USER-SCOPED provider
+    /// settings (e.g. their personal Anthropic/OpenAI keys). Restored from TS
+    /// (finding 018); the previous implementation read the tenant-scoped
+    /// agent_configs blob, which is a different concept.
+    /// </summary>
+    public static async Task<IResult> GetProvidersConfig(
+        IUserRepository userRepo,
+        System.Security.Claims.ClaimsPrincipal principal)
     {
-        var config = await configRepo.GetAsync(tc.TenantId);
-        return Results.Ok(config is not null ? JsonSerializer.Deserialize<object>(config.Config) : new { });
+        var userId = ResolveUserId(principal);
+        if (userId is null) return Results.Unauthorized();
+
+        var json = await userRepo.GetUserSettingsAsync(userId.Value);
+        if (string.IsNullOrWhiteSpace(json) || json == "{}")
+            return Results.Ok(new { });
+        try
+        {
+            return Results.Ok(JsonSerializer.Deserialize<object>(json) ?? new { });
+        }
+        catch (JsonException)
+        {
+            return Results.Ok(new { });
+        }
     }
 
-    public static async Task<IResult> UpdatePromptsConfig(string role, IAgentConfigRepository configRepo, ITenantContext tc)
+    /// <summary>
+    /// PUT /api/config/providers — replaces the caller's user-scoped provider
+    /// settings JSON. Body must be a JSON object (not array). Persisted to
+    /// <c>users.settings</c> via <see cref="IUserRepository.UpdateUserSettingsAsync"/>.
+    /// Finding 018 — was a no-op stub before.
+    /// </summary>
+    public static async Task<IResult> UpdateProvidersConfig(
+        [FromBody] System.Text.Json.JsonElement body,
+        IUserRepository userRepo,
+        System.Security.Claims.ClaimsPrincipal principal)
     {
-        return Results.Ok(new { message = $"Prompt config for role '{role}' updated" });
+        if (body.ValueKind != JsonValueKind.Object)
+        {
+            return Results.BadRequest(new { error = "Request body must be a JSON object" });
+        }
+
+        var userId = ResolveUserId(principal);
+        if (userId is null) return Results.Unauthorized();
+
+        var json = body.GetRawText();
+        await userRepo.UpdateUserSettingsAsync(userId.Value, json);
+        return Results.Ok(new { message = "Providers config updated", persisted = true });
     }
 
-    public static async Task<IResult> GetProvidersConfig(IAgentConfigRepository configRepo, ITenantContext tc)
+    private static Guid? ResolveUserId(System.Security.Claims.ClaimsPrincipal principal)
     {
-        var config = await configRepo.GetAsync(tc.TenantId);
-        return Results.Ok(config is not null ? JsonSerializer.Deserialize<object>(config.Config) : new { });
-    }
-
-    public static async Task<IResult> UpdateProvidersConfig(IAgentConfigRepository configRepo, ITenantContext tc)
-    {
-        return Results.Ok(new { message = "Providers config updated" });
+        var sub = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                  ?? principal.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var g) ? g : null;
     }
 }

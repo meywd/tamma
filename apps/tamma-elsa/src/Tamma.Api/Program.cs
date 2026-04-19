@@ -651,6 +651,9 @@ providers.MapPut("/diagnostics/budget/{accountId}", ProviderEndpoints.UpdateBudg
     .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 providers.MapPost("/diagnostics", ProviderEndpoints.IngestDiagnostic)
     .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderIngest");
+// Batch ingest restored from TS (finding 010) — accepts up to 100 records.
+providers.MapPost("/diagnostics/batch", ProviderEndpoints.IngestDiagnosticBatch)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderIngest");
 providers.MapPost("/providers/create", ProviderEndpoints.CreateProvider)
     .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderExecute");
 providers.MapPost("/providers/{handle}/execute", ProviderEndpoints.ExecuteProvider)

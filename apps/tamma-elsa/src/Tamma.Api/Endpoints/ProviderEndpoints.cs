@@ -21,19 +21,28 @@ public static class ProviderEndpoints
         [FromServices] ITenantContext tc)
     {
         var all = await breaker.ListAsync(tc.TenantId);
+        // Dual-shape response per finding 012 — TS dashboards consumed a keyed
+        // map (Object.entries(response)); the C# API returns the array under
+        // `providers` for forward-compat AND mirrors the map under `byKey`.
+        var entries = all.Select(s => new
+        {
+            providerKey = s.ProviderKey,
+            state = s.State.ToString(),
+            status = MapLegacyStatus(s.State),
+            failureCount = s.FailureCount,
+            lastSuccess = s.LastSuccess,
+            lastFailure = s.LastFailure,
+            circuitOpenUntil = s.CircuitOpenUntil,
+            halfOpenInProgress = s.HalfOpenInProgress,
+            healthy = s.State == CircuitBreakerState.Closed,
+            circuitOpen = s.State == CircuitBreakerState.Open,
+            halfOpen = s.State == CircuitBreakerState.HalfOpen,
+            failures = s.FailureCount,
+        }).ToList();
         return Results.Ok(new
         {
-            providers = all.Select(s => new
-            {
-                providerKey = s.ProviderKey,
-                state = s.State.ToString(),
-                status = MapLegacyStatus(s.State),
-                failureCount = s.FailureCount,
-                lastSuccess = s.LastSuccess,
-                lastFailure = s.LastFailure,
-                circuitOpenUntil = s.CircuitOpenUntil,
-                halfOpenInProgress = s.HalfOpenInProgress,
-            }),
+            providers = entries,
+            byKey = entries.ToDictionary(e => e.providerKey, e => (object)e),
         });
     }
 
@@ -58,13 +67,17 @@ public static class ProviderEndpoints
     public static async Task<IResult> GetProviderHealth(
         string key,
         [FromServices] ICircuitBreakerService breaker,
-        [FromServices] IProviderHealthRepository repo,
         [FromServices] ITenantContext tc)
     {
-        // Require an existing row; unseen keys return 404 for parity with the prior API.
-        var row = await repo.GetStatusAsync(key, tc.TenantId);
-        if (row is null) return Results.NotFound(new { error = "Provider not found" });
+        // Validate the key shape (finding 013) before doing any I/O.
+        if (!IsValidProviderKey(key, out var validationError))
+        {
+            return Results.BadRequest(new { error = validationError });
+        }
 
+        // Unknown keys synthesise a healthy response (200) — matches TS
+        // GET /health/providers/:key behaviour. Finding 012 reverses the
+        // earlier 404 regression so dashboards can poll without branch logic.
         var s = await breaker.GetStateAsync(key, tc.TenantId);
         return Results.Ok(new
         {
@@ -76,7 +89,42 @@ public static class ProviderEndpoints
             lastFailure = s.LastFailure,
             circuitOpenUntil = s.CircuitOpenUntil,
             halfOpenInProgress = s.HalfOpenInProgress,
+            // TS-compat scalar — boolean shorthand for "circuit-closed".
+            healthy = s.State == CircuitBreakerState.Closed,
+            circuitOpen = s.State == CircuitBreakerState.Open,
+            halfOpen = s.State == CircuitBreakerState.HalfOpen,
+            failures = s.FailureCount,
         });
+    }
+
+    /// <summary>
+    /// Validate a provider key shape — non-empty, ≤ 256 chars, matching the
+    /// TS regex <c>^[a-zA-Z0-9._\-:/]+$</c>. Finding 013.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex KeyPattern =
+        new("^[a-zA-Z0-9._\\-:/]+$",
+            System.Text.RegularExpressions.RegexOptions.Compiled |
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static bool IsValidProviderKey(string key, out string error)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            error = "key must not be empty";
+            return false;
+        }
+        if (key.Length > 256)
+        {
+            error = "key too long (max 256)";
+            return false;
+        }
+        if (!KeyPattern.IsMatch(key))
+        {
+            error = "key contains invalid characters";
+            return false;
+        }
+        error = string.Empty;
+        return true;
     }
 
     public static async Task<IResult> RecordFailure(
@@ -84,6 +132,7 @@ public static class ProviderEndpoints
         [FromServices] ICircuitBreakerService breaker,
         [FromServices] ITenantContext tc)
     {
+        if (!IsValidProviderKey(key, out var err)) return Results.BadRequest(new { error = err });
         var s = await breaker.RecordFailureAsync(key, tc.TenantId);
         return Results.Ok(new
         {
@@ -99,6 +148,7 @@ public static class ProviderEndpoints
         [FromServices] ICircuitBreakerService breaker,
         [FromServices] ITenantContext tc)
     {
+        if (!IsValidProviderKey(key, out var err)) return Results.BadRequest(new { error = err });
         var s = await breaker.RecordSuccessAsync(key, tc.TenantId);
         return Results.Ok(new
         {
@@ -113,6 +163,7 @@ public static class ProviderEndpoints
         [FromServices] ICircuitBreakerService breaker,
         [FromServices] ITenantContext tc)
     {
+        if (!IsValidProviderKey(key, out var err)) return Results.BadRequest(new { error = err });
         var s = await breaker.ResetAsync(key, tc.TenantId);
         return Results.Ok(new
         {
@@ -232,23 +283,66 @@ public static class ProviderEndpoints
     }
 
     /// <summary>
-    /// Return a time-bucketed diagnostics report (<see cref="BucketSize.FiveMinutes"/>,
-    /// <see cref="BucketSize.Hour"/>, or <see cref="BucketSize.Day"/>) across the
-    /// half-open range <c>[from, to)</c>.
+    /// Return a diagnostics report. Two aggregation modes:
+    /// <list type="bullet">
+    ///   <item><c>?groupBy=provider|model|agentType</c> — per-dimension report
+    ///         (TS shape, restored by finding 009).</item>
+    ///   <item><c>?bucketSize=5m|hour|day</c> — time-bucketed report
+    ///         (current C# behaviour).</item>
+    /// </list>
+    /// If <c>groupBy</c> is supplied it takes precedence; otherwise the
+    /// time-bucketed report runs.
     /// </summary>
     public static async Task<IResult> GetReport(
         [FromServices] IDiagnosticsService service,
         [FromServices] ITenantContext tc,
         DateTime? from,
         DateTime? to,
-        string? bucketSize)
+        string? bucketSize,
+        string? groupBy)
     {
         var fromDt = from ?? DateTime.UtcNow.AddDays(-1);
         var toDt = to ?? DateTime.UtcNow;
-        var parsedBucket = ParseBucketSize(bucketSize, BucketSize.Hour);
 
+        if (!string.IsNullOrWhiteSpace(groupBy))
+        {
+            if (!TryParseGroupBy(groupBy, out var dim))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"Invalid groupBy value: {groupBy}. " +
+                            "Must be one of: provider, model, agentType",
+                });
+            }
+            var dimReport = await service.GetDimensionReportAsync(
+                tc.TenantId, fromDt, toDt, dim);
+            return Results.Ok(dimReport);
+        }
+
+        var parsedBucket = ParseBucketSize(bucketSize, BucketSize.Hour);
         var report = await service.GetReportAsync(tc.TenantId, fromDt, toDt, parsedBucket);
         return Results.Ok(report);
+    }
+
+    private static bool TryParseGroupBy(string raw, out DimensionGroup result)
+    {
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "provider":
+                result = DimensionGroup.Provider;
+                return true;
+            case "model":
+                result = DimensionGroup.Model;
+                return true;
+            case "agenttype":
+            case "agent_type":
+            case "agent-type":
+                result = DimensionGroup.AgentType;
+                return true;
+            default:
+                result = default;
+                return false;
+        }
     }
 
     /// <summary>
@@ -320,19 +414,70 @@ public static class ProviderEndpoints
         [FromServices] IDiagnosticsService service,
         [FromServices] ITenantContext tc)
     {
-        var diag = new ProviderDiagnostic
+        var id = await service.RecordEventAsync(MapDiagnostic(req, tc.TenantId));
+        return Results.Created($"/api/providers/diagnostics/{id}", new { id });
+    }
+
+    /// <summary>
+    /// Batch diagnostic ingest — accepts up to 100 records per call.
+    /// Mirrors the TS <c>POST /diagnostics</c> array shape (finding 010).
+    /// </summary>
+    public static async Task<IResult> IngestDiagnosticBatch(
+        IngestDiagnosticRequest[] reqs,
+        [FromServices] IDiagnosticsService service,
+        [FromServices] ITenantContext tc)
+    {
+        if (reqs is null || reqs.Length == 0)
+            return Results.BadRequest(new { error = "At least one diagnostics record is required" });
+        if (reqs.Length > 100)
+            return Results.BadRequest(new
+            {
+                error = $"Batch size {reqs.Length} exceeds max 100"
+            });
+
+        var ids = new List<Guid>(reqs.Length);
+        foreach (var req in reqs)
+        {
+            var id = await service.RecordEventAsync(MapDiagnostic(req, tc.TenantId));
+            ids.Add(id);
+        }
+        return Results.Created($"/api/providers/diagnostics/batch", new
+        {
+            recorded = ids.Count,
+            ids,
+        });
+    }
+
+    private static ProviderDiagnostic MapDiagnostic(IngestDiagnosticRequest req, Guid? tenantId)
+    {
+        // Default the input/output split: if caller only sent TokensUsed,
+        // attribute it all to input so per-token cost recomputation works.
+        var inputTok = req.InputTokens ?? (req.OutputTokens is null ? req.TokensUsed : 0);
+        var outputTok = req.OutputTokens ?? 0;
+
+        return new ProviderDiagnostic
         {
             ProviderKey = req.ProviderKey,
             RequestDurationMs = req.DurationMs,
             TokensUsed = req.TokensUsed,
+            InputTokens = inputTok,
+            OutputTokens = outputTok,
             Cost = req.Cost,
             Model = req.Model,
             Success = req.Success,
             ErrorMessage = req.Error,
-            TenantId = tc.TenantId
+            ErrorCode = req.ErrorCode,
+            CorrelationId = req.CorrelationId,
+            AgentType = req.AgentType,
+            ProjectId = req.ProjectId,
+            EngineId = req.EngineId,
+            TaskId = req.TaskId,
+            TaskType = req.TaskType,
+            // RequestType is the legacy field that mirrors EventType when
+            // the caller doesn't set it explicitly.
+            RequestType = req.EventType ?? req.TaskType,
+            TenantId = tenantId,
         };
-        var id = await service.RecordEventAsync(diag);
-        return Results.Created($"/api/providers/diagnostics/{id}", new { id });
     }
 
     private static BucketSize ParseBucketSize(string? raw, BucketSize fallback)

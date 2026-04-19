@@ -31,6 +31,18 @@ public interface IDiagnosticsService
         BucketSize bucketSize,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Build a per-dimension diagnostics report ("provider", "model",
+    /// "agentType") across the half-open range <c>[from, to)</c>. Restored
+    /// from TS <c>?groupBy=...</c> support — finding 009.
+    /// </summary>
+    Task<DimensionReport> GetDimensionReportAsync(
+        Guid? tenantId,
+        DateTime from,
+        DateTime to,
+        DimensionGroup groupBy,
+        CancellationToken ct = default);
+
     /// <summary>Compute current-period budget status for the given account (tenant).</summary>
     Task<BudgetStatus> GetBudgetAsync(Guid accountId, CancellationToken ct = default);
 

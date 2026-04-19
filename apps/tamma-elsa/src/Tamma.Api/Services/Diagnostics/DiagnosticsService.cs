@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -131,6 +132,92 @@ public sealed class DiagnosticsService : IDiagnosticsService
             TotalCalls: totalCalls,
             TotalCost: totalCost,
             OverallSuccessRate: overallRate);
+    }
+
+    /// <inheritdoc />
+    public async Task<DimensionReport> GetDimensionReportAsync(
+        Guid? tenantId,
+        DateTime from,
+        DateTime to,
+        DimensionGroup groupBy,
+        CancellationToken ct = default)
+    {
+        if (to <= from)
+        {
+            return new DimensionReport(from, to, groupBy, Array.Empty<DimensionBucket>());
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.TammaDbContext>();
+
+        var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+        var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
+
+        var query = db.ProviderDiagnostics
+            .Where(d => d.CreatedAt >= fromUtc && d.CreatedAt < toUtc);
+        if (tenantId.HasValue)
+        {
+            query = query.Where(d => d.TenantId == tenantId.Value);
+        }
+
+        // Group server-side and project to the bucket DTO. EF Core 8 supports
+        // GroupBy → Select aggregation translation against Postgres.
+        var grouped = groupBy switch
+        {
+            DimensionGroup.Provider => await query
+                .GroupBy(d => d.ProviderKey)
+                .Select(g => new
+                {
+                    Key = g.Key ?? "unknown",
+                    TotalCalls = (long)g.Count(),
+                    SuccessCount = (long)g.Count(d => d.Success),
+                    TotalCost = g.Sum(d => (decimal?)d.Cost) ?? 0m,
+                    TotalTokens = (long)(g.Sum(d => (int?)d.TokensUsed) ?? 0),
+                    AvgLatency = g.Average(d => (double?)d.RequestDurationMs) ?? 0.0,
+                })
+                .ToListAsync(ct),
+            DimensionGroup.Model => await query
+                .GroupBy(d => d.Model)
+                .Select(g => new
+                {
+                    Key = g.Key ?? "unknown",
+                    TotalCalls = (long)g.Count(),
+                    SuccessCount = (long)g.Count(d => d.Success),
+                    TotalCost = g.Sum(d => (decimal?)d.Cost) ?? 0m,
+                    TotalTokens = (long)(g.Sum(d => (int?)d.TokensUsed) ?? 0),
+                    AvgLatency = g.Average(d => (double?)d.RequestDurationMs) ?? 0.0,
+                })
+                .ToListAsync(ct),
+            DimensionGroup.AgentType => await query
+                .GroupBy(d => d.AgentType)
+                .Select(g => new
+                {
+                    Key = g.Key ?? "unknown",
+                    TotalCalls = (long)g.Count(),
+                    SuccessCount = (long)g.Count(d => d.Success),
+                    TotalCost = g.Sum(d => (decimal?)d.Cost) ?? 0m,
+                    TotalTokens = (long)(g.Sum(d => (int?)d.TokensUsed) ?? 0),
+                    AvgLatency = g.Average(d => (double?)d.RequestDurationMs) ?? 0.0,
+                })
+                .ToListAsync(ct),
+            _ => throw new ArgumentOutOfRangeException(nameof(groupBy), groupBy, null),
+        };
+
+        var buckets = grouped
+            .OrderByDescending(g => g.TotalCalls)
+            .Select(g => new DimensionBucket(
+                Key: g.Key,
+                TotalCalls: g.TotalCalls,
+                SuccessCount: g.SuccessCount,
+                ErrorRate: g.TotalCalls > 0
+                    ? 1.0 - ((double)g.SuccessCount / g.TotalCalls)
+                    : 0.0,
+                TotalCost: g.TotalCost,
+                TotalTokens: g.TotalTokens,
+                AvgLatencyMs: g.AvgLatency))
+            .ToList();
+
+        return new DimensionReport(from, to, groupBy, buckets);
     }
 
     /// <inheritdoc />

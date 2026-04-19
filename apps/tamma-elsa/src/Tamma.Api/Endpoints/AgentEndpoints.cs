@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Tamma.Api.Dtos.Agents;
 using Tamma.Api.Services.Agents;
+using Tamma.Api.Services.Security;
 using Tamma.Data;
 using Tamma.Data.Repositories;
 using Tamma.Data.Entities;
@@ -171,9 +173,19 @@ public static class AgentEndpoints
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Schema-level validation. Returns (valid, errors). Tolerant of empty
-    /// configs (those are valid — they simply fall through to platform
-    /// defaults during resolution).
+    /// Provider name regex from Story 9-1 AC 6 / TS validateAgentsConfig:
+    /// <c>^[a-z0-9][a-z0-9_-]{0,63}$</c>.
+    /// </summary>
+    private static readonly Regex ProviderNameRegex =
+        new("^[a-z0-9][a-z0-9_-]{0,63}$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Schema- AND semantic-level validation. Returns (valid, errors).
+    /// Tolerant of empty configs (valid — fall through to platform defaults).
+    /// Finding 014: enforces provider regex, budget range [0,100], ReDoS
+    /// guard on blockedCommandPatterns, maxFetchSizeBytes range [0, 1 GiB],
+    /// and prototype-pollution rejection on every key.
     /// </summary>
     private static (bool Valid, string[] Errors) ValidateConfigShape(string configJson)
     {
@@ -198,6 +210,7 @@ public static class AgentEndpoints
                 return (false, errors.ToArray());
             }
 
+            // ── Roles ────────────────────────────────────────────────────────
             if (root.TryGetProperty("roles", out var roles))
             {
                 if (roles.ValueKind != JsonValueKind.Object)
@@ -213,17 +226,198 @@ public static class AgentEndpoints
                         errors.Add($"Forbidden role key: '{prop.Name}'.");
                         continue;
                     }
-                    if (RolePhaseMap.ValidRoles.Contains(prop.Name)) continue;
-                    // Legacy TS role names — accept and document migration
-                    // path rather than 400-ing on existing rows. Finding 001.
-                    if (RolePhaseMap.LegacyRoleAliases.ContainsKey(prop.Name)) continue;
-                    errors.Add(
-                        $"Unknown role '{prop.Name}'. Valid: " +
-                        string.Join(", ", RolePhaseMap.ValidRoles) + ".");
+                    var roleKnown = RolePhaseMap.ValidRoles.Contains(prop.Name) ||
+                                    RolePhaseMap.LegacyRoleAliases.ContainsKey(prop.Name);
+                    if (!roleKnown)
+                    {
+                        errors.Add(
+                            $"Unknown role '{prop.Name}'. Valid: " +
+                            string.Join(", ", RolePhaseMap.ValidRoles) + ".");
+                        continue;
+                    }
+                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+
+                    ValidateRoleSemantics(prop.Name, prop.Value, errors);
                 }
+            }
+
+            // ── defaults.providerChain (legacy TS shape) ────────────────────
+            if (root.TryGetProperty("defaults", out var defaults) &&
+                defaults.ValueKind == JsonValueKind.Object &&
+                defaults.TryGetProperty("providerChain", out var defChain))
+            {
+                ValidateProviderChain("defaults.providerChain", defChain, errors);
+            }
+
+            // ── chains (canonical 2D shape) ─────────────────────────────────
+            if (root.TryGetProperty("chains", out var chains) &&
+                chains.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in chains.EnumerateObject())
+                {
+                    if (RolePhaseMap.ForbiddenKeys.Contains(prop.Name))
+                    {
+                        errors.Add($"Forbidden chain key: '{prop.Name}'.");
+                        continue;
+                    }
+                    if (prop.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        ValidateProviderChain($"chains.{prop.Name}", prop.Value, errors);
+                    }
+                    else if (prop.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var actionProp in prop.Value.EnumerateObject())
+                        {
+                            if (actionProp.Value.ValueKind != JsonValueKind.Array) continue;
+                            ValidateProviderChain(
+                                $"chains.{prop.Name}.{actionProp.Name}",
+                                actionProp.Value, errors);
+                        }
+                    }
+                }
+            }
+
+            // ── security branch (blockedCommandPatterns + maxFetchSizeBytes) ─
+            if (root.TryGetProperty("security", out var security) &&
+                security.ValueKind == JsonValueKind.Object)
+            {
+                ValidateSecurity(security, errors);
             }
         }
 
         return (errors.Count == 0, errors.ToArray());
+    }
+
+    private static void ValidateRoleSemantics(string role, JsonElement obj, List<string> errors)
+    {
+        // provider name regex
+        if (obj.TryGetProperty("provider", out var prov) &&
+            prov.ValueKind == JsonValueKind.String)
+        {
+            var name = prov.GetString() ?? string.Empty;
+            if (!ProviderNameRegex.IsMatch(name))
+            {
+                errors.Add(
+                    $"roles.{role}.provider '{name}' must match /^[a-z0-9][a-z0-9_-]{{0,63}}$/.");
+            }
+        }
+
+        // maxBudgetUsd range [0, 100], finite
+        if (obj.TryGetProperty("maxBudgetUsd", out var budget) &&
+            budget.ValueKind == JsonValueKind.Number)
+        {
+            if (!budget.TryGetDouble(out var budgetVal) || double.IsNaN(budgetVal) ||
+                double.IsInfinity(budgetVal))
+            {
+                errors.Add($"roles.{role}.maxBudgetUsd must be a finite number.");
+            }
+            else if (budgetVal < 0 || budgetVal > 100)
+            {
+                errors.Add($"roles.{role}.maxBudgetUsd must be in [0, 100] (got {budgetVal}).");
+            }
+        }
+
+        // permissionMode whitelist
+        if (obj.TryGetProperty("permissionMode", out var mode) &&
+            mode.ValueKind == JsonValueKind.String)
+        {
+            var modeVal = mode.GetString();
+            if (modeVal is not ("default" or "acceptEdits" or "bypassPermissions"))
+            {
+                errors.Add(
+                    $"roles.{role}.permissionMode must be one of " +
+                    "default | acceptEdits | bypassPermissions.");
+            }
+        }
+
+        // providerChain shape
+        if (obj.TryGetProperty("providerChain", out var chain) &&
+            chain.ValueKind == JsonValueKind.Array)
+        {
+            ValidateProviderChain($"roles.{role}.providerChain", chain, errors);
+        }
+    }
+
+    private static void ValidateProviderChain(string label, JsonElement arr, List<string> errors)
+    {
+        if (arr.GetArrayLength() == 0)
+        {
+            errors.Add($"{label}: chain must not be empty.");
+            return;
+        }
+        var i = 0;
+        foreach (var entry in arr.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object)
+            {
+                errors.Add($"{label}[{i}]: entry must be an object.");
+                i++;
+                continue;
+            }
+            if (!entry.TryGetProperty("provider", out var prov) ||
+                prov.ValueKind != JsonValueKind.String)
+            {
+                errors.Add($"{label}[{i}]: missing 'provider' string field.");
+                i++;
+                continue;
+            }
+            var name = prov.GetString() ?? string.Empty;
+            if (!ProviderNameRegex.IsMatch(name))
+            {
+                errors.Add(
+                    $"{label}[{i}].provider '{name}' must match " +
+                    "/^[a-z0-9][a-z0-9_-]{0,63}$/.");
+            }
+            i++;
+        }
+    }
+
+    private static void ValidateSecurity(JsonElement sec, List<string> errors)
+    {
+        if (sec.TryGetProperty("maxFetchSizeBytes", out var fetch))
+        {
+            if (fetch.ValueKind != JsonValueKind.Number ||
+                !fetch.TryGetInt64(out var bytes))
+            {
+                errors.Add("security.maxFetchSizeBytes must be a number.");
+            }
+            else if (bytes < 0 || bytes > 1L * 1024 * 1024 * 1024)
+            {
+                errors.Add(
+                    $"security.maxFetchSizeBytes must be in [0, 1 GiB] (got {bytes}).");
+            }
+        }
+
+        if (sec.TryGetProperty("blockedCommandPatterns", out var patterns) &&
+            patterns.ValueKind == JsonValueKind.Array)
+        {
+            if (patterns.GetArrayLength() > ReDosGuard.MaxPatternCount)
+            {
+                errors.Add(
+                    $"security.blockedCommandPatterns count {patterns.GetArrayLength()} " +
+                    $"exceeds max {ReDosGuard.MaxPatternCount}.");
+            }
+            var i = 0;
+            foreach (var entry in patterns.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.String)
+                {
+                    errors.Add($"security.blockedCommandPatterns[{i}]: must be a string.");
+                    i++;
+                    continue;
+                }
+                try
+                {
+                    ReDosGuard.Validate(
+                        $"security.blockedCommandPatterns[{i}]",
+                        entry.GetString() ?? string.Empty);
+                }
+                catch (ArgumentException ex)
+                {
+                    errors.Add(ex.Message);
+                }
+                i++;
+            }
+        }
     }
 }

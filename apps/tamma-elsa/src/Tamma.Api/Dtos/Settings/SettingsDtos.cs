@@ -24,6 +24,30 @@ public record SanitizeRequest(string Content);
 /// Selects which sanitisation pipeline to run — finding 006.</param>
 public record SanitizeEndpointRequest(string? Text, string? Content, string? Context, string? Direction = null);
 
-public record IngestDiagnosticRequest(string ProviderKey, double DurationMs, int TokensUsed, decimal Cost, string? Model, bool Success, string? Error);
+/// <summary>
+/// Single diagnostic event ingest payload. Restored fields (finding 008):
+/// <c>InputTokens</c>, <c>OutputTokens</c>, <c>EventType</c>, <c>AgentType</c>,
+/// <c>ProjectId</c>, <c>EngineId</c>, <c>TaskId</c>, <c>TaskType</c>,
+/// <c>CorrelationId</c>, <c>ErrorCode</c>. All optional so existing callers
+/// continue to work.
+/// </summary>
+public record IngestDiagnosticRequest(
+    string ProviderKey,
+    double DurationMs,
+    int TokensUsed,
+    decimal Cost,
+    string? Model,
+    bool Success,
+    string? Error,
+    int? InputTokens = null,
+    int? OutputTokens = null,
+    string? EventType = null,
+    string? AgentType = null,
+    string? ProjectId = null,
+    string? EngineId = null,
+    string? TaskId = null,
+    string? TaskType = null,
+    Guid? CorrelationId = null,
+    string? ErrorCode = null);
 public record CreateProviderRequest(string Type, object Config);
 public record ExecuteProviderRequest(object[] Messages, object? Options);

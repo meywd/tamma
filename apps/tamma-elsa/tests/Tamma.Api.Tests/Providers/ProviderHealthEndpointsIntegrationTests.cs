@@ -161,10 +161,18 @@ public class ProviderHealthEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task GetProviderHealth_UnknownKey_Returns404()
+    public async Task GetProviderHealth_UnknownKey_ReturnsHealthyTwoHundred()
     {
+        // Finding 012 — TS GET /health/providers/:key returned 200 with a
+        // synthesized healthy body for unseen keys so dashboards can poll
+        // without branching. C# now matches.
         var resp = await _client.GetAsync("/api/providers/health/providers/nonexistent-provider");
-        resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await resp.Content.ReadFromJsonAsync<JsonDocument>();
+        body!.RootElement.GetProperty("state").GetString().Should().Be("Closed");
+        body.RootElement.GetProperty("failureCount").GetInt32().Should().Be(0);
+        body.RootElement.GetProperty("healthy").GetBoolean().Should().BeTrue();
     }
 
     [Test]

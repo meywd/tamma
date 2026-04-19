@@ -123,3 +123,42 @@ public sealed record BudgetStatus(
     double AlertThreshold,
     bool ShouldAlert,
     bool IsOverBudget);
+
+/// <summary>
+/// Aggregation axis for <see cref="IDiagnosticsService.GetDimensionReportAsync"/>.
+/// Finding 009.
+/// </summary>
+public enum DimensionGroup
+{
+    /// <summary>Group by ProviderKey.</summary>
+    Provider,
+    /// <summary>Group by Model.</summary>
+    Model,
+    /// <summary>Group by AgentType (developer / tester / …).</summary>
+    AgentType,
+}
+
+/// <summary>One row of the per-dimension diagnostics report.</summary>
+/// <param name="Key">The grouping value (e.g. "anthropic", "claude-sonnet-4",
+/// "developer"). <c>"unknown"</c> when the column is null.</param>
+/// <param name="TotalCalls">Number of diagnostics rows in the bucket.</param>
+/// <param name="SuccessCount">Subset where <c>Success == true</c>.</param>
+/// <param name="ErrorRate">Fraction (0..1) of calls that failed.</param>
+/// <param name="TotalCost">Sum of <c>Cost</c> for the bucket (USD).</param>
+/// <param name="TotalTokens">Sum of <c>TokensUsed</c>.</param>
+/// <param name="AvgLatencyMs">Average <c>RequestDurationMs</c>.</param>
+public sealed record DimensionBucket(
+    string Key,
+    long TotalCalls,
+    long SuccessCount,
+    double ErrorRate,
+    decimal TotalCost,
+    long TotalTokens,
+    double AvgLatencyMs);
+
+/// <summary>Full per-dimension report.</summary>
+public sealed record DimensionReport(
+    DateTime From,
+    DateTime To,
+    DimensionGroup GroupBy,
+    IReadOnlyList<DimensionBucket> Groups);
