@@ -210,6 +210,19 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
+            // Cranl per-tenant provisioning columns (audit cranl/001).
+            // String enum (lower_snake_case) keeps psql-grep friendly; the
+            // ProvisioningState helpers parse/format around the string.
+            entity.Property(e => e.ProvisioningState)
+                .IsRequired().HasMaxLength(40).HasDefaultValue("none");
+            entity.Property(e => e.CranlProjectId).HasMaxLength(255);
+            entity.Property(e => e.CranlDatabaseId).HasMaxLength(255);
+            entity.Property(e => e.CranlAppId).HasMaxLength(255);
+            entity.Property(e => e.CranlRegion).HasMaxLength(100);
+            entity.Property(e => e.CranlAppUrl).HasMaxLength(255);
+            entity.Property(e => e.CranlDatabaseUrlEncrypted).HasColumnType("bytea");
+            // ProvisioningDetail intentionally untyped — free-form diagnostic.
+
             entity.HasIndex(e => e.Slug).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.ExternalId).IsUnique().HasFilter("\"ExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
 
