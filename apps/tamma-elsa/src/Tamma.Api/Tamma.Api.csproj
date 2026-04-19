@@ -34,6 +34,11 @@
          required by GitHub Actions secrets (audit: github 013). -->
     <PackageReference Include="Octokit" Version="14.0.0" />
     <PackageReference Include="Sodium.Core" Version="1.4.0" />
+    <!-- Distributed rate limiting (audit finding auth/014 follow-up). The
+         RateLimitService is in-process by default; when
+         ConnectionStrings:Redis is configured, the Redis-backed backend
+         kicks in so multi-pod deployments share a window counter. -->
+    <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
   </ItemGroup>
 
   <ItemGroup>

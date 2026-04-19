@@ -22,6 +22,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <!-- Testcontainers.Redis for the distributed rate-limit backend tests
+         (audit finding auth/014 follow-up). Same family as the Postgres
+         container used by the Phase-3 fixtures. -->
+    <PackageReference Include="Testcontainers.Redis" Version="3.10.0" />
     <PackageReference Include="Respawn" Version="6.2.1" />
     <PackageReference Include="Npgsql" Version="8.0.3" />
     <PackageReference Include="coverlet.collector" Version="6.0.0">

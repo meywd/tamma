@@ -220,8 +220,24 @@ builder.Services.AddScoped<ISessionCookieWriter, SessionCookieWriter>();
 // Path-tenant gate: every /api/v1/orgs/{tenantId}/* endpoint runs this
 // filter to verify caller membership (findings 001, 024).
 builder.Services.AddScoped<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Audit finding auth/014 follow-up — distributed rate-limit backend.
+// ConnectionStrings:Redis present → Redis-backed (multi-pod safe);
+// absent → in-process (single-pod default, matches pre-Redis behaviour).
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(_ =>
+        StackExchange.Redis.ConnectionMultiplexer.Connect(redisConnectionString));
+    builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IDistributedRateLimitBackend,
+        Tamma.Api.Services.RateLimit.RedisDistributedRateLimitBackend>();
+}
+else
+{
+    builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IDistributedRateLimitBackend,
+        Tamma.Api.Services.RateLimit.InMemoryDistributedRateLimitBackend>();
+}
 builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
-    Tamma.Api.Services.RateLimit.InMemoryRateLimitService>();
+    Tamma.Api.Services.RateLimit.RateLimitService>();
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();

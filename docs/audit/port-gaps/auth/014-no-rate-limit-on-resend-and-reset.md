@@ -147,6 +147,6 @@ AC 8 is explicit.
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Fixed
-- **Commit**: `e56b04d`
-- **Notes**: InMemoryRateLimitService (sliding window, 3/hour/email) is wired into ResendVerification (`resend-verification` scope) and PasswordResetRequest (`password-reset-request` scope). Quota only consumes on successful work to keep enumeration-safe.
+- **Outcome**: Fixed (incl. distributed backend for multi-pod)
+- **Commit**: `e56b04d` (initial in-process impl); distributed backend in a follow-up commit.
+- **Notes**: `RateLimitService` (3/hour/email) is wired into ResendVerification (`resend-verification` scope) and PasswordResetRequest (`password-reset-request` scope). Quota only consumes on successful work to keep enumeration-safe. **Distributed backend**: `IDistributedRateLimitBackend` abstraction with two impls — `InMemoryDistributedRateLimitBackend` (default, sliding window, exact semantics) and `RedisDistributedRateLimitBackend` (multi-pod, StackExchange.Redis 2.12.14, atomic Lua INCR+EXPIRE script). DI picks Redis when `ConnectionStrings:Redis` is configured, otherwise falls through to the in-process impl. Behavioral contract tests cover both backends (Redis tests use Testcontainers). Valkey-compatible since the protocol is unchanged.
