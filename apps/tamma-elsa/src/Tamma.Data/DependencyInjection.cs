@@ -114,6 +114,7 @@ public static class DependencyInjection
         services.AddScoped<ISanitizationRepository, SanitizationRepository>();
         services.AddScoped<IWorkflowRepository, WorkflowRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
+        services.AddScoped<IBudgetConfigRepository, BudgetConfigRepository>();
 
         return services;
     }

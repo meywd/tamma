@@ -7,6 +7,7 @@ using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using BudgetConfig = Tamma.Api.Services.Diagnostics.Models.BudgetConfig;
 
 namespace Tamma.Api.Tests.Diagnostics;
 

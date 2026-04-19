@@ -922,7 +922,7 @@ using (var scope = app.Services.CreateScope())
             Log.Information("Wiping Tamma-managed public-schema tables (TAMMA_PRESERVE_DB not set)");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
-                    api_keys, agent_configs, domain_events,
+                    api_keys, agent_configs, budget_configs, domain_events,
                     email_outbox,
                     github_installation_repos, github_installations,
                     github_webhook_deliveries,

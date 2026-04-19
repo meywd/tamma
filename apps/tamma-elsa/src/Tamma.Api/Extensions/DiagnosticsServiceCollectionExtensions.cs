@@ -23,8 +23,25 @@ public static class DiagnosticsServiceCollectionExtensions
     {
         // Resolve IConfiguration through DI so the budget provider can pick up
         // Budget:LimitUsd / Budget:AlertThreshold / Budget:PeriodDays at startup
-        // (finding 005). Per-tenant overrides land via SetConfig from the
-        // PUT /api/providers/budget/{tenantId} endpoint.
+        // (finding 005). Overrides live in the `budget_configs` Postgres table
+        // (finding 005 follow-up): the provider writes straight to the DB and
+        // keeps a short-TTL in-memory cache to shield the read path.
+        services.AddSingleton<IBudgetConfigProvider>(sp =>
+            new PostgresBudgetConfigProvider(
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetService<IConfiguration>()));
+        services.AddSingleton<IDiagnosticsService, DiagnosticsService>();
+        return services;
+    }
+
+    /// <summary>
+    /// Test-only registration that swaps in the pre-persistence in-memory
+    /// provider. Integration tests that don't want a Postgres round-trip per
+    /// <c>GetConfig</c> call (e.g. isolated endpoint tests) call this
+    /// instead of <see cref="AddDiagnosticsServices"/>.
+    /// </summary>
+    public static IServiceCollection AddInMemoryDiagnosticsServices(this IServiceCollection services)
+    {
         services.AddSingleton<IBudgetConfigProvider>(sp =>
             new InMemoryBudgetConfigProvider(sp.GetService<IConfiguration>()));
         services.AddSingleton<IDiagnosticsService, DiagnosticsService>();

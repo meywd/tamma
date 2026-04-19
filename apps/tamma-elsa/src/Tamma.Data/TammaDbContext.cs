@@ -102,6 +102,7 @@ public class TammaDbContext : DbContext
     public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
     public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
+    public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -640,6 +641,39 @@ public class TammaDbContext : DbContext
             {
                 entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
             }
+        });
+
+        // ── BudgetConfig ──
+        // Per-tenant budget caps (audit providers/005 follow-up). Natural key
+        // is (TenantId, AccountId); TenantId=NULL carries the platform
+        // default (same partial-unique pattern as agent_configs /
+        // sanitization_rules).
+        modelBuilder.Entity<BudgetConfig>(entity =>
+        {
+            entity.ToTable("budget_configs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.AccountId).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.LimitUsd).HasPrecision(18, 6);
+            entity.Property(e => e.AlertThreshold).HasDefaultValue(0.8);
+            entity.Property(e => e.PeriodDays).HasDefaultValue(30);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Partial unique indexes mirror the agent_configs split so (a)
+            // exactly one NULL-tenant default row can exist, and (b) each
+            // non-null tenant can hold one row per accountId.
+            entity.HasIndex(e => new { e.TenantId, e.AccountId })
+                .IsUnique()
+                .HasFilter("\"TenantId\" IS NOT NULL");
+            entity.HasIndex(e => e.AccountId)
+                .IsUnique()
+                .HasDatabaseName("ix_budget_configs_accountid_default")
+                .HasFilter("\"TenantId\" IS NULL");
+
+            // No query filter — the provider resolves both tenant-specific
+            // and platform-default rows explicitly. Tenant isolation is
+            // enforced at the repository layer (select by TenantId).
         });
 
         // ── EmailOutboxMessage ──
