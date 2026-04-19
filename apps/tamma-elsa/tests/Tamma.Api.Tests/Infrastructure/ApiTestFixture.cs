@@ -50,8 +50,20 @@ public class ApiTestFixture
         // late. The reliable override for .NET 8 minimal APIs is an env var
         // (double-underscore path syntax), which is loaded automatically by
         // the default configuration sources during CreateBuilder.
+        // Phase-3 added TammaDb / TammaAppDb as the primary lookup keys in
+        // Program.cs. appsettings.json ships with a stale localhost default
+        // for TammaDb (empty password), so clearing the env var lets the
+        // appsettings layer take over and we fail to auth. Instead, point
+        // ALL three keys explicitly at our container so Program.cs resolves
+        // the same connection whichever key it reads. TammaAppDb falls
+        // through to the admin connection in AddTammaData when empty, which
+        // is what we want — tests don't exercise the tamma_app role on this
+        // fixture.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
 
         // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of

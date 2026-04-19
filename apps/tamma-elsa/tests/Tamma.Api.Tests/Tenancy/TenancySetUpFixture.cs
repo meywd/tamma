@@ -74,13 +74,17 @@ public class TenancySetUpFixture
         };
         AppConnectionString = appBuilder.ToString();
 
+        // NOTE: we intentionally do NOT touch ConnectionStrings__DefaultConnection
+        // here — that env var drives the shared ApiTestFixture's WebApplication
+        // factory, and clobbering it causes sibling test fixtures (Orgs, Auth,
+        // Diagnostics) to fail-authenticate against OUR container when test
+        // runners dispatch both suites in the same process. The Tenancy fixture
+        // builds its own factory, which reads the dedicated TammaDb / TammaAppDb
+        // connection strings via Program.cs's Phase-3 lookup chain.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb", AdminConnectionString);
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaAppDb", AppConnectionString);
-        // Keep legacy key populated for code paths that still read it.
-        Environment.SetEnvironmentVariable(
-            "ConnectionStrings__DefaultConnection", AdminConnectionString);
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
 
@@ -142,16 +146,23 @@ public class TenancySetUpFixture
         if (Postgres is not null)
             await Postgres.DisposeAsync();
 
-        // Restore env var to the root ApiTestFixture so sibling suites can
-        // resolve their connections afterwards.
+        // Restore Phase-3 env vars to the parent ApiTestFixture's container
+        // so sibling fixtures that build their factories after us don't pick
+        // up appsettings.json's stale localhost default (empty password →
+        // 28P01 auth failure). ApiTestFixture.Postgres lives for the entire
+        // assembly, so its connection string is the safe fallback.
         if (ApiTestFixture.Postgres is not null)
         {
             Environment.SetEnvironmentVariable(
-                "ConnectionStrings__DefaultConnection",
-                ApiTestFixture.Postgres.GetConnectionString());
+                "ConnectionStrings__TammaDb", ApiTestFixture.Postgres.GetConnectionString());
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__TammaAppDb", "");
         }
-        Environment.SetEnvironmentVariable("ConnectionStrings__TammaDb", null);
-        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", null);
+        else
+        {
+            Environment.SetEnvironmentVariable("ConnectionStrings__TammaDb", null);
+            Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", null);
+        }
     }
 
     public static async Task ResetDatabaseAsync()

@@ -49,8 +49,15 @@ public class ProviderSessionSetUpFixture
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // Phase-3: point both DefaultConnection and TammaDb at our container.
+        // Clearing TammaDb would let appsettings.json's stale localhost
+        // default win. Empty TammaAppDb → AddTammaData falls through to the
+        // admin connection.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
         Environment.SetEnvironmentVariable("Jwt__Issuer", null);
@@ -80,13 +87,19 @@ public class ProviderSessionSetUpFixture
         if (Postgres is not null)
             await Postgres.DisposeAsync();
 
-        // Restore the shared ApiTestFixture's connection string so sibling
-        // namespaces that run after us can still resolve their database.
+        // Restore the shared ApiTestFixture's connection strings (all three
+        // Phase-3 keys) so sibling namespaces that run after us can still
+        // resolve their database against the parent container.
         if (ApiTestFixture.Postgres is not null)
         {
             Environment.SetEnvironmentVariable(
                 "ConnectionStrings__DefaultConnection",
                 ApiTestFixture.Postgres.GetConnectionString());
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__TammaDb",
+                ApiTestFixture.Postgres.GetConnectionString());
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__TammaAppDb", "");
         }
     }
 

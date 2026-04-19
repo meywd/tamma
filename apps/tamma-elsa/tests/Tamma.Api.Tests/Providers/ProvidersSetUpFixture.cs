@@ -52,8 +52,15 @@ public class ProvidersSetUpFixture
         // configuration chain, so set the connection string there rather
         // than relying on ConfigureAppConfiguration which Program.cs happens
         // to read before our overrides can layer on top.
+        // Phase-3: point both DefaultConnection and TammaDb at our container.
+        // Clearing TammaDb would let appsettings.json's stale localhost
+        // default win. Empty TammaAppDb → AddTammaData falls through to the
+        // admin connection.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         // Intentionally leave Jwt:Secret unset so Program.cs takes the
         // Development-mode branch that registers permissive policies.
@@ -86,14 +93,21 @@ public class ProvidersSetUpFixture
         if (Postgres is not null)
             await Postgres.DisposeAsync();
 
-        // Restore the env var to the root ApiTestFixture's container so
+        // Restore the env vars to the root ApiTestFixture's container so
         // sibling-namespace tests running after us can still resolve their
-        // connection string.
+        // connection string. All three Phase-3 keys must be restored —
+        // Program.cs reads TammaDb first, so leaving it null would let
+        // appsettings.json's stale localhost default take over.
         if (ApiTestFixture.Postgres is not null)
         {
             Environment.SetEnvironmentVariable(
                 "ConnectionStrings__DefaultConnection",
                 ApiTestFixture.Postgres.GetConnectionString());
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__TammaDb",
+                ApiTestFixture.Postgres.GetConnectionString());
+            Environment.SetEnvironmentVariable(
+                "ConnectionStrings__TammaAppDb", "");
         }
     }
 
