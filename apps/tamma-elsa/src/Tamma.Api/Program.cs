@@ -166,11 +166,37 @@ builder.Services.AddHttpClient("github", client =>
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 });
 
+// ────────────────────────────────────────────────────────────────────────────
 // Database + repositories (via extension method)
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' is not configured.");
+//
+// Phase-3 dual-connection-string architecture:
+//   - TammaDb        → admin / migrations / background services (superuser)
+//   - TammaAppDb     → per-request runtime, role=tamma_app, RLS-enforced
+//
+// For backward compat with pre-Phase-3 configs, `DefaultConnection` still
+// works: it's treated as the admin string when TammaDb isn't set. If
+// TammaAppDb is absent, it falls through to the admin connection with a
+// warning — dev-mode single-role Postgres continues to function, but
+// production must set TammaAppDb explicitly (see the Phase-3 runbook).
+// ────────────────────────────────────────────────────────────────────────────
+var connectionString = builder.Configuration.GetConnectionString("TammaDb")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "No admin database connection configured. Set ConnectionStrings:TammaDb "
+        + "(or the legacy ConnectionStrings:DefaultConnection).");
 
-builder.Services.AddTammaData(connectionString);
+var appConnectionString = builder.Configuration.GetConnectionString("TammaAppDb");
+if (string.IsNullOrWhiteSpace(appConnectionString))
+{
+    Log.Warning(
+        "ConnectionStrings:TammaAppDb is not configured — falling back to the "
+        + "admin connection for per-request DbContexts. RLS will be inactive "
+        + "until the app-role connection is wired (see Phase-3 runbook). "
+        + "This is expected for local development; production deployments "
+        + "must set this explicitly.");
+}
+
+builder.Services.AddTammaData(connectionString, appConnectionString);
 
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();

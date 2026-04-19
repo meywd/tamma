@@ -20,6 +20,41 @@ public class TammaDbContext : DbContext
         _tenantContext = tenantContext;
     }
 
+    /// <summary>
+    /// Constructor used by subclasses that want to project their own typed
+    /// <see cref="DbContextOptions{T}"/> onto this base. EF Core dispatches
+    /// by runtime context type, so the subclass carries its own model
+    /// cache and OnModelCreating can behave differently (notably: enable
+    /// fail-closed tenant query filters).
+    /// </summary>
+    protected TammaDbContext(DbContextOptions options)
+        : base(options)
+    {
+    }
+
+    protected TammaDbContext(DbContextOptions options, ITenantContext tenantContext)
+        : base(options)
+    {
+        _tenantContext = tenantContext;
+    }
+
+    /// <summary>
+    /// When <c>true</c>, tenant-scoped <c>HasQueryFilter</c> calls emit
+    /// <c>TenantId == _tenantContext.TenantId</c> (fail-closed: a null
+    /// tenant context returns zero rows — the correct TS-parity
+    /// behavior). When <c>false</c>, filters use the legacy permissive
+    /// form (<c>tenantId == null || TenantId == tenantId</c>) so admin
+    /// paths that deliberately read cross-tenant (migrations, task queue,
+    /// outbox, workflow sync) continue to work without touching every
+    /// repository call site.
+    ///
+    /// <para>The base class (admin) returns <c>false</c>. The
+    /// <see cref="TammaAppDbContext"/> subclass overrides to <c>true</c>.
+    /// This closes finding orgs/002 by making the per-request runtime
+    /// path fail-closed while preserving admin escape hatches.</para>
+    /// </summary>
+    protected virtual bool EnforceTenantFilter => false;
+
     // Existing mentorship entities
     public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
     public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
@@ -82,9 +117,21 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => e.GitHubId).IsUnique().HasFilter("\"GitHubId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.TenantId);
 
-            // Soft delete + tenant isolation filter
+            // Soft delete + tenant isolation filter.
+            //
+            // Fail-closed (app-role context): null tenant returns zero rows.
+            // Permissive (admin/base context): null tenant returns ALL rows
+            // so background services + migrations keep working without
+            // manual .IgnoreQueryFilters() at every call site.
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => e.DeletedAt == null && (tenantId == null || e.TenantId == tenantId));
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.DeletedAt == null && e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => e.DeletedAt == null && (tenantId == null || e.TenantId == tenantId));
+            }
         });
 
         // ── RefreshToken ──
@@ -289,7 +336,14 @@ public class TammaDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── PromptOverride ──
@@ -309,7 +363,14 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── ProviderHealth ──
@@ -330,7 +391,14 @@ public class TammaDbContext : DbContext
                 .HasFilter("\"TenantId\" IS NOT NULL");
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── ProviderDiagnostic ──
@@ -362,7 +430,14 @@ public class TammaDbContext : DbContext
             // query-filter layer.
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── SanitizationRule ──
@@ -385,7 +460,14 @@ public class TammaDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── WorkflowDefinition ──
@@ -404,7 +486,14 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => e.TenantId);
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── WorkflowInstance ──
@@ -431,7 +520,14 @@ public class TammaDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── QueuedTask ──
@@ -479,7 +575,14 @@ public class TammaDbContext : DbContext
                 .HasFilter("\"IssueNumber\" IS NOT NULL");
 
             var tenantId = _tenantContext?.TenantId;
-            entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            if (EnforceTenantFilter)
+            {
+                entity.HasQueryFilter(e => e.TenantId == tenantId);
+            }
+            else
+            {
+                entity.HasQueryFilter(e => tenantId == null || e.TenantId == tenantId);
+            }
         });
 
         // ── EmailOutboxMessage ──
