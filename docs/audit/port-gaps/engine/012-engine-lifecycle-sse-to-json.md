@@ -175,16 +175,41 @@ For a user clicking "Stop engine" in the dashboard:
 ## Remediation status
 
 - **Confirmed**: 2026-04-18 by agent
-- **Outcome**: Partial / Deferred
-- **Commit**: ff581af
-- **Notes**: `/api/engine/events/state` and `/api/engine/events/logs` now
-  emit a single `text/event-stream`-shaped frame
-  (`event: {state|log}\ndata: {...}\n\n`). Browser/EventSource clients
-  parse one tick instead of failing content negotiation, but live
-  streaming + lifecycle command dispatch require porting the
-  `TammaEngine` abstraction (no engine exists in C# today; the
-  endpoints are still event-store shims for the rest). Marked TODO in
-  source. Full remediation: epic-10/story-10-1 (TammaEngine port) plus
-  finding 013 (engine registry). Rebuilding lifecycle from scratch is
-  out of scope for this sprint — would block on the wholesale agent /
-  provider port.
+- **Outcome**: Fixed (SSE streaming); command-dispatch scope deferred
+- **Commit**: 57b2e66 (feat), a89ea16 (tests)
+- **Notes**: Replaced the single-frame scaffold with a real continuous
+  SSE stream backed by an in-process `IEngineLifecycleBus`
+  (`apps/tamma-elsa/src/Tamma.Api/Services/Engine/Lifecycle/`). Dashboard
+  `EventSource` clients now receive live frames as workflow / task /
+  engine-registry state changes.
+
+  Wiring:
+  - `WorkflowLifecycleService.UpdateStatusAsync` / `RecordResultAsync`
+    fan `workflow.{status}` frames on the bus (tenant-scoped).
+  - `TaskQueueProcessor` publishes `task.claimed` / `task.completed` /
+    `task.failed` around each claimed row.
+  - `EngineRegistryHeartbeatService` (hosted) snapshots
+    `IEngineRegistry` every 30s and publishes `engine.heartbeat`.
+  - SSE endpoints stream `text/event-stream` with an immediate snapshot
+    frame, 15s keep-alive comments (configurable via
+    `EngineLifecycle:HeartbeatInterval`), and cancellation tied to
+    `HttpContext.RequestAborted` so client disconnects drain the
+    subscription. Tenant filter enforces finding-016 scoping: events
+    whose `TenantId` doesn't match the caller never reach the wire.
+  - 15 new tests (unit + HTTP-level WebApplicationFactory) prove
+    tenant isolation, filter semantics for the logs variant, subscriber
+    cleanup on disconnect, and publisher wiring.
+
+  Remaining scope (carved out):
+  - `/api/engine/command` still returns "Command accepted" with no
+    dispatch — needs the real `TammaEngine` abstraction (epic-10/
+    story-10-1) which is out of scope for this sprint. The SSE
+    stream's existence means the dashboard live tile is no longer
+    broken even though commands remain no-ops.
+  - Multi-pod deployments: the bus is process-local. Cross-pod fanout
+    requires Redis pub/sub or Postgres `LISTEN/NOTIFY` bridged to
+    `domain_events` inserts once the wholesale engine port lands.
+    Documented in `IEngineLifecycleBus` XML docs.
+  - Explicit `engine.registered` / `engine.deregistered` events are
+    synthetic (heartbeat-only) until the real `TammaEngine` abstraction
+    ports register/dispose lifecycle semantics.
