@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -210,6 +211,43 @@ builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)
 builder.Services.AddControllers();
+
+// Rate limiting (finding 020). Per-IP token-bucket with named policies for
+// settings/provider/agent endpoints. TS used @fastify/rate-limit at 100/min
+// read, 30/min write; we mirror those defaults.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = 429;
+
+    options.AddFixedWindowLimiter("ConfigRead", o =>
+    {
+        o.PermitLimit = 100;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("ConfigWrite", o =>
+    {
+        o.PermitLimit = 30;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("ProviderIngest", o =>
+    {
+        o.PermitLimit = 500;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("ProviderExecute", o =>
+    {
+        o.PermitLimit = 50;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+});
 
 // CORS
 builder.Services.AddCors(options =>
@@ -423,6 +461,7 @@ app.UseCors("AllowDashboard");
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.UseMiddleware<TenantContextMiddleware>();
 app.UseMiddleware<EnsurePersonalTenantMiddleware>();
 
@@ -534,9 +573,15 @@ orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
 
 // ── Agents Config ──
-var agents = app.MapGroup("/api/v1/agents").RequireAuthorization("SettingsView");
+// Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
+// override on the PUT.
+var agents = app.MapGroup("/api/v1/agents")
+    .RequireAuthorization("SettingsView")
+    .RequireRateLimiting("ConfigRead");
 agents.MapGet("/config", AgentEndpoints.GetConfig);
-agents.MapPut("/config", AgentEndpoints.UpdateConfig).RequireAuthorization("SettingsManage");
+agents.MapPut("/config", AgentEndpoints.UpdateConfig)
+    .RequireAuthorization("SettingsManage")
+    .RequireRateLimiting("ConfigWrite");
 agents.MapPost("/config/validate", AgentEndpoints.ValidateConfig);
 agents.MapGet("/{role}/resolve", AgentEndpoints.ResolveAgent);
 agents.MapPost("/resolve-for-phase", AgentEndpoints.ResolveForPhase);
@@ -558,37 +603,60 @@ app.MapGet("/api/convention-templates", ConventionEndpoints.ListAll);
 app.MapGet("/api/convention-templates/{key}", ConventionEndpoints.GetByKey);
 
 // ── Settings / Config ──
-var config = app.MapGroup("/api/config").RequireAuthorization("SettingsView");
+// Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
+// override on each write surface. Sanitize is a runtime POST and shares the
+// write quota since it can be expensive to run hot.
+var config = app.MapGroup("/api/config")
+    .RequireAuthorization("SettingsView")
+    .RequireRateLimiting("ConfigRead");
 config.MapGet("/agents", SettingsEndpoints.GetAgentsConfig);
-config.MapPut("/agents", SettingsEndpoints.UpdateAgentsConfig).RequireAuthorization("SettingsManage");
+config.MapPut("/agents", SettingsEndpoints.UpdateAgentsConfig)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 config.MapGet("/security", SettingsEndpoints.GetSecurityConfig);
-config.MapPut("/security", SettingsEndpoints.UpdateSecurityConfig).RequireAuthorization("SettingsManage");
-config.MapPost("/sanitize", SettingsEndpoints.Sanitize).RequireAuthorization("SettingsManage");
+config.MapPut("/security", SettingsEndpoints.UpdateSecurityConfig)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
+config.MapPost("/sanitize", SettingsEndpoints.Sanitize)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 config.MapGet("/sanitize/rules", SettingsEndpoints.GetSanitizationRules);
-config.MapPut("/sanitize/rules", SettingsEndpoints.UpdateSanitizationRules).RequireAuthorization("SettingsManage");
+config.MapPut("/sanitize/rules", SettingsEndpoints.UpdateSanitizationRules)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 config.MapGet("/prompts", SettingsEndpoints.GetPromptsConfig);
-config.MapPut("/prompts/{role}", SettingsEndpoints.UpdatePromptsConfig).RequireAuthorization("SettingsManage");
+config.MapPut("/prompts/{role}", SettingsEndpoints.UpdatePromptsConfig)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 config.MapGet("/providers", SettingsEndpoints.GetProvidersConfig);
-config.MapPut("/providers", SettingsEndpoints.UpdateProvidersConfig).RequireAuthorization("SettingsManage");
+config.MapPut("/providers", SettingsEndpoints.UpdateProvidersConfig)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 
 // ── Providers ──
-var providers = app.MapGroup("/api/providers").RequireAuthorization("SettingsView");
+// Rate limit (finding 020): ConfigRead for the group; per-route policies on
+// ingest (high-volume from Elsa workers) and execute (expensive).
+var providers = app.MapGroup("/api/providers")
+    .RequireAuthorization("SettingsView")
+    .RequireRateLimiting("ConfigRead");
 providers.MapGet("/health", ProviderEndpoints.GetHealthSummary);
 providers.MapGet("/health/providers", ProviderEndpoints.ListProviderHealth);
 providers.MapGet("/health/providers/{key}", ProviderEndpoints.GetProviderHealth);
-providers.MapPost("/health/providers/{key}/failure", ProviderEndpoints.RecordFailure).RequireAuthorization("SettingsManage");
-providers.MapPost("/health/providers/{key}/success", ProviderEndpoints.RecordSuccess).RequireAuthorization("SettingsManage");
-providers.MapPost("/health/providers/{key}/reset", ProviderEndpoints.ResetProvider).RequireAuthorization("SettingsManage");
+providers.MapPost("/health/providers/{key}/failure", ProviderEndpoints.RecordFailure)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
+providers.MapPost("/health/providers/{key}/success", ProviderEndpoints.RecordSuccess)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
+providers.MapPost("/health/providers/{key}/reset", ProviderEndpoints.ResetProvider)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 providers.MapPost("/chain/resolve", ProviderEndpoints.ResolveChain);
 providers.MapGet("/diagnostics", ProviderEndpoints.GetDiagnostics);
 providers.MapGet("/diagnostics/query", ProviderEndpoints.QueryDiagnostics);
 providers.MapGet("/diagnostics/report", ProviderEndpoints.GetReport);
 providers.MapGet("/diagnostics/budget/{accountId}", ProviderEndpoints.GetBudget);
-providers.MapPut("/diagnostics/budget/{accountId}", ProviderEndpoints.UpdateBudget).RequireAuthorization("SettingsManage");
-providers.MapPost("/diagnostics", ProviderEndpoints.IngestDiagnostic).RequireAuthorization("SettingsManage");
-providers.MapPost("/providers/create", ProviderEndpoints.CreateProvider).RequireAuthorization("SettingsManage");
-providers.MapPost("/providers/{handle}/execute", ProviderEndpoints.ExecuteProvider).RequireAuthorization("SettingsManage");
-providers.MapDelete("/providers/{handle}", ProviderEndpoints.DeleteProvider).RequireAuthorization("SettingsManage");
+providers.MapPut("/diagnostics/budget/{accountId}", ProviderEndpoints.UpdateBudget)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
+providers.MapPost("/diagnostics", ProviderEndpoints.IngestDiagnostic)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderIngest");
+providers.MapPost("/providers/create", ProviderEndpoints.CreateProvider)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderExecute");
+providers.MapPost("/providers/{handle}/execute", ProviderEndpoints.ExecuteProvider)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ProviderExecute");
+providers.MapDelete("/providers/{handle}", ProviderEndpoints.DeleteProvider)
+    .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");
 providers.MapGet("/providers/sessions", ProviderEndpoints.ListSessions);
 
 // ── Engine ──

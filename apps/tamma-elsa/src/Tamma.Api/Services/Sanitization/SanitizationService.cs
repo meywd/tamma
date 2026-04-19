@@ -43,6 +43,7 @@ public sealed class SanitizationService : ISanitizationService
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(100);
 
     private readonly ISanitizationRepository _repository;
+    private readonly IContentSanitizer _contentSanitizer;
     private readonly ILogger<SanitizationService> _logger;
 
     /// <summary>
@@ -55,8 +56,15 @@ public sealed class SanitizationService : ISanitizationService
     public SanitizationService(
         ISanitizationRepository repository,
         ILogger<SanitizationService> logger)
+        : this(repository, new ContentSanitizer(), logger) { }
+
+    public SanitizationService(
+        ISanitizationRepository repository,
+        IContentSanitizer contentSanitizer,
+        ILogger<SanitizationService> logger)
     {
         _repository = repository;
+        _contentSanitizer = contentSanitizer;
         _logger = logger;
     }
 
@@ -64,11 +72,13 @@ public sealed class SanitizationService : ISanitizationService
     public async Task<SanitizeResult> SanitizeAsync(
         string input,
         Guid? tenantId,
+        SanitizeDirection direction = SanitizeDirection.Input,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(input))
         {
-            return new SanitizeResult(string.Empty, Array.Empty<SanitizationHit>());
+            return new SanitizeResult(string.Empty, Array.Empty<SanitizationHit>(),
+                Array.Empty<string>());
         }
 
         var rules = await _repository.GetRulesAsync(tenantId).ConfigureAwait(false);
@@ -124,7 +134,17 @@ public sealed class SanitizationService : ISanitizationService
             }
         }
 
-        return new SanitizeResult(result, hits);
+        // Run the ContentSanitizer pipeline (HTML strip + zero-width strip +
+        // injection detection on input; preserve-code-block strip on output)
+        // AFTER the user's regex-replace rules so any rule-supplied
+        // replacements still flow through. Warnings are surfaced verbatim
+        // via SanitizeResult.Warnings (finding 006).
+        var sanitised = direction == SanitizeDirection.Output
+            ? _contentSanitizer.SanitizeOutput(result)
+            : _contentSanitizer.Sanitize(result);
+
+        return new SanitizeResult(sanitised.Result, hits,
+            sanitised.Warnings.Count > 0 ? sanitised.Warnings : Array.Empty<string>());
     }
 
     /// <summary>

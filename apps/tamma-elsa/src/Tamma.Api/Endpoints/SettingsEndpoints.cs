@@ -49,7 +49,10 @@ public static class SettingsEndpoints
         [FromServices] ITenantContext tc)
     {
         var input = req.Text ?? req.Content ?? string.Empty;
-        var result = await sanitizer.SanitizeAsync(input, tc.TenantId);
+        var direction = string.Equals(req.Direction, "output", StringComparison.OrdinalIgnoreCase)
+            ? SanitizeDirection.Output
+            : SanitizeDirection.Input;
+        var result = await sanitizer.SanitizeAsync(input, tc.TenantId, direction);
         return Results.Ok(result);
     }
 

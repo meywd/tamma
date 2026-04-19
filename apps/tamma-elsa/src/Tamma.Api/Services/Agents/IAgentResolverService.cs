@@ -42,4 +42,16 @@ public interface IAgentResolverService
     /// <paramref name="role"/> is not eligible for the phase.
     /// </exception>
     Task<ResolvedAgentConfig> ResolveForPhaseAsync(Guid? tenantId, string phase, string role);
+
+    /// <summary>
+    /// Resolve for a specific (tenant, phase, role) plus per-task overrides.
+    /// Overrides are clamped (finding 007): budget is <c>Math.Min</c>'d against
+    /// the role's ceiling, tool lists are intersected, and
+    /// <c>bypassPermissions</c> requires <c>TAMMA_ALLOW_BYPASS_PERMISSIONS=true</c>
+    /// from configuration — without that gate the role's permission mode is
+    /// preserved.
+    /// </summary>
+    Task<ResolvedAgentConfig> ResolveForPhaseAsync(
+        Guid? tenantId, string phase, string role,
+        Dtos.Agents.TaskOverrides? overrides);
 }

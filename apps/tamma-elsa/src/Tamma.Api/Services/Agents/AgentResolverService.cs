@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Api.Dtos.Agents;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Agents;
@@ -15,13 +17,21 @@ namespace Tamma.Api.Services.Agents;
 public sealed class AgentResolverService : IAgentResolverService
 {
     private readonly IAgentConfigRepository _repo;
+    private readonly IConfiguration? _configuration;
     private readonly ILogger<AgentResolverService> _logger;
 
     public AgentResolverService(
         IAgentConfigRepository repo,
         ILogger<AgentResolverService> logger)
+        : this(repo, null, logger) { }
+
+    public AgentResolverService(
+        IAgentConfigRepository repo,
+        IConfiguration? configuration,
+        ILogger<AgentResolverService> logger)
     {
         _repo = repo;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -56,8 +66,13 @@ public sealed class AgentResolverService : IAgentResolverService
     }
 
     /// <inheritdoc />
-    public async Task<ResolvedAgentConfig> ResolveForPhaseAsync(
+    public Task<ResolvedAgentConfig> ResolveForPhaseAsync(
         Guid? tenantId, string phase, string role)
+        => ResolveForPhaseAsync(tenantId, phase, role, overrides: null);
+
+    /// <inheritdoc />
+    public async Task<ResolvedAgentConfig> ResolveForPhaseAsync(
+        Guid? tenantId, string phase, string role, TaskOverrides? overrides)
     {
         // Legacy alias normalisation runs before strict validation so
         // workflows still emitting CODE_GENERATION / implementer keep working
@@ -77,20 +92,98 @@ public sealed class AgentResolverService : IAgentResolverService
 
         var resolved = await ResolveAsync(tenantId, role);
 
-        // Attach phase context to the resolved config
+        // Apply task-override clamping (finding 007). Ceiling always wins:
+        // budget can only shrink, tool lists can only narrow, bypass-perm
+        // mode requires operator consent via env/config.
+        var clampedBudget = resolved.MaxBudgetUsd;
+        var clampedTools = resolved.Tools;
+        var clampedPermissionMode = resolved.PermissionMode;
+        var appliedModel = resolved.Model;
+
+        if (overrides is not null)
+        {
+            // Budget clamp — Math.Min against role ceiling.
+            if (overrides.MaxBudgetUsd.HasValue)
+            {
+                clampedBudget = clampedBudget.HasValue
+                    ? Math.Min(overrides.MaxBudgetUsd.Value, clampedBudget.Value)
+                    : overrides.MaxBudgetUsd.Value;
+            }
+
+            // Tool intersection — start from role list, drop anything not on
+            // it regardless of what the override requested.
+            if (overrides.AllowedTools is not null)
+            {
+                if (resolved.Tools.Count > 0)
+                {
+                    var roleSet = new HashSet<string>(resolved.Tools, StringComparer.Ordinal);
+                    clampedTools = overrides.AllowedTools
+                        .Where(t => roleSet.Contains(t))
+                        .ToArray();
+                }
+                else
+                {
+                    // Role has no tool list → start from what the override offers.
+                    clampedTools = overrides.AllowedTools.ToArray();
+                }
+            }
+
+            // bypassPermissions requires operator consent via env / config.
+            // TAMMA_ALLOW_BYPASS_PERMISSIONS takes precedence so ops teams
+            // can lock it down without redeploying; the IConfiguration
+            // fallback lets staging flip it via appsettings.json.
+            if (!string.IsNullOrEmpty(overrides.PermissionMode))
+            {
+                if (string.Equals(overrides.PermissionMode, "bypassPermissions",
+                        StringComparison.Ordinal))
+                {
+                    var envAllow = Environment.GetEnvironmentVariable(
+                        "TAMMA_ALLOW_BYPASS_PERMISSIONS");
+                    var cfgAllow = _configuration?["Tamma:AllowBypassPermissions"];
+                    var allowed =
+                        string.Equals(envAllow, "true", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(cfgAllow, "true", StringComparison.OrdinalIgnoreCase);
+                    if (allowed)
+                    {
+                        clampedPermissionMode = "bypassPermissions";
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "bypassPermissions requested for role={Role} phase={Phase} " +
+                            "but TAMMA_ALLOW_BYPASS_PERMISSIONS is not set — silently " +
+                            "keeping role-level permissionMode",
+                            role, phase);
+                    }
+                }
+                else
+                {
+                    clampedPermissionMode = overrides.PermissionMode;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(overrides.Model))
+            {
+                appliedModel = overrides.Model;
+            }
+        }
+
         return new ResolvedAgentConfig
         {
             Role = resolved.Role,
             Handle = resolved.Handle,
             Provider = resolved.Provider,
-            Model = resolved.Model,
+            Model = appliedModel,
             Temperature = resolved.Temperature,
             MaxTokens = resolved.MaxTokens,
             TokenBudget = resolved.TokenBudget,
-            Tools = resolved.Tools,
+            Tools = clampedTools,
             SystemPrompt = resolved.SystemPrompt,
             Source = resolved.Source,
             Phase = phase,
+            MaxBudgetUsd = clampedBudget,
+            PermissionMode = clampedPermissionMode,
+            AllowedTools = clampedTools,
         };
     }
 

@@ -20,7 +20,9 @@ public record SanitizeRequest(string Content);
 /// <param name="Context">Optional caller-supplied context string (e.g. the
 /// channel or LLM message role) used for observability only; never applied to
 /// rule selection.</param>
-public record SanitizeEndpointRequest(string? Text, string? Content, string? Context);
+/// <param name="Direction">Either <c>"input"</c> (default) or <c>"output"</c>.
+/// Selects which sanitisation pipeline to run — finding 006.</param>
+public record SanitizeEndpointRequest(string? Text, string? Content, string? Context, string? Direction = null);
 
 public record IngestDiagnosticRequest(string ProviderKey, double DurationMs, int TokensUsed, decimal Cost, string? Model, bool Success, string? Error);
 public record CreateProviderRequest(string Type, object Config);

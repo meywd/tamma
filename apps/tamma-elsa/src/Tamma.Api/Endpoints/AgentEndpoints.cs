@@ -153,7 +153,7 @@ public static class AgentEndpoints
         try
         {
             var resolved = await resolver.ResolveForPhaseAsync(
-                tenantContext.TenantId, req.Phase, role);
+                tenantContext.TenantId, req.Phase, role, req.TaskOverrides);
             return Results.Ok(resolved);
         }
         catch (ArgumentException ex)

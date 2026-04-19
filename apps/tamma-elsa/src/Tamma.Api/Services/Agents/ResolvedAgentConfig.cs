@@ -42,4 +42,26 @@ public class ResolvedAgentConfig
 
     /// <summary>Optional phase context (set by <see cref="IAgentResolverService.ResolveForPhaseAsync"/>).</summary>
     public string? Phase { get; init; }
+
+    /// <summary>
+    /// Per-task USD budget ceiling. Null means "inherit role default" (no
+    /// clamp applied at resolver time). Finding 007 — TS <c>maxBudgetUsd</c>
+    /// clamping rule: <c>maxBudgetUsd = Math.min(taskOverride, role)</c>.
+    /// </summary>
+    public decimal? MaxBudgetUsd { get; init; }
+
+    /// <summary>
+    /// Permission mode. Valid values: <c>"default" | "acceptEdits" |
+    /// "bypassPermissions"</c>. <c>bypassPermissions</c> requires the
+    /// operator-set env var <c>TAMMA_ALLOW_BYPASS_PERMISSIONS=true</c>;
+    /// otherwise the override is silently dropped and the role mode is kept.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>
+    /// Effective allowed tool list after task-override clamping. The TS
+    /// behaviour is strictly intersectional — overrides can restrict but
+    /// never add tools the role didn't already have.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedTools { get; init; }
 }

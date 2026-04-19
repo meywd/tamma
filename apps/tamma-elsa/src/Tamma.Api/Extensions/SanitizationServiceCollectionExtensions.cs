@@ -30,6 +30,11 @@ public static class SanitizationServiceCollectionExtensions
     public static IServiceCollection AddSanitizationServices(this IServiceCollection services)
     {
         services.AddSingleton<ISanitizationDefaultsProvider, SystemSanitizationDefaultsProvider>();
+        // ContentSanitizer is stateless beyond ctor options; singleton.
+        services.AddSingleton<IContentSanitizer>(sp =>
+            new ContentSanitizer(
+                options: new ContentSanitizerOptions { Enabled = true },
+                logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<ContentSanitizer>>()));
         services.AddScoped<ISanitizationService, SanitizationService>();
         return services;
     }

@@ -115,41 +115,87 @@ public sealed class ProviderChainResolver : IProviderChainResolver
             return Array.Empty<ProviderHandle>();
 
         using var doc = JsonDocument.Parse(configJson);
-        if (!doc.RootElement.TryGetProperty("chains", out var chains) ||
-            chains.ValueKind != JsonValueKind.Object)
+        var root = doc.RootElement;
+
+        // Preferred (C#) shape: chains[role][action] → chains[role][default] →
+        // chains[role] (as array) → chains[default].
+        if (root.TryGetProperty("chains", out var chains) &&
+            chains.ValueKind == JsonValueKind.Object)
         {
-            return Array.Empty<ProviderHandle>();
+            if (chains.TryGetProperty(role, out var roleNode) && roleNode.ValueKind == JsonValueKind.Object)
+            {
+                if (roleNode.TryGetProperty(action, out var roleActionArr) &&
+                    roleActionArr.ValueKind == JsonValueKind.Array)
+                {
+                    return ParseHandles(roleActionArr);
+                }
+                if (roleNode.TryGetProperty("default", out var roleDefault) &&
+                    roleDefault.ValueKind == JsonValueKind.Array)
+                {
+                    return ParseHandles(roleDefault);
+                }
+            }
+            if (chains.TryGetProperty(role, out var roleArrFallback) &&
+                roleArrFallback.ValueKind == JsonValueKind.Array)
+            {
+                return ParseHandles(roleArrFallback);
+            }
+            if (chains.TryGetProperty("default", out var defaultNode) &&
+                defaultNode.ValueKind == JsonValueKind.Array)
+            {
+                return ParseHandles(defaultNode);
+            }
         }
 
-        // 1. chains[role][action]
-        if (chains.TryGetProperty(role, out var roleNode) && roleNode.ValueKind == JsonValueKind.Object)
+        // Legacy TS (Story 9-5 / 9-8) shape — finding 011. Old rows persist
+        // chains under roles.<role>.providerChain with defaults.providerChain.
+        // Try canonical role first, then alias.
+        var legacyRole = role;
+        if (TryReadLegacy(root, legacyRole, out var legacyChain))
         {
-            if (roleNode.TryGetProperty(action, out var roleActionArr) &&
-                roleActionArr.ValueKind == JsonValueKind.Array)
+            return legacyChain;
+        }
+        // Walk legacy aliases mapping to the requested canonical role.
+        foreach (var (legacy, canonical) in Agents.RolePhaseMap.LegacyRoleAliases)
+        {
+            if (!string.Equals(canonical, role, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TryReadLegacy(root, legacy, out var aliasedChain))
             {
-                return ParseHandles(roleActionArr);
-            }
-            // 2. chains[role]["default"]
-            if (roleNode.TryGetProperty("default", out var roleDefault) &&
-                roleDefault.ValueKind == JsonValueKind.Array)
-            {
-                return ParseHandles(roleDefault);
+                return aliasedChain;
             }
         }
 
-        // 3. chains["default"] — when the role key is itself an array it is also treated as default.
-        if (chains.TryGetProperty(role, out var roleArrFallback) &&
-            roleArrFallback.ValueKind == JsonValueKind.Array)
+        // Final TS fallback: defaults.providerChain.
+        if (root.TryGetProperty("defaults", out var defaultsNode) &&
+            defaultsNode.ValueKind == JsonValueKind.Object &&
+            defaultsNode.TryGetProperty("providerChain", out var defChainNode) &&
+            defChainNode.ValueKind == JsonValueKind.Array)
         {
-            return ParseHandles(roleArrFallback);
-        }
-        if (chains.TryGetProperty("default", out var defaultNode) &&
-            defaultNode.ValueKind == JsonValueKind.Array)
-        {
-            return ParseHandles(defaultNode);
+            return ParseHandles(defChainNode);
         }
 
         return Array.Empty<ProviderHandle>();
+    }
+
+    /// <summary>
+    /// Read the TS-shape <c>roles.{role}.providerChain</c> array. Returns
+    /// false (no chain found) instead of an empty list so callers can
+    /// continue cascading.
+    /// </summary>
+    private static bool TryReadLegacy(
+        JsonElement root, string role, out IReadOnlyList<ProviderHandle> chain)
+    {
+        chain = Array.Empty<ProviderHandle>();
+        if (!root.TryGetProperty("roles", out var roles) ||
+            roles.ValueKind != JsonValueKind.Object) return false;
+        if (!roles.TryGetProperty(role, out var roleNode) ||
+            roleNode.ValueKind != JsonValueKind.Object) return false;
+        if (!roleNode.TryGetProperty("providerChain", out var pcNode) ||
+            pcNode.ValueKind != JsonValueKind.Array) return false;
+
+        chain = ParseHandles(pcNode);
+        return chain.Count > 0;
     }
 
     private static IReadOnlyList<ProviderHandle> ParseHandles(JsonElement arr)
