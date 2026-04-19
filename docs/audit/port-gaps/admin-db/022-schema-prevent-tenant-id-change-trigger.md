@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (with a deliberate semantic adjustment for the C# personal-tenant-on-demand pattern)
+- **Notes**: `Phase2RlsAndTriggers` installs `prevent_tenant_id_change()` plpgsql function and BEFORE-UPDATE triggers on 11 tenant-scoped tables. **Semantic adjustment**: where TS blocked any `OLD.tenant_id IS DISTINCT FROM NEW.tenant_id` transition, the C# version permits the first NULL → uuid assignment so the personal-tenant bootstrap flow (Register → EnsurePersonalTenantMiddleware → User.TenantId backfill) can complete. Subsequent value → other-value or value → NULL transitions are still blocked, preserving the audit guarantee against covert tenant migration of established records. Triggers fire for every connecting role (no superuser bypass), so this is live defense-in-depth today, independent of finding 020/021's dormant RLS.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/010_rls_tenant_isolation.sql` + `011_tenant_scoped_stores.sql`.

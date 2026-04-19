@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 12-16h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (policies installed; dormant pending Phase-3 connection-string swap)
+- **Notes**: `20260419021119_Phase2RlsAndTriggers` migration installs `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` + a `tenant_isolation_policy` on 14 tenant-scoped tables: `tenants`, `tenant_memberships`, `users`, `github_installations`, `github_installation_repos` (joined via parent), `user_invites`, `api_keys` (with service-scope cross-tenant exemption), `domain_events`, `workflow_instances`, `workflow_definitions`, `agent_configs`, `provider_diagnostics`, `provider_health`, `sanitization_rules`, `prompt_overrides`. Policies use `current_setting('app.current_tenant_id', true)::uuid` matching the existing `TenantContextMiddleware`. **Policies are dormant today** because the application still connects as a privileged role (which bypasses RLS); they activate the moment finding 021's connection-string split lands. The `tamma_app` role is also created here so Phase-3 only needs the connection-string change. Tested: full Tamma.Api.Tests suite (540 tests) passes — RLS does not affect privileged-role connections.
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/010_rls_tenant_isolation.sql` (and `011_tenant_scoped_stores.sql` for event/workflow tables).

@@ -5,6 +5,12 @@
 **Status**: Data-model regression
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed partial (role created; connection-string split deferred to Phase-3)
+- **Notes**: `Phase2RlsAndTriggers` migration creates `tamma_app` role idempotently via `pg_roles` probe + grants `CONNECT`, `USAGE` on schema, `SELECT/INSERT/UPDATE/DELETE` on all current and future tables, `USAGE/SELECT` on sequences. Password is a placeholder; production deploys must `ALTER ROLE tamma_app PASSWORD '<secret>'` before swap. **Not done in this scope**: connection-string split (`MigrationConnection` privileged vs `DefaultConnection` as `tamma_app`) — touches DI, appsettings, docker-compose, deployment manifests; landed as a dedicated Phase-3 follow-up to keep this PR scoped. Without the swap RLS is dormant (bypassed by superuser).
+
 ## 1. What's in TS
 
 Archived at `database/archived-sql-migrations/010_rls_tenant_isolation.sql`.
