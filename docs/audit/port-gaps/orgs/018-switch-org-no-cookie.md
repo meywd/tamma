@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (cookie side-effect dropped)
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `Tamma.Api.Auth.ISessionCookieWriter` (registered scoped) sets the `tamma_session` cookie with HttpOnly, SameSite=Lax, Path=/, MaxAge=900. Domain reads from `Auth:CookieDomain` config; falls back to `null` (localhost) in Development and `.tamma.dev` otherwise. `Secure` is true outside Development so `localhost` HTTP testing still works. `OrgEndpoints.SwitchOrg` calls `cookieWriter.WriteSession(httpContext, accessToken)` after generating the JWT. Response shape now matches TS: `{ accessToken, tenantId, role, expiresIn }`. Status code aligned: user-not-found → 401 (was 404).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

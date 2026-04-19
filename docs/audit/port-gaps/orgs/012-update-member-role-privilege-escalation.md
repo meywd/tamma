@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported shape, dropped all invariants)
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: All five guards now live in `OrgEndpoints.UpdateMemberRole`: (1) `TenantRoleHierarchy.IsValid(req.Role)` whitelist → 400; (2) requester membership/role read from `HttpContext.Items["TenantRole"]` (filter stash) → 403; (3) `GetRoleAsync` of target → 404; (4) hierarchy: only owners touch owner-level, admins cannot touch peers/promote-up → 403; (5) new `CountOwnersAsync` repo method drives last-owner guard on demote → 400. Tests: `OrgEndpointHandlerTests.UpdateMemberRole_Returns400_WhenRoleUnknown`, `_Returns404_WhenTargetNotMember`, `_Returns403_WhenAdminTriesToPromoteToOwner`, `_Returns400_WhenDemotingLastOwner`, `_Succeeds_WhenOwnerPromotesMember`. CHECK constraint already in place from Phase-1 (finding 025).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

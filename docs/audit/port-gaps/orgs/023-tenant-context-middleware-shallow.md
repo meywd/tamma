@@ -5,6 +5,13 @@
 **Status**: Incomplete (3 of 4 resolution sources missing + fail-open on the one present)
 **Estimated port effort**: 6h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (resolution); 403-on-unresolved deferred to Phase-3
+- **Commit**: 549f10d
+- **Notes**: Middleware widened to four-source resolution: (1) `AuthPrincipal` via `HttpContextAuthExtensions.GetAuthPrincipal()` — `UserAuthPrincipal.TenantId`, `InstallationAuthPrincipal.TenantId` or fallback to `tenantRepo.GetByExternalIdAsync(installationId)`, `ServiceAuthPrincipal.TenantId`; (2) JWT `tenantId` (canonical) or `tid` (API-key compat) claim; (3) installation external-id lookup (rolled into source 1); (4) user-row fallback via `userRepo.GetByIdAsync(jwt.sub).TenantId`. Constructor injects `ITenantRepository` and `IUserRepository`. The 403-on-unresolved branch from TS is intentionally NOT enabled today: it would break legitimate first-login paths where `EnsurePersonalTenantMiddleware` materialises the tenant on the same request. The 403 lands once the EF query-filter tightening (finding 002) flips to fail-closed under the Phase-3 connection split. Scope-cap noted in middleware xmldoc.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/middleware/tenant-context.ts`.

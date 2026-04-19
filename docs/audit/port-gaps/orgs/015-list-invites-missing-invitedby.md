@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port — one field dropped)
 **Estimated port effort**: 0.25h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `PendingInviteResponse(Id, Email, Role, InvitedBy, ExpiresAt, CreatedAt)` record. `OrgEndpoints.ListInvites` now wraps in `{ invites: [...] }` envelope and includes `InvitedBy` per TS shape. Admin+ membership gate enforced via the route filter + role check.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

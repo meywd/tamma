@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported shape, dropped all invariants + side-effects)
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: `OrgEndpoints.RemoveMember` enforces: requester role admin+ → 403, target membership exists → 404, self-remove last-owner → 400, admin-cannot-remove-owner → 403. After remove, calls new `IUserRepository.SwitchActiveTenantAwayFromAsync(removedUserId, tenantId)` — picks any other membership the user has, leaves `users.tenant_id` pointed at deleted-tenant when no alternative exists (the `prevent_tenant_id_change` trigger blocks non-NULL → NULL transitions; EnsurePersonalTenantMiddleware re-resolves on next request). Emits `TENANT.MEMBER_REMOVED.SUCCESS`. Tests: `_Returns400_WhenSelfRemovingLastOwner`, `_Returns403_WhenAdminTriesToRemoveOwner`, `_Returns404_WhenTargetNotMember`, `_Returns403_WhenRequesterIsMember`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (fail-open instead of fail-closed)
 **Estimated port effort**: 3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred to Phase-3
+- **Commit**: 549f10d (partial)
+- **Notes**: Tightened `TenantContextMiddleware` to widen tenant resolution from 1 source to 4 (AuthPrincipal, JWT `tenantId`/`tid`, installation lookup, user-row fallback) so the resolution layer no longer silently fails open for API-key / webhook callers. Did NOT flip the `tenantId == null ||` disjunction in EF query filters: doing so without first landing the connection-string split (Phase-3 / finding 004) would break personal-tenant bootstrap (the user has no membership before EnsurePersonalTenantMiddleware runs) and the task-queue / outbox / WorkflowSync background services that intentionally read cross-tenant. RLS policies installed by Phase-2 migration are the eventual fail-closed layer; they are dormant under the superuser runtime today. EF-filter tightening is gated on Phase-3 connection-string switch.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/middleware/tenant-context.ts`.

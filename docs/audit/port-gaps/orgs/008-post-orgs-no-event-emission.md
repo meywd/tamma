@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: `OrgEndpoints` now emits the full set: `TENANT.CREATED.SUCCESS` (CreateOrg), `TENANT.MEMBER_REMOVED.SUCCESS` (RemoveMember), `TENANT.MEMBER_INVITED.SUCCESS` (CreateInvite), `TENANT.MEMBER_JOINED.SUCCESS` (AcceptInvite), `TENANT.OWNERSHIP_TRANSFERRED.SUCCESS` (TransferOwnership), `TENANT.DELETED.SUCCESS` (DeleteOrg phase 1), `TENANT.PURGED.SUCCESS` (DeleteOrg phase 2). EnsurePersonalTenantMiddleware also emits `TENANT.RESOLVED.SUCCESS` and `TENANT.AUTO_CREATED.SUCCESS`. Shared `EmitTenantEvent` helper builds the JSON tags/metadata/data envelope per CLAUDE.md DCB pattern. Tested via `OrgEndpointHandlerTests.CreateOrg_PersistsActiveTenant_AndEmitsEvent`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

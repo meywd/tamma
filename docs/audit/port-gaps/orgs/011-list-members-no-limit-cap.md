@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port)
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: Membership gate enforced by `RequireTenantMembershipFilter` (shared with finding 001). Handler clamps `limit = Math.Clamp(req ?? 50, 1, 100)` and `offset = Math.Max(req ?? 0, 0)`, echoes both back in the response so callers can paginate.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

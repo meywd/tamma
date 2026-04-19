@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented (trigger + function absent)
 **Estimated port effort**: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: 6f86086 (admin-db Phase-2)
+- **Notes**: `Phase2RlsAndTriggers` migration creates `prevent_tenant_id_change()` plpgsql function and attaches `BEFORE UPDATE` triggers on all 11 tenant-scoped tables (users, github_installations, api_keys, user_invites, domain_events, workflow_instances, agent_configs, provider_diagnostics, provider_health, sanitization_rules, prompt_overrides). Trigger has the documented carve-out: NULL → uuid is permitted (one-time bootstrap of personal tenant via `EnsurePersonalTenantMiddleware`); non-NULL → other or non-NULL → NULL is blocked. This satisfies finding 005's intent — established `tenant_id` cannot be reassigned. The carve-out cascades into orgs scope: my `RemoveMember` / `DeleteOrg` flows can no longer null `users.tenant_id`, so `IUserRepository.SwitchActiveTenantAwayFromAsync` was added to switch to another membership instead.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/010_rls_tenant_isolation.sql`.

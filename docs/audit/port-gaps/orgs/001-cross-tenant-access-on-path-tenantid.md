@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported but semantics diverged)
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `RequireTenantMembershipFilter` (Authorization/) attached to every `/api/v1/orgs/{tenantId}/*` route in Program.cs. Filter calls `ITenantMembershipRepository.GetRoleAsync(pathTenantId, jwt.sub)` and 403s on null; on success it stashes the resolved role on `HttpContext.Items["TenantRole"]` for handlers + companion role filter. Replaced the old `AdminAccess`/`OwnerAccess`/`SettingsManage` policies on these routes (those checked JWT *platform* permission, not path-tenant role).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

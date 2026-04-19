@@ -5,6 +5,13 @@
 **Status**: Behavioral drift + scope loss
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: Token is now `RandomNumberGenerator.GetBytes(32)` hex-encoded → 256 bits entropy (64 hex chars). TTL reduced from 7 days to 72 hours. Role validated against `{owner, admin, member}` whitelist → 400. Path-tenant admin+ enforced (filter + handler). Email dispatch wired via existing `IEmailService` + new `EmailTemplates.TenantInviteEmail` template (HTML + plain text, encodes recipient/inviter/role). Send is fire-and-forget (`Task.Run`); failures log via injected logger but do not 500. Response body no longer leaks the raw token — only `{ id, email, role, expiresAt }`. `TENANT.MEMBER_INVITED.SUCCESS` event emitted. Accept URL is built from `Dashboard:Url` config: `{base}/invites/accept?token={raw}`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

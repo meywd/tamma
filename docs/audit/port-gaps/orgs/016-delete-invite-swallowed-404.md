@@ -5,6 +5,13 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 0.25h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `IInviteRepository.DeleteScopedAsync(tenantId, id)` returns `bool`. Handler returns 404 when no row matched (also covers cross-tenant attempts where the invite GUID exists in another tenant). Old `DeleteAsync` kept as `[Obsolete]` for any transitional callers. Tests: `OrgEndpointHandlerTests.DeleteInvite_Returns404_WhenMissing`, `_WhenCrossTenant`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

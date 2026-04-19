@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (naming-only drift; functionally equivalent)
+- **Commit**: n/a
+- **Notes**: The C# `user_invites` table already carries the tenant-scoped schema shape (NOT-NULL `TenantId`, FK to `tenants` ON DELETE CASCADE, `ck_user_invites_role` CHECK constraint). Functionally it IS `tenant_invites` — only the table name and entity class differ from the TS rename plan. The platform-admin invite flow that the TS migration plan would have left behind is not present in the C# port (Story 18-1 / 18-2 use email-verification + register, not platform-admin invite). Renaming the table requires a destructive migration + cascading entity/repository renames (`UserInvite` → `TenantInvite`, `IInviteRepository` → `ITenantInviteRepository`, all references in tests + endpoints). The naming drift has no functional impact on the orgs flows; deferring the rename keeps blast radius contained. If a future story re-introduces a platform-admin invite, we can split then.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/017_tenant_memberships.sql`.

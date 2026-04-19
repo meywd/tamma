@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented (the whole defense-in-depth layer is missing)
 **Estimated port effort**: 6h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: 6f86086 (admin-db Phase-2)
+- **Notes**: Phase-2 migration `Phase2RlsAndTriggers` (2026-04-19) installs `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` on all 14 tenant-scoped tables, creates the `tenant_isolation_policy` (tenants by `Id`, others by `TenantId`, `github_installation_repos` via parent installation, `api_keys` with `Scope='service'` carve-out), creates the `tamma_app` non-superuser role with idempotent `pg_roles` probe + minimal CRUD grants. Policies are dormant — the runtime still connects as superuser (which bypasses RLS by design). Phase-3 will swap the connection string and turn the dormant policies into a live safety net. Scope: orgs scope inherits this defense-in-depth at no additional cost.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/010_rls_tenant_isolation.sql`.

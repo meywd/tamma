@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port, missing validation)
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `Tamma.Api.Validation.SlugValidation` module ports the TS regex `^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$` plus the 16-entry reserved set verbatim. `OrgEndpoints.CreateOrg` now (1) validates `Name.Trim()` length 2-100, (2) lowercases the slug, (3) enforces the regex, (4) checks the reserved set, (5) returns 409 only on duplicate. Same validation will be re-applied to the `Name`/`Plan` fields on `UpdateOrgSettings` (finding 010). Tests: `SlugValidationTests`, `OrgEndpointHandlerTests.CreateOrg_Returns400_WhenSlugIsReserved`, `_WhenNameTooShort`, `_WhenSlugInvalid`, `_Returns409_OnDuplicateSlug`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

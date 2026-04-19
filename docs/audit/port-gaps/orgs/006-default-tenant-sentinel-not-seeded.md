@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (superseded)
+- **Commit**: n/a
+- **Notes**: Per admin-db ruling on finding 023, the default-tenant sentinel was intentionally replaced by `EnsurePersonalTenantMiddleware`, which materialises a per-user personal tenant on first authenticated request. Mirroring TS's `DEFAULT_TENANT_ID` would re-introduce a globally-shared tenant that defeats the per-user tenancy model the C# port adopted. CLI / self-hosted bootstrap (Story 17-1 AC 12) is met by the personal-tenant flow + the `users.tenant_id` column. No sentinel row will be seeded.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/008_tenants.sql` and `git show 9e9a57c~1:packages/api/src/persistence/tenant-store.ts`.

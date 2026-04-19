@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: e8dd76b (admin-db Phase-1)
+- **Notes**: `SchemaHardeningPhase1` migration (2026-04-19) installs `ck_tenant_memberships_role CHECK (Role IN ('owner','admin','member'))` and the matching `ck_user_invites_role` and `ck_users_role` constraints. App-layer whitelist (finding 012) now layers above this DB-level constraint so invalid roles fail with 400, not the raw 23514 from the DB. Verified via Phase-1 migration source (lines 269-279).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/017_tenant_memberships.sql`.

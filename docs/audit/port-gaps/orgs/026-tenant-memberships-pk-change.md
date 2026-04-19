@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (idiomatic preference)
+- **Commit**: n/a
+- **Notes**: Surrogate `Id` PK is idiomatic EF Core and not load-bearing for any application code (no method calls `db.TenantMemberships.Find(id)`). Uniqueness on `(TenantId, UserId)` is enforced by the explicit unique index in `TammaDbContext.cs:159`. Reverting to a composite PK requires a non-trivial drop-and-recreate migration with no observable behavioral benefit; the audit's "minor write amplification" cost is negligible at the membership-table cardinality. Decision: keep surrogate, accept the schema-shape drift from TS. If a future cross-system tool relies on the composite PK shape we can revisit.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/017_tenant_memberships.sql`.

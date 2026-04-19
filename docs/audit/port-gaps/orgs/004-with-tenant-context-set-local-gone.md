@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented (helper not ported, no replacement hook in EF interceptors)
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Deferred to Phase-3
+- **Commit**: n/a
+- **Notes**: Pre-positioned by admin-db Phase-2: the RLS policies that this hook would activate are already installed (`current_setting('app.current_tenant_id', true)::uuid` references in `Phase2RlsAndTriggers`). Phase-3 will land (a) the connection-string split to `tamma_app`, (b) an Npgsql `DbConnectionInterceptor` that runs `SELECT set_config('app.current_tenant_id', @id, false)` on `ConnectionOpenedAsync`, and (c) the EF query-filter tightening (finding 002). Shipping the interceptor today would do nothing useful (superuser bypasses RLS), so the work is sequenced behind the connection-string split.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/persistence/with-tenant-context.ts`.

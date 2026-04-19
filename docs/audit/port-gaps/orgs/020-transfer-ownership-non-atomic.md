@@ -5,6 +5,13 @@
 **Status**: Data-model regression + behavioral drift
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (Path B)
+- **Commit**: 549f10d
+- **Notes**: Adopted Path B (keep `tenants.OwnerId`, enforce invariant by transactional swap). All three writes (membership new owner, membership old owner, tenants.OwnerId) wrapped in a single `db.Database.BeginTransactionAsync()` so partial failure rolls back. Added missing guards: requester must be path-tenant owner (filter stash), `same_user` 400, `not_a_member` 400 via `GetRoleAsync` precheck, `404` for soft-deleted tenant. Emits `TENANT.OWNERSHIP_TRANSFERRED.SUCCESS`. Path A (drop `OwnerId` column) deferred — would cascade into `EnsurePersonalTenantMiddleware`, `CreateOrg`, FK relationships, and a destructive migration; Path B closes the data-integrity gap without that risk. Tests: `_Returns400_WhenSameUser`, `_Returns400_WhenNewOwnerNotMember`, `_Returns403_WhenRequesterNotOwner`, `_SwapsRoles_AndUpdatesOwnerColumn`.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

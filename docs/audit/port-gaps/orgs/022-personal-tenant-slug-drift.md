@@ -5,6 +5,13 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: Slug now `u-{first-8-hex-of-userId}` matching TS exactly, with collision-retry suffix (`-1`..`-5`) and a logged-error escape hatch. Tenant name now `"{displayName}'s Workspace"` for UX parity. Existing-membership path now persists `users.tenant_id` via `UpdateActiveTenantAsync` and emits `TENANT.RESOLVED.SUCCESS`; first-login path emits `TENANT.AUTO_CREATED.SUCCESS`. Both events are best-effort (logged exceptions don't break the pipeline).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/middleware/ensure-personal-tenant.ts`.

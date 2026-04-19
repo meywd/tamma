@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port — fields dropped)
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `ITenantRepository.ListMembershipsByUserAsync` returns `List<TenantMembershipView>` (Tenant + Role + JoinedAt). Handler projects to new `TenantSummaryResponse(Id, Name, Slug, Plan, Role, JoinedAt, IsActive)` and wraps in `{ tenants: [...] }` envelope. `IsActive` derived by comparing each tenant id to the caller's `tenantId`/`tid` JWT claim.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

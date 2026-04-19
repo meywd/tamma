@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port — persistence call dropped)
 **Estimated port effort**: 0.25h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: `OrgEndpoints.CreateOrg` now calls `userRepo.UpdateActiveTenantAsync(userId, tenant.Id)` immediately after the owner-membership add. AcceptInvite mirrors this for first-time members. Test: `OrgEndpointHandlerTests.CreateOrg_PersistsActiveTenant_AndEmitsEvent` and `AcceptInvite_AddsMembership_AndPersistsActiveTenant`. JWT re-issue is intentionally NOT done here — the dashboard re-issues via the existing `/refresh` endpoint or by hitting `/auth/me` after the create.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

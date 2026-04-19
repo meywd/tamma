@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port — name field dropped entirely)
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: `UpdateOrgSettingsRequest` widened to `(string? Name, string? Plan, object? Settings)`. Handler validates Name (2-100 chars trimmed), Plan (`free|pro|enterprise`), rejects empty body with 400 "No fields to update". Membership gate runs in the route filter (finding 001); admin+ check runs in the handler against `HttpContext.Items["TenantRole"]`. Response now echoes the full tenant DTO via `BuildOrgResponse(t)` (now includes `Plan`).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

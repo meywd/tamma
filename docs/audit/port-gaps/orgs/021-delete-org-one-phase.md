@@ -5,6 +5,13 @@
 **Status**: Semantic rewrite (TS two-phase with HMAC → C# one-phase)
 **Estimated port effort**: 8h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: Two-phase flow ported. New `IDeleteConfirmationService` (HMAC-SHA256 over `{tenantId}:{userId}:{issuedAtMs}` with `Jwt:Secret`, 10-min TTL, constant-time verify via `CryptographicOperations.FixedTimeEquals`). Phase 1 (no `?confirm=`): owner-check (filter), `last_tenant` 409 guard, `tenantRepo.SoftDeleteAsync`, `SwitchActiveTenantAwayFromAsync` for caller, mint token, emit `TENANT.DELETED.SUCCESS`, return 202 with `{ confirmationToken, expiresAt }`. Phase 2 (`?confirm=<tok>`): verify HMAC → 400 `confirmation_expired`; transactional cascade — `ListAllByTenantAsync` then per-member `RemoveAsync` + `SwitchActiveTenantAwayFromAsync`, `DeleteAllByTenantAsync` for invites, then `SoftDeleteAsync` of tenant; emit `TENANT.PURGED.SUCCESS`; return 204. Tests: `_Returns409_WhenLastTenant`, `_Returns202_OnPhase1AndMintsConfirmationToken`, `_Phase2_Returns400_WhenConfirmationInvalid`, plus full `DeleteConfirmationServiceTests` suite (HMAC verify/expire/corrupt).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/orgs/index.ts`.

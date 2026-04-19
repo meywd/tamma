@@ -5,6 +5,13 @@
 **Status**: Not-yet-implemented
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: 549f10d
+- **Notes**: New `Tamma.Api.Authorization.RequireTenantMembershipFilter` (`IEndpointFilter`) reads the route `tenantId`, looks up the caller's role via `ITenantMembershipRepository.GetRoleAsync`, 403s on null, stashes role + tenant on `HttpContext.Items["TenantRole"]` / `["PathTenantId"]`. Companion `RequireTenantRoleFilter(string minRole)` reads the stash and compares against `TenantRoleHierarchy.Level`. Filter wired in `Program.cs` to every `/api/v1/orgs/{tenantId}/*` route. `TenantRoleHierarchy` constants/helpers in same namespace. Tests: `RequireTenantMembershipFilterTests` (401/400/403/success+stash), `TenantRoleHierarchyTests` (rank + IsAtLeast).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/middleware/require-tenant.ts`.
