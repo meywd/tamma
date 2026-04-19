@@ -5,6 +5,12 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 30min
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: Handler probes `GetByIdAsync` first (returns 404 if missing) and now returns `Results.NoContent()` on success.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

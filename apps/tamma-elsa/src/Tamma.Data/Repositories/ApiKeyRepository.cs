@@ -13,6 +13,9 @@ public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
         return apiKey;
     }
 
+    public async Task<ApiKey?> GetByIdAsync(Guid id)
+        => await db.ApiKeys.FindAsync(id);
+
     public async Task<ApiKey?> GetByHashAsync(string keyHash)
         => await db.ApiKeys.FirstOrDefaultAsync(k => k.KeyHash == keyHash);
 
@@ -36,7 +39,12 @@ public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
     {
         var old = await db.ApiKeys.FindAsync(oldId)
             ?? throw new InvalidOperationException("API key not found");
-        old.RevokedAt = DateTime.UtcNow;
+
+        // 24h grace period: the old key continues to validate until this
+        // moment so dependent services can roll over without an outage.
+        // Matches the TS rotateApiKey behavior. Hash-lookup paths must
+        // treat RevokedAt > NOW() as still-valid.
+        old.RevokedAt = DateTime.UtcNow.AddHours(24);
 
         var newKey = new ApiKey
         {

@@ -5,6 +5,12 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: All four `/api/admin/service-keys*` routes now declare `.RequireAuthorization("SettingsManage")` in `Program.cs`, matching TS owner-only gating. Tests not added in this pass — depends on JWT-issuance test harness which exists but is not yet wired for admin-vs-owner distinction.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

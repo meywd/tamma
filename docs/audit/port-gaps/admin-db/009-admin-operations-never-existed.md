@@ -5,6 +5,12 @@
 **Status**: Not-yet-implemented — but not a regression
 **Estimated port effort**: 0h (documentation); 40-60h if anyone ever decides to build them
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid (documentation-only, not a regression)
+- **Notes**: Both TS and C# admin surfaces never shipped these features. No code change required — the finding is preserved as a documentation artifact for future product discussion. Per the finding's own "What's needed to finish" section, building them is a 40-60h product spec exercise that is out of scope for the port-gap remediation.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/`.

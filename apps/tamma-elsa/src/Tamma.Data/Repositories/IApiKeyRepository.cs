@@ -5,6 +5,7 @@ namespace Tamma.Data.Repositories;
 public interface IApiKeyRepository
 {
     Task<ApiKey> CreateAsync(ApiKey apiKey);
+    Task<ApiKey?> GetByIdAsync(Guid id);
     Task<ApiKey?> GetByHashAsync(string keyHash);
     Task<List<ApiKey>> ListByScopeAsync(string scope);
     Task<List<ApiKey>> ListByOwnerAsync(string ownerId);

@@ -5,6 +5,12 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `CreateServiceKeyRequest` now requires `ServiceName`; the handler validates it (400 on missing) and persists it as `OwnerId`. The response echoes `ServiceName` so the dashboard can label keys.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

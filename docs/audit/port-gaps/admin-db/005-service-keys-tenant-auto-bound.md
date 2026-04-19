@@ -5,6 +5,12 @@
 **Status**: Behavioral drift
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `CreateServiceKey` now writes `TenantId = null` and the handler signature drops the `ITenantContext` injection. Inline comment cites the cross-tenant rationale to discourage regression.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

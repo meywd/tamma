@@ -5,6 +5,12 @@
 **Status**: Incomplete
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `ServiceKeyResponse` now exposes `ServiceName`, `LastUsedAt`, `RevokedAt`, `RotatedFromId`, `Warning` alongside the existing fields. All three handlers (Create / List / Rotate) populate them. The user-API-key Create / List endpoints now share the same DTO shape so the dashboard renders both consistently.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

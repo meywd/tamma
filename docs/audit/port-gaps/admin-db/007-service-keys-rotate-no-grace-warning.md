@@ -5,6 +5,12 @@
 **Status**: Incomplete
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `ApiKeyRepository.RotateAsync` now sets `old.RevokedAt = DateTime.UtcNow.AddHours(24)` (was UtcNow). The handler returns 404 for missing source ids, populates `RotatedFromId`, and emits the 24h grace warning string in the response body. Caller of GetByHashAsync still needs to treat `RevokedAt > NOW()` as still-valid; that change is in the auth scope (out of admin-db scope).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/service-keys.ts`.

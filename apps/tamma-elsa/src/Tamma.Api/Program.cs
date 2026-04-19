@@ -337,10 +337,13 @@ app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback);
 // ── Admin ──
 var admin = app.MapGroup("/api/admin").RequireAuthorization("AdminAccess");
 admin.MapGet("/health", AdminEndpoints.GetHealth);
-admin.MapPost("/service-keys", AdminEndpoints.CreateServiceKey);
-admin.MapGet("/service-keys", AdminEndpoints.ListServiceKeys);
-admin.MapPost("/service-keys/{id}/rotate", AdminEndpoints.RotateServiceKey);
-admin.MapDelete("/service-keys/{id}", AdminEndpoints.DeleteServiceKey);
+// Service keys are platform credentials (Elsa → API, BFF → API). Per Story
+// 16-7 they are owner-only — admins must NOT be able to mint or rotate them.
+// SettingsManage maps to settings:manage (owner-only) in the RBAC matrix.
+admin.MapPost("/service-keys", AdminEndpoints.CreateServiceKey).RequireAuthorization("SettingsManage");
+admin.MapGet("/service-keys", AdminEndpoints.ListServiceKeys).RequireAuthorization("SettingsManage");
+admin.MapPost("/service-keys/{id}/rotate", AdminEndpoints.RotateServiceKey).RequireAuthorization("SettingsManage");
+admin.MapDelete("/service-keys/{id}", AdminEndpoints.DeleteServiceKey).RequireAuthorization("SettingsManage");
 admin.MapGet("/users", AdminEndpoints.ListUsers);
 admin.MapGet("/users/{id}", AdminEndpoints.GetUser);
 admin.MapPut("/users/{id}/role", AdminEndpoints.UpdateUserRole).RequireAuthorization("OwnerAccess");

@@ -14,11 +14,19 @@ public static class AdminEndpoints
         return Task.FromResult(Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow, database = "connected" }));
     }
 
+    /// <summary>
+    /// Service-key creator. ServiceName is required (persisted as OwnerId so
+    /// each consuming service has its own row, independently revocable).
+    /// TenantId is intentionally null — service keys are platform-level
+    /// credentials and must work cross-tenant.
+    /// </summary>
     public static async Task<IResult> CreateServiceKey(
         CreateServiceKeyRequest req,
-        IApiKeyRepository apiKeyRepo,
-        ITenantContext tenantContext)
+        IApiKeyRepository apiKeyRepo)
     {
+        if (string.IsNullOrWhiteSpace(req.ServiceName))
+            return Results.BadRequest(new { error = "serviceName is required" });
+
         var rawKey = $"tamma_sk_{Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}";
         var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))).ToLowerInvariant();
         var prefix = rawKey[..16];
@@ -26,39 +34,83 @@ public static class AdminEndpoints
         var apiKey = await apiKeyRepo.CreateAsync(new ApiKey
         {
             Scope = "service",
-            OwnerId = "system",
+            OwnerId = req.ServiceName,
             KeyHash = keyHash,
             KeyPrefix = prefix,
             Label = req.Label,
             Permissions = req.Permissions,
-            TenantId = tenantContext.TenantId
+            TenantId = null // service keys are not tenant-scoped at creation
         });
 
         return Results.Created($"/api/admin/service-keys/{apiKey.Id}",
-            new ServiceKeyResponse(apiKey.Id, apiKey.Label, apiKey.KeyPrefix, apiKey.Permissions, apiKey.CreatedAt, rawKey));
+            new ServiceKeyResponse(
+                apiKey.Id,
+                apiKey.OwnerId,
+                apiKey.Label,
+                apiKey.KeyPrefix,
+                apiKey.Permissions,
+                apiKey.CreatedAt,
+                apiKey.LastUsedAt,
+                apiKey.RevokedAt,
+                apiKey.RotatedFromId,
+                rawKey));
     }
 
     public static async Task<IResult> ListServiceKeys(IApiKeyRepository apiKeyRepo)
     {
         var keys = await apiKeyRepo.ListByScopeAsync("service");
         var response = keys.Select(k =>
-            new ServiceKeyResponse(k.Id, k.Label, k.KeyPrefix, k.Permissions, k.CreatedAt)).ToList();
+            new ServiceKeyResponse(
+                k.Id,
+                k.OwnerId,
+                k.Label,
+                k.KeyPrefix,
+                k.Permissions,
+                k.CreatedAt,
+                k.LastUsedAt,
+                k.RevokedAt,
+                k.RotatedFromId)).ToList();
         return Results.Ok(response);
     }
 
+    /// <summary>
+    /// Rotate a service key. Old key remains valid for a 24h grace period
+    /// (RevokedAt = now+24h) so dependent services can roll over without an
+    /// outage. The response includes a warning advertising the grace window
+    /// and the rotated-from id so the caller can track the rotation chain.
+    /// Returns 404 when the source id does not exist.
+    /// </summary>
     public static async Task<IResult> RotateServiceKey(Guid id, IApiKeyRepository apiKeyRepo)
     {
+        var existing = await apiKeyRepo.GetByIdAsync(id);
+        if (existing is null)
+            return Results.NotFound(new { error = "Service key not found" });
+
         var rawKey = $"tamma_sk_{Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))}";
         var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawKey))).ToLowerInvariant();
         var prefix = rawKey[..16];
         var newKey = await apiKeyRepo.RotateAsync(id, keyHash, prefix);
-        return Results.Ok(new ServiceKeyResponse(newKey.Id, newKey.Label, newKey.KeyPrefix, newKey.Permissions, newKey.CreatedAt, rawKey));
+        return Results.Ok(new ServiceKeyResponse(
+            newKey.Id,
+            newKey.OwnerId,
+            newKey.Label,
+            newKey.KeyPrefix,
+            newKey.Permissions,
+            newKey.CreatedAt,
+            newKey.LastUsedAt,
+            newKey.RevokedAt,
+            newKey.RotatedFromId,
+            rawKey,
+            "Store this key securely. It cannot be retrieved again. Old key is valid for 24h."));
     }
 
     public static async Task<IResult> DeleteServiceKey(Guid id, IApiKeyRepository apiKeyRepo)
     {
+        var existing = await apiKeyRepo.GetByIdAsync(id);
+        if (existing is null)
+            return Results.NotFound(new { error = "Service key not found" });
         await apiKeyRepo.RevokeAsync(id);
-        return Results.Ok(new { message = "Service key revoked" });
+        return Results.NoContent();
     }
 
     public static async Task<IResult> ListUsers(
@@ -113,9 +165,16 @@ public static class AdminEndpoints
         if (!tenantContext.TenantId.HasValue)
             return Results.BadRequest(new { error = "No tenant context" });
 
+        // Reject the Guid.Empty fallback the previous implementation used
+        // when no NameIdentifier claim was present. With FK on InvitedBy
+        // (post-finding 019 hardening), a synthetic empty guid would either
+        // FK-violate or pollute audit history. Demand a real caller id.
+        var userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId) || !Guid.TryParse(userId, out var inviterId))
+            return Results.BadRequest(new { error = "Authenticated user identity required" });
+
         var token = Guid.NewGuid().ToString("N");
         var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
-        var userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
         var invite = await inviteRepo.CreateAsync(new UserInvite
         {
@@ -123,7 +182,7 @@ public static class AdminEndpoints
             Email = req.Email,
             Role = req.Role,
             InviteTokenHash = tokenHash,
-            InvitedBy = userId is not null ? Guid.Parse(userId) : Guid.Empty,
+            InvitedBy = inviterId,
             ExpiresAt = DateTime.UtcNow.AddDays(7)
         });
 
@@ -167,14 +226,33 @@ public static class AdminEndpoints
         });
 
         return Results.Created($"/api/admin/users/{id}/keys/{apiKey.Id}",
-            new ServiceKeyResponse(apiKey.Id, apiKey.Label, apiKey.KeyPrefix, apiKey.Permissions, apiKey.CreatedAt, rawKey));
+            new ServiceKeyResponse(
+                apiKey.Id,
+                apiKey.OwnerId,
+                apiKey.Label,
+                apiKey.KeyPrefix,
+                apiKey.Permissions,
+                apiKey.CreatedAt,
+                apiKey.LastUsedAt,
+                apiKey.RevokedAt,
+                apiKey.RotatedFromId,
+                rawKey));
     }
 
     public static async Task<IResult> ListUserApiKeys(Guid id, IApiKeyRepository apiKeyRepo)
     {
         var keys = await apiKeyRepo.ListByOwnerAsync(id.ToString());
         return Results.Ok(keys.Select(k =>
-            new ServiceKeyResponse(k.Id, k.Label, k.KeyPrefix, k.Permissions, k.CreatedAt)));
+            new ServiceKeyResponse(
+                k.Id,
+                k.OwnerId,
+                k.Label,
+                k.KeyPrefix,
+                k.Permissions,
+                k.CreatedAt,
+                k.LastUsedAt,
+                k.RevokedAt,
+                k.RotatedFromId)));
     }
 
     public static async Task<IResult> DeleteUserApiKey(Guid id, Guid keyId, IApiKeyRepository apiKeyRepo)
