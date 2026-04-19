@@ -151,3 +151,10 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AdminEndpoints.cs:101-105`, `apps/tamma-elsa/src/Tamma.Data/Repositories/UserRepository.cs:44-53`
 - Story: `docs/stories/epic-16/16-2-user-management-api.md` (referenced)
 - Related findings: `022-user-repository-missing-methods.md`, `023-user-installations-table-absent.md`, `018-admin-update-user-role-missing-guards.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: DeleteUser now blocks self-delete (400), 404s on unknown id, calls RevokeAllByOwnerAsync to revoke every key owned by the user, emits USER.DELETED.SUCCESS log. Installation-unlink skipped per admin-db ruling — tenant_memberships replaces user_installations and an automated tenant-ownership unwind is out-of-scope for this finding.

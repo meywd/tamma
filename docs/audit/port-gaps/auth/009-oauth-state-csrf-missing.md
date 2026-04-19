@@ -132,3 +132,10 @@ Story subtask 4.2 mandates state for CSRF specifically. C# dropped it entirely.
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (subtask 4.2); `docs/stories/epic-16/16-4-unified-navigation-impl-plan.md` (§278); `docs/stories/epic-18/18-3-organization-tenant-creation-impl-plan.md` (§82-88)
 - Related findings: `008-oauth-callback-stub.md` (callback needs state)
 - RFC 6749 §10.12 — CSRF protection via `state`.
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: GitHubAuth accepts ?rd= and ?invite=, generates a 32-byte CSRF nonce in tamma_oauth_csrf cookie, base64url-encodes {rd, invite, csrf} JSON as `state`, sanitizes rd against the configured Cookie:Domain. Scope upgraded to `read:user user:email`.

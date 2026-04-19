@@ -154,3 +154,10 @@ C# regresses from the story's explicit list.
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Repositories/IUserRepository.cs`, `UserRepository.cs`
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (subtask 1.4); `18-2` (subtask 4.6-4.7)
 - Related findings: `005-email-verification-stub.md`, `008-oauth-callback-stub.md`, `019-admin-delete-user-no-cascade.md`, `023-user-installations-table-absent.md`, `025-user-settings-jsonb-column-missing.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: IUserRepository extended with GetByEmailVerificationTokenHashAsync, SetEmailVerifiedAsync, UpdateVerificationTokenAsync, UpdatePasswordHashAsync, UpdateAuthMethodAsync, SetGitHubIdAsync, UpdateLastActiveAsync, GetUserSettingsAsync, UpdateUserSettingsAsync. Implementations target the underlying column rather than full-row UpdateAsync.

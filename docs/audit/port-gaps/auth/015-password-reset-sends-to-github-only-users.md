@@ -133,3 +133,10 @@ The CLAUDE.md "Security Requirements" section says: *"Input validation: Sanitize
 - Story: `docs/stories/epic-18/story-18-6/18-6-password-reset.md` — no explicit mention of GitHub-only handling
 - Related findings: `014-no-rate-limit-on-resend-and-reset.md`
 - CLAUDE.md section: Security Requirements (doesn't cover this specific case)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: PasswordResetRequest skips the email send when user.AuthMethod == 'github' OR user.PasswordHash is null. Returns the canned response either way.

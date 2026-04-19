@@ -171,3 +171,10 @@ Story is explicit about the family-rotation pattern. C# skipped it.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:233-261`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 9-10, §180, subtask 5.4-5.5)
 - Related findings: `004-session-cookie-payload-and-domain.md` (source of refresh-token location)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: Refresh now: detects reuse (revoked-token replay → revoke entire user family + WARN log), revokes presented token, mints+persists new refresh, returns both tokens, updates session cookie.

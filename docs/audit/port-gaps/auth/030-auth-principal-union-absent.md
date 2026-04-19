@@ -135,3 +135,10 @@ Story is explicit about the discriminated-union design.
 - C# source: None — `AuthPrincipal` does not exist
 - Story: `docs/stories/epic-16/16-7-service-to-service-auth.md` (§95-102)
 - Related findings: `029-unified-auth-missing.md` (the populator)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: AuthPrincipal abstract record + UserAuthPrincipal / InstallationAuthPrincipal / ServiceAuthPrincipal sealed records. ApiKeyAuthHandler stores the typed principal on HttpContext.Items via SetAuthPrincipal; downstream code can pattern-match via GetAuthPrincipal.

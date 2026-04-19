@@ -139,3 +139,10 @@ TS precisely matches the story.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:370-375`
 - Story: `docs/stories/epic-16/16-5-role-based-access-control.md` (§285, §384)
 - Related findings: `002-jwt-claim-shape.md`, `004-session-cookie-payload-and-domain.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: RoleCheck accepts ?service=elsa|logs|admin, maps to the corresponding `*:access` permission, returns 200/401/403 by status code (nginx-friendly). Endpoint uses AuthenticatedAny so the cookie-bound JWT verifies.

@@ -136,3 +136,10 @@ C# is a triple regression: payload, domain, and max-age all violate AC 12 explic
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 12); `docs/stories/epic-16/16-4-unified-navigation-impl-plan.md` (§278)
 - Related findings: `002-jwt-claim-shape.md`, `010-role-check-service-to-permission-map.md`, `011-get-me-reads-bearer-not-cookie.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: tamma_session cookie now carries the access JWT (not refresh), MaxAge=900s, Domain pulled from Cookie:Domain config (.tamma.dev in prod). LoginResponse adds RefreshToken to the body.

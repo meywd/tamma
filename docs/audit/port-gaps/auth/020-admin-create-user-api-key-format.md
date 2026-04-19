@@ -143,3 +143,10 @@ Combined with 003, the user might argue that `tamma_uk_` is a *clarification*: u
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AdminEndpoints.cs:17-39, 49-56, 148-171`
 - Story: `docs/stories/epic-16/16-7-service-to-service-auth.md` (generic); `docs/stories/epic-16/16-2-user-management-api.md` (referenced, not quoted)
 - Related findings: `003-api-key-hash-algorithm.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: AdminEndpoints CreateServiceKey, RotateServiceKey, and CreateUserApiKey all route through ApiKeyHasher (one prefix `tamma_sk_`, base64url, SHA-256, 12-char display prefix).

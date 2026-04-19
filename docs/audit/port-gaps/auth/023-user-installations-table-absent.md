@@ -130,3 +130,10 @@ Decision needed from architecture: does Tamma's model intentionally drop user-le
 - C# source: None — table missing
 - Story: `docs/stories/epic-18/18-4-github-app-installation-onboarding.md` (does not explicitly cover user_installations)
 - Related findings: `008-oauth-callback-stub.md`, `019-admin-delete-user-no-cascade.md`, `022-user-repository-missing-methods.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid
+- **Commit**: `e56b04d`
+- **Notes**: Per admin-db decision: TS user_installations was intentionally folded into tenant_memberships in the C# port. OAuth callback (finding 008) and DeleteUser cascade (019) use tenant_memberships; no user_installations table is reintroduced.

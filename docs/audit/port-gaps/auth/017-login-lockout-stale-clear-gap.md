@@ -160,3 +160,10 @@ Error paths:
 - TS source: `packages/api/src/auth/login-lockout.ts:63-92` (commit `9e9a57c~1`)
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Auth/LoginLockoutService.cs:21-42`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (subtask 2.2, 2.4)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: RecordFailedAttempt now clears expired LockedUntil + Attempts BEFORE counting, mirroring the TS branch order.

@@ -155,3 +155,10 @@ Error paths:
 - Story: `docs/stories/epic-16/16-5-role-based-access-control.md` (§537); `docs/stories/epic-16/16-2-user-management-api.md` (referenced)
 - Related findings: `016-require-self-or-role-missing.md`, `019-admin-delete-user-no-cascade.md`
 - CLAUDE.md section: "Self-Maintenance Goal" / "complete audit trail" — required structured logging
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: UpdateUserRole validates against {owner,admin,member}, blocks self-change, blocks non-owner promotions (defense-in-depth on top of the OwnerAccess route gate), emits USER.ROLE_CHANGED.SUCCESS structured log.

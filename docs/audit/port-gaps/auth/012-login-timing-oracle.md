@@ -124,3 +124,10 @@ Story's subtask 3.4 explicitly says "constant-time path" — C# broke this.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:177-182`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 3, subtask 3.4)
 - Related findings: `001-password-hash-scrypt-vs-argon2.md` (the `DummyHash` must share the algorithm)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: Login calls VerifyPassword(req.Password, DummyHash) on the user-not-found branch so the argon2id cost is paid regardless of whether the email exists.

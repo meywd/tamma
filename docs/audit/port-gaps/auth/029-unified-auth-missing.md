@@ -215,3 +215,10 @@ Explicitly required per AC. C# implements a subset.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Auth/ApiKeyAuthHandler.cs`
 - Story: `docs/stories/epic-16/16-7-service-to-service-auth.md` (§33, §35, §43)
 - Related findings: `003-api-key-hash-algorithm.md`, `030-auth-principal-union-absent.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: ApiKeyAuthHandler now: accepts Bearer + ApiKey headers; tries scrypt fallback hash; treats future-dated RevokedAt as 24h grace period (WARN + allow); validates X-Tenant-Id for service scope; checks SuspendedAt for installation scope; fire-and-forget UpdateLastUsedAsync; emits structured INFO/WARN audit log per request.

@@ -172,3 +172,10 @@ The story is exhaustive. Zero percent of it is implemented in C#.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:387-391`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 5-7, Task 4); `docs/stories/epic-16/16-1-oauth2-proxy-unified-auth.md` (§286-299)
 - Related findings: `009-oauth-state-csrf-missing.md`, `021-invite-token-raw-vs-hash.md`, `022-user-repository-missing-methods.md`, `023-user-installations-table-absent.md`, `004-session-cookie-payload-and-domain.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: GitHubCallback ports the primary paths: code→token, profile fetch, CSRF verify, invite hash-lookup with role assignment, user upsert (new + email-linking + GitHub placeholder email), JWT + cookie + sanitized rd. Installation-auto-link path skipped per admin-db decision (tenant_memberships replaces user_installations).

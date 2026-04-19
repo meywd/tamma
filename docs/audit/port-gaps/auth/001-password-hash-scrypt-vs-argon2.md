@@ -124,3 +124,10 @@ The TS implementation went with scrypt against its own story's stated intent (OW
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (AC 2, subtask 2.2)
 - Related findings: `003-api-key-hash-algorithm.md` (same scrypt→SHA256 shape for API keys), `013-password-strength-validation-missing.md`
 - Archived SQL migration: `database/archived-sql-migrations/018_user_auth_fields.sql` (adds `password_hash TEXT` column — format is agnostic at the schema level, so the column itself is portable)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: PasswordService now verifies scrypt-format hashes using BouncyCastle SCrypt. Login transparently rehashes to argon2id via NeedsRehash + UpdatePasswordHashAsync.

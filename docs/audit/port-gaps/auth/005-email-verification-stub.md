@@ -141,3 +141,10 @@ The story is unambiguous. C# ports the return message but nothing else.
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (AC 7, Task 5)
 - Related findings: `006-login-email-verified-check-missing.md`, `022-user-repository-missing-methods.md`
 - Archived SQL migration: `database/archived-sql-migrations/018_user_auth_fields.sql` (adds `email_verified`, `email_verification_token_hash`, `email_verification_expires_at` columns)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: VerifyEmail now hashes the token, calls GetByEmailVerificationTokenHashAsync, branches on null/expired/already-verified, and calls SetEmailVerifiedAsync on success.

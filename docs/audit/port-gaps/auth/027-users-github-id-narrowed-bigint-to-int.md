@@ -93,3 +93,10 @@ Compare to GitHub's own API docs, which document user ID as a 64-bit integer.
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Entities/User.cs:15`, `Migrations/20260416172234_InitialSchema.cs:450`, `Repositories/IUserRepository.cs:9`, `UserRepository.cs:23`
 - Story: No governing story — schema-level detail
 - Related findings: `023-user-installations-table-absent.md` (installation_id should also be bigint)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d`
+- **Notes**: GitHubId was widened to bigint by SchemaHardeningPhase1 migration; entity declares `long? GitHubId`; IUserRepository.GetByGitHubIdAsync(long) is already in place.

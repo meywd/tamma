@@ -105,3 +105,10 @@ Story is unambiguous — both unique AND case-insensitive. C# did neither.
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Migrations/20260416172234_InitialSchema.cs:669-672`
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (AC 3, subtask 1.3)
 - Related findings: `026-users-email-not-null-regression.md` (same column; both need to coordinate with nullable-email)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d`
+- **Notes**: SchemaHardeningPhase1 migration creates `ix_users_email_lower` as a partial unique index on LOWER(Email) WHERE DeletedAt IS NULL. Register endpoint catches DbUpdateException → 409 Conflict for the race-condition path.

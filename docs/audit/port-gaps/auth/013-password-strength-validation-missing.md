@@ -156,3 +156,10 @@ For register: regression vs explicit AC 4. For password-reset/confirm: likely sp
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:44-48, 325-348`
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (AC 4, subtask 2.3-2.4); `docs/stories/epic-18/story-18-6/18-6-password-reset.md` (subtask 3.3)
 - Related findings: `001-password-hash-scrypt-vs-argon2.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: PasswordStrengthValidator ports the TS criteria + 45-entry common-password set. Wired into Register and PasswordResetConfirm; both return 400 with details on weak input.

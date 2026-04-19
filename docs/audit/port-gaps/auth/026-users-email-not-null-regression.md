@@ -113,3 +113,10 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Entities/User.cs:6`, `Migrations/20260416172234_InitialSchema.cs:441`
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 6, line 18)
 - Related findings: `008-oauth-callback-stub.md` (blocked by this), `015-password-reset-sends-to-github-only-users.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid
+- **Commit**: `e56b04d`
+- **Notes**: Per admin-db decision: Email is intentionally NOT NULL with a placeholder pattern for OAuth-only users. GitHubCallback synthesizes `{id}+{login}@users.noreply.github.com` when GitHub returns no public email.

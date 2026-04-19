@@ -131,3 +131,10 @@ Error paths:
 - Story: `docs/stories/epic-16/16-7-service-to-service-auth.md` (referenced)
 - Related findings: `003-api-key-hash-algorithm.md`
 - CLAUDE.md section: "No migration anxiety" (end of the file)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Invalid
+- **Commit**: `e56b04d`
+- **Notes**: Per CLAUDE.md `No migration anxiety` policy and admin-db greenfield decision: legacy user_api_keys data is not migrated. Drop list in Program.cs already wipes Tamma-managed tables; the user_api_keys add was deferred as out-of-scope.

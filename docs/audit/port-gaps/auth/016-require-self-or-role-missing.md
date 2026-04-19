@@ -129,3 +129,10 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Program.cs:345, 351-353`, `AdminEndpoints.cs:148-184`, `Auth/Permissions.cs`, `Auth/PermissionHandler.cs`
 - Story: `docs/stories/epic-16/16-5-role-based-access-control.md` (RBAC matrix, no self-or-role concept)
 - Related findings: `018-admin-update-user-role-missing-guards.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: SelfOrPermissionRequirement + handler succeeds when the route {id} matches the caller's sub. Wired to admin user-keys (POST/GET/DELETE) and GET /admin/users/{id} via SelfOrApiKeysManage / SelfOrUsersView policies.

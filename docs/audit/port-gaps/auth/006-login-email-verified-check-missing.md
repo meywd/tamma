@@ -117,3 +117,10 @@ Explicitly mandated by the story. C# just forgot to port it.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:158-231` (specifically the gap at :186-187)
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 2, subtask 3.6)
 - Related findings: `005-email-verification-stub.md` (must be fixed before this, else users can never verify)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: Login returns 403 with `Please verify your email` when EmailVerified is false.

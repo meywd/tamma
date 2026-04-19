@@ -104,3 +104,10 @@ Error paths: none — the operation succeeds but at the wrong scope.
 - Story: No governing story — `users.settings` is pre-Epic-17 lore.
 - Related findings: `022-user-repository-missing-methods.md` (depends on this for `GetUserSettingsAsync`/`UpdateUserSettingsAsync`)
 - CLAUDE.md section: "Prompt Store Architecture" (as analog for per-user overrides modeling)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed
+- **Commit**: `e56b04d`
+- **Notes**: users.settings JSONB column was added by SchemaHardeningPhase1 migration and is already exposed on the User entity. Repo wiring (GetUserSettingsAsync / UpdateUserSettingsAsync) added in this batch via finding 022.

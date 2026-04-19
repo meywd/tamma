@@ -133,3 +133,10 @@ C# is a regression vs both the story AC and TS.
 - Story: `docs/stories/epic-18/18-2-user-login-session-management.md` (AC 8, §150-176)
 - Related findings: `004-session-cookie-payload-and-domain.md` (cookie carries this JWT), `011-get-me-reads-bearer-not-cookie.md` (reads these claims)
 - CLAUDE.md section: "JWT payload contract" via `UnifiedJwtPayload`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: JwtService emits the seven TS-shape claims (sub, tenantId, role, platformRole, email, name, authMethod). MapInboundClaims=false so JWT JSON has bare claim names.

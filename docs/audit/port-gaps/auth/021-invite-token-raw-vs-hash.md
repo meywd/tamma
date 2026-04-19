@@ -139,3 +139,10 @@ Error paths:
 - C# source: `apps/tamma-elsa/src/Tamma.Data/Entities/UserInvite.cs:9`, `Endpoints/AdminEndpoints.cs:116-131`, `Repositories/IInviteRepository.cs` (missing method)
 - Story: `docs/stories/epic-18/18-3-organization-tenant-creation-impl-plan.md` (§82-88)
 - Related findings: `008-oauth-callback-stub.md` (read side consumer)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: GitHubCallback hashes state.invite via SHA-256 then calls IInviteRepository.GetByTokenHashAsync (already exists). Invite role applied via tenant_memberships; AcceptAsync marks the invite consumed.

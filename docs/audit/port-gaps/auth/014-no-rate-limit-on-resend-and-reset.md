@@ -143,3 +143,10 @@ AC 8 is explicit.
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:112-156, 280-323`
 - Story: `docs/stories/epic-18/18-1-user-registration-email-verification.md` (AC 8, subtask 6.5); `docs/stories/epic-18/story-18-6/18-6-password-reset.md`
 - Related findings: `015-password-reset-sends-to-github-only-users.md` (compounds with this)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: InMemoryRateLimitService (sliding window, 3/hour/email) is wired into ResendVerification (`resend-verification` scope) and PasswordResetRequest (`password-reset-request` scope). Quota only consumes on successful work to keep enumeration-safe.

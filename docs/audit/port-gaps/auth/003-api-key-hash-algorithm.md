@@ -127,3 +127,10 @@ Note: there is a defensible argument for moving API-key hashing to a fast hash (
 - Story: `docs/stories/epic-16/16-7-service-to-service-auth.md` (AC 2)
 - Related findings: `001-password-hash-scrypt-vs-argon2.md` (same pattern, different table), `020-admin-create-user-api-key-format.md`, `024-user-api-keys-legacy-table-orphan.md`, `029-unified-auth-missing.md`
 - Archived SQL migration: `database/archived-sql-migrations/009_unified_api_keys.sql` (creates `api_keys.key_hash` column)
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: ApiKeyHasher centralizes generation/hash. ApiKeyAuthHandler tries SHA-256 first, falls back to legacy scrypt hex via ApiKeyHasher.LegacyScryptHash so persisted TS keys still verify.

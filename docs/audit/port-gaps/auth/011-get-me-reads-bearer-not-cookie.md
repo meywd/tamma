@@ -132,3 +132,10 @@ Story is explicit about both the cookie source and the `{ user: { id, username, 
 - C# source: `apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs:350-368`
 - Story: `docs/stories/epic-16/16-4-unified-navigation-impl-plan.md` (§12, §189-192)
 - Related findings: `002-jwt-claim-shape.md`, `004-session-cookie-payload-and-domain.md`, `010-role-check-service-to-permission-map.md`
+
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: `e56b04d`
+- **Notes**: JWT bearer middleware reads the JWT from the tamma_session cookie when no Authorization header. GetMe returns the wrapped { user: { ... } } payload with id, email, displayName, githubId, username, role, platformRole, authMethod, tenantId, memberships.
