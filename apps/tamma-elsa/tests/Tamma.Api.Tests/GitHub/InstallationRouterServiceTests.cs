@@ -22,6 +22,9 @@ public class InstallationRouterServiceTests
     private Mock<IEventRepository> _eventRepo = null!;
     private Mock<ITenantRepository> _tenantRepo = null!;
     private Mock<IUserRepository> _userRepo = null!;
+    private Mock<IApiKeyRepository> _apiKeyRepo = null!;
+    private Mock<IGitHubAppClient> _gitHubApp = null!;
+    private Mock<IGitHubSecretsProvisioner> _provisioner = null!;
     private Mock<ILogger<InstallationRouterService>> _logger = null!;
     private InstallationRouterService _service = null!;
 
@@ -32,7 +35,38 @@ public class InstallationRouterServiceTests
         _eventRepo = new Mock<IEventRepository>();
         _tenantRepo = new Mock<ITenantRepository>();
         _userRepo = new Mock<IUserRepository>();
+        _apiKeyRepo = new Mock<IApiKeyRepository>();
+        _gitHubApp = new Mock<IGitHubAppClient>();
+        _provisioner = new Mock<IGitHubSecretsProvisioner>();
         _logger = new Mock<ILogger<InstallationRouterService>>();
+
+        // Default: GitHub App client is unwired (Null behaviour) and the
+        // provisioner returns no work so the callback unit tests focus on
+        // tenant linking semantics. Findings 007 + 008 + 013 are exercised
+        // separately via integration tests.
+        _gitHubApp
+            .Setup(c => c.GetInstallationAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GitHubAppResult<GitHubInstallationDetails>.NotConfigured());
+        _gitHubApp
+            .Setup(c => c.ListInstallationReposAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GitHubAppResult<IReadOnlyList<GitHubInstallationRepoDetail>>.NotConfigured());
+        _provisioner
+            .Setup(p => p.ProvisionSecretAsync(
+                It.IsAny<long>(),
+                It.IsAny<IReadOnlyList<(string, string)>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<SecretProvisionResult>)Array.Empty<SecretProvisionResult>());
+        _apiKeyRepo
+            .Setup(r => r.ListByOwnerAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<ApiKey>());
+        _apiKeyRepo
+            .Setup(r => r.CreateAsync(It.IsAny<ApiKey>()))
+            .ReturnsAsync((ApiKey k) => { k.Id = Guid.NewGuid(); return k; });
+        _installRepo
+            .Setup(r => r.ListReposAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(new List<GitHubInstallationRepo>());
 
         _service = new InstallationRouterService(
             _installRepo.Object,
@@ -40,6 +74,9 @@ public class InstallationRouterServiceTests
             _tenantRepo.Object,
             _userRepo.Object,
             new MemoryCache(new MemoryCacheOptions()),
+            _gitHubApp.Object,
+            _provisioner.Object,
+            _apiKeyRepo.Object,
             _logger.Object);
     }
 

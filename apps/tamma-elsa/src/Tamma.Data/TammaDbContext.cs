@@ -36,6 +36,7 @@ public class TammaDbContext : DbContext
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<GitHubInstallation> GitHubInstallations => Set<GitHubInstallation>();
     public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
+    public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
@@ -248,6 +249,21 @@ public class TammaDbContext : DbContext
                 .WithMany(i => i.Repos)
                 .HasForeignKey(e => e.InstallationEntityId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── GitHubWebhookDelivery (audit findings 003 + 019) ──
+        modelBuilder.Entity<GitHubWebhookDelivery>(entity =>
+        {
+            entity.ToTable("github_webhook_deliveries");
+            entity.HasKey(e => e.DeliveryId);
+            entity.Property(e => e.DeliveryId).HasColumnType("uuid");
+            entity.Property(e => e.ReceivedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Action).HasMaxLength(100);
+            entity.Property(e => e.InstallationId).HasColumnType("bigint");
+
+            entity.HasIndex(e => e.ReceivedAt);
+            entity.HasIndex(e => new { e.InstallationId, e.ReceivedAt });
         });
 
         // ── AgentConfig ──

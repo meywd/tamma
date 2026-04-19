@@ -281,6 +281,25 @@ builder.Services.AddRateLimiter(options =>
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
     });
+    // Audit findings 014 + 017 — match TS @fastify/rate-limit on the GitHub
+    // public surface. Webhook = 300/min (high enough for an active GitHub
+    // App, low enough that an attacker spamming HMAC-failed deliveries hits
+    // 429 before exhausting CPU). OAuth start = 60/min to throttle CSRF
+    // cookie spray and code-exchange amplification.
+    options.AddFixedWindowLimiter("GitHubWebhook", o =>
+    {
+        o.PermitLimit = 300;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+    options.AddFixedWindowLimiter("OAuthStart", o =>
+    {
+        o.PermitLimit = 60;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
 });
 
 // CORS
@@ -543,8 +562,14 @@ app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("Authentica
 // status alone (audit finding 010). AuthenticatedAny enforces auth; the
 // endpoint itself returns 403 for insufficient role.
 app.MapGet("/api/auth/role-check", AuthEndpoints.RoleCheck).RequireAuthorization("AuthenticatedAny");
-app.MapGet("/api/auth/github", AuthEndpoints.GitHubAuth);
-app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback);
+// Audit finding 014 — rate limit OAuth start + callback (60/min). Both share
+// the policy because the callback's HTTP-side cost is comparable to the start
+// (token exchange + GitHub API call) and an attacker spraying either consumes
+// the same downstream budget.
+app.MapGet("/api/auth/github", AuthEndpoints.GitHubAuth)
+    .RequireRateLimiting("OAuthStart");
+app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback)
+    .RequireRateLimiting("OAuthStart");
 
 // ── Admin ──
 var admin = app.MapGroup("/api/admin").RequireAuthorization("AdminAccess");
@@ -750,9 +775,14 @@ workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).Require
 workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 
 // ── GitHub App (no auth, webhook signature verification) ──
+// Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The
+// install callback shares OAuthStart's 60/min cap; legitimate installs are
+// rare events but the route is publicly reachable.
 var github = app.MapGroup("/api/github");
-github.MapGet("/callback", GitHubEndpoints.Callback);
-github.MapPost("/webhooks", GitHubEndpoints.Webhooks);
+github.MapGet("/callback", GitHubEndpoints.Callback)
+    .RequireRateLimiting("OAuthStart");
+github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
+    .RequireRateLimiting("GitHubWebhook");
 
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
@@ -844,6 +874,7 @@ using (var scope = app.Services.CreateScope())
                     api_keys, agent_configs, domain_events,
                     email_outbox,
                     github_installation_repos, github_installations,
+                    github_webhook_deliveries,
                     junior_developers, mentorship_events, mentorship_sessions,
                     password_reset_tokens, prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,

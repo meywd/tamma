@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Tamma.Api.Services.GitHub;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -9,10 +10,13 @@ namespace Tamma.Api.Services.SaaS;
 /// <summary>
 /// Concrete <see cref="IApiKeyRotationService"/>.
 ///
-/// Ported from the deleted TypeScript <c>routes/saas/key-rotation.ts</c>
-/// (Epic 19 Phase 3). The TS version also re-provisioned the rotated key to
-/// GitHub-hosted repo secrets via Octokit; that re-provisioning is out of
-/// scope for this C# port because we do not yet wire a GitHub App client.
+/// <para>Ported from the deleted TypeScript <c>routes/saas/key-rotation.ts</c>
+/// (Epic 19 Phase 3). Audit findings 013 + 018 — re-provisioning to GitHub
+/// Actions secrets now flows through <see cref="IGitHubSecretsProvisioner"/>;
+/// when the Null impl is wired (default until the GitHub App client port
+/// lands) the per-repo summary is populated with
+/// <c>github_client_not_configured</c> entries so operators see exactly which
+/// repos still hold the stale secret.</para>
 /// </summary>
 public sealed class ApiKeyRotationService : IApiKeyRotationService
 {
@@ -29,6 +33,7 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
     private readonly IApiKeyRepository _apiKeys;
     private readonly ITenantMembershipRepository _memberships;
     private readonly IEventRepository _events;
+    private readonly IGitHubSecretsProvisioner _provisioner;
     private readonly ILogger<ApiKeyRotationService> _logger;
 
     public ApiKeyRotationService(
@@ -36,12 +41,14 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
         IApiKeyRepository apiKeys,
         ITenantMembershipRepository memberships,
         IEventRepository events,
+        IGitHubSecretsProvisioner provisioner,
         ILogger<ApiKeyRotationService> logger)
     {
         _installations = installations;
         _apiKeys = apiKeys;
         _memberships = memberships;
         _events = events;
+        _provisioner = provisioner;
         _logger = logger;
     }
 
@@ -147,27 +154,35 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
             "API key rotated: installation={InstallationEntityId} tenant={TenantId} user={UserId} newKeyId={KeyId}",
             installationEntityId, tenantId, callerUserId, stored.Id);
 
-        // Audit finding 021 — TS atomic-rotated the DB hash AND re-provisioned
-        // the new plaintext to every repo's GitHub Actions secrets so running
-        // workflows never broke. The C# port can't yet do that (no GitHub App
-        // client wired; cross-ref findings 005-011). Until that lands, report
-        // the documented per-repo summary with every repo flagged
-        // `github_client_not_configured` so the operator knows secrets need
-        // manual updating after this rotation.
+        // Audit finding 013 + 021 — TS atomic-rotated the DB hash AND
+        // re-provisioned the new plaintext to every repo's GitHub Actions
+        // secrets so running workflows never broke. We delegate to the
+        // injected provisioner; when the Null impl is wired every entry
+        // surfaces `github_client_not_configured` (matches the prior
+        // hardcoded summary; once the real provisioner lands the per-repo
+        // results turn green automatically without touching this code).
         var repos = await _installations.ListReposAsync(installationEntityId)
             ?? new List<Tamma.Data.Entities.GitHubInstallationRepo>();
-        var perRepoResults = repos
-            .Where(r => !string.IsNullOrEmpty(r.Owner) && !string.IsNullOrEmpty(r.Name))
+        var repoTuples = (IReadOnlyList<(string Owner, string Repo)>)repos
+            .Where(r => r.IsActive
+                && !string.IsNullOrEmpty(r.Owner)
+                && !string.IsNullOrEmpty(r.Name))
+            .Select(r => (r.Owner, r.Name))
+            .ToList();
+        var provisionResults = await _provisioner.ProvisionSecretAsync(
+            installation.InstallationId, repoTuples, "TAMMA_API_KEY", plaintext);
+        var perRepoResults = provisionResults
             .Select(r => new RepoProvisioningResult(
                 Owner: r.Owner,
-                Repo: r.Name,
-                Success: false,
-                Error: "github_client_not_configured"))
+                Repo: r.Repo,
+                Success: r.Success,
+                Error: r.Error))
             .ToList();
+        var successCount = perRepoResults.Count(r => r.Success);
         var summary = new KeyRotationProvisioningSummary(
             Total: perRepoResults.Count,
-            Success: 0,
-            Failed: perRepoResults.Count,
+            Success: successCount,
+            Failed: perRepoResults.Count - successCount,
             Results: perRepoResults);
 
         return new KeyRotationResult(

@@ -103,6 +103,39 @@ public class GitHubEndpointsIntegrationTests
     }
 
     [Test]
+    public async Task Webhook_NoSecretConfigured_Returns401()
+    {
+        // Audit finding 001 (P0). When GitHub:WebhookSecret is empty, the
+        // handler must reject every webhook outright instead of silently
+        // skipping verification.
+        var noSecretClient = ApiTestFixture.Factory.WithWebHostBuilder(b =>
+        {
+            b.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["GitHub:WebhookSecret"] = ""
+                });
+            });
+            b.ConfigureServices(services =>
+            {
+                services.AddGitHubInstallationServices();
+            });
+        }).CreateClient();
+
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/github/webhooks")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        };
+        req.Headers.Add("X-GitHub-Event", "installation");
+        req.Headers.Add("X-Hub-Signature-256", "sha256=anything");
+
+        var response = await noSecretClient.SendAsync(req);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
     public async Task Webhook_ValidSignature_MissingEvent_Returns400()
     {
         using var client = CreateClient();

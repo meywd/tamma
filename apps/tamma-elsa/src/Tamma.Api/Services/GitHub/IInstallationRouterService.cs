@@ -36,15 +36,20 @@ public interface IInstallationRouterService
 {
     /// <summary>
     /// Handle the OAuth redirect after a user installs the Tamma GitHub App.
-    /// Binds the installation to the calling user's active tenant.
+    /// Binds the installation to the calling user's active tenant when one is
+    /// signed in. Audit finding 020 — when <paramref name="callingUserId"/>
+    /// is null (Marketplace install with no Tamma session), the row is
+    /// persisted as an orphan (TenantId = null) so the user can claim it
+    /// later via the dashboard.
     /// </summary>
     /// <param name="installationId">GitHub App installation ID from the query string.</param>
     /// <param name="setupActionId">Optional GitHub <c>setup_action</c> identifier.</param>
-    /// <param name="callingUserId">Authenticated user ID (from JWT claim).</param>
+    /// <param name="callingUserId">Authenticated user ID (from JWT claim) or null
+    /// if no Tamma session was present.</param>
     Task<CallbackResult> HandleCallbackAsync(
         long installationId,
         int? setupActionId,
-        Guid callingUserId);
+        Guid? callingUserId);
 
     /// <summary>
     /// Dispatch a verified webhook payload to the appropriate handler.

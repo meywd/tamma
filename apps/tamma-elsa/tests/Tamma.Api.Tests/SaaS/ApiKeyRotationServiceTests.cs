@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
+using Tamma.Api.Services.GitHub;
 using Tamma.Api.Services.SaaS;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -21,6 +22,7 @@ public class ApiKeyRotationServiceTests
     private Mock<IApiKeyRepository> _apiKeyRepo = null!;
     private Mock<ITenantMembershipRepository> _membershipRepo = null!;
     private Mock<IEventRepository> _eventRepo = null!;
+    private Mock<IGitHubSecretsProvisioner> _provisioner = null!;
     private Mock<ILogger<ApiKeyRotationService>> _logger = null!;
     private ApiKeyRotationService _service = null!;
 
@@ -31,13 +33,27 @@ public class ApiKeyRotationServiceTests
         _apiKeyRepo = new Mock<IApiKeyRepository>();
         _membershipRepo = new Mock<ITenantMembershipRepository>();
         _eventRepo = new Mock<IEventRepository>();
+        _provisioner = new Mock<IGitHubSecretsProvisioner>();
         _logger = new Mock<ILogger<ApiKeyRotationService>>();
+
+        // Default: provisioner returns no per-repo results (mirrors the repo
+        // list being empty); each test that exercises the provisioner sets up
+        // its own behaviour.
+        _provisioner
+            .Setup(p => p.ProvisionSecretAsync(
+                It.IsAny<long>(),
+                It.IsAny<IReadOnlyList<(string, string)>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<SecretProvisionResult>)Array.Empty<SecretProvisionResult>());
 
         _service = new ApiKeyRotationService(
             _installRepo.Object,
             _apiKeyRepo.Object,
             _membershipRepo.Object,
             _eventRepo.Object,
+            _provisioner.Object,
             _logger.Object);
     }
 

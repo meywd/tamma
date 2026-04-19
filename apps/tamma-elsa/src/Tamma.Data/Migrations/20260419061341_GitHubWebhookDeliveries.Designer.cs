@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
@@ -12,9 +13,11 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations
 {
     [DbContext(typeof(TammaDbContext))]
-    partial class TammaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260419061341_GitHubWebhookDeliveries")]
+    partial class GitHubWebhookDeliveries
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -360,9 +363,6 @@ namespace Tamma.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
-
-                    b.Property<byte[]>("EncryptedPlaintext")
-                        .HasColumnType("bytea");
 
                     b.Property<string>("KeyHash")
                         .IsRequired()

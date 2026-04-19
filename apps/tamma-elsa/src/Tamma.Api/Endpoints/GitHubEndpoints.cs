@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Logging;
 using Tamma.Api.Services.GitHub;
+using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
 
@@ -52,12 +53,18 @@ public static class GitHubEndpoints
             return Results.BadRequest(new { error = "invalid installation_id" });
         }
 
-        // Must be an authenticated user to link the install to a tenant.
+        // Audit finding 020 — accept Marketplace installs that lack a Tamma
+        // session. TS persisted these as orphan rows (TenantId = null) so the
+        // user could claim them later via the dashboard. Bouncing
+        // unauthenticated callers to /onboarding/error breaks the
+        // GitHub-Marketplace-first install flow that Story 18-4 explicitly
+        // documents. We persist regardless; only the linking semantics
+        // depend on whether a user is signed in.
         var userIdClaim = context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        Guid? userId = null;
+        if (!string.IsNullOrEmpty(userIdClaim) && Guid.TryParse(userIdClaim, out var parsedUserId))
         {
-            var unauthedUri = $"{dashboardBase}{ErrorRedirectPath}?reason=unauthenticated";
-            return Results.Redirect(unauthedUri);
+            userId = parsedUserId;
         }
 
         int? setupActionId = int.TryParse(setupAction, out var s) ? s : null;
@@ -73,6 +80,17 @@ public static class GitHubEndpoints
                     "Install callback failed: {Reason} (installation={InstallationId}, user={UserId})",
                     reason, installationId, userId);
                 return Results.Redirect($"{dashboardBase}{ErrorRedirectPath}?reason={reason}");
+            }
+
+            if (result.TenantId is null)
+            {
+                logger.LogInformation(
+                    "Install callback persisted orphan installation {InstallationId} (no authenticated user)",
+                    installationId);
+                // Send the user to the dashboard's claim-installation flow so
+                // they can sign in and adopt this row.
+                return Results.Redirect(
+                    $"{dashboardBase}{SuccessRedirectPath}?orphan=1&installation_id={installationId}");
             }
 
             logger.LogInformation(
@@ -96,6 +114,7 @@ public static class GitHubEndpoints
         HttpContext context,
         [FromServices] IConfiguration config,
         [FromServices] IInstallationRouterService router,
+        [FromServices] IGitHubWebhookDeliveryRepository deliveryRepo,
         [FromServices] ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("GitHubEndpoints.Webhooks");
@@ -120,8 +139,19 @@ public static class GitHubEndpoints
             context.Request.Body.Position = 0;
         }
 
+        // Audit finding 001 (P0 security): never fail open on missing secret.
+        // TS made the secret a required plugin option (`GitHubWebhookOptions.webhookSecret: string`),
+        // so an unset secret was unreachable. The C# port previously short-circuited
+        // verification when the secret was empty, turning a misconfiguration into a
+        // public, unauthenticated webhook surface. We now reject every webhook
+        // outright when no secret is configured.
         var secret = config["GitHub:WebhookSecret"];
-        if (!string.IsNullOrEmpty(secret) && !VerifySignature(secret, body, signature))
+        if (string.IsNullOrEmpty(secret))
+        {
+            logger.LogError("Webhook rejected: GitHub:WebhookSecret is not configured");
+            return Results.Unauthorized();
+        }
+        if (!VerifySignature(secret, body, signature))
         {
             logger.LogWarning("Webhook rejected: invalid signature");
             return Results.Unauthorized();
@@ -145,6 +175,40 @@ public static class GitHubEndpoints
         {
             logger.LogWarning(ex, "Webhook rejected: invalid JSON body");
             return Results.BadRequest(new { error = "Invalid JSON" });
+        }
+
+        // ── 3a. Idempotency (audit findings 003 + 019) ──
+        // GitHub sets X-GitHub-Delivery to a UUID stable across retry attempts
+        // for the same logical delivery. Reject duplicates before dispatch so
+        // the durable Postgres-backed task queue doesn't accumulate redundant
+        // work. Missing/invalid delivery headers fall through with a warn log
+        // — backward-compat for replayed historical payloads.
+        var deliveryHeader = context.Request.Headers["X-GitHub-Delivery"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(deliveryHeader) && Guid.TryParse(deliveryHeader, out var parsedDeliveryId))
+        {
+            var action = TryGetActionForLog(payload);
+            long? installationId = TryGetInstallationIdForLog(payload);
+            var inserted = await deliveryRepo.TryRecordAsync(
+                parsedDeliveryId, eventType, action, installationId);
+            if (!inserted)
+            {
+                logger.LogInformation(
+                    "Webhook {Event} delivery {DeliveryId} skipped (duplicate)",
+                    LogSanitizer.Clean(eventType), parsedDeliveryId);
+                return Results.Ok(new
+                {
+                    received = true,
+                    @event = eventType,
+                    skipped = true,
+                    reason = "duplicate_delivery"
+                });
+            }
+        }
+        else if (!string.IsNullOrEmpty(deliveryHeader))
+        {
+            logger.LogWarning(
+                "Webhook {Event} carried non-UUID X-GitHub-Delivery header — proceeding without idempotency",
+                LogSanitizer.Clean(eventType));
         }
 
         try
@@ -184,6 +248,29 @@ public static class GitHubEndpoints
                 "Internal error processing webhook",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
+    }
+
+    // ─── Idempotency log helpers ────────────────────────────────────────────
+
+    private static string? TryGetActionForLog(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+        if (!payload.TryGetProperty("action", out var actionEl)) return null;
+        return actionEl.ValueKind == JsonValueKind.String ? actionEl.GetString() : null;
+    }
+
+    private static long? TryGetInstallationIdForLog(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+        if (!payload.TryGetProperty("installation", out var installation)) return null;
+        if (installation.ValueKind != JsonValueKind.Object) return null;
+        if (!installation.TryGetProperty("id", out var idEl)) return null;
+        return idEl.ValueKind switch
+        {
+            JsonValueKind.Number when idEl.TryGetInt64(out var n) => n,
+            JsonValueKind.String when long.TryParse(idEl.GetString(), out var s) => s,
+            _ => null
+        };
     }
 
     // ─── HMAC verification ──────────────────────────────────────────────────
