@@ -43,6 +43,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Top-1000 common passwords (audit finding auth/013). Sourced from
+         SecLists (MIT-licensed, Daniel Miessler 2018):
+         Passwords/Common-Credentials/xato-net-10-million-passwords-1000.txt.
+         Loaded into a FrozenSet at startup by PasswordStrengthValidator. -->
+    <EmbeddedResource Include="Auth/common-passwords.txt">
+      <LogicalName>Tamma.Api.Auth.common-passwords.txt</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
     <ProjectReference Include="..\Tamma.Data\Tamma.Data.csproj" />
     <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />

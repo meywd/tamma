@@ -54,13 +54,34 @@ public class PasswordStrengthValidatorTests
         r.Errors.Should().Contain(e => e.Contains("digit"));
     }
 
-    [TestCase("password123")]
-    [TestCase("Password123")]
-    [TestCase("admin123")]
+    // Representative entries across the top-1000 list. The upstream SecLists
+    // ranking is observed-frequency, so highly-rated dictionary words appear
+    // but some plausible-sounding variants (e.g. "password123") are not in
+    // the actual list. Each TestCase below is a real entry; the mixed-case
+    // variants exercise case-insensitive lookup.
+    [TestCase("password")]      // #2 in SecLists top-1000
+    [TestCase("password1")]     // #308
+    [TestCase("qwerty")]        // #4
+    [TestCase("qwertyuiop")]    // #21
+    [TestCase("letmein")]       // #16
+    [TestCase("Letmein")]       // case-insensitive
+    [TestCase("LETMEIN")]       // case-insensitive
+    [TestCase("iloveyou")]      // entry further down the list
+    [TestCase("trustno1")]      // #37 area
     public void CommonPassword_Rejected(string pwd)
     {
         var r = PasswordStrengthValidator.Validate(pwd);
         r.Valid.Should().BeFalse();
         r.Errors.Should().Contain(e => e.Contains("too common"));
+    }
+
+    [Test]
+    public void CommonPasswordList_LoadsTopThousand()
+    {
+        // Audit finding auth/013: the embedded SecLists top-1000 file must
+        // load at least 950 entries (blank lines + any dedup on case are
+        // tolerated; the source ships with ~1000 unique case-insensitive
+        // rows).
+        PasswordStrengthValidator.CommonPasswordCount.Should().BeGreaterThanOrEqualTo(950);
     }
 }

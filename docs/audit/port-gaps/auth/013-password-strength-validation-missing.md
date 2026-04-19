@@ -161,5 +161,5 @@ For register: regression vs explicit AC 4. For password-reset/confirm: likely sp
 
 - **Confirmed**: 2026-04-18 by agent
 - **Outcome**: Fixed
-- **Commit**: `e56b04d`
-- **Notes**: PasswordStrengthValidator ports the TS criteria + 45-entry common-password set. Wired into Register and PasswordResetConfirm; both return 400 with details on weak input.
+- **Commit**: `e56b04d` (initial port); top-1000 expansion in a follow-up commit
+- **Notes**: PasswordStrengthValidator now loads the SecLists top-1000 common passwords (`Passwords/Common-Credentials/xato-net-10-million-passwords-1000.txt`, MIT-licensed) from an embedded resource (`Auth/common-passwords.txt`) into a `FrozenSet<string>` with `OrdinalIgnoreCase` comparer. Story 18-1 AC 4 ("top-1000 common passwords") now satisfied. Wired into Register and PasswordResetConfirm; both return 400 with details on weak input.
