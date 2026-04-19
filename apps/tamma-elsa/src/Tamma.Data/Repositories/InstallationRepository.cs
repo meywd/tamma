@@ -206,4 +206,16 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
             await db.SaveChangesAsync();
         }
     }
+
+    public async Task<GitHubInstallation?> GetByRepoFullNameAsync(string repoFullName)
+    {
+        // Join via the active-only repo view so that a repo removed from the
+        // installation no longer resolves back to the installation row.
+        var repo = await db.GitHubInstallationRepos
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.IsActive && r.RepoFullName == repoFullName);
+        if (repo is null) return null;
+        return await db.GitHubInstallations
+            .FirstOrDefaultAsync(i => i.Id == repo.InstallationEntityId);
+    }
 }

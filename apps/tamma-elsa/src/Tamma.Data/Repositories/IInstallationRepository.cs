@@ -36,4 +36,14 @@ public interface IInstallationRepository
 
     /// <summary>Soft-delete a repo row by flipping IsActive=false.</summary>
     Task RemoveRepoAsync(Guid installationEntityId, long repoId);
+
+    /// <summary>
+    /// Reverse-lookup: given a repo's <c>owner/name</c> full name, find the
+    /// installation that grants access to it. Used by the engine callback
+    /// service (audit engine findings 005-011) to map incoming
+    /// <c>?repo=owner/name</c> query params back to an installation id so it
+    /// can mint an access token. Returns null when no active repo row
+    /// matches; the caller treats that as 503 <c>github_client_not_configured</c>.
+    /// </summary>
+    Task<GitHubInstallation?> GetByRepoFullNameAsync(string repoFullName);
 }

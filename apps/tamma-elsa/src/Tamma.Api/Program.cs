@@ -226,16 +226,31 @@ builder.Services.AddSaaSServices();
 
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
-// IGitHubEngineCallbackService falls through to the Null impl until a real
-// GitHub App / Octokit client is wired (cross-ref github audit scope) — the
-// Null impl returns 503 with `github_client_not_configured` so the deployed
-// Elsa activities see the documented soft-fail instead of bogus 200s.
+//
+// IGitHubEngineCallbackService uses the Octokit-backed impl when the GitHub
+// App is configured (GitHub:AppId + GitHub:PrivateKey), otherwise falls
+// through to the Null impl which returns 503 with
+// `github_client_not_configured`. Matches the switching logic in
+// AddGitHubInstallationServices so the two GitHub surfaces stay in sync.
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IContextStore,
     Tamma.Api.Services.Engine.InMemoryContextStore>();
 builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
     Tamma.Api.Services.Engine.ExecuteTaskService>();
-builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
-    Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
+if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long appId && appId > 0
+    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
+{
+    // The resolver is scoped (takes a scoped repository); wrap the service
+    // itself as scoped so the resolver flow works.
+    builder.Services.AddScoped<Tamma.Api.Services.Engine.IRepoInstallationResolver,
+        Tamma.Api.Services.Engine.InstallationRepoResolver>();
+    builder.Services.AddScoped<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
+        Tamma.Api.Services.Engine.OctokitGitHubEngineCallbackService>();
+}
+else
+{
+    builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
+        Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
+}
 // Engine registry (audit finding 013). Until TammaEngine ports, the
 // in-memory impl materialises synthetic per-tenant entries from the
 // workflow store so the dashboard /engines tile is not blank.
