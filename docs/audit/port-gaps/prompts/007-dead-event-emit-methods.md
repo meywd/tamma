@@ -5,6 +5,13 @@
 **Status**: Incomplete (partial port, missing 2 event emissions)
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ea4d5e5
+- **Notes**: Repository `UpsertAsync` now returns `(entity, wasCreated)` and threads through `PromptStoreService.UpsertRoleActionAsync` / `UpsertRoleSystemAsync` / `UpsertActionDefaultAsync`. The `UpsertPrompt` and `UpsertSystemPrompt` endpoints branch on `wasCreated` to emit `PROMPT.CREATED.SUCCESS` vs `PROMPT.UPDATED.SUCCESS`. `DeletePrompt` and `DeleteSystemPrompt` now emit `PROMPT.RESET.SUCCESS` (CLAUDE.md describes DELETE as "delete user override — falls back to system default", which is semantically a reset). Service tests `UpsertRoleActionAsync_FirstCall_ReportsWasCreatedTrue` and `UpsertRoleActionAsync_SecondCall_ReportsWasCreatedFalse` lock the discriminator.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/prompt-store-events.ts`.

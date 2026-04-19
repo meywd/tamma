@@ -5,6 +5,13 @@
 **Status**: Semantic rewrite (structure changed, not a port)
 **Estimated port effort**: 4h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (CLAUDE.md is the spec, C# matches)
+- **Commit**: n/a
+- **Notes**: CLAUDE.md "Prompt Store Architecture > Storage" defines `prompt_overrides` keyed by `user_id` with `UNIQUE(user_id, scope, role, action)`. The C# port deliberately moved from tenant-scoped (TS) to user-scoped to comply with the spec. Per the binding from prior scopes ("user-scoped change is correct per CLAUDE.md"), no remediation required. The `PromptOverride` entity retains a `TenantId` column for event-emission tagging only — repository lookups filter by `UserId` exclusively. Test `ResolveRoleActionAsync_UserOverrides_DoNotLeak_BetweenUsers` already locks the per-user isolation semantics.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/prompt-store.ts` and `pg-prompt-store.ts`.

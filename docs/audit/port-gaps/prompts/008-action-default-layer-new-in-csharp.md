@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported but added a layer)
 **Estimated port effort**: 0h (documentation update only)
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (matches CLAUDE.md spec; locked by tests)
+- **Commit**: ea4d5e5
+- **Notes**: Layer-4 fallback is the CLAUDE.md spec; no code change needed. Added two regression tests in `PromptStoreServiceTests.cs`: `ResolveRoleActionAsync_UnknownRole_KnownAction_ResolvesToActionDefault` (locks the positive deviation — unknown roles still get a usable template) and `ResolveRoleActionAsync_UnknownRole_UnknownAction_ReturnsNull` (locks the remaining 404 path). The write path for Layer 3 (user action-default overrides) is implemented in `PromptStoreService.UpsertActionDefaultAsync` but no HTTP route exposes it yet — deliberate; CLAUDE.md does not document a write route for action-defaults.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/prompt-store.ts` and `pg-prompt-store.ts`.

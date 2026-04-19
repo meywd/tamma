@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported but contract changed)
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (extended to TS contract)
+- **Commit**: ea4d5e5
+- **Notes**: `RenderedPromptResponse` now exposes the full eight-field TS contract (role, action, version, renderedTemplate, renderedSystemPrompt, enableTools, maxTokens, unresolvedVariables). Threaded `Version` through `ResolvedPrompt` and the upsert pipeline (defaults to 1 for system templates, bumps on every override update — closes the link to finding 010). Integration test `PromptEndpointsIntegrationTests.RenderPrompt_Returns_AllEightFields_MatchingTsContract` asserts the camelCase shape on the wire.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/prompt-store.ts` and `packages/api/src/routes/prompts/prompt-routes.ts`.

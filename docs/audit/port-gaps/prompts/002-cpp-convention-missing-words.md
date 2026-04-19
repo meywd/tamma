@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported but text diverged)
 **Estimated port effort**: 0.1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Commit**: ea4d5e5
+- **Notes**: Restored "for readability" to `ConventionTemplates.cs:738`. New regression test `GetByKey_Cpp_IncludesReadabilityClause` in `ConventionTemplatesTests.cs` asserts the exact phrase.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/convention-templates.ts`.

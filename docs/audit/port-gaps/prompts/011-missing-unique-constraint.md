@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 0.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (unique index in TammaDbContext / migration)
+- **Commit**: n/a
+- **Notes**: `TammaDbContext.cs:293` already declares `entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique()`, materialized by the `InitialSchema` migration as `IX_prompt_overrides_UserId_Scope_Role_Action`. The audit finding under-reported this — the index exists. The repository's read-then-write upsert remains theoretically race-prone in the small window between `FirstOrDefaultAsync` and `Add`, but Postgres will reject the duplicate `Add` via the unique constraint, surfacing as `DbUpdateException` to the caller. A future hardening could replace the read-then-write with `INSERT ... ON CONFLICT DO UPDATE` for atomic upserts; deferred until a story requires it. **Not done**: NULLS NOT DISTINCT or COALESCE filtered index for action-default scope (Role NULL) and role-system scope (Action NULL) — Postgres treats `NULL != NULL` in unique constraints, so duplicates per-NULL slot are still possible. Filed as latent issue; no current write path stresses it.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/012_prompt_store.sql`.

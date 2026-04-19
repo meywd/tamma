@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (ported but semantics diverged)
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (Option B — formalize C# shape)
+- **Commit**: ea4d5e5
+- **Notes**: Updated `SystemPrompts.cs` header comment to document the deliberate divergence (single role-tailored block instead of TS's four parallel ternaries collapsing to whitespace). Added 10 lock-shape tests in `SystemPromptsTests.cs` covering security/tester/architect/devops bullet bodies plus the four roles (developer, product_owner, senior_developer, tech_writer) that hit the generic fallback for both plan-review and code-review.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/default-prompts.ts`.

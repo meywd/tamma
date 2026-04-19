@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 0.3h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (CLAUDE.md spec mandates text[])
+- **Commit**: n/a
+- **Notes**: CLAUDE.md "Prompt Store Architecture > Storage" explicitly defines `variables TEXT[]`. The C# port matches the spec; the TS JSONB choice was a TS-era decision that CLAUDE.md superseded. Per the binding "user-scoped change deliberate per CLAUDE.md", text[] is the canonical choice. No future-proofing for nested-object variables is on the roadmap; if it becomes necessary, a value converter can be added without an entity rename. No remediation required for the prompts scope (admin-db scope finding 030 confirms the same outcome).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/012_prompt_store.sql` and `packages/api/src/services/pg-prompt-store.ts`.

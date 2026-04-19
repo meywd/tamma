@@ -5,6 +5,18 @@
 **Status**: Incomplete (partial port, missing 4 endpoints)
 **Estimated port effort**: 1.5h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (CLAUDE.md naming wins; legacy /system retained as alias)
+- **Commit**: ea4d5e5
+- **Notes**: Added all four missing endpoints per CLAUDE.md:
+  - `GET /api/prompts/defaults` → alias of `GET /api/prompts/system`
+  - `GET /api/prompts/defaults/{role}/{action}` → alias of `GET /api/prompts/system/{role}/{action}`
+  - `GET /api/prompts/defaults/{action}` → new handler `PromptEndpoints.GetActionDefault` exposing the Layer-4 safety-net registry
+  - `POST /api/prompts/{role}/{action}/reset` → alias of `DELETE /api/prompts/{role}/{action}` (also dispatches `PROMPT.RESET.SUCCESS`)
+  Both `/system` and `/defaults` naming are wired so existing dashboard/CLI clients keep working while new integrators can follow the CLAUDE.md spec verbatim. Integration tests (`GetDefaults_AliasOfGetSystem_Returns200`, `GetDefaultsAction_ReturnsActionDefaultTemplate`, `GetDefaultsAction_UnknownAction_Returns404`) cover the new surface.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/prompts/prompt-routes.ts`.

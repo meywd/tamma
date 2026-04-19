@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (no explicit configuration — relies on framework default)
 **Estimated port effort**: 0.2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (camelCase locked explicitly + wire-format test)
+- **Commit**: ea4d5e5
+- **Notes**: Added `builder.Services.ConfigureHttpJsonOptions(...)` to `Program.cs` immediately after Swagger registration. Sets `PropertyNamingPolicy = CamelCase`, `PropertyNameCaseInsensitive = true`, and `DictionaryKeyPolicy = null` (the last preserves dict keys verbatim — role names like `developer` and action names like `code-review` must not be transformed). Integration test `PromptEndpointsIntegrationTests.GetSystem_EmitsCamelCaseProperties` parses the raw JSON and asserts `roleActionTemplates` exists while `RoleActionTemplates` does not — the contract is now locked at the API surface, not just at the framework default. Applied across the API surface (not just prompts), so all endpoint groups inherit the lock.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/prompts/prompt-routes.ts`.

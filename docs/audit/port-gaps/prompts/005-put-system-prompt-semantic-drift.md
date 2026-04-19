@@ -5,6 +5,13 @@
 **Status**: Semantic rewrite (structure changed, not a port)
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (URL normalized to {role}-only)
+- **Commit**: ea4d5e5
+- **Notes**: Per CLAUDE.md, role-system overrides are keyed by `(userId, role)` only — there is no action axis. The `{action}` URL segment was silently ignored. Renamed routes to `PUT /api/prompts/system/{role}` and `DELETE /api/prompts/system/{role}`; removed the dead `action` parameter from `UpsertSystemPrompt`/`DeleteSystemPrompt`. The TS endpoint's "platform-admin writes to a global system default" semantic was deliberately not restored — CLAUDE.md does not describe such a write path; system defaults remain in code (`SystemPrompts.cs`, immutable at runtime). The route is now coherent with the data model and authorization (`SettingsManage` permission gates per-user role-system override). Wires `EmitCreatedAsync` for new rows and `EmitResetAsync` for deletes (closes part of finding 007).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/prompts/prompt-routes.ts`.

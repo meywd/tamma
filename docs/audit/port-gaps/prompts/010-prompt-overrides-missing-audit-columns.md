@@ -5,6 +5,13 @@
 **Status**: Data-model regression
 **Estimated port effort**: 1h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed (schema already added by admin-db 030; wiring completed here)
+- **Commit**: ea4d5e5
+- **Notes**: Schema columns (`Version`, `CreatedBy`, `UpdatedBy`) were added by `SchemaHardeningPhase1` migration (admin-db finding 030). This commit completes the wiring: `PromptRepository.UpsertAsync` now bumps `Version` on every UPDATE, sets `CreatedBy` on INSERT, sets `UpdatedBy` on every write. An optional `actingUserId` parameter supports impersonation/service-key writes (defaults to row owner). `ResolvedPrompt.Version` flows into the render response (closes finding 003). Tests `UpsertRoleActionAsync_SetsCreatedByAndUpdatedBy_ToOwnerByDefault` and `ResolveRoleActionAsync_UserOverride_BumpsVersionOnEachUpdate` lock the behavior. **Not done**: optimistic-concurrency `If-Match` header guard at the endpoint layer (no story currently requires it).
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:database/archived-sql-migrations/012_prompt_store.sql`.

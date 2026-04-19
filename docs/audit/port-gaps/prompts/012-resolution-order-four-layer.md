@@ -5,6 +5,13 @@
 **Status**: Behavioral drift (positive deviation)
 **Estimated port effort**: 0h (documentation only)
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Already-fixed (matches CLAUDE.md; locked by tests)
+- **Commit**: ea4d5e5
+- **Notes**: 4-layer resolution is implemented in `PromptStoreService.ResolveRoleActionAsync` and matches CLAUDE.md "Prompt Store Architecture > Resolution Order" exactly. All four layers are now covered by named tests in `PromptStoreServiceTests.cs`: `ResolveRoleActionAsync_UserOverride_Wins`, `ResolveRoleActionAsync_FallsBackTo_SystemRoleActionDefault`, `ResolveRoleActionAsync_FallsBackTo_UserActionDefault_WhenNoRoleActionExists`, `ResolveRoleActionAsync_FallsBackTo_SystemActionDefault_WhenNothingElse`, `ResolveRoleActionAsync_ReturnsNull_WhenNoLayerMatches`. No code change required.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/services/pg-prompt-store.ts`.

@@ -17,21 +17,21 @@ Headline: among all audited scopes, prompts is the **cleanest port** — most su
 
 ## Findings
 
-| # | Title | Severity | Status | Effort |
-|---|---|---|---|---|
-| [001](./001-role-action-template-whitespace-diff.md) | 16 role+action templates diverge in whitespace (plan-review + code-review × 8 roles) | P3 | Behavioral drift | 1h |
-| [002](./002-cpp-convention-missing-words.md) | `cpp` convention template drops "for readability" | P3 | Behavioral drift | 0.1h |
-| [003](./003-render-response-field-names.md) | Render response field names changed (`renderedTemplate` → `userPrompt`, etc.) | **P1** | Behavioral drift | 0.5h |
-| [004](./004-tenant-scoped-to-user-scoped.md) | Prompt overrides moved from tenant-scoped to user-scoped | **P1** | Semantic rewrite | 4h |
-| [005](./005-put-system-prompt-semantic-drift.md) | `PUT/DELETE /api/prompts/system/:role/:action` semantic drift — writes user override, not system default | **P1** | Semantic rewrite | 2h |
-| [006](./006-missing-defaults-endpoints.md) | Missing `/api/prompts/defaults*` endpoints and `POST /reset` | P2 | Incomplete | 1.5h |
-| [007](./007-dead-event-emit-methods.md) | `EmitCreatedAsync` and `EmitResetAsync` never called from endpoints | P3 | Incomplete | 0.5h |
-| [008](./008-action-default-layer-new-in-csharp.md) | Action-default safety-net layer new in C# (positive deviation) | P3 | Behavioral drift (positive) | 0h |
-| [009](./009-variables-column-type-change.md) | `variables` column type changed JSONB → `text[]` | P3 | Data-model regression | 0.3h |
-| [010](./010-prompt-overrides-missing-audit-columns.md) | `prompt_overrides` missing `version`, `created_by`, `updated_by` | P2 | Data-model regression | 1h |
-| [011](./011-missing-unique-constraint.md) | No `UNIQUE(user_id, scope, role, action)` constraint | P2 | Data-model regression | 0.5h |
-| [012](./012-resolution-order-four-layer.md) | TS 2-layer vs C# 4-layer resolution (matches CLAUDE.md) | P3 | Behavioral drift (positive) | 0h |
-| [013](./013-json-property-naming-policy.md) | No explicit `JsonSerializerOptions.PropertyNamingPolicy` config | P2 | Behavioral drift | 0.2h |
+| # | Title | Severity | Status | Effort | Remediation |
+|---|---|---|---|---|---|
+| [001](./001-role-action-template-whitespace-diff.md) | 16 role+action templates diverge in whitespace (plan-review + code-review × 8 roles) | P3 | Behavioral drift | 1h | Fixed (formalize C# shape) |
+| [002](./002-cpp-convention-missing-words.md) | `cpp` convention template drops "for readability" | P3 | Behavioral drift | 0.1h | Fixed |
+| [003](./003-render-response-field-names.md) | Render response field names changed (`renderedTemplate` → `userPrompt`, etc.) | **P1** | Behavioral drift | 0.5h | Fixed (extended to TS contract) |
+| [004](./004-tenant-scoped-to-user-scoped.md) | Prompt overrides moved from tenant-scoped to user-scoped | **P1** | Semantic rewrite | 4h | Already-fixed (CLAUDE.md spec) |
+| [005](./005-put-system-prompt-semantic-drift.md) | `PUT/DELETE /api/prompts/system/:role/:action` semantic drift — writes user override, not system default | **P1** | Semantic rewrite | 2h | Fixed (URL → /system/{role}) |
+| [006](./006-missing-defaults-endpoints.md) | Missing `/api/prompts/defaults*` endpoints and `POST /reset` | P2 | Incomplete | 1.5h | Fixed |
+| [007](./007-dead-event-emit-methods.md) | `EmitCreatedAsync` and `EmitResetAsync` never called from endpoints | P3 | Incomplete | 0.5h | Fixed |
+| [008](./008-action-default-layer-new-in-csharp.md) | Action-default safety-net layer new in C# (positive deviation) | P3 | Behavioral drift (positive) | 0h | Already-fixed (locked by tests) |
+| [009](./009-variables-column-type-change.md) | `variables` column type changed JSONB → `text[]` | P3 | Data-model regression | 0.3h | Already-fixed (CLAUDE.md spec) |
+| [010](./010-prompt-overrides-missing-audit-columns.md) | `prompt_overrides` missing `version`, `created_by`, `updated_by` | P2 | Data-model regression | 1h | Fixed (schema by admin-db 030; wiring here) |
+| [011](./011-missing-unique-constraint.md) | No `UNIQUE(user_id, scope, role, action)` constraint | P2 | Data-model regression | 0.5h | Already-fixed (index in DbContext + migration) |
+| [012](./012-resolution-order-four-layer.md) | TS 2-layer vs C# 4-layer resolution (matches CLAUDE.md) | P3 | Behavioral drift (positive) | 0h | Already-fixed (CLAUDE.md spec; locked by tests) |
+| [013](./013-json-property-naming-policy.md) | No explicit `JsonSerializerOptions.PropertyNamingPolicy` config | P2 | Behavioral drift | 0.2h | Fixed |
 
 ## Cross-cutting themes
 
