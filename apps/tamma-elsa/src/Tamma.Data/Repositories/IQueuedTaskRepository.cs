@@ -53,4 +53,14 @@ public interface IQueuedTaskRepository
     /// <c>pending</c> so the processor can re-claim it on its next cycle.
     /// </summary>
     Task<QueuedTask?> IncrementRetryAndRequeueAsync(Guid id, string error, CancellationToken ct = default);
+
+    /// <summary>
+    /// Audit finding 026 — visibility-timeout reaper. Rows stuck in
+    /// <c>processing</c> for longer than <paramref name="visibilityTimeout"/>
+    /// are presumed orphaned by a dead worker and either re-queued (if
+    /// retry budget remains) or marked <c>failed</c>. Returns the number
+    /// of rows touched.
+    /// </summary>
+    Task<int> ReapStaleProcessingAsync(
+        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default);
 }

@@ -56,10 +56,51 @@ public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
         if (task is null) return null;
         if (task.Status != "pending") return null;
 
+        var now = DateTime.UtcNow;
         task.Status = "processing";
-        task.UpdatedAt = DateTime.UtcNow;
+        task.ClaimedAt = now; // Audit finding 026 — drives the reaper.
+        task.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         return task;
+    }
+
+    /// <summary>
+    /// Audit finding 026 — visibility-timeout reaper. Resets rows stuck in
+    /// <c>processing</c> for longer than <paramref name="visibilityTimeout"/>
+    /// back to <c>pending</c> (or <c>failed</c> when retry ceiling reached)
+    /// so a worker that died mid-task does not leave zombies forever.
+    /// Returns the number of rows reaped.
+    /// </summary>
+    public async Task<int> ReapStaleProcessingAsync(
+        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default)
+    {
+        var threshold = DateTime.UtcNow - visibilityTimeout;
+        var stale = await db.QueuedTasks
+            .Where(t => t.Status == "processing"
+                && (t.ClaimedAt == null || t.ClaimedAt < threshold))
+            .ToListAsync(ct);
+
+        if (stale.Count == 0) return 0;
+
+        var now = DateTime.UtcNow;
+        foreach (var task in stale)
+        {
+            task.RetryCount += 1;
+            task.Error = $"reaped after {visibilityTimeout.TotalSeconds:0}s visibility timeout";
+            task.UpdatedAt = now;
+
+            if (task.RetryCount >= maxRetries)
+            {
+                task.Status = "failed";
+            }
+            else
+            {
+                task.Status = "pending";
+                task.ClaimedAt = null;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        return stale.Count;
     }
 
     public async Task MarkCompletedAsync(Guid id, CancellationToken ct = default)

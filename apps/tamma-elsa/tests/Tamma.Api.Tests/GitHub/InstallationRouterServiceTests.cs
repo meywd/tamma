@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NUnit.Framework;
@@ -38,6 +39,7 @@ public class InstallationRouterServiceTests
             _eventRepo.Object,
             _tenantRepo.Object,
             _userRepo.Object,
+            new MemoryCache(new MemoryCacheOptions()),
             _logger.Object);
     }
 
@@ -175,8 +177,11 @@ public class InstallationRouterServiceTests
     }
 
     [Test]
-    public async Task HandleWebhookAsync_InstallationDeleted_SoftDeletesInstallation()
+    public async Task HandleWebhookAsync_InstallationDeleted_HardDeletesInstallation()
     {
+        // Audit finding 030 — switched from soft-delete (which collided with
+        // SuspendedAt) to hard-delete; audit is preserved by the
+        // INSTALLATION.DELETED.SUCCESS event below.
         var payload = JsonDocument.Parse("""
             {
               "action": "deleted",
@@ -191,7 +196,7 @@ public class InstallationRouterServiceTests
 
         result.Skipped.Should().BeFalse();
         result.Action.Should().Be("deleted");
-        _installRepo.Verify(r => r.SoftDeleteAsync(987654L), Times.Once);
+        _installRepo.Verify(r => r.DeleteAsync(987654L), Times.Once);
         _eventRepo.Verify(r => r.AppendAsync(It.Is<DomainEvent>(
             e => e.Type == "INSTALLATION.DELETED.SUCCESS")),
             Times.Once);

@@ -17,7 +17,29 @@ public sealed record KeyRotationResult(
     string? PlaintextKey,
     string? KeyPrefix,
     Guid? KeyId,
-    string? ErrorReason);
+    string? ErrorReason,
+    KeyRotationProvisioningSummary? Provisioning = null);
+
+/// <summary>
+/// Per-repo outcome from re-provisioning the rotated key to GitHub Actions
+/// secrets. Audit finding 021 — TS returned <c>{total, success, failed,
+/// results[]}</c> so the caller could see exactly which repos got the new
+/// key. Until a GitHub App client lands in C# every entry is
+/// <c>{success: false, error: "github_client_not_configured"}</c>; the
+/// shape is preserved so SDK clients written against the TS contract don't
+/// trip on a missing field.
+/// </summary>
+public sealed record KeyRotationProvisioningSummary(
+    int Total,
+    int Success,
+    int Failed,
+    IReadOnlyList<RepoProvisioningResult> Results);
+
+public sealed record RepoProvisioningResult(
+    string Owner,
+    string Repo,
+    bool Success,
+    string? Error);
 
 /// <summary>
 /// Rotates the API key associated with a GitHub-App installation.

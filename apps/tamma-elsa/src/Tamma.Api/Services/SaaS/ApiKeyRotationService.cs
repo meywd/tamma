@@ -147,16 +147,40 @@ public sealed class ApiKeyRotationService : IApiKeyRotationService
             "API key rotated: installation={InstallationEntityId} tenant={TenantId} user={UserId} newKeyId={KeyId}",
             installationEntityId, tenantId, callerUserId, stored.Id);
 
+        // Audit finding 021 — TS atomic-rotated the DB hash AND re-provisioned
+        // the new plaintext to every repo's GitHub Actions secrets so running
+        // workflows never broke. The C# port can't yet do that (no GitHub App
+        // client wired; cross-ref findings 005-011). Until that lands, report
+        // the documented per-repo summary with every repo flagged
+        // `github_client_not_configured` so the operator knows secrets need
+        // manual updating after this rotation.
+        var repos = await _installations.ListReposAsync(installationEntityId)
+            ?? new List<Tamma.Data.Entities.GitHubInstallationRepo>();
+        var perRepoResults = repos
+            .Where(r => !string.IsNullOrEmpty(r.Owner) && !string.IsNullOrEmpty(r.Name))
+            .Select(r => new RepoProvisioningResult(
+                Owner: r.Owner,
+                Repo: r.Name,
+                Success: false,
+                Error: "github_client_not_configured"))
+            .ToList();
+        var summary = new KeyRotationProvisioningSummary(
+            Total: perRepoResults.Count,
+            Success: 0,
+            Failed: perRepoResults.Count,
+            Results: perRepoResults);
+
         return new KeyRotationResult(
             Success: true,
             PlaintextKey: plaintext,
             KeyPrefix: keyPrefix,
             KeyId: stored.Id,
-            ErrorReason: null);
+            ErrorReason: null,
+            Provisioning: summary);
     }
 
     private static KeyRotationResult Fail(string reason) =>
-        new(Success: false, PlaintextKey: null, KeyPrefix: null, KeyId: null, ErrorReason: reason);
+        new(Success: false, PlaintextKey: null, KeyPrefix: null, KeyId: null, ErrorReason: reason, Provisioning: null);
 
     private static string GenerateKey()
     {

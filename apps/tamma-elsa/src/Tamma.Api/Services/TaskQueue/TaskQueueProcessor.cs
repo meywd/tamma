@@ -24,6 +24,15 @@ public sealed class TaskQueueProcessorOptions
     /// requeue, try, fail → flip to <c>failed</c>. Default 3.
     /// </summary>
     public int MaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Audit finding 026 — visibility timeout. Rows that stay in
+    /// <c>processing</c> longer than this are presumed orphaned by a worker
+    /// that died between MarkProcessingAsync and MarkCompletedAsync, and the
+    /// reaper resets them to <c>pending</c> (or <c>failed</c> when the retry
+    /// budget is exhausted). Default 10 minutes.
+    /// </summary>
+    public TimeSpan VisibilityTimeout { get; set; } = TimeSpan.FromMinutes(10);
 }
 
 /// <summary>
@@ -102,6 +111,27 @@ public sealed class TaskQueueProcessor : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IQueuedTaskRepository>();
         var registry = scope.ServiceProvider.GetRequiredService<ITaskHandlerRegistry>();
+
+        // Audit finding 026 — reap orphaned `processing` rows before claiming
+        // new work, so a worker that died mid-task does not leave the row
+        // stuck forever. Exceptions here are logged but do not abort the
+        // poll; reaping is best-effort.
+        try
+        {
+            var reaped = await repo.ReapStaleProcessingAsync(
+                _options.VisibilityTimeout, _options.MaxRetries, ct);
+            if (reaped > 0)
+            {
+                _logger.LogWarning(
+                    "TaskQueueProcessor reaped {Count} stale processing rows " +
+                    "(visibility timeout={Timeout})",
+                    reaped, _options.VisibilityTimeout);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "TaskQueueProcessor reaper pass failed");
+        }
 
         var pending = await repo.ListPendingAsync(tenantId: null, _options.BatchSize, ct);
         if (pending.Count == 0) return 0;

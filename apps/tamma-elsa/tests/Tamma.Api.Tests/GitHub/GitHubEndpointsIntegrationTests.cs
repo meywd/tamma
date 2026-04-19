@@ -158,7 +158,7 @@ public class GitHubEndpointsIntegrationTests
     // ─── installation.deleted soft-deletes ────────────────────────────────────
 
     [Test]
-    public async Task Webhook_InstallationDeleted_SoftDeletesInstallation()
+    public async Task Webhook_InstallationDeleted_HardDeletesInstallation()
     {
         using var client = CreateClient();
 
@@ -187,16 +187,16 @@ public class GitHubEndpointsIntegrationTests
         var response = await client.SendAsync(BuildWebhookRequest("installation", deleteBody));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // Assert: soft-deleted (SuspendedAt set as marker) or truly removed
+        // Assert: hard-deleted (audit finding 030) — the row is gone but the
+        // INSTALLATION.DELETED.SUCCESS event preserves audit. Soft-delete via
+        // SuspendedAt collided with the suspend/unsuspend lifecycle.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
 
         var installation = await db.GitHubInstallations
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.InstallationId == 5550002L);
-        installation.Should().NotBeNull();
-        // Soft-delete: SuspendedAt set (used as deleted marker) — inspected elsewhere
-        installation!.SuspendedAt.Should().NotBeNull("deleted installations should have SuspendedAt set as soft-delete marker");
+        installation.Should().BeNull("deleted installations should be removed; audit lives in the event store");
 
         var eventRepo = scope.ServiceProvider.GetRequiredService<IEventRepository>();
         var events = await eventRepo.QueryAsync(null, "INSTALLATION.DELETED.SUCCESS", null, 10);

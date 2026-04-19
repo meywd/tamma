@@ -352,12 +352,25 @@ public static class SaaSEndpoints
             // One-time plaintext reveal. The caller has exactly one opportunity
             // to capture and surface it to the end-user.
             apiKey = result.PlaintextKey,
-            // Provisioning summary (audit finding 021): when no GitHub App
-            // client is wired we still report the field as `null` so SDK
-            // clients written against the TS shape don't trip on a missing
-            // key. Real provisioning lands once the GitHub App client is
-            // added (cross-ref findings 005-011, 021).
-            provisioning = (object?)null
+            // Audit finding 021 — provisioning summary: until a GitHub App
+            // client is wired every repo entry is flagged
+            // `github_client_not_configured`, but the documented shape
+            // {total, success, failed, results[]} is preserved so SDK
+            // clients written against the TS contract see the expected
+            // structure.
+            provisioning = result.Provisioning is not null ? new
+            {
+                total = result.Provisioning.Total,
+                success = result.Provisioning.Success,
+                failed = result.Provisioning.Failed,
+                results = result.Provisioning.Results.Select(r => new
+                {
+                    owner = r.Owner,
+                    repo = r.Repo,
+                    success = r.Success,
+                    error = r.Error
+                })
+            } : null
         });
     }
 

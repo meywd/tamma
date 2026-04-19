@@ -56,6 +56,15 @@ public class QueuedTask
     /// </summary>
     public int RetryCount { get; set; }
 
+    /// <summary>
+    /// Wall-clock time when the row was last claimed by a processor (status
+    /// flipped to <c>processing</c>). Audit finding 026 — drives the
+    /// visibility-timeout reaper that recovers zombie processing rows when a
+    /// worker dies between MarkProcessingAsync and MarkCompletedAsync.
+    /// Null on rows that have never been claimed.
+    /// </summary>
+    public DateTime? ClaimedAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

@@ -197,6 +197,8 @@ builder.Services.AddScoped<Tamma.Api.Authorization.RequireTenantMembershipFilter
 builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
     Tamma.Api.Services.RateLimit.InMemoryRateLimitService>();
 builder.Services.AddHttpContextAccessor();
+// IMemoryCache for the installation router cache (audit finding 029).
+builder.Services.AddMemoryCache();
 // GitHub OAuth http client (token exchange + profile fetch). User-Agent
 // header is required by the GitHub API.
 builder.Services.AddHttpClient("github-oauth", client =>
@@ -234,6 +236,11 @@ builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
     Tamma.Api.Services.Engine.ExecuteTaskService>();
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IGitHubEngineCallbackService,
     Tamma.Api.Services.Engine.NullGitHubEngineCallbackService>();
+// Engine registry (audit finding 013). Until TammaEngine ports, the
+// in-memory impl materialises synthetic per-tenant entries from the
+// workflow store so the dashboard /engines tile is not blank.
+builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
+    Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)

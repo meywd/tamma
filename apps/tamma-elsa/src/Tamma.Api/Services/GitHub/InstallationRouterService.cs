@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Tamma.Api.Services.TaskQueue;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -13,11 +14,22 @@ namespace Tamma.Api.Services.GitHub;
 /// </summary>
 public sealed class InstallationRouterService : IInstallationRouterService
 {
+    /// <summary>
+    /// Audit finding 029 — TS maintained a 60s TTL cache keyed by installation
+    /// id. Webhook dispatch hit the cache on the steady-state path; only one
+    /// DB lookup per minute per installation. The C# port dropped this and
+    /// took a DB roundtrip per webhook (~30-50ms with the
+    /// <c>.Include(i => i.Repos)</c> fan-out), regressing p99 dispatch
+    /// latency under load.
+    /// </summary>
+    private static readonly TimeSpan InstallationCacheTtl = TimeSpan.FromSeconds(60);
+
     private readonly IInstallationRepository _installations;
     private readonly IEventRepository _events;
     private readonly ITenantRepository _tenants;
     private readonly IUserRepository _users;
     private readonly ITaskQueue? _taskQueue;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<InstallationRouterService> _logger;
 
     public InstallationRouterService(
@@ -25,6 +37,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         IEventRepository events,
         ITenantRepository tenants,
         IUserRepository users,
+        IMemoryCache cache,
         ILogger<InstallationRouterService> logger,
         ITaskQueue? taskQueue = null)
     {
@@ -32,8 +45,29 @@ public sealed class InstallationRouterService : IInstallationRouterService
         _events = events;
         _tenants = tenants;
         _users = users;
+        _cache = cache;
         _taskQueue = taskQueue;
         _logger = logger;
+    }
+
+    private static string CacheKeyForInstallation(long installationId) =>
+        $"install:{installationId}";
+
+    private async Task<GitHubInstallation?> GetInstallationCachedAsync(long installationId)
+    {
+        // 60-second TTL — short enough to surface install/uninstall/suspend
+        // state changes without a process restart, long enough to amortise
+        // the steady-state webhook flood.
+        return await _cache.GetOrCreateAsync(CacheKeyForInstallation(installationId), entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = InstallationCacheTtl;
+            return _installations.GetByInstallationIdAsync(installationId);
+        });
+    }
+
+    private void InvalidateInstallationCache(long installationId)
+    {
+        _cache.Remove(CacheKeyForInstallation(installationId));
     }
 
     // ─── OAuth callback ─────────────────────────────────────────────────────
@@ -161,10 +195,11 @@ public sealed class InstallationRouterService : IInstallationRouterService
         // Bind to the tenant that owns this installation (if any). Unknown
         // installations are still enqueued with a null tenant — callers can
         // decide at handler-time whether to drop them.
+        // (Audit finding 029) cache lookup avoids DB roundtrip on hot path.
         Guid? tenantId = null;
         if (installationId is not null)
         {
-            var install = await _installations.GetByInstallationIdAsync(installationId.Value);
+            var install = await GetInstallationCachedAsync(installationId.Value);
             tenantId = install?.TenantId;
         }
 
@@ -236,6 +271,10 @@ public sealed class InstallationRouterService : IInstallationRouterService
                     Permissions = permissions
                 });
 
+                // Audit finding 029 — invalidate cache so the next webhook
+                // observes the new installation immediately.
+                InvalidateInstallationCache(installationId.Value);
+
                 // Seed initial repositories (if the payload carries them).
                 if (payload.TryGetProperty("repositories", out var reposEl) &&
                     reposEl.ValueKind == JsonValueKind.Array)
@@ -267,7 +306,14 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
             case "deleted":
             {
-                await _installations.SoftDeleteAsync(installationId.Value);
+                // Audit finding 030 — Option A (match TS hard-delete). Audit
+                // is preserved by the INSTALLATION.DELETED.SUCCESS event below
+                // (the event carries the installation id and survives the row
+                // deletion). Reusing SuspendedAt as a soft-delete marker
+                // collided with the suspend/unsuspend lifecycle and let an
+                // unsuspend webhook resurrect a deleted record.
+                await _installations.DeleteAsync(installationId.Value);
+                InvalidateInstallationCache(installationId.Value);
                 await EmitEventAsync(
                     "INSTALLATION.DELETED.SUCCESS",
                     null,
@@ -280,6 +326,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
             case "suspend":
                 await _installations.SetSuspendedAsync(installationId.Value, true);
+                InvalidateInstallationCache(installationId.Value);
                 await EmitEventAsync(
                     "INSTALLATION.SUSPENDED.SUCCESS",
                     null,
@@ -288,6 +335,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
 
             case "unsuspend":
                 await _installations.SetSuspendedAsync(installationId.Value, false);
+                InvalidateInstallationCache(installationId.Value);
                 await EmitEventAsync(
                     "INSTALLATION.UNSUSPENDED.SUCCESS",
                     null,
