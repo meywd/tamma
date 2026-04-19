@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Tamma.Api.Dtos.Admin;
+using Tamma.Api.Services;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -9,9 +10,15 @@ namespace Tamma.Api.Endpoints;
 
 public static class AdminEndpoints
 {
-    public static Task<IResult> GetHealth()
+    /// <summary>
+    /// Aggregates infrastructure health probes (Postgres + 4 HTTP services) in
+    /// parallel. Mirrors the TS <c>/api/admin/health</c> envelope shape:
+    /// <c>{ services: ServiceCheck[], checkedAt: string }</c>.
+    /// </summary>
+    public static async Task<IResult> GetHealth(IAdminHealthService healthService, CancellationToken ct)
     {
-        return Task.FromResult(Results.Ok(new { status = "ok", timestamp = DateTime.UtcNow, database = "connected" }));
+        var result = await healthService.GetHealthAsync(ct);
+        return Results.Ok(result);
     }
 
     /// <summary>

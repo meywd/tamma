@@ -153,9 +153,15 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Health checks
+// Health checks. Tag the Postgres check as "ready" so the readiness probe
+// fails when the DB is unreachable; the liveness probe (no DB dependency)
+// only verifies the process is up.
 builder.Services.AddHealthChecks()
-    .AddNpgSql(connectionString);
+    .AddNpgSql(connectionString, tags: new[] { "ready" });
+
+// Admin health aggregator (per-service ping fan-out for the dashboard).
+// Mirrors the TS /api/admin/health behavior.
+builder.Services.AddScoped<IAdminHealthService, AdminHealthService>();
 
 // ────────────────────────────────────────────────────────────────────────────
 // Authentication + Authorization
@@ -307,8 +313,21 @@ app.UseMiddleware<EnsurePersonalTenantMiddleware>();
 // Existing MVC controllers
 app.MapControllers();
 
-// ASP.NET health checks (detailed)
+// ASP.NET health checks. Three routes:
+//   /health      — full check (all checks, including DB-dependent ones)
+//   /health/live — liveness probe (no checks; passes whenever the process is up)
+//   /health/ready — readiness probe (only checks tagged "ready", e.g. DB)
+// Kubernetes / Docker compose can target the split routes for distinct
+// liveness / readiness semantics.
 app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = _ => false
+});
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+});
 
 // ────────────────────────────────────────────────────────────────────────────
 // Minimal API Endpoints

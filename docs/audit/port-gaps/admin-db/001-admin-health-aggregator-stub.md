@@ -5,6 +5,12 @@
 **Status**: Not-yet-implemented (stub)
 **Estimated port effort**: 8h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: New `IAdminHealthService` / `AdminHealthService` runs Postgres `SELECT 1` plus four `HttpClient` probes (ELSA / OpenSearch / RabbitMQ / ChromaDB) in parallel via `Task.WhenAll` with a 5s per-probe timeout. Per-service exceptions are captured into `{ status:"unhealthy", details: ex.Message }` so one outage doesn't poison the others. Probes with no configured URL return `status:"unknown"`. `AdminEndpoints.GetHealth` now serializes the `{ services, checkedAt }` envelope matching TS.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/routes/admin/health-routes.ts`.

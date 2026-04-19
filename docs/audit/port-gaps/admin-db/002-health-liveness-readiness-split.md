@@ -5,6 +5,12 @@
 **Status**: Incomplete
 **Estimated port effort**: 2h
 
+## Remediation status
+
+- **Confirmed**: 2026-04-18 by agent
+- **Outcome**: Fixed
+- **Notes**: `AddHealthChecks().AddNpgSql(..., tags: ["ready"])` plus three `MapHealthChecks` endpoints — `/health` (all checks), `/health/live` (always-pass liveness), `/health/ready` (only ready-tagged checks). Docker compose / k8s manifests aren't updated here (deployment scope), but the routes are now available.
+
 ## 1. What's in TS
 
 Pre-delete snapshot at `git show 9e9a57c~1:packages/api/src/`.
