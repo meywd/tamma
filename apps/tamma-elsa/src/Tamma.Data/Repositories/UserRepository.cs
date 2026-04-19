@@ -67,6 +67,34 @@ public class UserRepository(TammaDbContext db) : IUserRepository
         }
     }
 
+    public async Task<Guid?> SwitchActiveTenantAwayFromAsync(Guid userId, Guid removedTenantId)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user is null) return null;
+        if (user.TenantId != removedTenantId) return user.TenantId;
+
+        // Find any remaining membership (excluding the removed tenant).
+        var alt = await db.TenantMemberships
+            .Where(m => m.UserId == userId && m.TenantId != removedTenantId)
+            .OrderByDescending(m => m.JoinedAt)
+            .Select(m => (Guid?)m.TenantId)
+            .FirstOrDefaultAsync();
+
+        if (alt is null)
+        {
+            // No alternative — cannot null because of prevent_tenant_id_change
+            // trigger (NULL → uuid only). Leave as-is; EnsurePersonalTenantMiddleware
+            // re-resolves on next request and will materialise a new personal
+            // tenant once the user has none.
+            return user.TenantId;
+        }
+
+        user.TenantId = alt.Value;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return alt.Value;
+    }
+
     public async Task SetEmailVerifiedAsync(Guid id)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);

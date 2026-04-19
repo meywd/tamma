@@ -58,4 +58,13 @@ public class TenantMembershipRepository(TammaDbContext db) : ITenantMembershipRe
             await db.SaveChangesAsync();
         }
     }
+
+    public async Task<int> CountOwnersAsync(Guid tenantId)
+        => await db.TenantMemberships
+            .CountAsync(m => m.TenantId == tenantId && m.Role == "owner");
+
+    public async Task<List<TenantMembership>> ListAllByTenantAsync(Guid tenantId)
+        => await db.TenantMemberships
+            .Where(m => m.TenantId == tenantId)
+            .ToListAsync();
 }

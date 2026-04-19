@@ -49,4 +49,16 @@ public class TenantRepository(TammaDbContext db) : ITenantRepository
             .Select(m => m.Tenant)
             .ToListAsync();
     }
+
+    public async Task<List<TenantMembershipView>> ListMembershipsByUserAsync(Guid userId)
+    {
+        var rows = await db.TenantMemberships
+            .Where(m => m.UserId == userId)
+            .Include(m => m.Tenant)
+            .OrderBy(m => m.JoinedAt)
+            .Select(m => new { m.Tenant, m.Role, m.JoinedAt })
+            .ToListAsync();
+        return rows.Select(r => new TenantMembershipView(r.Tenant, r.Role, r.JoinedAt))
+            .ToList();
+    }
 }

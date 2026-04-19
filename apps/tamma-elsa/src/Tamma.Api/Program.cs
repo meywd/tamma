@@ -121,6 +121,12 @@ builder.Services.AddHostedService<WorkflowSyncService>();
 // Auth services
 builder.Services.AddSingleton<IPasswordService, PasswordService>();
 builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
+// Two-phase delete confirmation (finding 021) + session cookie writer (finding 018).
+builder.Services.AddSingleton<IDeleteConfirmationService, DeleteConfirmationService>();
+builder.Services.AddScoped<ISessionCookieWriter, SessionCookieWriter>();
+// Path-tenant gate: every /api/v1/orgs/{tenantId}/* endpoint runs this
+// filter to verify caller membership (findings 001, 024).
+builder.Services.AddScoped<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
     Tamma.Api.Services.RateLimit.InMemoryRateLimitService>();
 builder.Services.AddHttpContextAccessor();
@@ -441,19 +447,37 @@ admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthoriz
 admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
 
 // ── Orgs / Tenants ──
+// Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the
+// RequireTenantMembershipFilter so the handler body can trust the route
+// tenant. Tenant-role gating (admin+, owner) is enforced inside each
+// handler against HttpContext.Items["TenantRole"] (filter stash) — the
+// previous `AdminAccess` / `OwnerAccess` policies checked JWT *platform*
+// permissions, not the caller's role within the path tenant, and were the
+// root cause of audit findings 001, 012, 013, 020, 021.
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
-orgs.MapGet("/{tenantId}", OrgEndpoints.GetOrg);
-orgs.MapPut("/{tenantId}/settings", OrgEndpoints.UpdateOrgSettings).RequireAuthorization("SettingsManage");
-orgs.MapGet("/{tenantId}/members", OrgEndpoints.ListMembers);
-orgs.MapPut("/{tenantId}/members/{userId}/role", OrgEndpoints.UpdateMemberRole).RequireAuthorization("AdminAccess");
-orgs.MapDelete("/{tenantId}/members/{userId}", OrgEndpoints.RemoveMember).RequireAuthorization("AdminAccess");
-orgs.MapPost("/{tenantId}/invites", OrgEndpoints.CreateInvite).RequireAuthorization("AdminAccess");
-orgs.MapGet("/{tenantId}/invites", OrgEndpoints.ListInvites).RequireAuthorization("AdminAccess");
-orgs.MapDelete("/{tenantId}/invites/{inviteId}", OrgEndpoints.DeleteInvite).RequireAuthorization("AdminAccess");
 orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
-orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership).RequireAuthorization("OwnerAccess");
-orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg).RequireAuthorization("OwnerAccess");
+
+orgs.MapGet("/{tenantId}", OrgEndpoints.GetOrg)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPut("/{tenantId}/settings", OrgEndpoints.UpdateOrgSettings)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId}/members", OrgEndpoints.ListMembers)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPut("/{tenantId}/members/{userId}/role", OrgEndpoints.UpdateMemberRole)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId}/members/{userId}", OrgEndpoints.RemoveMember)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId}/invites", OrgEndpoints.CreateInvite)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId}/invites", OrgEndpoints.ListInvites)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId}/invites/{inviteId}", OrgEndpoints.DeleteInvite)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
 

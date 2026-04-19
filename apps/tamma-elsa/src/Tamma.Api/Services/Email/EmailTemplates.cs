@@ -100,6 +100,61 @@ public static class EmailTemplates
     }
 
     /// <summary>
+    /// Tenant-invite email sent when an admin invites a user to join their
+    /// organization (Story 18-3 AC 6, finding 014). The raw token is
+    /// embedded in <paramref name="acceptUrl"/>; the recipient clicks
+    /// through to the dashboard which POSTs to <c>/orgs/invites/accept</c>.
+    /// </summary>
+    public static EmailMessage TenantInviteEmail(
+        string recipient,
+        string tenantName,
+        string inviterName,
+        string acceptUrl,
+        string role)
+    {
+        var encodedRecipient = WebUtility.HtmlEncode(recipient);
+        var encodedTenant = WebUtility.HtmlEncode(tenantName);
+        var encodedInviter = WebUtility.HtmlEncode(inviterName);
+        var encodedUrl = WebUtility.HtmlEncode(acceptUrl);
+        var encodedRole = WebUtility.HtmlEncode(role);
+
+        var html = $$"""
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2>You're invited to join {{encodedTenant}}</h2>
+              <p>Hi {{encodedRecipient}},</p>
+              <p>{{encodedInviter}} invited you to join <strong>{{encodedTenant}}</strong> on Tamma as <strong>{{encodedRole}}</strong>.</p>
+              <p>
+                <a href="{{encodedUrl}}"
+                   style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">
+                  Accept invitation
+                </a>
+              </p>
+              <p style="color: #666;">Or paste this URL into your browser:</p>
+              <p style="word-break: break-all; color: #666;">{{encodedUrl}}</p>
+              <p style="color: #999; font-size: 14px;">This invitation expires in 72 hours. If you weren't expecting it, you can safely ignore this email.</p>
+            </div>
+            """;
+
+        var text = $"""
+            You're invited to join {tenantName} on Tamma!
+
+            {inviterName} invited you to join {tenantName} as {role}.
+
+            Accept the invitation:
+            {acceptUrl}
+
+            This invitation expires in 72 hours. If you weren't expecting it, you can safely ignore this email.
+            """;
+
+        return new EmailMessage(
+            To: recipient,
+            Subject: $"You're invited to join {tenantName} on Tamma",
+            Html: html,
+            Text: text,
+            Template: "tenant-invite");
+    }
+
+    /// <summary>
     /// Welcome email sent once a user completes email verification and is
     /// bound to their first tenant.
     /// </summary>

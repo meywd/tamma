@@ -22,6 +22,18 @@ public interface IUserRepository
     Task UpdateActiveTenantAsync(Guid userId, Guid tenantId);
 
     /// <summary>
+    /// Switches the user's active tenant to another tenant they are a member
+    /// of, or leaves it unchanged if no alternative exists. Used by the
+    /// post-remove-member / delete-tenant flows (findings 013, 021) where the
+    /// TS code did <c>updateActiveTenant(userId, null)</c>; the C# port
+    /// cannot null the column directly because the
+    /// <c>prevent_tenant_id_change</c> trigger blocks non-NULL → NULL
+    /// transitions. Returns the new active tenant id (or current if no swap
+    /// was needed / possible).
+    /// </summary>
+    Task<Guid?> SwitchActiveTenantAwayFromAsync(Guid userId, Guid removedTenantId);
+
+    /// <summary>
     /// Marks the user's email as verified and clears the verification-token
     /// fields. No-op when the user is already verified.
     /// </summary>
