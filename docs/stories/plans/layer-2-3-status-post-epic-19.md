@@ -109,6 +109,45 @@ Notes:
   parallel plan — that document is now historical; the punch list above is
   the current source of truth.
 
+## Punch list completion status
+
+**Date:** 2026-04-18
+**Verifier:** auth-foundation hardening agent (post-audit-remediation pass)
+**Baseline:** 1731 tests passing (842 Api + 882 Activities + 7 Core), build green.
+
+The 8-task punch list above was effectively closed by the audit-remediation
+work landed across ~47 commits in the auth-foundation session. This pass
+verified each task end-to-end against the C# code, confirmed test coverage,
+and documents the closing commit(s) below. **No new code was written in this
+pass** — all eight tasks were already complete. The punch list is now CLOSED;
+Layer 4 is unblocked.
+
+| # | Task | Outcome | Closing commit(s) | Notes |
+|---|------|---------|-------------------|-------|
+| 1 | System prompt defaults (80+8+10) → SystemPrompts.cs registry + /defaults endpoints | Already-done | `ea4d5e5` (prompts P1 fixes), `d72c541` (initial port) | `Tamma.Api/Auth/SystemPrompts.cs` ports the full TS `default-prompts.ts` registry: 8 role identities, 10 action-defaults, 80 role+action templates. `PromptEndpoints.GetSystemDefault` / `GetActionDefault` / `ListSystemDefaults` are all wired and bound under `GET /api/prompts/defaults`, `GET /api/prompts/defaults/{action}`, `GET /api/prompts/defaults/{role}/{action}`. Test coverage: `PromptStore/SystemPromptsTests.cs` (249 LoC, 80-pair parameterised tests + lookups). |
+| 2 | Agent resolver: GET /api/v1/agents/{role}/resolve, POST /resolve-for-phase | Already-done | `7fadaa1` (initial), `ccfff64` (real wiring), `498889b` (P0 normalise + role keys) | `AgentResolverService` walks platform-default → tenant-override (3-level merge from `agent_configs.config` JSONB), with `RolePhaseMap` providing role↔phase eligibility, `LegacyRoleAliases` and `LegacyPhaseAliases` normalisers (finding 001), and per-task clamping for budget/tools/permissionMode (finding 007). Endpoints `MapGet("/{role}/resolve")` and `MapPost("/resolve-for-phase")` wired at `Program.cs:732-733`. Test coverage: `AgentResolverServiceTests.cs` (294 LoC), `AgentEndpointsIntegrationTests.cs` (191 LoC), `RolePhaseMapTests.cs` (183 LoC). |
+| 3 | Provider chain: POST /api/v1/providers/chain/resolve | Already-done | `1bce71c` (port), `32bba50` (P1 chain shape — finding 011) | `ProviderChainResolver` reads `chains[role][action] → chains[role][default] → chains[role] → chains[default]`, plus legacy TS shape (`roles.{role}.providerChain`, `defaults.providerChain`). Healthy/Unknown providers come first; HalfOpen probes appended at tail; Open providers excluded. Endpoint `MapPost("/chain/resolve")` wired at `Program.cs:805` (group `/api/providers`). Test coverage: `ProviderChainResolverTests.cs` (311 LoC), integration tests in `ProviderHealthEndpointsIntegrationTests.cs` (4 ResolveChain scenarios incl. circuit-open exclusion + half-open promotion). |
+| 4 | Circuit breaker state machine (open/half-open/closed) | Already-done | `1bce71c` (port), `0dbccf9` (validation/health fixes) | `CircuitBreakerService` is a real state machine persisted to `provider_health` table — sliding failure window, configurable `FailureThreshold` + `CooldownDuration`, atomic Open→HalfOpen auto-promotion via `ISystemClock`, `TryProbeAsync` for HalfOpen consent, and Reset endpoint. Test coverage: `CircuitBreakerStateMachineTests.cs` (343 LoC). |
+| 5 | Diagnostics aggregation: time-bucketed reports + per-provider budget | Already-done | `2fe9d6e` (initial merge), `0dbccf9` (P1/P2 batches), `f355c1a` (Postgres budget persistence) | `DiagnosticsService.GetReportAsync` returns `DiagnosticsReport` with 5-minute / hour / day buckets via repository `AggregateAsync`. `GetDimensionReportAsync` groups by Provider/Model/AgentType server-side. `GetBudgetAsync` reads per-account budget config (now Postgres-backed via `IBudgetConfigProvider`/`PostgresBudgetConfigProvider`) and computes alert/over-budget signals. Test coverage: `DiagnosticsAggregationTests.cs` (269 LoC), `BudgetServiceTests.cs` (231 LoC), `BudgetConfigRepositoryTests.cs` (203 LoC), `DiagnosticsEndpointsIntegrationTests.cs` (223 LoC). |
+| 6 | Prompt render endpoint (variable substitution, system+user merge, tool flag) | Already-done | `ea4d5e5` (8-field RenderResponse + render contract align — finding 003) | `PromptEndpoints.RenderPrompt` resolves through the 4-layer model, calls `PromptStoreService.RenderFull` for system+user template merge, returns `RenderedPromptResponse(Role, Action, Version, RenderedTemplate, RenderedSystemPrompt, EnableTools, MaxTokens, UnresolvedVariables[])` matching the TS `RenderedPrompt` contract. Single-pass substitution; unresolved variables tracked, not eagerly thrown. Test coverage: `PromptRenderTests.cs` (158 LoC), `PromptEndpointsIntegrationTests.cs` (150 LoC) including render-route assertions. |
+| 7 | Sanitization rule engine port from packages/shared/src/security/ | Already-done | `32bba50` (ContentSanitizer port — finding 006) | `Tamma.Api/Services/Sanitization/ContentSanitizer.cs` is a direct ~360-LoC port of `packages/shared/src/security/content-sanitizer.ts` (TS source 408 LoC at commit `9e9a57c~1`). Preserves all six Story 9-7 AC 6 behaviours: HTML quote-aware strip, zero-width Unicode removal (incl. CVE-2021-42574 bidi overrides), 5-category prompt-injection detection, NFKD normalisation, asymmetric input/output pipelines (output preserves fenced code), null-byte hard-floor strip. Wired through `SanitizationService` + `SettingsEndpoints.Sanitize`. Test coverage: `ContentSanitizerTests.cs` (151 LoC), `SanitizationServiceTests.cs` (291 LoC), `SanitizationEndpointsIntegrationTests.cs` (166 LoC), `SanitizationRegexTimeoutTests.cs` (50 LoC ReDoS guard). |
+| 8 | Email sending wiring (SMTP) for registration + password reset | Already-done | `218c746` (initial Email service), `e809f5b` (SMTP outbox rewrite), `7d24fe8` (OutboxSmtpSender), `34b1d4e` (Resend HTTP), `c6601a6`/`6aa7594`/`93300eb`/`0b086cd` (CodeQL log-injection hardening) | `AuthEndpoints.Register` enqueues a verification email via `IEmailService.SendAsync`; `AuthEndpoints.PasswordResetRequest` enqueues a reset email; `AuthEndpoints.ResendVerification` enqueues a re-verify email — all three wired and rate-limited. `AddEmailServices()` extension picks `smtp` (default, outbox + `OutboxSmtpSender` background drain via `MailKitSmtpTransport`) / `resend` (HTTP) / `inmemory` (dev fallback) by `Email:Provider` config. Test coverage: `AuthRegisterEmailIntegrationTests.cs`, `PasswordResetEmailIntegrationTests.cs`, `OutboxSmtpSenderTests.cs` (255 LoC), `SmtpEmailServiceOutboxTests.cs`, `ResendEmailServiceTests.cs`, `InMemoryEmailServiceTests.cs`, `EmailOutboxRepositoryTests.cs`, `EmailTemplatesTests.cs` — 1622 LoC across 10 email test files. |
+
+**Punch-list test totals (the eight task areas):** 361 tests passing (subset
+of the 1731 baseline), 0 failures, 0 skips.
+
+**Gaps verified absent:** searched for `TODO|FIXME|STUB|HACK|NotImplementedException`
+across all six punch-list service trees (`Services/{Agents,Providers,Diagnostics,
+PromptStore,Email,Sanitization}/`) — zero matches.
+
+**Drift discovered:** none — the audit remediation incidentally and
+comprehensively closed the punch list. The pre-Layer-4 hardening pass
+forecast 60 hours; the audit work absorbed all of it.
+
+**Conclusion:** All 8 tasks are Done (closed by audit-remediation work, no
+additional commits in this pass). Layer 4 may proceed without further
+hardening on this list.
+
 ## Related
 
 - Epic 19 rewrite: [`../epic-19/19-1-api-consolidation-to-csharp.md`](../epic-19/19-1-api-consolidation-to-csharp.md)
