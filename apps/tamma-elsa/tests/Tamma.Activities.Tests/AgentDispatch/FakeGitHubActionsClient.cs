@@ -101,6 +101,29 @@ internal sealed class FakeGitHubActionsClient : IGitHubActionsClient
     public Task<IReadOnlyList<CheckRunSummary>> ListCheckRunsAsync(
         string owner, string repo, string commitSha, CancellationToken ct = default)
         => Task.FromResult(CheckRuns);
+
+    /// <summary>
+    /// Map of "owner/repo" → installation id used by
+    /// <see cref="ResolveInstallationIdAsync"/>. Defaults to the
+    /// value of <see cref="DefaultInstallationId"/> for any repo not
+    /// explicitly mapped; tests that want null can clear this and
+    /// leave the default as null.
+    /// </summary>
+    public Dictionary<string, long?> InstallationIdByRepo { get; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public long? DefaultInstallationId { get; set; } = 100L;
+
+    public Task<long?> ResolveInstallationIdAsync(
+        string owner, string repo, CancellationToken ct = default)
+    {
+        var key = $"{owner}/{repo}";
+        if (InstallationIdByRepo.TryGetValue(key, out var id))
+        {
+            return Task.FromResult<long?>(id);
+        }
+        return Task.FromResult<long?>(DefaultInstallationId);
+    }
 }
 
 internal sealed record DispatchInvocation(

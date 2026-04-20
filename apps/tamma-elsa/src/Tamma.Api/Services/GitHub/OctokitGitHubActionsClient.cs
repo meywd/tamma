@@ -296,6 +296,16 @@ public sealed class OctokitGitHubActionsClient : IGitHubActionsClient
         }
     }
 
+    public Task<long?> ResolveInstallationIdAsync(
+        string owner, string repo, CancellationToken ct = default)
+    {
+        // Expose the underlying resolver through the narrow IGitHubActionsClient
+        // surface so Tamma.Activities callers (e.g. AgentMonitorService) can
+        // tenant-scope webhook-signal keys without pulling in a direct
+        // dependency on the IRepoInstallationResolver type from Tamma.Api.
+        return _resolver.ResolveInstallationIdAsync(owner, repo, ct);
+    }
+
     public async Task<IReadOnlyList<CheckRunSummary>> ListCheckRunsAsync(
         string owner, string repo, string commitSha, CancellationToken ct = default)
     {

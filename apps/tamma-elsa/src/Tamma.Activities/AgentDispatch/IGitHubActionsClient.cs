@@ -95,6 +95,17 @@ public interface IGitHubActionsClient
     /// </summary>
     Task<IReadOnlyList<CheckRunSummary>> ListCheckRunsAsync(
         string owner, string repo, string commitSha, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolve the GitHub App installation id that owns <paramref name="owner"/>/<paramref name="repo"/>.
+    /// Returns <c>null</c> when no installation can be located for the repo
+    /// (e.g. dev mode with no GitHub App configured). Used by the monitor
+    /// service to scope the webhook-signal registry key so cross-tenant
+    /// waiters on the same repo+branch cannot be cross-woken
+    /// (review-session 2026-04-20 finding 5).
+    /// </summary>
+    Task<long?> ResolveInstallationIdAsync(
+        string owner, string repo, CancellationToken ct = default);
 }
 
 /// <summary>

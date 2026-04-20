@@ -33,6 +33,120 @@ public class WebhookSignalRegistryTests
     }
 
     [Test]
+    public void Key_ToKey_PrefixesInstallationId_WhenSet()
+    {
+        var withInstall = new AgentWebhookSignalKey(
+            "Acme/Widgets", "main", "sess_a",
+            WorkflowRunId: 42, InstallationId: 9001).ToKey();
+        var withInstallBranchOnly = new AgentWebhookSignalKey(
+            "Acme/Widgets", "main", "sess_a",
+            WorkflowRunId: null, InstallationId: 9001).ToKey();
+
+        withInstall.Should().Be("install:9001:run:acme/widgets:42");
+        withInstallBranchOnly.Should().Be("install:9001:branch:acme/widgets:main:sess_a");
+    }
+
+    [Test]
+    public async Task Publish_DifferentInstallation_DoesNotWakeWaiter()
+    {
+        // review-session 2026-04-20 finding 5: cross-tenant cross-wake
+        // guard. Two tenants install Tamma on the same repo+branch; the
+        // webhook for tenant B must NOT wake tenant A's waiter.
+        var registry = new WebhookSignalRegistry();
+        var waitKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: "sess_tenantA",
+            WorkflowRunId: null,
+            InstallationId: 1111);
+
+        var waitTask = registry.WaitForSignalAsync(waitKey, TimeSpan.FromMilliseconds(200));
+
+        // Give the waiter a moment to register its entry in the dictionary.
+        await Task.Delay(50);
+        registry.PendingWaiterCount.Should().BeGreaterThan(0);
+
+        // Publish under a DIFFERENT installation for the same repo+branch.
+        var publishKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: null,
+            WorkflowRunId: 5555,
+            InstallationId: 2222);
+
+        var matched = registry.PublishSignal(publishKey, MakeSignal(5555));
+        matched.Should().BeFalse(
+            "webhooks from another installation must not wake this tenant's monitor");
+
+        // Waiter should time out with null, not return the signal.
+        var result = await waitTask;
+        result.Should().BeNull("different-installation webhook is not a match");
+    }
+
+    [Test]
+    public async Task Publish_SameInstallation_WakesWaiter()
+    {
+        // Positive case for the install-scoped key shape.
+        var registry = new WebhookSignalRegistry();
+        var waitKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: "sess_abc",
+            WorkflowRunId: null,
+            InstallationId: 7777);
+
+        var waitTask = registry.WaitForSignalAsync(waitKey, TimeSpan.FromSeconds(5));
+        await Task.Delay(50);
+        registry.PendingWaiterCount.Should().BeGreaterThan(0);
+
+        var publishKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: null,
+            WorkflowRunId: 9999,
+            InstallationId: 7777);
+
+        var matched = registry.PublishSignal(publishKey, MakeSignal(9999));
+        matched.Should().BeTrue();
+
+        var signal = await waitTask;
+        signal.Should().NotBeNull();
+        signal!.WorkflowRunId.Should().Be(9999);
+    }
+
+    [Test]
+    public async Task Publish_UnscopedPublish_DoesNotWakeInstallScopedWaiter()
+    {
+        // When the waiter has an InstallationId but the publisher does not
+        // (e.g. back-compat path where the webhook payload was malformed),
+        // the install-prefixed waiter must not accidentally match.
+        var registry = new WebhookSignalRegistry();
+        var waitKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: "sess_abc",
+            WorkflowRunId: null,
+            InstallationId: 1234);
+
+        var waitTask = registry.WaitForSignalAsync(waitKey, TimeSpan.FromMilliseconds(200));
+        await Task.Delay(50);
+
+        var publishKey = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: null,
+            WorkflowRunId: 5555,
+            InstallationId: null);
+
+        var matched = registry.PublishSignal(publishKey, MakeSignal(5555));
+        matched.Should().BeFalse(
+            "unscoped publish must not match install-scoped waiter");
+
+        var result = await waitTask;
+        result.Should().BeNull();
+    }
+
+    [Test]
     public async Task Publish_WithRunIdKey_WakesBranchFallbackWaiter()
     {
         var registry = new WebhookSignalRegistry();

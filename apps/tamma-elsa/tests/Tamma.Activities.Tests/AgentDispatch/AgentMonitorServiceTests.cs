@@ -192,7 +192,11 @@ public class AgentMonitorServiceTests
             Repository: "acme/widgets",
             HeadBranch: "tamma/issue-42",
             SessionId: null,
-            WorkflowRunId: 99_999);
+            WorkflowRunId: 99_999,
+            // Match the installation id that the FakeGitHubActionsClient
+            // resolves by default — the monitor now scopes its wait key
+            // with the installation id (review 2026-04-20 finding 5).
+            InstallationId: fake.DefaultInstallationId);
         registry.PublishSignal(key, signal);
 
         var result = await monitorTask;

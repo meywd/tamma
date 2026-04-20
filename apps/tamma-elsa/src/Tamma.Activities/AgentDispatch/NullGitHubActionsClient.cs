@@ -50,4 +50,8 @@ public sealed class NullGitHubActionsClient : IGitHubActionsClient
     public Task<IReadOnlyList<CheckRunSummary>> ListCheckRunsAsync(
         string owner, string repo, string commitSha, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<CheckRunSummary>>(System.Array.Empty<CheckRunSummary>());
+
+    public Task<long?> ResolveInstallationIdAsync(
+        string owner, string repo, CancellationToken ct = default)
+        => Task.FromResult<long?>(null);
 }

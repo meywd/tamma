@@ -63,16 +63,30 @@ public interface IWebhookSignalRegistry
 /// the run id but not the session id) and the monitor side (which has the
 /// session id but may not yet have the run id) can always find each other:
 /// <list type="bullet">
-///   <item><c>run:{repo}:{runId}</c> — preferred match; written by the
-///   webhook and read by the monitor once it knows the run id.</item>
-///   <item><c>branch:{repo}:{branch}</c> — branch-only alias; lets the
-///   webhook match a pre-discovery waiter without knowing the session id.</item>
-///   <item><c>branch:{repo}:{branch}:{sessionId}</c> — session-scoped alias;
-///   disambiguates multiple concurrent dispatches on the same branch by
-///   the same installation.</item>
+///   <item><c>[install:{installationId}:]run:{repo}:{runId}</c> — preferred
+///   match; written by the webhook and read by the monitor once it knows
+///   the run id.</item>
+///   <item><c>[install:{installationId}:]branch:{repo}:{branch}</c> —
+///   branch-only alias; lets the webhook match a pre-discovery waiter
+///   without knowing the session id.</item>
+///   <item><c>[install:{installationId}:]branch:{repo}:{branch}:{sessionId}</c>
+///   — session-scoped alias; disambiguates multiple concurrent dispatches
+///   on the same branch by the same installation.</item>
 /// </list>
+///
+/// <para>The <c>install:{id}:</c> prefix (review-session 2026-04-20 finding
+/// 5) scopes every alias to the GitHub App installation so two tenants
+/// that share an <c>owner/repo</c> + branch name cannot cross-wake each
+/// other's monitors. When <paramref name="InstallationId"/> is null the
+/// old unprefixed aliases are emitted — this is the back-compat path for
+/// in-progress waiters that predate the installation plumbing.</para>
 /// </summary>
-public sealed record AgentWebhookSignalKey(string Repository, string? HeadBranch, string? SessionId, long? WorkflowRunId)
+public sealed record AgentWebhookSignalKey(
+    string Repository,
+    string? HeadBranch,
+    string? SessionId,
+    long? WorkflowRunId,
+    long? InstallationId = null)
 {
     /// <summary>
     /// Canonical string form for the run-id path.
@@ -80,35 +94,47 @@ public sealed record AgentWebhookSignalKey(string Repository, string? HeadBranch
     public string ToKey()
     {
         var repo = (Repository ?? string.Empty).ToLowerInvariant();
+        var prefix = InstallationId is not null
+            ? $"install:{InstallationId.Value}:"
+            : string.Empty;
         if (WorkflowRunId is not null)
         {
-            return $"run:{repo}:{WorkflowRunId.Value}";
+            return $"{prefix}run:{repo}:{WorkflowRunId.Value}";
         }
 
         var branch = (HeadBranch ?? string.Empty).ToLowerInvariant();
         var session = SessionId ?? string.Empty;
-        return $"branch:{repo}:{branch}:{session}";
+        return $"{prefix}branch:{repo}:{branch}:{session}";
     }
 
     /// <summary>
     /// All dictionary keys this logical identifier should publish to. The
     /// monitor registers waiters on every form it knows; the webhook
     /// receiver tries each form until one matches.
+    ///
+    /// <para>When <c>InstallationId</c> is set, every alias is prefixed
+    /// with <c>install:{id}:</c>. When it is null, the unprefixed aliases
+    /// are emitted for back-compat with waiters that predate the
+    /// installation-scoped keying.</para>
     /// </summary>
     internal IEnumerable<string> ExpandKeys()
     {
         var repo = (Repository ?? string.Empty).ToLowerInvariant();
+        var prefix = InstallationId is not null
+            ? $"install:{InstallationId.Value}:"
+            : string.Empty;
+
         if (WorkflowRunId is not null)
         {
-            yield return $"run:{repo}:{WorkflowRunId.Value}";
+            yield return $"{prefix}run:{repo}:{WorkflowRunId.Value}";
         }
         if (!string.IsNullOrEmpty(HeadBranch))
         {
             var branch = HeadBranch!.ToLowerInvariant();
-            yield return $"branch:{repo}:{branch}";
+            yield return $"{prefix}branch:{repo}:{branch}";
             if (!string.IsNullOrEmpty(SessionId))
             {
-                yield return $"branch:{repo}:{branch}:{SessionId}";
+                yield return $"{prefix}branch:{repo}:{branch}:{SessionId}";
             }
         }
     }

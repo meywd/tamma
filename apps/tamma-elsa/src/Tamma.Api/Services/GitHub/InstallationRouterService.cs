@@ -419,6 +419,24 @@ public sealed class InstallationRouterService : IInstallationRouterService
         var createdAt = TryGetDateTime(runEl, "created_at") ?? DateTime.UtcNow;
         var updatedAt = TryGetDateTime(runEl, "updated_at") ?? DateTime.UtcNow;
 
+        // Extract installation.id from the outer payload so the publish key
+        // is tenant-scoped (review-session 2026-04-20 finding 5). Without
+        // this, two tenants with Tamma installed on the same owner/repo can
+        // cross-wake each other's AgentMonitorService via the branch-
+        // fallback alias.
+        long? installationId = null;
+        if (payload.TryGetProperty("installation", out var installEl) &&
+            installEl.ValueKind == JsonValueKind.Object)
+        {
+            installationId = GetInstallationId(installEl);
+        }
+        if (installationId is null)
+        {
+            _logger.LogWarning(
+                "workflow_run.completed payload missing installation.id — " +
+                "publishing unscoped key (back-compat path, cross-tenant risk)");
+        }
+
         var signal = new AgentWebhookSignal(
             WorkflowRunId: runId.Value,
             Status: status,
@@ -431,12 +449,15 @@ public sealed class InstallationRouterService : IInstallationRouterService
         // We don't know the session id on the webhook side, so we publish
         // under the run-id key. The registry also tries a branch-fallback
         // lookup, which lets a webhook that beats discovery match the
-        // (repo, branch, *) waiter.
+        // (repo, branch, *) waiter. The installation id scopes all aliases
+        // to the specific GitHub App installation so two tenants sharing
+        // an owner/repo + branch cannot cross-wake each other.
         var publishKey = new AgentWebhookSignalKey(
             Repository: repoFullName,
             HeadBranch: headBranch,
             SessionId: null,
-            WorkflowRunId: runId.Value);
+            WorkflowRunId: runId.Value,
+            InstallationId: installationId);
 
         var matched = _webhookSignals.PublishSignal(publishKey, signal);
         if (matched)

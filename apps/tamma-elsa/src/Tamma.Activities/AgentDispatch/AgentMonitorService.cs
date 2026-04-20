@@ -141,6 +141,35 @@ public sealed class AgentMonitorService : IAgentMonitorService
     {
         if (_signals is null) return null; // unreachable; mode-check above.
 
+        // Resolve the installation id so the wait key is scoped to this
+        // tenant's GitHub App installation (review-session 2026-04-20
+        // finding 5). Without the scope, two tenants on the same repo +
+        // branch can cross-wake each other through the branch alias.
+        // Resolution failure (e.g. dev mode with no GitHub App) leaves
+        // installationId as null — the registry falls back to the
+        // unscoped alias form, which keeps legacy back-compat but emits
+        // a warning on the publish side.
+        long? installationId = null;
+        try
+        {
+            installationId = await _client.ResolveInstallationIdAsync(owner, repo, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex,
+                "ResolveInstallationIdAsync failed for {Owner}/{Repo} — falling back to unscoped alias",
+                owner, repo);
+        }
+
+        if (installationId is null)
+        {
+            _logger?.LogWarning(
+                "AgentMonitor webhook wait: installation id not resolved for {Owner}/{Repo} — " +
+                "falling back to unscoped key (cross-tenant risk, dev-mode only)",
+                owner, repo);
+        }
+
         // Pre-discovery bookmark: we don't have the run id yet, so the key
         // is (repo + branch + sessionId). The registry also registers an
         // alias under the branch-key so both the webhook side (which
@@ -150,7 +179,8 @@ public sealed class AgentMonitorService : IAgentMonitorService
             Repository: $"{owner}/{repo}",
             HeadBranch: request.BranchName,
             SessionId: request.SessionId,
-            WorkflowRunId: null);
+            WorkflowRunId: null,
+            InstallationId: installationId);
 
         // Clamp to at least 1 second so an egregious 0-multiplier
         // misconfig doesn't immediately trip the fallback. The
