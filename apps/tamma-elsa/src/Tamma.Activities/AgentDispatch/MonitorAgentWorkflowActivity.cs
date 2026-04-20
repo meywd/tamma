@@ -22,9 +22,11 @@ namespace Tamma.Activities.AgentDispatch;
 /// </list>
 /// </para>
 ///
-/// <para>AC-7: webhook mode is documented as a TODO in
-/// <see cref="AgentMonitorService"/>. Poll mode is the only supported
-/// mode for v1.</para>
+/// <para>AC-7: webhook mode is supported via the <see cref="Mode"/> input
+/// (<c>Auto</c> / <c>Poll</c> / <c>Webhook</c>). Default remains
+/// <c>Poll</c> for back-compat. See <see cref="AgentMonitorMode"/> for
+/// the resolution rules; <c>Auto</c> is the production-recommended
+/// setting when the webhook receiver is wired.</para>
 /// </summary>
 [Activity(
     "Tamma.AgentDispatch",
@@ -46,7 +48,7 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
         ["sessionId"] = SessionId.Get(context),
         ["pollIntervalSeconds"] = PollIntervalSeconds.Get(context),
         ["timeoutMinutes"] = TimeoutMinutes.Get(context),
-        ["mode"] = "poll"
+        ["mode"] = ResolveModeString(context)
     };
 
     public Dictionary<string, object?> BuildEndData(ActivityExecutionContext context)
@@ -84,6 +86,9 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
 
     [Input(Description = "Timeout in minutes")]
     public Input<int> TimeoutMinutes { get; set; } = new(35);
+
+    [Input(Description = "Monitor mode: Auto (webhook with poll fallback), Poll (default), or Webhook (webhook-only, no fallback)")]
+    public Input<string> Mode { get; set; } = new("Poll");
 
     // ─── Outputs ────────────────────────────────────────────────────────
     [Output(Description = "The GitHub workflow run ID")]
@@ -145,7 +150,8 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
 
         var options = new AgentMonitorOptions(
             PollIntervalSeconds: Math.Max(5, PollIntervalSeconds.Get(context)),
-            TimeoutMinutes: Math.Max(1, TimeoutMinutes.Get(context)));
+            TimeoutMinutes: Math.Max(1, TimeoutMinutes.Get(context)),
+            Mode: ResolveMode(context));
 
         try
         {
@@ -203,4 +209,30 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
         DurationSeconds.Set(context, r.DurationSeconds);
         ArtifactsUrl.Set(context, r.ArtifactsUrl);
     }
+
+    /// <summary>
+    /// Parse the <see cref="Mode"/> input into an <see cref="AgentMonitorMode"/>.
+    /// Unknown values fall through to <see cref="AgentMonitorMode.Poll"/> so
+    /// a typo never disables poll mode silently.
+    /// </summary>
+    private AgentMonitorMode ResolveMode(ActivityExecutionContext context)
+    {
+        var raw = Mode.Get(context);
+        if (string.IsNullOrWhiteSpace(raw)) return AgentMonitorMode.Poll;
+        return raw.Trim().ToLowerInvariant() switch
+        {
+            "auto" => AgentMonitorMode.Auto,
+            "webhook" => AgentMonitorMode.Webhook,
+            "poll" => AgentMonitorMode.Poll,
+            _ => AgentMonitorMode.Poll
+        };
+    }
+
+    private string ResolveModeString(ActivityExecutionContext context) =>
+        ResolveMode(context) switch
+        {
+            AgentMonitorMode.Auto => "auto",
+            AgentMonitorMode.Webhook => "webhook",
+            _ => "poll"
+        };
 }

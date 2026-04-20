@@ -4,34 +4,42 @@ using Tamma.Activities.AgentDispatch.Models;
 namespace Tamma.Activities.AgentDispatch;
 
 /// <summary>
-/// Default <see cref="IAgentMonitorService"/> — polls the GitHub Actions
-/// API for a dispatched workflow run until it reaches a terminal state
+/// Default <see cref="IAgentMonitorService"/> — observes a dispatched
+/// GitHub Actions workflow run until it reaches a terminal state
 /// (story 19-3).
 ///
-/// <para>Two phases:</para>
-/// <list type="number">
+/// <para>Two modes:</para>
+/// <list type="bullet">
 ///   <item>
-///     <b>Discovery</b> — the dispatch API returns 204 with no run id, so
-///     the service queries <c>/actions/runs</c> for the branch+event and
-///     picks the most recent run created after the dispatch timestamp.
-///     Poll every 5s up to <c>DiscoveryTimeoutSeconds</c>.
+///     <b>Poll</b> (default, AC 1-6 / 8) — the dispatch API returns 204 with
+///     no run id, so the service queries <c>/actions/runs</c> for the
+///     branch+event and picks the most recent run created after the
+///     dispatch timestamp. Then polls <c>/actions/runs/{id}</c> every
+///     <c>PollIntervalSeconds</c> until <c>status == "completed"</c> or
+///     the overall timeout triggers.
 ///   </item>
 ///   <item>
-///     <b>Monitoring</b> — once the run id is known, poll
-///     <c>/actions/runs/{id}</c> every <c>PollIntervalSeconds</c> until
-///     <c>status == "completed"</c> or the overall timeout triggers.
+///     <b>Webhook</b> (AC-7) — the service registers a wait with
+///     <see cref="IWebhookSignalRegistry"/> keyed on the repository +
+///     branch + session id. When the GitHub webhook receiver observes a
+///     matching <c>workflow_run.completed</c> payload it publishes the
+///     signal, the monitor wakes, and returns immediately. No polling
+///     against GitHub at all.
+///   </item>
+///   <item>
+///     <b>Auto</b> — webhook when the registry is wired, with a safety
+///     window that falls back to poll if the webhook doesn't fire inside
+///     <c>TimeoutMinutes * WebhookSafetyWindowMultiplier</c>. This is the
+///     production-recommended setting for SaaS deployments.
 ///   </item>
 /// </list>
-///
-/// <para>Webhook mode (AC-7) is intentionally deferred — see TODO below.
-/// Poll-mode is sufficient for v1 and matches the scoping note in the
-/// story.</para>
 /// </summary>
 public sealed class AgentMonitorService : IAgentMonitorService
 {
     private readonly IGitHubActionsClient _client;
     private readonly ILogger<AgentMonitorService>? _logger;
     private readonly IDelayProvider _delay;
+    private readonly IWebhookSignalRegistry? _signals;
 
     // Discovery phase polls every 5s. Short enough to feel snappy;
     // long enough that we don't blow the rate-limit budget.
@@ -40,11 +48,13 @@ public sealed class AgentMonitorService : IAgentMonitorService
     public AgentMonitorService(
         IGitHubActionsClient client,
         ILogger<AgentMonitorService>? logger = null,
-        IDelayProvider? delay = null)
+        IDelayProvider? delay = null,
+        IWebhookSignalRegistry? signals = null)
     {
         _client = client;
         _logger = logger;
         _delay = delay ?? new TaskDelayProvider();
+        _signals = signals;
     }
 
     public async Task<AgentMonitorResult> MonitorAsync(
@@ -58,6 +68,124 @@ public sealed class AgentMonitorService : IAgentMonitorService
             return NotFoundResult($"Invalid repository format '{request.Repository}'");
         }
 
+        // Resolve the effective mode. Auto falls back to Poll when no
+        // signal registry is wired (e.g. the ElsaServer composition root
+        // or a test harness without the webhook plumbing).
+        var effectiveMode = options.Mode;
+        if (effectiveMode == AgentMonitorMode.Auto && _signals is null)
+        {
+            _logger?.LogDebug(
+                "AgentMonitor mode=Auto but IWebhookSignalRegistry not registered — falling back to Poll for {Repository}/{Branch}",
+                request.Repository, request.BranchName);
+            effectiveMode = AgentMonitorMode.Poll;
+        }
+        if (effectiveMode == AgentMonitorMode.Webhook && _signals is null)
+        {
+            _logger?.LogError(
+                "AgentMonitor mode=Webhook but IWebhookSignalRegistry not registered — returning monitor_failed");
+            return new AgentMonitorResult(
+                WorkflowRunId: 0,
+                Status: "error",
+                Conclusion: "monitor_failed",
+                WorkflowRunUrl: string.Empty,
+                DurationSeconds: 0,
+                ArtifactsUrl: string.Empty);
+        }
+
+        if (effectiveMode == AgentMonitorMode.Poll)
+        {
+            return await PollAsync(owner, repo, request, dispatchedAfter, options, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // Webhook / Auto path.
+        var webhookResult = await WaitForWebhookAsync(
+            owner, repo, request, options, cancellationToken).ConfigureAwait(false);
+
+        if (webhookResult is not null)
+        {
+            return webhookResult;
+        }
+
+        // Safety-window expired. Auto falls back to polling so the workflow
+        // doesn't hang on a missed webhook delivery. Webhook (strict) bails
+        // out with monitor_failed.
+        if (effectiveMode == AgentMonitorMode.Webhook)
+        {
+            _logger?.LogWarning(
+                "Webhook-mode safety window expired for {Repository}/{Branch} — webhook never arrived",
+                request.Repository, request.BranchName);
+            return new AgentMonitorResult(
+                WorkflowRunId: 0,
+                Status: "error",
+                Conclusion: "monitor_failed",
+                WorkflowRunUrl: string.Empty,
+                DurationSeconds: 0,
+                ArtifactsUrl: string.Empty);
+        }
+
+        _logger?.LogWarning(
+            "Webhook-mode (Auto) safety window expired for {Repository}/{Branch} — falling back to poll",
+            request.Repository, request.BranchName);
+        return await PollAsync(owner, repo, request, dispatchedAfter, options, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    // ── Webhook path ──────────────────────────────────────────────────────
+
+    private async Task<AgentMonitorResult?> WaitForWebhookAsync(
+        string owner, string repo,
+        AgentExecutionRequest request,
+        AgentMonitorOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (_signals is null) return null; // unreachable; mode-check above.
+
+        // Pre-discovery bookmark: we don't have the run id yet, so the key
+        // is (repo + branch + sessionId). The registry also registers an
+        // alias under the branch-key so both the webhook side (which
+        // *does* know the run id once it arrives) and the discovery side
+        // can match.
+        var key = new AgentWebhookSignalKey(
+            Repository: $"{owner}/{repo}",
+            HeadBranch: request.BranchName,
+            SessionId: request.SessionId,
+            WorkflowRunId: null);
+
+        var safetyWindow = TimeSpan.FromMinutes(
+            Math.Max(1.0, options.TimeoutMinutes * options.WebhookSafetyWindowMultiplier));
+
+        _logger?.LogInformation(
+            "AgentMonitor webhook wait: key={Key} safety={SafetyMinutes}m",
+            key.ToKey(), safetyWindow.TotalMinutes);
+
+        var signal = await _signals.WaitForSignalAsync(key, safetyWindow, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (signal is null)
+        {
+            return null; // caller decides how to handle (Auto falls back, Webhook fails).
+        }
+
+        var durationSeconds = (int)Math.Max(0, (signal.UpdatedAt - signal.CreatedAt).TotalSeconds);
+        return new AgentMonitorResult(
+            WorkflowRunId: signal.WorkflowRunId,
+            Status: signal.Status,
+            Conclusion: signal.Conclusion,
+            WorkflowRunUrl: signal.WorkflowRunUrl,
+            DurationSeconds: durationSeconds,
+            ArtifactsUrl: signal.ArtifactsUrl);
+    }
+
+    // ── Poll path (unchanged from story 19-3 v1) ──────────────────────────
+
+    private async Task<AgentMonitorResult> PollAsync(
+        string owner, string repo,
+        AgentExecutionRequest request,
+        DateTime dispatchedAfter,
+        AgentMonitorOptions options,
+        CancellationToken cancellationToken)
+    {
         // ── Phase 1: discover the run ─────────────────────────────────
         var run = await DiscoverRunAsync(
             owner, repo, request.BranchName, dispatchedAfter,
@@ -163,14 +291,6 @@ public sealed class AgentMonitorService : IAgentMonitorService
             WorkflowRunUrl: lastRun.HtmlUrl,
             DurationSeconds: timeoutDuration,
             ArtifactsUrl: lastRun.ArtifactsUrl);
-
-        // TODO: Webhook-mode (story 19-3 AC-7). When the GitHub webhook
-        // handler receives workflow_run.completed, it should resume an
-        // ELSA bookmark keyed by the session id / run id, eliminating
-        // the poll loop. Requires wiring on two sides: the webhook
-        // handler must map workflow_run → bookmark, and this service
-        // must create+await the bookmark. Defer until the poll path is
-        // validated in production.
     }
 
     private async Task<WorkflowRunSummary?> DiscoverRunAsync(

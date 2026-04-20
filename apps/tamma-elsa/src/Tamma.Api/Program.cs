@@ -341,6 +341,15 @@ builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentResultCollectorService,
     Tamma.Activities.AgentDispatch.AgentResultCollectorService>();
 
+// Webhook-signal registry (story 19-3 AC-7). Singleton — the registry
+// IS the in-process pub/sub plane. Lets a workflow_run.completed webhook
+// wake a suspended IAgentMonitorService call, eliminating the 60 GitHub
+// API poll calls per agent run. Mode=Auto on MonitorAgentWorkflowActivity
+// falls back to poll when this registry is missing, so wiring it is
+// purely additive.
+builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IWebhookSignalRegistry,
+    Tamma.Activities.AgentDispatch.WebhookSignalRegistry>();
+
 // Executors — LocalExecutor only needs the process runner (singleton-safe);
 // GitHubActionsExecutor composes the three scoped services so itself must
 // be scoped.

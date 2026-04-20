@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
+using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.TaskQueue;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -39,6 +40,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly IGitHubAppClient _gitHubApp;
     private readonly IGitHubSecretsProvisioner _provisioner;
     private readonly IApiKeyRepository _apiKeys;
+    private readonly IWebhookSignalRegistry? _webhookSignals;
     private readonly ILogger<InstallationRouterService> _logger;
 
     public InstallationRouterService(
@@ -51,7 +53,8 @@ public sealed class InstallationRouterService : IInstallationRouterService
         IGitHubSecretsProvisioner provisioner,
         IApiKeyRepository apiKeys,
         ILogger<InstallationRouterService> logger,
-        ITaskQueue? taskQueue = null)
+        ITaskQueue? taskQueue = null,
+        IWebhookSignalRegistry? webhookSignals = null)
     {
         _installations = installations;
         _events = events;
@@ -62,6 +65,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         _provisioner = provisioner;
         _apiKeys = apiKeys;
         _taskQueue = taskQueue;
+        _webhookSignals = webhookSignals;
         _logger = logger;
     }
 
@@ -323,6 +327,13 @@ public sealed class InstallationRouterService : IInstallationRouterService
             case "installation_repositories":
                 return await HandleInstallationRepositoriesEventAsync(payload, action);
 
+            // Story 19-3 AC-7 — webhook-mode monitor wake-up. Match the
+            // workflow_run to a suspended AgentMonitorService by
+            // (repo, run_id) or (repo, branch, session_id). Non-matching
+            // workflow_runs (not Tamma-dispatched) fall through to Skipped.
+            case "workflow_run":
+                return HandleWorkflowRunEvent(payload, action);
+
             // Deferred events — enqueue for async processing so the webhook
             // handler can return quickly. Ported from the TS queueing path.
             case "push":
@@ -336,6 +347,127 @@ public sealed class InstallationRouterService : IInstallationRouterService
                     Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
                 return new WebhookResult(eventType, action, Skipped: true);
         }
+    }
+
+    /// <summary>
+    /// Story 19-3 AC-7 — match an incoming <c>workflow_run.completed</c>
+    /// webhook to a suspended <see cref="IAgentMonitorService"/> call.
+    /// Skipped when:
+    /// <list type="bullet">
+    ///   <item>the webhook-signal registry is not wired (self-hosted mode);</item>
+    ///   <item>the <c>action</c> is not <c>completed</c> (we don't care about in-flight updates — the monitor is interested in terminal states only);</item>
+    ///   <item>no waiter is registered for the matched key (not every workflow_run is Tamma-dispatched).</item>
+    /// </list>
+    /// </summary>
+    private WebhookResult HandleWorkflowRunEvent(JsonElement payload, string? action)
+    {
+        if (_webhookSignals is null)
+        {
+            _logger.LogDebug(
+                "workflow_run event received but IWebhookSignalRegistry is not registered — skipping");
+            return new WebhookResult("workflow_run", action, Skipped: true);
+        }
+
+        // Only terminal transitions matter. GitHub fires this event on every
+        // status change (requested / in_progress / completed); the monitor
+        // only cares when the run is done.
+        if (!string.Equals(action, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return new WebhookResult("workflow_run", action, Skipped: true);
+        }
+
+        if (!payload.TryGetProperty("workflow_run", out var runEl) ||
+            runEl.ValueKind != JsonValueKind.Object)
+        {
+            _logger.LogWarning("workflow_run.completed payload missing 'workflow_run' object");
+            return new WebhookResult("workflow_run", action, Skipped: true);
+        }
+
+        var runId = TryGetLong(runEl, "id");
+        if (runId is null)
+        {
+            _logger.LogWarning("workflow_run.completed payload missing run id");
+            return new WebhookResult("workflow_run", action, Skipped: true);
+        }
+
+        // Repo slug. GitHub puts it on both `repository.full_name` (outer) and
+        // `workflow_run.repository.full_name` — prefer the outer as it's the
+        // canonical delivery-context repo.
+        string? repoFullName = null;
+        if (payload.TryGetProperty("repository", out var repoEl) &&
+            repoEl.ValueKind == JsonValueKind.Object)
+        {
+            repoFullName = TryGetString(repoEl, "full_name");
+        }
+        if (string.IsNullOrEmpty(repoFullName) &&
+            runEl.TryGetProperty("repository", out var nestedRepo) &&
+            nestedRepo.ValueKind == JsonValueKind.Object)
+        {
+            repoFullName = TryGetString(nestedRepo, "full_name");
+        }
+        if (string.IsNullOrEmpty(repoFullName))
+        {
+            _logger.LogWarning("workflow_run.completed payload missing repository.full_name");
+            return new WebhookResult("workflow_run", action, Skipped: true);
+        }
+
+        var status = TryGetString(runEl, "status") ?? "completed";
+        var conclusion = TryGetString(runEl, "conclusion") ?? string.Empty;
+        var htmlUrl = TryGetString(runEl, "html_url") ?? string.Empty;
+        var artifactsUrl = TryGetString(runEl, "artifacts_url") ?? string.Empty;
+        var headBranch = TryGetString(runEl, "head_branch");
+        var createdAt = TryGetDateTime(runEl, "created_at") ?? DateTime.UtcNow;
+        var updatedAt = TryGetDateTime(runEl, "updated_at") ?? DateTime.UtcNow;
+
+        var signal = new AgentWebhookSignal(
+            WorkflowRunId: runId.Value,
+            Status: status,
+            Conclusion: conclusion,
+            WorkflowRunUrl: htmlUrl,
+            CreatedAt: createdAt,
+            UpdatedAt: updatedAt,
+            ArtifactsUrl: artifactsUrl);
+
+        // We don't know the session id on the webhook side, so we publish
+        // under the run-id key. The registry also tries a branch-fallback
+        // lookup, which lets a webhook that beats discovery match the
+        // (repo, branch, *) waiter.
+        var publishKey = new AgentWebhookSignalKey(
+            Repository: repoFullName,
+            HeadBranch: headBranch,
+            SessionId: null,
+            WorkflowRunId: runId.Value);
+
+        var matched = _webhookSignals.PublishSignal(publishKey, signal);
+        if (matched)
+        {
+            _logger.LogInformation(
+                "workflow_run.completed webhook matched waiter: repo={Repo} run={RunId} conclusion={Conclusion}",
+                Logging.LogSanitizer.Clean(repoFullName), runId, Logging.LogSanitizer.Clean(conclusion));
+        }
+        else
+        {
+            _logger.LogDebug(
+                "workflow_run.completed webhook with no matching waiter (not a Tamma-dispatched run)");
+        }
+
+        return new WebhookResult("workflow_run", action, Skipped: !matched);
+    }
+
+    private static DateTime? TryGetDateTime(JsonElement el, string name)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(name, out var prop)) return null;
+        if (prop.ValueKind != JsonValueKind.String) return null;
+        if (DateTime.TryParse(prop.GetString(),
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal |
+            System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var dt))
+        {
+            return dt;
+        }
+        return null;
     }
 
     /// <summary>
