@@ -10,6 +10,7 @@ using Serilog.Sinks.OpenSearch;
 using Tamma.Api.Auth;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Extensions;
+using Tamma.Api.Infrastructure;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
 using Tamma.Core.Interfaces;
@@ -179,14 +180,15 @@ builder.Services.AddHttpClient("github", client =>
 // warning — dev-mode single-role Postgres continues to function, but
 // production must set TammaAppDb explicitly (see the Phase-3 runbook).
 // ────────────────────────────────────────────────────────────────────────────
-var connectionString = builder.Configuration.GetConnectionString("TammaDb")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException(
-        "No admin database connection configured. Set ConnectionStrings:TammaDb "
-        + "(or the legacy ConnectionStrings:DefaultConnection).");
-
-var appConnectionString = builder.Configuration.GetConnectionString("TammaAppDb");
-if (string.IsNullOrWhiteSpace(appConnectionString))
+// IsNullOrWhiteSpace fallback (not just `??`): appsettings.json may ship an
+// empty TammaDb default to opt operators into env-only configuration, and the
+// container's appsettings.json default of "Server=localhost;..." would
+// otherwise mask a missing env override and connect to the wrong host.
+// Resolver lives in Tamma.Api.Infrastructure with unit tests exercising
+// each fallback branch — see ConnectionStringResolverTests.
+var connectionString = ConnectionStringResolver.ResolveAdmin(builder.Configuration);
+var appConnectionString = ConnectionStringResolver.ResolveApp(builder.Configuration);
+if (appConnectionString is null)
 {
     Log.Warning(
         "ConnectionStrings:TammaAppDb is not configured — falling back to the "

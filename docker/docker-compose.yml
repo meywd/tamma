@@ -165,6 +165,17 @@ services:
     restart: unless-stopped
     environment:
       ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      # Phase-3 dual connection strings (port-gap findings orgs/002, orgs/004).
+      # TammaDb = admin/migrations/background services. TammaAppDb = per-request
+      # endpoints connecting as the tamma_app role so Phase-2 RLS policies
+      # enforce tenant isolation. If TAMMA_APP_DB_PASSWORD is unset the app
+      # connection silently falls back to admin (RLS dormant) per the Phase-3
+      # runbook. Operator activates RLS by:
+      #   1. psql: ALTER ROLE tamma_app WITH PASSWORD '<rotated>';
+      #   2. set TAMMA_APP_DB_PASSWORD in .env
+      #   3. restart tamma-api
+      ConnectionStrings__TammaDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
+      ConnectionStrings__TammaAppDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-}"
       ElsaServer__Url: http://elsa-server:5000
       TAMMA_SERVICE_API_KEY: ${TAMMA_SERVICE_API_KEY:-}
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
