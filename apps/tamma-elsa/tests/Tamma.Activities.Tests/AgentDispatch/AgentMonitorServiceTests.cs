@@ -212,13 +212,14 @@ public class AgentMonitorServiceTests
         var fake = new FakeGitHubActionsClient();
         var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), registry);
 
-        // 1-minute timeout * 0.01 multiplier = sub-second safety window
-        // so the test doesn't have to wait for the real 1.5x default.
+        // 0.01-minute timeout * 0.01 multiplier = 0.0001 min → clamped to
+        // 1 second floor in AgentMonitorService (we just need the safety
+        // window to elapse, not the full 35m production default).
         var options = new AgentMonitorOptions(
             PollIntervalSeconds: 30,
-            TimeoutMinutes: 1,
+            TimeoutMinutes: 0,
             Mode: AgentMonitorMode.Webhook,
-            WebhookSafetyWindowMultiplier: 0.01);
+            WebhookSafetyWindowMultiplier: 0);
 
         var result = await svc.MonitorAsync(
             MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
@@ -243,7 +244,7 @@ public class AgentMonitorServiceTests
             PollIntervalSeconds: 30,
             TimeoutMinutes: 1,
             Mode: AgentMonitorMode.Auto,
-            WebhookSafetyWindowMultiplier: 0.01);
+            WebhookSafetyWindowMultiplier: 0);
 
         var result = await svc.MonitorAsync(
             MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);

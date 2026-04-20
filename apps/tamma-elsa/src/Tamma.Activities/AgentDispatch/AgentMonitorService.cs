@@ -152,8 +152,14 @@ public sealed class AgentMonitorService : IAgentMonitorService
             SessionId: request.SessionId,
             WorkflowRunId: null);
 
-        var safetyWindow = TimeSpan.FromMinutes(
-            Math.Max(1.0, options.TimeoutMinutes * options.WebhookSafetyWindowMultiplier));
+        // Clamp to at least 1 second so an egregious 0-multiplier
+        // misconfig doesn't immediately trip the fallback. The
+        // AgentMonitorOptions default (35 * 1.5 = ~52 minutes) is the
+        // production path; small values are test-mode.
+        var safetyWindowMinutes = options.TimeoutMinutes * options.WebhookSafetyWindowMultiplier;
+        var safetyWindow = safetyWindowMinutes <= 0
+            ? TimeSpan.FromSeconds(1)
+            : TimeSpan.FromMinutes(safetyWindowMinutes);
 
         _logger?.LogInformation(
             "AgentMonitor webhook wait: key={Key} safety={SafetyMinutes}m",

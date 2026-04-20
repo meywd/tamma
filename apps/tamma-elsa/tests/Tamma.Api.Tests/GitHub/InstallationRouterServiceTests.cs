@@ -425,4 +425,162 @@ public class InstallationRouterServiceTests
         _installRepo.Verify(r => r.AddRepoAsync(entityId, 10L, "acme/repo-a"), Times.Once);
         _installRepo.Verify(r => r.AddRepoAsync(entityId, 20L, "acme/repo-b"), Times.Once);
     }
+
+    // ─── HandleWebhookAsync: workflow_run (story 19-3 AC-7) ───────────────────
+
+    /// <summary>
+    /// Build a router with a real <see cref="WebhookSignalRegistry"/> wired.
+    /// Captures the registry so the test can inspect / register waiters.
+    /// </summary>
+    private (InstallationRouterService Svc, Tamma.Activities.AgentDispatch.WebhookSignalRegistry Registry) BuildServiceWithSignals()
+    {
+        var registry = new Tamma.Activities.AgentDispatch.WebhookSignalRegistry();
+        var svc = new InstallationRouterService(
+            _installRepo.Object,
+            _eventRepo.Object,
+            _tenantRepo.Object,
+            _userRepo.Object,
+            new MemoryCache(new MemoryCacheOptions()),
+            _gitHubApp.Object,
+            _provisioner.Object,
+            _apiKeyRepo.Object,
+            _logger.Object,
+            taskQueue: null,
+            webhookSignals: registry);
+        return (svc, registry);
+    }
+
+    [Test]
+    public async Task HandleWebhookAsync_WorkflowRunCompleted_MatchesPendingWaiter()
+    {
+        var (svc, registry) = BuildServiceWithSignals();
+
+        var payload = JsonDocument.Parse("""
+            {
+              "action": "completed",
+              "workflow_run": {
+                "id": 77777777,
+                "status": "completed",
+                "conclusion": "success",
+                "html_url": "https://github.com/acme/widgets/actions/runs/77777777",
+                "artifacts_url": "https://api.github.com/repos/acme/widgets/actions/runs/77777777/artifacts",
+                "head_branch": "tamma/issue-42",
+                "created_at": "2026-04-18T10:00:00Z",
+                "updated_at": "2026-04-18T10:05:00Z"
+              },
+              "repository": { "full_name": "acme/widgets" }
+            }
+            """).RootElement;
+
+        // Park a waiter that expects a branch-fallback match.
+        var waitKey = new Tamma.Activities.AgentDispatch.AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: "sess_abc",
+            WorkflowRunId: null);
+        var waitTask = registry.WaitForSignalAsync(waitKey, TimeSpan.FromSeconds(10));
+
+        // Let the wait register before the webhook publishes.
+        var deadline = DateTime.UtcNow.AddSeconds(1);
+        while (registry.PendingWaiterCount == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        var result = await svc.HandleWebhookAsync("workflow_run", payload);
+
+        result.Skipped.Should().BeFalse("a matching Tamma waiter was parked");
+        result.EventType.Should().Be("workflow_run");
+        result.Action.Should().Be("completed");
+
+        var signal = await waitTask;
+        signal.Should().NotBeNull();
+        signal!.WorkflowRunId.Should().Be(77777777);
+        signal.Conclusion.Should().Be("success");
+        signal.Status.Should().Be("completed");
+        signal.WorkflowRunUrl.Should().Be("https://github.com/acme/widgets/actions/runs/77777777");
+    }
+
+    [Test]
+    public async Task HandleWebhookAsync_WorkflowRunCompleted_NoWaiter_ReturnsSkipped()
+    {
+        var (svc, registry) = BuildServiceWithSignals();
+
+        var payload = JsonDocument.Parse("""
+            {
+              "action": "completed",
+              "workflow_run": {
+                "id": 42,
+                "status": "completed",
+                "conclusion": "failure",
+                "html_url": "https://github.com/acme/widgets/actions/runs/42",
+                "artifacts_url": "https://api.github.com/repos/acme/widgets/actions/runs/42/artifacts",
+                "head_branch": "main",
+                "created_at": "2026-04-18T10:00:00Z",
+                "updated_at": "2026-04-18T10:01:00Z"
+              },
+              "repository": { "full_name": "acme/widgets" }
+            }
+            """).RootElement;
+
+        var result = await svc.HandleWebhookAsync("workflow_run", payload);
+
+        result.Skipped.Should().BeTrue(
+            "an unmatched workflow_run is almost always a non-Tamma-dispatched run");
+        registry.PendingWaiterCount.Should().Be(0);
+    }
+
+    [Test]
+    public async Task HandleWebhookAsync_WorkflowRun_NonCompletedAction_IsSkipped()
+    {
+        var (svc, _) = BuildServiceWithSignals();
+
+        var payload = JsonDocument.Parse("""
+            {
+              "action": "in_progress",
+              "workflow_run": { "id": 1, "head_branch": "main" },
+              "repository": { "full_name": "acme/widgets" }
+            }
+            """).RootElement;
+
+        var result = await svc.HandleWebhookAsync("workflow_run", payload);
+
+        result.Skipped.Should().BeTrue(
+            "only terminal workflow_run.completed is relevant to the monitor");
+    }
+
+    [Test]
+    public async Task HandleWebhookAsync_WorkflowRun_NoRegistry_IsSkipped()
+    {
+        // Default _service uses the base setup with no registry.
+        var payload = JsonDocument.Parse("""
+            {
+              "action": "completed",
+              "workflow_run": { "id": 1, "head_branch": "main" },
+              "repository": { "full_name": "acme/widgets" }
+            }
+            """).RootElement;
+
+        var result = await _service.HandleWebhookAsync("workflow_run", payload);
+
+        result.Skipped.Should().BeTrue(
+            "self-hosted deployments without the registry fall through");
+    }
+
+    [Test]
+    public async Task HandleWebhookAsync_WorkflowRun_MissingWorkflowRun_IsSkipped()
+    {
+        var (svc, _) = BuildServiceWithSignals();
+
+        var payload = JsonDocument.Parse("""
+            {
+              "action": "completed",
+              "repository": { "full_name": "acme/widgets" }
+            }
+            """).RootElement;
+
+        var result = await svc.HandleWebhookAsync("workflow_run", payload);
+
+        result.Skipped.Should().BeTrue();
+    }
 }
