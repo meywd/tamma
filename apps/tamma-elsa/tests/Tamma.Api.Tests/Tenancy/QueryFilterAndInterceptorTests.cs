@@ -286,6 +286,158 @@ public class QueryFilterAndInterceptorTests
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // NULL-tenant policy tightening — review 2026-04-20 finding 2
+    //
+    // Phase-2 originally wrote the tenant_isolation_policy as
+    // "TenantId IS NULL OR TenantId = current_setting(...)". Strict tenant-
+    // scoped tables (users, github_installations, user_invites,
+    // domain_events, workflow_instances, provider_diagnostics,
+    // provider_health) dropped the IS NULL branch in migration
+    // 20260420120000_Phase2RlsNullPolicyTightening. A row with TenantId =
+    // NULL must no longer be visible to an app-role session whose bound
+    // tenant doesn't match.
+    // ──────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task Rls_NullTenantRow_NotVisibleToAppRole_OnStrictTable()
+    {
+        // Seed a GitHubInstallation row with TenantId = NULL via the admin
+        // connection (superuser bypasses RLS + trigger for NULL→uuid path).
+        // The prevent_tenant_id_change trigger only fires on UPDATE (not
+        // INSERT), and INSERT with TenantId = NULL is permitted by design
+        // (bootstrap-before-tenant).
+        using (var scope = TenancySetUpFixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            db.GitHubInstallations.Add(new Tamma.Data.Entities.GitHubInstallation
+            {
+                Id = Guid.NewGuid(),
+                InstallationId = 555_555L,
+                AccountLogin = "orphan-install",
+                AccountType = "Organization",
+                AppId = 999_999L,
+                TenantId = null, // strict-table NULL-tenant row
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Sanity check: the admin (superuser) connection DOES see the row
+        // (RLS is bypassed for superusers).
+        await using (var admin = new NpgsqlConnection(TenancySetUpFixture.AdminConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var adminCmd = admin.CreateCommand();
+            adminCmd.CommandText = "SELECT COUNT(*) FROM github_installations WHERE \"TenantId\" IS NULL";
+            var adminCount = Convert.ToInt32(await adminCmd.ExecuteScalarAsync());
+            adminCount.Should().Be(1, "seed landed via admin");
+        }
+
+        // App-role connection with an arbitrary bound tenant. The NULL-
+        // tenant row is strictly not its, so the tightened policy must
+        // return zero rows.
+        await using var conn = new NpgsqlConnection(TenancySetUpFixture.AppConnectionString);
+        await conn.OpenAsync();
+
+        await using (var bindCmd = conn.CreateCommand())
+        {
+            bindCmd.CommandText = "SELECT set_config('app.current_tenant_id', @p, false)";
+            var p = bindCmd.CreateParameter();
+            p.ParameterName = "p";
+            p.Value = Guid.NewGuid().ToString();
+            bindCmd.Parameters.Add(p);
+            await bindCmd.ExecuteNonQueryAsync();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM github_installations";
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+        count.Should().Be(0,
+            "NULL-tenant rows must not be visible to the app-role plane on strict tables");
+    }
+
+    [Test]
+    public async Task Rls_NullTenantRow_NotVisibleToAppRole_EvenWithEmptyTenantSetting()
+    {
+        // Same seed, but the app-role session has no tenant bound at all.
+        // The policy evaluates `"TenantId" = NULLIF('', '')::uuid` which
+        // compares to NULL → always false; zero rows returned.
+        using (var scope = TenancySetUpFixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            db.GitHubInstallations.Add(new Tamma.Data.Entities.GitHubInstallation
+            {
+                Id = Guid.NewGuid(),
+                InstallationId = 666_666L,
+                AccountLogin = "another-orphan",
+                AccountType = "Organization",
+                AppId = 888_888L,
+                TenantId = null,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using var conn = new NpgsqlConnection(TenancySetUpFixture.AppConnectionString);
+        await conn.OpenAsync();
+
+        await using (var bindCmd = conn.CreateCommand())
+        {
+            bindCmd.CommandText = "SELECT set_config('app.current_tenant_id', '', false)";
+            await bindCmd.ExecuteNonQueryAsync();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM github_installations";
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+        count.Should().Be(0,
+            "empty tenant binding + NULL-tenant row must fail closed on strict tables");
+    }
+
+    [Test]
+    public async Task Rls_NullTenantRow_StillVisibleToAppRole_OnPlatformGlobalTable()
+    {
+        // prompt_overrides retains the IS NULL branch because NULL means
+        // "Tamma-shipped system default" — legitimately visible to every
+        // tenant session. This is the complementary invariant to the
+        // strict-table tightening.
+        using (var scope = TenancySetUpFixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            db.PromptOverrides.Add(new Tamma.Data.Entities.PromptOverride
+            {
+                TenantId = null, // system default
+                UserId = Guid.NewGuid(),
+                Scope = "role-action",
+                Role = "pm",
+                Action = "create-story",
+                Template = "system-default template",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await using var conn = new NpgsqlConnection(TenancySetUpFixture.AppConnectionString);
+        await conn.OpenAsync();
+
+        await using (var bindCmd = conn.CreateCommand())
+        {
+            bindCmd.CommandText = "SELECT set_config('app.current_tenant_id', @p, false)";
+            var p = bindCmd.CreateParameter();
+            p.ParameterName = "p";
+            p.Value = Guid.NewGuid().ToString();
+            bindCmd.Parameters.Add(p);
+            await bindCmd.ExecuteNonQueryAsync();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM prompt_overrides";
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+        count.Should().Be(1,
+            "NULL-tenant rows on platform-global tables remain visible by design");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────
 
