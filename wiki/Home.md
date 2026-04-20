@@ -5,7 +5,13 @@
 ## Quick Links
 
 - [Project Roadmap](Roadmap) - All 27 epics with timeline and status
-- [Architecture](Architecture) - System architecture overview
+- [Architecture](Architecture) - System architecture overview (three deployment modes, executor abstraction, Cranl provisioning)
+- [Deployment](Deployment) - Docker stack, Phase-3 RLS runbook, env vars, Redis/Cranl activation
+- [Agent Dispatch](Agent-Dispatch) - Epic 19 executor abstraction (Local + GitHub Actions)
+- [Security](Security) - RLS, rate limiting, API key hashing, content sanitization, libsodium secrets
+- [GitHub Integration](GitHub-Integration) - Octokit App client, OAuth flows, Actions dispatch
+- [Testing](Testing) - Test strategy, testcontainers patterns, per-scope coverage
+- [Port Audit](Port-Audit) - Summary of TS → C# port-gap audit (196 findings across 8 scopes)
 - [Epics](Epics) - All 27 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
@@ -15,6 +21,7 @@
 - [Epic 9: Agent Management](Epics/Epic-9-Agent-Management) - Config-driven multi-agent system
 - [Epic 10: Engine Core](Epics/Epic-10-Engine-Core) - Workflow-driven architecture
 - [Epic 11-14: ELSA Hardening](Epics/Epic-11-14-ELSA) - Security, agentic tool loop, workflow decomposition, custom studio
+- [Epic 19: GitHub App Agent Dispatch](Epics/Epic-19-GitHub-App-Agent-Dispatch) - Executor abstraction, Local/GitHubActions modes, dispatch/monitor/collect
 - [Epic 23: System Monitoring](Epics/Epic-23-System-Monitoring) - Production-grade monitoring & observability dashboard
 - [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation with orchestrator
 - [Epic 25: Wiki Site](Epics/Epic-25-Wiki-Site) - Custom documentation site on Cloudflare Workers
@@ -60,18 +67,20 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 **Last Audit:** 2026-04-02 (sprint-status.yaml audited against codebase for all 27 epics)
 **Audit Results:** 117 done, 20 in-progress, 56 drafted
 
-### Recent Progress
+### Recent Progress (auth-foundation sprint)
 
-- **Story 6-11: Context API Wiring (done)** -- 13 API endpoints connecting C# Elsa activities to TypeScript packages (context storage, GitHub operations, task execution, cycle results) in `packages/api/src/routes/engine/`
-- **Story 12-5: Prompt Registry (done)** -- Role + action key system (8 roles x 10 actions = 80 default templates) with GET/PUT/POST render API in `packages/api/src/routes/prompts/`
-- **Context Gathering redesigned** -- Sequential role-based scanning (Dev, QA, Security, DevOps, Architect, Vector DB, PO Review); each role dispatches LlmCallWorkflow with role+action+variables (no inline prompts), stores findings in vector DB, PO produces Minimum Viable Context summary
-- **Issue Triage Workflow built** -- Fetches untriaged items (issues + Dependabot + CodeQL alerts); for each: gather context, 4-role panel review (security/dev/devops/qa), PO decision, apply labels and post comment; creates issues for security alerts
-- **31 ELSA workflows** -- 3 new triage sub-workflows (TriageContextGathering, TriagePanelReview, TriagePODecision) added
-- **ADL Orchestrator redesigned** -- Fire-and-forget dispatch, priority-based work item selection, triage integration, concurrency-based limits, full event emission on every step
-- **SingleIssueCycle redesigned** -- 15 steps (was 36), plan review panels, task creation, TDD loop, deployment pipeline, 6 new stub sub-workflows
-- **Epic 26 stories documented** -- Issue triage, scrum management, release management, priority configuration
-- **Wiki site React Flow diagrams updated** -- ADL and SingleIssueCycle diagrams updated, multi-select support (Shift+drag), better layout (ELK engine)
-- **Deep audit completed** -- all 27 epics verified against codebase; Epic 3, 4, 5, 8 statuses significantly corrected
+- **TS → C# port audit** -- 196 per-finding audit notes across 8 scopes (`admin-db`, `auth`, `orgs`, `providers`, `prompts`, `engine`, `github`, `kb`); **118 findings landed** during this sprint. Notes live in `docs/audit/port-gaps/<scope>/NNN-*.md` with per-scope `index.md` summaries. See [Port Audit](Port-Audit) for the rollup.
+- **Phase-3 dual-connection RLS (orgs/002, 004)** -- `TammaDb` (admin, migrations, background services) + `TammaAppDb` (per-request, role `tamma_app`, RLS-enforced). Tenant-context EF interceptor runs `SET LOCAL app.current_tenant_id` at the start of every DbCommand; every tenant-scoped entity has a query filter; filters **fail-closed** on null tenant. See [Deployment](Deployment#phase-3-rls-runbook) for the activation runbook.
+- **Octokit GitHub App client (github/all 11 findings)** -- real `OctokitGitHubAppClient` in `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/` using installation-scoped JWTs. `NullGitHubAppClient` seam when `GitHub:AppId` is absent — endpoints surface a clean `github_client_not_configured` error instead of silently succeeding.
+- **Libsodium secrets provisioner** -- `LibsodiumGitHubSecretsProvisioner` encrypts GitHub Actions repository secrets via `Sodium.Core` sealed boxes (public-key encryption). Null seam falls back when sodium isn't wired.
+- **TammaEngine SSE lifecycle (engine/012)** -- in-process `InMemoryEngineLifecycleBus` + SSE endpoints `/api/engine/events/state` and `/api/engine/events/logs`. Tenant-scoped fanout (each subscriber filters by tenant claim); 15-second heartbeats keep proxies from timing out idle streams.
+- **Redis-backed distributed rate limit (auth/014)** -- `IDistributedRateLimitBackend` with Lua `INCR + EXPIRE` script. In-process default; Redis activated by setting `ConnectionStrings:Redis`, making the rate limit multi-pod-safe.
+- **Cranl per-tenant provisioner** -- `CranlTenantProvisioner` spins up a per-tenant Cranl project + Postgres DB + Elsa workflow app. Admin endpoint `POST /api/admin/tenants/{id}/provision`. `NullTenantProvisioner` is the default — tenants stay on the shared central Postgres via RLS until `Cranl:ApiKey` + `Cranl:OrganizationId` are both set.
+- **Epic 19 agent dispatch (stories 19-2 / 3 / 4 / 5)** -- `IAgentExecutor` abstraction with `LocalExecutor` (CLI mode subprocess) + `GitHubActionsExecutor` (SaaS/multi-tenant). `DispatchAgentWorkflowActivity`, `MonitorAgentWorkflowActivity`, `CollectAgentResultsActivity`, and `ExecuteAgentActivity` in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`. Three deployment modes: **CLI** (local), **SaaS single-tenant** (central Postgres + RLS), **SaaS multi-tenant** (Cranl-provisioned per-tenant infra). Executor is resolved via `TAMMA_AGENT_MODE` env > `Agent:ExecutorMode` config > auto-detect. See [Agent Dispatch](Agent-Dispatch).
+- **Password hardening (auth/013)** -- `PasswordStrengthValidator` loads a top-1000 common-password list from SecLists, enforces length/upper/lower/digit + common-password rejection on register and password-reset.
+- **Postgres budget-config persistence (providers/005)** -- `BudgetConfigRepository` + `BudgetService` now persist provider-level budget limits; enforcement is real (no-op removed).
+- **Sole-owner delete guard + transfer-ownership (orgs/019)** -- deleting the sole owner of an org now requires a transfer-ownership flow; membership cascade cleans up stale rows.
+- **Content sanitizer port (~360 LoC)** -- C# port of the TS `ContentSanitizer` with prompt-injection detection, zero-width removal, NFKD normalisation; enforced on LLM output + API responses.
 
 ### Completed Epics (13)
 
@@ -140,4 +149,4 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 
 ---
 
-_Last updated: 2026-04-02 (workflow optimization sync) | Maintained by: meywd_
+_Last updated: 2026-04-18 (auth-foundation sprint sync) | Maintained by: meywd_

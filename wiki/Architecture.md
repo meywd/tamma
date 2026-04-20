@@ -228,6 +228,7 @@ The ELSA workflow engine (apps/tamma-elsa/) provides the orchestration backbone.
 | Security | (in LlmCall) CommandValidator, PathValidator | Security enforcement in workflows |
 | TDD / Testing | (via workflows) TDD cycle management, test execution | Test-first development |
 | Tool Execution | FileRead, FileWrite, SearchCode, ShellExecute, RunTests, GitOperations, ToolExecutorRegistry, ContextCompactor, TokenEstimator | In-process tool execution for agentic LLM calls |
+| Agent Dispatch (Epic 19) | DispatchAgentWorkflow, MonitorAgentWorkflow, CollectAgentResults, ExecuteAgent | Out-of-process agent execution via `IAgentExecutor` (Local subprocess or GitHub Actions) |
 
 ### 3. Infrastructure
 
@@ -267,33 +268,47 @@ Total: ~7.1GB without observability, ~11.8GB with OpenSearch.
 
 ## Deployment Modes
 
+Tamma can run in three topologies. The agent executor (Epic 19) picks which surface to dispatch work to at runtime based on `TAMMA_AGENT_MODE` / `Agent:ExecutorMode` config / auto-detection of a GitHub App. See [Agent Dispatch](Agent-Dispatch) for executor selection details.
+
 ### 1. CLI Mode (`tamma start`)
 ```bash
 tamma start --config ~/.tamma/config.json
 ```
-- Self-hosted engine running locally
-- Agents execute on user's machine (Claude Code, OpenCode)
-- No cloud dependencies required
-- ELSA workflow engine embedded or connected locally
+- Self-hosted engine running locally.
+- `LocalExecutor` runs agent tasks as subprocesses on the operator's machine (Claude Code, OpenCode).
+- No cloud dependencies required; ELSA workflow engine embedded or connected locally.
 
-### 2. Server Mode (`tamma server`)
-```bash
-tamma server --port 3000
-```
-- Self-hosted HTTP server with REST API
-- Dashboard accessible at configured URL
-- Manages worker pool locally
-- Suitable for small team deployments
+### 2. SaaS single-tenant (`tamma server` / `tamma api`, shared infra)
+- Self-hosted HTTP server with REST API and React dashboard.
+- One central Postgres; every tenant's data lives in the shared schema and is isolated by **Phase-3 row-level security** (the app connects as the non-superuser `tamma_app` role + a per-request `SET LOCAL app.current_tenant_id`).
+- Default for "just deploy Tamma and let a few orgs use it" scenarios.
+- No per-tenant Cranl provisioning required.
 
-### 3. SaaS Mode (`tamma api`)
-```bash
-# Entrypoint: packages/api/src/serve.ts
-```
-- Multi-tenant SaaS deployment
-- GitHub App authentication
-- Agents dispatched to user's GitHub Actions runners
-- User code never leaves their infrastructure
-- LLM proxy for users without their own API keys
+### 3. SaaS multi-tenant (`tamma api` with Cranl)
+- Same API surface, but each tenant gets its own **Cranl-provisioned** Postgres + Elsa workflow app.
+- `GitHubActionsExecutor` dispatches agent work to the tenant's GitHub Actions runners — user code never leaves their infrastructure.
+- Activated when `Cranl:ApiKey` + `Cranl:OrganizationId` are set **and** a GitHub App is configured. Otherwise the Null seam keeps every tenant on the shared central Postgres via RLS.
+- Admin endpoint `POST /api/admin/tenants/{id}/provision` kicks off provisioning. See [Deployment → Cranl activation](Deployment#cranl-per-tenant-provisioning-optional).
+
+## Tenancy & Data Isolation
+
+All tenant-scoped tables carry a `tenant_id` column, an EF query filter, and a Postgres RLS policy against `current_setting('app.current_tenant_id')`. Two connection strings ship:
+
+| Connection | Role | Used for |
+|------------|------|----------|
+| `ConnectionStrings:TammaDb` | superuser | migrations, background services, admin flows |
+| `ConnectionStrings:TammaAppDb` | `tamma_app` (non-superuser) | per-request `DbContext`s; RLS policies bite because the role lacks `BYPASSRLS` |
+
+A DbCommand interceptor emits `SET LOCAL app.current_tenant_id = '...'` before each request's first query. Query filters **fail-closed** when no tenant is in scope — a missing tenant returns an empty set instead of the default "show everything" EF behaviour. See [Deployment → Phase-3 RLS runbook](Deployment#phase-3-rls-runbook) for the operator activation steps.
+
+## Agent Dispatch (Epic 19)
+
+`IAgentExecutor` is the abstraction over "actually run the agent" — it hides whether that's a local subprocess, a GitHub Actions workflow, or anything else. `AgentExecutorFactory` picks between:
+
+- `LocalExecutor` — `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/LocalExecutor.cs`. Spawns the CLI agent as a subprocess; wraps `IProcessRunner` so tests can substitute a fake.
+- `GitHubActionsExecutor` — `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/GitHubActionsExecutor.cs`. Dispatches a workflow_dispatch to the tenant's repo, polls via `AgentMonitorService`, and collects artifacts via `AgentResultCollectorService`.
+
+Four Elsa activities compose the lifecycle: `DispatchAgentWorkflowActivity`, `MonitorAgentWorkflowActivity`, `CollectAgentResultsActivity`, and the orchestrator wrapper `ExecuteAgentActivity`. The factory resolves mode from (in order) explicit override → `TAMMA_AGENT_MODE` env → `Agent:ExecutorMode` config → auto-detection (GitHubActions if the GitHub App is wired, else Local). See [Agent Dispatch](Agent-Dispatch) for the full story.
 
 ---
 
