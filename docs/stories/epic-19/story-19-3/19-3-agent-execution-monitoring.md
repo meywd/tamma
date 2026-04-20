@@ -7,8 +7,34 @@ Status: done
 - Shipped as `MonitorAgentWorkflowActivity` + `AgentMonitorService` in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`.
 - Two-phase poll: 5s discovery (up to `DiscoveryTimeoutSeconds`) then 30s monitor (up to `TimeoutMinutes`). 5 consecutive errors bail out as `monitor_failed`. 1 timeout -> `timed_out`.
 - `IDelayProvider` indirection keeps unit tests deterministic.
-- AC coverage: 1-6 and 8 done. AC-7 (webhook mode) is deferred with a clearly marked TODO block pointing at the `workflow_run.completed` bookmark wiring — poll mode is fully functional for v1.
-- Commit: `b63c8f4` `feat(agent-dispatch): MonitorAgentWorkflowActivity + service [story 19-3]`.
+- AC coverage: 1-8 done. AC-7 (webhook mode) landed in commits `90d3ac7` (feat) + `63674df` (tests). Webhook path reuses an in-process `IWebhookSignalRegistry`; Auto mode falls back to poll after `TimeoutMinutes * WebhookSafetyWindowMultiplier` (default 1.5x) if the webhook never fires.
+- Commits:
+  - `b63c8f4` `feat(agent-dispatch): MonitorAgentWorkflowActivity + service [story 19-3]`
+  - `90d3ac7` `feat(agent-dispatch): MonitorAgentWorkflowActivity webhook mode + bookmark [story 19-3 AC-7]`
+  - `63674df` `test(agent-dispatch): webhook mode resume + safety-window fallback`
+
+## AC-7 Implementation (webhook mode)
+
+**Mode resolution** — `MonitorAgentWorkflowActivity.Mode` input accepts `Auto` / `Poll` / `Webhook` (default `Poll` for back-compat). Unknown values fall through to `Poll`.
+- `Poll` — unchanged v1 behaviour.
+- `Webhook` — suspend until a `workflow_run.completed` webhook arrives. No poll fallback; safety-window expiry returns `monitor_failed`.
+- `Auto` — prefer webhook when `IWebhookSignalRegistry` is wired; fall back to poll after the safety window. Registry-missing degrades silently to poll.
+
+**Webhook plumbing** — `InstallationRouterService.HandleWebhookAsync` recognises `workflow_run` events with `action = completed` and publishes an `AgentWebhookSignal` via `IWebhookSignalRegistry.PublishSignal`. Non-Tamma-dispatched runs fall through to `skipped`.
+
+**Bookmark key format** — `AgentWebhookSignalKey` expands into up to three dictionary keys so the webhook side (which knows the run id) and the monitor side (which knows the branch+session) always correlate:
+- `run:{repo}:{runId}` — preferred match.
+- `branch:{repo}:{branch}` — alias for webhook-first races.
+- `branch:{repo}:{branch}:{sessionId}` — disambiguates concurrent dispatches on the same branch by the same installation.
+
+Repos are lower-cased to survive GitHub's mixed-case slugs.
+
+**Safety window** — `WebhookSafetyWindowMultiplier * TimeoutMinutes` (default 1.5x). Clamped to a 1-second floor when the product is non-positive so test mode stays fast without disabling the feature. Webhook strict → `monitor_failed`; Auto → fall through to poll.
+
+**Deployment**
+- Tamma.Api wires `WebhookSignalRegistry` as a singleton and passes it to `InstallationRouterService` + `AgentMonitorService`.
+- Tamma.ElsaServer intentionally does NOT wire the registry — its activities are poll-only because it isn't the webhook receiver.
+- Operators who want webhook monitoring set `Agent:MonitorMode=Auto` (or wire the activity's `Mode` input to `Auto`) and ensure `GitHub:WebhookSecret` is configured.
 
 ## Story
 
@@ -44,7 +70,7 @@ so that the orchestration can wait for the agent to finish and then proceed to r
    - GitHub API errors during polling -- retry with backoff, fail after 5 consecutive errors
 7. The activity supports two monitoring modes:
    - **Poll mode** (default): Periodically query the workflow_run status
-   - **Webhook mode** (future): ELSA bookmark that resumes when a `workflow_run.completed` webhook arrives
+   - **Webhook mode** (shipped in commits `90d3ac7` + `63674df`): resumes when a `workflow_run.completed` webhook arrives; see the AC-7 Implementation section below
 8. Events recorded:
    - `AGENT.MONITOR.STARTED` -- when monitoring begins
    - `AGENT.MONITOR.POLL` -- each poll (at debug level, not every poll recorded at info)
@@ -170,16 +196,20 @@ public record MonitorResult(
 );
 ```
 
-### Webhook Mode (Future Enhancement)
+### Webhook Mode — shipped (AC-7)
 
-Instead of polling, ELSA can create a bookmark and wait for a `workflow_run.completed` webhook:
+Instead of polling, the monitor service registers a wait on the
+`IWebhookSignalRegistry` and the GitHub webhook receiver publishes the
+signal on `workflow_run.completed`:
 
-1. `DispatchAgentWorkflowActivity` records the expected branch + session ID
-2. `MonitorAgentWorkflowActivity` creates an ELSA bookmark with a key like `agent-run:{session_id}`
-3. The GitHub webhook handler (Story 19-2 addition to `github-webhook.ts`) matches incoming `workflow_run.completed` events to bookmarks
-4. ELSA resumes the workflow with the webhook payload
+1. `DispatchAgentWorkflowActivity` records the expected branch + session ID (story 19-2 output).
+2. `MonitorAgentWorkflowActivity` (Mode=Auto or Webhook) creates a wait on `IWebhookSignalRegistry` keyed by `(repo, branch, sessionId)`.
+3. `InstallationRouterService.HandleWebhookAsync` routes `workflow_run.completed` to `HandleWorkflowRunEvent`, which publishes under `run:{repo}:{runId}` + `branch:{repo}:{branch}` keys.
+4. The registry matches whichever alias pair is shared, the waiter wakes with an `AgentWebhookSignal`, and the monitor returns immediately.
 
-This eliminates polling entirely but requires webhook infrastructure. Implement poll mode first, add webhook mode as an optimization.
+Auto mode falls back to poll after `TimeoutMinutes * WebhookSafetyWindowMultiplier` (default 1.5x) in case the webhook never arrives. Webhook (strict) returns `monitor_failed` on safety-window expiry.
+
+**Registry scope** — in-process (`ConcurrentDictionary<string, Waiter>`). Both the webhook receiver and the monitor live in Tamma.Api for SaaS, so this is sufficient for the AC-7 goal. Distributed deployments fall back to poll because Tamma.ElsaServer does not wire the registry (it isn't the webhook endpoint).
 
 ### Event Schema
 
