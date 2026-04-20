@@ -98,7 +98,16 @@ public static class TammaEventEmitter
         });
     }
 
-    private static void Emit(ActivityExecutionContext context, IActivity source, ILogger? logger, TammaEvent evt)
+    /// <summary>
+    /// Emit an arbitrary TammaEvent (e.g. AGENT.RESULTS.PARTIAL — a
+    /// non-standard status the caller has already composed).
+    /// </summary>
+    public static void Emit(ActivityExecutionContext context, IActivity source, ILogger? logger, TammaEvent evt)
+    {
+        EmitInternal(context, source, logger, evt);
+    }
+
+    private static void EmitInternal(ActivityExecutionContext context, IActivity source, ILogger? logger, TammaEvent evt)
     {
         evt.Timestamp = DateTime.UtcNow;
         evt.ActivityId = source.Id;
