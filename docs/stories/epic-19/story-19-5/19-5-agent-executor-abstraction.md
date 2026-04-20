@@ -1,6 +1,16 @@
 # Story 19-5: CLI / SaaS Mode Abstraction (IAgentExecutor)
 
-Status: ready-for-dev
+Status: done (AC-6 workflow integration deferred — see below)
+
+## Implementation Notes
+
+- Shared types (`AgentExecutionRequest` / `AgentExecutionResult` / `ExecutionMode`) and the `IAgentExecutor` interface landed in `67901c3`.
+- `LocalExecutor` shells out to the Tamma CLI (Node) over a JSON request/result-file protocol. The TypeScript `execute-agent` CLI command is a follow-up story — the C# side is complete and the protocol is documented in `LocalExecutor.cs`. `IProcessRunner` + `DefaultProcessRunner` cleanly separate the process-spawning concern.
+- `GitHubActionsExecutor` chose "Option B" (service reuse) over programmatically executing Elsa activities. The three phase services (`IAgentDispatchService`, `IAgentMonitorService`, `IAgentResultCollectorService`) are the shared substrate.
+- `AgentExecutorFactory` precedence: `modeOverride` > `TAMMA_AGENT_MODE` env > `Agent:ExecutorMode` config > auto-detect (GitHub App configured -> github_actions).
+- `ExecuteAgentActivity` is the single-activity Elsa wrapper (AC-5). DI wired in both `Tamma.Api/Program.cs` (Octokit impl when GitHub App configured, Null impl otherwise) and `Tamma.ElsaServer/Program.cs` (Null impl; ElsaServer doesn't reference Tamma.Api).
+- AC coverage: 1, 2, 3, 4, 5, 7, 8 done. **AC-6 (wire `ExecuteAgentActivity` into `SingleIssueCycleWorkflow`) is deferred**: the existing workflow dispatches sub-workflows (TddWithDebugRetry etc.) rather than calling agent activities directly, so the drop-in is not possible without restructuring sub-workflow boundaries. Tracked as a follow-up story — to be scheduled alongside the TS `execute-agent` CLI command.
+- Commit: `a0963d8` `feat(agent-dispatch): Local + GitHubActions executors + ExecuteAgentActivity [story 19-5]`. Tests in `fa314c9`.
 
 ## Story
 

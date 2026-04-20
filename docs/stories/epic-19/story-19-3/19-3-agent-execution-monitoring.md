@@ -1,6 +1,14 @@
 # Story 19-3: Agent Execution Monitoring
 
-Status: ready-for-dev
+Status: done
+
+## Implementation Notes
+
+- Shipped as `MonitorAgentWorkflowActivity` + `AgentMonitorService` in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`.
+- Two-phase poll: 5s discovery (up to `DiscoveryTimeoutSeconds`) then 30s monitor (up to `TimeoutMinutes`). 5 consecutive errors bail out as `monitor_failed`. 1 timeout -> `timed_out`.
+- `IDelayProvider` indirection keeps unit tests deterministic.
+- AC coverage: 1-6 and 8 done. AC-7 (webhook mode) is deferred with a clearly marked TODO block pointing at the `workflow_run.completed` bookmark wiring — poll mode is fully functional for v1.
+- Commit: `b63c8f4` `feat(agent-dispatch): MonitorAgentWorkflowActivity + service [story 19-3]`.
 
 ## Story
 
