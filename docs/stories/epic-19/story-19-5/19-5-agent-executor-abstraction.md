@@ -1,6 +1,6 @@
 # Story 19-5: CLI / SaaS Mode Abstraction (IAgentExecutor)
 
-Status: done (AC-6 workflow integration deferred — see below)
+Status: done (all ACs complete — AC-6 landed as follow-up)
 
 ## Implementation Notes
 
@@ -9,8 +9,13 @@ Status: done (AC-6 workflow integration deferred — see below)
 - `GitHubActionsExecutor` chose "Option B" (service reuse) over programmatically executing Elsa activities. The three phase services (`IAgentDispatchService`, `IAgentMonitorService`, `IAgentResultCollectorService`) are the shared substrate.
 - `AgentExecutorFactory` precedence: `modeOverride` > `TAMMA_AGENT_MODE` env > `Agent:ExecutorMode` config > auto-detect (GitHub App configured -> github_actions).
 - `ExecuteAgentActivity` is the single-activity Elsa wrapper (AC-5). DI wired in both `Tamma.Api/Program.cs` (Octokit impl when GitHub App configured, Null impl otherwise) and `Tamma.ElsaServer/Program.cs` (Null impl; ElsaServer doesn't reference Tamma.Api).
-- AC coverage: 1, 2, 3, 4, 5, 7, 8 done. **AC-6 (wire `ExecuteAgentActivity` into `SingleIssueCycleWorkflow`) is deferred**: the existing workflow dispatches sub-workflows (TddWithDebugRetry etc.) rather than calling agent activities directly, so the drop-in is not possible without restructuring sub-workflow boundaries. Tracked as a follow-up story — to be scheduled alongside the TS `execute-agent` CLI command.
-- Commit: `a0963d8` `feat(agent-dispatch): Local + GitHubActions executors + ExecuteAgentActivity [story 19-5]`. Tests in `fa314c9`.
+- AC coverage: 1, 2, 3, 4, 5, 6, 7, 8 — **all done**.
+- Commits:
+  - `a0963d8` `feat(agent-dispatch): Local + GitHubActions executors + ExecuteAgentActivity [story 19-5]` (AC-1..5, 7, 8)
+  - Tests in `fa314c9`.
+  - `8bdf860` `refactor(workflows): swap direct agent dispatch for ExecuteAgentActivity [story 19-5 AC-6]` — replaces the per-task `TddForTask` `DispatchWorkflow(tdd-cycle)` in `SingleIssueCycleWorkflow` with the mode-aware `ExecuteAgentActivity`. The `tdd-cycle` + `tdd-with-debug-retry` workflows remain registered (still consumed by `MentorshipWorkflow`) so there is no sub-workflow breakage.
+  - `cdfb7c1` `test(workflows): verify ExecuteAgentActivity wiring in SingleIssueCycle [story 19-5 AC-6]` — 8 new structural tests in `SingleIssueCycleRoutingTests` asserting the `TddForTask` activity is an `ExecuteAgentActivity`, that connections into/out of it (including `Completed`/`Failed` outcomes looping back to `IncrementTask`) are correct, and that required inputs (`Task`, `AgentProvider`, `TimeoutMinutes`) are configured. Test count: 1782 → 1790.
+- AC-6 scope cap: only the per-task agent-execution site in `SingleIssueCycleWorkflow` was migrated. `DebuggingWorkflow`, `ReviewFixWorkflow`, `llm-call`-based sub-workflows (`PlanGenerationWorkflow`, `TaskCreationWorkflow`, review panels, etc.), and the inner `TddWorkflow` activities (`WriteTestsActivity`, `WriteImplementationActivity`, refactor activities) are **not** swapped — they perform additional orchestration that `ExecuteAgentActivity` does not model at the same granularity. If a future story needs mode-aware invocation for those sites, each should be assessed individually rather than force-fitted through `ExecuteAgentActivity`.
 
 ## Story
 
