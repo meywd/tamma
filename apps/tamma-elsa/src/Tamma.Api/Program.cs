@@ -307,6 +307,53 @@ else
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
     Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
 
+// ─── Epic 19: Agent dispatch (stories 19-2 / 3 / 4 / 5) ────────────────
+//
+// IGitHubActionsClient — Octokit-backed when the GitHub App is wired,
+// otherwise the Null impl that reports NotConfigured so the activities
+// surface a clean operator error instead of silently succeeding.
+//
+// Services (Dispatch/Monitor/Collect) wrap the client and encapsulate
+// the logic shared by the Elsa activities AND the GitHubActionsExecutor.
+// The AgentExecutorFactory picks between LocalExecutor and
+// GitHubActionsExecutor at runtime (TAMMA_AGENT_MODE env var > config
+// `Agent:ExecutorMode` > auto-detect via GitHub App presence).
+if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long actionsAppId && actionsAppId > 0
+    && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
+{
+    // Scoped because IRepoInstallationResolver depends on a scoped
+    // installation repository. Matches the engine-callback pattern
+    // above.
+    builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
+        Tamma.Api.Services.GitHub.OctokitGitHubActionsClient>();
+}
+else
+{
+    builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
+        Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+}
+
+// Services — scoped to match the client lifetime.
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
+    Tamma.Activities.AgentDispatch.AgentDispatchService>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
+    Tamma.Activities.AgentDispatch.AgentMonitorService>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentResultCollectorService,
+    Tamma.Activities.AgentDispatch.AgentResultCollectorService>();
+
+// Executors — LocalExecutor only needs the process runner (singleton-safe);
+// GitHubActionsExecutor composes the three scoped services so itself must
+// be scoped.
+builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IProcessRunner,
+    Tamma.Activities.AgentDispatch.DefaultProcessRunner>();
+builder.Services.AddSingleton(_ =>
+    Tamma.Activities.AgentDispatch.LocalExecutorOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
+
+// Factory + activity wrapper.
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
+
 // Engine lifecycle SSE bus (audit finding 012). In-process pub/sub that
 // fans workflow / task-queue / engine-registry events to dashboard
 // EventSource clients subscribed on /api/engine/events/state and
