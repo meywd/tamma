@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Configuration;
 using Octokit;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.Engine;
@@ -22,18 +23,41 @@ namespace Tamma.Api.Services.GitHub;
 /// </summary>
 public sealed class OctokitGitHubActionsClient : IGitHubActionsClient
 {
+    // Review-session 2026-04-20 finding 6: 4 MB default cap on the
+    // artifact download path. Agents produce small JSON + log summary
+    // payloads; 4 MB leaves headroom for verbose logs while bounding a
+    // compromised-agent DoS. Configurable via Agent:MaxArtifactBytes
+    // (set to a different value if an operator needs more; setting to 0
+    // or negative reverts to the default — we do not allow unbounded).
+    internal const long DefaultMaxArtifactBytes = 4L * 1024 * 1024;
+    private const string MaxArtifactBytesConfigKey = "Agent:MaxArtifactBytes";
+
     private readonly OctokitGitHubAppClient _appClient;
     private readonly IRepoInstallationResolver _resolver;
     private readonly ILogger<OctokitGitHubActionsClient> _logger;
+    private readonly long _maxArtifactBytes;
 
     public OctokitGitHubActionsClient(
         OctokitGitHubAppClient appClient,
         IRepoInstallationResolver resolver,
-        ILogger<OctokitGitHubActionsClient> logger)
+        ILogger<OctokitGitHubActionsClient> logger,
+        IConfiguration? configuration = null)
     {
         _appClient = appClient;
         _resolver = resolver;
         _logger = logger;
+        _maxArtifactBytes = ResolveMaxArtifactBytes(configuration);
+    }
+
+    private static long ResolveMaxArtifactBytes(IConfiguration? configuration)
+    {
+        if (configuration is null) return DefaultMaxArtifactBytes;
+        var raw = configuration[MaxArtifactBytesConfigKey];
+        if (long.TryParse(raw, out var parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+        return DefaultMaxArtifactBytes;
     }
 
     public async Task<WorkflowFileCheck> CheckWorkflowFileAsync(
@@ -201,10 +225,24 @@ public sealed class OctokitGitHubActionsClient : IGitHubActionsClient
             if (stream is null) return null;
             await using (stream)
             {
+                // Review-session 2026-04-20 finding 6: cap the download so
+                // a compromised agent cannot OOM the API by uploading a
+                // multi-GB artifact. LimitedStream throws
+                // ArtifactTooLargeException on overflow; we catch and
+                // return empty so the caller falls back to the compare-
+                // API path.
+                using var limited = new LimitedStream(stream, _maxArtifactBytes);
                 using var ms = new MemoryStream();
-                await stream.CopyToAsync(ms, ct);
+                await limited.CopyToAsync(ms, ct);
                 return ms.ToArray();
             }
+        }
+        catch (ArtifactTooLargeException ex)
+        {
+            _logger.LogWarning(
+                "DownloadArtifact refused — artifact exceeded cap {Limit} bytes for {Owner}/{Repo} artifact={ArtifactId} (read {BytesRead})",
+                ex.Limit, owner, repo, artifactId, ex.BytesRead);
+            return null;
         }
         catch (NotFoundException)
         {

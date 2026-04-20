@@ -41,6 +41,19 @@ public sealed class AgentResultCollectorService : IAgentResultCollectorService
     private const string ResultArtifactFileName = "result.json";
     private const string DefaultBaseBranch = "main";
 
+    // Review-session 2026-04-20 finding 6: cap the decompressed
+    // result.json entry size so a 4 MB zip that decompresses to hundreds
+    // of MB of attacker-controlled JSON cannot OOM the process. 4 MB is
+    // the same cap used on the artifact download path.
+    internal const long MaxResultJsonBytes = 4L * 1024 * 1024;
+
+    // Review-session 2026-04-20 finding 8 hint: clamp individual string
+    // fields so a malicious agent cannot bloat the workflow_instances
+    // JSONB column. 32 KB for the log summary (verbose tool traces),
+    // 2 KB for the short error / branch / sha fields.
+    internal const int MaxAgentLogSummaryChars = 32 * 1024;
+    internal const int MaxShortStringChars = 2 * 1024;
+
     private readonly IGitHubActionsClient _client;
     private readonly ILogger<AgentResultCollectorService>? _logger;
 
@@ -183,9 +196,33 @@ public sealed class AgentResultCollectorService : IAgentResultCollectorService
             return null;
         }
 
+        // Review-session 2026-04-20 finding 6: cap the decompressed entry
+        // size — a 4 MB zip can decompress to arbitrarily large JSON. We
+        // use the entry's reported Length as a cheap guard AND wrap the
+        // stream so the actual read count is checked regardless.
+        if (entry.Length > MaxResultJsonBytes)
+        {
+            _logger?.LogWarning(
+                "result.json entry for run {RunId} exceeds cap: declared length={Length} cap={Cap}",
+                runId, entry.Length, MaxResultJsonBytes);
+            return null;
+        }
+
         using var entryStream = entry.Open();
-        using var reader = new StreamReader(entryStream);
-        var json = await reader.ReadToEndAsync(ct);
+        using var limited = new LimitedStream(entryStream, MaxResultJsonBytes);
+        using var reader = new StreamReader(limited);
+        string json;
+        try
+        {
+            json = await reader.ReadToEndAsync(ct);
+        }
+        catch (ArtifactTooLargeException ex)
+        {
+            _logger?.LogWarning(
+                "result.json entry for run {RunId} exceeded decompressed cap {Limit}; rejecting",
+                runId, ex.Limit);
+            return null;
+        }
         return ParseResultJson(json);
     }
 
@@ -205,31 +242,45 @@ public sealed class AgentResultCollectorService : IAgentResultCollectorService
                     if (f.ValueKind == JsonValueKind.String)
                     {
                         var s = f.GetString();
-                        if (!string.IsNullOrEmpty(s)) filesChanged.Add(s);
+                        if (!string.IsNullOrEmpty(s))
+                        {
+                            filesChanged.Add(Clamp(s, MaxShortStringChars));
+                        }
                     }
                 }
             }
 
+            // Review-session 2026-04-20 finding 6 (+ finding 8 hint): clamp
+            // every string field so a malicious agent cannot bloat the
+            // workflow_instances.Result JSONB column or other downstream
+            // persistence with multi-MB strings.
             return new AgentResultArtifact(
                 Success: ReadBool(root, "success") ?? false,
-                Task: ReadString(root, "task") ?? string.Empty,
+                Task: Clamp(ReadString(root, "task"), MaxShortStringChars) ?? string.Empty,
                 IssueNumber: ReadInt(root, "issue_number") ?? 0,
-                BranchName: ReadString(root, "branch_name") ?? string.Empty,
-                TammaSessionId: ReadString(root, "tamma_session_id") ?? string.Empty,
+                BranchName: Clamp(ReadString(root, "branch_name"), MaxShortStringChars) ?? string.Empty,
+                TammaSessionId: Clamp(ReadString(root, "tamma_session_id"), MaxShortStringChars) ?? string.Empty,
                 FilesChanged: filesChanged.ToArray(),
                 PrNumber: ReadInt(root, "pr_number"),
-                CommitSha: ReadString(root, "commit_sha") ?? string.Empty,
-                ErrorMessage: ReadString(root, "error_message"),
-                AgentLogSummary: ReadString(root, "agent_log_summary"),
+                CommitSha: Clamp(ReadString(root, "commit_sha"), MaxShortStringChars) ?? string.Empty,
+                ErrorMessage: Clamp(ReadString(root, "error_message"), MaxShortStringChars),
+                AgentLogSummary: Clamp(ReadString(root, "agent_log_summary"), MaxAgentLogSummaryChars),
                 TokensUsed: ReadInt(root, "tokens_used") ?? 0,
                 DurationSeconds: ReadInt(root, "duration_seconds") ?? 0,
-                AgentProvider: ReadString(root, "agent_provider") ?? "claude-code",
-                AgentVersion: ReadString(root, "agent_version"));
+                AgentProvider: Clamp(ReadString(root, "agent_provider"), MaxShortStringChars) ?? "claude-code",
+                AgentVersion: Clamp(ReadString(root, "agent_version"), MaxShortStringChars));
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    private static string? Clamp(string? value, int maxChars)
+    {
+        if (value is null) return null;
+        if (value.Length <= maxChars) return value;
+        return value.Substring(0, maxChars);
     }
 
     private async Task<PullRequestSummary?> TryFindPullRequestAsync(

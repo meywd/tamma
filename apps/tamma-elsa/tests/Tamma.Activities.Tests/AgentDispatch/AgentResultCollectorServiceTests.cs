@@ -241,4 +241,131 @@ public class AgentResultCollectorServiceTests
         result.TokensUsed.Should().Be(0);
         result.AgentProvider.Should().Be("claude-code");
     }
+
+    // ================================================================
+    // Review-session 2026-04-20 finding 6 — bounded artifact download
+    // ================================================================
+
+    [Test]
+    public void ParseResultJson_ClampsAgentLogSummary_To32Kb()
+    {
+        var hugeLog = new string('x', 100_000); // 100 KB — over 32 KB cap
+        var json = $@"{{
+            ""success"": true,
+            ""task"": ""implement"",
+            ""issue_number"": 42,
+            ""branch_name"": ""tamma/issue-42"",
+            ""tamma_session_id"": ""sess_abc"",
+            ""files_changed"": [],
+            ""commit_sha"": ""abc123"",
+            ""agent_log_summary"": ""{hugeLog}"",
+            ""tokens_used"": 0,
+            ""duration_seconds"": 1,
+            ""agent_provider"": ""claude-code""
+        }}";
+
+        var artifact = AgentResultCollectorService.ParseResultJson(json);
+
+        artifact.Should().NotBeNull();
+        artifact!.AgentLogSummary.Should().NotBeNull();
+        artifact.AgentLogSummary!.Length.Should().Be(
+            AgentResultCollectorService.MaxAgentLogSummaryChars,
+            "agent_log_summary is clamped to 32 KB");
+    }
+
+    [Test]
+    public void ParseResultJson_ClampsShortStringFields_To2Kb()
+    {
+        var hugeMessage = new string('y', 10_000); // 10 KB — over 2 KB cap
+        var json = $@"{{
+            ""success"": false,
+            ""task"": ""implement"",
+            ""issue_number"": 42,
+            ""branch_name"": ""tamma/issue-42"",
+            ""tamma_session_id"": ""sess_abc"",
+            ""files_changed"": [],
+            ""commit_sha"": ""abc123"",
+            ""error_message"": ""{hugeMessage}"",
+            ""tokens_used"": 0,
+            ""duration_seconds"": 1,
+            ""agent_provider"": ""claude-code""
+        }}";
+
+        var artifact = AgentResultCollectorService.ParseResultJson(json);
+
+        artifact.Should().NotBeNull();
+        artifact!.ErrorMessage.Should().NotBeNull();
+        artifact.ErrorMessage!.Length.Should().Be(
+            AgentResultCollectorService.MaxShortStringChars,
+            "error_message is clamped to 2 KB");
+    }
+
+    [Test]
+    public async Task CollectAsync_OversizedResultJsonInZip_IsRejected()
+    {
+        // Build a zip whose result.json is ~5 MB — over the 4 MB cap.
+        var hugePayload = new string('z', (int)(AgentResultCollectorService.MaxResultJsonBytes + 1024));
+        var json = $@"{{
+            ""success"": true,
+            ""task"": ""implement"",
+            ""issue_number"": 42,
+            ""branch_name"": ""tamma/issue-42"",
+            ""tamma_session_id"": ""sess_abc"",
+            ""files_changed"": [],
+            ""commit_sha"": ""abc123"",
+            ""agent_log_summary"": ""{hugePayload}""
+        }}";
+
+        var fake = new FakeGitHubActionsClient();
+        fake.ArtifactsByRunId[99] = new[]
+        {
+            new WorkflowRunArtifact(500, "tamma-result", 100, Expired: false)
+        };
+        fake.ArtifactBytes[500] = BuildArtifactZip(json);
+
+        var svc = new AgentResultCollectorService(fake);
+
+        // Oversized result.json is rejected — the service falls back to
+        // other data sources (PR lookup, compare API). No artifact data
+        // propagates.
+        var result = await svc.CollectAsync(MakeRequest(), MonitorOk("success"));
+
+        result.Success.Should().BeTrue("monitor said success; artifact was rejected but that doesn't flip it");
+        result.TokensUsed.Should().Be(0, "artifact was rejected so no tokens carried over");
+        result.AgentLogSummary.Should().BeNull("no artifact means no log summary");
+    }
+
+    [Test]
+    public void LimitedStream_ThrowsOnOverflow()
+    {
+        var data = new byte[8 * 1024]; // 8 KB
+        using var src = new MemoryStream(data);
+        using var limited = new LimitedStream(src, byteLimit: 4 * 1024); // 4 KB cap
+
+        var buf = new byte[8 * 1024];
+        Action act = () =>
+        {
+            var total = 0;
+            int n;
+            while ((n = limited.Read(buf, total, buf.Length - total)) > 0)
+            {
+                total += n;
+            }
+        };
+
+        act.Should().Throw<ArtifactTooLargeException>();
+    }
+
+    [Test]
+    public void LimitedStream_ReadsWithinLimit_Succeeds()
+    {
+        var data = new byte[2 * 1024]; // 2 KB
+        using var src = new MemoryStream(data);
+        using var limited = new LimitedStream(src, byteLimit: 4 * 1024); // 4 KB cap
+
+        using var dest = new MemoryStream();
+        limited.CopyTo(dest);
+
+        dest.Length.Should().Be(2 * 1024);
+    }
 }
