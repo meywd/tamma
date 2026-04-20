@@ -243,7 +243,7 @@ public sealed class LocalExecutorOptions
     /// Path to the Tamma CLI entry point. Overridden in
     /// <c>appsettings</c> when Tamma is packaged with a bundled CLI.
     /// </summary>
-    public string CliEntryPoint { get; set; } = "packages/cli/bin/tamma.js";
+    public string CliEntryPoint { get; set; } = "packages/cli/dist/index.js";
 
     /// <summary>
     /// Working directory for the child process. If empty, a per-session

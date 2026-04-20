@@ -58,27 +58,24 @@ public interface IWebhookSignalRegistry
 
 /// <summary>
 /// Stable identifier for matching a <c>workflow_run.completed</c> webhook
-/// to a suspended monitor. The service pre-computes two keys on the wait
-/// side and the webhook receiver picks whichever one it has:
+/// to a suspended monitor. A single <see cref="AgentWebhookSignalKey"/>
+/// expands to up to three dictionary keys so the webhook side (which has
+/// the run id but not the session id) and the monitor side (which has the
+/// session id but may not yet have the run id) can always find each other:
 /// <list type="bullet">
-///   <item>
-///     <c>repo + runId</c> — the preferred path. The monitor registers
-///     this key only after the discovery phase has resolved the run id.
-///   </item>
-///   <item>
-///     <c>repo + branch + sessionId</c> — used before discovery completes
-///     (or when the webhook lands first) so we can correlate by the
-///     pre-dispatch fields. The receiver matches on this when the payload
-///     carries a matching <c>head_branch</c>.
-///   </item>
+///   <item><c>run:{repo}:{runId}</c> — preferred match; written by the
+///   webhook and read by the monitor once it knows the run id.</item>
+///   <item><c>branch:{repo}:{branch}</c> — branch-only alias; lets the
+///   webhook match a pre-discovery waiter without knowing the session id.</item>
+///   <item><c>branch:{repo}:{branch}:{sessionId}</c> — session-scoped alias;
+///   disambiguates multiple concurrent dispatches on the same branch by
+///   the same installation.</item>
 /// </list>
 /// </summary>
 public sealed record AgentWebhookSignalKey(string Repository, string? HeadBranch, string? SessionId, long? WorkflowRunId)
 {
     /// <summary>
-    /// Canonical string form for use as a dictionary key. Casing is
-    /// normalised so webhook-side lookups survive GitHub's mixed-case repo
-    /// slugs.
+    /// Canonical string form for the run-id path.
     /// </summary>
     public string ToKey()
     {
@@ -91,6 +88,29 @@ public sealed record AgentWebhookSignalKey(string Repository, string? HeadBranch
         var branch = (HeadBranch ?? string.Empty).ToLowerInvariant();
         var session = SessionId ?? string.Empty;
         return $"branch:{repo}:{branch}:{session}";
+    }
+
+    /// <summary>
+    /// All dictionary keys this logical identifier should publish to. The
+    /// monitor registers waiters on every form it knows; the webhook
+    /// receiver tries each form until one matches.
+    /// </summary>
+    internal IEnumerable<string> ExpandKeys()
+    {
+        var repo = (Repository ?? string.Empty).ToLowerInvariant();
+        if (WorkflowRunId is not null)
+        {
+            yield return $"run:{repo}:{WorkflowRunId.Value}";
+        }
+        if (!string.IsNullOrEmpty(HeadBranch))
+        {
+            var branch = HeadBranch!.ToLowerInvariant();
+            yield return $"branch:{repo}:{branch}";
+            if (!string.IsNullOrEmpty(SessionId))
+            {
+                yield return $"branch:{repo}:{branch}:{SessionId}";
+            }
+        }
     }
 }
 
@@ -128,25 +148,39 @@ public sealed class WebhookSignalRegistry : IWebhookSignalRegistry
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
-        var primary = key.ToKey();
-        // Always also register the branch+session fallback key so a
-        // webhook that arrives before discovery completes can still match.
-        var fallback = new AgentWebhookSignalKey(
-            key.Repository, key.HeadBranch, key.SessionId, WorkflowRunId: null).ToKey();
-
-        var waiter = new Waiter();
-
-        // De-dupe: multiple waiters on the same key would split the signal
-        // unpredictably. In practice the monitor only registers one bookmark
-        // per request so this is a defensive guard.
-        if (!_waiters.TryAdd(primary, waiter))
+        var aliases = key.ExpandKeys().Distinct().ToArray();
+        if (aliases.Length == 0)
         {
-            _logger?.LogWarning(
-                "Webhook-signal duplicate waiter on key {Key} — rejecting", primary);
+            _logger?.LogWarning("Webhook-signal wait requested with an empty key — rejecting");
             return null;
         }
 
-        var hasFallback = primary != fallback && _waiters.TryAdd(fallback, waiter);
+        var waiter = new Waiter();
+        var registered = new List<string>(aliases.Length);
+
+        foreach (var alias in aliases)
+        {
+            if (_waiters.TryAdd(alias, waiter))
+            {
+                registered.Add(alias);
+            }
+            else
+            {
+                // Defensive guard: another in-flight monitor already owns
+                // this alias. Skip it but keep any aliases we did register
+                // — the webhook has more than one way to match.
+                _logger?.LogDebug(
+                    "Webhook-signal alias {Alias} already taken — skipping", alias);
+            }
+        }
+
+        if (registered.Count == 0)
+        {
+            _logger?.LogWarning(
+                "Webhook-signal wait could not register any of {Count} aliases (duplicate keys)",
+                aliases.Length);
+            return null;
+        }
 
         try
         {
@@ -164,23 +198,18 @@ public sealed class WebhookSignalRegistry : IWebhookSignalRegistry
         }
         finally
         {
-            _waiters.TryRemove(primary, out _);
-            if (hasFallback)
+            foreach (var alias in registered)
             {
-                _waiters.TryRemove(fallback, out _);
+                _waiters.TryRemove(alias, out _);
             }
         }
     }
 
     public bool PublishSignal(AgentWebhookSignalKey key, AgentWebhookSignal signal)
     {
-        // Try run-id path first, then the branch+session fallback.
-        var tried = new List<string> { key.ToKey() };
-        if (key.WorkflowRunId is not null && key.HeadBranch is not null)
-        {
-            tried.Add(new AgentWebhookSignalKey(
-                key.Repository, key.HeadBranch, key.SessionId, WorkflowRunId: null).ToKey());
-        }
+        // Try every expansion of the publish key (run-id, branch, branch+session).
+        // Order matters: run-id first to prefer the exact-match path.
+        var tried = key.ExpandKeys().Distinct().ToList();
 
         foreach (var candidate in tried)
         {

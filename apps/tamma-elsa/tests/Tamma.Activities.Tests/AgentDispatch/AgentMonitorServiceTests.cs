@@ -151,4 +151,149 @@ public class AgentMonitorServiceTests
 
         result.Conclusion.Should().Be("not_found");
     }
+
+    // ================================================================
+    // Story 19-3 AC-7 — webhook mode
+    // ================================================================
+
+    [Test]
+    public async Task MonitorAsync_WebhookMode_ResumesOnSignal()
+    {
+        var registry = new WebhookSignalRegistry();
+        var fake = new FakeGitHubActionsClient();
+        var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), registry);
+
+        var options = new AgentMonitorOptions(
+            PollIntervalSeconds: 30,
+            TimeoutMinutes: 5,
+            Mode: AgentMonitorMode.Webhook);
+
+        var monitorTask = svc.MonitorAsync(MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
+
+        // Wait for the monitor to park on the signal before we publish.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (registry.PendingWaiterCount == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+        registry.PendingWaiterCount.Should().BeGreaterThan(0,
+            "the monitor must register its wait before we publish");
+
+        var now = DateTime.UtcNow;
+        var signal = new AgentWebhookSignal(
+            WorkflowRunId: 99_999,
+            Status: "completed",
+            Conclusion: "success",
+            WorkflowRunUrl: "https://github.com/acme/widgets/actions/runs/99999",
+            CreatedAt: now.AddMinutes(-3),
+            UpdatedAt: now,
+            ArtifactsUrl: "https://api.github.com/repos/acme/widgets/actions/runs/99999/artifacts");
+        var key = new AgentWebhookSignalKey(
+            Repository: "acme/widgets",
+            HeadBranch: "tamma/issue-42",
+            SessionId: null,
+            WorkflowRunId: 99_999);
+        registry.PublishSignal(key, signal);
+
+        var result = await monitorTask;
+
+        result.WorkflowRunId.Should().Be(99_999);
+        result.Conclusion.Should().Be("success");
+        result.Status.Should().Be("completed");
+        result.DurationSeconds.Should().BeGreaterThan(0);
+        fake.ListRunsCalls.Should().Be(0, "webhook mode must never poll GitHub");
+        fake.GetRunCalls.Should().Be(0);
+    }
+
+    [Test]
+    public async Task MonitorAsync_WebhookMode_ReturnsMonitorFailed_OnSafetyWindowExpiry()
+    {
+        var registry = new WebhookSignalRegistry();
+        var fake = new FakeGitHubActionsClient();
+        var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), registry);
+
+        // 1-minute timeout * 0.01 multiplier = sub-second safety window
+        // so the test doesn't have to wait for the real 1.5x default.
+        var options = new AgentMonitorOptions(
+            PollIntervalSeconds: 30,
+            TimeoutMinutes: 1,
+            Mode: AgentMonitorMode.Webhook,
+            WebhookSafetyWindowMultiplier: 0.01);
+
+        var result = await svc.MonitorAsync(
+            MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
+
+        result.Conclusion.Should().Be("monitor_failed",
+            "explicit Webhook mode has no poll fallback");
+        fake.ListRunsCalls.Should().Be(0,
+            "Webhook mode must not fall back to polling");
+    }
+
+    [Test]
+    public async Task MonitorAsync_AutoMode_FallsBackToPoll_WhenSafetyWindowExpires()
+    {
+        var registry = new WebhookSignalRegistry();
+        var fake = new FakeGitHubActionsClient
+        {
+            DefaultListRuns = new[] { Run(424242, "completed", "success") }
+        };
+        var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), registry);
+
+        var options = new AgentMonitorOptions(
+            PollIntervalSeconds: 30,
+            TimeoutMinutes: 1,
+            Mode: AgentMonitorMode.Auto,
+            WebhookSafetyWindowMultiplier: 0.01);
+
+        var result = await svc.MonitorAsync(
+            MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
+
+        result.Conclusion.Should().Be("success",
+            "Auto mode should fall back to polling when the webhook never arrives");
+        result.WorkflowRunId.Should().Be(424242);
+        fake.ListRunsCalls.Should().BeGreaterThan(0,
+            "fallback path runs the discovery+poll cycle");
+    }
+
+    [Test]
+    public async Task MonitorAsync_AutoMode_FallsBackToPoll_WhenRegistryNotWired()
+    {
+        var fake = new FakeGitHubActionsClient
+        {
+            DefaultListRuns = new[] { Run(10_001, "completed", "success") }
+        };
+        // No registry passed in — mirrors ElsaServer composition root.
+        var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), signals: null);
+
+        var options = new AgentMonitorOptions(
+            PollIntervalSeconds: 30,
+            TimeoutMinutes: 5,
+            Mode: AgentMonitorMode.Auto);
+
+        var result = await svc.MonitorAsync(
+            MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
+
+        result.Conclusion.Should().Be("success");
+        result.WorkflowRunId.Should().Be(10_001);
+        fake.ListRunsCalls.Should().BeGreaterThan(0);
+    }
+
+    [Test]
+    public async Task MonitorAsync_WebhookMode_ReturnsMonitorFailed_WhenRegistryNotWired()
+    {
+        var fake = new FakeGitHubActionsClient();
+        var svc = new AgentMonitorService(fake, logger: null, new ImmediateDelayProvider(), signals: null);
+
+        var options = new AgentMonitorOptions(
+            PollIntervalSeconds: 30,
+            TimeoutMinutes: 5,
+            Mode: AgentMonitorMode.Webhook);
+
+        var result = await svc.MonitorAsync(
+            MakeRequest(), DateTime.UtcNow.AddMinutes(-1), options);
+
+        result.Conclusion.Should().Be("monitor_failed",
+            "explicit Webhook without registry is a misconfiguration");
+        fake.ListRunsCalls.Should().Be(0);
+    }
 }
