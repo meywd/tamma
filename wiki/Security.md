@@ -93,6 +93,20 @@ When Tamma writes secrets into a tenant's GitHub repo (for the `GitHubActionsExe
 
 Depends on `Sodium.Core` (native libsodium bindings). Null seam when sodium isn't wired — reports a clean `secrets_provisioner_not_configured` error instead of writing plaintext.
 
+**libsodium is GitHub-only.** Research (`docs/stories/research/multi-git-platform-2026.md §2`) confirms every other platform (Gitea / Forgejo / GitLab / Bitbucket / Azure DevOps) accepts plaintext secrets over TLS and encrypts at rest server-side. Epic 31 Story 31-8 moves libsodium to a GitHub-driver private detail; the `ICiSecretsProvisioner` abstraction is plaintext-in.
+
+## Webhook signal tenant-scoping
+
+`WebhookSignalRegistry` maps GitHub `workflow_run` webhook events to suspended `MonitorAgentWorkflowActivity` bookmarks. Three alias forms, all prefixed with `install:{installId}:` as of commit `9160db1` (code-review finding 5):
+
+| Form | Shape |
+|------|-------|
+| `run` | `install:{installId}:run:{repo}:{runId}` |
+| `branch` | `install:{installId}:branch:{repo}:{branch}` |
+| `branch-session` | `install:{installId}:branch:{repo}:{branch}:{sessionId}` |
+
+Before the fix, two tenants with Tamma installed on the same `owner/repo` could cross-wake each other's `AgentMonitorService` via the branch alias and the collector would attempt to download the sibling tenant's artifacts with the wrong installation token. `InstallationRouterService.PublishWebhookSignalAsync` propagates the installation id on every publish.
+
 ## Fail-closed defaults
 
 Several controls default to the safe option when unconfigured:
@@ -104,6 +118,29 @@ Several controls default to the safe option when unconfigured:
 - Tenant provisioner: `Cranl:ApiKey` unset → `NullTenantProvisioner` returns 501.
 - LLM circuit breaker + budget guards: `LlmCallWorkflow` refuses to dispatch if either check returns unknown.
 
+## Artifact download size cap
+
+`AgentResultCollectorService.DownloadResultArtifactAsync` and `OctokitGitHubActionsClient.DownloadArtifactZipAsync` enforce a **4 MB cap** on the downloaded ZIP stream (commit `ced59bc`, review finding 6). GitHub Actions artifacts can be up to 10 GB; a compromised agent that uploads a giant `tamma-result` artifact would OOM the API process and drop every other tenant's request without the cap.
+
+Implementation: a `LimitedStream` wrapper in `DownloadArtifactZipAsync` throws when the cap is exceeded; `AgentResultCollectorService` catches and returns `null` so the compare-API fallback kicks in. `ParseResultJson` additionally clamps each string field to its practical ceiling (2 KB for `error_message` / `branch_name` / `commit_sha`, 32 KB for `agent_log_summary`).
+
+## Dependency hardening (2026-04-20)
+
+Dependabot bumps merged during the sprint:
+
+| Package | From | To | Rationale |
+|---------|------|----|-----------|
+| `System.Text.Json` | 8.0.0 | 8.0.6 | Closes NuGet advisory (JSON deserialization DoS) |
+| `MailKit` | 4.15.1 | 4.16.0 | Closes NuGet advisory (IMAP buffer handling) |
+
+Both advisories are now closed. CI green; no behaviour change.
+
+## Connection-string resolver fix
+
+`ConnectionStringResolver` in `apps/tamma-elsa/src/Tamma.Api/Infrastructure/` now treats `IsNullOrWhiteSpace` values as absent when resolving `ConnectionStrings:TammaDb` / `TammaAppDb`. The `appsettings.json` default for `TammaDb` was cleared to an empty string so the resolver falls back to the env-provided value rather than the (empty-but-non-null) baseline.
+
+Before the fix, deploy-to-VPS was regressing because the empty-string default was being preferred over the production `TAMMA_*__CONNECTIONSTRINGS__TAMMADB` env var.
+
 ## Audit findings tracked
 
 The TS → C# port audit tracks security regressions and fixes per-scope in `docs/audit/port-gaps/`. The auth-foundation sprint landed:
@@ -112,4 +149,4 @@ The TS → C# port audit tracks security regressions and fixes per-scope in `doc
 - All findings under `github/` (webhook fail-closed, idempotency, rate limiting, install/rotation provisioner seam).
 - All findings under `engine/` (cross-tenant guards, SaaS shape parity, idempotent upsert, context store, DTO realignment).
 
-See [Port Audit](Port-Audit) for the full rollup.
+The **2026-04-20 code review** added 18 findings on top; 4 merge-blockers closed in this sprint (findings 1, 2, 5, 6) and 14 scheduled follow-ups mapped into Epics 29 / 30 / future. See [Port Audit](Port-Audit) for the full rollup.
