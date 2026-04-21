@@ -218,3 +218,14 @@ Cross-reference of 2026-04-20 review findings to closing stories:
 - Research notes: 1 doc (`research/secret-management-and-multi-backend-provisioning-2026.md`)
 - Next step: when a team is ready, convert each brief into a full
   implementation plan (same shape as `docs/stories/epic-19/19-1-phase-1-impl-plan.md`).
+
+## See also
+
+- [`epic-31-33-placement.md`](./epic-31-33-placement.md) — layer
+  placement + dependency graph for Epic 31 (Multi Git Platform
+  Support), Epic 33 (Per-Tenant IdP — deferred), and the tenant
+  user-management add-ons (Stories 18-7 + 18-8). Cross-reference
+  table there extends the one above with multi-platform review
+  findings.
+- [`tenant-user-mgmt-audit.md`](./tenant-user-mgmt-audit.md) — gap
+  audit behind Stories 18-7 + 18-8.
