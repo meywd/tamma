@@ -72,8 +72,8 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `block px-3 py-1.5 rounded-md text-[13px] leading-snug transition-colors ${
       isActive
-        ? 'bg-white/10 text-white font-medium'
-        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+        ? 'bg-sky-400/10 text-sky-300 font-medium'
+        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
     }`;
 
   const sectionHeader = (label: string, key: string, count?: number) => (
@@ -111,7 +111,7 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
       aria-hidden={!mobileOpen ? undefined : false}
       className={[
         // Mobile: fixed drawer sliding in from the left
-        'fixed inset-y-0 left-0 z-40 w-[82vw] max-w-[300px] h-screen overflow-y-auto bg-[#111113] border-r border-zinc-800/60 flex flex-col',
+        'fixed inset-y-0 left-0 z-40 w-[82vw] max-w-[300px] h-screen overflow-y-auto bg-[#0b1324] border-r border-sky-400/10 flex flex-col',
         'transition-transform duration-200 ease-out will-change-transform',
         mobileOpen ? 'translate-x-0' : '-translate-x-full',
         // Desktop (md+): pinned inline, always visible, no translation
@@ -144,7 +144,7 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
           placeholder="Search..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-3 py-1.5 bg-white/5 border border-zinc-700/50 rounded-md text-[13px] text-zinc-300 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-colors"
+          className="w-full px-3 py-1.5 bg-white/5 border border-sky-400/15 rounded-md text-[13px] text-zinc-300 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-colors"
         />
       </div>
 
@@ -161,6 +161,10 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
           <NavLink to="/github-integration" className={navClass}>GitHub Integration</NavLink>
           <NavLink to="/testing" className={navClass}>Testing</NavLink>
           <NavLink to="/port-audit" className={navClass}>Port Audit</NavLink>
+          <NavLink to="/secret-management" className={navClass}>Secret Management</NavLink>
+          <NavLink to="/multi-tenant-provisioning" className={navClass}>Multi-Tenant Provisioning</NavLink>
+          <NavLink to="/multi-git-platform" className={navClass}>Multi Git Platform</NavLink>
+          <NavLink to="/identity-providers" className={navClass}>Identity Providers</NavLink>
         </div>
 
         <div className="h-px bg-zinc-800/60 mx-2 my-1" />
@@ -223,7 +227,7 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-zinc-800/60 text-[11px] text-zinc-600">
+      <div className="px-4 py-3 border-t border-sky-400/10 text-[11px] text-zinc-600">
         <a href="https://github.com/meywd/tamma" target="_blank" rel="noopener" className="hover:text-zinc-400 transition-colors">
           GitHub
         </a>
