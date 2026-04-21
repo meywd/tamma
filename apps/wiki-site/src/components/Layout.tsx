@@ -33,7 +33,7 @@ export default function Layout() {
   }, [mobileNavOpen]);
 
   return (
-    <div className="flex h-screen bg-[#0e0e10] text-zinc-300">
+    <div className="flex h-screen bg-[#0f1729] text-slate-300">
       {/* Sidebar: desktop is inline at md+; on mobile it becomes a fixed slide-in drawer */}
       <Sidebar mobileOpen={mobileNavOpen} onCloseMobile={closeNav} />
 
@@ -49,7 +49,7 @@ export default function Layout() {
 
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile top bar with hamburger */}
-        <header className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-3 px-4 h-12 bg-[#111113]/95 backdrop-blur border-b border-zinc-800/60">
+        <header className="md:hidden sticky top-0 z-20 flex items-center justify-between gap-3 px-4 h-12 bg-[#0f1729]/85 backdrop-blur-xl border-b border-sky-400/10">
           <button
             type="button"
             aria-label="Open navigation menu"
