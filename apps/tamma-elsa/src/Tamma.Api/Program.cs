@@ -896,6 +896,19 @@ admin.MapPost("/secrets", SecretEndpoints.CreatePlatformSecret)
 admin.MapPost("/secrets/{id:guid}/rotate", SecretEndpoints.RotateSecret)
     .RequireAuthorization("OwnerAccess");
 
+// Story 29-4 — platform-admin query + lifecycle surface consumed by
+// the /admin/secrets UI. Metadata-only; no plaintext ever leaves
+// these endpoints (reveal-once is the /reveal/{token} path).
+admin.MapGet("/secrets", SecretEndpoints.ListPlatformSecrets)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/secrets/{id:guid}", SecretEndpoints.GetPlatformSecret)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/secrets/{id:guid}/versions", SecretEndpoints.ListPlatformVersions)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/secrets/{id:guid}/retire-version/{versionNumber:int}",
+        SecretEndpoints.RetirePlatformVersion)
+    .RequireAuthorization("OwnerAccess");
+
 // ── Orgs / Tenants ──
 // Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the
 // RequireTenantMembershipFilter so the handler body can trust the route

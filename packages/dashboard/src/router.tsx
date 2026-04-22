@@ -13,6 +13,8 @@ import { PromptsAdminPage } from './pages/admin/prompts/PromptsAdminPage.js';
 // Story 28-11 — platform-admin tenant-status UX.
 import { TenantsListPage } from './pages/admin/tenants/TenantsListPage.js';
 import { TenantDetailPage } from './pages/admin/tenants/TenantDetailPage.js';
+// Story 29-4 — platform-admin secrets management.
+import { SecretsAdminPage } from './pages/admin/secrets/SecretsAdminPage.js';
 import { AdminGuard } from './guards/AdminGuard.js';
 import { AuthGuard } from './guards/AuthGuard.js';
 import { AdminErrorBoundary } from './pages/admin/AdminErrorBoundary.js';
@@ -188,6 +190,17 @@ export const router = createBrowserRouter([
         element: (
           <AdminGuard>
             <TenantDetailPage />
+          </AdminGuard>
+        ),
+      },
+      // Story 29-4: platform-admin secret-management UI. Lists every
+      // platform-scoped secret, lets owners create / rotate / retire
+      // with reveal-once-on-create UX.
+      {
+        path: '/admin/secrets',
+        element: (
+          <AdminGuard>
+            <SecretsAdminPage />
           </AdminGuard>
         ),
       },
