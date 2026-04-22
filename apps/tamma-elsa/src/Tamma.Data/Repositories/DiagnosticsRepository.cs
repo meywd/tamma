@@ -5,25 +5,33 @@ namespace Tamma.Data.Repositories;
 
 /// <summary>
 /// EF Core / Npgsql backed implementation of <see cref="IDiagnosticsRepository"/>.
+///
+/// <para>Writes (Insert) route through <see cref="ITenantDbContextFactory"/>
+/// when a tenant id is carried on the diagnostic row; rows with no tenant id
+/// (platform-scope telemetry) land in <see cref="ControlPlaneDbContext"/>.
+/// Reads use CP because aggregation and dimension-report queries are
+/// cross-tenant by design (billing reports, ops dashboards).</para>
 /// </summary>
-/// <remarks>
-/// Read operations defer to EF's global query filter for tenant isolation
-/// whenever the explicit <c>tenantId</c> parameter is <c>null</c>. The
-/// aggregation query uses <c>date_trunc</c>/<c>to_timestamp</c> via raw SQL
-/// for efficient server-side time bucketing, which requires a PostgreSQL
-/// backend (the rest of the codebase already assumes this).
-/// </remarks>
-public class DiagnosticsRepository(TammaDbContext db) : IDiagnosticsRepository
+public class DiagnosticsRepository(
+    ITenantDbContextFactory tenantDbFactory,
+    ControlPlaneDbContext cp) : IDiagnosticsRepository
 {
     /// <inheritdoc />
     public async Task<Guid> InsertAsync(ProviderDiagnostic diagnostic)
     {
-        // Preserve any caller-provided CreatedAt (tests need stable timestamps).
         if (diagnostic.CreatedAt == default)
             diagnostic.CreatedAt = DateTime.UtcNow;
 
-        db.ProviderDiagnostics.Add(diagnostic);
-        await db.SaveChangesAsync();
+        if (diagnostic.TenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            db.ProviderDiagnostics.Add(diagnostic);
+            await db.SaveChangesAsync();
+            return diagnostic.Id;
+        }
+
+        cp.ProviderDiagnostics.Add(diagnostic);
+        await cp.SaveChangesAsync();
         return diagnostic.Id;
     }
 
@@ -44,7 +52,9 @@ public class DiagnosticsRepository(TammaDbContext db) : IDiagnosticsRepository
         bool? success,
         string? model)
     {
-        var query = db.ProviderDiagnostics.AsQueryable();
+        // CP carries every row during the transition (shared physical DB);
+        // reads run cross-tenant and filter explicitly.
+        var query = cp.ProviderDiagnostics.IgnoreQueryFilters().AsQueryable();
 
         if (!string.IsNullOrEmpty(providerKey))
             query = query.Where(d => d.ProviderKey == providerKey);
@@ -80,13 +90,12 @@ public class DiagnosticsRepository(TammaDbContext db) : IDiagnosticsRepository
         var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
         var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
 
-        var query = db.ProviderDiagnostics
+        var query = cp.ProviderDiagnostics.IgnoreQueryFilters()
             .Where(d => d.CreatedAt >= fromUtc && d.CreatedAt < toUtc);
 
         if (tenantId.HasValue)
             query = query.Where(d => d.TenantId == tenantId.Value);
 
-        // EF translates Sum over empty to null → coalesce to 0m.
         var sum = await query
             .Select(d => (decimal?)d.Cost)
             .SumAsync();
@@ -107,11 +116,6 @@ public class DiagnosticsRepository(TammaDbContext db) : IDiagnosticsRepository
         var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
         var bucketSeconds = (long)bucket.TotalSeconds;
 
-        // Server-side bucketing via Postgres epoch arithmetic. The bucket
-        // index is floor((epoch(created_at) - epoch(from)) / bucket_seconds);
-        // multiplying back and adding to @from yields the bucket-start
-        // timestamp. We return via ADO.NET so global query filters don't
-        // matter — tenant isolation is handled by the @tenantId parameter.
         var sql = @"
             SELECT
               to_timestamp(
@@ -130,7 +134,7 @@ public class DiagnosticsRepository(TammaDbContext db) : IDiagnosticsRepository
             ORDER BY bucket_start;
         ";
 
-        var conn = db.Database.GetDbConnection();
+        var conn = cp.Database.GetDbConnection();
         if (conn.State != System.Data.ConnectionState.Open)
             await conn.OpenAsync();
 

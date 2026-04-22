@@ -17,27 +17,24 @@ namespace Tamma.Api.Tests.PromptStore;
 [TestFixture]
 public class PromptStoreServiceTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private PromptRepository _repo = null!;
     private PromptStoreService _service = null!;
 
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
-        _db = new TestDbContext(options);
-        _repo = new PromptRepository(_db);
+        _fx = new InMemoryDbFixture();
+        _db = _fx.Cp;
+        _repo = new PromptRepository(_fx.Factory, new TenantContext(), _db);
         _service = new PromptStoreService(_repo);
     }
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
-        _db.Dispose();
+        await _fx.DisposeAsync();
     }
 
     // ------------------------------------------------------------------

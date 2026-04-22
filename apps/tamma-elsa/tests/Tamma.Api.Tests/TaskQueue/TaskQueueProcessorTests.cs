@@ -23,7 +23,8 @@ namespace Tamma.Api.Tests.TaskQueue;
 public class TaskQueueProcessorTests
 {
     private ServiceProvider _services = null!;
-    private DbContextOptions<TammaDbContext> _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private Mock<ITaskHandler> _handler = null!;
     private TaskQueueProcessor _processor = null!;
 
@@ -32,17 +33,22 @@ public class TaskQueueProcessorTests
     {
         var dbName = Guid.NewGuid().ToString();
 
-        _options = new DbContextOptionsBuilder<TammaDbContext>()
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        var capturedOptions = _options;
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         var services = new ServiceCollection();
-        // TestDbContext has two constructors; DI can't pick between them, so
-        // register a factory that binds to the single-arg constructor explicitly.
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(capturedOptions));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
         services.AddScoped<IQueuedTaskRepository, QueuedTaskRepository>();
 
         _handler = new Mock<ITaskHandler>();
@@ -78,7 +84,9 @@ public class TaskQueueProcessorTests
     /// the processor uses, and stops EF Core change-tracking from returning
     /// stale copies of rows that another scope already updated.</summary>
     private QueuedTaskRepository FreshRepo()
-        => new QueuedTaskRepository(new TestDbContext(_options));
+        => new QueuedTaskRepository(
+            new TestTenantDbContextFactory(_tenantOptions),
+            new TestControlPlaneDbContext(_cpOptions));
 
     // ─── Happy path ───────────────────────────────────────────────────────────
 

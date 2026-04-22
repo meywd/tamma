@@ -4,17 +4,20 @@ using Tamma.Data.Entities;
 namespace Tamma.Data.Repositories;
 
 /// <summary>
-/// EF-backed <see cref="IEmailOutboxRepository"/>. Two different claim paths:
-/// <list type="bullet">
-///   <item><description>Postgres (production): <c>UPDATE ... RETURNING</c>
-///     with <c>FOR UPDATE SKIP LOCKED</c> in a subquery so concurrent senders
-///     on a cluster never pick the same row twice. Single-statement, no race.</description></item>
-///   <item><description>Other providers (EF InMemory, SQLite-in-test): naive
-///     find-order-first + update semantics. Safe for a single writer; used by
-///     unit tests only.</description></item>
-/// </list>
+/// EF-backed <see cref="IEmailOutboxRepository"/>.
+///
+/// <para>In the Epic 28 target architecture each tenant has its own outbox
+/// table in its own DB; the sender polls every tenant's outbox in round-robin
+/// fashion. During the transition the physical table is shared. Enqueue
+/// operations that know their tenant go through
+/// <see cref="ITenantDbContextFactory"/>; sender-facing cross-tenant
+/// operations (claim-next, mark-sent, mark-failed, by-id lookups) use
+/// <see cref="ControlPlaneDbContext"/> because they traverse the shared
+/// outbox as platform-infrastructure.</para>
 /// </summary>
-public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
+public class EmailOutboxRepository(
+    ITenantDbContextFactory tenantDbFactory,
+    ControlPlaneDbContext cp) : IEmailOutboxRepository
 {
     private const string NpgsqlProviderName = "Npgsql.EntityFrameworkCore.PostgreSQL";
 
@@ -31,32 +34,34 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
         msg.UpdatedAt = now;
         if (msg.MaxAttempts <= 0) msg.MaxAttempts = 5;
 
-        db.EmailOutbox.Add(msg);
-        await db.SaveChangesAsync(ct);
+        if (msg.TenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            db.EmailOutbox.Add(msg);
+            await db.SaveChangesAsync(ct);
+            return msg;
+        }
+
+        // Platform-scope enqueue (system-generated emails with no tenant).
+        cp.EmailOutbox.Add(msg);
+        await cp.SaveChangesAsync(ct);
         return msg;
     }
 
     public async Task<EmailOutboxMessage?> ClaimNextPendingAsync(
         DateTime now, CancellationToken ct = default)
     {
-        if (string.Equals(db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        // Sender path — cross-tenant scan, platform infrastructure.
+        if (string.Equals(cp.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
         {
-            return await ClaimViaPostgresAsync(now, ct);
+            return await ClaimViaPostgresAsync(cp, now, ct);
         }
-
-        return await ClaimViaNaivePathAsync(now, ct);
+        return await ClaimViaNaivePathAsync(cp, now, ct);
     }
 
-    private async Task<EmailOutboxMessage?> ClaimViaPostgresAsync(
-        DateTime now, CancellationToken ct)
+    private static async Task<EmailOutboxMessage?> ClaimViaPostgresAsync(
+        ControlPlaneDbContext db, DateTime now, CancellationToken ct)
     {
-        // Single-statement atomic claim: grab the oldest due `pending` row,
-        // flip it to `sending`, and return every column. FOR UPDATE SKIP
-        // LOCKED lets concurrent senders in a multi-instance deploy each
-        // pick a different row without retrying on lock contention.
-        //
-        // Parameter binding via FromSqlInterpolated prevents injection even
-        // though `now` is a DateTime (not user input).
         var rows = await db.EmailOutbox.FromSqlInterpolated($"""
             UPDATE email_outbox
             SET "Status" = 'sending', "UpdatedAt" = {now}
@@ -74,8 +79,8 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
         return rows.FirstOrDefault();
     }
 
-    private async Task<EmailOutboxMessage?> ClaimViaNaivePathAsync(
-        DateTime now, CancellationToken ct)
+    private static async Task<EmailOutboxMessage?> ClaimViaNaivePathAsync(
+        ControlPlaneDbContext db, DateTime now, CancellationToken ct)
     {
         var candidate = await db.EmailOutbox
             .Where(m => m.Status == "pending" && m.NextAttemptAt <= now)
@@ -93,7 +98,7 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
 
     public async Task MarkSentAsync(Guid id, CancellationToken ct = default)
     {
-        var msg = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        var msg = await cp.EmailOutbox.FindAsync(new object[] { id }, ct);
         if (msg is null) return;
 
         var now = DateTime.UtcNow;
@@ -101,13 +106,13 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
         msg.LastError = null;
         msg.SentAt = now;
         msg.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+        await cp.SaveChangesAsync(ct);
     }
 
     public async Task<EmailOutboxMessage?> MarkFailedAsync(
         Guid id, string error, TimeSpan? backoff, CancellationToken ct = default)
     {
-        var msg = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        var msg = await cp.EmailOutbox.FindAsync(new object[] { id }, ct);
         if (msg is null) return null;
 
         var now = DateTime.UtcNow;
@@ -123,21 +128,20 @@ public class EmailOutboxRepository(TammaDbContext db) : IEmailOutboxRepository
         else
         {
             msg.Status = "failed";
-            // Keep NextAttemptAt where it was — no more attempts are scheduled.
         }
 
-        await db.SaveChangesAsync(ct);
+        await cp.SaveChangesAsync(ct);
         return msg;
     }
 
     public async Task<EmailOutboxMessage?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        => await cp.EmailOutbox.FindAsync(new object[] { id }, ct);
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var row = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        var row = await cp.EmailOutbox.FindAsync(new object[] { id }, ct);
         if (row is null) return;
-        db.EmailOutbox.Remove(row);
-        await db.SaveChangesAsync(ct);
+        cp.EmailOutbox.Remove(row);
+        await cp.SaveChangesAsync(ct);
     }
 }

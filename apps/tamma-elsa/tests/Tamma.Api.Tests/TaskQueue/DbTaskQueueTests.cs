@@ -17,24 +17,20 @@ namespace Tamma.Api.Tests.TaskQueue;
 [TestFixture]
 public class DbTaskQueueTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private QueuedTaskRepository _repo = null!;
 
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
-        _db = new TestDbContext(options);
-        _repo = new QueuedTaskRepository(_db);
+        _fx = new InMemoryDbFixture();
+        _db = _fx.Cp;
+        _repo = new QueuedTaskRepository(_fx.Factory, _db);
     }
 
     [TearDown]
-    public void TearDown() => _db.Dispose();
+    public async Task TearDown() => await _fx.DisposeAsync();
 
     private static DbTaskQueue NewQueue(QueuedTaskRepository repo, Guid? tenantId)
     {
