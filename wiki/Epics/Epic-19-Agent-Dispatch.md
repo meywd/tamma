@@ -7,17 +7,17 @@
 
 ## Overview
 
-Epic 19 enables Tamma Cloud to orchestrate autonomous development agents that run on the **user's own GitHub Actions runners**, so that user code never leaves their GitHub environment. Tamma dispatches work, monitors execution, and collects results exclusively through the GitHub API.
+Epic 19 enables Tamma Cloud to orchestrate autonomous development agents that run on the user's own GitHub Actions runners, so that user code never leaves their GitHub environment. Tamma dispatches work, monitors execution, and collects results exclusively through the GitHub API.
 
-The epic shipped end-to-end during the auth-foundation sprint (2026-04-18 → 2026-04-21). All four implementation stories landed; Two security hardening fixes followed from the 2026-04-20 code review.
+The epic shipped end-to-end during the auth-foundation sprint (2026-04-18 to 2026-04-21). All four implementation stories landed; two security hardening fixes followed from the 2026-04-20 code review.
 
 ## Goals
 
-1. Create reusable GitHub Actions workflow template for agent execution **(done — Story 19-1)**
-2. Implement Elsa activity to dispatch `workflow_dispatch` events **(done — Story 19-2)**
-3. Build agent execution monitoring (polling + webhook) **(done — Story 19-3, with `WebhookSignalRegistry`)**
-4. Collect results from completed runs (PR data, check results, file changes) **(done — Story 19-4, 4 MB artifact cap)**
-5. Abstract CLI/SaaS mode via `IAgentExecutor` interface **(done — Story 19-5)**
+1. Create reusable GitHub Actions workflow template for agent execution (Story 19-1, done)
+2. Implement Elsa activity to dispatch `workflow_dispatch` events (Story 19-2, done)
+3. Build agent execution monitoring with polling and webhook modes (Story 19-3, done — `WebhookSignalRegistry`)
+4. Collect results from completed runs with 4 MB artifact cap (Story 19-4, done)
+5. Abstract CLI / SaaS mode via `IAgentExecutor` interface (Story 19-5, done)
 
 ## Value delivered
 

@@ -26,10 +26,12 @@ interface StoryEntry {
 }
 
 // Same status sets as EpicsPage for consistency
+// Updated 2026-04-21 — Epic 19 complete; Epic 12 partial; Epic 22 absorbed by 19;
+// Epic 27/28/29/30/31/33 newly scoped (drafted); Epic 33 deferred.
 const completedEpics = new Set([
-  '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '25',
+  '7', '8', '9', '11', '13', '14', '15', '16', '19', '25',
 ]);
-const inProgressEpics = new Set(['1', '1.5', '2', '3', '17', '18', '19', '23', '24']);
+const inProgressEpics = new Set(['1', '1.5', '2', '3', '4', '5', '6', '12', '17', '18', '21', '22', '23', '24', '26']);
 
 function parseEpicNumberFromSlug(slug: string): string {
   // "1-foundation" -> "1", "1-5-infrastructure" -> "1.5", "11-14-elsa" -> "11-14"
