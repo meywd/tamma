@@ -39,6 +39,17 @@ public sealed class OutboxSmtpSenderOptions
 ///   <item><description><see cref="EmailEventTypes.Failed"/> only when the retry
 ///     ceiling is reached (the final, permanent failure).</description></item>
 /// </list>
+///
+/// <para>Story 28-6 — the sender drains BOTH the per-tenant
+/// <c>email_outbox</c> AND the control-plane <c>platform_email_outbox</c>
+/// in the same loop. Platform-scope mail (registration verification,
+/// welcome, password reset, deletion confirmation) lives on the CP table
+/// because it must deliver before a tenant DB exists or after one is
+/// gone (Doc 03 §7.1, Epic 28 conflict resolution #2). The CP repo is
+/// optional — when <see cref="IPlatformEmailOutboxRepository"/> is not
+/// registered (legacy single-DB topologies) the platform path is a
+/// no-op, so this change is back-compat with deployments that have
+/// not yet shipped the CP migration.</para>
 /// </summary>
 public sealed class OutboxSmtpSender : BackgroundService
 {
@@ -111,8 +122,14 @@ public sealed class OutboxSmtpSender : BackgroundService
     }
 
     /// <summary>
-    /// Claim and deliver a single message, returning <c>true</c> when a row was
-    /// processed. Exposed for tests so they don't race the polling timer.
+    /// Claim and deliver a single message from either the per-tenant or
+    /// the platform outbox, returning <c>true</c> when a row was
+    /// processed. Tenant outbox is drained first to preserve historical
+    /// behaviour; platform outbox is checked only when the tenant queue
+    /// is empty so a heavy tenant load doesn't starve the platform
+    /// queue (the next poll cycle will visit the platform queue when
+    /// the tenant queue is drained). Exposed for tests so they don't
+    /// race the polling timer.
     /// </summary>
     public async Task<bool> ProcessOnceAsync(CancellationToken ct)
     {
@@ -122,8 +139,23 @@ public sealed class OutboxSmtpSender : BackgroundService
         var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
 
         var claimed = await outbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
-        if (claimed is null) return false;
+        if (claimed is not null)
+        {
+            await ProcessTenantClaimedAsync(outbox, transport, events, claimed, ct);
+            return true;
+        }
 
+        // Tenant queue empty — try the platform queue. Story 28-6.
+        return await TryProcessPlatformOnceAsync(scope.ServiceProvider, transport, ct);
+    }
+
+    private async Task ProcessTenantClaimedAsync(
+        IEmailOutboxRepository outbox,
+        ISmtpTransport transport,
+        IEventRepository events,
+        EmailOutboxMessage claimed,
+        CancellationToken ct)
+    {
         try
         {
             await transport.SendAsync(claimed, ct);
@@ -138,7 +170,6 @@ public sealed class OutboxSmtpSender : BackgroundService
             await outbox.DeleteAsync(claimed.Id, ct);
 
             _logger.LogInformation("Email delivered txn={TxnId}", claimed.Id);
-            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -167,9 +198,124 @@ public sealed class OutboxSmtpSender : BackgroundService
                     "Email transient failure txn={TxnId} attempt={Attempt}",
                     claimed.Id, attempt);
             }
+        }
+    }
+
+    /// <summary>
+    /// Story 28-6 — drain one row from <c>platform_email_outbox</c> if
+    /// the repo is registered. Falls back to <c>false</c> (no-op) when
+    /// <see cref="IPlatformEmailOutboxRepository"/> is unavailable so
+    /// deployments that have not yet shipped the CP migration are
+    /// unaffected.
+    /// </summary>
+    private async Task<bool> TryProcessPlatformOnceAsync(
+        IServiceProvider scopedProvider, ISmtpTransport transport, CancellationToken ct)
+    {
+        var platformOutbox = scopedProvider.GetService<IPlatformEmailOutboxRepository>();
+        if (platformOutbox is null)
+        {
+            // Legacy / single-DB topology — silently skip the platform
+            // path on each poll. Logged once at startup if the operator
+            // wants to see why; not per-poll to keep logs quiet.
+            return false;
+        }
+
+        var claimed = await platformOutbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
+        if (claimed is null) return false;
+
+        // Map the platform row onto an EmailOutboxMessage so the existing
+        // ISmtpTransport seam works unchanged. Only the fields the
+        // transport reads are populated; status/attempts on the platform
+        // row remain authoritative for retry policy.
+        var transportShim = ToTransportShim(claimed);
+
+        // Resolve the CP-bound IPlatformEventRepository for terminal
+        // event emission. Optional — if absent, the sent/failed events
+        // simply aren't written and the operation continues; the
+        // platform outbox row itself carries enough state for ops.
+        var platformEvents = scopedProvider.GetService<IPlatformEventRepository>();
+
+        try
+        {
+            await transport.SendAsync(transportShim, ct);
+            await platformOutbox.MarkSentAsync(claimed.Id, ct);
+            if (platformEvents is not null)
+            {
+                await EmitPlatformSentAsync(platformEvents, claimed, ct);
+            }
+
+            // Same delete-on-success contract as the tenant path —
+            // recipient/subject/body don't linger past delivery. The
+            // permanent audit lives in platform_events.
+            await platformOutbox.DeleteAsync(claimed.Id, ct);
+
+            _logger.LogInformation(
+                "Platform email delivered txn={TxnId} template={Template}",
+                claimed.Id, claimed.Template);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var attempt = claimed.Attempts + 1;
+            var backoff = PickBackoff(attempt);
+            var updated = await platformOutbox.MarkFailedAsync(
+                claimed.Id, ex.Message, backoff, ct);
+
+            if (updated is not null && updated.Status == "failed")
+            {
+                _logger.LogError(ex,
+                    "Platform email permanently failed txn={TxnId} attempts={Attempts}",
+                    claimed.Id, updated.Attempts);
+                if (platformEvents is not null)
+                {
+                    await EmitPlatformFailedAsync(platformEvents, claimed, ex, ct);
+                }
+
+                // Same delete-on-terminal-failure contract — the audit
+                // is in platform_events; the row's PII can go.
+                await platformOutbox.DeleteAsync(claimed.Id, ct);
+            }
+            else
+            {
+                _logger.LogWarning(ex,
+                    "Platform email transient failure txn={TxnId} attempt={Attempt}",
+                    claimed.Id, attempt);
+            }
 
             return true;
         }
+    }
+
+    /// <summary>
+    /// Shim a <see cref="PlatformEmailOutboxMessage"/> into the
+    /// <see cref="EmailOutboxMessage"/> shape the existing
+    /// <see cref="ISmtpTransport"/> consumes. Only fields the transport
+    /// reads (recipient, subject, html/text body, from, attempt count)
+    /// are copied; everything mutable on the platform row stays under
+    /// <see cref="IPlatformEmailOutboxRepository"/> control.
+    /// </summary>
+    private static EmailOutboxMessage ToTransportShim(PlatformEmailOutboxMessage src)
+    {
+        return new EmailOutboxMessage
+        {
+            Id = src.Id,
+            TenantId = src.TenantId,
+            UserId = src.UserId,
+            Template = src.Template,
+            ToAddress = src.ToAddress,
+            Subject = src.Subject,
+            HtmlBody = src.HtmlBody,
+            TextBody = src.TextBody,
+            FromAddress = src.FromAddress,
+            Status = src.Status,
+            Attempts = src.Attempts,
+            MaxAttempts = src.MaxAttempts,
+            NextAttemptAt = src.NextAttemptAt,
+            LastError = src.LastError,
+            CreatedAt = src.CreatedAt,
+            UpdatedAt = src.UpdatedAt,
+            SentAt = src.SentAt,
+        };
     }
 
     private TimeSpan PickBackoff(int attempt)
@@ -227,5 +373,68 @@ public sealed class OutboxSmtpSender : BackgroundService
             Metadata = """{"eventSource":"system"}""",
             Data = JsonSerializer.Serialize(data),
         });
+    }
+
+    // Story 28-6 — terminal-outcome events for the platform outbox land
+    // in platform_events instead of the per-tenant domain_events stream
+    // because some platform mail (verification, deletion confirmation)
+    // fires before/after a tenant DB exists.
+    private static async Task EmitPlatformSentAsync(
+        IPlatformEventRepository events,
+        PlatformEmailOutboxMessage row,
+        CancellationToken ct)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["txn_id"] = row.Id.ToString(),
+            ["template"] = row.Template,
+            ["tenant_id"] = row.TenantId?.ToString(),
+            ["user_id"] = row.UserId?.ToString(),
+            ["scope"] = "platform",
+        };
+        var data = new Dictionary<string, object?>
+        {
+            ["provider"] = "smtp",
+            ["attempts"] = row.Attempts + 1,
+        };
+        await events.AppendAsync(new PlatformEvent
+        {
+            Type = EmailEventTypes.Sent,
+            TenantId = row.TenantId,
+            UserId = row.UserId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        }, ct);
+    }
+
+    private static async Task EmitPlatformFailedAsync(
+        IPlatformEventRepository events,
+        PlatformEmailOutboxMessage row,
+        Exception ex,
+        CancellationToken ct)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["txn_id"] = row.Id.ToString(),
+            ["template"] = row.Template,
+            ["tenant_id"] = row.TenantId?.ToString(),
+            ["user_id"] = row.UserId?.ToString(),
+            ["scope"] = "platform",
+        };
+        var data = new Dictionary<string, object?>
+        {
+            ["provider"] = "smtp",
+            ["error_class"] = ex.GetType().FullName,
+        };
+        await events.AppendAsync(new PlatformEvent
+        {
+            Type = EmailEventTypes.Failed,
+            TenantId = row.TenantId,
+            UserId = row.UserId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        }, ct);
     }
 }
