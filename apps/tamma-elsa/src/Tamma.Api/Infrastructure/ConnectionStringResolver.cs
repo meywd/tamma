@@ -24,4 +24,17 @@ internal static class ConnectionStringResolver
         var app = cfg.GetConnectionString("TammaAppDb");
         return string.IsNullOrWhiteSpace(app) ? null : app;
     }
+
+    /// <summary>
+    /// Epic 28 control-plane connection string. Production:
+    /// <c>tamma_control</c> Postgres. Dev: falls back to the admin
+    /// connection so a single-DB local Postgres keeps working until the
+    /// new context is wired into actual handlers (Story 28-2 endpoint
+    /// cutover and Story 28-5 provisioning workflow).
+    /// </summary>
+    public static string? ResolveControlPlane(IConfiguration cfg)
+    {
+        var cp = cfg.GetConnectionString("ControlPlane");
+        return string.IsNullOrWhiteSpace(cp) ? null : cp;
+    }
 }

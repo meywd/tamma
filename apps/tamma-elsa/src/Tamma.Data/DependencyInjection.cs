@@ -42,11 +42,21 @@ public static class DependencyInjection
     ///
     /// <para>Closes port-gap findings orgs/002 (EF filter permissive on null
     /// tenant) and orgs/004 (<c>withTenantContext</c> SET LOCAL gone).</para>
+    ///
+    /// <para><b>Epic 28 (DB-per-Tenant)</b> — this method also registers
+    /// <see cref="ControlPlaneDbContext"/> when
+    /// <paramref name="controlPlaneConnectionString"/> is supplied or
+    /// <c>ConnectionStrings:ControlPlane</c> is set. Until Story 28-2's
+    /// endpoint cutover lands, no caller injects this context; it is
+    /// available for the new auth/admin handlers shipped in subsequent
+    /// stories. Falls back to <paramref name="adminConnectionString"/> for
+    /// local-dev convenience.</para>
     /// </summary>
     public static IServiceCollection AddTammaData(
         this IServiceCollection services,
         string adminConnectionString,
-        string? appConnectionString = null)
+        string? appConnectionString = null,
+        string? controlPlaneConnectionString = null)
     {
         services.AddScoped<ITenantContext, TenantContext>();
 
@@ -96,6 +106,30 @@ public static class DependencyInjection
                 npgsql.MigrationsHistoryTable("__TammaMigrationsHistory");
             });
             options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
+        });
+
+        // ── Epic 28: Control-plane context (Story 28-2) ──
+        //
+        // Registers <see cref="ControlPlaneDbContext"/> alongside the legacy
+        // contexts. Until Story 28-2's endpoint migration lands, no handler
+        // injects this context — it exists so the new auth, admin, and
+        // tenant-lifecycle stories (28-5, 28-6, 28-7, 28-9, 28-11) can
+        // inject it as they ship.
+        //
+        // Uses its own migrations history table (__ControlPlaneMigrationsHistory)
+        // so it can coexist with the legacy <see cref="TammaDbContext"/>
+        // without clobbering the existing __TammaMigrationsHistory rows
+        // during the migration window. In production, the connection string
+        // points at the new <c>tamma_control</c> database; in dev it can
+        // fall back to the admin connection so local-laptop Postgres setups
+        // need no extra configuration.
+        var cpConnectionString = string.IsNullOrWhiteSpace(controlPlaneConnectionString)
+            ? adminConnectionString
+            : controlPlaneConnectionString;
+        services.AddDbContext<ControlPlaneDbContext>(options =>
+        {
+            options.UseNpgsql(cpConnectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
         });
 
         services.AddScoped<IUserRepository, UserRepository>();

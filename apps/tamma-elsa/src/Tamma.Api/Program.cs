@@ -188,6 +188,7 @@ builder.Services.AddHttpClient("github", client =>
 // each fallback branch — see ConnectionStringResolverTests.
 var connectionString = ConnectionStringResolver.ResolveAdmin(builder.Configuration);
 var appConnectionString = ConnectionStringResolver.ResolveApp(builder.Configuration);
+var controlPlaneConnectionString = ConnectionStringResolver.ResolveControlPlane(builder.Configuration);
 if (appConnectionString is null)
 {
     Log.Warning(
@@ -197,8 +198,19 @@ if (appConnectionString is null)
         + "This is expected for local development; production deployments "
         + "must set this explicitly.");
 }
+if (controlPlaneConnectionString is null)
+{
+    // Story 28-2: ControlPlane connection falls back to the admin connection
+    // for local dev. Production must set ConnectionStrings:ControlPlane to
+    // point at the new tamma_control database (created by the Story 28-5
+    // bootstrap script).
+    Log.Information(
+        "ConnectionStrings:ControlPlane not configured — ControlPlaneDbContext "
+        + "will share the admin connection. Acceptable for local dev; production "
+        + "must point at the dedicated tamma_control database (Story 28-1).");
+}
 
-builder.Services.AddTammaData(connectionString, appConnectionString);
+builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
