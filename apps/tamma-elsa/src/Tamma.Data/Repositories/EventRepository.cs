@@ -65,4 +65,32 @@ public class EventRepository(TammaDbContext db) : IEventRepository
         db.DomainEvents.RemoveRange(events);
         await db.SaveChangesAsync();
     }
+
+    public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
+        Guid tenantId, string? typePrefix, int limit, int offset)
+    {
+        // Honour the global query filter first (defence-in-depth: if the
+        // caller forgot to set ambient tenant we still get cross-tenant
+        // rejection from the explicit Where below). Both the Where +
+        // ambient filter combine to require TenantId == tenantId.
+        var query = db.DomainEvents
+            .Where(e => e.TenantId == tenantId);
+
+        if (!string.IsNullOrEmpty(typePrefix))
+        {
+            // EF.Functions.Like translates to SQL LIKE on Postgres which is
+            // index-friendly for prefix matches.
+            var like = typePrefix + "%";
+            query = query.Where(e => EF.Functions.Like(e.Type, like));
+        }
+
+        var total = await query.CountAsync();
+        var rows = await query
+            .OrderByDescending(e => e.CreatedAt)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+
+        return (rows, total);
+    }
 }

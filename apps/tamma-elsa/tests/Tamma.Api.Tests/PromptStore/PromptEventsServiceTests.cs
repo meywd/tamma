@@ -122,5 +122,9 @@ public class PromptEventsServiceTests
             => throw new NotImplementedException();
 
         public Task ClearAsync(Guid tenantId) => throw new NotImplementedException();
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
+            Guid tenantId, string? typePrefix, int limit, int offset)
+            => throw new NotImplementedException();
     }
 }

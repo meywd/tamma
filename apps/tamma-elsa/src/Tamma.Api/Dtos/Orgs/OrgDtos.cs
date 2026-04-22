@@ -54,3 +54,20 @@ public record PendingInviteResponse(
     Guid InvitedBy,
     DateTime ExpiresAt,
     DateTime CreatedAt);
+
+/// <summary>
+/// Audit-log row projection used by
+/// <c>GET /api/v1/orgs/:tenantId/audit</c> (story 18-7). Strips the
+/// platform-internal <c>Metadata</c> column from the source
+/// <see cref="Tamma.Data.Entities.DomainEvent"/>; the dashboard only
+/// needs id + type + timestamp + tags + data to render the audit table.
+/// Tags + Data are emitted as raw JSON strings so the dashboard can
+/// JSON.parse them client-side without a server-side schema change for
+/// every new event type.
+/// </summary>
+public record AuditEventResponse(
+    Guid Id,
+    string Type,
+    DateTime CreatedAt,
+    string Tags,
+    string Data);

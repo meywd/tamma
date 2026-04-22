@@ -767,6 +767,12 @@ orgs.MapGet("/{tenantId}/invites", OrgEndpoints.ListInvites)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapDelete("/{tenantId}/invites/{inviteId}", OrgEndpoints.DeleteInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Story 18-7: resend a pending invite (extends expiry, re-dispatches email).
+orgs.MapPost("/{tenantId}/invites/{inviteId}/resend", OrgEndpoints.ResendInvite)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Story 18-7: tenant-scoped audit log read for tenant admins.
+orgs.MapGet("/{tenantId}/audit", OrgEndpoints.ListTenantAudit)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
