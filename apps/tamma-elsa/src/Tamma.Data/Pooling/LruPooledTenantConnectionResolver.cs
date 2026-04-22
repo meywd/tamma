@@ -57,6 +57,17 @@ namespace Tamma.Data.Pooling;
 /// <para><b>Per-tenant Elsa schema</b> (<see cref="GetElsaDataSourceAsync"/>)
 /// currently mirrors the app data source — Story 28-5 wires the
 /// dedicated Elsa pool when per-tenant Elsa databases ship.</para>
+///
+/// <para><b>Rotation-driven invalidation gap</b>: the user task asks
+/// the resolver to subscribe to <c>TENANT.CONNECTION_STRING_ROTATED.SUCCESS</c>
+/// events via an <c>IPlatformEventBus</c>. That bus does NOT exist in
+/// the repository today (verified 2026-04-18 — no implementations or
+/// references). Until it lands, the rotation flow has to call
+/// <see cref="EvictAsync"/> directly from whichever handler updates
+/// <c>tenants.EncryptedConnectionString</c> (Story 28-12). The
+/// <see cref="EvictAsync"/> contract is already shaped to be the
+/// bus-subscriber callback, so wiring is mechanical when the bus
+/// arrives.</para>
 /// </summary>
 public sealed class LruPooledTenantConnectionResolver
     : ITenantConnectionResolver, IAsyncDisposable
