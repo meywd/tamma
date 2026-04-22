@@ -1,9 +1,21 @@
 # Finding 002: EF Query Filter Permissive When `TenantContext.TenantId` is Null
 
+> **SUPERSEDED (Wave A.5, 2026-04-18)**: Epic 28 db-per-tenant isolation
+> replaces the EF permissive-filter + RLS-on-shared-DB plane entirely.
+> Each tenant now has its own physical database; there is no tenant column
+> for filters to be permissive about. The `TammaDbContext` /
+> `TammaAppDbContext` dual-context scaffold and the
+> `TenantContextInterceptor` were deleted in commits `7289d4b`,
+> `3548f12`, `fc3be04` as part of Wave A.5. Every tenant-scoped
+> repository is now routed through `ITenantDbContextFactory`, which
+> binds a fixed tenant id into the EF model cache per instance —
+> fail-closed by construction. This finding's remediation is
+> architecturally resolved.
+
 **Scope**: orgs
-**Severity**: P0 (cutover-blocking)
-**Status**: Behavioral drift (fail-open instead of fail-closed)
-**Estimated port effort**: 3h
+**Severity**: P0 (cutover-blocking) — **Superseded by Epic 28 db-per-tenant**
+**Status**: Superseded
+**Estimated port effort**: 3h (resolved by Epic 28 architectural shift, not per-finding fix)
 
 ## Remediation status
 
