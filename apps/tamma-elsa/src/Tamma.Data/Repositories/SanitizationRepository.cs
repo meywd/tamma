@@ -35,7 +35,11 @@ public class SanitizationRepository : ISanitizationRepository
         WriteIndented = false,
     };
 
-    private readonly TammaDbContext _db;
+    // Story 19-6: per-request reads route through TammaAppDbContext so RLS
+    // + fail-closed EF filter both fire. The IgnoreQueryFilters paths in
+    // LoadOverridesAsync remain explicit per-tenant lookups; they bypass
+    // the EF filter so platform-default (TenantId == null) rows merge in.
+    private readonly TammaAppDbContext _db;
     private readonly ISanitizationDefaultsProvider _defaults;
 
     /// <summary>
@@ -45,7 +49,7 @@ public class SanitizationRepository : ISanitizationRepository
     /// called. If nothing is registered, we fall back to
     /// <see cref="EmptyDefaultsProvider"/>.
     /// </summary>
-    public SanitizationRepository(TammaDbContext db, IEnumerable<ISanitizationDefaultsProvider> defaults)
+    public SanitizationRepository(TammaAppDbContext db, IEnumerable<ISanitizationDefaultsProvider> defaults)
     {
         _db = db;
         _defaults = defaults?.FirstOrDefault() ?? EmptyDefaultsProvider.Instance;
