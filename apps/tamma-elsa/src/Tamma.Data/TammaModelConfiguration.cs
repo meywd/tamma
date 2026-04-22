@@ -262,6 +262,33 @@ internal static class TammaModelConfiguration
     public static void ConfigureTenantEntities(
         ModelBuilder modelBuilder, Guid? fixedTenantId = null)
     {
+        // When invoked from TenantDbContext, register Tenant/User as
+        // shadow entities (no CP-side navigations) so EF can resolve the
+        // HasOne(e => e.Tenant) nav on AgentConfig / SanitizationRule
+        // without demanding the full CP relationship graph (Tenant↔Owner
+        // ↔ User ↔ Memberships). Without this EF complains about
+        // ambiguous one-to-one sides for Tenant.Owner / User.Tenant.
+        if (fixedTenantId is not null)
+        {
+            modelBuilder.Entity<Tenant>(entity =>
+            {
+                entity.ToTable("tenants");
+                entity.HasKey(e => e.Id);
+                entity.Ignore(e => e.Owner);
+                entity.Ignore(e => e.Memberships);
+                entity.Ignore(e => e.Invites);
+            });
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.ToTable("users");
+                entity.HasKey(e => e.Id);
+                entity.Ignore(e => e.Tenant);
+                entity.Ignore(e => e.Memberships);
+                entity.Ignore(e => e.RefreshTokens);
+                entity.Ignore(e => e.PasswordResetTokens);
+            });
+        }
+
         // ── AgentConfig ──
         modelBuilder.Entity<AgentConfig>(entity =>
         {
@@ -497,20 +524,25 @@ internal static class TammaModelConfiguration
         Guid? fixedTenantId,
         System.Linq.Expressions.Expression<Func<T, Guid?>> tenantAccessor) where T : class
     {
-        if (fixedTenantId is Guid tid)
-        {
-            // Fail-closed per-tenant filter — TenantDbContext path.
-            var param = tenantAccessor.Parameters[0];
-            var eq = System.Linq.Expressions.Expression.Equal(
-                tenantAccessor.Body,
-                System.Linq.Expressions.Expression.Constant((Guid?)tid, typeof(Guid?)));
-            var lambda = System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(eq, param);
-            entity.HasQueryFilter(lambda);
-        }
-        // When fixedTenantId is null we are on the ControlPlaneDbContext
-        // migration-graph coverage path: no filter is applied. App code
-        // MUST route tenant reads through ITenantDbContextFactory, which
-        // always attaches a fixed tenant filter.
+        // When configuring the tenant context we DO NOT bake the tenant id
+        // into the model graph. EF caches compiled models by context type,
+        // so a per-instance constant inside the filter lambda would leak
+        // the first-seen tenant to every subsequent context. Instead we
+        // leave the filter off the model entirely and rely on the
+        // per-tenant Npgsql connection to enforce isolation at the wire
+        // (one physical DB per tenant) plus the factory binding tenant
+        // id into the context instance. Until the physical-DB split lands
+        // (Story 28-1) call sites that query a tenant context MUST apply
+        // WHERE TenantId == @tid explicitly — that is the Wave A.5
+        // contract. Many repos already filter by TenantId as part of the
+        // primary key lookup or composite index.
+        //
+        // On ControlPlaneDbContext (fixedTenantId == null) we leave the
+        // filter off too — the CP plane is a cross-tenant admin /
+        // migration-graph carrier during the transition. Only tenant
+        // repos read from these DbSets, and they always pass an explicit
+        // tenantId predicate.
+        _ = entity; _ = fixedTenantId; _ = tenantAccessor;
     }
 
     public static void ConfigureMentorshipEntities(ModelBuilder modelBuilder)

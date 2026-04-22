@@ -16,14 +16,21 @@ public class EventRepository(
 {
     public async Task<DomainEvent> AppendAsync(DomainEvent evt)
     {
-        var tid = evt.TenantId ?? tenantContext.TenantId
-            ?? throw new InvalidOperationException(
-                "Cannot append a domain event without a tenant id. Set DomainEvent.TenantId or bind ITenantContext.");
-
-        evt.TenantId = tid;
         evt.CreatedAt = DateTime.UtcNow;
 
-        await using var db = await tenantDbFactory.CreateAsync(tid);
+        // Platform-scope events (no tenant) — e.g. Resend email without a
+        // tenant-bound sender — write to CP. Tenant-scoped events route
+        // through the factory.
+        var tid = evt.TenantId ?? tenantContext.TenantId;
+        if (tid is null)
+        {
+            cp.DomainEvents.Add(evt);
+            await cp.SaveChangesAsync();
+            return evt;
+        }
+
+        evt.TenantId = tid;
+        await using var db = await tenantDbFactory.CreateAsync(tid.Value);
         db.DomainEvents.Add(evt);
         await db.SaveChangesAsync();
         return evt;
@@ -47,7 +54,11 @@ public class EventRepository(
         if (tenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            var query = db.DomainEvents.AsQueryable();
+            // Explicit tenant predicate — the factory-issued context no
+            // longer carries an EF query filter (the Npgsql per-tenant
+            // connection is the real isolation plane; during transition
+            // the physical DB is shared so we filter at query time).
+            var query = db.DomainEvents.Where(e => e.TenantId == tid);
             if (!string.IsNullOrEmpty(type))
                 query = query.Where(e => e.Type == type);
             if (issueNumber.HasValue)
@@ -68,7 +79,7 @@ public class EventRepository(
     {
         await using var db = await tenantDbFactory.CreateAsync(tenantId);
         return await db.DomainEvents
-            .Where(e => e.Type == type)
+            .Where(e => e.TenantId == tenantId && e.Type == type)
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefaultAsync();
     }

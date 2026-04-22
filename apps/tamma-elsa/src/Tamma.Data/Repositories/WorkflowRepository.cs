@@ -81,6 +81,7 @@ public class WorkflowRepository(
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
             return await db.WorkflowDefinitions
+                .Where(d => d.TenantId == tid)
                 .OrderByDescending(d => d.UpdatedAt).ToListAsync();
         }
         // System scope — all definitions across tenants (admin view).
@@ -178,7 +179,7 @@ public class WorkflowRepository(
         if (tenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            var query = db.WorkflowInstances.AsQueryable();
+            var query = db.WorkflowInstances.Where(i => i.TenantId == tid);
             if (definitionId.HasValue)
                 query = query.Where(i => i.DefinitionId == definitionId.Value);
             var total = await query.CountAsync();

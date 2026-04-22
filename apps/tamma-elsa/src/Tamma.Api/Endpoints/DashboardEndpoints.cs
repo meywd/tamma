@@ -29,7 +29,7 @@ public static class DashboardEndpoints
         if (tc.TenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            totalEvents = await db.DomainEvents.LongCountAsync();
+            totalEvents = await db.DomainEvents.LongCountAsync(e => e.TenantId == tid);
         }
 
         var engines = await engineRegistry.ListAsync(tc.TenantId);
@@ -82,6 +82,7 @@ public static class DashboardEndpoints
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
             var counts = await db.WorkflowInstances
+                .Where(i => i.TenantId == tid)
                 .GroupBy(i => i.DefinitionId)
                 .Select(g => new { DefinitionId = g.Key, Count = g.Count() })
                 .ToListAsync();
