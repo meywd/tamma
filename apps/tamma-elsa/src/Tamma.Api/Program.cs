@@ -821,6 +821,29 @@ admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
 admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
     .RequireAuthorization("OwnerAccess");
 
+// Story 28-11 — platform-admin tenant-status UX. List + detail surface the
+// Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
+// FailureReason, DeleteRequestedAt); action endpoints re-drive the Story
+// 28-5 workflows (retry / delete / force-delete) under a state-gate that
+// returns 409 for illegal transitions. Platform-owner only.
+admin.MapGet("/tenants", Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ListTenants)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/tenants/{tenantId:guid}/detail",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantDetail)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/tenants/{tenantId:guid}/actions/retry",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.RetryTenant)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/tenants/{tenantId:guid}/actions/delete",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.DeleteTenant)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/tenants/{tenantId:guid}/actions/force-delete",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ForceDeleteTenant)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPatch("/tenants/{tenantId:guid}/plan",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
+    .RequireAuthorization("OwnerAccess");
+
 // ── Orgs / Tenants ──
 // Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the
 // RequireTenantMembershipFilter so the handler body can trust the route
