@@ -52,6 +52,41 @@ public class CheckBudgetActivity : Activity
             var budgetJson = BudgetStateJson.Get(context);
             var providerName = ProviderName.Get(context);
 
+            // Story 9-11: Prefer Tamma API budget state when available and
+            // an AccountId is carried in workflow variables. Falls back to
+            // local BudgetStateJson on any failure (AC 5 backward compat).
+            var apiClient = context.GetService<TammaApiClient>();
+            var accountId = context.GetVariable<string>("AccountId")
+                            ?? context.GetVariable<string>("TenantId");
+            if (apiClient is not null && !string.IsNullOrWhiteSpace(accountId))
+            {
+                try
+                {
+                    var apiBudget = await apiClient
+                        .GetBudgetAsync(accountId, accountId, context.CancellationToken)
+                        .ConfigureAwait(false);
+                    if (apiBudget is not null)
+                    {
+                        if (apiBudget.Limit > 0 && apiBudget.Spent >= apiBudget.Limit)
+                        {
+                            _logger?.LogWarning(
+                                "Tamma API reports budget exhausted for {Account}: spent ${Spent:F4} of ${Limit:F4}",
+                                accountId, apiBudget.Spent, apiBudget.Limit);
+                            await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
+                            return;
+                        }
+                        await context.CompleteActivityWithOutcomesAsync("WithinBudget");
+                        return;
+                    }
+                }
+                catch (Exception apiEx)
+                {
+                    _logger?.LogWarning(apiEx,
+                        "Tamma API budget check failed for {Account}, falling back to local state",
+                        accountId);
+                }
+            }
+
             var budget = DeserializeBudget(budgetJson);
 
             if (budget.CapUsd <= 0)

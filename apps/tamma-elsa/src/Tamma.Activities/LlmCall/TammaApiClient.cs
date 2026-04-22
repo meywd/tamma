@@ -1,0 +1,276 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall.Models;
+
+namespace Tamma.Activities.LlmCall;
+
+/// <summary>
+/// Story 9-11: Shared HTTP client for calling the Tamma API (Fastify in TS,
+/// ASP.NET in the C# port). Used by simplified Elsa activities to delegate
+/// agent resolution, health, diagnostics, and provider execution to the
+/// central API plane.
+///
+/// Configuration (read from <see cref="IConfiguration"/> with env-var
+/// fallbacks):
+/// <list type="bullet">
+///   <item><c>Tamma:ApiUrl</c> or env <c>TAMMA_API_URL</c> — base URL
+///         (defaults to <c>http://localhost:3000</c>).</item>
+///   <item><c>Tamma:ApiToken</c> or env <c>TAMMA_API_TOKEN</c> — bearer
+///         token for Authorization header.</item>
+/// </list>
+///
+/// All methods return <c>null</c> on HTTP / network failure so callers can
+/// fall back to local behavior (per AC 5 in Story 9-11).
+/// </summary>
+public class TammaApiClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly ILogger<TammaApiClient> _logger;
+    private readonly string _baseUrl;
+
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    public TammaApiClient(
+        HttpClient httpClient,
+        ILogger<TammaApiClient> logger,
+        IConfiguration? configuration = null)
+    {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        _baseUrl = configuration?["Tamma:ApiUrl"]
+                   ?? Environment.GetEnvironmentVariable("TAMMA_API_URL")
+                   ?? "http://localhost:3000";
+        _baseUrl = _baseUrl.TrimEnd('/');
+
+        var token = configuration?["Tamma:ApiToken"]
+                    ?? Environment.GetEnvironmentVariable("TAMMA_API_TOKEN");
+        if (!string.IsNullOrWhiteSpace(token) &&
+            _httpClient.DefaultRequestHeaders.Authorization is null)
+        {
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+
+    /// <summary>Base URL in use (test hook).</summary>
+    public string BaseUrl => _baseUrl;
+
+    // ----- Agent Resolution --------------------------------------------
+
+    public Task<AgentResolveResult?> ResolveAgentAsync(
+        string role,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agents/{Uri.EscapeDataString(role)}/resolve";
+        return GetAsync<AgentResolveResult>(url, tenantId, ct);
+    }
+
+    public Task<AgentResolveResult?> ResolveForPhaseAsync(
+        ResolveForPhaseRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agents/resolve-for-phase";
+        return PostAsync<AgentResolveResult>(url, request, tenantId, ct);
+    }
+
+    // ----- Provider Health ---------------------------------------------
+
+    public Task<ProviderHealthStatus?> GetProviderHealthAsync(
+        string providerKey,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/health/providers/{Uri.EscapeDataString(providerKey)}";
+        return GetAsync<ProviderHealthStatus>(url, tenantId, ct);
+    }
+
+    public Task<bool> RecordProviderFailureAsync(
+        string providerKey,
+        string? error = null,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/health/providers/{Uri.EscapeDataString(providerKey)}/failure";
+        return PostVoidAsync(url, new { error }, tenantId, ct);
+    }
+
+    public Task<bool> RecordProviderSuccessAsync(
+        string providerKey,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/health/providers/{Uri.EscapeDataString(providerKey)}/success";
+        return PostVoidAsync(url, new { }, tenantId, ct);
+    }
+
+    // ----- Diagnostics --------------------------------------------------
+
+    public Task<bool> RecordDiagnosticsAsync(
+        DiagnosticsIngestRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/diagnostics";
+        return PostVoidAsync(url, request, tenantId, ct);
+    }
+
+    public Task<BudgetStatus?> GetBudgetAsync(
+        string accountId,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/diagnostics/budget/{Uri.EscapeDataString(accountId)}";
+        return GetAsync<BudgetStatus>(url, tenantId, ct);
+    }
+
+    // ----- Provider Sessions (create/execute/dispose) ------------------
+
+    public Task<ProviderSessionResult?> CreateProviderAsync(
+        ProviderCreateRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/providers/create";
+        return PostAsync<ProviderSessionResult>(url, request, tenantId, ct);
+    }
+
+    public Task<TaskExecuteResult?> ExecuteProviderAsync(
+        string handle,
+        TaskExecuteRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/providers/{Uri.EscapeDataString(handle)}/execute";
+        return PostAsync<TaskExecuteResult>(url, request, tenantId, ct);
+    }
+
+    public async Task<bool> DisposeProviderAsync(
+        string handle,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/providers/providers/{Uri.EscapeDataString(handle)}";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+            AddTenantHeader(request, tenantId);
+            var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Tamma API DELETE failed: {Url}", url);
+            return false;
+        }
+    }
+
+    // ----- Helpers ------------------------------------------------------
+
+    private async Task<T?> GetAsync<T>(
+        string url,
+        string? tenantId,
+        CancellationToken ct) where T : class
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API GET {Url} returned {Status}",
+                    url, (int)response.StatusCode);
+                return null;
+            }
+            return await response.Content
+                .ReadFromJsonAsync<T>(JsonOpts, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Tamma API GET failed: {Url}", url);
+            return null;
+        }
+    }
+
+    private async Task<T?> PostAsync<T>(
+        string url,
+        object body,
+        string? tenantId,
+        CancellationToken ct) where T : class
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API POST {Url} returned {Status}",
+                    url, (int)response.StatusCode);
+                return null;
+            }
+            return await response.Content
+                .ReadFromJsonAsync<T>(JsonOpts, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Tamma API POST failed: {Url}", url);
+            return null;
+        }
+    }
+
+    private async Task<bool> PostVoidAsync(
+        string url,
+        object body,
+        string? tenantId,
+        CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API POST {Url} returned {Status}",
+                    url, (int)response.StatusCode);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Tamma API POST failed: {Url}", url);
+            return false;
+        }
+    }
+
+    private static void AddTenantHeader(HttpRequestMessage request, string? tenantId)
+    {
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            request.Headers.TryAddWithoutValidation("X-Tenant-Id", tenantId);
+        }
+    }
+}

@@ -153,6 +153,60 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
             "Diagnostics recorded: provider={Provider}, attempt={Attempt}, succeeded={Succeeded}, cost=${Cost:F6}",
             providerName, diagnostic.AttemptNumber, diagnostic.Succeeded, budget.SpentUsd);
 
+        // Story 9-11: Additionally write the diagnostic to the Tamma API so
+        // the persistent store + shared cost tracker see the event. Local
+        // workflow-variable state is kept intact for backward compat.
+        var apiClient = context.GetService<TammaApiClient>();
+        if (apiClient is not null)
+        {
+            try
+            {
+                var accountId = context.GetVariable<string>("AccountId")
+                                ?? context.GetVariable<string>("TenantId");
+                var correlationId = context.GetVariable<string>("CorrelationId");
+                var cost = EstimateCost(providerName, diagnostic.PromptTokens, diagnostic.CompletionTokens);
+                var role = context.GetVariable<string>("Role");
+                var action = context.GetVariable<string>("OperationName");
+
+                await apiClient.RecordDiagnosticsAsync(
+                    new Models.DiagnosticsIngestRequest(
+                        Provider: providerName,
+                        Model: response.Model,
+                        Role: role,
+                        Action: action,
+                        Success: diagnostic.Succeeded,
+                        PromptTokens: diagnostic.PromptTokens,
+                        CompletionTokens: diagnostic.CompletionTokens,
+                        TotalTokens: diagnostic.PromptTokens + diagnostic.CompletionTokens,
+                        CostUsd: cost,
+                        DurationMs: diagnostic.DurationMs,
+                        ErrorMessage: diagnostic.ErrorMessage,
+                        AccountId: accountId,
+                        CorrelationId: correlationId),
+                    tenantId: accountId,
+                    ct: context.CancellationToken).ConfigureAwait(false);
+
+                if (diagnostic.Succeeded)
+                {
+                    await apiClient.RecordProviderSuccessAsync(
+                        providerName, accountId, context.CancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await apiClient.RecordProviderFailureAsync(
+                        providerName, diagnostic.ErrorMessage, accountId, context.CancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception apiEx)
+            {
+                // Non-fatal — local state already updated.
+                _logger?.LogWarning(apiEx,
+                    "Tamma API diagnostics record failed (local state retained) for {Provider}",
+                    providerName);
+            }
+        }
+
         // Return the updated diagnostics list JSON as the activity result
         context.SetResult(Serialize(diagnosticsList));
     }
