@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Npgsql;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Interceptors;
 using Tamma.Data.Repositories;
 
@@ -42,11 +44,21 @@ public static class DependencyInjection
     ///
     /// <para>Closes port-gap findings orgs/002 (EF filter permissive on null
     /// tenant) and orgs/004 (<c>withTenantContext</c> SET LOCAL gone).</para>
+    ///
+    /// <para><b>Epic 28 (DB-per-Tenant)</b> — this method also registers
+    /// <see cref="ControlPlaneDbContext"/> when
+    /// <paramref name="controlPlaneConnectionString"/> is supplied or
+    /// <c>ConnectionStrings:ControlPlane</c> is set. Until Story 28-2's
+    /// endpoint cutover lands, no caller injects this context; it is
+    /// available for the new auth/admin handlers shipped in subsequent
+    /// stories. Falls back to <paramref name="adminConnectionString"/> for
+    /// local-dev convenience.</para>
     /// </summary>
     public static IServiceCollection AddTammaData(
         this IServiceCollection services,
         string adminConnectionString,
-        string? appConnectionString = null)
+        string? appConnectionString = null,
+        string? controlPlaneConnectionString = null)
     {
         services.AddScoped<ITenantContext, TenantContext>();
 
@@ -97,6 +109,51 @@ public static class DependencyInjection
             });
             options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
         });
+
+        // ── Epic 28: Control-plane context (Story 28-2) ──
+        //
+        // Registers <see cref="ControlPlaneDbContext"/> alongside the legacy
+        // contexts. Until Story 28-2's endpoint migration lands, no handler
+        // injects this context — it exists so the new auth, admin, and
+        // tenant-lifecycle stories (28-5, 28-6, 28-7, 28-9, 28-11) can
+        // inject it as they ship.
+        //
+        // Uses its own migrations history table (__ControlPlaneMigrationsHistory)
+        // so it can coexist with the legacy <see cref="TammaDbContext"/>
+        // without clobbering the existing __TammaMigrationsHistory rows
+        // during the migration window. In production, the connection string
+        // points at the new <c>tamma_control</c> database; in dev it can
+        // fall back to the admin connection so local-laptop Postgres setups
+        // need no extra configuration.
+        var cpConnectionString = string.IsNullOrWhiteSpace(controlPlaneConnectionString)
+            ? adminConnectionString
+            : controlPlaneConnectionString;
+        services.AddDbContext<ControlPlaneDbContext>(options =>
+        {
+            options.UseNpgsql(cpConnectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+        });
+
+        // ── Epic 28: Per-tenant context factory + stub resolver (Story 28-3) ──
+        //
+        // The factory builds a fresh <see cref="TenantDbContext"/> per call,
+        // resolving the per-tenant <see cref="NpgsqlDataSource"/> via the
+        // <see cref="ITenantConnectionResolver"/>. Story 28-4 replaces the
+        // stub resolver with the LRU pool cache backed by
+        // <c>tenants.EncryptedConnectionString</c>; until then every tenant
+        // routes to the same dev DataSource (the central admin connection
+        // string), which is correct for compile-time wiring + dev-laptop
+        // smoke runs but does NOT enforce per-tenant isolation.
+        //
+        // Singleton lifetime: the resolver owns long-lived data sources and
+        // a process-wide pool cache; the factory is cheap and stateless and
+        // can also live as a singleton.
+        services.AddSingleton<ITenantConnectionResolver>(sp =>
+        {
+            var dataSource = NpgsqlDataSource.Create(adminConnectionString);
+            return new StubTenantConnectionResolver(dataSource);
+        });
+        services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
