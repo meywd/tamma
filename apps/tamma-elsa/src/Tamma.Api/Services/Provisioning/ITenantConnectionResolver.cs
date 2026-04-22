@@ -21,7 +21,7 @@ namespace Tamma.Api.Services.Provisioning;
 /// <para><b>Status (audit cranl/004): STUBBED.</b> The interface +
 /// default-central impl land here so the seam is in place without
 /// rewriting every repository. Wiring this into
-/// <see cref="Tamma.Data.TammaAppDbContext"/> via a fresh
+/// <see cref="Tamma.Data.TenantDbContext"/> via a fresh
 /// <see cref="Microsoft.EntityFrameworkCore.DbContextOptionsBuilder"/>
 /// per-request requires plumbing through <c>AddDbContextFactory</c> and
 /// migrating the repository constructors to ask for a factory rather
@@ -53,7 +53,7 @@ public sealed record TenantConnection(
 /// <summary>
 /// Stub <see cref="ITenantConnectionResolver"/> that always returns the
 /// central connection. Replaced once
-/// <c>AddDbContextFactory&lt;TammaAppDbContext&gt;</c> + the per-request
+/// <see cref="Tamma.Data.ITenantDbContextFactory"/> + the per-request
 /// routing seam land — see the interface doc-comment for the cascade
 /// scope reason. Until then every tenant rides on the shared Postgres.
 ///

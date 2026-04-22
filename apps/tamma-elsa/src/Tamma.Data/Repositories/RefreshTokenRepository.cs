@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class RefreshTokenRepository(TammaDbContext db) : IRefreshTokenRepository
+public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRepository
 {
     public async Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
     {

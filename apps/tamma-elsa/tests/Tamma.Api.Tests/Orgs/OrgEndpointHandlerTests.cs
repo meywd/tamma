@@ -28,7 +28,7 @@ public class OrgEndpointHandlerTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032 // Disposed via _scope
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private ITenantRepository _tenantRepo = null!;
     private ITenantMembershipRepository _membershipRepo = null!;
@@ -43,7 +43,7 @@ public class OrgEndpointHandlerTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _tenantRepo = _scope.ServiceProvider.GetRequiredService<ITenantRepository>();
         _membershipRepo = _scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
         _inviteRepo = _scope.ServiceProvider.GetRequiredService<IInviteRepository>();

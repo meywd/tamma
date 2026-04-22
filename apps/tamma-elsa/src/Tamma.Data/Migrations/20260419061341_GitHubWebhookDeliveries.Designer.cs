@@ -12,7 +12,7 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
+    [DbContext(typeof(ControlPlaneDbContext))]
     [Migration("20260419061341_GitHubWebhookDeliveries")]
     partial class GitHubWebhookDeliveries
     {

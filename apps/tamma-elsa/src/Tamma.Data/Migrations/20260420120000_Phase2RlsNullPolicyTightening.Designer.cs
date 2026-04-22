@@ -12,7 +12,7 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
+    [DbContext(typeof(ControlPlaneDbContext))]
     [Migration("20260420120000_Phase2RlsNullPolicyTightening")]
     partial class Phase2RlsNullPolicyTightening
     {

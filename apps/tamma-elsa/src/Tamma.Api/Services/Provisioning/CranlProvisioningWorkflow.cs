@@ -28,7 +28,7 @@ public sealed class CranlProvisioningWorkflow
     public static readonly TimeSpan ApplicationPollTimeout = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
     private readonly ICranlApiClient _cranl;
     private readonly CranlOptions _options;
     private readonly TenantSecretProtector _protector;
@@ -36,7 +36,7 @@ public sealed class CranlProvisioningWorkflow
     private readonly ILogger<CranlProvisioningWorkflow> _logger;
 
     public CranlProvisioningWorkflow(
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ICranlApiClient cranl,
         CranlOptions options,
         TenantSecretProtector protector,

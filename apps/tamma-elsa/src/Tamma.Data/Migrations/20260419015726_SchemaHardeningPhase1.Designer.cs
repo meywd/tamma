@@ -12,7 +12,7 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
+    [DbContext(typeof(ControlPlaneDbContext))]
     [Migration("20260419015726_SchemaHardeningPhase1")]
     partial class SchemaHardeningPhase1
     {

@@ -12,7 +12,7 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
+    [DbContext(typeof(ControlPlaneDbContext))]
     [Migration("20260417010406_WorkflowInstanceResult")]
     partial class WorkflowInstanceResult
     {

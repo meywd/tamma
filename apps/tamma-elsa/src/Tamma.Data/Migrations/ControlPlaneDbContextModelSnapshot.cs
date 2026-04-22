@@ -11,8 +11,8 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
-    partial class TammaDbContextModelSnapshot : ModelSnapshot
+    [DbContext(typeof(ControlPlaneDbContext))]
+    partial class ControlPlaneDbContextModelSnapshot : ModelSnapshot
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {

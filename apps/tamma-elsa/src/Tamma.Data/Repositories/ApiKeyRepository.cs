@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
+public class ApiKeyRepository(ControlPlaneDbContext db) : IApiKeyRepository
 {
     public async Task<ApiKey> CreateAsync(ApiKey apiKey)
     {

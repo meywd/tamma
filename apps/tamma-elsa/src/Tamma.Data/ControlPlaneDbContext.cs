@@ -6,55 +6,37 @@ using Tamma.Data.Entities;
 namespace Tamma.Data;
 
 /// <summary>
-/// <b>OBSOLETE.</b> Superseded by <see cref="ControlPlaneDbContext"/> for CP
-/// tables and <see cref="ITenantDbContextFactory"/> + <see cref="TenantDbContext"/>
-/// for per-tenant data. This class remains during the Wave A.5 cleanup
-/// commit window so repos migrate in staged commits without breaking the
-/// build.
+/// Control-plane <see cref="DbContext"/> that owns the tenant-agnostic
+/// tables: users, tenants (registry), tenant memberships, invites, API keys
+/// (CP-scoped), GitHub installations, webhook deliveries, and auth tokens.
 ///
-/// <para>The obsolete context re-projects <see cref="ControlPlaneDbContext"/>'s
-/// model graph so existing callers continue to compile. Callers MUST NOT
-/// add new dependencies on this type — it is deleted in the final cleanup
-/// commit (Epic 28 isolation model, Wave A.5).</para>
+/// <para>Epic 28 isolation model: control-plane data never carries a
+/// <c>TenantId</c> filter — the rows themselves are either global (users,
+/// plans) or organisational (tenants, memberships, invites). Per-tenant
+/// business data (workflows, prompts, events, queued tasks, budgets,
+/// diagnostics, etc.) lives on <see cref="TenantDbContext"/>, constructed
+/// via <see cref="ITenantDbContextFactory"/>.</para>
+///
+/// <para>Supersedes the Epic 17 dual-context split (<c>TammaDbContext</c>
+/// + <c>TammaAppDbContext</c> + RLS on shared DB). The db-per-tenant
+/// architecture replaces RLS entirely — each tenant eventually gets its
+/// own physical database with no tenant column and no row-level filter.</para>
 /// </summary>
-[Obsolete("Use ControlPlaneDbContext for CP data and ITenantDbContextFactory for tenant data. Deleted in Wave A.5 final cleanup.", error: false)]
-public class TammaDbContext : DbContext
+public class ControlPlaneDbContext : DbContext
 {
-    private readonly ITenantContext? _tenantContext;
-
-    public TammaDbContext(DbContextOptions<TammaDbContext> options)
+    public ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext> options)
         : base(options)
     {
     }
 
-    public TammaDbContext(DbContextOptions<TammaDbContext> options, ITenantContext tenantContext)
-        : base(options)
-    {
-        _tenantContext = tenantContext;
-    }
-
-    protected TammaDbContext(DbContextOptions options)
-        : base(options)
-    {
-    }
-
-    protected TammaDbContext(DbContextOptions options, ITenantContext tenantContext)
-        : base(options)
-    {
-        _tenantContext = tenantContext;
-    }
-
-    protected virtual bool EnforceTenantFilter => false;
-
-    public Guid? CurrentTenantId => _tenantContext?.TenantId;
-
-    // Mentorship entities.
+    // Existing mentorship entities (global registry — shared across tenants,
+    // lives on CP until mentorship becomes a per-tenant feature).
     public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
     public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
     public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
     public DbSet<Story> Stories => Set<Story>();
 
-    // CP entities.
+    // ── Control-plane entities ──
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -66,7 +48,15 @@ public class TammaDbContext : DbContext
     public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
 
-    // Tenant entities (legacy surface).
+    // ── Legacy-shared tables (DEPRECATED) ──
+    //
+    // These DbSets cover tenant-scoped entities that still live on the same
+    // physical database during the Epic 28 transition. They are exposed here
+    // solely so migrations (which run against ControlPlaneDbContext as the
+    // owning context) still see the complete schema graph. Application code
+    // MUST NOT read/write these through ControlPlaneDbContext — use
+    // ITenantDbContextFactory instead. The DbSet surface will move to
+    // TenantDbContext exclusively once Story 28-1 physical-DB split lands.
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
@@ -84,8 +74,6 @@ public class TammaDbContext : DbContext
         base.OnModelCreating(modelBuilder);
         TammaModelConfiguration.ConfigureMentorshipEntities(modelBuilder);
         TammaModelConfiguration.ConfigureControlPlaneEntities(modelBuilder);
-        // Permissive tenant filter: legacy callers injecting TammaDbContext
-        // can still read cross-tenant. Migrated repos use the new contexts.
-        TammaModelConfiguration.ConfigureTenantEntities(modelBuilder, fixedTenantId: null);
+        TammaModelConfiguration.ConfigureTenantEntities(modelBuilder);
     }
 }

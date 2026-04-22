@@ -509,7 +509,7 @@ public static class OrgEndpoints
     public static async Task<IResult> TransferOwnership(
         Guid tenantId,
         TransferOwnershipRequest req,
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IEventRepository events,
@@ -567,7 +567,7 @@ public static class OrgEndpoints
 
     public static async Task<IResult> DeleteOrg(
         Guid tenantId,
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IInviteRepository inviteRepo,

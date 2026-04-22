@@ -16,10 +16,10 @@ namespace Tamma.Api.Services.Provisioning;
 /// </summary>
 public sealed class NullTenantProvisioner : ITenantProvisioner
 {
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
     private readonly ILogger<NullTenantProvisioner> _logger;
 
-    public NullTenantProvisioner(TammaDbContext db, ILogger<NullTenantProvisioner> logger)
+    public NullTenantProvisioner(ControlPlaneDbContext db, ILogger<NullTenantProvisioner> logger)
     {
         _db = db;
         _logger = logger;

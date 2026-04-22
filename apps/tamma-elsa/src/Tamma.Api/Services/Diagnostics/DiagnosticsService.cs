@@ -148,7 +148,7 @@ public sealed class DiagnosticsService : IDiagnosticsService
         }
 
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.ControlPlaneDbContext>();
 
         var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
         var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
