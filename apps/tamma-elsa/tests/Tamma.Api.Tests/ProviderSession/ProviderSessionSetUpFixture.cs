@@ -67,7 +67,7 @@ public class ProviderSessionSetUpFixture
             .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
 
         using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         await db.Database.MigrateAsync();
 
         await using var conn = new NpgsqlConnection(Postgres.GetConnectionString());

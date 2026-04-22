@@ -5,35 +5,10 @@ using Tamma.Data;
 namespace Tamma.Api.Tests.Infrastructure;
 
 /// <summary>
-/// In-memory-friendly <see cref="TammaDbContext"/>. Retained for tests still
-/// referencing the obsolete type during the Wave A.5 transition. New test
-/// code targets <see cref="TestControlPlaneDbContext"/> and
-/// <see cref="TestTenantDbContextFactory"/> directly.
-/// </summary>
-[Obsolete("Use TestControlPlaneDbContext / TestTenantDbContextFactory for Epic 28 tests.", error: false)]
-public class TestDbContext : TammaDbContext
-{
-    public TestDbContext(DbContextOptions<TammaDbContext> options) : base(options) { }
-
-    public TestDbContext(DbContextOptions<TammaDbContext> options, ITenantContext tenantContext)
-        : base(options, tenantContext) { }
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        base.OnModelCreating(modelBuilder);
-
-        // Mentorship entities rely on PG-specific jsonb/row-version types that
-        // the InMemory provider rejects. They aren't needed for prompt tests.
-        modelBuilder.Ignore<JuniorDeveloper>();
-        modelBuilder.Ignore<Story>();
-        modelBuilder.Ignore<MentorshipSession>();
-        modelBuilder.Ignore<MentorshipEvent>();
-    }
-}
-
-/// <summary>
 /// In-memory friendly <see cref="ControlPlaneDbContext"/>. Mirrors the
-/// production class with EF-InMemory-hostile mentorship entities elided.
+/// production class with EF-InMemory-hostile mentorship entities elided
+/// (<c>JsonDocument</c>/<c>jsonb</c>/row-version types the InMemory
+/// provider cannot materialise).
 /// </summary>
 public class TestControlPlaneDbContext : ControlPlaneDbContext
 {

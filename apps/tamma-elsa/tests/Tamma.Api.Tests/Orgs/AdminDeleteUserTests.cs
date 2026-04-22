@@ -28,7 +28,7 @@ public class AdminDeleteUserTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private IUserRepository _userRepo = null!;
     private IApiKeyRepository _apiKeyRepo = null!;
@@ -43,7 +43,7 @@ public class AdminDeleteUserTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();
         _apiKeyRepo = _scope.ServiceProvider.GetRequiredService<IApiKeyRepository>();
         _membershipRepo = _scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();

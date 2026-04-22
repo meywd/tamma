@@ -93,7 +93,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         doc.RootElement.GetProperty("taskId").GetString().Should().NotBeNullOrEmpty();
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var task = await db.QueuedTasks.FirstOrDefaultAsync();
         task.Should().NotBeNull();
@@ -121,7 +121,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
         task.Should().NotBeNull();
@@ -146,7 +146,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
         task.Should().NotBeNull();
@@ -174,7 +174,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         // installation events should NOT land in queued_tasks — they are handled
         // inline by the existing installation router code path.
@@ -197,7 +197,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         json.Should().Contain("\"skipped\":true");
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         (await db.QueuedTasks.AnyAsync()).Should().BeFalse();
     }
 
@@ -216,7 +216,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var tenantId = Guid.NewGuid();
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.Tenants.Add(new Data.Entities.Tenant
             {
                 Id = tenantId,
@@ -246,7 +246,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var assertScope = ApiTestFixture.Factory.Services.CreateScope();
-        var adb = assertScope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var adb = assertScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var queued = await adb.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 7777L);
         queued.Should().NotBeNull();

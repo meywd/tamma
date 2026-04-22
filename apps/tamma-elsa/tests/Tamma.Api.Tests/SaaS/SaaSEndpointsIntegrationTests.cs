@@ -76,7 +76,7 @@ public class SaaSEndpointsIntegrationTests
 
         // A diagnostic row must have been persisted.
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var diagnosticCount = await db.ProviderDiagnostics
             .IgnoreQueryFilters()
             .CountAsync(d => d.ProviderKey == "anthropic-claude");
@@ -111,7 +111,7 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.BadGateway);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var failures = await db.ProviderDiagnostics
             .IgnoreQueryFilters()
             .Where(d => !d.Success)
@@ -142,7 +142,7 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var instance = await db.WorkflowInstances.IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == instanceId);
         instance.Should().NotBeNull();
@@ -190,7 +190,7 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var instance = await db.WorkflowInstances.IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == instanceId);
         instance.Should().NotBeNull();
@@ -224,7 +224,7 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var events = await db.DomainEvents.IgnoreQueryFilters()
             .Where(e => e.Type == "WORKFLOW.FAILED")
             .ToListAsync();
@@ -270,7 +270,7 @@ public class SaaSEndpointsIntegrationTests
         result.Success.Should().BeTrue();
         result.PlaintextKey.Should().StartWith("tamma_sk_");
 
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         (await db.ApiKeys.IgnoreQueryFilters()
             .CountAsync(k => k.OwnerId == installationEntityId.ToString()))
             .Should().Be(1);
@@ -347,7 +347,7 @@ public class SaaSEndpointsIntegrationTests
     private static async Task<(Guid DefinitionId, Guid InstanceId)> SeedWorkflowInstanceAsync()
     {
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var def = new WorkflowDefinition
         {
@@ -375,7 +375,7 @@ public class SaaSEndpointsIntegrationTests
     private static async Task<(Guid UserId, Guid TenantId, Guid InstallationEntityId)> SeedInstallationWithOwnerAsync()
     {
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();

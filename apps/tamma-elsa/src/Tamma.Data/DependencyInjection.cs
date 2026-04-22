@@ -1,7 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Tamma.Data.Interceptors;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Data;
@@ -24,10 +22,6 @@ public static class DependencyInjection
     ///     </description></item>
     /// </list>
     ///
-    /// <para>The obsolete <c>TammaDbContext</c> and <c>TammaAppDbContext</c>
-    /// types are registered transitionally so unmigrated consumers keep
-    /// compiling; they are deleted at the end of the Wave A.5 cleanup.</para>
-    ///
     /// <para>Connection strings:</para>
     /// <list type="bullet">
     ///   <item><description><c>ConnectionStrings:TammaDb</c> — admin / CP
@@ -46,8 +40,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantContext, TenantContext>();
 
         // Control-plane context (migrations-owning). Scoped because auth
-        // handlers, admin endpoints and CP repos depend on it. Uses the
-        // admin connection so CP writes are unconstrained.
+        // handlers, admin endpoints and CP repos depend on it.
         services.AddDbContext<ControlPlaneDbContext>(options =>
         {
             options.UseNpgsql(adminConnectionString, npgsql =>
@@ -55,36 +48,14 @@ public static class DependencyInjection
         });
 
         // Factory for per-tenant contexts. Uses the app connection when
-        // provided (RLS plane on the shared DB during transition), else
-        // falls back to the admin connection.
+        // provided, else falls back to the admin connection.
         var tenantConnectionString = string.IsNullOrWhiteSpace(appConnectionString)
             ? adminConnectionString
             : appConnectionString;
         services.AddSingleton<ITenantDbContextFactory>(
             _ => new TenantDbContextFactory(tenantConnectionString));
 
-        // ──── Obsolete contexts — registered transitionally ────
-        // Kept for unmigrated consumers. Wave A.5 deletes these and the
-        // consumers in the same commit window.
-#pragma warning disable CS0618 // Type or member is obsolete
-        services.AddScoped<TenantContextInterceptor>();
-
-        services.AddDbContext<TammaDbContext>((sp, options) =>
-        {
-            options.UseNpgsql(adminConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
-            options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
-        });
-
-        services.AddDbContext<TammaAppDbContext>((sp, options) =>
-        {
-            options.UseNpgsql(tenantConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
-            options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
-        });
-#pragma warning restore CS0618
-
-        // Control-plane repositories (Epic 28 isolation model).
+        // Control-plane repositories.
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IPasswordResetRepository, PasswordResetRepository>();
@@ -95,7 +66,7 @@ public static class DependencyInjection
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
 
-        // Tenant-scoped repositories (Epic 28 — use ITenantDbContextFactory).
+        // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();

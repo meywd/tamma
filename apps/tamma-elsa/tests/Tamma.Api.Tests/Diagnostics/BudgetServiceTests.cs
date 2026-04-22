@@ -20,7 +20,7 @@ public class BudgetServiceTests
     private IServiceScope _scope = null!;
     // DbContext is owned by _scope; disposing the scope cascades.
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private IDiagnosticsRepository _repo = null!;
     private IDiagnosticsService _service = null!;
@@ -31,7 +31,7 @@ public class BudgetServiceTests
     {
         await DiagnosticsSetUpFixture.ResetDatabaseAsync();
         _scope = DiagnosticsTestHarness.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _repo = _scope.ServiceProvider.GetRequiredService<IDiagnosticsRepository>();
         _service = _scope.ServiceProvider.GetRequiredService<IDiagnosticsService>();
         _budgetProvider = _scope.ServiceProvider.GetRequiredService<IBudgetConfigProvider>();

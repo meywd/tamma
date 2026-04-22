@@ -105,7 +105,7 @@ public class TenancySetUpFixture
         // Materialise the factory + run migrations via Program.cs.
         using (var scope = Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             await db.Database.MigrateAsync();
         }
 

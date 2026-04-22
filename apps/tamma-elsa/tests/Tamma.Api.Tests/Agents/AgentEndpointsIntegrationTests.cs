@@ -83,7 +83,7 @@ public class AgentEndpointsIntegrationTests
 
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.ControlPlaneDbContext>();
             db.Tenants.Add(new Tamma.Data.Entities.Tenant
             {
                 Id = tenantId,

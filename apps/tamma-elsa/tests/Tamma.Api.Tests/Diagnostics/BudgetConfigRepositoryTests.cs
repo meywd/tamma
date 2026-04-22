@@ -19,7 +19,7 @@ public class BudgetConfigRepositoryTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private IBudgetConfigRepository _repo = null!;
 
@@ -28,7 +28,7 @@ public class BudgetConfigRepositoryTests
     {
         await DiagnosticsSetUpFixture.ResetDatabaseAsync();
         _scope = DiagnosticsTestHarness.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _repo = _scope.ServiceProvider.GetRequiredService<IBudgetConfigRepository>();
     }
 
