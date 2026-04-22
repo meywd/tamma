@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin "@tailwindcss/typography";
 
 /* Typography is loaded via <link> in index.html (Space Grotesk + JetBrains Mono — matches marketing site). */
 
