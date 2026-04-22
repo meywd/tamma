@@ -390,6 +390,12 @@ builder.Services.AddSingleton<Tamma.Api.Services.Engine.Lifecycle.IEngineLifecyc
 builder.Services.Configure<Tamma.Api.Services.Engine.Lifecycle.EngineLifecycleOptions>(
     builder.Configuration.GetSection("EngineLifecycle"));
 builder.Services.AddHostedService<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatService>();
+
+// Story 28-6: in-process platform-event bus. Subscribers attach in this
+// process only; multi-pod fanout pending a Postgres LISTEN/NOTIFY bridge
+// against platform_events. Repository registration lives in AddTammaData.
+builder.Services.AddPlatformEventBus();
+
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
 // Controllers (for existing mentorship controller)
