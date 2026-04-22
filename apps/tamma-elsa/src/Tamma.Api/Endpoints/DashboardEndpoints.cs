@@ -18,9 +18,14 @@ public static class DashboardEndpoints
         IEventRepository eventRepo,
         IWorkflowRepository workflowRepo,
         IEngineRegistry engineRegistry,
-        TammaDbContext db,
+        TammaAppDbContext db,
         ITenantContext tc)
     {
+        // Story 19-6: per-request reads route through TammaAppDbContext so
+        // the EF fail-closed query filter + Phase-2 RLS policies (active
+        // when the connection binds as `tamma_app`) both fire. The
+        // `tc.TenantId == null || ...` guard remains as defense-in-depth.
+
         // True total-events count (the previous QueryAsync(..., 1000) was
         // capped at 1000 and presented as if it were a true total).
         var totalEvents = await db.DomainEvents
@@ -78,7 +83,7 @@ public static class DashboardEndpoints
     /// </summary>
     public static async Task<IResult> GetWorkflows(
         IWorkflowRepository workflowRepo,
-        TammaDbContext db,
+        TammaAppDbContext db,
         ITenantContext tc)
     {
         var defs = await workflowRepo.ListDefinitionsAsync();
