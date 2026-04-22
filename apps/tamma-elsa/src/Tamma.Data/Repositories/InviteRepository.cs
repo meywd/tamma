@@ -53,6 +53,18 @@ public class InviteRepository(TammaDbContext db) : IInviteRepository
         return rows.Count;
     }
 
+    public async Task<UserInvite?> GetByIdScopedAsync(Guid tenantId, Guid id)
+        => await db.UserInvites
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId);
+
+    public async Task ExtendExpiryAsync(Guid id, DateTime newExpiresAt)
+    {
+        var invite = await db.UserInvites.FindAsync(id);
+        if (invite is null) return;
+        invite.ExpiresAt = newExpiresAt;
+        await db.SaveChangesAsync();
+    }
+
     [Obsolete("Use DeleteScopedAsync for per-tenant invariant. Kept for transitional callers.")]
     public async Task DeleteAsync(Guid id)
     {

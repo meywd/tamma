@@ -15,6 +15,13 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
       { to: '/keys', label: 'API Keys' },
     ],
   },
+  {
+    // Story 18-8: tenant-admin user-mgmt UI. Visible to all members; the
+    // TenantAdminGuard renders a friendly 403 if the user lacks admin/
+    // owner role inside their active tenant.
+    label: 'Organization',
+    items: [{ to: '/settings/organization', label: 'Members & Audit' }],
+  },
 ];
 
 const ADMIN_NAV_GROUPS: NavGroup[] = [
