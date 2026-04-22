@@ -35,7 +35,7 @@ public class CrossEpicIntegrationTests
         _tenantB = Guid.NewGuid();
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         // Seed two tenant rows — agent_configs FK requires them.
         db.Tenants.Add(new Tenant
