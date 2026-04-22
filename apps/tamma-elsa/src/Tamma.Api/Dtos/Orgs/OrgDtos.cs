@@ -15,7 +15,10 @@ public record UpdateMemberRoleRequest(string Role);
 public record CreateOrgInviteRequest(string Email, string Role);
 public record AcceptInviteRequest(string Token);
 public record TransferOwnershipRequest(Guid NewOwnerId);
-public record SwitchOrgRequest(Guid TenantId);
+// Story 28-9: the Story-18-3 `SwitchOrgRequest` record was deleted along
+// with `OrgEndpoints.SwitchOrg`. The canonical switch-org request body now
+// lives at `Tamma.Api.Dtos.Auth.SwitchOrgRequest` (carries both TenantId
+// and optional RefreshToken for rotation).
 
 public record OrgResponse(
     Guid Id,

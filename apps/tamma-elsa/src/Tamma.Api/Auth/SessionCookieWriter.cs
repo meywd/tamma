@@ -5,11 +5,13 @@ namespace Tamma.Api.Auth;
 /// nginx auth_request gate rely on for cross-subdomain session state.
 /// Mirrors the TS <c>reply.setCookie('tamma_session', ...)</c> calls in
 /// <c>packages/api/src/routes/orgs/index.ts</c> (switch-org,
-/// <see cref="OrgEndpoints.SwitchOrg"/>) and the auth login flow.
+/// <see cref="AuthEndpoints.SwitchOrg"/>) and the auth login flow.
 ///
-/// <para>Finding 018 remediation: the C# <c>SwitchOrg</c> only returned the
-/// JWT in JSON and never wrote the cookie, breaking the browser's ability
-/// to pick up the new tenant on subsequent requests.</para>
+/// <para>Finding 018 remediation: the original Story-18-3 switch-org only
+/// returned the JWT in JSON and never wrote the cookie, breaking the
+/// browser's ability to pick up the new tenant on subsequent requests. The
+/// canonical Story-28-9 handler (<c>AuthEndpoints.SwitchOrg</c>) now calls
+/// <see cref="WriteSession"/> alongside refresh-token rotation.</para>
 /// </summary>
 public interface ISessionCookieWriter
 {

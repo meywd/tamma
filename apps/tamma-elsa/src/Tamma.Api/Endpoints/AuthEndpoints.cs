@@ -689,7 +689,10 @@ public static class AuthEndpoints
             user, req.TenantId, role, tenantClaims);
 
         // Cookie write so the next browser request lands in the new tenant
-        // automatically. Mirrors finding 018 / OrgEndpoints.SwitchOrg.
+        // automatically. Addresses audit finding 018 (the Story-18-3
+        // OrgEndpoints.SwitchOrg only returned the JWT in JSON and never wrote
+        // the cookie; that handler has since been deleted, and this handler is
+        // the canonical surface for the switch).
         cookieWriter.WriteSession(httpContext, accessToken);
 
         return Results.Ok(new SwitchOrgResponse(

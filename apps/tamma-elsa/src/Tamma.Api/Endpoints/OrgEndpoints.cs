@@ -616,41 +616,17 @@ public static class OrgEndpoints
         });
     }
 
-    public static async Task<IResult> SwitchOrg(
-        SwitchOrgRequest req,
-        ITenantMembershipRepository membershipRepo,
-        IUserRepository userRepo,
-        IJwtService jwtService,
-        ISessionCookieWriter cookieWriter,
-        ClaimsPrincipal principal,
-        HttpContext httpContext)
-    {
-        var userId = ResolveUserId(principal);
-        if (userId is null) return Results.Unauthorized();
-
-        var role = await membershipRepo.GetRoleAsync(req.TenantId, userId.Value);
-        if (role is null)
-            return Results.Json(new { error = "Not a member of the target organization" }, statusCode: 403);
-
-        var user = await userRepo.GetByIdAsync(userId.Value);
-        if (user is null)
-            return Results.Json(new { error = "User not found" }, statusCode: 401);
-
-        await userRepo.UpdateActiveTenantAsync(userId.Value, req.TenantId);
-        var accessToken = jwtService.GenerateAccessToken(user, req.TenantId, role);
-
-        // Finding 018: write the tamma_session cookie so the dashboard's
-        // next request automatically uses the new tenant.
-        cookieWriter.WriteSession(httpContext, accessToken);
-
-        return Results.Ok(new
-        {
-            accessToken,
-            tenantId = req.TenantId,
-            role,
-            expiresIn = 900,
-        });
-    }
+    // Story 28-9: the original `OrgEndpoints.SwitchOrg` (Story 18-3) called
+    // `IUserRepository.UpdateActiveTenantAsync` directly, which at runtime
+    // triggers the Phase-2 `prevent_tenant_id_change` Postgres trigger and
+    // fails for every user whose personal tenant is already set (uuid→uuid
+    // update path is blocked). The canonical handler now lives at
+    // `AuthEndpoints.SwitchOrg` (POST /api/v1/auth/switch-org), which stashes
+    // the runtime active tenant in `users.Settings.activeTenantId` JSON —
+    // avoiding the trigger — and additionally rotates the refresh token.
+    // The method and its route registration have both been deleted; the old
+    // path `POST /api/v1/orgs/switch-org` now 404s (covered by
+    // `Tamma.Api.Tests.Orgs.OrgSwitchOrgRoute404Tests`).
 
     public static async Task<IResult> ListTenants(
         ITenantRepository tenantRepo,
