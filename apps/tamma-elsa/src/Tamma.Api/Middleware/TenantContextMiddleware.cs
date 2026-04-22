@@ -93,10 +93,13 @@ public class TenantContextMiddleware(RequestDelegate next)
             resolved = sp.TenantId; // already pre-resolved from X-Tenant-Id
         }
 
-        // Source 2: JWT claim (either name).
+        // Source 2: JWT claim. Story 28-9 promoted `active_tenant_id` to the
+        // canonical claim name; `tenantId` and `tid` are kept as legacy
+        // fallbacks so tokens minted before the rollout still resolve.
         if (resolved is null)
         {
-            var tidClaim = context.User.FindFirst("tenantId")?.Value
+            var tidClaim = context.User.FindFirst("active_tenant_id")?.Value
+                ?? context.User.FindFirst("tenantId")?.Value
                 ?? context.User.FindFirst("tid")?.Value;
             if (!string.IsNullOrEmpty(tidClaim) && Guid.TryParse(tidClaim, out var fromClaim))
             {

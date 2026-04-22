@@ -703,7 +703,11 @@ auth.MapPost("/refresh", AuthEndpoints.Refresh);
 auth.MapPost("/logout", AuthEndpoints.Logout).RequireAuthorization("MemberAccess");
 auth.MapPost("/password-reset/request", AuthEndpoints.PasswordResetRequest);
 auth.MapPost("/password-reset/confirm", AuthEndpoints.PasswordResetConfirm);
-auth.MapPost("/switch-org", OrgEndpoints.SwitchOrg).RequireAuthorization("MemberAccess");
+// Story 28-9 — switch-org owns refresh-token rotation alongside the new JWT
+// mint, so it lives in AuthEndpoints. The Story 18-3 OrgEndpoints version
+// stays in place for any future `/api/v1/orgs/switch` wiring but is no
+// longer mounted under /auth.
+auth.MapPost("/switch-org", AuthEndpoints.SwitchOrg).RequireAuthorization("MemberAccess");
 
 app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("AuthenticatedAny");
 // /api/auth/role-check is the nginx auth_request gate — must accept either

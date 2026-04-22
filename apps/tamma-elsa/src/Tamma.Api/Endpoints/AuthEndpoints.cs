@@ -32,6 +32,100 @@ public static class AuthEndpoints
         return $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
     }
 
+    /// <summary>
+    /// Loads the user's full membership list and projects it to the JWT
+    /// <c>tenants</c> claim shape. Story 28-9 — every token (login, refresh,
+    /// switch-org, GitHub callback) carries the array so the dashboard can
+    /// render a tenant switcher and the switch-org gate can validate
+    /// membership without a DB hit.
+    /// </summary>
+    private static async Task<List<TenantClaim>> LoadTenantClaimsAsync(
+        ITenantMembershipRepository membershipRepo, Guid userId)
+    {
+        var memberships = await membershipRepo.GetUserTenantsAsync(userId);
+        return memberships
+            .Where(m => m.TenantId != Guid.Empty)
+            .Select(m => new TenantClaim(m.TenantId, m.Role))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Story 28-9 — persists the per-user "active tenant" across refreshes.
+    /// The Phase-2 <c>prevent_tenant_id_change</c> trigger blocks any
+    /// <c>uuid → uuid</c> change to <c>users.TenantId</c>, so once the user
+    /// has a personal tenant we cannot rebind that column. The fallback is
+    /// <c>users.Settings.activeTenantId</c>, a JSON field already designed
+    /// for per-user mutable preferences. First-time activation (when
+    /// <c>users.TenantId</c> is still NULL) still uses
+    /// <c>UpdateActiveTenantAsync</c> because <c>NULL → uuid</c> IS allowed
+    /// and that path keeps the EnsurePersonalTenantMiddleware bootstrap
+    /// working.
+    /// </summary>
+    private static async Task PersistActiveTenantAsync(
+        IUserRepository userRepo, Guid userId, Guid tenantId)
+    {
+        var user = await userRepo.GetByIdAsync(userId);
+        if (user is null) return;
+
+        if (user.TenantId is null || user.TenantId.Value == Guid.Empty)
+        {
+            // Trigger permits NULL → uuid; do the legacy update.
+            await userRepo.UpdateActiveTenantAsync(userId, tenantId);
+            return;
+        }
+
+        // uuid → uuid blocked at the DB level. Stash the runtime active
+        // tenant in the Settings JSON instead.
+        var raw = user.Settings ?? "{}";
+        Dictionary<string, object?> settings;
+        try
+        {
+            settings = System.Text.Json.JsonSerializer
+                .Deserialize<Dictionary<string, object?>>(raw)
+                ?? new Dictionary<string, object?>();
+        }
+        catch
+        {
+            // Defensive — if the column was hand-edited or written by a
+            // legacy code path with a non-object shape, reset rather than
+            // throw.
+            settings = new Dictionary<string, object?>();
+        }
+        settings["activeTenantId"] = tenantId.ToString();
+        await userRepo.UpdateUserSettingsAsync(
+            userId, System.Text.Json.JsonSerializer.Serialize(settings));
+    }
+
+    /// <summary>
+    /// Story 28-9 — read counterpart to <see cref="PersistActiveTenantAsync"/>.
+    /// Resolution order: Settings JSON <c>activeTenantId</c> (set by
+    /// switch-org on uuid→uuid moves), then the legacy <c>users.TenantId</c>
+    /// column (still authoritative when the user has never switched).
+    /// </summary>
+    private static Guid? ReadActiveTenantId(User user)
+    {
+        var settingsRaw = user.Settings ?? "{}";
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(settingsRaw);
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("activeTenantId", out var prop)
+                && prop.ValueKind == System.Text.Json.JsonValueKind.String
+                && Guid.TryParse(prop.GetString(), out var fromSettings)
+                && fromSettings != Guid.Empty)
+            {
+                return fromSettings;
+            }
+        }
+        catch
+        {
+            // fall through to column
+        }
+        return user.TenantId is null || user.TenantId.Value == Guid.Empty
+            ? null
+            : user.TenantId.Value;
+    }
+
     private static CookieOptions BuildSessionCookie(IConfiguration config, int maxAgeSeconds)
     {
         // Cookie domain comes from config so dev (localhost) gets no Domain
@@ -279,8 +373,13 @@ public static class AuthEndpoints
             if (memberRole is not null) role = memberRole;
         }
 
+        // Story 28-9 — every access token carries the full tenants list so
+        // the dashboard can show a switcher and switch-org can validate
+        // membership against the token.
+        var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, user.Id);
+
         var accessToken = jwtService.GenerateAccessToken(
-            user, tenantId == Guid.Empty ? null : tenantId, role);
+            user, tenantId == Guid.Empty ? null : tenantId, role, tenantClaims);
         var refreshToken = jwtService.GenerateRefreshToken();
         var refreshHash = HashToken(refreshToken);
 
@@ -343,13 +442,37 @@ public static class AuthEndpoints
         if (user is null)
             return Results.Json(new { error = "User not found" }, statusCode: 401);
 
-        var tenantId = user.TenantId ?? Guid.Empty;
-        var role = "member";
-        if (tenantId != Guid.Empty)
+        // Story 28-9 — preserve the active tenant across refresh. Resolution
+        // honours the runtime activeTenantId (Settings JSON, written by
+        // switch-org on uuid→uuid moves) before the legacy users.TenantId
+        // column. Only when the user has lost membership in their stored
+        // active tenant do we fall back to the first available membership;
+        // that happens when an admin removed them between refreshes.
+        var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, user.Id);
+        var storedTenantId = ReadActiveTenantId(user) ?? Guid.Empty;
+        Guid tenantId = Guid.Empty;
+        string role = "member";
+
+        if (storedTenantId != Guid.Empty
+            && tenantClaims.Any(t => t.TenantId == storedTenantId))
         {
-            var memberRole = await membershipRepo.GetRoleAsync(tenantId, user.Id);
-            if (memberRole is not null) role = memberRole;
+            tenantId = storedTenantId;
+            role = tenantClaims.First(t => t.TenantId == storedTenantId).Role;
         }
+        else if (tenantClaims.Count > 0)
+        {
+            // Membership lost — drop to the first available tenant and
+            // persist it so subsequent refreshes are stable.
+            tenantId = tenantClaims[0].TenantId;
+            role = tenantClaims[0].Role;
+            await PersistActiveTenantAsync(userRepo, user.Id, tenantId);
+            loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
+                .LogInformation(
+                    "USER.REFRESH_TENANT_FALLBACK userId={UserId} oldTenantId={OldTenantId} newTenantId={NewTenantId} — active tenant lost; reset to first available",
+                    user.Id, storedTenantId, tenantId);
+        }
+        // else: zero memberships — leave tenantId Empty; access token will
+        // emit empty `tenants` claim and middleware fail-closed (as today).
 
         // Rotate: revoke the presented token, mint and persist a new one.
         await refreshTokenRepo.RevokeAsync(token.Id);
@@ -358,7 +481,7 @@ public static class AuthEndpoints
         await refreshTokenRepo.CreateAsync(user.Id, newRefreshHash, DateTime.UtcNow.AddDays(7));
 
         var accessToken = jwtService.GenerateAccessToken(
-            user, tenantId == Guid.Empty ? null : tenantId, role);
+            user, tenantId == Guid.Empty ? null : tenantId, role, tenantClaims);
 
         // Update the session cookie to the new access JWT.
         httpContext.Response.Cookies.Append("tamma_session", accessToken,
@@ -483,6 +606,98 @@ public static class AuthEndpoints
         await refreshTokenRepo.RevokeAllForUserAsync(user.Id);
 
         return Results.Ok(new { message = "Password reset successfully" });
+    }
+
+    /// <summary>
+    /// Story 28-9 — <c>POST /api/v1/auth/switch-org { tenantId }</c>. Re-issues
+    /// the access JWT and rotates the refresh token to scope the session to a
+    /// new tenant. Membership is verified against the DB; non-members get 403.
+    /// On success, the user's <c>active_tenant_id</c> is persisted, the old
+    /// refresh token is revoked, and the <c>tamma_session</c> cookie is
+    /// updated with the new JWT so the dashboard's next request lands in the
+    /// new tenant context.
+    /// </summary>
+    public static async Task<IResult> SwitchOrg(
+        SwitchOrgRequest req,
+        IUserRepository userRepo,
+        ITenantMembershipRepository membershipRepo,
+        IJwtService jwtService,
+        IRefreshTokenRepository refreshTokenRepo,
+        ISessionCookieWriter cookieWriter,
+        ClaimsPrincipal principal,
+        HttpContext httpContext)
+    {
+        var userIdRaw = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(userIdRaw, out var userId))
+            return Results.Unauthorized();
+
+        if (req.TenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId is required" });
+
+        // Membership gate — DB lookup, not the token. The token's `tenants`
+        // claim is for UI hints; the DB is the source of truth at every
+        // privileged transition.
+        var role = await membershipRepo.GetRoleAsync(req.TenantId, userId);
+        if (role is null)
+            return Results.Json(
+                new { error = "Not a member of the target organization" },
+                statusCode: 403);
+
+        var user = await userRepo.GetByIdAsync(userId);
+        if (user is null)
+            return Results.Json(new { error = "User not found" }, statusCode: 401);
+
+        // Persist new active tenant before issuing the token so a refresh
+        // racing with switch-org converges on the same tenant. Goes through
+        // PersistActiveTenantAsync because the Phase-2
+        // prevent_tenant_id_change trigger blocks uuid→uuid updates of
+        // users.TenantId — Settings JSON is the runtime stash.
+        await PersistActiveTenantAsync(userRepo, userId, req.TenantId);
+
+        // Story 28-9 — rotate the refresh token alongside the access token so
+        // the entire session is bound to the new tenant. The dashboard's
+        // refresh handler picks up the new (cookie-only) refresh token; the
+        // body returns the rotated value for clients that read the JSON.
+        // Caller-supplied refresh token is optional — if not present, all of
+        // the user's existing refresh tokens are revoked so a stale tab
+        // can't keep re-issuing access tokens for the previous tenant.
+        var presented = req.RefreshToken;
+        if (!string.IsNullOrEmpty(presented))
+        {
+            var presentedHash = HashToken(presented);
+            var existing = await refreshTokenRepo.GetByTokenHashAsync(presentedHash);
+            if (existing is not null && existing.UserId == userId && existing.RevokedAt is null)
+            {
+                await refreshTokenRepo.RevokeAsync(existing.Id);
+            }
+        }
+        else
+        {
+            // No refresh token in the request body — revoke all active
+            // refresh tokens for this user so stale clients can't keep the
+            // old tenant alive. Same shape as a password-reset.
+            await refreshTokenRepo.RevokeAllForUserAsync(userId);
+        }
+
+        var newRefresh = jwtService.GenerateRefreshToken();
+        var newRefreshHash = HashToken(newRefresh);
+        await refreshTokenRepo.CreateAsync(userId, newRefreshHash, DateTime.UtcNow.AddDays(7));
+
+        var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, userId);
+        var accessToken = jwtService.GenerateAccessToken(
+            user, req.TenantId, role, tenantClaims);
+
+        // Cookie write so the next browser request lands in the new tenant
+        // automatically. Mirrors finding 018 / OrgEndpoints.SwitchOrg.
+        cookieWriter.WriteSession(httpContext, accessToken);
+
+        return Results.Ok(new SwitchOrgResponse(
+            AccessToken: accessToken,
+            RefreshToken: newRefresh,
+            TenantId: req.TenantId,
+            Role: role,
+            ExpiresIn: 900));
     }
 
     public static async Task<IResult> GetMe(
@@ -742,8 +957,12 @@ public static class AuthEndpoints
             if (memberRole is not null) role = memberRole;
         }
 
+        // Story 28-9 — populate the tenants claim for cross-org dashboard
+        // navigation.
+        var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, user.Id);
+
         var jwt = jwtService.GenerateAccessToken(
-            user, activeTenantId == Guid.Empty ? null : activeTenantId, role);
+            user, activeTenantId == Guid.Empty ? null : activeTenantId, role, tenantClaims);
         var refreshToken = jwtService.GenerateRefreshToken();
         await refreshTokenRepo.CreateAsync(user.Id, HashToken(refreshToken),
             DateTime.UtcNow.AddDays(7));

@@ -6,6 +6,28 @@ public record LoginRequest(string Email, string Password);
 public record LoginResponse(string AccessToken, string RefreshToken, int ExpiresIn, UserInfo User);
 public record RefreshRequest(string? RefreshToken);
 public record RefreshResponse(string AccessToken, string RefreshToken, int ExpiresIn);
+
+/// <summary>
+/// Story 28-9 — request body for <c>POST /api/v1/auth/switch-org</c>.
+/// Carries the target tenant id plus an optional current refresh token; when
+/// present the rotator revokes only that specific token (precise rotation),
+/// when absent it revokes every refresh token for the user (defensive
+/// rotation). Distinct from <see cref="Tamma.Api.Dtos.Orgs.SwitchOrgRequest"/>
+/// (Story 18-3) which only carried <c>TenantId</c>.
+/// </summary>
+public record SwitchOrgRequest(Guid TenantId, string? RefreshToken = null);
+
+/// <summary>
+/// Story 28-9 — response from <c>POST /api/v1/auth/switch-org</c>. Includes
+/// the rotated refresh token so non-cookie clients (CLI, integration tests)
+/// can keep refreshing without a re-login.
+/// </summary>
+public record SwitchOrgResponse(
+    string AccessToken,
+    string RefreshToken,
+    Guid TenantId,
+    string Role,
+    int ExpiresIn);
 public record PasswordResetRequestDto(string Email);
 public record PasswordResetConfirmDto(string Token, string NewPassword);
 public record VerifyEmailRequest(string Token);
