@@ -13,6 +13,7 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/account', label: 'Account' },
       { to: '/keys', label: 'API Keys' },
+      { to: '/settings/prompts', label: 'AI Prompts' },
     ],
   },
   {
@@ -38,7 +39,6 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { to: '/settings/security', label: 'Security' },
       { to: '/settings/health', label: 'Provider Health' },
       { to: '/settings/budget', label: 'Budget & Cost' },
-      { to: '/settings/prompts', label: 'Prompt Templates' },
     ],
   },
   {
