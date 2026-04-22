@@ -9,6 +9,11 @@ on:
     branches: [main]
   pull_request:
 
+# Minimal permissions — this workflow only needs to read the checked-out
+# tree to grep for forbidden literals. No write scopes.
+permissions:
+  contents: read
+
 jobs:
   forbidden-symbols:
     runs-on: ubuntu-latest
