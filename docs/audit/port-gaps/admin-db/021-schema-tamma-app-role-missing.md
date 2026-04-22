@@ -1,9 +1,21 @@
 # Finding 021: `tamma_app` non-superuser role not created by EF migrations
 
+> **SUPERSEDED (Wave A.5, 2026-04-18)**: Epic 28 db-per-tenant isolation
+> replaces the shared-DB + `tamma_app` role plane entirely. Each tenant
+> has its own physical Postgres database; the per-tenant connection
+> can use whatever role the tenant DB host provisions — there is no
+> shared-DB non-superuser role to create centrally. The Phase-2
+> `tamma_app` role remains installed by the historic
+> `Phase2RlsAndTriggers` migration for backward-compat, but the
+> runtime no longer depends on it. Related scaffold
+> (`TammaAppDbContext` + `TenantContextInterceptor`) was deleted in
+> Wave A.5 commits `7289d4b`, `3548f12`, `fc3be04`. This finding is
+> resolved by the Epic 28 architectural shift.
+
 **Scope**: admin-db
-**Severity**: P0
-**Status**: Data-model regression
-**Estimated port effort**: 3h
+**Severity**: P0 — **Superseded by Epic 28 db-per-tenant**
+**Status**: Superseded
+**Estimated port effort**: 3h (resolved by Epic 28 architectural shift, not per-finding fix)
 
 ## Remediation status
 

@@ -4,25 +4,24 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace Tamma.Data;
 
 /// <summary>
-/// Design-time factory used by <c>dotnet ef migrations add/script</c>. The
-/// runtime DI registration (DependencyInjection.cs) wires the real
-/// <c>TammaDbContext</c> with a runtime <see cref="ITenantContext"/>; the
-/// design-time path only needs the parameterless constructor variant. We
-/// use a placeholder Postgres connection string — migrations are generated
-/// from the model graph, not the live database.
+/// Design-time factory used by <c>dotnet ef migrations add/script</c>.
+/// Targets <see cref="ControlPlaneDbContext"/> — the CP context owns the
+/// migrations history table on the shared Postgres. Per-tenant contexts
+/// do not run migrations; they rely on the CP context having brought
+/// the schema up.
 /// </summary>
-public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<TammaDbContext>
+public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<ControlPlaneDbContext>
 {
-    public TammaDbContext CreateDbContext(string[] args)
+    public ControlPlaneDbContext CreateDbContext(string[] args)
     {
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
             ?? "Host=localhost;Port=5432;Database=tamma_design;Username=tamma;Password=tamma";
 
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
+        var options = new DbContextOptionsBuilder<ControlPlaneDbContext>()
             .UseNpgsql(connectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"))
             .Options;
 
-        return new TammaDbContext(options);
+        return new ControlPlaneDbContext(options);
     }
 }

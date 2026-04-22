@@ -17,31 +17,24 @@ namespace Tamma.Api.Tests.PromptStore;
 [TestFixture]
 public class PromptStoreServiceTests
 {
-    private TammaAppDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private PromptRepository _repo = null!;
     private PromptStoreService _service = null!;
 
     [SetUp]
     public void SetUp()
     {
-        // Story 19-6: PromptRepository now takes TammaAppDbContext so the
-        // unit fixture mirrors that. The in-memory provider doesn't honour
-        // RLS; the InMemoryDatabase scheme is shared by name so two
-        // instances of TestAppDbContext over the same name see the same data.
-        var options = new DbContextOptionsBuilder<TammaAppDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
-        _db = new TestAppDbContext(options);
-        _repo = new PromptRepository(_db);
+        _fx = new InMemoryDbFixture();
+        _db = _fx.Cp;
+        _repo = new PromptRepository(_fx.Factory, new TenantContext(), _db);
         _service = new PromptStoreService(_repo);
     }
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
-        _db.Dispose();
+        await _fx.DisposeAsync();
     }
 
     // ------------------------------------------------------------------

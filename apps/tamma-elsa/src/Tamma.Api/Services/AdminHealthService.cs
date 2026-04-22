@@ -36,11 +36,11 @@ public class AdminHealthService : IAdminHealthService
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _config;
 
-    public AdminHealthService(TammaDbContext db, IHttpClientFactory httpClientFactory, IConfiguration config)
+    public AdminHealthService(ControlPlaneDbContext db, IHttpClientFactory httpClientFactory, IConfiguration config)
     {
         _db = db;
         _httpClientFactory = httpClientFactory;

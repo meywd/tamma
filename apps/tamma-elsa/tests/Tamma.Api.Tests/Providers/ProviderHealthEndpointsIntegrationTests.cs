@@ -213,7 +213,7 @@ public class ProviderHealthEndpointsIntegrationTests
             await PostFailureAsync("anthropic");
 
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var row = await db.ProviderHealths
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(h => h.ProviderKey == "anthropic");
@@ -575,7 +575,7 @@ public class ProviderHealthEndpointsIntegrationTests
     private async Task SeedAgentConfigAsync(string configJson)
     {
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var existing = await db.AgentConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == null);
         if (existing is null)

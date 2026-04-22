@@ -29,7 +29,8 @@ namespace Tamma.Api.Tests.Email;
 [TestFixture]
 public class SmtpEmailServiceOutboxTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private EmailOutboxRepository _outbox = null!;
     private EventRepository _events = null!;
     private TenantContext _tenantContext = null!;
@@ -38,16 +39,11 @@ public class SmtpEmailServiceOutboxTests
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
+        _fx = new InMemoryDbFixture();
         _tenantContext = new TenantContext();
-        _db = new TestDbContext(options, _tenantContext);
-        _outbox = new EmailOutboxRepository(_db);
-        _events = new EventRepository(_db);
+        _db = _fx.Cp;
+        _outbox = new EmailOutboxRepository(_fx.Factory, _db);
+        _events = new EventRepository(_fx.Factory, _tenantContext, _db);
 
         _config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -58,7 +54,7 @@ public class SmtpEmailServiceOutboxTests
     }
 
     [TearDown]
-    public void TearDown() => _db.Dispose();
+    public async Task TearDown() => await _fx.DisposeAsync();
 
     private SmtpEmailService NewService() => new(
         _outbox, _events, _tenantContext, _config,

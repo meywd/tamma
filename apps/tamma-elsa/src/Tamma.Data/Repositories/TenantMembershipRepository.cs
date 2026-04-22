@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class TenantMembershipRepository(TammaDbContext db) : ITenantMembershipRepository
+public class TenantMembershipRepository(ControlPlaneDbContext db) : ITenantMembershipRepository
 {
     public async Task<TenantMembership> AddAsync(Guid tenantId, Guid userId, string role)
     {

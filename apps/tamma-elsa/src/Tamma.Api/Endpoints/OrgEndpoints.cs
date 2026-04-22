@@ -654,12 +654,7 @@ public static class OrgEndpoints
     public static async Task<IResult> TransferOwnership(
         Guid tenantId,
         TransferOwnershipRequest req,
-        // Story 19-6: per-request tx context binds to TammaAppDbContext so
-        // RLS + fail-closed EF filter both fire on this code path. The
-        // tenancy-scoped repositories injected separately resolve their own
-        // contexts; the transaction here only spans the inline `tenant`
-        // mutation since EF transactions don't cross DbContexts.
-        TammaAppDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IEventRepository events,
@@ -717,8 +712,7 @@ public static class OrgEndpoints
 
     public static async Task<IResult> DeleteOrg(
         Guid tenantId,
-        // Story 19-6: same rationale as TransferOwnership above.
-        TammaAppDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IInviteRepository inviteRepo,

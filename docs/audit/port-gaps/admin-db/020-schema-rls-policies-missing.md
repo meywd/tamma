@@ -1,9 +1,22 @@
 # Finding 020: RLS tenant isolation policies entirely absent from EF schema
 
+> **SUPERSEDED (Wave A.5, 2026-04-18)**: Epic 28 db-per-tenant isolation
+> replaces RLS entirely. Each tenant has its own physical Postgres
+> database; tenancy is enforced by the connection string, not by
+> row-level policies. The Phase-2 RLS scaffold (policies + `tamma_app`
+> role + `ENABLE ROW LEVEL SECURITY` on 14 tables) remains in the
+> migration history for backward-compat but is architecturally inert —
+> the tables either move to per-tenant DBs (no shared rows to
+> isolate) or stay on the control-plane DB (no tenant column, so
+> nothing to filter). Related scaffold (`TammaAppDbContext` +
+> `TenantContextInterceptor`) was deleted in Wave A.5 commits
+> `7289d4b`, `3548f12`, `fc3be04`. This finding is resolved by the
+> Epic 28 architectural shift.
+
 **Scope**: admin-db
-**Severity**: P0
-**Status**: Data-model regression
-**Estimated port effort**: 12-16h
+**Severity**: P0 — **Superseded by Epic 28 db-per-tenant**
+**Status**: Superseded
+**Estimated port effort**: 12-16h (resolved by Epic 28 architectural shift, not per-finding fix)
 
 ## Remediation status
 

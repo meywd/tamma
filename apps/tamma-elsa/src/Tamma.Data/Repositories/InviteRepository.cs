@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class InviteRepository(TammaDbContext db) : IInviteRepository
+public class InviteRepository(ControlPlaneDbContext db) : IInviteRepository
 {
     public async Task<UserInvite> CreateAsync(UserInvite invite)
     {

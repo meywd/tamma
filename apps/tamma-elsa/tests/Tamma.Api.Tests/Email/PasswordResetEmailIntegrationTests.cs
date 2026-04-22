@@ -95,7 +95,7 @@ public class PasswordResetEmailIntegrationTests
 
         // Assert hashed token persisted with a future expiry.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var tokens = await db.PasswordResetTokens.ToListAsync();
 
         tokens.Should().ContainSingle();
@@ -121,7 +121,7 @@ public class PasswordResetEmailIntegrationTests
             "unknown emails must not receive reset messages (anti-enumeration)");
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var tokens = await db.PasswordResetTokens.ToListAsync();
         tokens.Should().BeEmpty("no reset token should be persisted for unknown emails");
     }

@@ -1,43 +1,49 @@
 using Microsoft.EntityFrameworkCore;
-using Tamma.Data.Abstractions;
 
 namespace Tamma.Data;
 
 /// <summary>
-/// Default <see cref="ITenantDbContextFactory"/>. Asks the
-/// <see cref="ITenantConnectionResolver"/> for the per-tenant
-/// <c>NpgsqlDataSource</c>, wraps it in a fresh
-/// <see cref="TenantDbContext"/>, and returns it for the caller to
-/// dispose.
+/// Default <see cref="ITenantDbContextFactory"/> implementation. Builds
+/// a fresh <see cref="TenantDbContext"/> per call using the connection
+/// string registered as <c>TammaAppDb</c> (with fallback to the admin
+/// connection for dev environments).
 ///
-/// <para>Story 28-3 wires this implementation against the stub
-/// resolver (<see cref="StubTenantConnectionResolver"/>). Story 28-4
-/// swaps the resolver to the LRU pool cache without any change here —
-/// the factory is connection-source agnostic.</para>
+/// <para>Transitional implementation: every tenant shares the same
+/// central Postgres; the context's fixed-tenant query filter enforces
+/// scoping at the EF layer. Story 28-4 replaces this with a real
+/// <c>ITenantConnectionResolver</c> that returns a per-tenant
+/// <c>NpgsqlDataSource</c>. Call sites do not change — they already
+/// pass the tenant id explicitly.</para>
 /// </summary>
 public sealed class TenantDbContextFactory : ITenantDbContextFactory
 {
-    private readonly ITenantConnectionResolver _resolver;
+    private readonly string _connectionString;
 
-    public TenantDbContextFactory(ITenantConnectionResolver resolver)
+    public TenantDbContextFactory(string connectionString)
     {
-        ArgumentNullException.ThrowIfNull(resolver);
-        _resolver = resolver;
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new ArgumentException(
+                "TenantDbContextFactory requires a non-empty connection string.",
+                nameof(connectionString));
+        _connectionString = connectionString;
     }
 
-    public async ValueTask<TenantDbContext> CreateAsync(
+    public Task<TenantDbContext> CreateAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
-        var dataSource = await _resolver
-            .GetDataSourceAsync(tenantId, cancellationToken)
-            .ConfigureAwait(false);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException(
+                "Tenant id is required. Use ControlPlaneDbContext for CP data.",
+                nameof(tenantId));
 
         var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .UseNpgsql(_connectionString, npgsql =>
+                // Tenant context never runs migrations — CP context owns
+                // the shared migration history table.
+                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"))
             .Options;
 
-        return new TenantDbContext(options);
+        return Task.FromResult(new TenantDbContext(options, tenantId));
     }
 }

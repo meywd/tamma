@@ -4,41 +4,91 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class AgentConfigRepository(TammaDbContext db) : IAgentConfigRepository
+/// <summary>
+/// Tenant-scoped repo; uses <see cref="ITenantDbContextFactory"/> for
+/// tenant-bound reads/writes. Platform-default rows (<c>TenantId IS NULL</c>
+/// — the "system default" agent config row) are accessed through
+/// <see cref="ControlPlaneDbContext"/> since they are cross-tenant by
+/// definition and the tenant factory requires a tenant id.
+/// </summary>
+public class AgentConfigRepository(
+    ITenantDbContextFactory tenantDbFactory,
+    ControlPlaneDbContext cp) : IAgentConfigRepository
 {
     public async Task<AgentConfig?> GetAsync(Guid? tenantId)
-        => await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId);
+    {
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            return await db.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == tid);
+        }
+        // Platform-default row lives in the CP plane.
+        return await cp.AgentConfigs.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.TenantId == null);
+    }
 
     public async Task<AgentConfig> UpsertAsync(Guid? tenantId, string configJson, Guid? userId)
     {
-        var existing = await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId);
-        if (existing is not null)
+        if (tenantId is Guid tid)
         {
-            existing.Config = configJson;
-            existing.Version++;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedBy = userId;
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            var existing = await db.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == tid);
+            if (existing is not null)
+            {
+                existing.Config = configJson;
+                existing.Version++;
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = userId;
+                await db.SaveChangesAsync();
+                return existing;
+            }
+            var config = new AgentConfig
+            {
+                TenantId = tid,
+                Config = configJson,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                CreatedBy = userId,
+                UpdatedBy = userId
+            };
+            db.AgentConfigs.Add(config);
             await db.SaveChangesAsync();
-            return existing;
+            return config;
         }
-        var config = new AgentConfig
+        else
         {
-            TenantId = tenantId,
-            Config = configJson,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            CreatedBy = userId,
-            UpdatedBy = userId
-        };
-        db.AgentConfigs.Add(config);
-        await db.SaveChangesAsync();
-        return config;
+            // Platform default (TenantId == null) — CP plane.
+            var existing = await cp.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == null);
+            if (existing is not null)
+            {
+                existing.Config = configJson;
+                existing.Version++;
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = userId;
+                await cp.SaveChangesAsync();
+                return existing;
+            }
+            var config = new AgentConfig
+            {
+                TenantId = null,
+                Config = configJson,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                CreatedBy = userId,
+                UpdatedBy = userId
+            };
+            cp.AgentConfigs.Add(config);
+            await cp.SaveChangesAsync();
+            return config;
+        }
     }
 
     public async Task<bool> DeleteAsync(Guid tenantId)
     {
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
         var config = await db.AgentConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId);
         if (config is null) return false;
@@ -49,27 +99,37 @@ public class AgentConfigRepository(TammaDbContext db) : IAgentConfigRepository
 
     public async Task<(AgentConfig Config, string Source)> ResolveAsync(Guid tenantId)
     {
-        // Try tenant-specific first
-        var config = await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId);
-        if (config is not null)
-            return (config, "tenant");
+        await using (var db = await tenantDbFactory.CreateAsync(tenantId))
+        {
+            var config = await db.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == tenantId);
+            if (config is not null)
+                return (config, "tenant");
+        }
 
-        // Fall back to system default
-        config = await db.AgentConfigs.IgnoreQueryFilters()
+        var systemConfig = await cp.AgentConfigs.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == null);
-        if (config is not null)
-            return (config, "system");
+        if (systemConfig is not null)
+            return (systemConfig, "system");
 
-        // Return empty default
         return (new AgentConfig { Config = "{}" }, "default");
     }
 
     /// <inheritdoc />
     public async Task<JsonDocument?> GetTenantConfigAsync(Guid? tenantId)
     {
-        var row = await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId);
+        AgentConfig? row;
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            row = await db.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == tid);
+        }
+        else
+        {
+            row = await cp.AgentConfigs.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(c => c.TenantId == null);
+        }
         if (row is null || string.IsNullOrWhiteSpace(row.Config))
         {
             return null;
@@ -81,8 +141,6 @@ public class AgentConfigRepository(TammaDbContext db) : IAgentConfigRepository
         }
         catch (JsonException)
         {
-            // Corrupt JSON in DB — treat as "no override" and let the resolver
-            // fall back to platform defaults.
             return null;
         }
     }

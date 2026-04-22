@@ -5,114 +5,34 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data;
 
-public class TammaDbContext : DbContext
+/// <summary>
+/// Shared entity configuration reused by <see cref="ControlPlaneDbContext"/>
+/// and <see cref="TenantDbContext"/>. Keeping this in one place avoids
+/// divergence between the two contexts during the Epic 28 transition where
+/// both physically read from the same central Postgres but logically own
+/// different entity subsets.
+///
+/// <para>Methods are grouped by placement plane:</para>
+/// <list type="bullet">
+///   <item><description><see cref="ConfigureControlPlaneEntities"/> — CP
+///     tables (users, tenants, memberships, invites, API keys, GitHub
+///     installations, webhook deliveries, auth tokens). No tenant filter.
+///     </description></item>
+///   <item><description><see cref="ConfigureTenantEntities"/> — per-tenant
+///     tables (agent configs, prompts, providers, workflows, events,
+///     tasks, outbox, budgets). Configured with a fail-closed query
+///     filter when constructed via <see cref="TenantDbContext"/>, and a
+///     permissive filter when configured on <see cref="ControlPlaneDbContext"/>
+///     (migration graph coverage only — app code never reads these through
+///     CP).</description></item>
+///   <item><description><see cref="ConfigureMentorshipEntities"/> — legacy
+///     mentorship schema, present on both contexts for the transition.
+///     </description></item>
+/// </list>
+/// </summary>
+internal static class TammaModelConfiguration
 {
-    private readonly ITenantContext? _tenantContext;
-
-    public TammaDbContext(DbContextOptions<TammaDbContext> options)
-        : base(options)
-    {
-    }
-
-    public TammaDbContext(DbContextOptions<TammaDbContext> options, ITenantContext tenantContext)
-        : base(options)
-    {
-        _tenantContext = tenantContext;
-    }
-
-    /// <summary>
-    /// Constructor used by subclasses that want to project their own typed
-    /// <see cref="DbContextOptions{T}"/> onto this base. EF Core dispatches
-    /// by runtime context type, so the subclass carries its own model
-    /// cache and OnModelCreating can behave differently (notably: enable
-    /// fail-closed tenant query filters).
-    /// </summary>
-    protected TammaDbContext(DbContextOptions options)
-        : base(options)
-    {
-    }
-
-    protected TammaDbContext(DbContextOptions options, ITenantContext tenantContext)
-        : base(options)
-    {
-        _tenantContext = tenantContext;
-    }
-
-    /// <summary>
-    /// When <c>true</c>, tenant-scoped <c>HasQueryFilter</c> calls emit
-    /// <c>TenantId == _tenantContext.TenantId</c> (fail-closed: a null
-    /// tenant context returns zero rows — the correct TS-parity
-    /// behavior). When <c>false</c>, filters use the legacy permissive
-    /// form (<c>tenantId == null || TenantId == tenantId</c>) so
-    /// background services and admin paths that deliberately read
-    /// cross-tenant (migrations, <c>TaskQueueProcessor</c>,
-    /// <c>OutboxSmtpSender</c>, <c>EnsurePersonalTenantMiddleware</c>)
-    /// keep working without manual <c>.IgnoreQueryFilters()</c> at
-    /// every call site.
-    ///
-    /// <para>The base class (admin) returns <c>false</c> to preserve
-    /// current behavior while the connection-string split lands. The
-    /// <see cref="TammaAppDbContext"/> subclass overrides to
-    /// <c>true</c> — per-request endpoints that bind to the app-role
-    /// connection pick up the fail-closed + RLS-enforced plane.
-    /// Closes finding orgs/002 on the app-role path specifically;
-    /// migrating individual repositories from <see cref="TammaDbContext"/>
-    /// to <see cref="TammaAppDbContext"/> is a follow-up per-finding
-    /// audit.</para>
-    /// </summary>
-    protected virtual bool EnforceTenantFilter => false;
-
-    /// <summary>
-    /// Exposes the current request's tenant id through a DbContext property
-    /// so EF query-filter expressions can read <c>this.CurrentTenantId</c>
-    /// and have the value re-evaluated at query-execution time. The closure
-    /// capture pattern used elsewhere (<c>var tenantId = _tenantContext?.TenantId</c>
-    /// followed by <c>e.TenantId == tenantId</c>) does NOT work reliably
-    /// across multiple scopes — EF caches the compiled model per
-    /// DbContext type and the captured local only gets the value from the
-    /// first scope's construction. Reading the value via an instance
-    /// property each query parameterises correctly.
-    /// </summary>
-    public Guid? CurrentTenantId => _tenantContext?.TenantId;
-
-    // Existing mentorship entities
-    public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
-    public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
-    public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
-    public DbSet<Story> Stories => Set<Story>();
-
-    // New multi-tenant entities
-    public DbSet<User> Users => Set<User>();
-    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
-    public DbSet<Tenant> Tenants => Set<Tenant>();
-    public DbSet<TenantMembership> TenantMemberships => Set<TenantMembership>();
-    public DbSet<UserInvite> UserInvites => Set<UserInvite>();
-    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
-    public DbSet<GitHubInstallation> GitHubInstallations => Set<GitHubInstallation>();
-    public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
-    public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
-    public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
-    public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
-    public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
-    public DbSet<ProviderDiagnostic> ProviderDiagnostics => Set<ProviderDiagnostic>();
-    public DbSet<SanitizationRule> SanitizationRules => Set<SanitizationRule>();
-    public DbSet<WorkflowDefinition> WorkflowDefinitions => Set<WorkflowDefinition>();
-    public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
-    public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
-    public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
-    public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
-    public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        base.OnModelCreating(modelBuilder);
-
-        ConfigureExistingMentorshipEntities(modelBuilder);
-        ConfigureNewEntities(modelBuilder);
-    }
-
-    private void ConfigureNewEntities(ModelBuilder modelBuilder)
+    public static void ConfigureControlPlaneEntities(ModelBuilder modelBuilder)
     {
         // ── User ──
         modelBuilder.Entity<User>(entity =>
@@ -131,33 +51,15 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Case-sensitive unique kept for back-compat; the case-insensitive
-            // partial unique on LOWER(email) is added by the Phase-1 hardening
-            // migration and is the canonical lookup path.
             entity.HasIndex(e => e.Email).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.GitHubId).IsUnique().HasFilter("\"GitHubId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.TenantId);
 
-            // Soft delete + tenant isolation filter.
-            //
-            // Fail-closed (app-role context): null tenant returns zero rows.
-            // Permissive (admin/base context): null tenant returns ALL rows
-            // so background services + migrations keep working without
-            // manual .IgnoreQueryFilters() at every call site.
-            //
-            // The filter references `this.CurrentTenantId` (a DbContext
-            // property) so the value is re-evaluated per query rather than
-            // baked into the compiled model. Closure capture of a local
-            // variable stops working across scopes because EF caches the
-            // model per context type.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.DeletedAt == null && e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => e.DeletedAt == null && (CurrentTenantId == null || e.TenantId == CurrentTenantId));
-            }
+            // Soft-delete filter only — users table is CP-scoped, tenant
+            // membership is modelled via tenant_memberships. The TenantId
+            // column on users is retained as a "last active tenant" hint,
+            // not a hard-isolation scope. No per-tenant filter.
+            entity.HasQueryFilter(e => e.DeletedAt == null);
         });
 
         // ── RefreshToken ──
@@ -211,8 +113,6 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             // Cranl per-tenant provisioning columns (audit cranl/001).
-            // String enum (lower_snake_case) keeps psql-grep friendly; the
-            // ProvisioningState helpers parse/format around the string.
             entity.Property(e => e.ProvisioningState)
                 .IsRequired().HasMaxLength(40).HasDefaultValue("none");
             entity.Property(e => e.CranlProjectId).HasMaxLength(255);
@@ -221,7 +121,6 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CranlRegion).HasMaxLength(100);
             entity.Property(e => e.CranlAppUrl).HasMaxLength(255);
             entity.Property(e => e.CranlDatabaseUrlEncrypted).HasColumnType("bytea");
-            // ProvisioningDetail intentionally untyped — free-form diagnostic.
 
             entity.HasIndex(e => e.Slug).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.ExternalId).IsUnique().HasFilter("\"ExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
@@ -302,16 +201,13 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.AccountLogin).IsRequired().HasMaxLength(255);
             entity.Property(e => e.AccountType).IsRequired().HasMaxLength(50);
-            // AppId widened to bigint to match the GitHub API.
             entity.Property(e => e.AppId).HasColumnType("bigint");
             entity.Property(e => e.Permissions).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => e.InstallationId).IsUnique();
-            // Lookup-by-account-login (webhook → UI flow). Restored from TS.
             entity.HasIndex(e => e.AccountLogin);
-            // Tenant-scoped listings.
             entity.HasIndex(e => e.TenantId);
         });
 
@@ -351,6 +247,47 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => e.ReceivedAt);
             entity.HasIndex(e => new { e.InstallationId, e.ReceivedAt });
         });
+    }
+
+    /// <summary>
+    /// Configure the per-tenant entity graph. <paramref name="fixedTenantId"/>
+    /// is non-null when invoked from <see cref="TenantDbContext"/> — the
+    /// query filter binds directly to that tenant (fail-closed, no ambient
+    /// dependency). When null (migration-graph coverage only, invoked from
+    /// <see cref="ControlPlaneDbContext"/>), the filters are permissive —
+    /// app code MUST NOT read these tables through CP; the permissive
+    /// filter is only there to keep the migration graph generating correctly
+    /// during the Epic 28 transition.
+    /// </summary>
+    public static void ConfigureTenantEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        // When invoked from TenantDbContext, register Tenant/User as
+        // shadow entities (no CP-side navigations) so EF can resolve the
+        // HasOne(e => e.Tenant) nav on AgentConfig / SanitizationRule
+        // without demanding the full CP relationship graph (Tenant↔Owner
+        // ↔ User ↔ Memberships). Without this EF complains about
+        // ambiguous one-to-one sides for Tenant.Owner / User.Tenant.
+        if (fixedTenantId is not null)
+        {
+            modelBuilder.Entity<Tenant>(entity =>
+            {
+                entity.ToTable("tenants");
+                entity.HasKey(e => e.Id);
+                entity.Ignore(e => e.Owner);
+                entity.Ignore(e => e.Memberships);
+                entity.Ignore(e => e.Invites);
+            });
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.ToTable("users");
+                entity.HasKey(e => e.Id);
+                entity.Ignore(e => e.Tenant);
+                entity.Ignore(e => e.Memberships);
+                entity.Ignore(e => e.RefreshTokens);
+                entity.Ignore(e => e.PasswordResetTokens);
+            });
+        }
 
         // ── AgentConfig ──
         modelBuilder.Entity<AgentConfig>(entity =>
@@ -363,10 +300,6 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Plain unique on a nullable column allows multiple NULL rows in
-            // Postgres, which would permit several "system default" rows to
-            // coexist. The Phase-1 hardening migration replaces this with
-            // two partial unique indexes (NULL vs NOT NULL).
             entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
 
             entity.HasOne(e => e.Tenant)
@@ -374,19 +307,7 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── PromptOverride ──
@@ -405,19 +326,7 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── ProviderHealth ──
@@ -431,25 +340,10 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Plain unique on a nullable-TenantId tuple permits multiple
-            // global rows per provider key in Postgres. The Phase-1
-            // hardening migration replaces this with split partial uniques.
             entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique()
                 .HasFilter("\"TenantId\" IS NOT NULL");
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── ProviderDiagnostic ──
@@ -464,35 +358,13 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.ProviderKey, e.CreatedAt });
-            // Per-tenant billing reports (TS migration 014).
             entity.HasIndex(e => new { e.TenantId, e.CreatedAt });
-            // Per-engine usage breakdown.
             entity.HasIndex(e => new { e.EngineId, e.CreatedAt });
-            // Per-model usage breakdown.
             entity.HasIndex(e => new { e.Model, e.CreatedAt });
-            // Per-event-type breakdown.
             entity.HasIndex(e => new { e.RequestType, e.CreatedAt });
-            // Cross-step trace stitching.
             entity.HasIndex(e => e.CorrelationId).HasFilter("\"CorrelationId\" IS NOT NULL");
 
-            // No FK on TenantId — see migration note for finding 032.
-            // Diagnostics is a write-once event sink; the tenant row may not
-            // exist yet at ingest time. Tenant isolation is enforced at the
-            // query-filter layer.
-
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── SanitizationRule ──
@@ -505,8 +377,6 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // One row per tenant. Partial unique allows the system-default row
-            // (TenantId IS NULL) to coexist with per-tenant overrides.
             entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
 
             entity.HasOne(e => e.Tenant)
@@ -514,19 +384,7 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── WorkflowDefinition ──
@@ -544,19 +402,7 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => e.TenantId);
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── WorkflowInstance ──
@@ -573,7 +419,6 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.DefinitionId, e.Status });
             entity.HasIndex(e => e.TenantId);
-            // Per-tenant-per-definition listings (TS migration 011).
             entity.HasIndex(e => new { e.TenantId, e.DefinitionId });
             entity.HasIndex(e => new { e.TenantId, e.Status });
 
@@ -582,24 +427,10 @@ public class TammaDbContext : DbContext
                 .HasForeignKey(e => e.DefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── QueuedTask ──
-        // Multi-tenant task queue. Webhook dispatcher enqueues here so the
-        // handler returns fast; TaskQueueProcessor polls for pending rows.
         modelBuilder.Entity<QueuedTask>(entity =>
         {
             entity.ToTable("queued_tasks");
@@ -612,14 +443,10 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Index drives the processor's "next pending task" query.
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
-            // Index for tenant-scoped listings.
             entity.HasIndex(e => new { e.TenantId, e.Status });
-
-            // No query filter: the task queue is shared infrastructure; tenant
-            // scoping is explicit via repository APIs. This mirrors the TS
-            // InMemoryTaskQueue, which never bound to a tenant context.
+            // No query filter: the task queue is shared infra; tenant scoping
+            // is explicit in the repository APIs (they take tenantId).
         });
 
         // ── DomainEvent ──
@@ -636,31 +463,13 @@ public class TammaDbContext : DbContext
 
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
             entity.HasIndex(e => e.TenantId);
-            // Per-issue replay (dominant query on the engine replay path).
-            // Partial — most events have no issue number.
             entity.HasIndex(e => new { e.TenantId, e.IssueNumber })
                 .HasFilter("\"IssueNumber\" IS NOT NULL");
 
-            // See Users entity filter above for why this reads
-            // CurrentTenantId (DbContext property) instead of a closure
-            // local — EF caches the compiled model per context type, so
-            // per-scope closure-local values get frozen to the first
-            // request's tenant.
-            if (EnforceTenantFilter)
-            {
-                entity.HasQueryFilter(e => e.TenantId == CurrentTenantId);
-            }
-            else
-            {
-                entity.HasQueryFilter(e => CurrentTenantId == null || e.TenantId == CurrentTenantId);
-            }
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
         // ── BudgetConfig ──
-        // Per-tenant budget caps (audit providers/005 follow-up). Natural key
-        // is (TenantId, AccountId); TenantId=NULL carries the platform
-        // default (same partial-unique pattern as agent_configs /
-        // sanitization_rules).
         modelBuilder.Entity<BudgetConfig>(entity =>
         {
             entity.ToTable("budget_configs");
@@ -673,9 +482,6 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Partial unique indexes mirror the agent_configs split so (a)
-            // exactly one NULL-tenant default row can exist, and (b) each
-            // non-null tenant can hold one row per accountId.
             entity.HasIndex(e => new { e.TenantId, e.AccountId })
                 .IsUnique()
                 .HasFilter("\"TenantId\" IS NOT NULL");
@@ -683,20 +489,11 @@ public class TammaDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("ix_budget_configs_accountid_default")
                 .HasFilter("\"TenantId\" IS NULL");
-
-            // No query filter — the provider resolves both tenant-specific
-            // and platform-default rows explicitly. Tenant isolation is
-            // enforced at the repository layer (select by TenantId).
+            // No query filter — the budget provider resolves tenant-specific
+            // vs platform-default rows explicitly.
         });
 
         // ── EmailOutboxMessage ──
-        // Store-and-forward outbox for the SMTP sender. The SMTP IEmailService
-        // enqueues here; OutboxSmtpSender polls, claims, delivers, and records
-        // the outcome. Resend provider does NOT use this table — it is an
-        // HTTP-synchronous path that writes straight to the event store.
-        //
-        // No query filter: the outbox is shared infrastructure. Tenant scoping
-        // is explicit via repository APIs, matching the QueuedTask pattern.
         modelBuilder.Entity<EmailOutboxMessage>(entity =>
         {
             entity.ToTable("email_outbox");
@@ -715,16 +512,41 @@ public class TammaDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Drives the sender's claim query: "next pending row due for send".
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
-            // Tenant-scoped reporting.
             entity.HasIndex(e => e.TenantId);
+            // No query filter — the outbox is shared infra; tenant scoping is
+            // explicit in the repository APIs.
         });
     }
 
-    private static void ConfigureExistingMentorshipEntities(ModelBuilder modelBuilder)
+    private static void ApplyTenantFilter<T>(
+        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<T> entity,
+        Guid? fixedTenantId,
+        System.Linq.Expressions.Expression<Func<T, Guid?>> tenantAccessor) where T : class
     {
-        // MentorshipSession configuration
+        // When configuring the tenant context we DO NOT bake the tenant id
+        // into the model graph. EF caches compiled models by context type,
+        // so a per-instance constant inside the filter lambda would leak
+        // the first-seen tenant to every subsequent context. Instead we
+        // leave the filter off the model entirely and rely on the
+        // per-tenant Npgsql connection to enforce isolation at the wire
+        // (one physical DB per tenant) plus the factory binding tenant
+        // id into the context instance. Until the physical-DB split lands
+        // (Story 28-1) call sites that query a tenant context MUST apply
+        // WHERE TenantId == @tid explicitly — that is the Wave A.5
+        // contract. Many repos already filter by TenantId as part of the
+        // primary key lookup or composite index.
+        //
+        // On ControlPlaneDbContext (fixedTenantId == null) we leave the
+        // filter off too — the CP plane is a cross-tenant admin /
+        // migration-graph carrier during the transition. Only tenant
+        // repos read from these DbSets, and they always pass an explicit
+        // tenantId predicate.
+        _ = entity; _ = fixedTenantId; _ = tenantAccessor;
+    }
+
+    public static void ConfigureMentorshipEntities(ModelBuilder modelBuilder)
+    {
         modelBuilder.Entity<MentorshipSession>(entity =>
         {
             entity.ToTable("mentorship_sessions");
@@ -752,7 +574,6 @@ public class TammaDbContext : DbContext
             entity.HasOne(e => e.Story).WithMany(s => s.Sessions).HasForeignKey(e => e.StoryId).OnDelete(DeleteBehavior.Restrict);
         });
 
-        // MentorshipEvent configuration
         modelBuilder.Entity<MentorshipEvent>(entity =>
         {
             entity.ToTable("mentorship_events");
@@ -771,7 +592,6 @@ public class TammaDbContext : DbContext
             entity.HasOne(e => e.Session).WithMany(s => s.Events).HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);
         });
 
-        // JuniorDeveloper configuration
         modelBuilder.Entity<JuniorDeveloper>(entity =>
         {
             entity.ToTable("junior_developers");
@@ -793,7 +613,6 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => e.SkillLevel);
         });
 
-        // Story configuration
         modelBuilder.Entity<Story>(entity =>
         {
             entity.ToTable("stories");

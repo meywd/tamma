@@ -76,7 +76,7 @@ public class AuthRegisterTxnIdIntegrationTests
         await Task.Delay(50);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var queued = await db.DomainEvents
             .IgnoreQueryFilters()
@@ -118,7 +118,7 @@ public class AuthRegisterTxnIdIntegrationTests
         await Task.Delay(50);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var rows = await db.EmailOutbox.ToListAsync();
         rows.Should().ContainSingle();

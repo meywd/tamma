@@ -23,7 +23,7 @@ public class CranlTenantProvisionerTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private Mock<ITaskQueue> _queue = null!;
     private CranlTenantProvisioner _provisioner = null!;
@@ -33,7 +33,7 @@ public class CranlTenantProvisionerTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         _queue = new Mock<ITaskQueue>(MockBehavior.Strict);
         _queue.Setup(q => q.EnqueueAsync(

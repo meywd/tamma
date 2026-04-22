@@ -5,9 +5,9 @@ namespace Tamma.Data.Repositories;
 
 public sealed class GitHubWebhookDeliveryRepository : IGitHubWebhookDeliveryRepository
 {
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
 
-    public GitHubWebhookDeliveryRepository(TammaDbContext db)
+    public GitHubWebhookDeliveryRepository(ControlPlaneDbContext db)
     {
         _db = db;
     }

@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class InstallationRepository(TammaDbContext db) : IInstallationRepository
+public class InstallationRepository(ControlPlaneDbContext db) : IInstallationRepository
 {
     public async Task<GitHubInstallation> UpsertAsync(GitHubInstallation installation)
     {

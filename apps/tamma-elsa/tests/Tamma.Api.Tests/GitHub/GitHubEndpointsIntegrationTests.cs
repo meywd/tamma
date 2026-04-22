@@ -224,7 +224,7 @@ public class GitHubEndpointsIntegrationTests
         // INSTALLATION.DELETED.SUCCESS event preserves audit. Soft-delete via
         // SuspendedAt collided with the suspend/unsuspend lifecycle.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var installation = await db.GitHubInstallations
             .IgnoreQueryFilters()

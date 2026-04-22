@@ -28,7 +28,7 @@ public static class EmailServiceCollectionExtensions
 {
     public static IServiceCollection AddEmailServices(this IServiceCollection services)
     {
-        // Shared repository — Scoped because TammaDbContext is Scoped.
+        // Shared repository — Scoped because ControlPlaneDbContext is Scoped.
         services.TryAddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
 
         // The production SMTP transport. Can be replaced in tests by

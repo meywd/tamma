@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class UserRepository(TammaDbContext db) : IUserRepository
+public class UserRepository(ControlPlaneDbContext db) : IUserRepository
 {
     public async Task<User> CreateAsync(User user)
     {

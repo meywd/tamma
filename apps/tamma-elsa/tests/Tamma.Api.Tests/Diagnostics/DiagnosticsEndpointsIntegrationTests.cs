@@ -76,7 +76,7 @@ public class DiagnosticsEndpointsIntegrationTests
     {
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.ProviderDiagnostics.AddRange(
                 Row("p1", cost: 1m, success: true),
                 Row("p1", cost: 1m, success: false),
@@ -104,7 +104,7 @@ public class DiagnosticsEndpointsIntegrationTests
         var now = DateTime.UtcNow;
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.ProviderDiagnostics.AddRange(
                 Row("x", success: true, createdAt: now.AddHours(-5)),
                 Row("x", success: true, createdAt: now.AddMinutes(-5)));
@@ -130,7 +130,7 @@ public class DiagnosticsEndpointsIntegrationTests
 
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.ProviderDiagnostics.AddRange(
                 Row("p", cost: 1m, success: true, createdAt: baseTime.AddMinutes(1)),
                 Row("p", cost: 2m, success: true, createdAt: baseTime.AddMinutes(2)),
@@ -185,7 +185,7 @@ public class DiagnosticsEndpointsIntegrationTests
                 PeriodStart: now.AddDays(-5),
                 PeriodEnd: now.AddDays(5)));
 
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.ProviderDiagnostics.Add(Row("p", cost: 30m, success: true, tenantId: tenant, createdAt: now.AddHours(-1)));
             await db.SaveChangesAsync();
         }

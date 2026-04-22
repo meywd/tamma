@@ -1,9 +1,20 @@
 # Finding 004: `withTenantContext` / `SET LOCAL app.current_tenant_id` Gone
 
+> **SUPERSEDED (Wave A.5, 2026-04-18)**: Epic 28 db-per-tenant isolation
+> replaces the `set_config('app.current_tenant_id', …)` + RLS plane
+> entirely. With one physical DB per tenant there is no shared
+> connection that needs per-request tenant binding — the connection
+> string itself encodes tenancy. `TenantContextInterceptor` and both
+> obsolete DbContexts were deleted in Wave A.5 commits `7289d4b`,
+> `3548f12`, `fc3be04`. Tenant-scoped repositories now use
+> `ITenantDbContextFactory.CreateAsync(tenantId)` which returns a
+> `TenantDbContext` bound to a (future) per-tenant connection. This
+> finding's remediation is architecturally resolved.
+
 **Scope**: orgs
-**Severity**: P0 (cutover-blocking)
-**Status**: Not-yet-implemented (helper not ported, no replacement hook in EF interceptors)
-**Estimated port effort**: 4h
+**Severity**: P0 (cutover-blocking) — **Superseded by Epic 28 db-per-tenant**
+**Status**: Superseded
+**Estimated port effort**: 4h (resolved by Epic 28 architectural shift, not per-finding fix)
 
 ## Remediation status
 

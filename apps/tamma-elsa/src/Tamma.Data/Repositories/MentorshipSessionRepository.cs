@@ -5,31 +5,68 @@ using Tamma.Core.Enums;
 namespace Tamma.Data.Repositories;
 
 /// <summary>
-/// Repository implementation for mentorship session data access
+/// Repository for mentorship session data access.
+///
+/// <para>Epic 28: mentorship data is tenant-scoped in the target architecture
+/// (every mentorship belongs to an org). During the transition the table does
+/// not yet carry a TenantId column, so the repo picks its context lazily —
+/// tenant-scoped when <see cref="ITenantContext.TenantId"/> is bound, else
+/// <see cref="ControlPlaneDbContext"/> for system-scope / admin operations.
+/// The context is held across method calls within a request so
+/// CreateAsync + SaveChanges patterns work against the same EF change tracker.</para>
 /// </summary>
-public class MentorshipSessionRepository : IMentorshipSessionRepository
+public class MentorshipSessionRepository : IMentorshipSessionRepository, IAsyncDisposable
 {
-    private readonly TammaDbContext _context;
+    private readonly ITenantDbContextFactory _factory;
+    private readonly ITenantContext _tenantContext;
+    private readonly ControlPlaneDbContext _cp;
+    private TenantDbContext? _cachedTenantCtx;
 
-    public MentorshipSessionRepository(TammaDbContext context)
+    public MentorshipSessionRepository(
+        ITenantDbContextFactory factory,
+        ITenantContext tenantContext,
+        ControlPlaneDbContext cp)
     {
-        _context = context;
+        _factory = factory;
+        _tenantContext = tenantContext;
+        _cp = cp;
     }
 
-    // ============================================
-    // Session Operations
-    // ============================================
+    private async Task<DbContext> GetCtxAsync()
+    {
+        if (_tenantContext.TenantId is Guid tid)
+        {
+            _cachedTenantCtx ??= await _factory.CreateAsync(tid);
+            return _cachedTenantCtx;
+        }
+        return _cp;
+    }
+
+    private async Task<DbSet<MentorshipSession>> Sessions()
+        => (await GetCtxAsync()) is TenantDbContext t ? t.MentorshipSessions : _cp.MentorshipSessions;
+
+    private async Task<DbSet<MentorshipEvent>> Events()
+        => (await GetCtxAsync()) is TenantDbContext t ? t.MentorshipEvents : _cp.MentorshipEvents;
+
+    // Mentorship juniors/stories live on CP (no tenant DB has them in
+    // transition) — always use CP.
+
+    private async Task SaveAsync()
+    {
+        var ctx = await GetCtxAsync();
+        await ctx.SaveChangesAsync();
+    }
 
     public async Task<MentorshipSession> CreateAsync(MentorshipSession session)
     {
-        _context.MentorshipSessions.Add(session);
-        await _context.SaveChangesAsync();
+        (await Sessions()).Add(session);
+        await SaveAsync();
         return session;
     }
 
     public async Task<MentorshipSession?> GetByIdAsync(Guid id)
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Junior)
             .Include(s => s.Story)
             .FirstOrDefaultAsync(s => s.Id == id);
@@ -37,7 +74,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<MentorshipSession?> GetByWorkflowInstanceIdAsync(string workflowInstanceId)
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Junior)
             .Include(s => s.Story)
             .FirstOrDefaultAsync(s => s.WorkflowInstanceId == workflowInstanceId);
@@ -45,7 +82,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<List<MentorshipSession>> GetByJuniorIdAsync(string juniorId)
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Story)
             .Where(s => s.JuniorId == juniorId)
             .OrderByDescending(s => s.CreatedAt)
@@ -54,7 +91,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<List<MentorshipSession>> GetByStoryIdAsync(string storyId)
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Junior)
             .Where(s => s.StoryId == storyId)
             .OrderByDescending(s => s.CreatedAt)
@@ -63,7 +100,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<List<MentorshipSession>> GetActiveSessionsAsync()
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Junior)
             .Include(s => s.Story)
             .Where(s => s.Status == SessionStatus.Active)
@@ -73,7 +110,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<List<MentorshipSession>> GetSessionsByStatusAsync(SessionStatus status)
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Include(s => s.Junior)
             .Include(s => s.Story)
             .Where(s => s.Status == status)
@@ -87,7 +124,7 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
         string? juniorId = null,
         string? status = null)
     {
-        var query = _context.MentorshipSessions
+        var query = (await Sessions())
             .Include(s => s.Junior)
             .Include(s => s.Story)
             .AsQueryable();
@@ -116,35 +153,34 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
     public async Task UpdateAsync(MentorshipSession session)
     {
         session.UpdatedAt = DateTime.UtcNow;
-        _context.MentorshipSessions.Update(session);
-        await _context.SaveChangesAsync();
+        (await Sessions()).Update(session);
+        await SaveAsync();
     }
 
     public async Task DeleteAsync(Guid id)
     {
-        var session = await _context.MentorshipSessions.FindAsync(id)
+        var sessions = await Sessions();
+        var session = await sessions.FindAsync(id)
             ?? throw new KeyNotFoundException($"Session {id} not found");
-        _context.MentorshipSessions.Remove(session);
-        await _context.SaveChangesAsync();
+        sessions.Remove(session);
+        await SaveAsync();
     }
-
-    // ============================================
-    // State Management
-    // ============================================
 
     public async Task UpdateStateAsync(Guid sessionId, MentorshipState newState, MentorshipState? previousState = null)
     {
-        var session = await _context.MentorshipSessions.FindAsync(sessionId)
+        var sessions = await Sessions();
+        var session = await sessions.FindAsync(sessionId)
             ?? throw new KeyNotFoundException($"Session {sessionId} not found");
         session.PreviousState = previousState ?? session.CurrentState;
         session.CurrentState = newState;
         session.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        await SaveAsync();
     }
 
     public async Task UpdateStatusAsync(Guid sessionId, SessionStatus status)
     {
-        var session = await _context.MentorshipSessions.FindAsync(sessionId)
+        var sessions = await Sessions();
+        var session = await sessions.FindAsync(sessionId)
             ?? throw new KeyNotFoundException($"Session {sessionId} not found");
         session.Status = status;
         session.UpdatedAt = DateTime.UtcNow;
@@ -154,32 +190,29 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
             session.CompletedAt = DateTime.UtcNow;
         }
 
-        await _context.SaveChangesAsync();
+        await SaveAsync();
     }
 
     public async Task UpdateWorkflowInstanceIdAsync(Guid sessionId, string workflowInstanceId)
     {
-        var session = await _context.MentorshipSessions.FindAsync(sessionId)
+        var sessions = await Sessions();
+        var session = await sessions.FindAsync(sessionId)
             ?? throw new KeyNotFoundException($"Session {sessionId} not found");
         session.WorkflowInstanceId = workflowInstanceId;
         session.UpdatedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        await SaveAsync();
     }
-
-    // ============================================
-    // Event Operations
-    // ============================================
 
     public async Task<MentorshipEvent> LogEventAsync(MentorshipEvent eventRecord)
     {
-        _context.MentorshipEvents.Add(eventRecord);
-        await _context.SaveChangesAsync();
+        (await Events()).Add(eventRecord);
+        await SaveAsync();
         return eventRecord;
     }
 
     public async Task<List<MentorshipEvent>> GetEventsBySessionIdAsync(Guid sessionId)
     {
-        return await _context.MentorshipEvents
+        return await (await Events())
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.CreatedAt)
             .ToListAsync();
@@ -187,92 +220,64 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<List<MentorshipEvent>> GetRecentEventsAsync(Guid sessionId, int count = 10)
     {
-        return await _context.MentorshipEvents
+        return await (await Events())
             .Where(e => e.SessionId == sessionId)
             .OrderByDescending(e => e.CreatedAt)
             .Take(count)
             .ToListAsync();
     }
 
-    // ============================================
-    // Junior Developer Operations
-    // ============================================
-
+    // Juniors and stories stay on CP — they're cross-tenant today.
     public async Task<JuniorDeveloper?> GetJuniorByIdAsync(string id)
-    {
-        return await _context.JuniorDevelopers.FindAsync(id);
-    }
+        => await _cp.JuniorDevelopers.FindAsync(id);
 
     public async Task<JuniorDeveloper> CreateJuniorAsync(JuniorDeveloper junior)
     {
-        _context.JuniorDevelopers.Add(junior);
-        await _context.SaveChangesAsync();
+        _cp.JuniorDevelopers.Add(junior);
+        await _cp.SaveChangesAsync();
         return junior;
     }
 
     public async Task UpdateJuniorAsync(JuniorDeveloper junior)
     {
         junior.UpdatedAt = DateTime.UtcNow;
-        _context.JuniorDevelopers.Update(junior);
-        await _context.SaveChangesAsync();
+        _cp.JuniorDevelopers.Update(junior);
+        await _cp.SaveChangesAsync();
     }
 
     public async Task<List<JuniorDeveloper>> GetAllJuniorsAsync()
-    {
-        return await _context.JuniorDevelopers
-            .OrderBy(j => j.Name)
-            .ToListAsync();
-    }
-
-    // ============================================
-    // Story Operations
-    // ============================================
+        => await _cp.JuniorDevelopers.OrderBy(j => j.Name).ToListAsync();
 
     public async Task<Story?> GetStoryByIdAsync(string id)
-    {
-        return await _context.Stories.FindAsync(id);
-    }
+        => await _cp.Stories.FindAsync(id);
 
     public async Task<Story> CreateStoryAsync(Story story)
     {
-        _context.Stories.Add(story);
-        await _context.SaveChangesAsync();
+        _cp.Stories.Add(story);
+        await _cp.SaveChangesAsync();
         return story;
     }
 
     public async Task UpdateStoryAsync(Story story)
     {
         story.UpdatedAt = DateTime.UtcNow;
-        _context.Stories.Update(story);
-        await _context.SaveChangesAsync();
+        _cp.Stories.Update(story);
+        await _cp.SaveChangesAsync();
     }
 
     public async Task<List<Story>> GetAllStoriesAsync()
-    {
-        return await _context.Stories
-            .OrderByDescending(s => s.CreatedAt)
-            .ToListAsync();
-    }
-
-    // ============================================
-    // Analytics Queries
-    // ============================================
+        => await _cp.Stories.OrderByDescending(s => s.CreatedAt).ToListAsync();
 
     public async Task<int> GetActiveSessionCountAsync()
-    {
-        return await _context.MentorshipSessions
-            .CountAsync(s => s.Status == SessionStatus.Active);
-    }
+        => await (await Sessions()).CountAsync(s => s.Status == SessionStatus.Active);
 
     public async Task<int> GetCompletedSessionCountAsync(DateTime since)
-    {
-        return await _context.MentorshipSessions
-            .CountAsync(s => s.Status == SessionStatus.Completed && s.CompletedAt >= since);
-    }
+        => await (await Sessions()).CountAsync(
+            s => s.Status == SessionStatus.Completed && s.CompletedAt >= since);
 
     public async Task<double> GetAverageCompletionTimeAsync(DateTime since)
     {
-        var completedSessions = await _context.MentorshipSessions
+        var completedSessions = await (await Sessions())
             .Where(s => s.Status == SessionStatus.Completed &&
                         s.CompletedAt >= since &&
                         s.CompletedAt != null)
@@ -288,9 +293,18 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository
 
     public async Task<Dictionary<MentorshipState, int>> GetSessionCountByStateAsync()
     {
-        return await _context.MentorshipSessions
+        return await (await Sessions())
             .Where(s => s.Status == SessionStatus.Active)
             .GroupBy(s => s.CurrentState)
             .ToDictionaryAsync(g => g.Key, g => g.Count());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cachedTenantCtx is not null)
+        {
+            await _cachedTenantCtx.DisposeAsync();
+            _cachedTenantCtx = null;
+        }
     }
 }

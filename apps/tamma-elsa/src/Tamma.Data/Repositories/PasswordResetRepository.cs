@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class PasswordResetRepository(TammaDbContext db) : IPasswordResetRepository
+public class PasswordResetRepository(ControlPlaneDbContext db) : IPasswordResetRepository
 {
     public async Task<PasswordResetToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
     {

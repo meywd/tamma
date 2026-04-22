@@ -1168,7 +1168,7 @@ kb.MapGet("/analytics/costs", KbEndpoints.GetKbCosts);
 // ────────────────────────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+    var dbContext = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
     try
     {
         // Per the Epic 19 wipe-and-recreate directive ("nothing exists

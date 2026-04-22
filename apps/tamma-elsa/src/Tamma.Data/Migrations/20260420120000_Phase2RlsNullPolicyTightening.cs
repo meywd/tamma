@@ -15,8 +15,9 @@ namespace Tamma.Data.Migrations
     /// <code>"TenantId" IS NULL OR "TenantId" = NULLIF(current_setting(...), '')::uuid</code>
     /// so rows that legitimately have <c>TenantId = NULL</c> (system defaults,
     /// service keys, bootstrap rows) remained visible to every session.
-    /// Once Phase-3 wires <c>TammaAppDbContext</c> onto the runtime hot path
-    /// (follow-up story 19-6), the <c>IS NULL</c> branch would expose those
+    /// Once Phase-3 wired the app-role context onto the runtime hot path
+    /// (follow-up story 19-6, now superseded by Epic 28 db-per-tenant),
+    /// the <c>IS NULL</c> branch would expose those
     /// rows across every tenant session — a cross-tenant data leak.
     /// </para>
     ///

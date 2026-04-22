@@ -4,62 +4,91 @@ using Tamma.Data.Entities;
 namespace Tamma.Data.Repositories;
 
 /// <summary>
-/// EF-backed event store. Uses the global query filter on
-/// <see cref="DomainEvent"/> (see <see cref="TammaDbContext.OnModelCreating"/>)
-/// which scopes reads to the ambient <see cref="ITenantContext"/>.
-///
-/// <para>Audit finding 028 (RLS bypass): the previous version called
-/// <c>IgnoreQueryFilters()</c> on every query, defeating the global tenant
-/// filter and effectively making cross-tenant access the default. This
-/// version honours the global filter; cross-tenant call sites that legitimately
-/// need it (e.g. <see cref="GetLastByTypeAsync"/> when called from system
-/// scope, the dashboard "all-tenants" admin view) must opt in via the
-/// <c>*CrossTenant</c> overloads.</para>
-///
-/// <para>Postgres RLS itself is dormant pending the Phase-3 connection-string
-/// split; this repo enforces tenant scoping at the EF layer in the meantime.</para>
+/// Tenant-scoped event store. Writes always go through the tenant factory;
+/// reads scope to the ambient tenant. Cross-tenant admin queries
+/// (<c>QueryAsync(tenantId: null)</c>) use <see cref="ControlPlaneDbContext"/>
+/// because the factory requires a specific tenant.
 /// </summary>
-public class EventRepository(TammaDbContext db) : IEventRepository
+public class EventRepository(
+    ITenantDbContextFactory tenantDbFactory,
+    ITenantContext tenantContext,
+    ControlPlaneDbContext cp) : IEventRepository
 {
     public async Task<DomainEvent> AppendAsync(DomainEvent evt)
     {
         evt.CreatedAt = DateTime.UtcNow;
+
+        // Platform-scope events (no tenant) — e.g. Resend email without a
+        // tenant-bound sender — write to CP. Tenant-scoped events route
+        // through the factory.
+        var tid = evt.TenantId ?? tenantContext.TenantId;
+        if (tid is null)
+        {
+            cp.DomainEvents.Add(evt);
+            await cp.SaveChangesAsync();
+            return evt;
+        }
+
+        evt.TenantId = tid;
+        await using var db = await tenantDbFactory.CreateAsync(tid.Value);
         db.DomainEvents.Add(evt);
         await db.SaveChangesAsync();
         return evt;
     }
 
     public async Task<DomainEvent?> GetByIdAsync(Guid id)
-        => await db.DomainEvents.FindAsync(id);
-
-    public async Task<List<DomainEvent>> QueryAsync(Guid? tenantId, string? type, int? issueNumber, int limit)
     {
-        // Honour the global query filter — when the ambient tenant context is
-        // set, it scopes; when it's null (system scope, e.g. background
-        // processor), the filter degrades to "all tenants". Caller-supplied
-        // tenantId narrows further inside that.
-        var query = db.DomainEvents.AsQueryable();
-        if (tenantId.HasValue)
-            query = query.Where(e => e.TenantId == tenantId.Value);
+        if (tenantContext.TenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            return await db.DomainEvents.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(e => e.Id == id);
+        }
+        return await cp.DomainEvents.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(e => e.Id == id);
+    }
+
+    public async Task<List<DomainEvent>> QueryAsync(
+        Guid? tenantId, string? type, int? issueNumber, int limit)
+    {
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            // Explicit tenant predicate — the factory-issued context no
+            // longer carries an EF query filter (the Npgsql per-tenant
+            // connection is the real isolation plane; during transition
+            // the physical DB is shared so we filter at query time).
+            var query = db.DomainEvents.Where(e => e.TenantId == tid);
+            if (!string.IsNullOrEmpty(type))
+                query = query.Where(e => e.Type == type);
+            if (issueNumber.HasValue)
+                query = query.Where(e => e.IssueNumber == issueNumber.Value);
+            return await query.OrderByDescending(e => e.CreatedAt).Take(limit).ToListAsync();
+        }
+
+        // Cross-tenant admin view (system scope). CP context exposes all rows.
+        var q = cp.DomainEvents.IgnoreQueryFilters().AsQueryable();
         if (!string.IsNullOrEmpty(type))
-            query = query.Where(e => e.Type == type);
+            q = q.Where(e => e.Type == type);
         if (issueNumber.HasValue)
-            query = query.Where(e => e.IssueNumber == issueNumber.Value);
-        return await query.OrderByDescending(e => e.CreatedAt).Take(limit).ToListAsync();
+            q = q.Where(e => e.IssueNumber == issueNumber.Value);
+        return await q.OrderByDescending(e => e.CreatedAt).Take(limit).ToListAsync();
     }
 
     public async Task<DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)
-        => await db.DomainEvents
+    {
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+        return await db.DomainEvents
             .Where(e => e.TenantId == tenantId && e.Type == type)
             .OrderByDescending(e => e.CreatedAt)
             .FirstOrDefaultAsync();
+    }
 
     public async Task ClearAsync(Guid tenantId)
     {
-        // ClearAsync is an admin / test helper; bypass the ambient filter so
-        // the explicit tenantId argument is the sole authority. Without
-        // IgnoreQueryFilters() here, a clear request from a different ambient
-        // tenant would silently delete nothing.
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+        // IgnoreQueryFilters() is safe here because the context is already
+        // fixed to this tenant — there is no other tenant's data to reach.
         var events = await db.DomainEvents.IgnoreQueryFilters()
             .Where(e => e.TenantId == tenantId).ToListAsync();
         db.DomainEvents.RemoveRange(events);

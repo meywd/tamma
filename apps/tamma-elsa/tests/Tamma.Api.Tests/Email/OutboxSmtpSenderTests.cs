@@ -24,7 +24,8 @@ namespace Tamma.Api.Tests.Email;
 public class OutboxSmtpSenderTests
 {
     private ServiceProvider _services = null!;
-    private DbContextOptions<TammaDbContext> _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private Mock<ISmtpTransport> _transport = null!;
     private OutboxSmtpSender _sender = null!;
     private IConfiguration _config = null!;
@@ -33,15 +34,23 @@ public class OutboxSmtpSenderTests
     public void SetUp()
     {
         var dbName = Guid.NewGuid().ToString();
-        _options = new DbContextOptionsBuilder<TammaDbContext>()
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        var captured = _options;
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         var services = new ServiceCollection();
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(captured));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
+        services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
 
@@ -81,8 +90,13 @@ public class OutboxSmtpSenderTests
         _services.Dispose();
     }
 
-    private EmailOutboxRepository FreshOutbox() => new(new TestDbContext(_options));
-    private EventRepository FreshEvents() => new(new TestDbContext(_options));
+    private EmailOutboxRepository FreshOutbox()
+        => new(new TestTenantDbContextFactory(_tenantOptions),
+               new TestControlPlaneDbContext(_cpOptions));
+    private EventRepository FreshEvents()
+        => new(new TestTenantDbContextFactory(_tenantOptions),
+               new TenantContext(),
+               new TestControlPlaneDbContext(_cpOptions));
 
     private static EmailOutboxMessage NewRow(int maxAttempts = 5) => new()
     {
@@ -182,7 +196,7 @@ public class OutboxSmtpSenderTests
         afterFirst!.Status.Should().Be("pending");
 
         // Fast-forward NextAttemptAt so the next ProcessOnceAsync picks it up.
-        using (var db = new TestDbContext(_options))
+        using (var db = new TestControlPlaneDbContext(_cpOptions))
         {
             var row = await db.EmailOutbox.FindAsync(enq.Id);
             row!.NextAttemptAt = DateTime.UtcNow.AddMinutes(-1);

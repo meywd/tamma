@@ -17,20 +17,27 @@ namespace Tamma.Api.Tests.Email;
 [TestFixture]
 public class EmailOutboxRepositoryTests
 {
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
     private EmailOutboxRepository _repo = null!;
 
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+        var dbName = Guid.NewGuid().ToString();
+        var cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        var tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        _db = new TestDbContext(options);
-        _repo = new EmailOutboxRepository(_db);
+        _db = new TestControlPlaneDbContext(cpOptions);
+        var factory = new TestTenantDbContextFactory(tenantOptions);
+        _repo = new EmailOutboxRepository(factory, _db);
     }
 
     [TearDown]

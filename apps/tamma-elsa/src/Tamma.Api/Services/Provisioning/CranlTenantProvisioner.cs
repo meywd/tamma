@@ -44,12 +44,12 @@ public sealed class CranlTenantProvisioner : ITenantProvisioner
     public const string ProvisioningTaskType = "provisioning.tenant";
     public const string DeprovisioningTaskType = "provisioning.tenant.deprovision";
 
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
     private readonly ITaskQueue _taskQueue;
     private readonly ILogger<CranlTenantProvisioner> _logger;
 
     public CranlTenantProvisioner(
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ITaskQueue taskQueue,
         ILogger<CranlTenantProvisioner> logger)
     {

@@ -23,7 +23,7 @@ public class DiagnosticsAggregationTests
     // DbContext is owned by _scope; disposing the scope cascades correctly.
     // Suppress NUnit1032 (false positive for scoped deps).
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
 
     [SetUp]
@@ -31,7 +31,7 @@ public class DiagnosticsAggregationTests
     {
         await DiagnosticsSetUpFixture.ResetDatabaseAsync();
         _scope = DiagnosticsTestHarness.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _repo = _scope.ServiceProvider.GetRequiredService<IDiagnosticsRepository>();
         _service = _scope.ServiceProvider.GetRequiredService<IDiagnosticsService>();
     }

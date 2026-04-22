@@ -23,7 +23,8 @@ namespace Tamma.Api.Tests.Engine;
 public class TaskQueueProcessorLifecycleBusTests
 {
     private ServiceProvider _services = null!;
-    private DbContextOptions<TammaDbContext> _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private Mock<ITaskHandler> _handler = null!;
     private TaskQueueProcessor _processor = null!;
     private InMemoryEngineLifecycleBus _bus = null!;
@@ -32,17 +33,24 @@ public class TaskQueueProcessorLifecycleBusTests
     public void SetUp()
     {
         var dbName = Guid.NewGuid().ToString();
-        _options = new DbContextOptionsBuilder<TammaDbContext>()
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        var capturedOptions = _options;
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         _bus = new InMemoryEngineLifecycleBus();
 
         var services = new ServiceCollection();
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(capturedOptions));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
         services.AddScoped<IQueuedTaskRepository, QueuedTaskRepository>();
         services.AddSingleton<IEngineLifecycleBus>(_bus);
 
@@ -70,7 +78,8 @@ public class TaskQueueProcessorLifecycleBusTests
     }
 
     private QueuedTaskRepository FreshRepo()
-        => new(new TestDbContext(_options));
+        => new(new TestTenantDbContextFactory(_tenantOptions),
+               new TestControlPlaneDbContext(_cpOptions));
 
     [Test]
     public async Task ProcessOnceAsync_SuccessfulTask_PublishesClaimedThenCompleted()
