@@ -162,6 +162,23 @@ Operator        tamma CLI        C# Elsa          LocalExecutor   tamma execute-
 | 22-4 | CLI + SaaS Feature Parity Matrix | P1 | 6h | Drafted |
 | 22-5 | CLI Docker Installation | P2 | — | Drafted |
 
+## Feature parity matrix (22-4 target schema)
+
+| Capability | CLI standalone | SaaS (GitHub Actions) | Hybrid |
+|-----------|---------------|-----------------------|--------|
+| Agent execution | Local subprocess | User's GitHub Actions runner | Local subprocess |
+| Event store | In-memory | Per-tenant Postgres | In-memory + cloud sync |
+| Workflow engine | Elsa (self-hosted) | Elsa (Tamma Cloud) | Elsa (self-hosted) |
+| Dashboard | TUI (Ink 5) | Web dashboard | TUI + optional cloud dashboard |
+| Config source | `~/.tamma/*` + repo `.tamma/` | GitHub App + env vars | `~/.tamma/*` + optional cloud pull |
+| Secrets | OS keychain | Per-tenant cabinet (Epic 29) | OS keychain |
+| Billing | None (self-hosted) | Stripe subscription | None (self-hosted) |
+| Multi-tenancy | Single tenant (self) | Full multi-tenant | Single tenant (self) |
+| Telemetry | Local Pino logs | OpenSearch + Pino | Local Pino + optional forward |
+| Updates | `pnpm install -g` / Docker pull | Managed | `pnpm install -g` / Docker pull |
+
+A feature that lands on only one column must declare a migration path or an explicit "SaaS-only" / "CLI-only" intent in its story file. New features default to dual-mode; opt-outs require a maintainer sign-off.
+
 ## Dependencies
 
 | Dependency | Epic | Reason |
@@ -187,6 +204,21 @@ Even though Epic 19 absorbed 22-1 and 22-2, this epic stays as the permanent hom
 1. **Optional cloud-sync (22-3)** — the observability bridge that's explicitly not SaaS lock-in.
 2. **Feature parity matrix (22-4)** — documentation that blocks "we'll do this SaaS-only" from quietly happening.
 3. **CLI-mode preservation as a project value** — someone has to formally own the "no cloud required" guarantee, with this page as the durable reference.
+
+## Cloud-sync transport (22-3 design)
+
+The `CloudSyncTransport` is an `IEventStore` decorator, not a replacement. The engine keeps writing to `InMemoryEventStore` as the source of truth. The transport batches events (50-event or 5-second windows), signs each batch with the tenant's cloud API key, POSTs to `https://api.tamma.cloud/api/v1/events/ingest`, and honours a circuit breaker on 5xx responses. On circuit-open, events queue in a bounded ring buffer (10k events max); on circuit-close, the buffer drains oldest-first. A local log line at WARN reports drops with event count and age. The transport never blocks the engine: all work is async and failures are swallowed.
+
+## Operator-facing commands
+
+| Command | Mode | What it does |
+|---------|------|---------------|
+| `tamma start` | Standalone | Boots engine in TUI mode, runs workflows locally |
+| `tamma server` | Self-hosted server | Boots Fastify API + engine (no Tamma Cloud) |
+| `tamma api` | SaaS / GitHub App | Boots the Tamma Cloud API surface |
+| `tamma execute-agent` | Internal | The subprocess side of `LocalExecutor`'s JSON shell-out protocol |
+| `tamma config show` | All | Dumps resolved config with source labels |
+| `tamma doctor` | All | Validates provider keys, GitHub App creds, local Elsa reachability |
 
 ## See also
 
