@@ -108,6 +108,7 @@ Research: `docs/stories/research/multi-git-platform-2026.md` (2025–2026 citati
 
 ## Related
 
+- See also: [Epic 31 detail](Epics/Epic-31-Multi-Git-Platform.md)
 - [Identity Providers](Identity-Providers) — Epic 33 deferred stub; orthogonal sign-in plane
 - [Security → GitHub secrets provisioning (libsodium)](Security#github-secrets-provisioning-libsodium)
 - [Agent Dispatch](Agent-Dispatch) — Epic 19's `IAgentExecutor` is platform-agnostic already

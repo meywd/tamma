@@ -137,6 +137,7 @@ Same shape, scoped to the tenant's own secrets. Depends on 18-5 dashboard shell 
 
 ## Related
 
+- See also: [Epic 29 detail](Epics/Epic-29-Secret-Management.md)
 - [Security](Security)
 - [Port Audit](Port-Audit) — review findings 4, 15, 16
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) — Epic 30 backends each register rotation handlers

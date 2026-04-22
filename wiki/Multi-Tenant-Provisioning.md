@@ -151,6 +151,7 @@ Request → resolve apiKey / JWT → tenantId
 
 ## Related
 
+- See also: [Epic 30 detail](Epics/Epic-30-Pluggable-Provisioning.md)
 - [Architecture → Deployment Modes](Architecture#deployment-modes-three-mode-architecture)
 - [Secret Management](Secret-Management) — Epic 29 provides rotation primitives each backend registers against
 - [Port Audit](Port-Audit) — review finding 14 closed by 30-3

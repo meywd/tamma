@@ -100,6 +100,7 @@ A tenant user could eventually sign in via their corporate SAML IdP (Epic 33) wh
 
 ## Related
 
+- See also: [Epic 33 detail](Epics/Epic-33-Per-Tenant-IdP.md)
 - [Multi Git Platform](Multi-Git-Platform) — orthogonal API-access plane
 - [Security → API key hashing](Security#api-key-hashing) — built-in auth today
 - Source: [`docs/stories/epic-33/README.md`](https://github.com/meywd/tamma/tree/main/docs/stories/epic-33)
