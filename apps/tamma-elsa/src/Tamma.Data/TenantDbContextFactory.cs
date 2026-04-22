@@ -52,7 +52,7 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
         _resolver = resolver;
     }
 
-    public async Task<TenantDbContext> CreateAsync(
+    public async ValueTask<TenantDbContext> CreateAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {

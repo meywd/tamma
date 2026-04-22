@@ -23,13 +23,14 @@ public class PlatformAnalyticsServiceFactTableTests
         new(2026, 04, 18, 12, 00, 00, DateTimeKind.Utc);
 
     private ControlPlaneDbContext _cp = null!;
-    private TestAppDbContext _app = null!;
     private PlatformAnalyticsService _sut = null!;
     private FakeTimeProvider _clock = null!;
 
     [SetUp]
     public void SetUp()
     {
+        // Wave A.5 collapsed TammaAppDbContext into ControlPlaneDbContext;
+        // legacy WorkflowInstances / DomainEvents DbSets now live on CP.
         var cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
             .UseInMemoryDatabase($"cp-fact-{Guid.NewGuid()}")
             .ConfigureWarnings(w => w.Ignore(
@@ -37,22 +38,14 @@ public class PlatformAnalyticsServiceFactTableTests
             .Options;
         _cp = new ControlPlaneDbContext(cpOptions);
 
-        var appOptions = new DbContextOptionsBuilder<TammaAppDbContext>()
-            .UseInMemoryDatabase($"app-fact-{Guid.NewGuid()}")
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-        _app = new TestAppDbContext(appOptions);
-
         _clock = new FakeTimeProvider(FixedNow);
-        _sut = new PlatformAnalyticsService(_cp, _app, _clock);
+        _sut = new PlatformAnalyticsService(_cp, _clock);
     }
 
     [TearDown]
     public void TearDown()
     {
         _cp.Dispose();
-        _app.Dispose();
     }
 
     [Test]
@@ -131,7 +124,7 @@ public class PlatformAnalyticsServiceFactTableTests
     {
         // No fact-table rows — populate the live sources.
         var tenantId = Guid.NewGuid();
-        _app.WorkflowInstances.Add(new WorkflowInstance
+        _cp.WorkflowInstances.Add(new WorkflowInstance
         {
             Id = Guid.NewGuid(),
             DefinitionId = Guid.NewGuid(),
@@ -141,9 +134,9 @@ public class PlatformAnalyticsServiceFactTableTests
             CreatedAt = FixedNow.AddHours(-1),
             UpdatedAt = FixedNow.AddHours(-1),
         });
-        await _app.SaveChangesAsync();
+        await _cp.SaveChangesAsync();
 
-        _app.DomainEvents.Add(new DomainEvent
+        _cp.DomainEvents.Add(new DomainEvent
         {
             Id = Guid.NewGuid(),
             Type = "LLM.CALL.SUCCESS",
@@ -153,7 +146,7 @@ public class PlatformAnalyticsServiceFactTableTests
             Data = "{\"costUsd\":0.75}",
             CreatedAt = FixedNow.AddHours(-1),
         });
-        await _app.SaveChangesAsync();
+        await _cp.SaveChangesAsync();
 
         var summary = await _sut.GetSummaryAsync();
 

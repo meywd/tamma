@@ -1,3 +1,4 @@
+using Tamma.Data.Abstractions;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;

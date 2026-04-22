@@ -1,3 +1,4 @@
+using Tamma.Data.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;

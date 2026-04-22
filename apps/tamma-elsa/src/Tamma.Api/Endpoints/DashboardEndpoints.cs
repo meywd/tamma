@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Engine;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;

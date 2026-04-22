@@ -1,3 +1,4 @@
+using Tamma.Data.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Core.Entities;
 using Tamma.Data;
@@ -58,12 +59,12 @@ public sealed class TestTenantDbContextFactory : ITenantDbContextFactory
         _options = options;
     }
 
-    public Task<TenantDbContext> CreateAsync(
+    public ValueTask<TenantDbContext> CreateAsync(
         Guid tenantId, CancellationToken cancellationToken = default)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException(
                 "Tenant id is required.", nameof(tenantId));
-        return Task.FromResult<TenantDbContext>(new TestTenantDbContext(_options, tenantId));
+        return ValueTask.FromResult<TenantDbContext>(new TestTenantDbContext(_options, tenantId));
     }
 }
