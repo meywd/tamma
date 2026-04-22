@@ -1,8 +1,26 @@
 # Tamma Project Roadmap
 
-Comprehensive roadmap covering all **31 epics** from foundation through SaaS platform plus the four newly scoped epics from the 2026-04-20/21 planning sweep.
+Comprehensive roadmap covering **33 epics** from foundation through SaaS platform, including five newly scoped epics from the 2026-04-20/21 planning sweep (Epics 28, 29, 30, 31, 33). _(Epics 27 and 32 are now defined; previous roadmap text marking them "reserved" was stale.)_
 
-_Last audited: 2026-04-21 (auth-foundation sprint + Wave-2 planning)._
+_Last audited: 2026-04-21 (auth-foundation sprint + Wave-2 planning + prioritization)._
+
+## Prioritization (Wave A → D)
+
+Full ranking with scoring methodology, dependency graph, and 10 open product questions: [Layer 4-5 Prioritization (2026-04-21)](https://github.com/meywd/tamma/blob/feat/auth-foundation/docs/stories/plans/layer-4-5-prioritization-2026-04-21.md).
+
+| Wave | Theme | Stories | Hours | Notes |
+|------|-------|--------:|------:|-------|
+| **A — Launch-critical** | First-customer blockers + P0/P1 security | 20 | ~370 | 19-6 (P0 RLS wiring) leads; Epic 28 phase A/B; 9-5; 18-7/18-8; 29-1; 28-9 |
+| **B — Core SaaS features** | Secret mgmt, prompt UIs, Epic 9 completion | 15 | ~290 | 27-4/27-5; remainder of Epic 29; 9-9..9-12; 18-4/18-5; 28-10..28-12 |
+| **C — Scale enablement** | Epic 12 agent effectiveness + Epic 31 multi-platform | 20 | ~325 | 12-5a/b/d; 12-7a..e; 31-1..31-5 (GitHub refactor + Gitea/Forgejo); 31-7..31-10 |
+| **D — Operational quality** | Multi-backend drivers, Layer 5 validation, P2 cleanup | 16 | ~260 | Epic 30 (Cranl/Hetzner/Cloudflare/BYO); 31-6 GitLab; review P2 backlog |
+| **Deferred** | Trigger-gated | 4 | — | 28-13 OpenBao, 31-11 Bitbucket, 31-12 Azure DevOps, Epic 33 Per-Tenant IdP |
+
+**Top 5 next**: 19-6 → 28-1 → 28-2 → 28-3 → 9-5. Detailed rationale in the prioritization doc.
+
+**Wall-clock estimate** at current 4-team parallel model: ~22 weeks (5 months) from Wave A start to Layer 5 complete.
+
+**10 open product questions** gate ordering — see prioritization doc §6 (single vs multi-tenant launch, Cranl-only vs Hetzner-now, SOC 2 timeline, SSO horizon, GitLab at launch, etc.).
 
 ## Current scoping inventory (at a glance)
 

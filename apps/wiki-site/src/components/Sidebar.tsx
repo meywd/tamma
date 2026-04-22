@@ -67,6 +67,15 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
     return numA - numB;
   });
 
+  // Sort epic detail pages numerically by epic number in path
+  // (path like "/epics/27-prompt-store" or "/epics/1-5-infrastructure")
+  const epicPageNumber = (path: string): number => {
+    const match = path.match(/\/epics\/(\d+(?:-\d+)?)/);
+    if (!match) return 999;
+    return parseFloat(match[1].replace('-', '.'));
+  };
+  epicPages.sort((a, b) => epicPageNumber(a.path) - epicPageNumber(b.path));
+
   const toggle = (s: string) => setExpanded((prev) => ({ ...prev, [s]: !prev[s] }));
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
