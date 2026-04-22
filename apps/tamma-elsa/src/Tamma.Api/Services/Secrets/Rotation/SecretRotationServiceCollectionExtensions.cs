@@ -27,6 +27,13 @@ public static class SecretRotationServiceCollectionExtensions
             "generic-http",
             (sp, _) => sp.GetRequiredService<GenericHttpRotationHandler>());
 
+        // Story 29-7: Postgres role rotation handler.
+        services.AddSingleton<IPostgresRotationExecutor, NpgsqlPostgresRotationExecutor>();
+        services.AddScoped<PostgresRoleRotationHandler>();
+        services.AddKeyedScoped<IRotationHandler>(
+            "postgres",
+            (sp, _) => sp.GetRequiredService<PostgresRoleRotationHandler>());
+
         return services;
     }
 }
