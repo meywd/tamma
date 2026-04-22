@@ -901,31 +901,37 @@ orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
 // method-not-allowed fallthrough.
 orgs.MapPost("/switch-org", () => Results.NotFound()).AllowAnonymous();
 
-orgs.MapGet("/{tenantId}", OrgEndpoints.GetOrg)
+// Every tenant-scoped route constrains {tenantId} to :guid so accidental
+// path confusion (e.g. `/api/v1/orgs/switch-org` — a legitimate 404) does
+// not route through the tenant-membership filter and return 405 for a
+// non-matching verb. The Story-18-3 OrgEndpoints.SwitchOrg handler is
+// gone (replaced by POST /api/v1/auth/switch-org in Story 28-9); the
+// regression test `OrgSwitchOrgRoute404Tests` pins this contract.
+orgs.MapGet("/{tenantId:guid}", OrgEndpoints.GetOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPut("/{tenantId}/settings", OrgEndpoints.UpdateOrgSettings)
+orgs.MapPut("/{tenantId:guid}/settings", OrgEndpoints.UpdateOrgSettings)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapGet("/{tenantId}/members", OrgEndpoints.ListMembers)
+orgs.MapGet("/{tenantId:guid}/members", OrgEndpoints.ListMembers)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPut("/{tenantId}/members/{userId}/role", OrgEndpoints.UpdateMemberRole)
+orgs.MapPut("/{tenantId:guid}/members/{userId:guid}/role", OrgEndpoints.UpdateMemberRole)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}/members/{userId}", OrgEndpoints.RemoveMember)
+orgs.MapDelete("/{tenantId:guid}/members/{userId:guid}", OrgEndpoints.RemoveMember)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPost("/{tenantId}/invites", OrgEndpoints.CreateInvite)
+orgs.MapPost("/{tenantId:guid}/invites", OrgEndpoints.CreateInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapGet("/{tenantId}/invites", OrgEndpoints.ListInvites)
+orgs.MapGet("/{tenantId:guid}/invites", OrgEndpoints.ListInvites)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}/invites/{inviteId}", OrgEndpoints.DeleteInvite)
+orgs.MapDelete("/{tenantId:guid}/invites/{inviteId:guid}", OrgEndpoints.DeleteInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 // Story 18-7: resend a pending invite (extends expiry, re-dispatches email).
-orgs.MapPost("/{tenantId}/invites/{inviteId}/resend", OrgEndpoints.ResendInvite)
+orgs.MapPost("/{tenantId:guid}/invites/{inviteId:guid}/resend", OrgEndpoints.ResendInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 // Story 18-7: tenant-scoped audit log read for tenant admins.
-orgs.MapGet("/{tenantId}/audit", OrgEndpoints.ListTenantAudit)
+orgs.MapGet("/{tenantId:guid}/audit", OrgEndpoints.ListTenantAudit)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
+orgs.MapPost("/{tenantId:guid}/transfer-ownership", OrgEndpoints.TransferOwnership)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
+orgs.MapDelete("/{tenantId:guid}", OrgEndpoints.DeleteOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 // Story 29-3 — tenant-scope secret create. Caller must be a member of

@@ -30,7 +30,7 @@ public class ControlPlaneDbContextModelTests
     }
 
     [Test]
-    public void Model_Has14_ControlPlaneEntities()
+    public void Model_Has_ExpectedControlPlaneEntities()
     {
         using var ctx = CreateContext();
 
@@ -39,6 +39,11 @@ public class ControlPlaneDbContextModelTests
             .Where(n => n is not null)
             .ToHashSet()!;
 
+        // Doc 01 §1.2 lists 14 foundational CP tables; Story 28-10 adds
+        // platform_analytics_hourly (fact table for the hourly rollup).
+        // Each CP-resident table must be listed here so a missing mapping
+        // — or an accidental TenantId-scoped entity leaking onto the CP
+        // context — fails the test loudly.
         entityTypes.Should().BeEquivalentTo(new[]
         {
             "users",
@@ -55,7 +60,8 @@ public class ControlPlaneDbContextModelTests
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
-        }, because: "Doc 01 §1.2 lists exactly 14 control-plane tables.");
+            "platform_analytics_hourly",
+        }, because: "Doc 01 §1.2 (14 tables) + Story 28-10 (platform_analytics_hourly).");
     }
 
     [Test]

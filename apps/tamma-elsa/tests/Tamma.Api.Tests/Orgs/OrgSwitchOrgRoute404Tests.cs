@@ -26,21 +26,53 @@ namespace Tamma.Api.Tests.Orgs;
 public class OrgSwitchOrgRoute404Tests
 {
     [Test]
-    public async Task Post_Api_V1_Orgs_SwitchOrg_Returns404()
+    public async Task Post_Api_V1_Orgs_SwitchOrg_ReturnsNoHandler()
     {
         using var client = ApiTestFixture.CreateClient();
 
-        // Route must not resolve to any handler — the old
+        // Route must not resolve to any POST handler — the old
         // OrgEndpoints.SwitchOrg is gone and no /api/v1/orgs/switch-org
         // mapping exists.
+        //
+        // Accepted outcomes:
+        //   - 404 Not Found — path has no registered route at all.
+        //   - 405 Method Not Allowed — path resolves to a GET/DELETE
+        //     tenant-scoped route (that additionally blocks the literal
+        //     `switch-org` segment at constraint time for its own verb)
+        //     but ASP.NET Core's 405-synthesis sees those registrations
+        //     via the path template before constraints run.
+        //
+        // Either outcome proves "no POST handler for this URL" — the
+        // regression we are guarding against is POST resolving to the
+        // buggy old handler, which would return 200 or 4xx-with-body.
         var response = await client.PostAsJsonAsync(
             "/api/v1/orgs/switch-org",
             new { tenantId = Guid.NewGuid() });
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+        response.StatusCode.Should().BeOneOf(
+            new[] { HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed },
             "the Story-18-3 handler was deleted because it would have tripped "
             + "the Phase-2 prevent_tenant_id_change trigger; switch-org now "
             + "lives only at POST /api/v1/auth/switch-org (Story 28-9).");
+    }
+
+    [Test]
+    public async Task Get_Api_V1_Orgs_SwitchOrg_Returns404()
+    {
+        // Companion assertion: since Program.cs constrains
+        // `/api/v1/orgs/{tenantId:guid}` to require a guid-shaped
+        // segment, GET on the literal `switch-org` must be 404, not a
+        // 400-from-binding or 200-with-wrong-tenant. This pins the
+        // `:guid` constraint so a future revert that drops it would
+        // fail here and on the POST assertion above (which would then
+        // see the old non-constrained MapGet in the Allow header).
+        using var client = ApiTestFixture.CreateClient();
+
+        var response = await client.GetAsync("/api/v1/orgs/switch-org");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "the :guid constraint on /api/v1/orgs/{tenantId:guid} must "
+            + "keep the literal `switch-org` segment from matching.");
     }
 
     [Test]

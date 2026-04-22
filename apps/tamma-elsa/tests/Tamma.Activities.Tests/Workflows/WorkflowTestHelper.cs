@@ -75,6 +75,9 @@ public static class WorkflowTestHelper
             .Returns((string varName, Guid defaultValue) => { var v = new Variable<Guid>(varName, defaultValue); variables.Add(v); return v; });
         mockBuilder.Setup(b => b.WithVariable<string[]>(It.IsAny<string>(), It.IsAny<string[]>()))
             .Returns((string varName, string[] defaultValue) => { var v = new Variable<string[]>(varName, defaultValue); variables.Add(v); return v; });
+        // DateTime overload — used by Story 28-10's HourlyAnalyticsRollupWorkflow.
+        mockBuilder.Setup(b => b.WithVariable<DateTime>(It.IsAny<string>(), It.IsAny<DateTime>()))
+            .Returns((string varName, DateTime defaultValue) => { var v = new Variable<DateTime>(varName, defaultValue); variables.Add(v); return v; });
 
         var buildMethod = workflow.GetType().GetMethod(
             "Build",
