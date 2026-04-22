@@ -18,6 +18,12 @@ import { AccountPage } from './pages/AccountPage.js';
 import { MyApiKeysPage } from './pages/MyApiKeysPage.js';
 import { OrganizationLayout } from './pages/organization/OrganizationLayout.js';
 import { TenantAdminGuard } from './guards/TenantAdminGuard.js';
+// Story 18-4: onboarding wizard. Lives outside AppLayout because new
+// users don't have a tenant yet and the wizard is a single-card focused
+// flow (no sidebar / nav chrome).
+import { OnboardingPage } from './pages/onboarding/OnboardingPage.js';
+import { OnboardingSuccessPage } from './pages/onboarding/OnboardingSuccessPage.js';
+import { OnboardingErrorPage } from './pages/onboarding/OnboardingErrorPage.js';
 
 const AdminLayout = React.lazy(() =>
   import('./pages/admin/AdminLayout.js').then((m) => ({ default: m.AdminLayout })),
@@ -25,6 +31,43 @@ const AdminLayout = React.lazy(() =>
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  // Story 18-4 — onboarding wizard. Auth-gated but rendered without
+  // AppLayout so the user sees the focused single-card UX during setup.
+  {
+    path: '/onboarding',
+    element: (
+      <AuthGuard>
+        <OnboardingPage />
+      </AuthGuard>
+    ),
+  },
+  {
+    path: '/onboarding/repos',
+    // Alias of /onboarding — the connect step's redirect chain lands on
+    // /onboarding/repos historically. Render the same wizard; it picks
+    // the right step from live status.
+    element: (
+      <AuthGuard>
+        <OnboardingPage />
+      </AuthGuard>
+    ),
+  },
+  {
+    path: '/onboarding/success',
+    element: (
+      <AuthGuard>
+        <OnboardingSuccessPage />
+      </AuthGuard>
+    ),
+  },
+  {
+    path: '/onboarding/error',
+    // Error page must be reachable without auth — the callback that
+    // routes here may have failed *because* the user isn't signed in
+    // (`unknown_user` reason). Skipping the AuthGuard avoids a redirect
+    // loop in that case.
+    element: <OnboardingErrorPage />,
+  },
   {
     element: (
       <AuthGuard>
