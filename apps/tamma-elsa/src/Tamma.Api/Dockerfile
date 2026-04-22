@@ -45,14 +45,14 @@ RUN mkdir -p /app/logs && chown -R tamma:tamma /app
 USER tamma
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3100
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:3100/api/health || exit 1
 
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:3000
+ENV ASPNETCORE_URLS=http://+:3100
 ENV ASPNETCORE_ENVIRONMENT=Production
 
 # Entry point

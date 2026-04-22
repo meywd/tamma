@@ -1,0 +1,420 @@
+# =============================================================================
+# Tamma Reverse Proxy — nginx configuration template
+#
+# This is a template file processed by the nginx Docker image's built-in
+# envsubst support. Place at /etc/nginx/templates/default.conf.template
+# and nginx will output the processed file to /etc/nginx/conf.d/default.conf.
+#
+# Only variables defined as environment variables are substituted — nginx's
+# own variables ($host, $request_uri, $scheme, etc.) are left untouched.
+#
+# Substituted variables:
+#   $ELSA_ADMIN_API_KEY — injected into ELSA Server API proxy_set_header
+#
+# Listens on 443 (TLS with Cloudflare origin cert) and 80 (redirect to HTTPS).
+#
+# Routing:
+#   app.tamma.dev/        -> dashboard (oauth2-proxy protected)
+#   app.tamma.dev/api/    -> tamma-api (JWT auth, no oauth2-proxy)
+#   api.tamma.dev/        -> tamma-api (webhooks/machine clients, no oauth2-proxy)
+#   elsa.tamma.dev/       -> elsa-studio (oauth2-proxy protected)
+#   logs.tamma.dev/       -> opensearch-dashboards (oauth2-proxy protected)
+#   Bare IP               -> dashboard + /api/
+#
+# Auth: oauth2-proxy handles GitHub OAuth login for browser-facing routes
+#       (dashboard, ELSA Studio, Logs). API routes use JWT auth directly.
+#       Unauthenticated users are redirected to /oauth2/sign_in (GitHub login).
+#       The oauth2-proxy cookie (_oauth2_proxy) is shared across *.tamma.dev.
+#
+# Sign-out: /sign-out clears tamma_session JWT cookie, then redirects to
+#       oauth2-proxy /oauth2/sign_out to clear _oauth2_proxy cookie.
+#
+# Optional services: opensearch-dashboards and oauth2-proxy may not be running.
+#       We use variables for proxy_pass to defer DNS resolution to request time,
+#       and Docker's embedded DNS (127.0.0.11) as resolver.
+#
+# Nav: Unified navigation bar injected via sub_filter into third-party
+#      dashboards (Story 16.4). Assets served from /nav-header/ mount.
+# =============================================================================
+
+# Use Docker's embedded DNS resolver so variable-based proxy_pass works.
+# "valid=30s" caches DNS for 30s; services that restart get re-resolved.
+resolver 127.0.0.11 valid=30s ipv6=off;
+
+# Redirect HTTP -> HTTPS for named hosts
+server {
+    listen 80;
+    server_name app.tamma.dev api.tamma.dev elsa.tamma.dev logs.tamma.dev;
+    return 301 https://$host$request_uri;
+}
+
+# Bare IP on port 80 — dashboard + API (for testing without DNS)
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location /api/ {
+        proxy_pass http://tamma-api:3100/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://tamma-dashboard:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# TLS settings (shared)
+ssl_certificate /etc/nginx/certs/origin-cert.pem;
+ssl_certificate_key /etc/nginx/certs/origin-key.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+
+# =============================================================================
+# app.tamma.dev — dashboard + /api/
+# =============================================================================
+server {
+    listen 443 ssl;
+    server_name app.tamma.dev;
+
+    # ----- Shared nav bar assets (Story 16.4) -----
+    location = /tamma-nav.html {
+        alias /etc/nginx/nav-header/tamma-nav.html;
+        add_header Cache-Control "public, max-age=300";
+        add_header Access-Control-Allow-Origin "*";
+        add_header Access-Control-Allow-Methods "GET";
+        default_type text/html;
+    }
+
+    location = /tamma-nav.js {
+        alias /etc/nginx/nav-header/tamma-nav.js;
+        add_header Cache-Control "public, max-age=300";
+        add_header Access-Control-Allow-Origin "*";
+        add_header Access-Control-Allow-Methods "GET";
+        default_type application/javascript;
+    }
+
+    # ----- OAuth2 Proxy endpoints -----
+    # Variable proxy_pass defers DNS so nginx starts without oauth2-proxy.
+    location /oauth2/ {
+        set $oauth2_upstream http://oauth2-proxy:4180;
+        proxy_pass $oauth2_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location = /oauth2/auth {
+        internal;
+        set $oauth2_upstream http://oauth2-proxy:4180;
+        proxy_pass $oauth2_upstream/oauth2/auth;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Uri $request_uri;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Content-Length "";
+        proxy_pass_request_body off;
+    }
+
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
+    }
+
+    # ----- API routes: JWT-based auth (no oauth2-proxy) -----
+    location /api/ {
+        proxy_pass http://tamma-api:3100/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # ----- Named redirect location for unauthenticated users -----
+    # Using `error_page 401 = /oauth2/sign_in` would do an *internal*
+    # rewrite and return oauth2-proxy's sign-in page with status 200 —
+    # clients would never see a real redirect. Using a named location
+    # with `return 302` produces a proper external redirect that browsers
+    # (and post-deploy tests) can follow.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
+    # ----- Dashboard: protected by oauth2-proxy -----
+    location / {
+        auth_request /oauth2/auth;
+        error_page 401 = @oauth2_redirect;
+
+        auth_request_set $auth_user $upstream_http_x_auth_request_user;
+        auth_request_set $auth_email $upstream_http_x_auth_request_email;
+        proxy_set_header X-Auth-Request-User $auth_user;
+        proxy_set_header X-Auth-Request-Email $auth_email;
+
+        proxy_pass http://tamma-dashboard:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# =============================================================================
+# api.tamma.dev — API only (webhooks, machine clients) — no oauth2-proxy
+# =============================================================================
+server {
+    listen 443 ssl;
+    server_name api.tamma.dev;
+
+    location /api/github/webhooks {
+        proxy_pass http://tamma-api:3100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        client_max_body_size 10m;
+    }
+
+    location / {
+        proxy_pass http://tamma-api:3100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+
+# =============================================================================
+# elsa.tamma.dev — ELSA Studio + Server API (RBAC: admin/owner only)
+#
+# Auth: Role-check endpoint validates tamma_session JWT cookie and verifies
+# the user's role has 'elsa:access' permission (admin or owner).
+# Users without a valid session are redirected to GitHub OAuth login.
+# Users with insufficient role see a 403 page.
+#
+# Nav bar: Injected via nginx sub_filter from app.tamma.dev (Story 16.4).
+# Blazor WASM serves index.html once; the nav is position:fixed outside
+# Blazor's render root, so it survives client-side routing.
+# =============================================================================
+server {
+    listen 443 ssl;
+    server_name elsa.tamma.dev;
+
+    # ----- Custom error pages -----
+    error_page 403 /403.html;
+    location = /403.html {
+        root /etc/nginx/error-pages;
+        internal;
+    }
+
+    # ----- OAuth2 Proxy endpoints (still needed for login redirect) -----
+    location /oauth2/ {
+        set $oauth2_upstream http://oauth2-proxy:4180;
+        proxy_pass $oauth2_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # ----- RBAC auth_request: validates JWT + role via tamma-api -----
+    location = /auth/role-check {
+        internal;
+        proxy_pass http://tamma-api:3100/api/auth/role-check?service=elsa;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Content-Length "";
+        proxy_pass_request_body off;
+    }
+
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
+    }
+
+    # ----- ELSA health check: skip auth -----
+    location = /health {
+        proxy_pass http://elsa-server:5000/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # ----- Blazor WASM static assets: skip auth (no secrets here) -----
+    location /_framework/ {
+        set $elsa_studio_upstream http://elsa-studio:80;
+        proxy_pass $elsa_studio_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location /_content/ {
+        set $elsa_studio_upstream http://elsa-studio:80;
+        proxy_pass $elsa_studio_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # ----- Named redirect location for unauthenticated users -----
+    # See app.tamma.dev section above for the rationale. Uses
+    # /oauth2/start so oauth2-proxy kicks off the GitHub OAuth flow.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
+    # ----- ELSA Server API: RBAC-gated, API key injected -----
+    location /elsa/api/ {
+        auth_request /auth/role-check;
+        error_page 401 = @oauth2_redirect;
+        error_page 403 /403.html;
+
+        proxy_pass http://elsa-server:5000/elsa/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Inject ELSA admin API key — $ELSA_ADMIN_API_KEY is substituted by
+        # envsubst at container startup from the environment variable.
+        proxy_set_header Authorization "ApiKey $ELSA_ADMIN_API_KEY";
+    }
+
+    # ----- ELSA Studio UI: RBAC-gated (admin/owner only) -----
+    location / {
+        auth_request /auth/role-check;
+        error_page 401 = @oauth2_redirect;
+        error_page 403 /403.html;
+
+        set $elsa_studio_upstream http://elsa-studio:80;
+        proxy_pass $elsa_studio_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # --- Tamma Nav Bar Injection (Story 16.4) ---
+        # Disable upstream compression so sub_filter can operate on the body.
+        proxy_set_header Accept-Encoding "";
+        # Inject the self-injecting nav script before </head>.
+        sub_filter '</head>' '<script src="https://app.tamma.dev/tamma-nav.js" defer></script></head>';
+        sub_filter_once on;
+        sub_filter_types text/html;
+    }
+}
+
+# =============================================================================
+# logs.tamma.dev — OpenSearch Dashboards (RBAC: admin/owner only)
+#
+# Auth: Role-check endpoint validates tamma_session JWT cookie and verifies
+# the user's role has 'logs:access' permission (admin or owner).
+# Users without a valid session are redirected to GitHub OAuth login.
+# Users with insufficient role see a 403 page.
+#
+# OpenSearch Dashboards is behind the "observability" profile and may not be
+# running. All proxy_pass directives use variables for deferred DNS resolution.
+#
+# Nav bar: Injected via nginx sub_filter from app.tamma.dev (Story 16.4).
+# =============================================================================
+server {
+    listen 443 ssl;
+    server_name logs.tamma.dev;
+
+    # ----- Custom error pages -----
+    error_page 403 /403.html;
+    location = /403.html {
+        root /etc/nginx/error-pages;
+        internal;
+    }
+
+    # ----- OAuth2 Proxy endpoints (still needed for login redirect) -----
+    location /oauth2/ {
+        set $oauth2_upstream http://oauth2-proxy:4180;
+        proxy_pass $oauth2_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # ----- RBAC auth_request: validates JWT + role via tamma-api -----
+    location = /auth/role-check {
+        internal;
+        proxy_pass http://tamma-api:3100/api/auth/role-check?service=logs;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Cookie $http_cookie;
+        proxy_set_header Content-Length "";
+        proxy_pass_request_body off;
+    }
+
+    # ----- Sign out: clear JWT cookie + redirect to oauth2-proxy sign_out -----
+    location = /sign-out {
+        add_header Set-Cookie "tamma_session=; Path=/; Domain=.tamma.dev; Max-Age=0; HttpOnly; Secure; SameSite=Lax" always;
+        return 302 /oauth2/sign_out;
+    }
+
+    # ----- Named redirect location for unauthenticated users -----
+    # See app.tamma.dev section above for the rationale.
+    location @oauth2_redirect {
+        return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
+    }
+
+    # ----- Fallback: return 503 when opensearch-dashboards is unavailable -----
+    location @logs_unavailable {
+        default_type text/html;
+        return 503 '<html><body><h1>Logs Dashboard Unavailable</h1><p>The observability stack is not currently running. Start it with: <code>docker compose --profile observability up -d</code></p></body></html>';
+    }
+
+    # ----- OpenSearch Dashboards: RBAC-gated, nav bar injected -----
+    location / {
+        auth_request /auth/role-check;
+        error_page 401 = @oauth2_redirect;
+        error_page 403 /403.html;
+        # If opensearch-dashboards is down, show unavailable page
+        error_page 502 503 = @logs_unavailable;
+
+        set $osd_upstream http://opensearch-dashboards:5601;
+        proxy_pass $osd_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffer_size 128k;
+        proxy_buffers 4 256k;
+        proxy_busy_buffers_size 256k;
+
+        # --- Tamma Nav Bar Injection (Story 16.4) ---
+        proxy_set_header Accept-Encoding "";
+        sub_filter '</head>' '<script src="https://app.tamma.dev/tamma-nav.js" defer></script></head>';
+        sub_filter_once on;
+    }
+}

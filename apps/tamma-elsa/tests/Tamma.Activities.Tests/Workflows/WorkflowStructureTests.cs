@@ -620,6 +620,62 @@ public class WorkflowStructureTests
     }
 
     // ================================================================
+    // TenantId Propagation Tests (Story 27-6)
+    // ================================================================
+
+    [Test]
+    public void LlmCallWorkflow_ShouldHaveTenantIdVariable()
+    {
+        // Arrange & Act
+        var workflow = new LlmCallWorkflow();
+        var builder = BuildWorkflow(workflow);
+
+        // Assert
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "LlmCallWorkflow must accept TenantId input for tenant-scoped prompt resolution");
+    }
+
+    [Test]
+    public void SingleIssueCycleWorkflow_ShouldHaveTenantIdVariable()
+    {
+        // Arrange & Act
+        var workflow = new SingleIssueCycleWorkflow();
+        var builder = BuildWorkflow(workflow);
+
+        // Assert
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "SingleIssueCycleWorkflow must accept TenantId input for tenant-scoped prompt resolution");
+    }
+
+    [Test]
+    public void PlanGenerationWorkflow_ShouldHaveTenantIdVariable()
+    {
+        // Arrange & Act
+        var workflow = new PlanGenerationWorkflow();
+        var builder = BuildWorkflow(workflow);
+
+        // Assert
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "PlanGenerationWorkflow must accept TenantId input for tenant-scoped prompt resolution");
+    }
+
+    [Test]
+    public void TddWithDebugRetryWorkflow_ShouldHaveTenantIdVariable()
+    {
+        // Arrange & Act
+        var workflow = new TddWithDebugRetryWorkflow();
+        var builder = BuildWorkflow(workflow);
+
+        // Assert
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "TddWithDebugRetryWorkflow must accept TenantId input for tenant-scoped prompt resolution");
+    }
+
+    // ================================================================
     // Cross-cutting structure tests
     // ================================================================
 

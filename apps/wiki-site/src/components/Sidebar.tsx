@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router';
 
 interface ManifestEntry {
@@ -7,11 +7,26 @@ interface ManifestEntry {
   section: string;
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  /** Controls visibility on mobile (< md). On md+ the sidebar is always visible. */
+  mobileOpen?: boolean;
+  /** Called when the mobile drawer requests to close (Escape, close button, route change). */
+  onCloseMobile?: () => void;
+}
+
+export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarProps) {
   const [manifest, setManifest] = useState<ManifestEntry[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
   const location = useLocation();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus the close button when the drawer opens (a11y: keyboard users land inside)
+  useEffect(() => {
+    if (mobileOpen) {
+      closeButtonRef.current?.focus();
+    }
+  }, [mobileOpen]);
 
   useEffect(() => {
     fetch('/content/manifest.json')
@@ -52,13 +67,22 @@ export default function Sidebar() {
     return numA - numB;
   });
 
+  // Sort epic detail pages numerically by epic number in path
+  // (path like "/epics/27-prompt-store" or "/epics/1-5-infrastructure")
+  const epicPageNumber = (path: string): number => {
+    const match = path.match(/\/epics\/(\d+(?:-\d+)?)/);
+    if (!match) return 999;
+    return parseFloat(match[1].replace('-', '.'));
+  };
+  epicPages.sort((a, b) => epicPageNumber(a.path) - epicPageNumber(b.path));
+
   const toggle = (s: string) => setExpanded((prev) => ({ ...prev, [s]: !prev[s] }));
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `block px-3 py-1.5 rounded-md text-[13px] leading-snug transition-colors ${
       isActive
-        ? 'bg-white/10 text-white font-medium'
-        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+        ? 'bg-sky-400/10 text-sky-300 font-medium'
+        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
     }`;
 
   const sectionHeader = (label: string, key: string, count?: number) => (
@@ -90,13 +114,36 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className="w-[260px] shrink-0 h-screen overflow-y-auto bg-[#111113] border-r border-zinc-800/60 flex flex-col">
+    <aside
+      id="site-sidebar"
+      aria-label="Site navigation"
+      aria-hidden={!mobileOpen ? undefined : false}
+      className={[
+        // Mobile: fixed drawer sliding in from the left
+        'fixed inset-y-0 left-0 z-40 w-[82vw] max-w-[300px] h-screen overflow-y-auto bg-[#0b1324] border-r border-sky-400/10 flex flex-col',
+        'transition-transform duration-200 ease-out will-change-transform',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        // Desktop (md+): pinned inline, always visible, no translation
+        'md:static md:translate-x-0 md:w-[260px] md:max-w-none md:shrink-0 md:z-auto',
+      ].join(' ')}
+    >
       {/* Header */}
-      <div className="px-4 pt-5 pb-3">
+      <div className="px-4 pt-5 pb-3 flex items-center justify-between gap-2">
         <NavLink to="/" className="flex items-center gap-2.5 text-white font-semibold text-[15px] tracking-tight">
           <img src="/logo.png" alt="Tamma" className="w-7 h-7 rounded-full" />
           Tamma Docs
         </NavLink>
+        <button
+          type="button"
+          ref={closeButtonRef}
+          aria-label="Close navigation menu"
+          onClick={onCloseMobile}
+          className="md:hidden inline-flex items-center justify-center w-8 h-8 -mr-1 rounded-md text-zinc-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* Search */}
@@ -106,7 +153,7 @@ export default function Sidebar() {
           placeholder="Search..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-3 py-1.5 bg-white/5 border border-zinc-700/50 rounded-md text-[13px] text-zinc-300 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-colors"
+          className="w-full px-3 py-1.5 bg-white/5 border border-sky-400/15 rounded-md text-[13px] text-zinc-300 placeholder:text-zinc-600 outline-none focus:border-zinc-500 transition-colors"
         />
       </div>
 
@@ -117,6 +164,16 @@ export default function Sidebar() {
           <NavLink to="/" className={navClass}>Home</NavLink>
           <NavLink to="/roadmap" className={navClass}>Roadmap</NavLink>
           <NavLink to="/architecture" className={navClass}>Architecture</NavLink>
+          <NavLink to="/deployment" className={navClass}>Deployment</NavLink>
+          <NavLink to="/agent-dispatch" className={navClass}>Agent Dispatch</NavLink>
+          <NavLink to="/security" className={navClass}>Security</NavLink>
+          <NavLink to="/github-integration" className={navClass}>GitHub Integration</NavLink>
+          <NavLink to="/testing" className={navClass}>Testing</NavLink>
+          <NavLink to="/port-audit" className={navClass}>Port Audit</NavLink>
+          <NavLink to="/secret-management" className={navClass}>Secret Management</NavLink>
+          <NavLink to="/multi-tenant-provisioning" className={navClass}>Multi-Tenant Provisioning</NavLink>
+          <NavLink to="/multi-git-platform" className={navClass}>Multi Git Platform</NavLink>
+          <NavLink to="/identity-providers" className={navClass}>Identity Providers</NavLink>
         </div>
 
         <div className="h-px bg-zinc-800/60 mx-2 my-1" />
@@ -179,7 +236,7 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-zinc-800/60 text-[11px] text-zinc-600">
+      <div className="px-4 py-3 border-t border-sky-400/10 text-[11px] text-zinc-600">
         <a href="https://github.com/meywd/tamma" target="_blank" rel="noopener" className="hover:text-zinc-400 transition-colors">
           GitHub
         </a>

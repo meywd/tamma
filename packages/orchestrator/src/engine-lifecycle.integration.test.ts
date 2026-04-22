@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TammaEngine } from './engine.js';
-import { EngineState, EngineEventType, InMemoryEventStore } from '@tamma/shared';
+import { EngineState, EngineEventType, InMemoryEventStore, DEFAULT_TENANT_ID } from '@tamma/shared';
 import type { TammaConfig } from '@tamma/shared';
 import type { IAgentProvider } from '@tamma/providers';
 import type { IGitPlatform } from '@tamma/platforms';
@@ -140,7 +140,7 @@ describe('TammaEngine Integration', () => {
     );
 
     // Verify event store recorded the full lifecycle
-    const events = eventStore.getEvents(1);
+    const events = await eventStore.getEvents(DEFAULT_TENANT_ID, 1);
     const eventTypes = events.map((e) => e.type);
     expect(eventTypes).toContain(EngineEventType.ISSUE_SELECTED);
     expect(eventTypes).toContain(EngineEventType.ISSUE_ANALYZED);

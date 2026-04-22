@@ -1,22 +1,17 @@
 /**
  * `tamma server` command
  *
- * Starts a Fastify HTTP server with:
- *  - Engine REST/SSE routes
- *  - Auth plugin
- *  - Workflow sync routes
- *  - Dashboard routes
+ * Starts the Tamma engine with a C# API sidecar:
+ *  - Spawns the C# API process (ASP.NET Core) as the HTTP backend
+ *  - Runs the TammaEngine in-process for autonomous issue processing
  *
  * Loads configuration from tamma.config.json + environment variables,
- * creates a TammaEngine, and registers it with the engine registry.
+ * creates a TammaEngine, and connects it to the C# API over HTTP.
  */
 
 import * as path from 'node:path';
-import {
-  createApp,
-  EngineRegistry,
-  InMemoryWorkflowStore,
-} from '@tamma/api';
+import * as fs from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { TammaEngine } from '@tamma/orchestrator';
 import { InMemoryEventStore, DiagnosticsQueue, ContentSanitizer } from '@tamma/shared';
 import {
@@ -36,6 +31,53 @@ import type { CLIOptions } from '../config.js';
 export interface ServerOptions extends CLIOptions {
   port?: number;
   host?: string;
+}
+
+function findApiBinary(): string {
+  const envBinary = process.env['TAMMA_API_BINARY'];
+  if (envBinary && fs.existsSync(envBinary)) return envBinary;
+
+  const repoRoot = path.resolve(import.meta.dirname ?? __dirname, '..', '..', '..', '..');
+  const candidates = [
+    path.join(repoRoot, 'apps', 'tamma-elsa', 'src', 'Tamma.Api', 'bin', 'Release', 'net8.0', 'Tamma.Api.dll'),
+    path.join(repoRoot, 'apps', 'tamma-elsa', 'src', 'Tamma.Api', 'bin', 'Debug', 'net8.0', 'Tamma.Api.dll'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return '';
+}
+
+async function waitForApiHealth(port: number, maxRetries = 30): Promise<void> {
+  const url = `http://127.0.0.1:${port}/api/health`;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // Not ready yet
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error(`API sidecar health check failed after ${maxRetries}s at ${url}`);
+}
+
+function spawnApiSidecar(port: number): ChildProcess {
+  const apiBinary = findApiBinary();
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    ASPNETCORE_URLS: `http://+:${port}`,
+  };
+
+  if (apiBinary && apiBinary.endsWith('.dll')) {
+    return spawn('dotnet', [apiBinary], { env, stdio: 'pipe' });
+  }
+
+  const repoRoot = path.resolve(import.meta.dirname ?? __dirname, '..', '..', '..', '..');
+  const projectDir = path.join(repoRoot, 'apps', 'tamma-elsa', 'src', 'Tamma.Api');
+  return spawn('dotnet', ['run', '--project', projectDir], { env, stdio: 'pipe' });
 }
 
 export async function serverCommand(options: ServerOptions): Promise<void> {
@@ -58,6 +100,31 @@ export async function serverCommand(options: ServerOptions): Promise<void> {
   // SaaS mode is not supported in the server command — use the API server
   if (config.github.authMode === 'saas') {
     console.error('SaaS mode is not supported in the CLI server command. Use the standalone API server.');
+    process.exit(1);
+  }
+
+  // Start C# API sidecar
+  logger.info(`Starting C# API sidecar on port ${port}...`);
+  const apiProcess = spawnApiSidecar(port);
+
+  apiProcess.stdout?.on('data', (data: Buffer) => {
+    logger.debug(`[api] ${data.toString().trim()}`);
+  });
+  apiProcess.stderr?.on('data', (data: Buffer) => {
+    logger.warn(`[api] ${data.toString().trim()}`);
+  });
+  apiProcess.on('error', (err) => {
+    logger.error(`Failed to start API sidecar: ${err.message}`);
+    logger.error('Ensure the .NET 8 SDK is installed: https://dotnet.microsoft.com/download');
+    process.exit(1);
+  });
+
+  try {
+    await waitForApiHealth(port);
+    logger.info(`C# API sidecar healthy on port ${port}`);
+  } catch (err) {
+    logger.error('C# API sidecar did not become healthy', { error: err });
+    apiProcess.kill();
     process.exit(1);
   }
 
@@ -113,33 +180,6 @@ export async function serverCommand(options: ServerOptions): Promise<void> {
 
   await engine.initialize();
 
-  // Registry
-  const engineRegistry = new EngineRegistry();
-  engineRegistry.register('default', engine);
-
-  // Workflow store
-  const workflowStore = new InMemoryWorkflowStore();
-
-  // Build Fastify app with all plugins via options
-  const enableAuth = process.env['TAMMA_ENABLE_AUTH'] === 'true';
-  const jwtSecret = process.env['TAMMA_JWT_SECRET'];
-
-  if (enableAuth && !jwtSecret) {
-    console.error('Error: TAMMA_JWT_SECRET environment variable is required when TAMMA_ENABLE_AUTH=true.');
-    console.error('Generate a secret with: openssl rand -base64 32');
-    process.exit(1);
-  }
-
-  const app = await createApp({
-    engine: { engine },
-    auth: {
-      jwtSecret: jwtSecret ?? 'unused',
-      enableAuth,
-    },
-    workflowStore,
-    engineRegistry,
-  });
-
   // Graceful shutdown
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
@@ -148,10 +188,9 @@ export async function serverCommand(options: ServerOptions): Promise<void> {
     const shutdownTimer = setTimeout(() => { process.exit(1); }, 10_000);
     shutdownTimer.unref();
     logger.info('Shutting down server...');
-    try { await engineRegistry.disposeAll(); } catch (err) { logger.error('Engine registry disposal failed', { error: err }); }
+    try { apiProcess.kill('SIGTERM'); } catch { /* ignore */ }
     try { await diagnosticsQueue.dispose(); } catch (err) { logger.error('DiagnosticsQueue disposal failed', { error: err }); }
     try { await costTracker.dispose(); } catch (err) { logger.error('CostTracker disposal failed', { error: err }); }
-    try { await app.close(); } catch (err) { logger.error('App close failed', { error: err }); }
     process.exit(0);
   };
 
@@ -162,7 +201,5 @@ export async function serverCommand(options: ServerOptions): Promise<void> {
     void shutdown();
   });
 
-  // Start
-  await app.listen({ port, host });
-  logger.info(`Tamma server listening on ${host}:${port}`);
+  logger.info(`Tamma server running — engine in-process, C# API sidecar on ${host}:${port}`);
 }

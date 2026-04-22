@@ -6,7 +6,7 @@
  * Invite user dialog with role selection.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useUsers } from '../../hooks/admin/useUsers.js';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner.js';
@@ -91,6 +91,24 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus dialog on mount
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      dialogRef.current?.focus();
+    });
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    },
+    [onClose],
+  );
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -113,10 +131,13 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
     <div className="fixed inset-0 z-50 flex items-center justify-center" role="presentation">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="invite-dialog-title"
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 outline-none"
       >
         <h3 id="invite-dialog-title" className="text-lg font-semibold text-gray-900 mb-4">
           Invite User

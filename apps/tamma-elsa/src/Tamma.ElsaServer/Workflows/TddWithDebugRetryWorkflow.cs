@@ -46,6 +46,7 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
         var branchName = builder.WithVariable<string>("BranchName", "");
         var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var tddDebugAttempt = builder.WithVariable<int>("TddDebugAttempt", 0);
         var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
 
@@ -73,6 +74,8 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
                 if (skill > 0) skillLevel.Set(ctx, skill);
                 var issue = ctx.GetInput<int>("issueNumber");
                 if (issue > 0) issueNumber.Set(ctx, issue);
+                var acctId = ctx.GetInput<string>("tenantId");
+                if (!string.IsNullOrEmpty(acctId)) tenantId.Set(ctx, acctId);
                 var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
                 if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)(ctx.GetInput<string>("storyId") ?? "");
@@ -96,7 +99,8 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
                 ["taskFiles"] = new List<string>(),
                 ["repositoryUrl"] = repositoryUrl.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = skillLevel.Get(ctx)
+                ["skillLevel"] = skillLevel.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(tddResult)
@@ -151,7 +155,8 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
                 ["errorOutput"] = GetTddErrorOutput(tddResult.Get(ctx)),
                 ["repositoryUrl"] = repositoryUrl.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = skillLevel.Get(ctx)
+                ["skillLevel"] = skillLevel.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(debugResult)

@@ -9,7 +9,6 @@
   },
   "references": [
     { "path": "../shared" },
-    { "path": "../api" },
     { "path": "../observability" },
     { "path": "../orchestrator" },
     { "path": "../providers" },

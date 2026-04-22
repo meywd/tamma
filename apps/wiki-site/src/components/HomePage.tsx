@@ -1,32 +1,32 @@
 import { Link } from 'react-router';
 
 const quickLinks = [
-  { to: '/roadmap', title: 'Roadmap', desc: 'All 26 epics with timeline and status', icon: '🗺️' },
+  { to: '/roadmap', title: 'Roadmap', desc: 'All 33 epics with timeline and status', icon: '🗺️' },
   { to: '/architecture', title: 'Architecture', desc: 'System design and tech stack', icon: '🏗️' },
-  { to: '/epics', title: 'Epics', desc: '26 epics organized by phase', icon: '📋' },
-  { to: '/workflows', title: 'Workflows', desc: '20 ELSA workflows with flow diagrams', icon: '⚡' },
-  { to: '/stories', title: 'Stories', desc: '220+ stories across all epics', icon: '📖' },
+  { to: '/epics', title: 'Epics', desc: '33 epics organized by phase', icon: '📋' },
+  { to: '/workflows', title: 'Workflows', desc: '30 ELSA workflows with flow diagrams', icon: '⚡' },
+  { to: '/stories', title: 'Stories', desc: '310+ stories across all epics', icon: '📖' },
   { to: '/contributing', title: 'Contributing', desc: 'How to contribute to Tamma', icon: '🤝' },
 ];
 
 const stats = [
-  { label: 'Epics', value: '26' },
-  { label: 'Stories Done', value: '115' },
-  { label: 'In Progress', value: '20' },
-  { label: 'Workflows', value: '20' },
+  { label: 'Epics', value: '33' },
+  { label: 'Stories Done', value: '117+' },
+  { label: 'In Progress', value: '22' },
+  { label: 'Workflows', value: '30' },
 ];
 
 const completedEpics = [
-  { num: 6, name: 'Context & Knowledge', desc: 'RAG, vector DB, MCP, cost monitoring' },
-  { num: 7, name: 'Mentorship', desc: '28-state workflow, 12+ ELSA activities' },
+  { num: 7, name: 'Mentorship', desc: '28-state workflow, 12+ Elsa activities' },
   { num: 8, name: 'Distribution', desc: 'Docker, CI/CD, npm, Homebrew, binaries' },
   { num: 9, name: 'Agent Orchestration', desc: 'Provider chains, circuit breakers, diagnostics' },
   { num: 11, name: 'Security', desc: 'Content sanitization, tool validation, action gating' },
-  { num: 12, name: 'Tool Loop', desc: 'Agentic tool execution, context compaction' },
   { num: 13, name: 'Workflow Decomposition', desc: 'TDD/CI retry sub-workflows' },
-  { num: 14, name: 'ELSA Studio', desc: 'Custom Blazor WASM studio with branding' },
+  { num: 14, name: 'Elsa Studio', desc: 'Custom Blazor WASM studio with branding' },
   { num: 15, name: 'Log Aggregation', desc: 'OpenSearch integration' },
   { num: 16, name: 'Auth & Admin', desc: 'OAuth SSO, RBAC, admin dashboard' },
+  { num: 19, name: 'Agent Dispatch', desc: 'IAgentExecutor + Local + GitHub Actions, webhook-mode monitor' },
+  { num: 25, name: 'Wiki Site', desc: 'Vite + React SPA on Cloudflare Workers' },
 ];
 
 export default function HomePage() {

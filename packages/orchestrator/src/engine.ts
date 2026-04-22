@@ -10,7 +10,7 @@ import type {
   IEventStore,
   WorkflowPhase,
 } from '@tamma/shared';
-import { EngineState, EngineEventType, sleep, slugify, extractIssueReferences } from '@tamma/shared';
+import { EngineState, EngineEventType, sleep, slugify, extractIssueReferences, DEFAULT_TENANT_ID } from '@tamma/shared';
 import { WorkflowError, EngineError } from '@tamma/shared';
 import type { IAgentProvider, AgentTaskConfig, IRoleBasedAgentResolver } from '@tamma/providers';
 import type { IGitPlatform } from '@tamma/platforms';
@@ -41,6 +41,8 @@ export interface EngineContext {
   onStateChange?: OnStateChangeCallback;
   approvalHandler?: ApprovalHandler;
   agentResolver?: IRoleBasedAgentResolver;
+  /** Tenant ID for event scoping. Defaults to DEFAULT_TENANT_ID. */
+  tenantId?: string;
 }
 
 /**
@@ -88,6 +90,7 @@ export class TammaEngine {
   private readonly engineId = randomUUID();
   private readonly logger: ILogger;
   private readonly eventStore: IEventStore | undefined;
+  private readonly tenantId: string;
   private readonly onStateChange: OnStateChangeCallback | undefined;
   private readonly approvalHandler: ApprovalHandler | undefined;
 
@@ -109,6 +112,7 @@ export class TammaEngine {
     }
     this.logger = ctx.logger;
     this.eventStore = ctx.eventStore;
+    this.tenantId = ctx.tenantId ?? DEFAULT_TENANT_ID;
     this.onStateChange = ctx.onStateChange;
     this.approvalHandler = ctx.approvalHandler;
     this.startedAt = Date.now();
@@ -164,7 +168,7 @@ export class TammaEngine {
       try {
         await this.processOneIssue();
         // On success, reset to IDLE for next iteration
-        this.resetCurrentWork();
+        await this.resetCurrentWork();
       } catch (err: unknown) {
         // processOneIssue already sets ERROR state and clears work references.
         // Do not call resetCurrentWork() here — it would overwrite ERROR → IDLE
@@ -175,7 +179,7 @@ export class TammaEngine {
           state: this.state,
         });
         // Reset to IDLE only after logging, so the error state was observable
-        this.setState(EngineState.IDLE);
+        await this.setState(EngineState.IDLE);
       }
 
       if (this.running) {
@@ -237,7 +241,7 @@ export class TammaEngine {
       // Step 6: Implement
       const implResult = await this.implementCode(issue, plan, branch);
       if (!implResult.success) {
-        this.recordEvent(EngineEventType.IMPLEMENTATION_FAILED, issue.number, { error: implResult.error });
+        await this.recordEvent(EngineEventType.IMPLEMENTATION_FAILED, issue.number, { error: implResult.error });
         throw new WorkflowError(
           `Implementation failed: ${implResult.error ?? 'Unknown error'}`,
           { retryable: true, context: { issueNumber: issue.number } },
@@ -250,8 +254,8 @@ export class TammaEngine {
       // Step 8: Monitor and merge
       await this.monitorAndMerge(pr, issue);
     } catch (err: unknown) {
-      this.recordEvent(EngineEventType.ERROR_OCCURRED, this.currentIssue?.number, { error: err instanceof Error ? err.message : String(err) });
-      this.setState(EngineState.ERROR);
+      await this.recordEvent(EngineEventType.ERROR_OCCURRED, this.currentIssue?.number, { error: err instanceof Error ? err.message : String(err) });
+      await this.setState(EngineState.ERROR);
       throw err;
     } finally {
       // Clear work references but preserve ERROR state if set by catch block.
@@ -269,7 +273,7 @@ export class TammaEngine {
    * Returns null when no eligible issues are found.
    */
   async selectIssue(): Promise<IssueData | null> {
-    this.setState(EngineState.SELECTING_ISSUE);
+    await this.setState(EngineState.SELECTING_ISSUE);
     const { owner, repo, issueLabels, excludeLabels, botUsername } =
       this.config.github;
 
@@ -289,7 +293,7 @@ export class TammaEngine {
     });
 
     if (candidates.length === 0) {
-      this.setState(EngineState.IDLE);
+      await this.setState(EngineState.IDLE);
       return null;
     }
 
@@ -325,7 +329,7 @@ export class TammaEngine {
     };
 
     this.currentIssue = issueData;
-    this.recordEvent(EngineEventType.ISSUE_SELECTED, issueData.number, { title: issueData.title, url: issueData.url });
+    await this.recordEvent(EngineEventType.ISSUE_SELECTED, issueData.number, { title: issueData.title, url: issueData.url });
     this.logger.info('Issue selected', {
       number: issueData.number,
       title: issueData.title,
@@ -341,7 +345,7 @@ export class TammaEngine {
    * generation.
    */
   async analyzeIssue(issue: IssueData): Promise<string> {
-    this.setState(EngineState.ANALYZING);
+    await this.setState(EngineState.ANALYZING);
     const { owner, repo } = this.config.github;
 
     // Fetch full issue with comments
@@ -407,7 +411,7 @@ export class TammaEngine {
 
     const context = sections.join('\n');
 
-    this.recordEvent(EngineEventType.ISSUE_ANALYZED, issue.number, { contextLength: context.length, relatedIssues: issue.relatedIssueNumbers.length });
+    await this.recordEvent(EngineEventType.ISSUE_ANALYZED, issue.number, { contextLength: context.length, relatedIssues: issue.relatedIssueNumbers.length });
     this.logger.info('Issue analysis complete', {
       issueNumber: issue.number,
       contextLength: context.length,
@@ -484,7 +488,7 @@ export class TammaEngine {
     issue: IssueData,
     context: string,
   ): Promise<DevelopmentPlan> {
-    this.setState(EngineState.PLANNING);
+    await this.setState(EngineState.PLANNING);
 
     const planPrompt = `You are analyzing a GitHub issue to create a development plan.
 
@@ -608,7 +612,7 @@ Return ONLY valid JSON matching the schema.`;
 
     this.currentPlan = plan;
 
-    this.recordEvent(EngineEventType.PLAN_GENERATED, plan.issueNumber, { summary: plan.summary, complexity: plan.estimatedComplexity, fileChanges: plan.fileChanges.length });
+    await this.recordEvent(EngineEventType.PLAN_GENERATED, plan.issueNumber, { summary: plan.summary, complexity: plan.estimatedComplexity, fileChanges: plan.fileChanges.length });
     this.logger.info('Plan generated', {
       issueNumber: plan.issueNumber,
       summary: plan.summary,
@@ -627,10 +631,10 @@ Return ONLY valid JSON matching the schema.`;
    * @throws {WorkflowError} If the user rejects the plan (non-retryable).
    */
   async awaitApproval(plan: DevelopmentPlan): Promise<void> {
-    this.setState(EngineState.AWAITING_APPROVAL);
+    await this.setState(EngineState.AWAITING_APPROVAL);
 
     if (this.config.engine.approvalMode === 'auto') {
-      this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
+      await this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
       this.logger.info('Auto-approval mode, skipping approval gate');
       return;
     }
@@ -639,14 +643,14 @@ Return ONLY valid JSON matching the schema.`;
     if (this.approvalHandler !== undefined) {
       const decision = await this.approvalHandler(plan);
       if (decision === 'reject') {
-        this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, {});
+        await this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, {});
         throw new WorkflowError('Plan rejected by user', { retryable: false });
       }
       if (decision === 'skip') {
-        this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, { skipped: true });
+        await this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, { skipped: true });
         throw new WorkflowError('Plan skipped by user', { retryable: false });
       }
-      this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
+      await this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
       this.logger.info('Plan approved via handler');
       return;
     }
@@ -672,11 +676,11 @@ Return ONLY valid JSON matching the schema.`;
 
     const approved = await this.promptUser('Approve this plan? (y/n): ');
     if (approved.toLowerCase() !== 'y') {
-      this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, {});
+      await this.recordEvent(EngineEventType.PLAN_REJECTED, plan.issueNumber, {});
       throw new WorkflowError('Plan rejected by user', { retryable: false });
     }
 
-    this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
+    await this.recordEvent(EngineEventType.PLAN_APPROVED, plan.issueNumber, {});
     this.logger.info('Plan approved');
   }
 
@@ -713,7 +717,7 @@ Return ONLY valid JSON matching the schema.`;
         }
 
         this.currentBranch = branchName;
-        this.recordEvent(EngineEventType.BRANCH_CREATED, issue.number, { branch: branchName });
+        await this.recordEvent(EngineEventType.BRANCH_CREATED, issue.number, { branch: branchName });
         this.logger.info('Branch created', {
           branch: branchName,
           issueNumber: issue.number,
@@ -745,7 +749,7 @@ Return ONLY valid JSON matching the schema.`;
     plan: DevelopmentPlan,
     branch: string,
   ): Promise<AgentTaskResult> {
-    this.setState(EngineState.IMPLEMENTING);
+    await this.setState(EngineState.IMPLEMENTING);
     const { owner, repo } = this.config.github;
 
     const implPrompt = `You are an autonomous coding agent. Implement the following plan for issue #${issue.number}.
@@ -775,7 +779,7 @@ ${plan.testingStrategy}
 
 Follow existing project conventions and patterns.`;
 
-    this.recordEvent(EngineEventType.IMPLEMENTATION_STARTED, issue.number, { branch });
+    await this.recordEvent(EngineEventType.IMPLEMENTATION_STARTED, issue.number, { branch });
 
     const agent = await this.getAgentForPhase('CODE_GENERATION');
 
@@ -816,7 +820,7 @@ Follow existing project conventions and patterns.`;
 
     if (result.success) {
       this.totalCostUsd += result.costUsd;
-      this.recordEvent(EngineEventType.IMPLEMENTATION_COMPLETED, issue.number, { costUsd: result.costUsd, durationMs: result.durationMs });
+      await this.recordEvent(EngineEventType.IMPLEMENTATION_COMPLETED, issue.number, { costUsd: result.costUsd, durationMs: result.durationMs });
     }
 
     this.logger.info('Implementation complete', {
@@ -839,7 +843,7 @@ Follow existing project conventions and patterns.`;
     plan: DevelopmentPlan,
     branch: string,
   ): Promise<PullRequestInfo> {
-    this.setState(EngineState.CREATING_PR);
+    await this.setState(EngineState.CREATING_PR);
     const { owner, repo } = this.config.github;
 
     const repository = await this.platform.getRepository(owner, repo);
@@ -902,7 +906,7 @@ Follow existing project conventions and patterns.`;
     };
 
     this.currentPR = prInfo;
-    this.recordEvent(EngineEventType.PR_CREATED, issue.number, { prNumber: pr.number, url: pr.url });
+    await this.recordEvent(EngineEventType.PR_CREATED, issue.number, { prNumber: pr.number, url: pr.url });
     this.logger.info('PR created', {
       prNumber: pr.number,
       url: pr.url,
@@ -928,7 +932,7 @@ Follow existing project conventions and patterns.`;
     pr: PullRequestInfo,
     issue: IssueData,
   ): Promise<void> {
-    this.setState(EngineState.MONITORING);
+    await this.setState(EngineState.MONITORING);
     const { owner, repo } = this.config.github;
     const pollInterval = this.config.engine.ciPollIntervalMs;
     const timeout = this.config.engine.ciMonitorTimeoutMs;
@@ -989,7 +993,7 @@ Follow existing project conventions and patterns.`;
 
       if (ciStatus.state === 'success') {
         // Merge
-        this.setState(EngineState.MERGING);
+        await this.setState(EngineState.MERGING);
         this.logger.info('CI checks passed, merging PR', {
           prNumber: pr.number,
         });
@@ -1005,14 +1009,14 @@ Follow existing project conventions and patterns.`;
           );
         }
 
-        this.recordEvent(EngineEventType.PR_MERGED, issue.number, { prNumber: pr.number, sha: mergeResult.sha });
+        await this.recordEvent(EngineEventType.PR_MERGED, issue.number, { prNumber: pr.number, sha: mergeResult.sha });
 
         // Cleanup branch (configurable)
         const shouldDeleteBranch = this.config.engine.deleteBranchOnMerge !== false;
         if (shouldDeleteBranch) {
           try {
             await this.platform.deleteBranch(owner, repo, pr.branch);
-            this.recordEvent(EngineEventType.BRANCH_DELETED, issue.number, { branch: pr.branch });
+            await this.recordEvent(EngineEventType.BRANCH_DELETED, issue.number, { branch: pr.branch });
             this.logger.info('Branch deleted', { branch: pr.branch });
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -1035,7 +1039,7 @@ Follow existing project conventions and patterns.`;
         await this.platform.updateIssue(owner, repo, issue.number, {
           state: 'closed',
         });
-        this.recordEvent(EngineEventType.ISSUE_CLOSED, issue.number, { prNumber: pr.number });
+        await this.recordEvent(EngineEventType.ISSUE_CLOSED, issue.number, { prNumber: pr.number });
 
         // Completion checkpoint
         this.issuesProcessed++;
@@ -1085,28 +1089,29 @@ Follow existing project conventions and patterns.`;
     };
   }
 
-  private recordEvent(type: EngineEventType, issueNumber?: number, data: Record<string, unknown> = {}): void {
-    this.eventStore?.record({
+  private async recordEvent(type: EngineEventType, issueNumber?: number, data: Record<string, unknown> = {}): Promise<void> {
+    await this.eventStore?.record({
       type,
+      tenantId: this.tenantId,
       ...(issueNumber !== undefined ? { issueNumber } : {}),
       data,
     });
   }
 
-  private setState(state: EngineState): void {
+  private async setState(state: EngineState): Promise<void> {
     const prev = this.state;
     this.state = state;
-    this.recordEvent(EngineEventType.STATE_TRANSITION, this.currentIssue?.number, { from: prev, to: state });
+    await this.recordEvent(EngineEventType.STATE_TRANSITION, this.currentIssue?.number, { from: prev, to: state });
     this.logger.debug('State transition', { from: prev, to: state });
     this.onStateChange?.(state, this.currentIssue, this.getStats());
   }
 
-  private resetCurrentWork(): void {
+  private async resetCurrentWork(): Promise<void> {
     this.currentIssue = null;
     this.currentPlan = null;
     this.currentBranch = null;
     this.currentPR = null;
-    this.setState(EngineState.IDLE);
+    await this.setState(EngineState.IDLE);
   }
 
   private async promptUser(question: string): Promise<string> {

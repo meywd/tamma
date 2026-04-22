@@ -13,6 +13,7 @@ import { serverCommand } from './commands/server.js';
 import { apiCommand } from './commands/api.js';
 import { upgradeCommand } from './commands/upgrade.js';
 import { processIssueCommand } from './commands/process-issue.js';
+import { executeAgentCommand } from './commands/execute-agent.js';
 import { checkForUpdates } from './update-check.js';
 import { printBanner } from './components/Banner.js';
 
@@ -151,6 +152,29 @@ program
     }
     const exitCode = await processIssueCommand(processOpts);
     process.exit(exitCode);
+  });
+
+program
+  .command('execute-agent')
+  .description('Run an agent task from a JSON request file (invoked by the C# LocalExecutor)')
+  .requiredOption('--request <path>', 'Path to the AgentExecutionRequest JSON file')
+  .option('--output <path>', 'Path to write the result JSON file')
+  .option('--repo-dir <path>', 'Repository working directory (defaults to TAMMA_REPO_DIR or cwd)')
+  .action(async (opts) => {
+    const execOpts: Parameters<typeof executeAgentCommand>[0] = {
+      request: opts.request as string,
+    };
+    if (typeof opts.output === 'string' && opts.output.length > 0) {
+      execOpts.output = opts.output;
+    }
+    if (typeof opts.repoDir === 'string' && opts.repoDir.length > 0) {
+      execOpts.repoDir = opts.repoDir;
+    }
+    const result = await executeAgentCommand(execOpts);
+    if (result.diagnostic !== undefined) {
+      console.error(result.diagnostic);
+    }
+    process.exit(result.exitCode);
   });
 
 program

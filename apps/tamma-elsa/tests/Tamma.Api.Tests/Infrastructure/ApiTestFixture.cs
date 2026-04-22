@@ -1,0 +1,126 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using NUnit.Framework;
+using Respawn;
+using Tamma.Data;
+using Testcontainers.PostgreSql;
+
+// NOTE: namespace is intentionally the root `Tamma.Api.Tests`, not
+// `...Infrastructure`. NUnit's [SetUpFixture] applies to its declared
+// namespace and sub-namespaces, so placing it at the root lets every test
+// file anywhere under Tamma.Api.Tests share the container + migrations
+// without needing a local delegate fixture.
+namespace Tamma.Api.Tests;
+
+/// <summary>
+/// Shared integration-test fixture: boots a Postgres container once per test
+/// assembly, runs EF migrations against it, and exposes a
+/// <see cref="WebApplicationFactory{TEntryPoint}"/> pointed at that container.
+///
+/// Subclass and decorate tests with <c>[SetUp]</c> calling
+/// <see cref="ResetDatabaseAsync"/> between tests for isolation.
+/// </summary>
+[SetUpFixture]
+public class ApiTestFixture
+{
+    public static PostgreSqlContainer Postgres { get; private set; } = null!;
+    public static WebApplicationFactory<Program> Factory { get; private set; } = null!;
+    private static Respawner _respawner = null!;
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        Postgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("tamma_test")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
+
+        await Postgres.StartAsync();
+
+        // Program.cs reads `builder.Configuration.GetConnectionString(...)` at
+        // WebApplicationBuilder-composition time, BEFORE any callback passed to
+        // WithWebHostBuilder.ConfigureAppConfiguration runs. That means an
+        // in-memory override attached via ConfigureAppConfiguration is too
+        // late. The reliable override for .NET 8 minimal APIs is an env var
+        // (double-underscore path syntax), which is loaded automatically by
+        // the default configuration sources during CreateBuilder.
+        // Phase-3 added TammaDb / TammaAppDb as the primary lookup keys in
+        // Program.cs. appsettings.json ships with a stale localhost default
+        // for TammaDb (empty password), so clearing the env var lets the
+        // appsettings layer take over and we fail to auth. Instead, point
+        // ALL three keys explicitly at our container so Program.cs resolves
+        // the same connection whichever key it reads. TammaAppDb falls
+        // through to the admin connection in AddTammaData when empty, which
+        // is what we want — tests don't exercise the tamma_app role on this
+        // fixture.
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
+        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
+        Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
+
+        // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of
+        // three auth branches: real JWT (secret present), permissive dev
+        // (secret empty + Development env), or hard-fail (empty + non-dev).
+        // Tests use the permissive dev branch so they can exercise endpoints
+        // behind RequireAuthorization without minting tokens. Clear any stale
+        // value from earlier runs.
+        Environment.SetEnvironmentVariable("Jwt__Secret", null);
+        Environment.SetEnvironmentVariable("Jwt__Issuer", null);
+        Environment.SetEnvironmentVariable("Jwt__Audience", null);
+
+        Factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+
+        // The InitialSchema migration references uuid_generate_v4() (pre-existing
+        // mentorship schema) which lives in the uuid-ossp extension. Enable it
+        // before running migrations so the container image (stock postgres:17-alpine)
+        // can execute the migration bundle.
+        await using (var bootstrap = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString()))
+        {
+            await bootstrap.OpenAsync();
+            await using var cmd = bootstrap.CreateCommand();
+            cmd.CommandText = "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Force service resolution so Program.cs migrations run against the container.
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        await db.Database.MigrateAsync();
+
+        await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
+        await conn.OpenAsync();
+        _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.Postgres,
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            SchemasToInclude = new[] { "public" }
+        });
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown()
+    {
+        Factory?.Dispose();
+        if (Postgres is not null)
+            await Postgres.DisposeAsync();
+    }
+
+    /// <summary>Call from <c>[SetUp]</c> in each test class to clear tenant-scoped data.</summary>
+    public static async Task ResetDatabaseAsync()
+    {
+        await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
+        await conn.OpenAsync();
+        await _respawner.ResetAsync(conn);
+    }
+
+    public static HttpClient CreateClient() => Factory.CreateClient();
+}

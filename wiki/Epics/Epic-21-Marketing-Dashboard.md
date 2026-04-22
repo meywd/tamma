@@ -12,9 +12,9 @@ Epic 21 builds a production-quality marketing site at tamma.dev and a user-facin
 
 | Asset | Status | Framework |
 |-------|--------|-----------|
-| Marketing site (`apps/marketing-site/`) | Exists -- static HTML via Cloudflare Workers | Vanilla HTML/CSS + Wrangler |
-| Admin dashboard (`packages/dashboard/`) | Exists -- React SPA | React 18 + Vite + Zustand + Tailwind 4 |
-| User dashboard | Does not exist | -- |
+| Marketing site (`apps/marketing-site/`) | **Done** — Midnight Ocean redesign deployed at tamma.dev via wrangler | Vanilla HTML/CSS + Wrangler (Cloudflare Worker) |
+| Admin dashboard (`packages/dashboard/`) | Exists — React SPA | React 18 + Vite + Zustand + Tailwind 4 |
+| User dashboard | Does not exist | — |
 
 ### Gaps
 - No pricing page or plan comparison on marketing site

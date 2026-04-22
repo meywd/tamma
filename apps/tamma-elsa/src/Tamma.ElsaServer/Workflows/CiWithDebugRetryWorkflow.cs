@@ -25,13 +25,12 @@ namespace Tamma.ElsaServer.Workflows;
 ///       NO  -> finish(passed=false, errorMessage, ciRetryCount)
 ///       YES -> incrementCiRetry -> dispatchCiDebugging -> (loop to testingPipeline)
 ///
-/// Inputs:  repository, branchName, issueNumber, skillLevel, ciRetryCount
+/// Inputs:  repository, branchName, issueNumber, skillLevel
 /// Outputs: passed (bool), errorMessage (string), ciRetryCount (int)
 ///
-/// NOTE: ciRetryCount is passed through to preserve existing behavior.
-/// This means the counter persists across re-entries (review-fix, merge re-test).
-/// This is likely a bug — re-entry should reset the counter.
-/// Fix tracked as a separate ticket.
+/// ciRetryCount is always reset to 0 on entry so that each invocation
+/// (including re-entries from review-fix or merge re-test) gets the full
+/// retry budget.
 /// </summary>
 public class CiWithDebugRetryWorkflow : WorkflowBase
 {
@@ -49,10 +48,15 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
         var branchName = builder.WithVariable<string>("BranchName", "");
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var skillLevel = builder.WithVariable<int>("SkillLevel", 5);
-        // NOTE: ciRetryCount is passed through to preserve existing behavior.
-        // This means the counter persists across re-entries (review-fix, merge re-test).
-        // This is likely a bug — re-entry should reset the counter.
-        // Fix tracked as a separate ticket.
+        // ciRetryCount is always reset to 0 on workflow entry (see initInputs below)
+        // so each invocation gets the full retry budget regardless of prior history.
+        //
+        // Story 12-5e investigation (2026-04-15): Verified that this variable is
+        // declared at workflow-builder scope (persisted by Elsa across suspend/resume).
+        // The initInputs activity resets it to 0 on every entry. SingleIssueCycleWorkflow
+        // dispatches a fresh ci-with-debug-retry instance per CI check phase, so there
+        // is no cross-invocation counter leakage. The originally reported bug (counter
+        // persisting across re-entries) was stale — the reset logic was already correct.
         var ciRetryCount = builder.WithVariable<int>("CiRetryCount", 0);
         var maxRetries = builder.WithVariable<int>("MaxRetries", 3);
 
@@ -76,8 +80,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 if (issue > 0) issueNumber.Set(ctx, issue);
                 var skill = ctx.GetInput<int>("skillLevel");
                 if (skill > 0) skillLevel.Set(ctx, skill);
-                // Always set ciRetryCount — 0 is a valid value meaning "no retries yet"
-                ciRetryCount.Set(ctx, ctx.GetInput<int>("ciRetryCount"));
+                // Always reset ciRetryCount to 0 on entry so each invocation
+                // (including re-entries from review-fix or merge re-test) gets full retry budget.
+                // Verified correct per Story 12-5e investigation — no bug present.
+                ciRetryCount.Set(ctx, 0);
                 var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
                 if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)(ctx.GetInput<string>("repository") ?? "");

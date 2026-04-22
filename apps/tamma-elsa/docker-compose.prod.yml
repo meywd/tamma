@@ -107,6 +107,15 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ELSA_SERVER_URL=http://elsa-server:5000
       - DATABASE_URL=postgresql://tamma:${DB_PASSWORD}@postgres:5432/tamma
+      # Phase-3 dual connection strings (findings orgs/002, orgs/004).
+      # TammaDb = admin role for migrations + background services;
+      # TammaAppDb = tamma_app role for per-request endpoints (RLS-enforced).
+      # Operators must rotate the tamma_app password after first deploy
+      # and set TAMMA_APP_DB_PASSWORD in the env. If TAMMA_APP_DB_PASSWORD
+      # is unset the app falls back to the admin connection with a
+      # warning — acceptable on day-1 bring-up but blocks the RLS layer.
+      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma;Password=${DB_PASSWORD};
+      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-${DB_PASSWORD}};
       - SLACK_WEBHOOK=${SLACK_WEBHOOK}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - JWT_SECRET=${JWT_SECRET}

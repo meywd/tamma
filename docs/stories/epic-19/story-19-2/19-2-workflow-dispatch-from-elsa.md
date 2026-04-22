@@ -1,6 +1,13 @@
 # Story 19-2: Workflow Dispatch from ELSA
 
-Status: ready-for-dev
+Status: done
+
+## Implementation Notes
+
+- Shipped as `DispatchAgentWorkflowActivity` + `AgentDispatchService` in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`.
+- Octokit-backed `OctokitGitHubActionsClient` lives in `apps/tamma-elsa/src/Tamma.Api/Services/GitHub/` and uses the existing `OctokitGitHubAppClient` + `IRepoInstallationResolver` infrastructure (satisfies AC-7 without duplicating auth code).
+- AC coverage: all 8 ACs done. Events emitted via `TammaEventEmitter` in the workflow event bag with type prefix `AGENT.DISPATCH`.
+- Commit: `ed92e54` `feat(agent-dispatch): DispatchAgentWorkflowActivity + service [story 19-2]`. Types + interface in `67901c3`.
 
 ## Story
 

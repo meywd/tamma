@@ -17,7 +17,7 @@ so that every row in the database has an unambiguous owner and the system can en
 1. A `tenants` table exists with columns: `id` (UUID PK, default `gen_random_uuid()`), `name` (TEXT NOT NULL), `slug` (TEXT UNIQUE NOT NULL), `external_id` (TEXT UNIQUE — maps to `installation_id::text`), `plan` (TEXT NOT NULL DEFAULT `'free'`), `settings` (JSONB NOT NULL DEFAULT `'{}'`), `created_at` (TIMESTAMPTZ), `updated_at` (TIMESTAMPTZ), `deleted_at` (TIMESTAMPTZ nullable for soft delete)
 2. A sentinel "default" tenant row is inserted with `id = '00000000-0000-0000-0000-000000000000'`, `name = 'Default'`, `slug = 'default'`, `external_id = NULL` for CLI/self-hosted mode
 3. `github_installations` gains a `tenant_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000' REFERENCES tenants(id)` column
-4. `users` gains a `tenant_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000' REFERENCES tenants(id)` column
+4. `users` gains a `tenant_id UUID NULL DEFAULT NULL REFERENCES tenants(id)` column. This column is nullable: it represents the user's "active tenant" shortcut, NOT the ownership relationship. The canonical user-to-tenant relationship is M:N via the `tenant_memberships` table (Epic 18 Story 18-3). A NULL value means the user has not yet selected an active tenant.
 5. `user_api_keys` gains a `tenant_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000' REFERENCES tenants(id)` column
 6. `user_invites` gains a `tenant_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000' REFERENCES tenants(id)` column
 7. Every new `tenant_id` column has a B-tree index
@@ -114,9 +114,13 @@ ALTER TABLE github_installations
 
 CREATE INDEX IF NOT EXISTS idx_installations_tenant_id ON github_installations (tenant_id);
 
--- 4. Add tenant_id to users
+-- 4. Add tenant_id to users (nullable — "active tenant" shortcut)
+-- NOTE: This column is nullable. The canonical user-to-tenant relationship is M:N
+-- via the tenant_memberships table (Epic 18 Story 18-3). tenant_id here is the
+-- user's currently active tenant, set on login and org-switch. NULL means the
+-- user has not yet selected an active tenant.
 ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS tenant_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'
+  ADD COLUMN IF NOT EXISTS tenant_id UUID DEFAULT NULL
   REFERENCES tenants(id);
 
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users (tenant_id);
@@ -204,7 +208,7 @@ This wiring happens in Story 17.5 (middleware) but the store interfaces must be 
 ## Implementation Notes
 
 1. The migration uses `ADD COLUMN IF NOT EXISTS` and `ON CONFLICT DO NOTHING` for idempotency.
-2. `DEFAULT '00000000-0000-0000-0000-000000000000'` on `tenant_id` columns means the ALTER TABLE fills all existing rows automatically without a separate UPDATE statement. PostgreSQL applies the DEFAULT to existing rows when adding a NOT NULL column with a DEFAULT.
+2. `DEFAULT '00000000-0000-0000-0000-000000000000'` on `tenant_id` columns for `github_installations`, `user_api_keys`, and `user_invites` means the ALTER TABLE fills all existing rows automatically. **Exception: `users.tenant_id` is nullable with `DEFAULT NULL`** because the canonical user-to-tenant relationship is the M:N `tenant_memberships` table (Epic 18 Story 18-3). `users.tenant_id` is the "active tenant" shortcut.
 3. The `slug` column enables vanity URLs (e.g., `app.tamma.dev/orgs/acme-corp`) in future.
 4. `settings` JSONB on the tenant stores tenant-level configuration (rate limits, feature flags, etc.).
 5. `external_id` is nullable because the default tenant has no external identity.
@@ -245,6 +249,10 @@ Update existing store tests to pass `tenantId`:
 
 18. All existing tests continue to pass without specifying `tenantId` (defaults to `DEFAULT_TENANT_ID`)
 19. CLI mode starts and runs a workflow cycle without tenant configuration
+
+## Migration Number
+
+This story uses **migration 008** (`008_tenants.sql`). See `/docs/stories/migration-ordering.md` for the cross-epic migration sequence.
 
 ## Dependencies
 

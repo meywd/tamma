@@ -7,6 +7,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.AgentDispatch;
 using Tamma.Activities.Context;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
@@ -48,6 +49,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
+        var tenantId = builder.WithVariable<string>("TenantId", "");
 
         // Conventions (loaded from repo config)
         var conventions = builder.WithVariable<string>("Conventions", "");
@@ -86,6 +88,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 botAssignee.Set(ctx, ctx.GetInput<string>("botAssignee") ?? "tamma-bot");
                 baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 return (object)repo;
             }),
         };
@@ -129,6 +132,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -164,6 +168,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["reviewNotes"] = reviewNotes.Get(ctx),
                 ["revisionNumber"] = planRevisionCount.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -193,6 +198,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -280,6 +286,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["planJson"] = planJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -309,6 +316,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["planJson"] = planJson.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -415,6 +423,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["tasksJson"] = tasksJson.Get(ctx),
                 ["contextIds"] = contextIds.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -460,24 +469,47 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             catch { return (object)"{}"; }
         }, "ExtractCurrentTask", "Extract Current Task");
 
-        var tddForTask = new DispatchWorkflow
+        // ────────────────────────────────────────────────────────────────
+        // Story 19-5 AC-6: Replace direct tdd-cycle sub-workflow dispatch
+        // with mode-aware ExecuteAgentActivity. The activity selects
+        // LocalExecutor (CLI / self-hosted) or GitHubActionsExecutor (SaaS)
+        // via AgentExecutorFactory at runtime. The same workflow definition
+        // now works unchanged in both deployment modes.
+        //
+        // Input mapping (workflow vars -> AgentExecutionRequest):
+        //   Repository    = repository
+        //   BranchName    = branchName
+        //   IssueNumber   = issueNumber
+        //   IssueTitle    = workItemJson (title is carried in workItemJson)
+        //   Task          = "implement"  (per-task TDD iteration)
+        //   PlanJson      = currentTaskJson (the one-task slice)
+        //   SessionId     = deterministic session id for this task
+        //   AgentProvider = default "claude-code"
+        //   TimeoutMinutes = 30 (TDD task default)
+        //
+        // Output: AgentExecutionResult is set on the activity's outputs and
+        //   the "LastAgentExecutionResult" workflow variable. The loop
+        //   simply advances to the next task on either outcome (matches
+        //   prior behaviour of the DispatchWorkflow which did not branch).
+        // ────────────────────────────────────────────────────────────────
+        var tddForTask = new ExecuteAgentActivity
         {
             Id = "TddForTask",
-            Name = "TDD for Task",
-            WorkflowDefinitionId = new("tdd-cycle"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["branchName"] = branchName.Get(ctx),
-                ["taskJson"] = currentTaskJson.Get(ctx),
-                ["contextIds"] = contextIds.Get(ctx),
-                ["issueNumber"] = issueNumber.Get(ctx),
-                ["conventions"] = conventions.Get(ctx),
-            }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
+            Name = "TDD for Task (agent execution)",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            BranchName = new Input<string>(ctx => branchName.Get(ctx)),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            IssueTitle = new Input<string>(ctx => workItemJson.Get(ctx)),
+            Task = new Input<string>("implement"),
+            PlanJson = new Input<string>(ctx => currentTaskJson.Get(ctx)),
+            SessionId = new Input<string>(ctx =>
+                $"adl-{issueNumber.Get(ctx)}-task-{currentTaskIndex.Get(ctx)}"),
+            AgentProvider = new Input<string>("claude-code"),
+            AgentConfigJson = new Input<string?>(ctx => conventions.Get(ctx)),
+            TimeoutMinutes = new Input<int>(30),
+            ModeOverride = new Input<string?>(_ => null),
         };
-        tddForTask.SetDisplayText("TDD for Task");
+        tddForTask.SetDisplayText("TDD for Task (agent execution)");
 
         var incrementTask = Assign(currentTaskIndex, ctx =>
             (object)(currentTaskIndex.Get(ctx) + 1),
@@ -497,6 +529,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["conventions"] = conventions.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(false), // fire & forget
         };
@@ -803,9 +836,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 Connect(initTaskLoop, hasMoreTasks),
 
                 // TDD Loop: more tasks? → extract task → TDD → increment → loop
+                // Story 19-5 AC-6: ExecuteAgentActivity exposes Completed/Failed
+                // outcomes; both advance the loop (matching prior DispatchWorkflow
+                // behaviour where the loop ignored the sub-workflow's success flag).
                 ConnectOutcome(hasMoreTasks, "True", extractCurrentTask),
                 Connect(extractCurrentTask, tddForTask),
-                Connect(tddForTask, incrementTask),
+                ConnectOutcome(tddForTask, "Completed", incrementTask),
+                ConnectOutcome(tddForTask, "Failed", incrementTask),
                 Connect(incrementTask, hasMoreTasks), // loop back
 
                 // TDD Loop done → notify + dispatch code review + wait for approval (parallel)

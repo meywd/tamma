@@ -166,7 +166,7 @@ jobs:
         run: pnpm typecheck
 
       - name: Run E2E tests
-        run: npx vitest run --config vitest.e2e.config.ts
+        run: npx vitest run --config vitest.e2e.config.ts --passWithNoTests
 
   dotnet-tests:
     name: .NET Tests

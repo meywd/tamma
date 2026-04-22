@@ -1,8 +1,17 @@
 ---
-title: "Task 3: Implement render() with {{variable}} Interpolation and Size Limits"
+title: "SUPERSEDED by Epic 27"
 sidebar:
   order: 90
 ---
+
+> **This task file is superseded by Epic 27 (Prompt Store -- Multi-Tenant Prompt Management).**
+> The prompt registry functionality defined here has been absorbed into the Postgres-backed prompt store.
+> See `/home/meywd/tamma/docs/stories/epic-27/README.md` for the replacement.
+> This file is retained for historical reference only. Do not implement.
+
+---
+
+# Task 3: Implement render() with {{variable}} Interpolation and Size Limits
 
 **Story:** 9-6-agent-prompt-registry - Agent Prompt Registry
 **Epic:** 9

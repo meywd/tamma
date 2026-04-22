@@ -42,6 +42,9 @@ public class DispatchCycleActivity : TammaAsyncActivity
     [Input(Description = "Base branch")]
     public Input<string> BaseBranch { get; set; } = default!;
 
+    [Input(Description = "Tenant ID for tenant-scoped prompt resolution (empty = system defaults)")]
+    public Input<string> TenantId { get; set; } = new("");
+
     [Output(Description = "Dispatched workflow instance ID")]
     public Output<string?> InstanceId { get; set; } = default!;
 
@@ -72,6 +75,7 @@ public class DispatchCycleActivity : TammaAsyncActivity
             ["issueNumber"] = IssueNumber.Get(context),
             ["botAssignee"] = BotAssignee.Get(context),
             ["baseBranch"] = BaseBranch.Get(context),
+            ["tenantId"] = TenantId.Get(context),
         };
 
         var instanceId = Guid.NewGuid().ToString();

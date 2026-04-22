@@ -637,8 +637,13 @@ Create `packages/api/src/routes/auth/role-check.test.ts`:
 | Integration testing | 1 |
 | **Total** | **16 hours** |
 
+## Cross-References
+
+- **Unified RBAC Role Model**: See `/home/meywd/tamma/docs/stories/rbac-unified-model.md` for the canonical two-level role model (platform roles + tenant roles) that reconciles Epic 16 and Epic 18 role sets.
+
 ## Change Log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-03-28 | 1.0 | Initial story creation | Architecture Team |
+| 2026-04-09 | 1.1 | Added cross-reference to unified RBAC role model | Cross-epic review |

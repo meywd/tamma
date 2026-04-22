@@ -28,14 +28,14 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # TypeScript services (tamma-api, tamma-engine)
+  # TypeScript services (tamma-engine)
   # ---------------------------------------------------------------------------
   build-ts:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [tamma-api, tamma-engine]
+        target: [tamma-engine]
     steps:
       - uses: actions/checkout@v4
 
@@ -200,6 +200,47 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
+  # Intelligence sidecar (TS — proxies the C# KB endpoints to packages/intelligence)
+  # ---------------------------------------------------------------------------
+  build-intelligence-server:
+    name: Build intelligence-server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/intelligence-server
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr,prefix=pr-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/intelligence-server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
   # .NET services (ELSA server, Tamma .NET API)
   # ---------------------------------------------------------------------------
   build-dotnet:
@@ -211,7 +252,7 @@ jobs:
           - name: tamma-elsa
             context: apps/tamma-elsa
             dockerfile: apps/tamma-elsa/src/Tamma.ElsaServer/Dockerfile
-          - name: tamma-api-dotnet
+          - name: tamma-api
             context: apps/tamma-elsa/src
             dockerfile: apps/tamma-elsa/src/Tamma.Api/Dockerfile
           - name: tamma-studio
@@ -285,7 +326,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to VPS
-    needs: [build-ts, build-dashboard, build-dotnet]
+    needs: [build-ts, build-dashboard, build-dotnet, build-intelligence-server]
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -301,6 +342,7 @@ jobs:
           [ -z "${{ secrets.TAMMA_APP_ID }}" ] && missing+=("TAMMA_APP_ID")
           [ -z "${{ secrets.TAMMA_WEBHOOK_SECRET }}" ] && missing+=("TAMMA_WEBHOOK_SECRET")
           [ -z "${{ secrets.TAMMA_POSTGRES_PASSWORD }}" ] && missing+=("TAMMA_POSTGRES_PASSWORD")
+          [ -z "${{ secrets.TAMMA_JWT_SECRET }}" ] && missing+=("TAMMA_JWT_SECRET")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secrets: ${missing[*]}"
             exit 1
@@ -367,6 +409,9 @@ jobs:
             "GITHUB_OAUTH_CLIENT_ID=${{ secrets.TAMMA_OAUTH_CLIENT_ID }}" \
             "GITHUB_OAUTH_CLIENT_SECRET=${{ secrets.TAMMA_OAUTH_CLIENT_SECRET }}" \
             "JWT_SECRET=${{ secrets.TAMMA_JWT_SECRET }}" \
+            "OAUTH2_PROXY_COOKIE_SECRET=${{ secrets.TAMMA_OAUTH2_PROXY_COOKIE_SECRET }}" \
+            "ELSA_ADMIN_API_KEY=${{ secrets.TAMMA_ELSA_ADMIN_API_KEY }}" \
+            "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
             "DASHBOARD_URL=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
@@ -404,11 +449,11 @@ jobs:
             elsa-server:
               image: ghcr.io/${OWNER}/tamma-elsa:${IMAGE_TAG}
               build: !reset null
-            tamma-api-dotnet:
-              image: ghcr.io/${OWNER}/tamma-api-dotnet:${IMAGE_TAG}
-              build: !reset null
             elsa-studio:
               image: ghcr.io/${OWNER}/tamma-studio:${IMAGE_TAG}
+              build: !reset null
+            intelligence-server:
+              image: ghcr.io/${OWNER}/intelligence-server:${IMAGE_TAG}
               build: !reset null
           YAML
 
@@ -416,6 +461,30 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.VPS_SSH_PORT || 22 }}" \
             /tmp/docker-compose.images.yml \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/docker/docker-compose.images.yml
+
+      - name: "Pre-deploy: check disk space and clean up"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              USAGE=\$(df / --output=pcent | tail -1 | tr -d ' %')
+              echo \"Disk usage: \${USAGE}%\"
+              if [ \"\$USAGE\" -gt 85 ]; then
+                echo 'Disk usage above 85%, running aggressive cleanup...'
+                docker image prune -a --filter 'until=4h' -f 2>/dev/null || true
+                docker builder prune -a -f 2>/dev/null || true
+                docker volume prune -f 2>/dev/null || true
+                journalctl --vacuum-size=200M 2>/dev/null || true
+                apt-get clean 2>/dev/null || true
+                USAGE_AFTER=\$(df / --output=pcent | tail -1 | tr -d ' %')
+                echo \"Disk usage after cleanup: \${USAGE_AFTER}%\"
+                if [ \"\$USAGE_AFTER\" -gt 95 ]; then
+                  echo '::error::Disk still above 95% after cleanup. Manual intervention needed.'
+                  df -h /
+                  exit 1
+                fi
+              fi
+            "
 
       - name: Pull images and stop old containers
         run: |
@@ -436,7 +505,12 @@ jobs:
                 -f docker-compose.images.yml \
                 --env-file ../.env \
                 down --remove-orphans 2>/dev/null || true && \
-              docker container prune -f 2>/dev/null || true
+              docker container prune -f 2>/dev/null || true && \
+              docker image prune -a --filter 'until=10m' -f 2>/dev/null || true && \
+              docker builder prune -a -f 2>/dev/null || true && \
+              docker volume prune -f 2>/dev/null || true && \
+              journalctl --vacuum-size=500M 2>/dev/null || true && \
+              echo 'Disk usage after cleanup:' && df -h / | tail -1
             "
 
       - name: "Start layer 1: postgres + rabbitmq"
@@ -445,12 +519,17 @@ jobs:
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
-              docker compose \
-                -f docker-compose.yml \
-                -f docker-compose.prod.yml \
-                -f docker-compose.images.yml \
-                --env-file ../.env \
-                up -d --force-recreate postgres rabbitmq chromadb
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              \$COMPOSE up -d postgres rabbitmq chromadb && \
+              sleep 5 && \
+              RMQ_HEALTH=\$(docker inspect --format='{{.State.Health.Status}}' \$(\$COMPOSE ps -q rabbitmq 2>/dev/null) 2>/dev/null || echo 'none') && \
+              if [ \"\$RMQ_HEALTH\" != 'healthy' ]; then
+                echo 'RabbitMQ unhealthy, resetting volume...' && \
+                \$COMPOSE stop rabbitmq && \
+                \$COMPOSE rm -f rabbitmq && \
+                docker volume rm -f \$(docker volume ls -q | grep rmq-data) 2>/dev/null || true && \
+                \$COMPOSE up -d rabbitmq
+              fi
             "
 
       - name: "Verify layer 1: postgres + rabbitmq healthy"
@@ -475,19 +554,8 @@ jobs:
               exit 1
             "
 
-      - name: Run database migrations
-        run: |
-          ssh -i ~/.ssh/deploy_key \
-            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              cd ${{ secrets.VPS_DEPLOY_PATH }} && \
-              for f in database/migrations/*.sql; do
-                echo \"Running migration: \$f\" && \
-                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml -f docker/docker-compose.images.yml --env-file .env \
-                  exec -T postgres \
-                  psql -U \${POSTGRES_USER:-tamma} -d \${POSTGRES_DB:-tamma} -f /dev/stdin < \"\$f\" 2>&1 || true
-              done
-            "
+      # NOTE: SQL migrations removed — EF Core migrations run at C# API startup
+      # (Tamma.Api/Program.cs: dbContext.Database.Migrate())
 
       - name: "Start layer 2: elsa-server"
         run: |
@@ -533,7 +601,7 @@ jobs:
               exit 1
             "
 
-      - name: "Start layer 3: tamma-api-dotnet + tamma-api"
+      - name: "Start layer 3: tamma-api"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -544,7 +612,7 @@ jobs:
                 -f docker-compose.prod.yml \
                 -f docker-compose.images.yml \
                 --env-file ../.env \
-                up -d --force-recreate tamma-api-dotnet tamma-api
+                up -d --force-recreate tamma-api
             "
 
       - name: "Verify layer 3: tamma-api healthy"
@@ -556,15 +624,14 @@ jobs:
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               for i in \$(seq 1 30); do
                 API_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api | head -1) curl -4sf -o /dev/null http://127.0.0.1:3100/api/health 2>/dev/null && echo 'ok' || echo 'fail') && \
-                DOTNET_OK=\$(docker exec \$(\$COMPOSE ps -q tamma-api-dotnet | head -1) curl -4sf -o /dev/null http://127.0.0.1:3000/health 2>/dev/null && echo 'ok' || echo 'fail') && \
-                echo \"Check \$i/30: tamma-api=\$API_OK tamma-api-dotnet=\$DOTNET_OK\" && \
-                if [ \"\$API_OK\" = 'ok' ] && [ \"\$DOTNET_OK\" = 'ok' ]; then
+                echo \"Check \$i/30: tamma-api=\$API_OK\" && \
+                if [ \"\$API_OK\" = 'ok' ]; then
                   echo 'Layer 3 healthy' && exit 0
                 fi && \
                 sleep 3
               done && \
-              echo '::error::Layer 3 (APIs) failed to become healthy' && \
-              \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && \
+              echo '::error::Layer 3 (tamma-api) failed to become healthy' && \
+              \$COMPOSE logs --tail=30 tamma-api && \
               exit 1
             "
 
@@ -576,8 +643,8 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard elsa-studio && \
-              echo 'Starting nginx-proxy...' && \
-              \$COMPOSE up -d --force-recreate nginx-proxy && \
+              echo 'Starting oauth2-proxy + nginx-proxy...' && \
+              \$COMPOSE up -d --force-recreate oauth2-proxy nginx-proxy && \
               echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
               \$COMPOSE --profile observability run --rm opensearch-setup 2>/dev/null || echo 'OpenSearch setup skipped (observability not running)'
             "
@@ -615,59 +682,17 @@ jobs:
               exit 1
             "
 
-      - name: "Smoke test: critical domains reachable via proxy"
+      - name: "Post-deploy integration tests"
         run: |
+          scp -i ~/.ssh/deploy_key \
+            -P ${{ secrets.VPS_SSH_PORT || 22 }} \
+            docker/post-deploy-tests.sh \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh
+
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              FAILED=0
-
-              echo '--- Checking api.tamma.dev /api/health ---'
-              API_STATUS=\$(curl -sfk -o /dev/null -w '%{http_code}' -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null || echo '000')
-              if [ \"\$API_STATUS\" = '200' ]; then
-                echo \"  api.tamma.dev: OK (HTTP \$API_STATUS)\"
-              else
-                echo \"  api.tamma.dev: FAIL (HTTP \$API_STATUS)\"
-                FAILED=1
-              fi
-
-              echo '--- Checking app.tamma.dev ---'
-              APP_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: app.tamma.dev' https://localhost/ 2>/dev/null)
-              if [ \"\$APP_STATUS\" -lt 500 ] 2>/dev/null; then
-                echo \"  app.tamma.dev: OK (HTTP \$APP_STATUS)\"
-              else
-                echo \"  app.tamma.dev: FAIL (HTTP \$APP_STATUS)\"
-                FAILED=1
-              fi
-
-              echo '--- Checking elsa.tamma.dev ---'
-              ELSA_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/ 2>/dev/null)
-              if [ \"\$ELSA_STATUS\" -lt 500 ] 2>/dev/null; then
-                echo \"  elsa.tamma.dev: OK (HTTP \$ELSA_STATUS)\"
-              else
-                echo \"  elsa.tamma.dev: FAIL (HTTP \$ELSA_STATUS)\"
-                FAILED=1
-              fi
-
-              echo '--- Checking elsa.tamma.dev /elsa/api ---'
-              ELSA_API_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: elsa.tamma.dev' https://localhost/elsa/api/ 2>/dev/null)
-              if [ \"\$ELSA_API_STATUS\" -lt 500 ] 2>/dev/null; then
-                echo \"  elsa.tamma.dev/elsa/api: OK (HTTP \$ELSA_API_STATUS)\"
-              else
-                echo \"  elsa.tamma.dev/elsa/api: FAIL (HTTP \$ELSA_API_STATUS)\"
-                FAILED=1
-              fi
-
-              echo '--- Checking logs.tamma.dev (optional — observability profile) ---'
-              LOGS_STATUS=\$(curl -sk -o /dev/null -w '%{http_code}' -H 'Host: logs.tamma.dev' https://localhost/ 2>/dev/null)
-              echo \"  logs.tamma.dev: HTTP \$LOGS_STATUS (informational, not blocking)\"
-
-              if [ \"\$FAILED\" = '1' ]; then
-                echo '::error::One or more smoke tests failed — see above for details'
-                exit 1
-              fi
-              echo 'All critical smoke tests passed'
-            "
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "chmod +x ${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh && bash ${{ secrets.VPS_DEPLOY_PATH }}/post-deploy-tests.sh"
 
       - name: Dump container logs on failure
         if: failure()
@@ -679,7 +704,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api-dotnet tamma-api tamma-engine tamma-dashboard nginx-proxy; do
+              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api tamma-engine tamma-dashboard nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

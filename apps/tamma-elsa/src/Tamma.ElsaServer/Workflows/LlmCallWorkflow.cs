@@ -66,6 +66,7 @@ public class LlmCallWorkflow : WorkflowBase
         var taskPromptVar = builder.WithVariable<string>("TaskPrompt", "");
         var contextVar = builder.WithVariable<string>("Context", "");
         var sessionIdVar = builder.WithVariable<string>("SessionId", "");
+        var tenantIdVar = builder.WithVariable<string>("TenantId", "");
 
         // Legacy input support
         var inputVar = builder.WithVariable<string>("InputJson", "");
@@ -131,6 +132,9 @@ public class LlmCallWorkflow : WorkflowBase
                 var enableTools = context.GetInput<bool?>("enableTools") ?? false;
                 enableToolLoopVar.Set(context, enableTools);
 
+                // Tenant ID for tenant-scoped prompt resolution (Story 27-6)
+                tenantIdVar.Set(context, context.GetInput<string>("tenantId") ?? "");
+
                 var role = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role");
                 if (!string.IsNullOrWhiteSpace(role))
                 {
@@ -183,6 +187,7 @@ public class LlmCallWorkflow : WorkflowBase
             Action = new Input<string>(ctx => actionVar.Get(ctx)),
             VariablesJson = new Input<string>(ctx => variablesJsonVar.Get(ctx)),
             FallbackPrompt = new Input<string>(ctx => taskPromptVar.Get(ctx)),
+            TenantId = new Input<string>(ctx => tenantIdVar.Get(ctx)),
             ResolvedPrompt = new Output<string>(taskPromptVar), // overrides taskPrompt with rendered template
             ResolvedSystemPrompt = new Output<string>(resolvedSystemPromptVar),
             EnableTools = new Output<bool>(enableToolLoopVar),

@@ -139,6 +139,31 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamm
 builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
 builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry, Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
 
+// ─── Epic 19: Agent dispatch services (stories 19-2 / 3 / 4 / 5) ───────
+//
+// The ElsaServer process runs the Tamma workflows. It does NOT reference
+// Tamma.Api, so the Octokit-backed IGitHubActionsClient isn't available
+// here — the Null impl surfaces a clean operator error if workflows try
+// to dispatch. In production, agent-dispatching workflows are hosted by
+// the Tamma.Api process (which wires Octokit). This registration keeps
+// the Elsa runtime self-consistent for the non-SaaS (CLI / local-only)
+// deployments.
+builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
+    Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
+    Tamma.Activities.AgentDispatch.AgentDispatchService>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
+    Tamma.Activities.AgentDispatch.AgentMonitorService>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentResultCollectorService,
+    Tamma.Activities.AgentDispatch.AgentResultCollectorService>();
+builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IProcessRunner,
+    Tamma.Activities.AgentDispatch.DefaultProcessRunner>();
+builder.Services.AddSingleton(_ =>
+    Tamma.Activities.AgentDispatch.LocalExecutorOptions.FromConfiguration(builder.Configuration));
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
+builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
+
 // Security services (Epic 11 — LLM injection hardening)
 builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
 builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();

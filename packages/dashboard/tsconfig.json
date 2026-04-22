@@ -6,7 +6,8 @@
     "composite": false,
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "tsBuildInfoFile": "./dist/.tsbuildinfo"
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
   "references": [
     { "path": "../shared" }

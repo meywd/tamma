@@ -469,6 +469,40 @@ public class MentorshipWorkflow : WorkflowBase
         };
         extractSkillLevel.SetDisplayText("Extract Skill Level from Assessment");
 
+        // Story 12-5c: Adjust skill level based on assessment retry outcomes.
+        // extractSkillLevel handles the initial confidence-to-skill mapping from
+        // the Assessment sub-workflow. The nodes below handle subsequent retry
+        // iterations where assessJunior emits Correct/Partial/Incorrect outcomes:
+        //   Correct   -> increment skillLevel (capped at 5)
+        //   Partial   -> no change
+        //   Incorrect -> decrement skillLevel (floored at 1)
+        var adjustSkillOnCorrect = new SetVariable<int>(
+            skillLevel,
+            context => Math.Min(5, skillLevel.Get(context) + 1))
+        {
+            Id = "AdjustSkillOnCorrect",
+            Name = "Skill +1 (Correct)"
+        };
+        adjustSkillOnCorrect.SetDisplayText("Skill +1 (Correct)");
+
+        var adjustSkillOnPartial = new SetVariable<int>(
+            skillLevel,
+            context => skillLevel.Get(context)) // no change
+        {
+            Id = "AdjustSkillOnPartial",
+            Name = "Skill Unchanged (Partial)"
+        };
+        adjustSkillOnPartial.SetDisplayText("Skill Unchanged (Partial)");
+
+        var adjustSkillOnIncorrect = new SetVariable<int>(
+            skillLevel,
+            context => Math.Max(1, skillLevel.Get(context) - 1))
+        {
+            Id = "AdjustSkillOnIncorrect",
+            Name = "Skill -1 (Incorrect)"
+        };
+        adjustSkillOnIncorrect.SetDisplayText("Skill -1 (Incorrect)");
+
         // 7-1G: Blocker Diagnosis Workflow — used during blocker diagnosis
         var blockerDiagnosisWorkflow = new DispatchWorkflow
         {
@@ -723,13 +757,16 @@ public class MentorshipWorkflow : WorkflowBase
                 failed,
                 timeout,
 
-                // Sub-Workflow Dispatches (8) + skill level extraction
+                // Sub-Workflow Dispatches (8) + skill level extraction + adaptation
                 llmCallWorkflow,
                 contextGatheringWorkflow,
                 testingWorkflow,
                 codeReviewWorkflow,
                 assessmentWorkflow,
                 extractSkillLevel,
+                adjustSkillOnCorrect,
+                adjustSkillOnPartial,
+                adjustSkillOnIncorrect,
                 blockerDiagnosisWorkflow,
                 tddWorkflow,
                 debuggingWorkflow,
@@ -787,9 +824,11 @@ public class MentorshipWorkflow : WorkflowBase
                 // VALIDATE -> [Invalid] -> FAILED
                 // =============================================================
 
-                // 4. VALIDATE Valid -> ASSESS_JUNIOR_CAPABILITY directly
+                // 4. VALIDATE Valid -> Assessment sub-workflow -> Extract Skill Level -> ASSESS
+                // (Previously routed directly to assessJunior, skipping assessment and
+                //  leaving skillLevel at the hardcoded default of 3.)
                 new(new FlowEndpoint(validateStory, "Valid"),
-                    new FlowEndpoint(assessJunior)),
+                    new FlowEndpoint(assessmentWorkflow)),
 
                 // 5. Assessment sub-workflow -> Extract Skill Level -> ASSESS
                 new(assessmentWorkflow, extractSkillLevel),
@@ -817,16 +856,22 @@ public class MentorshipWorkflow : WorkflowBase
                 // ASSESS -> [Incorrect] -> IncrAttempt -> GuardRetries -> RE_EXPLAIN -> ASSESS
                 // =============================================================
 
-                // 10. ASSESS Correct -> LLM Call (for plan generation) -> PLAN_DECOMPOSITION
+                // 10. ASSESS Correct -> Adjust Skill +1 -> LLM Call -> PLAN_DECOMPOSITION
                 new(new FlowEndpoint(assessJunior, "Correct"),
-                    new FlowEndpoint(llmCallWorkflow)),
+                    new FlowEndpoint(adjustSkillOnCorrect)),
+
+                // 10b. Adjust Skill (Correct) -> LLM Call
+                new(adjustSkillOnCorrect, llmCallWorkflow),
 
                 // 11. LLM Call -> PLAN_DECOMPOSITION
                 new(llmCallWorkflow, planDecomposition),
 
-                // 12. ASSESS Partial -> Increment Assessment Attempt
+                // 12. ASSESS Partial -> Adjust Skill (no change) -> Increment Assessment Attempt
                 new(new FlowEndpoint(assessJunior, "Partial"),
-                    new FlowEndpoint(incrementAssessmentAttempt)),
+                    new FlowEndpoint(adjustSkillOnPartial)),
+
+                // 12b. Adjust Skill (Partial) -> Increment Assessment Attempt
+                new(adjustSkillOnPartial, incrementAssessmentAttempt),
 
                 // 13. Increment -> Guard Assessment Retries
                 new(incrementAssessmentAttempt, guardAssessmentRetries),
@@ -839,9 +884,12 @@ public class MentorshipWorkflow : WorkflowBase
                 new(new FlowEndpoint(guardAssessmentRetries, "False"),
                     new FlowEndpoint(escalateToSenior)),
 
-                // 16. ASSESS Incorrect -> RE_EXPLAIN_STORY directly
+                // 16. ASSESS Incorrect -> Adjust Skill -1 -> RE_EXPLAIN_STORY
                 new(new FlowEndpoint(assessJunior, "Incorrect"),
-                    new FlowEndpoint(reExplainStory)),
+                    new FlowEndpoint(adjustSkillOnIncorrect)),
+
+                // 16b. Adjust Skill (Incorrect) -> RE_EXPLAIN_STORY
+                new(adjustSkillOnIncorrect, reExplainStory),
 
                 // 17. ASSESS Error -> FAILED
                 new(new FlowEndpoint(assessJunior, "Error"),

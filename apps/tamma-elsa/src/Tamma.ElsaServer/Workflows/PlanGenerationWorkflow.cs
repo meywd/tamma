@@ -47,6 +47,7 @@ public class PlanGenerationWorkflow : WorkflowBase
         var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
         var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
         var revisionNumber = builder.WithVariable<int>("RevisionNumber", 0);
+        var tenantId = builder.WithVariable<string>("TenantId", "");
 
         var planJson = builder.WithVariable<string>("PlanJson", "");
         var planValid = builder.WithVariable<bool>("PlanValid", false);
@@ -72,6 +73,7 @@ public class PlanGenerationWorkflow : WorkflowBase
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
                 reviewNotes.Set(ctx, ctx.GetInput<string>("reviewNotes") ?? "");
                 revisionNumber.Set(ctx, ctx.GetInput<int>("revisionNumber"));
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
                 if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)repo;
@@ -90,6 +92,7 @@ public class PlanGenerationWorkflow : WorkflowBase
             {
                 ["role"] = "architect",
                 ["action"] = "plan",
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),

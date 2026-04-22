@@ -24,6 +24,37 @@
     <PackageReference Include="Serilog.Sinks.OpenSearch" Version="1.3.0" />
     <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="8.0.0" />
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.3.0" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <!-- GitHub App client (audit: github 007/015, engine 005-011, 021). Octokit
+         gives us typed JWT/installation-token auth + rate-limit headers via
+         GetLastApiInfo(); Sodium.Core is libsodium-backed sealed-box encryption
+         required by GitHub Actions secrets (audit: github 013). -->
+    <PackageReference Include="Octokit" Version="14.0.0" />
+    <PackageReference Include="Sodium.Core" Version="1.4.0" />
+    <!-- Distributed rate limiting (audit finding auth/014 follow-up). The
+         RateLimitService is in-process by default; when
+         ConnectionStrings:Redis is configured, the Redis-backed backend
+         kicks in so multi-pod deployments share a window counter. -->
+    <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internal helpers (e.g. sealed-box encryption) to the test
+         project without widening the public API surface. -->
+    <InternalsVisibleTo Include="Tamma.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Top-1000 common passwords (audit finding auth/013). Sourced from
+         SecLists (MIT-licensed, Daniel Miessler 2018):
+         Passwords/Common-Credentials/xato-net-10-million-passwords-1000.txt.
+         Loaded into a FrozenSet at startup by PasswordStrengthValidator. -->
+    <EmbeddedResource Include="Auth/common-passwords.txt">
+      <LogicalName>Tamma.Api.Auth.common-passwords.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

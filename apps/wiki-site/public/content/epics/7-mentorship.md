@@ -136,7 +136,6 @@ Located in `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/`:
 | PullRequestWorkflow | `PullRequestWorkflow.cs` | PR creation and management |
 | MergeWorkflow | `MergeWorkflow.cs` | PR merge process |
 | MergeApprovalWorkflow | `MergeApprovalWorkflow.cs` | Merge approval gate |
-| IssueSelectionWorkflow | `IssueSelectionWorkflow.cs` | Issue selection and filtering |
 | AssessmentWorkflow | `AssessmentWorkflow.cs` | Developer assessment flow |
 | BlockerDiagnosisWorkflow | `BlockerDiagnosisWorkflow.cs` | Blocker diagnosis sub-workflow |
 | DebuggingWorkflow | `DebuggingWorkflow.cs` | Systematic debugging pipeline |

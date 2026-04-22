@@ -28,8 +28,17 @@ Epic 18 extends the platform to support self-service registration without requir
 | 18-4 | GitHub App installation onboarding | M (3 days) | 18-3 |
 | 18-5 | User-facing dashboard shell | L (5 days) | 18-2 |
 | 18-6 | Password reset flow | M (3 days) | 18-1, 18-2 |
+| 18-7 | Tenant-admin user management API completion | S (14h) | 18-3 |
+| 18-8 | Tenant-admin user management UI | M (32h) | 18-5, 18-7 |
 
-**Total estimated effort**: ~29 days (single developer)
+**Total estimated effort**: ~29 days + ~46h (single developer)
+
+> **18-7 and 18-8** were added 2026-04-21 after the tenant-user-mgmt
+> gap audit (see [`../plans/tenant-user-mgmt-audit.md`](../plans/tenant-user-mgmt-audit.md)).
+> The backend for tenant-admin user management already lives in
+> `OrgEndpoints.cs`; 18-7 closes three thin backend gaps (resend-invite,
+> tenant-scoped audit endpoint, role-change event emission) and 18-8
+> ships the dashboard pages.
 
 ## Architecture Decisions
 

@@ -4,7 +4,7 @@ sidebar:
   order: 0
 ---
 
-This page provides an index of all user stories across all 27 epics. Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 33 epics (Epic 32 is intentionally skipped). Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -494,6 +494,125 @@ Autonomous project management workflows integrating with the ADL Orchestrator's 
 
 ---
 
+## Epic 27: Prompt Store — Multi-Tenant Prompt Management (Planned)
+
+Replaces the file-based, single-tenant `PromptStore` with a PostgreSQL-backed, multi-tenant prompt management system. Two-tier resolution (tenant override → system default), full audit trail via DCB events.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 27-1 | Prompt Store Database Schema + Migration | Planned |
+| 27-2 | Prompt Store Service (TypeScript) | Planned |
+| 27-3 | Prompt Store API Endpoints | Planned |
+| 27-4 | Prompt Store Admin UI | Planned |
+| 27-5 | Prompt Store Tenant UI | Planned |
+| 27-6 | Elsa Workflow Integration | Planned |
+| 27-7 | Prompt Store Event Sourcing | Planned |
+
+[Detailed Breakdown](/epics/27-prompt-store/) | [Story Files](/stories/epic-27/)
+
+---
+
+## Epic 28: Database-per-Tenant Isolation (Planned)
+
+Move from shared Postgres + RLS to database-per-tenant with separate control plane, per-tenant app DBs, global Elsa DB, per-tenant Elsa DB. Constant-time tenant deletion via `DROP DATABASE`.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 28-1 | EF migration scripts (CP + tenant + global-Elsa + per-tenant Elsa) | Planned |
+| 28-2 | Split `TammaDbContext` into `ControlPlaneDbContext` | Planned |
+| 28-3 | `TenantDbContext` factory with runtime connection routing | Planned |
+| 28-4 | Tenant connection resolver + LRU pool cache | Planned |
+| 28-5 | `CreateTenantWorkflow` + `DeleteTenantWorkflow` on global Elsa | Planned |
+| 28-6 | `platform_events` + `platform_queued_tasks` + `platform_email_outbox` | Planned |
+| 28-7 | API-key prefix routing | Planned |
+| 28-8 | `TenantContextMiddleware` async-provisioning handling | Planned |
+| 28-9 | JWT claims + `/auth/switch-org` + refresh tokens across tenants | Planned |
+| 28-10 | `platform_analytics_hourly` rollup workflow | Planned |
+| 28-11 | Admin UX for `tenants.Status` state machine | Planned |
+| 28-12 | Roles + KEK rotation | Planned |
+| 28-13 | OpenBao KMS backend (DEFERRED — trigger-gated) | Deferred |
+
+[Detailed Breakdown](/epics/28-db-per-tenant/) | [Story Files](/stories/epic-28/)
+
+---
+
+## Epic 29: Platform Secret Management (Planning)
+
+Typed secret cabinet with platform + tenant admin UIs, rotation workflows, reveal-once-on-create, migration of stopgap secrets. Sits on top of Epic 1.5 secret-management primitives.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 29-1 | Secret store abstraction + typed data model | Planned |
+| 29-2 | Postgres-backed envelope-encrypted store (KEK from env) | Planned |
+| 29-3 | Reveal-once-on-create UX + access audit events | Planned |
+| 29-4 | Platform-admin secret management UI | Planned |
+| 29-5 | Tenant-admin secret management UI | Planned |
+| 29-6 | Generic rotation workflow primitive (Elsa activity set) | Planned |
+| 29-7 | Postgres role-password rotation workflow | Planned |
+| 29-8 | Cranl env-var rotation workflow (push + restart) | Planned |
+| 29-9 | Migrate stopgap secrets (tamma_app, Cranl API key, shared HMAC, DB URLs) | Planned |
+| 29-10 | Delete `TenantSecretProtector` + encrypted columns | Planned |
+
+[Detailed Breakdown](/epics/29-secret-management/) | [Story Files](/stories/epic-29/)
+
+---
+
+## Epic 30: Pluggable Tenant Infrastructure Provisioning (Planning)
+
+Generalises the provisioning plane: one `ITenantInfrastructureProvider` v2 interface, multiple backends (Cranl / Hetzner / Cloudflare / BYO), multiple topologies, per-tenant routing.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 30-1 | `ITenantInfrastructureProvider` v2 + `ProvisioningTopology` | Planned |
+| 30-2 | Provisioning workflow in Elsa — resumable, per-backend dispatch | Planned |
+| 30-3 | Cranl provider refactor to v2 interface | Planned |
+| 30-4 | Hetzner Cloud provider (Cloud API + cloud-init) | Planned |
+| 30-5 | Cloudflare provider (D1 + Workers + KV) | Planned |
+| 30-6 | BYO provider (validate external DB + engine-registry hook) | Planned |
+| 30-7 | Admin UI — onboarding backend + topology picker | Planned |
+| 30-8 | Per-tenant routing — resolve tenantId → provider+endpoints | Planned |
+| 30-9 | Deprovisioning saga — reverse each backend | Planned |
+| 30-10 | Cost + quota dashboard per tenant | Planned |
+
+[Detailed Breakdown](/epics/30-pluggable-provisioning/) | [Story Files](/stories/epic-30/)
+
+---
+
+## Epic 31: Multi Git Platform Support (Planning)
+
+Splits GitHub-as-API-access from GitHub-as-sign-in. New `IGitPlatformClient` abstraction + drivers for Gitea / Forgejo (compat shim) / GitLab. Bitbucket and Azure DevOps deferred.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 31-1 | `IGitPlatformClient` + `IGitPlatformActionsClient` + capability matrix | Planned |
+| 31-2 | Platform registry + per-tenant platform routing resolver | Planned |
+| 31-3 | GitHub driver refactor — wrap existing Octokit clients | Planned |
+| 31-4 | Gitea driver | Planned |
+| 31-5 | Forgejo compat shim + test matrix extension | Planned |
+| 31-6 | GitLab driver | Planned |
+| 31-7 | Webhook receiver abstraction — per-platform signature + routing | Planned |
+| 31-8 | `ICiSecretsProvisioner` abstraction | Planned |
+| 31-9 | Onboarding UI — tenant picks platform + enters credentials | Planned |
+| 31-10 | Integration test harness — Gitea + Forgejo + GitLab containers | Planned |
+| 31-11 | Bitbucket Cloud driver (DEFERRED) | Deferred |
+| 31-12 | Azure DevOps driver (DEFERRED) | Deferred |
+
+[Detailed Breakdown](/epics/31-multi-git-platform/) | [Story Files](/stories/epic-31/)
+
+---
+
+## Epic 33: Per-Tenant Identity Providers (Deferred)
+
+Per-tenant SAML 2.0 / OIDC / LDAP / SCIM directory sync. Deferred until trigger conditions fire (first enterprise customer, compliance finding, ≥5 SSO requests, SCIM sales objection, or "Tamma Enterprise" launch). Three pre-scoped tiers: Lean OIDC (~100h), Full SAML+OIDC (~250h), Full + LDAP (~400h).
+
+| Story | Title | Status |
+|-------|-------|--------|
+| (none scoped yet) | Activate when trigger conditions fire | Deferred |
+
+[Detailed Breakdown](/epics/33-per-tenant-idp/) | [Story Files](/stories/epic-33/)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -509,19 +628,19 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~232 |
-| Stories done | 117 |
-| Stories in progress | 22 |
-| Stories drafted | 62 |
-| Epics completed | 9 (8, 9, 11, 12, 13, 14, 15, 16, 25) |
-| Epics near complete | 7 (1, 1.5, 2, 3, 4, 6, 7) |
-| Epics partially implemented | 5 (5, 18, 19, 21, 26) |
-| Epics drafted | 6 (10, 17, 20, 22, 23, 24) |
+| Total stories across all epics | ~310+ (Wave-2 added ~70 new stories) |
+| Total epics | 33 (Epic 32 skipped) |
+| Epics completed | 10 (8, 9, 11, 13, 14, 15, 16, 19, 21 — landing page only, 25) |
+| Epics near complete | 8 (1, 1.5, 2, 3, 4, 6, 7, 12) |
+| Epics partially implemented | 5 (5, 17, 18, 21, 22) |
+| Epics drafted | 5 (10, 20, 23, 24, 26) |
+| Epics newly scoped (Wave-2) | 5 (27, 28, 29, 30, 31) + 1 deferred (33) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
+| Wave-2 impl plans (Epics 9, 12, 18, 19-6, 28, 29, 30) | 39 |
 | TypeScript packages with code | 14 |
-| C# ELSA activities | 70+ |
-| ELSA code-first workflows | 30 |
+| C# Elsa activities | 70+ |
+| Elsa code-first workflows | 30 |
 
 ---
 
