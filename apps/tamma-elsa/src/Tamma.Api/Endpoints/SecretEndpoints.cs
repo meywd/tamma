@@ -2,7 +2,9 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Tamma.Api.Authorization;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Services.Secrets.Query;
 using Tamma.Api.Services.Secrets.Reveal;
 
 namespace Tamma.Api.Endpoints;
@@ -206,6 +208,348 @@ public static class SecretEndpoints
             _ => Results.Problem("Unknown reveal outcome"),
         };
     }
+
+    /// <summary>
+    /// Platform-scope list: <c>GET /api/v1/admin/secrets</c>. Returns
+    /// every platform-scoped secret's metadata (no plaintext). Gated by
+    /// <c>OwnerAccess</c> at the mapping site.
+    /// </summary>
+    public static async Task<IResult> ListPlatformSecrets(
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        var rows = await queryService.ListAsync(
+            SecretScope.Platform, tenantId: null, http.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Ok(new { secrets = rows.Select(ToListItem).ToList() });
+    }
+
+    /// <summary>
+    /// Tenant-scope list: <c>GET /api/v1/orgs/{tenantId}/secrets</c>.
+    /// Returns only this tenant's secrets; the caller has already been
+    /// proven a member by <c>RequireTenantMembershipFilter</c>. Member-
+    /// level access (read-only) is sufficient — rotate / retire are
+    /// admin+ via their own handlers.
+    /// </summary>
+    public static async Task<IResult> ListTenantSecrets(
+        Guid tenantId,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+
+        var rows = await queryService.ListAsync(
+            SecretScope.Tenant, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Ok(new { secrets = rows.Select(ToListItem).ToList() });
+    }
+
+    /// <summary>
+    /// Platform-scope get: <c>GET /api/v1/admin/secrets/{id}</c>.
+    /// </summary>
+    public static async Task<IResult> GetPlatformSecret(
+        Guid id,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var row = await queryService.GetAsync(
+            id, SecretScope.Platform, tenantId: null, http.RequestAborted)
+            .ConfigureAwait(false);
+        return row is null
+            ? Results.NotFound(new { error = "Secret not found" })
+            : Results.Ok(ToDetail(row));
+    }
+
+    /// <summary>
+    /// Tenant-scope get: <c>GET /api/v1/orgs/{tenantId}/secrets/{id}</c>.
+    /// Cross-tenant read returns 404 (not leaked as forbidden).
+    /// </summary>
+    public static async Task<IResult> GetTenantSecret(
+        Guid tenantId,
+        Guid id,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var row = await queryService.GetAsync(
+            id, SecretScope.Tenant, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        return row is null
+            ? Results.NotFound(new { error = "Secret not found" })
+            : Results.Ok(ToDetail(row));
+    }
+
+    /// <summary>
+    /// Platform-scope versions: <c>GET /api/v1/admin/secrets/{id}/versions</c>.
+    /// </summary>
+    public static async Task<IResult> ListPlatformVersions(
+        Guid id,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var versions = await queryService.ListVersionsAsync(
+            id, SecretScope.Platform, tenantId: null, http.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Ok(new { versions = versions.Select(ToVersionItem).ToList() });
+    }
+
+    /// <summary>
+    /// Tenant-scope versions: <c>GET /api/v1/orgs/{tenantId}/secrets/{id}/versions</c>.
+    /// </summary>
+    public static async Task<IResult> ListTenantVersions(
+        Guid tenantId,
+        Guid id,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var versions = await queryService.ListVersionsAsync(
+            id, SecretScope.Tenant, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Ok(new { versions = versions.Select(ToVersionItem).ToList() });
+    }
+
+    /// <summary>
+    /// Platform-scope retire: <c>POST /api/v1/admin/secrets/{id}/retire-version/{versionNumber}</c>.
+    /// Refuses the active version per AC5.
+    /// </summary>
+    public static async Task<IResult> RetirePlatformVersion(
+        Guid id,
+        int versionNumber,
+        ClaimsPrincipal principal,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+        if (versionNumber <= 0)
+            return Results.BadRequest(new { error = "versionNumber must be >= 1" });
+
+        var actorUserId = ResolveUserId(principal);
+
+        try
+        {
+            var status = await queryService.RetireVersionAsync(
+                id, versionNumber, SecretScope.Platform, tenantId: null,
+                actorUserId, http.RequestAborted)
+                .ConfigureAwait(false);
+            return Results.Ok(new
+            {
+                secretId = id,
+                versionNumber,
+                status = status.ToString(),
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Secret or version not found" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 409);
+        }
+    }
+
+    /// <summary>
+    /// Tenant-scope retire: <c>POST /api/v1/orgs/{tenantId}/secrets/{id}/retire-version/{versionNumber}</c>.
+    /// Requires tenant admin+ role (the handler enforces; membership
+    /// filter wraps the route).
+    /// </summary>
+    public static async Task<IResult> RetireTenantVersion(
+        Guid tenantId,
+        Guid id,
+        int versionNumber,
+        ClaimsPrincipal principal,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+        if (versionNumber <= 0)
+            return Results.BadRequest(new { error = "versionNumber must be >= 1" });
+
+        var actorUserId = ResolveUserId(principal);
+
+        try
+        {
+            var status = await queryService.RetireVersionAsync(
+                id, versionNumber, SecretScope.Tenant, tenantId,
+                actorUserId, http.RequestAborted)
+                .ConfigureAwait(false);
+            return Results.Ok(new
+            {
+                secretId = id,
+                versionNumber,
+                status = status.ToString(),
+            });
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Secret or version not found" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: 409);
+        }
+    }
+
+    /// <summary>
+    /// Tenant-scope rotate: <c>POST /api/v1/orgs/{tenantId}/secrets/{id}/rotate</c>.
+    /// Same body as the platform rotate; requires admin+ role.
+    /// </summary>
+    public static async Task<IResult> RotateTenantSecret(
+        Guid tenantId,
+        Guid id,
+        RotateSecretRequestBody body,
+        ClaimsPrincipal principal,
+        [FromServices] ISecretRevealService revealService,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        if (string.IsNullOrEmpty(body.NewPlaintext))
+            return Results.BadRequest(new { error = "newPlaintext is required" });
+        if (body.NewPlaintext.Length is < MinPlaintextLength or > MaxPlaintextLength)
+            return Results.BadRequest(new
+            {
+                error = $"newPlaintext length must be between {MinPlaintextLength} and {MaxPlaintextLength} characters"
+            });
+
+        // Defense-in-depth scope check BEFORE hitting the reveal
+        // service, which would otherwise happily rotate a platform
+        // row pushed into the tenant route by a forged path.
+        var existing = await queryService.GetAsync(
+            id, SecretScope.Tenant, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        if (existing is null)
+        {
+            return Results.NotFound(new { error = "Secret not found" });
+        }
+
+        var actorUserId = ResolveUserId(principal);
+
+        try
+        {
+            var result = await revealService.IssueRotateAsync(
+                secretId: id,
+                newPlaintext: body.NewPlaintext,
+                actorUserId: actorUserId,
+                ct: http.RequestAborted)
+                .ConfigureAwait(false);
+
+            return Results.Ok(ToIssueResponse(result));
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Secret not found" });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Minting / retiring / rotating credentials within a tenant is
+    /// admin+ per Story 29-5 AC6. Membership filter has already run
+    /// and stashed the caller's tenant role.
+    /// </summary>
+    private static bool RequireTenantAdmin(HttpContext http, out IResult? forbid)
+    {
+        var role = http.Items[RequireTenantMembershipFilter.TenantRoleItemKey] as string;
+        if (role is null)
+        {
+            forbid = Results.Json(
+                new { error = "Tenant role not resolved" },
+                statusCode: StatusCodes.Status500InternalServerError);
+            return false;
+        }
+        if (!TenantRoleHierarchy.IsAtLeast(role, TenantRoleHierarchy.Admin))
+        {
+            forbid = Results.Json(
+                new { error = "Requires admin role or higher" },
+                statusCode: StatusCodes.Status403Forbidden);
+            return false;
+        }
+        forbid = null;
+        return true;
+    }
+
+    private static object ToListItem(SecretMetadata row) => new
+    {
+        secretId = row.Id,
+        name = row.Name,
+        scope = row.Scope.ToString().ToLowerInvariant(),
+        tenantId = row.TenantId,
+        purpose = row.Purpose.ToString(),
+        consumerRefs = row.ConsumerRefs,
+        activeVersion = row.ActiveVersionNumber,
+        lastRotatedAt = row.LastRotatedAt,
+        nextRotationDueAt = row.NextRotationDueAt,
+        createdAt = row.CreatedAt,
+        updatedAt = row.UpdatedAt,
+    };
+
+    private static object ToDetail(SecretMetadata row) => new
+    {
+        secretId = row.Id,
+        name = row.Name,
+        scope = row.Scope.ToString().ToLowerInvariant(),
+        tenantId = row.TenantId,
+        purpose = row.Purpose.ToString(),
+        consumerRefs = row.ConsumerRefs,
+        ownerUserId = row.OwnerUserId,
+        rotationSchedule = new
+        {
+            kind = row.RotationSchedule.Kind.ToString(),
+            days = row.RotationSchedule.Days,
+            cronExpression = row.RotationSchedule.CronExpression,
+        },
+        activeVersion = row.ActiveVersionNumber,
+        lastRotatedAt = row.LastRotatedAt,
+        nextRotationDueAt = row.NextRotationDueAt,
+        createdAt = row.CreatedAt,
+        updatedAt = row.UpdatedAt,
+    };
+
+    private static object ToVersionItem(SecretVersion v) => new
+    {
+        secretId = v.SecretId,
+        versionNumber = v.VersionNumber,
+        status = v.Status.ToString(),
+        createdAt = v.CreatedAt,
+        activatedAt = v.ActivatedAt,
+        retiredAt = v.RetiredAt,
+        createdByUserId = v.CreatedByUserId,
+    };
 
     // ─────────────────────────────────────────────────────────────────
 

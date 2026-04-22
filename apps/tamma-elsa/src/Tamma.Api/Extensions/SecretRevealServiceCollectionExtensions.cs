@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Tamma.Api.Services.Secrets.Postgres;
 using Tamma.Api.Services.Secrets.Reveal;
 
 namespace Tamma.Api.Extensions;
@@ -68,9 +69,31 @@ public static class SecretRevealServiceCollectionExtensions
                 npgsql.MigrationsHistoryTable("__SecretRevealMigrationsHistory"));
         });
 
+        // Story 29-3 <see cref="SecretRevealService"/> also needs the
+        // Story 29-2 <see cref="SecretsDbContext"/> factory — the
+        // reveal flow writes parent secret rows + marks versions as
+        // active / retired inside a single transaction. Production
+        // Program.cs never calls the full
+        // <c>AddTammaPostgresSecrets</c>, so registering the factory
+        // here is what actually makes the reveal + query surfaces
+        // runnable end-to-end. TryAdd so explicit earlier calls win.
+        if (services.All(sd => sd.ServiceType != typeof(IDbContextFactory<SecretsDbContext>)))
+        {
+            services.AddDbContextFactory<SecretsDbContext>(options =>
+            {
+                options.UseNpgsql(resolvedConnectionString, npgsql =>
+                    npgsql.MigrationsHistoryTable("__SecretStoreMigrationsHistory"));
+            });
+        }
+
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<ISecretRevealService, SecretRevealService>();
         services.AddHostedService<RevealTokenSweeper>();
+
+        // Story 29-4 / 29-5 query + retire surface. Needs the
+        // SecretsDbContext factory registered above. Scoped to match.
+        services.TryAddScoped<Tamma.Api.Services.Secrets.Query.ISecretQueryService,
+            Tamma.Api.Services.Secrets.Query.SecretQueryService>();
 
         return services;
     }

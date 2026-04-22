@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Postgres;
+using Tamma.Api.Services.Secrets.Query;
 using Tamma.Api.Services.Secrets.Stopgap;
 
 namespace Tamma.Api.Extensions;
@@ -59,6 +60,13 @@ public static class SecretsServiceCollectionExtensions
         // calls RemoveAll + AddSingleton so the explicit Postgres
         // wiring wins over this fallback regardless of call order.
         services.TryAddSingleton<ISecretStoreBackend, InMemorySecretStoreBackend>();
+
+        // Shared infrastructure that the query service (registered by
+        // AddTammaPostgresSecrets when the DbContext factory is ready)
+        // needs. Placed here so callers of bare AddTammaSecrets still
+        // see a TimeProvider — the existing reveal service registration
+        // also relied on one.
+        services.TryAddSingleton(TimeProvider.System);
 
         return services;
     }
@@ -166,6 +174,12 @@ public static class SecretsServiceCollectionExtensions
         // order relative to AddTammaSecrets.
         services.RemoveAll<ISecretStoreBackend>();
         services.AddSingleton<ISecretStoreBackend, PostgresSecretStoreBackend>();
+
+        // Story 29-4 / 29-5 query + retire surface. Registered here
+        // because it depends on the SecretsDbContext factory above;
+        // the bare AddTammaSecrets path has no Postgres so it cannot
+        // construct this. Scoped to match EF context lifecycles.
+        services.TryAddScoped<ISecretQueryService, SecretQueryService>();
 
         return services;
     }
