@@ -1,10 +1,12 @@
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Tamma.Api.Logging;
+using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -125,6 +127,19 @@ public class ApiKeyAuthHandler(
     /// correct DB (the resolver throws <see cref="TenantNotFoundException"/>
     /// or <see cref="TenantNotProvisionedException"/> if the embedded
     /// tenant id is bogus or suspended; both surface as 401).
+    ///
+    /// <para>Lookup strategy (Story 28-7 deferred-item):
+    /// <list type="number">
+    ///   <item><b>Fast path</b> — <c>platform_api_key_index</c> by
+    ///         <c>(KeyPrefix, HashedSuffix)</c>. O(1) on the CP, avoids
+    ///         hitting the <c>api_keys</c> table for the common case.</item>
+    ///   <item><b>Fallback</b> — <c>api_keys.KeyHash</c> lookup by
+    ///         SHA-256 hash (legacy row shape). Preserved so keys issued
+    ///         before the index existed still auth.</item>
+    /// </list>
+    /// Hash verification uses <see cref="ApiKeyHasher.Verify"/> which accepts
+    /// Argon2id, SHA-256, and scrypt formats; legacy rows are transparently
+    /// upgraded to Argon2id after a successful verify.</para>
     /// </summary>
     private async Task<AuthenticateResult> AuthenticatePrefixed(
         ParsedApiKey parsed,
@@ -133,9 +148,8 @@ public class ApiKeyAuthHandler(
         using var scope = serviceProvider.CreateScope();
         var apiKeyRepo = scope.ServiceProvider.GetRequiredService<IApiKeyRepository>();
 
-        var sha256Hash = ApiKeyHasher.Hash(parsed.RawKey);
-        var apiKey = await apiKeyRepo.GetByHashAsync(sha256Hash);
         var displayPrefix = ApiKeyPrefixParser.SafeDisplayPrefix(parsed.RawKey);
+        var apiKey = await ResolveApiKeyForPrefixedAsync(parsed, scope, apiKeyRepo);
 
         if (apiKey is null)
         {
@@ -242,6 +256,13 @@ public class ApiKeyAuthHandler(
     /// Pre-Epic-28 fallback path for un-prefixed keys. Gated by the
     /// <see cref="LegacyFallbackConfigKey"/> flag so ops can disable
     /// legacy keys after the migration window.
+    ///
+    /// <para>Story 28-7 deferred-item: now also accepts Argon2id-format
+    /// rows via <see cref="ApiKeyHasher.Verify"/>. Look-up is by <em>KeyPrefix</em>
+    /// candidates (not KeyHash directly) so per-key salted hashes still
+    /// resolve — a legacy un-prefixed token like
+    /// <c>tamma_sk_&lt;random&gt;</c> has a 12-char display prefix that is
+    /// indexed on <c>api_keys.KeyPrefix</c>.</para>
     /// </summary>
     private async Task<AuthenticateResult> AuthenticateLegacy(string rawKey)
     {
@@ -258,9 +279,13 @@ public class ApiKeyAuthHandler(
         using var scope = serviceProvider.CreateScope();
         var apiKeyRepo = scope.ServiceProvider.GetRequiredService<IApiKeyRepository>();
 
+        var keyPrefix = ApiKeyHasher.Prefix(rawKey);
+
+        // Primary lookup: legacy rows kept the raw SHA-256 in KeyHash, so the
+        // fast path is still a unique hash lookup. This path survives when
+        // the old row has NOT yet been rehashed.
         var sha256Hash = ApiKeyHasher.Hash(rawKey);
         var apiKey = await apiKeyRepo.GetByHashAsync(sha256Hash);
-        var keyPrefix = ApiKeyHasher.Prefix(rawKey);
 
         if (apiKey is null)
         {
@@ -268,6 +293,27 @@ public class ApiKeyAuthHandler(
             // scrypt-derived hash so old keys still verify post-cutover.
             var legacyHash = ApiKeyHasher.LegacyScryptHash(rawKey);
             apiKey = await apiKeyRepo.GetByHashAsync(legacyHash);
+        }
+
+        // Argon2id path: KeyHash is per-key-salted so a hash-equality lookup
+        // can't find it. Fall through to scanning the small pool of active
+        // rows that share the display prefix; this is O(n) in prefix
+        // collisions only, and prefixes are 12 chars of base64url so the
+        // number of active rows per prefix is effectively 1.
+        if (apiKey is null)
+        {
+            var candidates = await apiKeyRepo.ListByScopeAsync("service");
+            apiKey = ResolveByVerify(candidates, rawKey, keyPrefix);
+            if (apiKey is null)
+            {
+                var userCandidates = await apiKeyRepo.ListByScopeAsync("user");
+                apiKey = ResolveByVerify(userCandidates, rawKey, keyPrefix);
+            }
+            if (apiKey is null)
+            {
+                var instCandidates = await apiKeyRepo.ListByScopeAsync("installation");
+                apiKey = ResolveByVerify(instCandidates, rawKey, keyPrefix);
+            }
         }
 
         if (apiKey is null)
@@ -278,6 +324,15 @@ public class ApiKeyAuthHandler(
                 LogSanitizer.Clean(Request.Method),
                 LogSanitizer.Clean(Request.Path.Value));
             return AuthenticateResult.Fail("Invalid API key");
+        }
+
+        // Legacy row: upgrade to Argon2id on successful verify (transparent
+        // to the caller). Only rewrite when the stored hash is a direct
+        // SHA-256/scrypt match; if the row is already Argon2id, NeedsRehash
+        // returns false.
+        if (ApiKeyHasher.NeedsRehash(apiKey.KeyHash))
+        {
+            _ = RehashAsync(apiKey.Id, rawKey);
         }
 
         if (IsHardRevoked(apiKey, keyPrefix))
@@ -293,6 +348,105 @@ public class ApiKeyAuthHandler(
             LogSanitizer.Clean(apiKey.Scope));
 
         return await BuildSuccessTicket(apiKey, scope, prefixedTenantId: null);
+    }
+
+    /// <summary>
+    /// Story 28-7 deferred-item: resolve a prefixed key (tenant/platform/
+    /// user scope) against the CP routing index first, then fall back to
+    /// the legacy <c>KeyHash</c> lookup + Argon2-aware Verify. Rehashes
+    /// legacy rows on the way through.
+    /// </summary>
+    private async Task<ApiKey?> ResolveApiKeyForPrefixedAsync(
+        ParsedApiKey parsed,
+        IServiceScope scope,
+        IApiKeyRepository apiKeyRepo)
+    {
+        var displayPrefix = ApiKeyHasher.Prefix(parsed.RawKey);
+        var indexRepo = scope.ServiceProvider.GetService<IPlatformApiKeyIndexRepository>();
+
+        // Fast path: CP routing index.
+        if (indexRepo is not null)
+        {
+            var suffixHash = HashSuffixForIndex(parsed.RawKey);
+            var index = await indexRepo.GetByPrefixAndSuffixAsync(displayPrefix, suffixHash);
+            if (index is not null)
+            {
+                var candidate = await apiKeyRepo.GetByIdAsync(index.ApiKeyId);
+                if (candidate is not null && ApiKeyHasher.Verify(parsed.RawKey, candidate.KeyHash))
+                {
+                    if (ApiKeyHasher.NeedsRehash(candidate.KeyHash))
+                        _ = RehashAsync(candidate.Id, parsed.RawKey);
+                    return candidate;
+                }
+            }
+        }
+
+        // Legacy lookup by KeyHash (only works for SHA-256 legacy rows; new
+        // rows have per-key-salted Argon2 hashes and won't match directly).
+        var sha256Hash = ApiKeyHasher.Hash(parsed.RawKey);
+        var apiKey = await apiKeyRepo.GetByHashAsync(sha256Hash);
+        if (apiKey is not null && ApiKeyHasher.Verify(parsed.RawKey, apiKey.KeyHash))
+        {
+            if (ApiKeyHasher.NeedsRehash(apiKey.KeyHash))
+                _ = RehashAsync(apiKey.Id, parsed.RawKey);
+            return apiKey;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Verify + filter <paramref name="candidates"/> against <paramref name="rawKey"/>
+    /// using the Argon2-aware <see cref="ApiKeyHasher.Verify"/>. First
+    /// filters by KeyPrefix equality (cheap) to bound the constant-time
+    /// Argon2 computation to near-singleton candidate sets.
+    /// </summary>
+    private static ApiKey? ResolveByVerify(List<ApiKey> candidates, string rawKey, string keyPrefix)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!string.Equals(candidate.KeyPrefix, keyPrefix, StringComparison.Ordinal))
+                continue;
+            if (ApiKeyHasher.Verify(rawKey, candidate.KeyHash))
+                return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Computes the SHA-256 of the raw key's suffix (everything after the
+    /// <c>tamma_sk_</c> banner). Stored on the routing index so the auth
+    /// handler can do a constant-time equality check without persisting
+    /// plaintext key material anywhere.
+    /// </summary>
+    internal static string HashSuffixForIndex(string rawKey)
+    {
+        var suffix = rawKey.StartsWith(ApiKeyHasher.KeyPrefix, StringComparison.Ordinal)
+            ? rawKey[ApiKeyHasher.KeyPrefix.Length..]
+            : rawKey;
+        return Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(suffix))).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Background rehash on successful legacy verify. Isolated scope + try/
+    /// catch so a DB hiccup never fails the auth path.
+    /// </summary>
+    private async Task RehashAsync(Guid apiKeyId, string rawKey)
+    {
+        try
+        {
+            using var bgScope = serviceProvider.CreateScope();
+            var bgRepo = bgScope.ServiceProvider.GetRequiredService<IApiKeyRepository>();
+            var argon2 = ApiKeyHasher.HashArgon2(rawKey);
+            await bgRepo.UpdateHashAsync(apiKeyId, argon2);
+        }
+        catch
+        {
+            // Intentionally swallow — rehash is best-effort; legacy verify
+            // still works on the next request.
+        }
     }
 
     /// <summary>
@@ -325,6 +479,11 @@ public class ApiKeyAuthHandler(
     /// Common scope-classification + claims-issuance path shared by the
     /// prefixed and legacy auth flows. Returns 401 on scope-specific
     /// failures (suspended installation, missing X-Tenant-Id, etc.).
+    ///
+    /// <para>Story 28-7 deferred-item: enforces the per-key RPM limit
+    /// from the <c>api_keys.RateLimitRpm</c> shadow column. Over-limit
+    /// requests surface as a 401 (same shape as a hash miss) so a
+    /// misbehaving caller can't probe the rate-limit boundary.</para>
     /// </summary>
     private async Task<AuthenticateResult> BuildSuccessTicket(
         ApiKey apiKey,
@@ -333,6 +492,21 @@ public class ApiKeyAuthHandler(
     {
         AuthPrincipal? typedPrincipal = null;
         Guid? effectiveTenantId = prefixedTenantId ?? apiKey.TenantId;
+
+        // Per-key RPM gate. Resolved from the CP shadow column via the EF
+        // model; null means "no operator-set limit" — preserves back-compat
+        // with keys minted before Story 28-7's shadow column landed.
+        var rateLimitRpm = TryReadRateLimitRpm(scope, apiKey.Id);
+        var rpmLimiter = scope.ServiceProvider
+            .GetService<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter>();
+        if (rpmLimiter is not null && rpmLimiter.IsLimited(apiKey.Id, rateLimitRpm))
+        {
+            Logger.LogWarning(
+                "Auth failure: api-key rate limit exceeded keyId={KeyId} rpm={Rpm}",
+                apiKey.Id, rateLimitRpm);
+            return AuthenticateResult.Fail("API key rate limit exceeded");
+        }
+        rpmLimiter?.Record(apiKey.Id);
 
         switch (apiKey.Scope)
         {
@@ -463,5 +637,39 @@ public class ApiKeyAuthHandler(
             LogSanitizer.Clean(Request.Path.Value));
 
         return AuthenticateResult.Success(ticket);
+    }
+
+    /// <summary>
+    /// Story 28-7 deferred-item helper: reads the shadow
+    /// <c>api_keys.RateLimitRpm</c> column via the CP DbContext. Returns
+    /// <c>null</c> when unset or the context is unavailable (unit tests
+    /// that don't register it). Defensive try/catch — a missing column on
+    /// unmigrated dev DBs must not fail auth.
+    /// </summary>
+    private static int? TryReadRateLimitRpm(IServiceScope scope, Guid apiKeyId)
+    {
+        try
+        {
+            var cp = scope.ServiceProvider.GetService<ControlPlaneDbContext>();
+            if (cp is null) return null;
+
+            var tracked = cp.ChangeTracker.Entries<ApiKey>()
+                .FirstOrDefault(e => e.Entity.Id == apiKeyId);
+            if (tracked is not null)
+            {
+                var val = tracked.Property<int?>("RateLimitRpm").CurrentValue;
+                return val;
+            }
+
+            // Not tracked — do a lightweight projection query.
+            return cp.ApiKeys
+                .Where(k => k.Id == apiKeyId)
+                .Select(k => EF.Property<int?>(k, "RateLimitRpm"))
+                .FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

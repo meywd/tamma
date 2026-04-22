@@ -269,6 +269,10 @@ else
 }
 builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
     Tamma.Api.Services.RateLimit.RateLimitService>();
+// Story 28-7 deferred-item: per-API-key RPM limiter. Sits next to the
+// per-action IRateLimitService but keyed per ApiKey.Id with 60s windows.
+builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter,
+    Tamma.Api.Services.RateLimit.ApiKeyRateLimiter>();
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();
@@ -811,6 +815,14 @@ admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
     .RequireAuthorization("OwnerAccess");
 
+// Story 28-7 deferred-item — platform API-keys CRUD. Owner-only because
+// platform keys carry global auth; a regular admin must not be able to
+// mint them. Reveal-once-on-create.
+admin.MapPost("/api-keys", AdminApiKeysEndpoints.CreateApiKey).RequireAuthorization("OwnerAccess");
+admin.MapGet("/api-keys", AdminApiKeysEndpoints.ListApiKeys).RequireAuthorization("OwnerAccess");
+admin.MapGet("/api-keys/{id:guid}", AdminApiKeysEndpoints.GetApiKey).RequireAuthorization("OwnerAccess");
+admin.MapDelete("/api-keys/{id:guid}", AdminApiKeysEndpoints.DeleteApiKey).RequireAuthorization("OwnerAccess");
+
 // Story 28-10 — platform-wide analytics rollup. Owner-only because each
 // handler reads across every tenant regardless of the caller's
 // TenantId — a regular member/admin must not see fleet-level volume.
@@ -833,31 +845,59 @@ var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
 orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
 
-orgs.MapGet("/{tenantId}", OrgEndpoints.GetOrg)
+// Explicit 404 pin for the deleted Story-18-3 handler. ASP.NET Core 8
+// routing returns a 405 for a URL that matches any endpoint template on
+// another verb, even when all siblings are GET/DELETE under a constrained
+// <c>{tenantId:guid}</c> parent. Anchoring an explicit `AllowAnonymous`
+// 404 on the specific deleted path prevents that fallback from leaking —
+// matches OrgSwitchOrgRoute404Tests and the Story 28-9 contract.
+orgs.MapMethods("/switch-org", new[] { "GET", "POST", "PUT", "DELETE", "PATCH" },
+        () => Results.NotFound(new { error = "Not found" }))
+    .AllowAnonymous();
+
+// All tenant-scoped routes pin the {tenantId} route segment to :guid so
+// non-GUID sub-paths (e.g. /api/v1/orgs/switch-org from stale clients)
+// miss entirely and return a clean 404 instead of a 405 from a partial
+// route-template match. Pinned as part of the Story 28-7 deferred-item
+// follow-up after <see cref="OrgSwitchOrgRoute404Tests"/> surfaced the
+// mismatch (was 405 MethodNotAllowed; contract expects 404).
+orgs.MapGet("/{tenantId:guid}", OrgEndpoints.GetOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPut("/{tenantId}/settings", OrgEndpoints.UpdateOrgSettings)
+orgs.MapPut("/{tenantId:guid}/settings", OrgEndpoints.UpdateOrgSettings)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapGet("/{tenantId}/members", OrgEndpoints.ListMembers)
+orgs.MapGet("/{tenantId:guid}/members", OrgEndpoints.ListMembers)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPut("/{tenantId}/members/{userId}/role", OrgEndpoints.UpdateMemberRole)
+orgs.MapPut("/{tenantId:guid}/members/{userId:guid}/role", OrgEndpoints.UpdateMemberRole)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}/members/{userId}", OrgEndpoints.RemoveMember)
+orgs.MapDelete("/{tenantId:guid}/members/{userId:guid}", OrgEndpoints.RemoveMember)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPost("/{tenantId}/invites", OrgEndpoints.CreateInvite)
+orgs.MapPost("/{tenantId:guid}/invites", OrgEndpoints.CreateInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapGet("/{tenantId}/invites", OrgEndpoints.ListInvites)
+orgs.MapGet("/{tenantId:guid}/invites", OrgEndpoints.ListInvites)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}/invites/{inviteId}", OrgEndpoints.DeleteInvite)
+orgs.MapDelete("/{tenantId:guid}/invites/{inviteId:guid}", OrgEndpoints.DeleteInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 // Story 18-7: resend a pending invite (extends expiry, re-dispatches email).
-orgs.MapPost("/{tenantId}/invites/{inviteId}/resend", OrgEndpoints.ResendInvite)
+orgs.MapPost("/{tenantId:guid}/invites/{inviteId:guid}/resend", OrgEndpoints.ResendInvite)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 // Story 18-7: tenant-scoped audit log read for tenant admins.
-orgs.MapGet("/{tenantId}/audit", OrgEndpoints.ListTenantAudit)
+orgs.MapGet("/{tenantId:guid}/audit", OrgEndpoints.ListTenantAudit)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
+orgs.MapPost("/{tenantId:guid}/transfer-ownership", OrgEndpoints.TransferOwnership)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
-orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
+orgs.MapDelete("/{tenantId:guid}", OrgEndpoints.DeleteOrg)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
+// Story 28-7 deferred-item — tenant-scoped API keys. Membership filter
+// guards path-tenant access; the handler body enforces admin+ role before
+// mutations (minting credentials is destructive).
+orgs.MapPost("/{tenantId:guid}/api-keys", OrgApiKeysEndpoints.CreateApiKey)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/api-keys", OrgApiKeysEndpoints.ListApiKeys)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/api-keys/{id:guid}", OrgApiKeysEndpoints.GetApiKey)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId:guid}/api-keys/{id:guid}", OrgApiKeysEndpoints.DeleteApiKey)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");

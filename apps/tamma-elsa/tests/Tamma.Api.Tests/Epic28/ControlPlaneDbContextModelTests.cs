@@ -30,7 +30,7 @@ public class ControlPlaneDbContextModelTests
     }
 
     [Test]
-    public void Model_Has14_ControlPlaneEntities()
+    public void Model_Has15_ControlPlaneEntities()
     {
         using var ctx = CreateContext();
 
@@ -48,6 +48,8 @@ public class ControlPlaneDbContextModelTests
             "tenant_memberships",
             "user_invites",
             "api_keys",
+            // Story 28-7 deferred-item: CP routing index, 15th CP-resident table.
+            "platform_api_key_index",
             "github_installations",
             "github_installation_repos",
             "github_webhook_deliveries",
@@ -55,7 +57,7 @@ public class ControlPlaneDbContextModelTests
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
-        }, because: "Doc 01 §1.2 lists exactly 14 control-plane tables.");
+        }, because: "Doc 01 §1.2 lists 14 CP tables + Story 28-7's platform_api_key_index routing table.");
     }
 
     [Test]

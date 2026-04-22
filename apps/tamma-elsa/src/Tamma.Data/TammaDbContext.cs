@@ -292,6 +292,14 @@ public class TammaDbContext : DbContext
             entity.HasIndex(e => e.KeyHash).IsUnique();
             entity.HasIndex(e => new { e.Scope, e.OwnerId });
             entity.HasIndex(e => e.TenantId);
+
+            // Story 28-7 deferred-item shadow column — legacy context mirrors
+            // the CP context's shadow property so test DBs that only run
+            // TammaDbContext migrations still have the column in api_keys.
+            // The legacy context never reads the value; it is only here to
+            // keep the physical schema consistent across both contexts when
+            // they share a connection (dev / single-pod).
+            entity.Property<int?>("RateLimitRpm");
         });
 
         // ── GitHubInstallation ──

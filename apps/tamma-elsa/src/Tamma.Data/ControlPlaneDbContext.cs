@@ -60,6 +60,13 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
 
+    /// <summary>
+    /// Story 28-7 deferred-item routing table: O(1) prefix → tenant+apiKey
+    /// lookups for <c>ApiKeyAuthHandler</c>. See
+    /// <see cref="PlatformApiKeyIndex"/> for row semantics.
+    /// </summary>
+    public DbSet<PlatformApiKeyIndex> PlatformApiKeyIndex => Set<PlatformApiKeyIndex>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -72,6 +79,7 @@ public class ControlPlaneDbContext : DbContext
         ConfigureTenantMemberships(modelBuilder);
         ConfigureUserInvites(modelBuilder);
         ConfigureApiKeys(modelBuilder);
+        ConfigurePlatformApiKeyIndex(modelBuilder);
         ConfigureGitHubInstallations(modelBuilder);
         ConfigureGitHubInstallationRepos(modelBuilder);
         ConfigureGitHubWebhookDeliveries(modelBuilder);
@@ -311,6 +319,31 @@ public class ControlPlaneDbContext : DbContext
             // CP context holds platform/user-scoped API keys (Doc 01 §1.2 row
             // 7). Tenant-scoped keys (Scope='tenant') live on the tenant DB
             // (TenantDbContext) and are dropped with the tenant.
+        });
+    }
+
+    private static void ConfigurePlatformApiKeyIndex(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformApiKeyIndex>(entity =>
+        {
+            entity.ToTable("platform_api_key_index");
+            entity.HasKey(e => e.KeyPrefix);
+            entity.Property(e => e.KeyPrefix).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.HashedSuffix).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ApiKeyId).IsRequired();
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Look-ups during auth:
+            // 1. Fast path — by composite (KeyPrefix, HashedSuffix); PK gives
+            //    us KeyPrefix already, suffix filter is a secondary equality.
+            //    A dedicated index keeps SELECT ... WHERE KeyPrefix = ? AND
+            //    HashedSuffix = ? off a full table scan on large CPs.
+            entity.HasIndex(e => new { e.KeyPrefix, e.HashedSuffix });
+            // 2. Reverse lookup by ApiKeyId for revoke cascades.
+            entity.HasIndex(e => e.ApiKeyId);
+            // 3. Tenant filter for bulk-revoke on tenant delete (cascade).
+            entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
         });
     }
 

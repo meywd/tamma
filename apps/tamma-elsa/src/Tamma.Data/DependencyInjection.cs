@@ -209,6 +209,9 @@ public static class DependencyInjection
         services.AddScoped<ITenantMembershipRepository, TenantMembershipRepository>();
         services.AddScoped<IInviteRepository, InviteRepository>();
         services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+        // Story 28-7 deferred-item: CP-scoped routing index for prefix-based
+        // API-key auth lookups. Scoped because ControlPlaneDbContext is.
+        services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
