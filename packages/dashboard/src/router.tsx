@@ -16,6 +16,8 @@ import { LoadingSpinner } from './components/common/LoadingSpinner.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { AccountPage } from './pages/AccountPage.js';
 import { MyApiKeysPage } from './pages/MyApiKeysPage.js';
+import { OrganizationLayout } from './pages/organization/OrganizationLayout.js';
+import { TenantAdminGuard } from './guards/TenantAdminGuard.js';
 
 const AdminLayout = React.lazy(() =>
   import('./pages/admin/AdminLayout.js').then((m) => ({ default: m.AdminLayout })),
@@ -34,6 +36,17 @@ export const router = createBrowserRouter([
       { path: '/', element: <Navigate to="/account" replace /> },
       { path: '/account', element: <AccountPage /> },
       { path: '/keys', element: <MyApiKeysPage /> },
+      // Tenant-admin routes (Story 18-8) — gated by TenantAdminGuard which
+      // reads the caller's role inside their currently-active tenant from
+      // /auth/me, NOT the platform role.
+      {
+        path: '/settings/organization',
+        element: (
+          <TenantAdminGuard>
+            <OrganizationLayout />
+          </TenantAdminGuard>
+        ),
+      },
       // Admin routes
       {
         path: '/dashboard',
