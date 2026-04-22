@@ -14,51 +14,76 @@ The LLM Call is the **universal building block** for all AI operations in Tamma.
 - Circuit breaker logic (skip failing providers)
 - Budget enforcement (stop when spend exceeds cap)
 - Provider allowlist filtering (security)
+- **Concurrency gating** (wait-loop until an LLM slot opens)
 - Retry with exponential backoff (transient errors)
 - Agent config resolution from ELSA Agents DB
+- Prompt registry resolution (role + action to rendered template)
 - Agentic tool loop (multi-turn tool calling)
 - Per-attempt diagnostics collection
 
 ## Flow Diagram
 
 ```
-+-------------------+
-| Initialize Inputs |
++--------------------+
+| Initialize Inputs  |
 | (typed or legacy)  |
-+---------+---------+
-          |
-          v
-+-------------------+
-| Setup Budget      |
-| (parse cap from   |
-|  input)           |
-+---------+---------+
-          |
-          v
-+-------------------+
-| Resolve Agent     |
-| Config (DB)       |
-| (prompt, chain,   |
-|  settings)        |
-+---------+---------+
-          |
-          v
-+-------------------+
-| Resolve Provider  |
-| Chain             |
-| (input > DB >     |
-|  default)         |
-+---------+---------+
-          |
-          v
-+-------------------+
-| For Each Provider |---> (for each provider in chain)
-| in Chain          |
-+---------+---------+
-          |
-    +-----+-----+
-    |             |
-    v             v
++--------+-----------+
+         |
+         v
++--------------------+
+| Resolve Prompt     |
+| (registry:         |
+|  role + action     |
+|  → template)       |
++--------+-----------+
+         |
+         v
++--------------------+
+| Setup Budget       |
+| (parse cap from    |
+|  input)            |
++--------+-----------+
+         |
+         v
++--------------------+
+| Resolve Agent      |
+| Config (DB)        |
+| (prompt, chain,    |
+|  settings)         |
++--------+-----------+
+         |
+         v
++--------------------+
+| Resolve Provider   |
+| Chain              |
+| (input > DB >      |
+|  default)          |
++--------+-----------+
+         |
+         v
++--------------------+
+| Check LLM          |<---------+
+| Concurrency        |          |
++--------+-----------+          |
+         |                      |
+    +----+----+                 |
+    OK        AtLimit           |
+    |            |              |
+    |            v              |
+    |     +-------------+      |
+    |     | Concurrency |      |
+    |     | Wait        |------+
+    |     | (delay)     |
+    |     +-------------+
+    v
++--------------------+
+| For Each Provider  |---> (for each provider in chain)
+| in Chain           |
++--------+-----------+
+         |
+    +----+-----+
+    |            |
+    v            v
  [Already     [Try Provider]
   Succeeded?]     |
     |             +---> Circuit Breaker Open?
@@ -115,14 +140,14 @@ The LLM Call is the **universal building block** for all AI operations in Tamma.
                                   Attempt]   Attempts]
                                        |
                                        +---> (loop)
-          |
-          v
-+-------------------+
-| Call Succeeded?   |
-+--+-------------+--+
-  YES              NO
-   |                |
-   v                v
+         |
+         v
++--------------------+
+| Call Succeeded?    |
++--+--------------+--+
+  YES               NO
+   |                 |
+   v                 v
 [Set Outputs]  +------------------+
                | Build Failure    |
                | Output           |
@@ -163,6 +188,17 @@ When a circuit breaker is open and its cooldown has not elapsed, the provider is
 The workflow tracks spending against a configurable budget cap (`BudgetCapUsd`). If the budget is exhausted, remaining providers are skipped.
 
 **Security note:** If the budget state cannot be parsed, spending is denied (fail closed).
+
+## Concurrency Gating
+
+Before entering the provider chain loop, the workflow checks LLM concurrency via `CheckLlmConcurrencyActivity`. This activity determines whether a slot is available for a new LLM call:
+
+| Outcome | Behavior |
+|---------|----------|
+| **OK** | A slot is available; proceed to the provider chain |
+| **AtLimit** | All slots are occupied; wait via `ConcurrencyWaitDelayActivity` and re-check |
+
+The wait-loop continues until a slot opens. This prevents overloading LLM providers when many workflows are running concurrently.
 
 ## Retry Loop
 

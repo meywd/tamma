@@ -40,9 +40,9 @@ sidebar:
 |---|---|---|
 | Context priority-based truncation | P0 | 12-5a |
 | Few-shot example injection | P1 | 12-5b |
-| Skill-level adaptation fix | Bug (Done) | 12-5c |
+| Skill-level adaptation fix | Bug | 12-5c |
 | A/B testing hooks | P2 | 12-5d |
-| CI retry counter bug | Bug (Invalid — stale) | 12-5e |
+| CI retry counter bug | Bug | 12-5e |
 
 ---
 
@@ -110,8 +110,6 @@ Store successful (input, output) pairs from previous LLM calls and inject 1-3 re
 
 ## Sub-Story 12-5c: Mentorship Skill-Level Adaptation Fix
 
-**Status: Done** — Three `SetVariable<int>` adjustment nodes (`AdjustSkillOnCorrect`, `AdjustSkillOnPartial`, `AdjustSkillOnIncorrect`) inserted between `assessJunior` outcome edges and their downstream targets in `MentorshipWorkflow.cs`. 14 structural tests added. `SkillLevelAdjusted` event type constant added.
-
 ### Summary
 
 Fix the hardcoded `skillLevel = 3` in MentorshipWorkflow. The assessment activities produce skill-level outcomes but the value is never updated.
@@ -163,27 +161,23 @@ Add infrastructure for prompt variant testing — not the full A/B framework, ju
 
 ## Sub-Story 12-5e: CI Retry Counter Bug Fix
 
-**Status: Invalid / Superseded** — Investigation per the verify-first plan (Case c) confirmed the bug is stale. `CiWithDebugRetryWorkflow` already resets `ciRetryCount` to 0 in `initInputs` on every entry. `SingleIssueCycleWorkflow` dispatches a fresh sub-workflow instance per CI check phase. Lines 349-351 of `SingleIssueCycleWorkflow.cs` are the branch-creation dispatch, not CI retry related. 8 regression tests added in `CiRetryCounterPersistenceTests.cs`. Inline comments in `CiWithDebugRetryWorkflow.cs` updated to document the verified-correct behavior.
-
 ### Summary
 
 Fix the documented bug where `ciRetryCount` persists across re-entries from review-fix and merge re-test paths in SingleIssueCycleWorkflow.
 
 ### Problem
 
-~~Lines 349-351 of SingleIssueCycleWorkflow.cs contain a self-documented bug: the CI retry counter passes through to `ci-with-debug-retry` sub-workflow and isn't reset when re-entering from review-fix or merge re-test. After a review-fix cycle, the CI retry budget may be partially consumed from the previous run.~~
-
-**Investigation result:** The originally reported bug location was incorrect. Lines 349-351 are unrelated (branch-creation dispatch). The counter reset in `CiWithDebugRetryWorkflow.cs` line 78 already handles re-entries correctly.
+Lines 349-351 of SingleIssueCycleWorkflow.cs contain a self-documented bug: the CI retry counter passes through to `ci-with-debug-retry` sub-workflow and isn't reset when re-entering from review-fix or merge re-test. After a review-fix cycle, the CI retry budget may be partially consumed from the previous run.
 
 ### Acceptance Criteria
 
-1. ~~CI retry counter resets to 0 on each new entry to the CI check phase~~ Already correct
-2. ~~The counter is scoped per-entry, not per-workflow-instance~~ Already correct (fresh dispatch per CI check)
-3. Test verifying the counter resets after review-fix loop -- Added as regression test
+1. CI retry counter resets to 0 on each new entry to the CI check phase
+2. The counter is scoped per-entry, not per-workflow-instance
+3. Test verifying the counter resets after review-fix loop
 
 ### Dependencies: None (self-contained fix)
 
-### Effort: 2 hours (investigation + regression tests)
+### Effort: 2 hours
 
 ---
 

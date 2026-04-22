@@ -4,9 +4,11 @@ sidebar:
   order: 9
 ---
 
-**Status:** Completed
-**Stories:** 11 (9-1 through 9-11)
+**Status:** Mostly Complete (9-1 through 9-11 done; 9-12 added Wave-2 — Unified Agent Resolver depends on Epic 27 prompt-store landing)
+**Stories:** 12 (9-1 through 9-12)
 **Packages:** `@tamma/shared`, `@tamma/providers`, `@tamma/mcp-client`, `@tamma/orchestrator`, `@tamma/cli`
+
+> **Note**: Story 9-6 (Agent Prompt Registry) is now superseded by [Epic 27 (Prompt Store)](Epic-27-Prompt-Store.md). The in-process `AgentPromptRegistry` class at `packages/providers/src/agent-prompt-registry.ts` will delegate to the Prompt Store API once Epic 27 ships. Story 9-8 (Unified Agent Resolver) and Story 9-12 both depend on Epic 27 for prompt resolution.
 
 ## Overview
 

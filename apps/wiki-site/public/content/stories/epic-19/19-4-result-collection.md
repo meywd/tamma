@@ -4,7 +4,16 @@ sidebar:
   order: 190
 ---
 
-Status: ready-for-dev
+Status: done
+
+## Implementation Notes
+
+- Shipped as `CollectAgentResultsActivity` + `AgentResultCollectorService` + `AgentResultArtifact` model in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`.
+- Four data sources merged in priority order: result artifact (zip) -> PR data -> compare base...head -> check runs.
+- Activity has three outcomes: `Collected` / `Partial` / `Failed` (AC-6). A new public `TammaEventEmitter.Emit(...)` entry-point was added to support the non-standard `AGENT.RESULTS.PARTIAL` status.
+- Fallback path (AC-5) is covered: when the artifact is missing/expired, the service infers `FilesChanged` / `CommitSha` / `CommitsCount` from the compare API.
+- AC coverage: all 6 ACs done.
+- Commit: `040bf53` `feat(agent-dispatch): CollectAgentResultsActivity + service [story 19-4]`.
 
 ## Story
 
