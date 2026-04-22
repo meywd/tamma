@@ -34,6 +34,14 @@ public static class SecretRotationServiceCollectionExtensions
             "postgres",
             (sp, _) => sp.GetRequiredService<PostgresRoleRotationHandler>());
 
+        // Story 29-8: Cranl env-var rotation handler. ICranlApiClient is
+        // expected to be registered already by the provisioning side of
+        // the Api (AddHttpClient<ICranlApiClient, CranlApiClient>()).
+        services.AddScoped<CranlEnvVarRotationHandler>();
+        services.AddKeyedScoped<IRotationHandler>(
+            "cranl",
+            (sp, _) => sp.GetRequiredService<CranlEnvVarRotationHandler>());
+
         return services;
     }
 }
