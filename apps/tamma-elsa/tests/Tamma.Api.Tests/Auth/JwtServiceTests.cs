@@ -93,4 +93,113 @@ public class JwtServiceTests
         principal.Should().NotBeNull();
         principal!.FindFirst("role")!.Value.Should().Be("owner");
     }
+
+    // ── Story 28-9: tenants[] + active_tenant_id ───────────────────────────
+
+    [Test]
+    public void GenerateAccessToken_EmitsActiveTenantIdClaim_MirroringTenantId()
+    {
+        var tenantId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var token = _service.GenerateAccessToken(MakeUser(), tenantId, "owner");
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_id"
+            && c.Value == tenantId.ToString());
+        jwt.Claims.Should().Contain(c => c.Type == "tenantId"
+            && c.Value == tenantId.ToString());
+    }
+
+    [Test]
+    public void GenerateAccessToken_NullTenant_EmitsEmptyActiveTenantIdClaim()
+    {
+        var token = _service.GenerateAccessToken(MakeUser(), null, "member");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_id"
+            && c.Value == string.Empty);
+    }
+
+    [Test]
+    public void GenerateAccessToken_TenantsClaim_IsEmittedEvenWhenNull()
+    {
+        // When the caller passes no tenants list (transitional callers,
+        // tests that mint a bare token), the claim must still be present as
+        // an empty array so the dashboard can detect "no memberships" vs
+        // "stale token".
+        var token = _service.GenerateAccessToken(MakeUser(), null, "member");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        var tenantsClaim = jwt.Claims.FirstOrDefault(c => c.Type == "tenants");
+        tenantsClaim.Should().NotBeNull();
+        tenantsClaim!.Value.Should().Be("[]");
+    }
+
+    [Test]
+    public void GenerateAccessToken_TenantsClaim_SerializesEveryMembership()
+    {
+        var t1 = Guid.Parse("aaaaaaaa-1111-1111-1111-111111111111");
+        var t2 = Guid.Parse("bbbbbbbb-2222-2222-2222-222222222222");
+        var tenants = new[]
+        {
+            new TenantClaim(t1, "owner"),
+            new TenantClaim(t2, "member"),
+        };
+
+        var token = _service.GenerateAccessToken(MakeUser(), t1, "owner", tenants);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        var raw = jwt.Claims.First(c => c.Type == "tenants").Value;
+        var parsed = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        parsed.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Array);
+        parsed.GetArrayLength().Should().Be(2);
+
+        var first = parsed[0];
+        first.GetProperty("tenantId").GetString().Should().Be(t1.ToString());
+        first.GetProperty("role").GetString().Should().Be("owner");
+
+        var second = parsed[1];
+        second.GetProperty("tenantId").GetString().Should().Be(t2.ToString());
+        second.GetProperty("role").GetString().Should().Be("member");
+    }
+
+    [Test]
+    public void GenerateAccessToken_TenantsClaim_FiltersEmptyGuids()
+    {
+        // Defensive — a stray Guid.Empty in the membership list (corrupt
+        // join, mock noise) must not produce a junk row in the JWT.
+        var realTenant = Guid.Parse("12121212-1212-1212-1212-121212121212");
+        var tenants = new[]
+        {
+            new TenantClaim(Guid.Empty, "member"),
+            new TenantClaim(realTenant, "admin"),
+        };
+
+        var token = _service.GenerateAccessToken(MakeUser(), realTenant, "admin", tenants);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        var raw = jwt.Claims.First(c => c.Type == "tenants").Value;
+        var parsed = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        parsed.GetArrayLength().Should().Be(1);
+        parsed[0].GetProperty("tenantId").GetString().Should().Be(realTenant.ToString());
+    }
+
+    [Test]
+    public void ValidateToken_RoundTrip_PreservesActiveTenantAndTenantsClaims()
+    {
+        var t1 = Guid.NewGuid();
+        var t2 = Guid.NewGuid();
+        var tenants = new[]
+        {
+            new TenantClaim(t1, "owner"),
+            new TenantClaim(t2, "member"),
+        };
+        var token = _service.GenerateAccessToken(MakeUser(), t1, "owner", tenants);
+
+        var principal = _service.ValidateToken(token);
+        principal.Should().NotBeNull();
+        principal!.FindFirst("active_tenant_id")!.Value.Should().Be(t1.ToString());
+
+        var raw = principal.FindFirst("tenants")!.Value;
+        var parsed = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        parsed.GetArrayLength().Should().Be(2);
+    }
 }
