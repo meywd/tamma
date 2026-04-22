@@ -496,6 +496,15 @@ builder.Services.AddHealthChecks()
 // Mirrors the TS /api/admin/health behavior.
 builder.Services.AddScoped<IAdminHealthService, AdminHealthService>();
 
+// Story 28-10 — platform-wide analytics rollup behind the
+// /api/admin/analytics/* endpoints. Reads the CP context
+// (tenants + platform_events) and the app context (workflow_instances +
+// domain_events) so it is scoped alongside both. Clock via TimeProvider.
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<
+    Tamma.Api.Services.Analytics.IPlatformAnalyticsService,
+    Tamma.Api.Services.Analytics.PlatformAnalyticsService>();
+
 // ────────────────────────────────────────────────────────────────────────────
 // Authentication + Authorization
 // ────────────────────────────────────────────────────────────────────────────
@@ -799,6 +808,16 @@ admin.MapPost("/tenants/{tenantId:guid}/deprovision", AdminEndpoints.Deprovision
 admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
     .RequireAuthorization("OwnerAccess");
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
+    .RequireAuthorization("OwnerAccess");
+
+// Story 28-10 — platform-wide analytics rollup. Owner-only because each
+// handler reads across every tenant regardless of the caller's
+// TenantId — a regular member/admin must not see fleet-level volume.
+admin.MapGet("/analytics/summary", AdminAnalyticsEndpoints.GetSummary)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
     .RequireAuthorization("OwnerAccess");
 
 // ── Orgs / Tenants ──
