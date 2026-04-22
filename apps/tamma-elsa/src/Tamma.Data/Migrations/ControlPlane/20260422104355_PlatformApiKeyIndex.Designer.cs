@@ -12,8 +12,8 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations.ControlPlane
 {
     [DbContext(typeof(ControlPlaneDbContext))]
-    [Migration("20260422105157_PlatformAnalyticsHourly")]
-    partial class PlatformAnalyticsHourly
+    [Migration("20260422104355_PlatformApiKeyIndex")]
+    partial class PlatformApiKeyIndex
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -331,87 +331,6 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .IsUnique();
 
                     b.ToTable("plans", (string)null);
-                });
-
-            modelBuilder.Entity("Tamma.Data.Entities.PlatformAnalyticsHourly", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<int>("ActiveTenantsAtHourEnd")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0);
-
-                    b.Property<long>("AgentDispatches")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.Property<DateTime>("ComputedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<decimal>("CostUsd")
-                        .ValueGeneratedOnAdd()
-                        .HasPrecision(20, 4)
-                        .HasColumnType("numeric(20,4)")
-                        .HasDefaultValue(0m);
-
-                    b.Property<DateTime>("Hour")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<long>("TokensIn")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.Property<long>("TokensOut")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.Property<long>("WorkflowsCompleted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.Property<long>("WorkflowsFailed")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.Property<long>("WorkflowsStarted")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasDefaultValue(0L);
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Hour")
-                        .IsUnique()
-                        .IsDescending()
-                        .HasDatabaseName("UX_platform_analytics_hourly_Hour_PlatformWide")
-                        .HasFilter("\"TenantId\" IS NULL");
-
-                    b.HasIndex("Hour", "TenantId")
-                        .IsUnique()
-                        .IsDescending(true, false)
-                        .HasDatabaseName("UX_platform_analytics_hourly_Hour_TenantId")
-                        .HasFilter("\"TenantId\" IS NOT NULL");
-
-                    b.HasIndex("TenantId", "Hour")
-                        .IsDescending(false, true)
-                        .HasDatabaseName("IX_platform_analytics_hourly_TenantId_Hour")
-                        .HasFilter("\"TenantId\" IS NOT NULL");
-
-                    b.ToTable("platform_analytics_hourly", (string)null);
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.PlatformApiKeyIndex", b =>

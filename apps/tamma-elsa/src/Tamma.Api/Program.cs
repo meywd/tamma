@@ -269,6 +269,10 @@ else
 }
 builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IRateLimitService,
     Tamma.Api.Services.RateLimit.RateLimitService>();
+// Story 28-7 deferred-item: per-API-key RPM limiter. Sits next to the
+// per-action IRateLimitService but keyed per ApiKey.Id with 60s windows.
+builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter,
+    Tamma.Api.Services.RateLimit.ApiKeyRateLimiter>();
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();
@@ -840,6 +844,14 @@ admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
     .RequireAuthorization("OwnerAccess");
 
+// Story 28-7 deferred-item — platform API-keys CRUD. Owner-only because
+// platform keys carry global auth; a regular admin must not be able to
+// mint them. Reveal-once-on-create.
+admin.MapPost("/api-keys", AdminApiKeysEndpoints.CreateApiKey).RequireAuthorization("OwnerAccess");
+admin.MapGet("/api-keys", AdminApiKeysEndpoints.ListApiKeys).RequireAuthorization("OwnerAccess");
+admin.MapGet("/api-keys/{id:guid}", AdminApiKeysEndpoints.GetApiKey).RequireAuthorization("OwnerAccess");
+admin.MapDelete("/api-keys/{id:guid}", AdminApiKeysEndpoints.DeleteApiKey).RequireAuthorization("OwnerAccess");
+
 // Story 28-10 — platform-wide analytics rollup. Owner-only because each
 // handler reads across every tenant regardless of the caller's
 // TenantId — a regular member/admin must not see fleet-level volume.
@@ -900,7 +912,11 @@ orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
 // not route through the tenant-membership filter and return 405 for a
 // non-matching verb. The Story-18-3 OrgEndpoints.SwitchOrg handler is
 // gone (replaced by POST /api/v1/auth/switch-org in Story 28-9); the
-// regression test `OrgSwitchOrgRoute404Tests` pins this contract.
+// regression test `OrgSwitchOrgRoute404Tests` pins this contract by
+// accepting either 404 (preferred) or 405 (acceptable). We deliberately
+// do NOT add an explicit `MapMethods("/switch-org", ...)` 404 shim — it
+// was tried, but the POST registration forced GET-on-that-URL to 405,
+// which broke the GET assertion.
 orgs.MapGet("/{tenantId:guid}", OrgEndpoints.GetOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPut("/{tenantId:guid}/settings", OrgEndpoints.UpdateOrgSettings)
@@ -933,6 +949,18 @@ orgs.MapDelete("/{tenantId:guid}", OrgEndpoints.DeleteOrg)
 // derives the tenant-role gating from HttpContext.Items["TenantRole"]
 // if the admin+ requirement needs enforcing (deferred to 29-4 UI).
 orgs.MapPost("/{tenantId:guid}/secrets", SecretEndpoints.CreateTenantSecret)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
+// Story 28-7 deferred-item — tenant-scoped API keys. Membership filter
+// guards path-tenant access; the handler body enforces admin+ role before
+// mutations (minting credentials is destructive).
+orgs.MapPost("/{tenantId:guid}/api-keys", OrgApiKeysEndpoints.CreateApiKey)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/api-keys", OrgApiKeysEndpoints.ListApiKeys)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/api-keys/{id:guid}", OrgApiKeysEndpoints.GetApiKey)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId:guid}/api-keys/{id:guid}", OrgApiKeysEndpoints.DeleteApiKey)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
@@ -1205,6 +1233,7 @@ using (var scope = app.Services.CreateScope())
                     junior_developers, mentorship_events, mentorship_sessions,
                     password_reset_tokens, plans,
                     platform_analytics_hourly,
+                    platform_api_key_index,
                     platform_email_outbox, platform_events, platform_queued_tasks,
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,

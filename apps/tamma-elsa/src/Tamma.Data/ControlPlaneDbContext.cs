@@ -62,6 +62,13 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<PlatformAnalyticsHourly> PlatformAnalyticsHourly => Set<PlatformAnalyticsHourly>();
 
+    /// <summary>
+    /// Story 28-7 deferred-item routing table: O(1) prefix → tenant+apiKey
+    /// lookups for <c>ApiKeyAuthHandler</c>. See
+    /// <see cref="PlatformApiKeyIndex"/> for row semantics.
+    /// </summary>
+    public DbSet<PlatformApiKeyIndex> PlatformApiKeyIndex => Set<PlatformApiKeyIndex>();
+
     // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
     //
     // These DbSets cover per-tenant business data that still lives on the
@@ -112,6 +119,7 @@ public class ControlPlaneDbContext : DbContext
         TammaModelConfiguration.ConfigureTenantEntities(modelBuilder);
 
         ConfigurePlatformAnalyticsHourly(modelBuilder);
+        ConfigurePlatformApiKeyIndex(modelBuilder);
     }
 
     private static void ConfigurePlatformAnalyticsHourly(ModelBuilder modelBuilder)
@@ -162,6 +170,37 @@ public class ControlPlaneDbContext : DbContext
                 .HasFilter("\"TenantId\" IS NULL")
                 .IsDescending(true)
                 .IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// Story 28-7 deferred-item routing table: maps a key prefix to its
+    /// tenant + ApiKey for O(1) bearer-token authentication. The
+    /// <see cref="PlatformApiKeyIndex.HashedSuffix"/> is SHA-256 of the
+    /// remainder so the table never stores plaintext material.
+    /// </summary>
+    private static void ConfigurePlatformApiKeyIndex(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformApiKeyIndex>(entity =>
+        {
+            entity.ToTable("platform_api_key_index");
+            entity.HasKey(e => e.KeyPrefix);
+            entity.Property(e => e.KeyPrefix).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.HashedSuffix).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ApiKeyId).IsRequired();
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Look-ups during auth:
+            // 1. Fast path — by composite (KeyPrefix, HashedSuffix); PK gives
+            //    us KeyPrefix already, suffix filter is a secondary equality.
+            //    A dedicated index keeps SELECT ... WHERE KeyPrefix = ? AND
+            //    HashedSuffix = ? off a full table scan on large CPs.
+            entity.HasIndex(e => new { e.KeyPrefix, e.HashedSuffix });
+            // 2. Reverse lookup by ApiKeyId for revoke cascades.
+            entity.HasIndex(e => e.ApiKeyId);
+            // 3. Tenant filter for bulk-revoke on tenant delete (cascade).
+            entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
         });
     }
 }

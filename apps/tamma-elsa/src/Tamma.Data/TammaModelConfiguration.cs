@@ -245,6 +245,8 @@ internal static class TammaModelConfiguration
             // Story 28-7 — partial index for active-key lookups only (filter
             // out revoked rows to keep the b-tree dense).
             entity.HasIndex(e => e.RevokedAt).HasFilter("\"RevokedAt\" IS NULL");
+            // Story 28-7 deferred-item — per-key rate limit shadow column.
+            entity.Property<int?>("RateLimitRpm");
         });
 
         // ── GitHubInstallation ──

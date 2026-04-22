@@ -60,6 +60,8 @@ public class ControlPlaneDbContextModelTests
             "tenant_memberships",
             "user_invites",
             "api_keys",
+            // Story 28-7 deferred-item: CP routing index, 15th CP-resident table.
+            "platform_api_key_index",
             "github_installations",
             "github_installation_repos",
             "github_webhook_deliveries",
@@ -68,7 +70,7 @@ public class ControlPlaneDbContextModelTests
             "platform_queued_tasks",
             "platform_email_outbox",
             "platform_analytics_hourly",
-        }, because: "Doc 01 §1.2 (14 tables) + Story 28-10 (platform_analytics_hourly).");
+        }, because: "Doc 01 §1.2 (14 tables) + Story 28-7 (platform_api_key_index) + Story 28-10 (platform_analytics_hourly).");
     }
 
     [Test]

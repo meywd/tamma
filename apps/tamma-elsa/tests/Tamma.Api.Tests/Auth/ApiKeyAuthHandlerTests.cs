@@ -95,15 +95,17 @@ public class ApiKeyAuthHandlerTests
         string scope = "user",
         Guid? tenantId = null,
         Guid? ownerId = null,
-        DateTime? revokedAt = null)
+        DateTime? revokedAt = null,
+        string keyHash = "stub",
+        string keyPrefix = "tamma_sk_xx")
     {
         return new ApiKey
         {
             Id = id ?? Guid.NewGuid(),
             Scope = scope,
             OwnerId = (ownerId ?? Guid.NewGuid()).ToString(),
-            KeyHash = "stub",
-            KeyPrefix = "tamma_sk_xx",
+            KeyHash = keyHash,
+            KeyPrefix = keyPrefix,
             Label = "test",
             Permissions = Array.Empty<string>(),
             TenantId = tenantId,
@@ -112,19 +114,38 @@ public class ApiKeyAuthHandlerTests
         };
     }
 
+    /// <summary>
+    /// Wire a key-lookup mock for <paramref name="rawKey"/>. Story 28-7
+    /// deferred-item path uses <see cref="ApiKeyHasher.Verify"/> which needs
+    /// <paramref name="returned"/>.KeyHash to actually match the raw key;
+    /// this helper rewrites KeyHash to the SHA-256 of the raw key so Verify
+    /// passes for the legacy-shape fixtures.
+    /// </summary>
     private void SeedKeyLookup(string rawKey, ApiKey? returned)
     {
         var sha = ApiKeyHasher.Hash(rawKey);
+        if (returned is not null)
+            returned.KeyHash = sha;
         _apiKeyRepo.Setup(r => r.GetByHashAsync(sha))
             .ReturnsAsync(returned);
+        // ListByScopeAsync is used by the legacy fallback path to scan for
+        // Argon2-format rows; Strict mock needs a default empty list.
+        _apiKeyRepo.Setup(r => r.ListByScopeAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<ApiKey>());
     }
 
     private void SeedLegacyKeyLookup(string rawKey, ApiKey? returnedFromSha, ApiKey? returnedFromScrypt)
     {
         var sha = ApiKeyHasher.Hash(rawKey);
         var scrypt = ApiKeyHasher.LegacyScryptHash(rawKey);
+        if (returnedFromSha is not null)
+            returnedFromSha.KeyHash = sha;
+        if (returnedFromScrypt is not null)
+            returnedFromScrypt.KeyHash = scrypt;
         _apiKeyRepo.Setup(r => r.GetByHashAsync(sha)).ReturnsAsync(returnedFromSha);
         _apiKeyRepo.Setup(r => r.GetByHashAsync(scrypt)).ReturnsAsync(returnedFromScrypt);
+        _apiKeyRepo.Setup(r => r.ListByScopeAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<ApiKey>());
     }
 
     // ── No-result paths ──────────────────────────────────────────────
