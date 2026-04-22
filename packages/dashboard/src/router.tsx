@@ -9,6 +9,7 @@ import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { ProviderHealthPage } from './pages/settings/ProviderHealthPage.js';
 import { BudgetPage } from './pages/settings/BudgetPage.js';
 import { PromptsPage } from './pages/settings/PromptsPage.js';
+import { PromptsAdminPage } from './pages/admin/prompts/PromptsAdminPage.js';
 import { AdminGuard } from './guards/AdminGuard.js';
 import { AuthGuard } from './guards/AuthGuard.js';
 import { AdminErrorBoundary } from './pages/admin/AdminErrorBoundary.js';
@@ -113,6 +114,15 @@ export const router = createBrowserRouter([
                 <AdminLayout />
               </Suspense>
             </AdminErrorBoundary>
+          </AdminGuard>
+        ),
+      },
+      // Story 27-4: platform-admin prompt-store management UI.
+      {
+        path: '/admin/prompts',
+        element: (
+          <AdminGuard>
+            <PromptsAdminPage />
           </AdminGuard>
         ),
       },

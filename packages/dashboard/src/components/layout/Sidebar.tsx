@@ -43,7 +43,11 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Administration',
-    items: [{ to: '/admin', label: 'Admin Panel' }],
+    items: [
+      { to: '/admin', label: 'Admin Panel' },
+      // Story 27-4: prompt-store admin UI.
+      { to: '/admin/prompts', label: 'System Prompts' },
+    ],
   },
 ];
 
