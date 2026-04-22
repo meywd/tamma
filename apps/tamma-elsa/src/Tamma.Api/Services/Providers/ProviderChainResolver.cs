@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Tamma.Api.Services.Diagnostics;
+using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Providers;
@@ -25,22 +27,48 @@ namespace Tamma.Api.Services.Providers;
 /// Lookup order: <c>chains[role][action]</c> → <c>chains[role]["default"]</c> →
 /// <c>chains["default"]</c>.
 /// </para>
+///
+/// <para>
+/// Story 9-5 adds per-account budget filtering via the optional
+/// <see cref="IDiagnosticsService"/> dependency. When an account is over
+/// budget every entry is marked <c>BudgetAllowed=false</c> and
+/// <c>RecommendedProvider</c> falls through to <c>null</c>, signalling
+/// callers to fail closed.
+/// </para>
 /// </summary>
 public sealed class ProviderChainResolver : IProviderChainResolver
 {
     private readonly IAgentConfigRepository _configRepo;
     private readonly ICircuitBreakerService _breaker;
+    private readonly IDiagnosticsService? _diagnostics;
 
     public ProviderChainResolver(IAgentConfigRepository configRepo, ICircuitBreakerService breaker)
+        : this(configRepo, breaker, diagnostics: null)
+    {
+    }
+
+    public ProviderChainResolver(
+        IAgentConfigRepository configRepo,
+        ICircuitBreakerService breaker,
+        IDiagnosticsService? diagnostics)
     {
         _configRepo = configRepo ?? throw new ArgumentNullException(nameof(configRepo));
         _breaker = breaker ?? throw new ArgumentNullException(nameof(breaker));
+        _diagnostics = diagnostics;
     }
+
+    public Task<ChainResolveResult> ResolveAsync(
+        Guid? tenantId,
+        string role,
+        string action,
+        CancellationToken ct = default) =>
+        ResolveAsync(tenantId, role, action, new ChainResolveOptions(), ct);
 
     public async Task<ChainResolveResult> ResolveAsync(
         Guid? tenantId,
         string role,
         string action,
+        ChainResolveOptions options,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(role))
@@ -55,8 +83,33 @@ public sealed class ProviderChainResolver : IProviderChainResolver
                 Array.Empty<ChainEntry>(),
                 Array.Empty<ChainEntry>(),
                 ErrorCode: "EMPTY_PROVIDER_CHAIN",
-                ErrorMessage: $"No provider chain configured for role='{role}' action='{action}'.");
+                ErrorMessage: $"No provider chain configured for role='{role}' action='{action}'.",
+                RecommendedProvider: null,
+                AllExhausted: true);
         }
+
+        // ── Account budget snapshot (single call, account-level) ─────────────
+        // Story 9-5: budget is per-account, not per-provider. Resolve once and
+        // apply to every entry. AccountId override > tenantId > skip entirely.
+        var budgetAccount = options.AccountId ?? tenantId;
+        BudgetStatus? budget = null;
+        if (budgetAccount.HasValue && _diagnostics is not null)
+        {
+            try
+            {
+                budget = await _diagnostics.GetBudgetAsync(budgetAccount.Value, ct);
+            }
+            catch
+            {
+                // Fail-open on budget service errors — do not strand the
+                // entire chain on a transient diagnostics outage. Per-entry
+                // BudgetAllowed will default to true.
+                budget = null;
+            }
+        }
+
+        var budgetAllowed = budget is null || !budget.IsOverBudget;
+        var budgetSpent = budget?.Spent ?? 0m;
 
         var healthyOrUnknown = new List<ChainEntry>();
         var halfOpenTail = new List<ChainEntry>();
@@ -73,13 +126,37 @@ public sealed class ProviderChainResolver : IProviderChainResolver
                     var reason = (status.LastSuccess is null && status.LastFailure is null)
                         ? ChainReason.Unknown
                         : ChainReason.Healthy;
-                    healthyOrUnknown.Add(new ChainEntry(handle, reason));
+                    healthyOrUnknown.Add(new ChainEntry(
+                        handle,
+                        reason,
+                        Healthy: true,
+                        CircuitOpen: false,
+                        CircuitOpenUntil: null,
+                        BudgetAllowed: budgetAllowed,
+                        BudgetSpent: budgetSpent,
+                        Recommended: false));
                     break;
                 case CircuitBreakerState.HalfOpen:
-                    halfOpenTail.Add(new ChainEntry(handle, ChainReason.HalfOpenProbeCandidate));
+                    halfOpenTail.Add(new ChainEntry(
+                        handle,
+                        ChainReason.HalfOpenProbeCandidate,
+                        Healthy: false,
+                        CircuitOpen: false,
+                        CircuitOpenUntil: status.CircuitOpenUntil,
+                        BudgetAllowed: budgetAllowed,
+                        BudgetSpent: budgetSpent,
+                        Recommended: false));
                     break;
                 case CircuitBreakerState.Open:
-                    skipped.Add(new ChainEntry(handle, ChainReason.CircuitOpen));
+                    skipped.Add(new ChainEntry(
+                        handle,
+                        ChainReason.CircuitOpen,
+                        Healthy: false,
+                        CircuitOpen: true,
+                        CircuitOpenUntil: status.CircuitOpenUntil,
+                        BudgetAllowed: budgetAllowed,
+                        BudgetSpent: budgetSpent,
+                        Recommended: false));
                     break;
             }
         }
@@ -96,10 +173,38 @@ public sealed class ProviderChainResolver : IProviderChainResolver
                 Array.Empty<ChainEntry>(),
                 skipped,
                 ErrorCode: "NO_AVAILABLE_PROVIDER",
-                ErrorMessage: "All providers in the chain are circuit-open.");
+                ErrorMessage: "All providers in the chain are circuit-open.",
+                RecommendedProvider: null,
+                AllExhausted: true);
         }
 
-        return new ChainResolveResult(ordered, skipped);
+        // ── Recommendation pass ──────────────────────────────────────────────
+        // Recommended = first ordered entry that is healthy AND within budget.
+        // We mark exactly one entry; downstream callers can short-circuit on
+        // RecommendedProvider when present. Half-open entries qualify because
+        // they are still selectable probes (the CB layer gates concurrency).
+        string? recommendedProvider = null;
+        var orderedWithRecommendation = new List<ChainEntry>(ordered.Count);
+        foreach (var entry in ordered)
+        {
+            // Treat Healthy as: not Open. Half-open is a permitted probe.
+            var entryHealthy = entry.Reason != ChainReason.CircuitOpen;
+            var isRecommended =
+                recommendedProvider is null && entryHealthy && entry.BudgetAllowed;
+            if (isRecommended)
+            {
+                recommendedProvider = entry.Provider.Provider;
+            }
+            orderedWithRecommendation.Add(entry with { Recommended = isRecommended });
+        }
+
+        return new ChainResolveResult(
+            orderedWithRecommendation,
+            skipped,
+            ErrorCode: null,
+            ErrorMessage: null,
+            RecommendedProvider: recommendedProvider,
+            AllExhausted: recommendedProvider is null);
     }
 
     // ── config parsing ───────────────────────────────────────────────────────
