@@ -772,6 +772,17 @@ orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
 orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
+// Story 18-5 — user-facing dashboard endpoints. Same path-tenant gate as
+// the rest of /api/v1/orgs/{tenantId}/* (findings 001, 024). These mirror
+// /api/dashboard/* in purpose but are strictly scoped to the route tenant,
+// so a member of org A cannot peek at org B's events / runs / stats.
+orgs.MapGet("/{tenantId:guid}/dashboard/summary", UserDashboardEndpoints.GetOrgSummary)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/dashboard/runs", UserDashboardEndpoints.GetRecentRuns)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/dashboard/stats", UserDashboardEndpoints.GetStats)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
 
 // ── Agents Config ──
