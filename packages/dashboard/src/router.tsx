@@ -83,14 +83,9 @@ export const router = createBrowserRouter([
           </AdminGuard>
         ),
       },
-      {
-        path: '/settings/prompts',
-        element: (
-          <AdminGuard>
-            <PromptsPage />
-          </AdminGuard>
-        ),
-      },
+      // Prompt Store (Story 27-5): available to all authenticated members;
+      // members see a read-only banner and the Save/Reset buttons are hidden.
+      { path: '/settings/prompts', element: <PromptsPage /> },
       {
         path: '/admin',
         element: (
