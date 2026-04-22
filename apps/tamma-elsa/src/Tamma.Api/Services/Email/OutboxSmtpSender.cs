@@ -58,6 +58,12 @@ public sealed class OutboxSmtpSender : BackgroundService
     private readonly IConfiguration _config;
     private readonly ILogger<OutboxSmtpSender> _logger;
 
+    // Story 28-6 — set to 1 after the first Postgres 42P01 (relation does
+    // not exist) on the platform queue so subsequent polls skip the
+    // attempt entirely instead of letting EF log the error each cycle.
+    // Volatile read in the hot path.
+    private int _platformPathDisabled;
+
     public OutboxSmtpSender(
         IServiceProvider serviceProvider,
         OutboxSmtpSenderOptions options,
@@ -203,14 +209,29 @@ public sealed class OutboxSmtpSender : BackgroundService
 
     /// <summary>
     /// Story 28-6 — drain one row from <c>platform_email_outbox</c> if
-    /// the repo is registered. Falls back to <c>false</c> (no-op) when
-    /// <see cref="IPlatformEmailOutboxRepository"/> is unavailable so
-    /// deployments that have not yet shipped the CP migration are
-    /// unaffected.
+    /// the repo is registered. Falls back to <c>false</c> (no-op) in two
+    /// back-compat cases:
+    /// <list type="bullet">
+    ///   <item><description><see cref="IPlatformEmailOutboxRepository"/>
+    ///     is not registered (legacy single-DB topology).</description></item>
+    ///   <item><description>Repo is registered but the underlying
+    ///     <c>platform_email_outbox</c> table doesn't exist yet (Postgres
+    ///     error 42P01 — the CP migration from Story 28-1 hasn't been
+    ///     applied to the test/dev database). The first occurrence is
+    ///     logged at debug; subsequent polls stay quiet.</description></item>
+    /// </list>
     /// </summary>
     private async Task<bool> TryProcessPlatformOnceAsync(
         IServiceProvider scopedProvider, ISmtpTransport transport, CancellationToken ct)
     {
+        if (Volatile.Read(ref _platformPathDisabled) == 1)
+        {
+            // A previous poll hit 42P01 — the CP migration hasn't been
+            // applied to this DB. Skip without touching the connection so
+            // we don't log a stack trace every cycle.
+            return false;
+        }
+
         var platformOutbox = scopedProvider.GetService<IPlatformEmailOutboxRepository>();
         if (platformOutbox is null)
         {
@@ -220,7 +241,37 @@ public sealed class OutboxSmtpSender : BackgroundService
             return false;
         }
 
-        var claimed = await platformOutbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
+        PlatformEmailOutboxMessage? claimed;
+        try
+        {
+            claimed = await platformOutbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
+        }
+        catch (Npgsql.PostgresException pgEx)
+            when (string.Equals(pgEx.SqlState, "42P01", StringComparison.Ordinal))
+        {
+            // platform_email_outbox table missing — repo was wired but the
+            // CP migration hasn't been applied to this DB. Disable the
+            // platform path for the lifetime of the process to keep logs
+            // quiet; restart picks up the CP migration on the next boot.
+            Interlocked.Exchange(ref _platformPathDisabled, 1);
+            _logger.LogWarning(
+                "platform_email_outbox table missing on this connection — " +
+                "disabling the platform email path for this process. " +
+                "Apply the Story 28-1 CP migration to enable it.");
+            return false;
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+            when (dbEx.InnerException is Npgsql.PostgresException pgEx
+                && string.Equals(pgEx.SqlState, "42P01", StringComparison.Ordinal))
+        {
+            Interlocked.Exchange(ref _platformPathDisabled, 1);
+            _logger.LogWarning(
+                "platform_email_outbox table missing on this connection — " +
+                "disabling the platform email path for this process. " +
+                "Apply the Story 28-1 CP migration to enable it.");
+            return false;
+        }
+
         if (claimed is null) return false;
 
         // Map the platform row onto an EmailOutboxMessage so the existing
