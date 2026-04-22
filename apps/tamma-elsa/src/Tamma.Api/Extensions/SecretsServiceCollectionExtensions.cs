@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Postgres;
+using Tamma.Api.Services.Secrets.Stopgap;
 
 namespace Tamma.Api.Extensions;
 
@@ -165,6 +166,48 @@ public static class SecretsServiceCollectionExtensions
         // order relative to AddTammaSecrets.
         services.RemoveAll<ISecretStoreBackend>();
         services.AddSingleton<ISecretStoreBackend, PostgresSecretStoreBackend>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Story 29-9 / 29-10: register the stopgap migrator +
+    /// <see cref="IRuntimeSecretResolver"/>. Requires
+    /// <see cref="AddTammaSecrets"/> (and, in production,
+    /// <see cref="AddTammaPostgresSecrets"/>) to have wired the
+    /// <see cref="ISecretStoreBackend"/> + <see cref="SecretsDbContext"/>
+    /// factory.
+    ///
+    /// <para><paramref name="allowEnvFallback"/> toggles the Story 29-9
+    /// coexistence behaviour — <c>true</c> keeps the env-var / config
+    /// fallback path alive (default during the grace window);
+    /// <c>false</c> flips the resolver to the Story 29-10 fail-fast
+    /// mode where a missing cabinet row throws
+    /// <see cref="MissingSecretException"/>.</para>
+    ///
+    /// <para>Idempotent via TryAdd*. Safe to call from tests +
+    /// production.</para>
+    /// </summary>
+    public static IServiceCollection AddTammaSecretStopgapMigrator(
+        this IServiceCollection services,
+        bool allowEnvFallback = true)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // The migrator + resolver both depend on the secrets DB +
+        // backend, so make sure the base registrations are present.
+        services.AddTammaSecrets();
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IStopgapSecretMigrator, StopgapSecretMigrator>();
+        services.TryAddSingleton<IRuntimeSecretResolver>(sp =>
+            new RuntimeSecretResolver(
+                sp.GetRequiredService<IDbContextFactory<SecretsDbContext>>(),
+                sp.GetRequiredService<ISecretStoreBackend>(),
+                sp.GetRequiredService<IConfiguration>(),
+                sp.GetRequiredService<
+                    Microsoft.Extensions.Logging.ILogger<RuntimeSecretResolver>>(),
+                sp.GetRequiredService<TimeProvider>(),
+                allowEnvFallback));
 
         return services;
     }

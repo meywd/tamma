@@ -15,6 +15,26 @@ public static class SecretAuditEventTypes
     public const string RotateFailed = "SECRET.ROTATE.FAILED";
     public const string Reveal = "SECRET.REVEAL";
     public const string VersionRevoked = "SECRET.VERSION.REVOKED";
+
+    /// <summary>
+    /// Story 29-9 migration imported a stopgap secret into the cabinet.
+    /// Emitted by <c>StopgapSecretMigrator</c> once per new row.
+    /// </summary>
+    public const string MigratedSuccess = "SECRET.MIGRATED.SUCCESS";
+
+    /// <summary>
+    /// Story 29-9 migration tried to import a stopgap secret and
+    /// failed (no source value, backend put failure, etc.). Emitted
+    /// by <c>StopgapSecretMigrator</c> per failed row.
+    /// </summary>
+    public const string MigratedFailed = "SECRET.MIGRATED.FAILED";
+
+    /// <summary>
+    /// Story 29-9 migration ran but found the cabinet row already
+    /// present and therefore did nothing. Emitted so idempotent
+    /// re-runs still show up in the audit trail.
+    /// </summary>
+    public const string MigratedSkipped = "SECRET.MIGRATED.SKIPPED";
 }
 
 /// <summary>

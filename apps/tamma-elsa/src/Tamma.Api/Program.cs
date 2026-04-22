@@ -313,6 +313,30 @@ builder.Services.AddTenantProvisioning(builder.Configuration);
 // real auditor.
 builder.Services.AddTammaSecrets();
 
+// Story 29-9 / 29-10: runtime resolver + stopgap migrator. The
+// resolver is the read-path abstraction over the cabinet + the
+// (deprecated) env-var fallback — when the TAMMA_STOPGAP_FAIL_FAST
+// env var is set (Story 29-10 mode) the resolver throws
+// MissingSecretException on a missing cabinet row instead of
+// silently falling back to IConfiguration. Default during the
+// coexistence window is fallback=on.
+//
+// Only wired when the secrets DbContext factory is itself wired —
+// the resolver and migrator both depend on it for cabinet reads /
+// writes. Tests that do not exercise the secrets pipeline therefore
+// do not need to provide a Postgres connection string.
+if (!string.IsNullOrWhiteSpace(
+        builder.Configuration.GetConnectionString("SecretStore"))
+    || !string.IsNullOrWhiteSpace(
+        builder.Configuration.GetConnectionString("ControlPlane")))
+{
+    var stopgapFailFast = string.Equals(
+        Environment.GetEnvironmentVariable("TAMMA_STOPGAP_FAIL_FAST"),
+        "true", StringComparison.OrdinalIgnoreCase);
+    builder.Services.AddTammaSecretStopgapMigrator(
+        allowEnvFallback: !stopgapFailFast);
+}
+
 // Story 29-3 reveal-once pipeline. Registers:
 //   • IDbContextFactory<SecretRevealDbContext> on the secret-store
 //     connection string (falls back to ControlPlane).
@@ -715,6 +739,18 @@ else
 }
 
 var app = builder.Build();
+
+// ────────────────────────────────────────────────────────────────────────────
+// CLI dispatch — Story 29-9 one-shot commands run BEFORE the HTTP pipeline
+// binds. `dotnet run --project Tamma.Api -- migrate-secrets` imports every
+// stopgap secret into the cabinet, prints a report, and exits.
+// ────────────────────────────────────────────────────────────────────────────
+if (Tamma.Api.Services.Secrets.Stopgap.MigrateSecretsCommand.ShouldRun(args))
+{
+    var exitCode = await Tamma.Api.Services.Secrets.Stopgap
+        .MigrateSecretsCommand.RunAsync(app.Services);
+    return exitCode;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Middleware pipeline
@@ -1259,6 +1295,7 @@ using (var scope = app.Services.CreateScope())
 Log.Information("Tamma API starting up...");
 
 app.Run();
+return 0;
 
 // Make Program class accessible for testing
 public partial class Program { }
