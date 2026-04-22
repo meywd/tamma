@@ -10,6 +10,9 @@ import { ProviderHealthPage } from './pages/settings/ProviderHealthPage.js';
 import { BudgetPage } from './pages/settings/BudgetPage.js';
 import { PromptsPage } from './pages/settings/PromptsPage.js';
 import { PromptsAdminPage } from './pages/admin/prompts/PromptsAdminPage.js';
+// Story 28-11 — platform-admin tenant-status UX.
+import { TenantsListPage } from './pages/admin/tenants/TenantsListPage.js';
+import { TenantDetailPage } from './pages/admin/tenants/TenantDetailPage.js';
 import { AdminGuard } from './guards/AdminGuard.js';
 import { AuthGuard } from './guards/AuthGuard.js';
 import { AdminErrorBoundary } from './pages/admin/AdminErrorBoundary.js';
@@ -166,6 +169,25 @@ export const router = createBrowserRouter([
         element: (
           <AdminGuard>
             <PromptsAdminPage />
+          </AdminGuard>
+        ),
+      },
+      // Story 28-11: platform-admin tenant-status UX. List + detail for
+      // every tenant with status badge, lifecycle events, and
+      // state-gated destructive actions (retry / delete / force-delete).
+      {
+        path: '/admin/tenants',
+        element: (
+          <AdminGuard>
+            <TenantsListPage />
+          </AdminGuard>
+        ),
+      },
+      {
+        path: '/admin/tenants/:tenantId',
+        element: (
+          <AdminGuard>
+            <TenantDetailPage />
           </AdminGuard>
         ),
       },
