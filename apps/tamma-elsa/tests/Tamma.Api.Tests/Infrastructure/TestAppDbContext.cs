@@ -5,25 +5,22 @@ using Tamma.Data;
 namespace Tamma.Api.Tests.Infrastructure;
 
 /// <summary>
-/// In-memory-friendly <see cref="TammaAppDbContext"/>. Mirrors
-/// <see cref="TestDbContext"/> for repositories that have moved off
-/// <see cref="TammaDbContext"/> onto the app-role context as part of
-/// Story 19-6. EF InMemory rejects the mentorship jsonb / row-version
-/// columns; we ignore them since prompt / sanitization / health repos
-/// don't touch those entities.
+/// Wave A.5 post-merge: the separate <c>TammaAppDbContext</c> was deleted
+/// when the two contexts collapsed into <see cref="ControlPlaneDbContext"/>
+/// (CP tables) + <see cref="TenantDbContext"/> (per-tenant tables). This
+/// type remains as a thin <see cref="ControlPlaneDbContext"/> subclass so
+/// the handful of Story 19-6-era tests that still depend on the "app
+/// role" context name keep compiling without touching production code.
+/// New tests should instantiate <see cref="ControlPlaneDbContext"/> (CP
+/// reads) or <see cref="TenantDbContext"/> (per-tenant writes) directly.
 ///
-/// <para>
-/// Like <see cref="TestDbContext"/> this exposes constructors that take
-/// the parent's <see cref="DbContextOptions{TammaAppDbContext}"/> so the
-/// switching repositories receive a context without DI plumbing.
-/// </para>
+/// <para>EF InMemory rejects the mentorship jsonb / row-version columns;
+/// we ignore them since the legacy repo tests don't touch those
+/// entities.</para>
 /// </summary>
-public class TestAppDbContext : TammaAppDbContext
+public class TestAppDbContext : ControlPlaneDbContext
 {
-    public TestAppDbContext(DbContextOptions<TammaAppDbContext> options) : base(options) { }
-
-    public TestAppDbContext(DbContextOptions<TammaAppDbContext> options, ITenantContext tenantContext)
-        : base(options, tenantContext) { }
+    public TestAppDbContext(DbContextOptions<ControlPlaneDbContext> options) : base(options) { }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

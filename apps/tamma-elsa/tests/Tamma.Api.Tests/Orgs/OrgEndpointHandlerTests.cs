@@ -328,7 +328,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.TransferOwnership(
             tenantId, new TransferOwnershipRequest(ownerId),
-            _appDb, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
+            _db, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -340,7 +340,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.TransferOwnership(
             tenantId, new TransferOwnershipRequest(Guid.NewGuid()),
-            _appDb, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
+            _db, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -352,7 +352,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.TransferOwnership(
             tenantId, new TransferOwnershipRequest(memberId),
-            _appDb, _tenantRepo, _membershipRepo, _events, Principal(memberId), ctx);
+            _db, _tenantRepo, _membershipRepo, _events, Principal(memberId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status403Forbidden);
     }
 
@@ -364,7 +364,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.TransferOwnership(
             tenantId, new TransferOwnershipRequest(memberId),
-            _appDb, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
+            _db, _tenantRepo, _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status200OK);
 
         (await _membershipRepo.GetRoleAsync(tenantId, memberId)).Should().Be("owner");
@@ -382,7 +382,7 @@ public class OrgEndpointHandlerTests
         var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
 
         var result = await OrgEndpoints.DeleteOrg(
-            tenantId, _appDb, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
+            tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
             _confirmation, _events, Principal(ownerId), ctx, confirm: null);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -397,7 +397,7 @@ public class OrgEndpointHandlerTests
 
         var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
         var result = await OrgEndpoints.DeleteOrg(
-            tenantId, _appDb, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
+            tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
             _confirmation, _events, Principal(ownerId), ctx, confirm: null);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status202Accepted);
     }
@@ -411,7 +411,7 @@ public class OrgEndpointHandlerTests
 
         var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
         var result = await OrgEndpoints.DeleteOrg(
-            tenantId, _appDb, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
+            tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
             _confirmation, _events, Principal(ownerId), ctx, confirm: "junk.deadbeef");
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }

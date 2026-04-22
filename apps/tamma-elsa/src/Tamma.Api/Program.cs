@@ -895,6 +895,11 @@ admin.MapPost("/secrets/{id:guid}/rotate", SecretEndpoints.RotateSecret)
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
 orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
+// Story 28-9 regression pin: the deleted Story 18-3 handler on
+// POST /api/v1/orgs/switch-org must 404 (not 405 from the
+// POST → GET {tenantId} overlap). Explicit 404 handler stops the
+// method-not-allowed fallthrough.
+orgs.MapPost("/switch-org", () => Results.NotFound()).AllowAnonymous();
 
 orgs.MapGet("/{tenantId}", OrgEndpoints.GetOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
@@ -1198,7 +1203,9 @@ using (var scope = app.Services.CreateScope())
                     github_installation_repos, github_installations,
                     github_webhook_deliveries,
                     junior_developers, mentorship_events, mentorship_sessions,
-                    password_reset_tokens, prompt_overrides,
+                    password_reset_tokens, plans,
+                    platform_email_outbox, platform_events, platform_queued_tasks,
+                    prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
                     sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
                     user_api_keys, user_installations, user_invites, users,

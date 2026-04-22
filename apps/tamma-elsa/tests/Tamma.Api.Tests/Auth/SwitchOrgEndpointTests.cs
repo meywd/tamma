@@ -34,7 +34,7 @@ public class SwitchOrgEndpointTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032 // Disposed via _scope (owned by the DI container)
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
     private Microsoft.Extensions.Logging.ILoggerFactory _loggerFactory = null!;
 #pragma warning restore NUnit1032
     private ITenantRepository _tenantRepo = null!;
@@ -50,7 +50,7 @@ public class SwitchOrgEndpointTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _tenantRepo = _scope.ServiceProvider.GetRequiredService<ITenantRepository>();
         _membershipRepo = _scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();

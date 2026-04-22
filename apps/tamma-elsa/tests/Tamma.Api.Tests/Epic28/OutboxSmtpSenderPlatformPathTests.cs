@@ -35,7 +35,7 @@ namespace Tamma.Api.Tests.Epic28;
 [TestFixture]
 public class OutboxSmtpSenderPlatformPathTests
 {
-    private DbContextOptions<TammaDbContext> _tenantOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
     private Mock<ISmtpTransport> _transport = null!;
     private IConfiguration _config = null!;
@@ -43,15 +43,23 @@ public class OutboxSmtpSenderPlatformPathTests
     [SetUp]
     public void SetUp()
     {
-        var dbName = Guid.NewGuid().ToString();
-        _tenantOptions = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase("tenant-" + dbName)
+        // Wave A.5 post-merge: tenant writes route through
+        // ITenantDbContextFactory → TenantDbContext. CP reads/writes
+        // stay on ControlPlaneDbContext. Both share the same EF InMemory
+        // database name so the email sender sees the same rows the test
+        // seeds through either surface (the transitional single-DB
+        // topology — once Story 28-1's db-per-tenant ships the factory
+        // will hand back a different data source and this shared-name
+        // pattern will be replaced by a round-robin poll).
+        var dbName = "outbox-" + Guid.NewGuid();
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
-            .UseInMemoryDatabase("cp-" + dbName)
+            .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
@@ -68,14 +76,17 @@ public class OutboxSmtpSenderPlatformPathTests
 
     private (ServiceProvider services, OutboxSmtpSender sender) BuildSender(bool registerPlatform)
     {
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         var services = new ServiceCollection();
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(_tenantOptions));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
+        services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
 
         if (registerPlatform)
         {
-            services.AddScoped(_ => new ControlPlaneDbContext(_cpOptions));
             services.AddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
             services.AddScoped<IPlatformEventRepository, PlatformEventRepository>();
         }
@@ -193,9 +204,21 @@ public class OutboxSmtpSenderPlatformPathTests
         var (sp, sender) = BuildSender(registerPlatform: true);
         try
         {
-            using var tdb = new TestDbContext(_tenantOptions);
-            var tenantRepo = new EmailOutboxRepository(tdb);
-            var tenantEnq = await tenantRepo.EnqueueAsync(NewTenantRow());
+            // Enqueue a tenant-scoped row through the factory-driven repo —
+            // the cross-cutting EmailOutboxRepository routes to a per-tenant
+            // DbContext when msg.TenantId is set, else to the CP legacy-shared
+            // email_outbox. We want the tenant path to win here, so stamp a
+            // tenant id. The sender's ClaimNext scans cp.EmailOutbox which
+            // under EF-InMemory shares the same database name as the tenant
+            // options (see SetUp), so the tenant row is visible to the CP
+            // scan too — the test's invariant is "tenant row delivers first",
+            // which the sender enforces by polling CP first.
+            var tenantRepo = new EmailOutboxRepository(
+                new TestTenantDbContextFactory(_tenantOptions),
+                new TestControlPlaneDbContext(_cpOptions));
+            var tenantRow = NewTenantRow();
+            tenantRow.TenantId = Guid.NewGuid();
+            var tenantEnq = await tenantRepo.EnqueueAsync(tenantRow);
 
             using var cp = new ControlPlaneDbContext(_cpOptions);
             var platformRepo = new PlatformEmailOutboxRepository(cp);

@@ -74,7 +74,7 @@ public class TenantDbContextFactoryTests
     [Test]
     public void Factory_NullResolver_Throws()
     {
-        Action act = () => _ = new TenantDbContextFactory(null!);
+        Action act = () => _ = new TenantDbContextFactory((ITenantConnectionResolver)null!);
         act.Should().Throw<ArgumentNullException>();
     }
 

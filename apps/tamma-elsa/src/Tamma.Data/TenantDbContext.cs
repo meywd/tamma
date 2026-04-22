@@ -35,13 +35,16 @@ public class TenantDbContext : DbContext
     /// </summary>
     public Guid TenantId { get; }
 
-    public TenantDbContext(DbContextOptions<TenantDbContext> options, Guid tenantId)
+    public TenantDbContext(DbContextOptions<TenantDbContext> options, Guid tenantId = default)
         : base(options)
     {
-        if (tenantId == Guid.Empty)
-            throw new ArgumentException(
-                "TenantDbContext requires a non-empty tenant id. Use ControlPlaneDbContext for CP data.",
-                nameof(tenantId));
+        // Guid.Empty is permitted only for design-time and migration callers
+        // (EF tooling, EfTenantDbMigrator.MigrateTenantAppAsync). Runtime
+        // callers MUST route through ITenantDbContextFactory.CreateAsync
+        // which always supplies a concrete tenant id. The ambient filter
+        // wired by TammaModelConfiguration.ApplyTenantFilter still
+        // short-circuits to permissive when TenantId is Guid.Empty so
+        // the migration graph stays consistent with production.
         TenantId = tenantId;
     }
 
@@ -58,11 +61,18 @@ public class TenantDbContext : DbContext
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
     public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
 
-    // Mentorship entities are CP-hosted today but tenant-scoped in the
-    // domain model. The factory path uses these DbSets for tenant-scoped
-    // mentorship queries; CP housekeeping uses ControlPlaneDbContext.
+    /// <summary>
+    /// Tenant-scoped API keys (Story 28-7). The tenant DB api_keys table
+    /// is locked to <c>Scope = 'tenant'</c> via a CHECK constraint; user /
+    /// platform / installation keys stay on the CP <c>api_keys</c> table.
+    /// </summary>
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
+    // Mentorship entities are tenant-scoped per Doc 01 §1.2 rows 27–30.
     public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
     public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
+    public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
+    public DbSet<Story> Stories => Set<Story>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -71,9 +81,13 @@ public class TenantDbContext : DbContext
         // Register the mentorship entities so configuration matches the
         // physical tables during the transition.
         TammaModelConfiguration.ConfigureMentorshipEntities(modelBuilder);
-        // Tenant-scoped configuration — fail-closed per-tenant filter that
-        // reads TenantId from this context instance (not ITenantContext).
+        // Tenant-scoped configuration — target architecture (Doc 01 §1.4)
+        // has NO TenantId column on tenant-resident tables. When
+        // fixedTenantId is non-null the configurator automatically
+        // ignores CP entities + strips TenantId columns.
         TammaModelConfiguration.ConfigureTenantEntities(
             modelBuilder, fixedTenantId: TenantId);
+        // Story 28-7 — tenant-scope api_keys with CHECK Scope='tenant'.
+        TammaModelConfiguration.ConfigureTenantApiKeys(modelBuilder);
     }
 }

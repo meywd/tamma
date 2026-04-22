@@ -123,7 +123,21 @@ public class WorkflowRepository(
         var found = await cp.WorkflowInstances.IgnoreQueryFilters()
             .Select(i => new { i.Id, i.TenantId })
             .FirstOrDefaultAsync(i => i.Id == id);
-        if (found is null || found.TenantId is null) return null;
+        if (found is null) return null;
+        if (found.TenantId is null)
+        {
+            // Platform-scope (null-tenant) instance — update in-place via CP.
+            // This is the path the SaaS workflow status/result endpoints hit
+            // when the caller is a system integrator without an ambient
+            // tenant (self-hosted path, Finding 012 lifecycle bus).
+            var cpInstance = await cp.WorkflowInstances.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(i => i.Id == id);
+            if (cpInstance is null) return null;
+            update(cpInstance);
+            cpInstance.UpdatedAt = DateTime.UtcNow;
+            await cp.SaveChangesAsync();
+            return cpInstance;
+        }
         await using var ctx = await tenantDbFactory.CreateAsync(found.TenantId.Value);
         var ti = await ctx.WorkflowInstances.IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == id);

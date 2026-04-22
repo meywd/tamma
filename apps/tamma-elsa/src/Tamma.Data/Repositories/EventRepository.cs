@@ -98,10 +98,12 @@ public class EventRepository(
     public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
         Guid tenantId, string? typePrefix, int limit, int offset)
     {
-        // Honour the global query filter first (defence-in-depth: if the
-        // caller forgot to set ambient tenant we still get cross-tenant
-        // rejection from the explicit Where below). Both the Where +
-        // ambient filter combine to require TenantId == tenantId.
+        // Factory-issued tenant context carries no EF query filter — the
+        // per-tenant Npgsql connection is the real isolation plane. The
+        // explicit TenantId predicate is defence-in-depth for the
+        // transitional shared-DB phase where multiple tenants may still
+        // share a physical database.
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
         var query = db.DomainEvents
             .Where(e => e.TenantId == tenantId);
 

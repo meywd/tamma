@@ -1,24 +1,37 @@
 using Microsoft.EntityFrameworkCore;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Data;
 
 /// <summary>
-/// Default <see cref="ITenantDbContextFactory"/> implementation. Builds
-/// a fresh <see cref="TenantDbContext"/> per call using the connection
-/// string registered as <c>TammaAppDb</c> (with fallback to the admin
-/// connection for dev environments).
+/// Default <see cref="ITenantDbContextFactory"/> implementation.
 ///
-/// <para>Transitional implementation: every tenant shares the same
-/// central Postgres; the context's fixed-tenant query filter enforces
-/// scoping at the EF layer. Story 28-4 replaces this with a real
-/// <c>ITenantConnectionResolver</c> that returns a per-tenant
-/// <c>NpgsqlDataSource</c>. Call sites do not change — they already
-/// pass the tenant id explicitly.</para>
+/// <para>Two construction modes share this class:</para>
+/// <list type="bullet">
+///   <item><description>Wave A.5 transitional form — a single shared
+///     Npgsql connection string resolves every tenant against the
+///     central DB. The per-tenant scoping is enforced by the EF query
+///     filter wired from <see cref="TenantDbContext.TenantId"/>.
+///     Used by DI registration in
+///     <see cref="DependencyInjection.AddTammaData"/> while the
+///     per-tenant pool cache is still being rolled out.</description></item>
+///   <item><description>Story 28-4 target form — an injected
+///     <see cref="ITenantConnectionResolver"/> returns a per-tenant
+///     <see cref="Npgsql.NpgsqlDataSource"/> (LRU pool). Call sites
+///     stay identical; only the resolver implementation changes when
+///     the pool cache lands in production.</description></item>
+/// </list>
 /// </summary>
 public sealed class TenantDbContextFactory : ITenantDbContextFactory
 {
-    private readonly string _connectionString;
+    private readonly string? _connectionString;
+    private readonly ITenantConnectionResolver? _resolver;
 
+    /// <summary>
+    /// Construct with a shared connection string. Wave A.5 transitional
+    /// mode — every tenant resolves to the same central DB, EF query
+    /// filter supplies the tenant scoping.
+    /// </summary>
     public TenantDbContextFactory(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -28,7 +41,18 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
         _connectionString = connectionString;
     }
 
-    public Task<TenantDbContext> CreateAsync(
+    /// <summary>
+    /// Construct with an injected <see cref="ITenantConnectionResolver"/>.
+    /// Story 28-4 form — the resolver hands back a per-tenant
+    /// <c>NpgsqlDataSource</c>; pool lifetime is owned by the resolver.
+    /// </summary>
+    public TenantDbContextFactory(ITenantConnectionResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        _resolver = resolver;
+    }
+
+    public async Task<TenantDbContext> CreateAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
     {
@@ -37,13 +61,22 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
                 "Tenant id is required. Use ControlPlaneDbContext for CP data.",
                 nameof(tenantId));
 
-        var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(_connectionString, npgsql =>
-                // Tenant context never runs migrations — CP context owns
-                // the shared migration history table.
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"))
-            .Options;
+        var builder = new DbContextOptionsBuilder<TenantDbContext>();
 
-        return Task.FromResult(new TenantDbContext(options, tenantId));
+        if (_resolver is not null)
+        {
+            var dataSource = await _resolver
+                .GetDataSourceAsync(tenantId, cancellationToken)
+                .ConfigureAwait(false);
+            builder.UseNpgsql(dataSource, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"));
+        }
+        else
+        {
+            builder.UseNpgsql(_connectionString!, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"));
+        }
+
+        return new TenantDbContext(builder.Options, tenantId);
     }
 }

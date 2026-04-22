@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Data;
@@ -56,6 +59,22 @@ public static class DependencyInjection
             : appConnectionString;
         services.AddSingleton<ITenantDbContextFactory>(
             _ => new TenantDbContextFactory(tenantConnectionString));
+
+        // Story 28-3 contract: every consumer of per-tenant connection
+        // pooling depends on ITenantConnectionResolver, not directly on
+        // a connection string. Wave A.5 post-merge restores the stub
+        // resolver so KekRotationCoordinator (Story 28-12) and the
+        // LRU pool cache (Story 28-4) have an implementation to wire
+        // against until the real per-tenant pool resolver replaces it.
+        //
+        // TryAddSingleton lets a higher-priority composition (e.g. the
+        // pool-cache extension once Story 28-4 lands) register its own
+        // resolver first without conflicting with this fallback.
+        services.TryAddSingleton<ITenantConnectionResolver>(sp =>
+        {
+            var dataSource = NpgsqlDataSource.Create(tenantConnectionString);
+            return new StubTenantConnectionResolver(dataSource);
+        });
 
         // Control-plane repositories.
         services.AddScoped<IUserRepository, UserRepository>();

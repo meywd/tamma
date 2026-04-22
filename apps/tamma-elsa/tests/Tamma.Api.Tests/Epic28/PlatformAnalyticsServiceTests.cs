@@ -19,7 +19,10 @@ public class PlatformAnalyticsServiceTests
         new(2026, 04, 18, 12, 00, 00, DateTimeKind.Utc);
 
     private ControlPlaneDbContext _cp = null!;
-    private TestAppDbContext _app = null!;
+    // Wave A.5 post-merge: DomainEvents + WorkflowInstances DbSets live on
+    // ControlPlaneDbContext now as legacy-shared tables. _app is an alias
+    // for _cp so the seed helpers stay grouped by semantic scope.
+    private ControlPlaneDbContext _app => _cp;
     private PlatformAnalyticsService _sut = null!;
     private FakeTimeProvider _clock = null!;
 
@@ -33,22 +36,14 @@ public class PlatformAnalyticsServiceTests
             .Options;
         _cp = new ControlPlaneDbContext(cpOptions);
 
-        var appOptions = new DbContextOptionsBuilder<TammaAppDbContext>()
-            .UseInMemoryDatabase($"app-{Guid.NewGuid()}")
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-        _app = new TestAppDbContext(appOptions);
-
         _clock = new FakeTimeProvider(FixedNow);
-        _sut = new PlatformAnalyticsService(_cp, _app, _clock);
+        _sut = new PlatformAnalyticsService(_cp, _clock);
     }
 
     [TearDown]
     public void TearDown()
     {
         _cp.Dispose();
-        _app.Dispose();
     }
 
     // ── TenantCounts ──

@@ -6,11 +6,15 @@ namespace Tamma.Api.Services.Analytics;
 
 /// <summary>
 /// Story 28-10 — on-demand implementation of
-/// <see cref="IPlatformAnalyticsService"/>. Aggregates from the existing
-/// <see cref="ControlPlaneDbContext"/> (tenants + platform_events) and the
-/// legacy <see cref="TammaAppDbContext"/> (workflow_instances +
-/// domain_events) until the full <c>platform_analytics_hourly</c> fact
-/// table + hourly rollup workflow from Story 28-10 §AC1–AC4 lands.
+/// <see cref="IPlatformAnalyticsService"/>. Aggregates from the
+/// <see cref="ControlPlaneDbContext"/> (tenants + platform_events +
+/// legacy-shared workflow_instances + domain_events) until the full
+/// <c>platform_analytics_hourly</c> fact table + hourly rollup workflow
+/// from Story 28-10 §AC1–AC4 lands. Wave A.5 removed the separate
+/// <c>TammaAppDbContext</c>; the legacy DbSets remain exposed on
+/// <see cref="ControlPlaneDbContext"/> as "shared-table" passthroughs so
+/// this cross-tenant admin service can still aggregate without a per-
+/// tenant factory fan-out.
 ///
 /// <para>Every query is bounded by a UTC window derived from
 /// <see cref="DateTime.UtcNow"/> at the call site so results are
@@ -27,7 +31,11 @@ namespace Tamma.Api.Services.Analytics;
 public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
 {
     private readonly ControlPlaneDbContext _cp;
-    private readonly TammaAppDbContext _app;
+    // Wave A.5: legacy-shared domain_events / workflow_instances DbSets
+    // still live on ControlPlaneDbContext (see ControlPlaneDbContext.cs
+    // "Legacy-shared tables" region). _app is an alias for _cp kept so
+    // the read-side code reads like the pre-merge app/cp split.
+    private ControlPlaneDbContext _app => _cp;
     private readonly TimeProvider _clock;
 
     // Event-type prefixes used by the rollup. Kept as constants so they
@@ -52,11 +60,9 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
 
     public PlatformAnalyticsService(
         ControlPlaneDbContext cp,
-        TammaAppDbContext app,
         TimeProvider? clock = null)
     {
         _cp = cp ?? throw new ArgumentNullException(nameof(cp));
-        _app = app ?? throw new ArgumentNullException(nameof(app));
         _clock = clock ?? TimeProvider.System;
     }
 

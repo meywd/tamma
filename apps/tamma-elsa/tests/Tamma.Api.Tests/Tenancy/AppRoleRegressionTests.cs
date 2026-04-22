@@ -177,7 +177,7 @@ public class AppRoleRegressionTests
         // get in the way. Each seed is a minimal valid row — only the
         // required NOT NULL columns are set.
         using var scope = TenancySetUpFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         // ── users ──
         db.Users.Add(new User

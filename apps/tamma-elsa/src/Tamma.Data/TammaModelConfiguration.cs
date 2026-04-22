@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
 using Tamma.Data.Entities;
@@ -32,7 +34,19 @@ namespace Tamma.Data;
 /// </summary>
 internal static class TammaModelConfiguration
 {
-    public static void ConfigureControlPlaneEntities(ModelBuilder modelBuilder)
+    /// <summary>
+    /// Configure the 14 control-plane tables (Doc 01 §1.2). When
+    /// <paramref name="includeTenantShadowColumns"/> is <c>true</c> the
+    /// Epic 28 shadow columns (<c>Status</c>, <c>PlanId</c>,
+    /// <c>EncryptedConnectionString</c>, <c>KekVersion</c>,
+    /// <c>FailureReason</c>, <c>DeleteRequestedAt</c>) are wired up on
+    /// the Tenant entity — those columns are CP-plane only and shouldn't
+    /// ride along when this configurator is called against a
+    /// <c>TenantDbContext</c>.
+    /// </summary>
+    public static void ConfigureControlPlaneEntities(
+        ModelBuilder modelBuilder,
+        bool includeTenantShadowColumns = false)
     {
         // ── User ──
         modelBuilder.Entity<User>(entity =>
@@ -122,6 +136,36 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CranlAppUrl).HasMaxLength(255);
             entity.Property(e => e.CranlDatabaseUrlEncrypted).HasColumnType("bytea");
 
+            if (includeTenantShadowColumns)
+            {
+                // ── Epic 28 shadow columns (Story 28-1, 28-4, 28-11, 28-12) ──
+                //
+                // These six fields land on the `tenants` table but are NOT
+                // modelled on the Tenant POCO — they belong to the
+                // db-per-tenant rollout and are accessed through
+                // EF.Property<T> by LruPooledTenantConnectionResolver (28-4),
+                // KekRotationCoordinator (28-12), AdminTenantsEndpoints
+                // (28-11), and PlatformAnalyticsService (28-10).
+                entity.Property<string?>("Status").HasMaxLength(32);
+                entity.Property<Guid?>("PlanId");
+                entity.Property<byte[]?>("EncryptedConnectionString").HasColumnType("bytea");
+                entity.Property<int?>("KekVersion");
+                entity.Property<string?>("FailureReason");
+                entity.Property<DateTime?>("DeleteRequestedAt");
+
+                // Epic 28 shadow-column indexes used by Admin tenant
+                // filtering + plan FK joins.
+                entity.HasIndex("Status");
+                entity.HasIndex("PlanId");
+
+                // FK to plans, Restrict so deleting a referenced plan
+                // fails loudly instead of silently orphaning tenants.
+                entity.HasOne<Plan>()
+                    .WithMany()
+                    .HasForeignKey("PlanId")
+                    .OnDelete(DeleteBehavior.Restrict);
+            }
+
             entity.HasIndex(e => e.Slug).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
             entity.HasIndex(e => e.ExternalId).IsUnique().HasFilter("\"ExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
 
@@ -188,9 +232,19 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Permissions).HasColumnType("text[]");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
+            // Story 28-7 shadow column — per-key rate-limit override, carried
+            // on the row so the API gateway can pick the tighter of the
+            // per-key and per-plan ceilings without an extra table join.
+            entity.Property<int?>("RateLimitRpm");
+
             entity.HasIndex(e => e.KeyHash).IsUnique();
             entity.HasIndex(e => new { e.Scope, e.OwnerId });
             entity.HasIndex(e => e.TenantId);
+            // Story 28-7 — route Bearer tokens by their 8-char prefix.
+            entity.HasIndex(e => e.KeyPrefix);
+            // Story 28-7 — partial index for active-key lookups only (filter
+            // out revoked rows to keep the b-tree dense).
+            entity.HasIndex(e => e.RevokedAt).HasFilter("\"RevokedAt\" IS NULL");
         });
 
         // ── GitHubInstallation ──
@@ -247,6 +301,80 @@ internal static class TammaModelConfiguration
             entity.HasIndex(e => e.ReceivedAt);
             entity.HasIndex(e => new { e.InstallationId, e.ReceivedAt });
         });
+
+        // ── Plan (Story 28-1) ──
+        modelBuilder.Entity<Plan>(entity =>
+        {
+            entity.ToTable("plans");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Slug).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.MonthlyPriceUsd).HasPrecision(18, 2);
+            entity.Property(e => e.Quotas).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
+        // ── PlatformEvent (Story 28-6) ──
+        modelBuilder.Entity<PlatformEvent>(entity =>
+        {
+            entity.ToTable("platform_events");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Type).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Tags).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Metadata).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Data).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
+            entity.HasIndex(e => e.UserId).HasFilter("\"UserId\" IS NOT NULL");
+            entity.HasIndex(e => new { e.Type, e.CreatedAt });
+        });
+
+        // ── PlatformQueuedTask (Story 28-6) ──
+        modelBuilder.Entity<PlatformQueuedTask>(entity =>
+        {
+            entity.ToTable("platform_queued_tasks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Type).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Payload).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.RetryCount).HasDefaultValue(0);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
+            entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
+            entity.HasIndex(e => e.InstallationId).HasFilter("\"InstallationId\" IS NOT NULL");
+        });
+
+        // ── PlatformEmailOutboxMessage (Story 28-6) ──
+        modelBuilder.Entity<PlatformEmailOutboxMessage>(entity =>
+        {
+            entity.ToTable("platform_email_outbox");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Template).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.ToAddress).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.FromAddress).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.Subject).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.HtmlBody).IsRequired();
+            entity.Property(e => e.TextBody).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.Property(e => e.MaxAttempts).HasDefaultValue(5);
+            entity.Property(e => e.NextAttemptAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+        });
     }
 
     /// <summary>
@@ -260,33 +388,35 @@ internal static class TammaModelConfiguration
     /// during the Epic 28 transition.
     /// </summary>
     public static void ConfigureTenantEntities(
-        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+        ModelBuilder modelBuilder,
+        Guid? fixedTenantId = null,
+        bool omitTenantIdColumn = false)
     {
-        // When invoked from TenantDbContext, register Tenant/User as
-        // shadow entities (no CP-side navigations) so EF can resolve the
-        // HasOne(e => e.Tenant) nav on AgentConfig / SanitizationRule
-        // without demanding the full CP relationship graph (Tenant↔Owner
-        // ↔ User ↔ Memberships). Without this EF complains about
-        // ambiguous one-to-one sides for Tenant.Owner / User.Tenant.
+        // When invoked from TenantDbContext (fixedTenantId != null) the
+        // tenant DB must NOT carry any CP entities (users, tenants,
+        // plans, platform_*, etc.) — tenancy is implicit in the
+        // connection string (Doc 01 §1.4). Ignore the POCOs entirely so
+        // EF doesn't pick them up through navigation properties like
+        // AgentConfig.Tenant / SanitizationRule.Tenant. The TenantId
+        // columns on tenant-resident tables are retained during the
+        // transitional shared-DB phase — tenant repos still filter by
+        // TenantId explicitly until Story 28-1's db-per-tenant split
+        // ships and that filter becomes redundant.
         if (fixedTenantId is not null)
         {
-            modelBuilder.Entity<Tenant>(entity =>
-            {
-                entity.ToTable("tenants");
-                entity.HasKey(e => e.Id);
-                entity.Ignore(e => e.Owner);
-                entity.Ignore(e => e.Memberships);
-                entity.Ignore(e => e.Invites);
-            });
-            modelBuilder.Entity<User>(entity =>
-            {
-                entity.ToTable("users");
-                entity.HasKey(e => e.Id);
-                entity.Ignore(e => e.Tenant);
-                entity.Ignore(e => e.Memberships);
-                entity.Ignore(e => e.RefreshTokens);
-                entity.Ignore(e => e.PasswordResetTokens);
-            });
+            modelBuilder.Ignore<Tenant>();
+            modelBuilder.Ignore<User>();
+            modelBuilder.Ignore<TenantMembership>();
+            modelBuilder.Ignore<UserInvite>();
+            modelBuilder.Ignore<RefreshToken>();
+            modelBuilder.Ignore<PasswordResetToken>();
+            modelBuilder.Ignore<GitHubInstallation>();
+            modelBuilder.Ignore<GitHubInstallationRepo>();
+            modelBuilder.Ignore<GitHubWebhookDelivery>();
+            modelBuilder.Ignore<Plan>();
+            modelBuilder.Ignore<PlatformEvent>();
+            modelBuilder.Ignore<PlatformQueuedTask>();
+            modelBuilder.Ignore<PlatformEmailOutboxMessage>();
         }
 
         // ── AgentConfig ──
@@ -300,12 +430,19 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
-
-            entity.HasOne(e => e.Tenant)
-                .WithMany()
-                .HasForeignKey(e => e.TenantId)
-                .OnDelete(DeleteBehavior.Cascade);
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+                entity.Ignore(e => e.Tenant);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
+                entity.HasOne(e => e.Tenant)
+                    .WithMany()
+                    .HasForeignKey(e => e.TenantId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -326,6 +463,7 @@ internal static class TammaModelConfiguration
 
             entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
 
+            if (omitTenantIdColumn) entity.Ignore(e => e.TenantId);
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
@@ -340,8 +478,16 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique()
-                .HasFilter("\"TenantId\" IS NOT NULL");
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+                entity.HasIndex(e => e.ProviderKey).IsUnique();
+            }
+            else
+            {
+                entity.HasIndex(e => new { e.ProviderKey, e.TenantId }).IsUnique()
+                    .HasFilter("\"TenantId\" IS NOT NULL");
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -358,11 +504,19 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.ProviderKey, e.CreatedAt });
-            entity.HasIndex(e => new { e.TenantId, e.CreatedAt });
             entity.HasIndex(e => new { e.EngineId, e.CreatedAt });
             entity.HasIndex(e => new { e.Model, e.CreatedAt });
             entity.HasIndex(e => new { e.RequestType, e.CreatedAt });
             entity.HasIndex(e => e.CorrelationId).HasFilter("\"CorrelationId\" IS NOT NULL");
+
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => new { e.TenantId, e.CreatedAt });
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -377,12 +531,19 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
-
-            entity.HasOne(e => e.Tenant)
-                .WithMany()
-                .HasForeignKey(e => e.TenantId)
-                .OnDelete(DeleteBehavior.Cascade);
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+                entity.Ignore(e => e.Tenant);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
+                entity.HasOne(e => e.Tenant)
+                    .WithMany()
+                    .HasForeignKey(e => e.TenantId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -400,7 +561,14 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.SyncedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.TenantId);
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId);
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -418,14 +586,22 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.DefinitionId, e.Status });
-            entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.DefinitionId });
-            entity.HasIndex(e => new { e.TenantId, e.Status });
 
             entity.HasOne(e => e.Definition)
                 .WithMany(d => d.Instances)
                 .HasForeignKey(e => e.DefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId);
+                entity.HasIndex(e => new { e.TenantId, e.DefinitionId });
+                entity.HasIndex(e => new { e.TenantId, e.Status });
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -444,7 +620,14 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
-            entity.HasIndex(e => new { e.TenantId, e.Status });
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => new { e.TenantId, e.Status });
+            }
             // No query filter: the task queue is shared infra; tenant scoping
             // is explicit in the repository APIs (they take tenantId).
         });
@@ -462,9 +645,17 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
-            entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.IssueNumber })
-                .HasFilter("\"IssueNumber\" IS NOT NULL");
+
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId);
+                entity.HasIndex(e => new { e.TenantId, e.IssueNumber })
+                    .HasFilter("\"IssueNumber\" IS NOT NULL");
+            }
 
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
@@ -482,13 +673,21 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => new { e.TenantId, e.AccountId })
-                .IsUnique()
-                .HasFilter("\"TenantId\" IS NOT NULL");
-            entity.HasIndex(e => e.AccountId)
-                .IsUnique()
-                .HasDatabaseName("ix_budget_configs_accountid_default")
-                .HasFilter("\"TenantId\" IS NULL");
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+                entity.HasIndex(e => e.AccountId).IsUnique();
+            }
+            else
+            {
+                entity.HasIndex(e => new { e.TenantId, e.AccountId })
+                    .IsUnique()
+                    .HasFilter("\"TenantId\" IS NOT NULL");
+                entity.HasIndex(e => e.AccountId)
+                    .IsUnique()
+                    .HasDatabaseName("ix_budget_configs_accountid_default")
+                    .HasFilter("\"TenantId\" IS NULL");
+            }
             // No query filter — the budget provider resolves tenant-specific
             // vs platform-default rows explicitly.
         });
@@ -513,9 +712,54 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
-            entity.HasIndex(e => e.TenantId);
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+            else
+            {
+                entity.HasIndex(e => e.TenantId);
+            }
             // No query filter — the outbox is shared infra; tenant scoping is
             // explicit in the repository APIs.
+        });
+    }
+
+    /// <summary>
+    /// Configure the tenant-DB-only <c>api_keys</c> table (Story 28-7).
+    /// The tenant DB locks the api_keys scope to <c>tenant</c> via a
+    /// CHECK constraint — user / installation / service keys live on the
+    /// CP api_keys table. KeyPrefix + RevokedAt indexes mirror the CP
+    /// side so Bearer-token routing works identically on either DB.
+    /// </summary>
+    public static void ConfigureTenantApiKeys(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ApiKey>(entity =>
+        {
+            entity.ToTable("api_keys", t =>
+            {
+                // Doc 01 §1.4 — only tenant-scope keys allowed on this DB.
+                t.HasCheckConstraint(
+                    "ck_api_keys_tenant_scope",
+                    "\"Scope\" = 'tenant'");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.OwnerId).IsRequired();
+            entity.Property(e => e.KeyHash).IsRequired();
+            entity.Property(e => e.KeyPrefix).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Label).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Permissions).HasColumnType("text[]");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Tenant DB has no TenantId column — tenancy is implicit.
+            entity.Ignore(e => e.TenantId);
+
+            entity.HasIndex(e => e.KeyHash).IsUnique();
+            entity.HasIndex(e => new { e.Scope, e.OwnerId });
+            entity.HasIndex(e => e.KeyPrefix);
+            entity.HasIndex(e => e.RevokedAt).HasFilter("\"RevokedAt\" IS NULL");
         });
     }
 
@@ -545,6 +789,46 @@ internal static class TammaModelConfiguration
         _ = entity; _ = fixedTenantId; _ = tenantAccessor;
     }
 
+    /// <summary>
+    /// Converts <see cref="JsonDocument"/> properties to/from a JSON string
+    /// so that non-relational providers (notably <c>Microsoft.EntityFrameworkCore.InMemory</c>
+    /// used by Epic 28 tests) can materialise mentorship entities without
+    /// blowing up on the native jsonb type. On Postgres the column is still
+    /// declared as <c>jsonb</c> via <c>HasColumnType("jsonb")</c>; the
+    /// provider simply rewrites the conversion at the storage layer.
+    /// </summary>
+    private static readonly ValueConverter<JsonDocument?, string?> JsonDocumentConverter =
+        new(
+            v => v == null ? null : v.RootElement.GetRawText(),
+            v => string.IsNullOrWhiteSpace(v) ? null : JsonDocument.Parse(v, default));
+
+    /// <summary>
+    /// Explicitly excludes the 11 legacy-shared + 4 mentorship entities
+    /// from a <see cref="ModelBuilder"/>. Used by
+    /// <see cref="ControlPlaneDbContext"/> so that the DbSet declarations
+    /// (which exist for compile-time shim reasons) do NOT auto-register
+    /// the entity types with EF's convention-based discovery. The CP
+    /// model should contain exactly the 14 Doc 01 §1.2 tables.
+    /// </summary>
+    public static void IgnoreLegacyAndMentorshipEntities(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Ignore<AgentConfig>();
+        modelBuilder.Ignore<PromptOverride>();
+        modelBuilder.Ignore<ProviderHealth>();
+        modelBuilder.Ignore<ProviderDiagnostic>();
+        modelBuilder.Ignore<SanitizationRule>();
+        modelBuilder.Ignore<WorkflowDefinition>();
+        modelBuilder.Ignore<WorkflowInstance>();
+        modelBuilder.Ignore<Entities.DomainEvent>();
+        modelBuilder.Ignore<QueuedTask>();
+        modelBuilder.Ignore<EmailOutboxMessage>();
+        modelBuilder.Ignore<BudgetConfig>();
+        modelBuilder.Ignore<MentorshipSession>();
+        modelBuilder.Ignore<MentorshipEvent>();
+        modelBuilder.Ignore<JuniorDeveloper>();
+        modelBuilder.Ignore<Story>();
+    }
+
     public static void ConfigureMentorshipEntities(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<MentorshipSession>(entity =>
@@ -556,8 +840,10 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.JuniorId).HasColumnName("junior_id").IsRequired();
             entity.Property(e => e.CurrentState).HasColumnName("current_state").HasConversion<string>().IsRequired();
             entity.Property(e => e.PreviousState).HasColumnName("previous_state").HasConversion<string>();
-            entity.Property(e => e.Context).HasColumnName("context").HasColumnType("jsonb");
-            entity.Property(e => e.Variables).HasColumnName("variables").HasColumnType("jsonb");
+            entity.Property(e => e.Context).HasColumnName("context").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
+            entity.Property(e => e.Variables).HasColumnName("variables").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
             entity.Property(e => e.WorkflowInstanceId).HasColumnName("workflow_instance_id");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
@@ -581,7 +867,8 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("uuid_generate_v4()");
             entity.Property(e => e.SessionId).HasColumnName("session_id").IsRequired();
             entity.Property(e => e.EventType).HasColumnName("event_type").IsRequired();
-            entity.Property(e => e.EventData).HasColumnName("event_data").HasColumnType("jsonb");
+            entity.Property(e => e.EventData).HasColumnName("event_data").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
             entity.Property(e => e.StateFrom).HasColumnName("state_from").HasConversion<string>();
             entity.Property(e => e.StateTo).HasColumnName("state_to").HasConversion<string>();
             entity.Property(e => e.Trigger).HasColumnName("trigger");
@@ -602,8 +889,10 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.SlackId).HasColumnName("slack_id");
             entity.Property(e => e.GitHubUsername).HasColumnName("github_username");
             entity.Property(e => e.SkillLevel).HasColumnName("skill_level").HasDefaultValue(1);
-            entity.Property(e => e.Preferences).HasColumnName("preferences").HasColumnType("jsonb");
-            entity.Property(e => e.LearningPatterns).HasColumnName("learning_patterns").HasColumnType("jsonb");
+            entity.Property(e => e.Preferences).HasColumnName("preferences").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
+            entity.Property(e => e.LearningPatterns).HasColumnName("learning_patterns").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
             entity.Property(e => e.TotalSessions).HasColumnName("total_sessions").HasDefaultValue(0);
             entity.Property(e => e.SuccessfulSessions).HasColumnName("successful_sessions").HasDefaultValue(0);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
@@ -620,8 +909,10 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Title).HasColumnName("title").IsRequired();
             entity.Property(e => e.Description).HasColumnName("description");
-            entity.Property(e => e.AcceptanceCriteria).HasColumnName("acceptance_criteria").HasColumnType("jsonb");
-            entity.Property(e => e.TechnicalRequirements).HasColumnName("technical_requirements").HasColumnType("jsonb");
+            entity.Property(e => e.AcceptanceCriteria).HasColumnName("acceptance_criteria").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
+            entity.Property(e => e.TechnicalRequirements).HasColumnName("technical_requirements").HasColumnType("jsonb")
+                .HasConversion(JsonDocumentConverter);
             entity.Property(e => e.Priority).HasColumnName("priority").HasDefaultValue(3);
             entity.Property(e => e.Complexity).HasColumnName("complexity").HasDefaultValue(3);
             entity.Property(e => e.EstimatedHours).HasColumnName("estimated_hours");

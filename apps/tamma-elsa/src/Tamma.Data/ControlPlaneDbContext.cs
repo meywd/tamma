@@ -29,14 +29,7 @@ public class ControlPlaneDbContext : DbContext
     {
     }
 
-    // Existing mentorship entities (global registry — shared across tenants,
-    // lives on CP until mentorship becomes a per-tenant feature).
-    public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
-    public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
-    public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
-    public DbSet<Story> Stories => Set<Story>();
-
-    // ── Control-plane entities ──
+    // ── Control-plane entities (Doc 01 §1.2 — exactly 14 tables) ──
     public DbSet<User> Users => Set<User>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -48,15 +41,40 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
 
-    // ── Legacy-shared tables (DEPRECATED) ──
+    // ── Control-plane platform tables (Story 28-6 + 28-10) ──
     //
-    // These DbSets cover tenant-scoped entities that still live on the same
-    // physical database during the Epic 28 transition. They are exposed here
-    // solely so migrations (which run against ControlPlaneDbContext as the
-    // owning context) still see the complete schema graph. Application code
-    // MUST NOT read/write these through ControlPlaneDbContext — use
-    // ITenantDbContextFactory instead. The DbSet surface will move to
-    // TenantDbContext exclusively once Story 28-1 physical-DB split lands.
+    // These three tables (platform_events, platform_queued_tasks,
+    // platform_email_outbox) own cross-tenant / pre-tenant-resolution work.
+    // They never live on a TenantDbContext — they are the control plane's
+    // durable scratchpad for lifecycle events, installation-routing tasks,
+    // and system-scope mail that must flow before or after a tenant DB
+    // exists. The Plans table owns the subscription-plan catalogue.
+    public DbSet<Plan> Plans => Set<Plan>();
+    public DbSet<PlatformEvent> PlatformEvents => Set<PlatformEvent>();
+    public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
+    public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
+
+    // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
+    //
+    // These DbSets cover per-tenant business data that still lives on the
+    // shared central Postgres until Story 28-1's db-per-tenant rollout
+    // completes. They are exposed here ONLY so the eleven legacy-shared
+    // repositories (AgentConfigRepository, PromptRepository, etc.) that
+    // take <see cref="ControlPlaneDbContext"/> can still compile during
+    // the transition — they are scoped to the <c>TenantId IS NULL</c>
+    // platform-default row family (Doc 01 §1.4 — "system defaults"
+    // carry no tenant scope; tenant-scoped data goes through
+    // <see cref="ITenantDbContextFactory"/>).
+    //
+    // <para><b>Mapping:</b> The entity types are NOT included in the CP
+    // model (<see cref="OnModelCreating"/> does not call
+    // <c>ConfigureTenantEntities</c>). Query attempts against these
+    // DbSets will throw — by design. Model-shape tests
+    // (<c>ControlPlaneDbContextModelTests.Model_Has14_ControlPlaneEntities</c>)
+    // enforce the 14-entity invariant. The DbSet surface is retained as a
+    // compile-time shim only; repositories must migrate fully onto
+    // <see cref="ITenantDbContextFactory"/> or onto the platform-plane
+    // tables before Story 28-1 ships.</para>
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
@@ -68,12 +86,21 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
     public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
+    public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
+    public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
+    public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
+    public DbSet<Story> Stories => Set<Story>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
         TammaModelConfiguration.ConfigureMentorshipEntities(modelBuilder);
-        TammaModelConfiguration.ConfigureControlPlaneEntities(modelBuilder);
+        TammaModelConfiguration.ConfigureControlPlaneEntities(
+            modelBuilder, includeTenantShadowColumns: true);
+        // Legacy tables still live on the shared central DB during the
+        // Epic 28 transition; repos access them through this context
+        // with explicit tenant predicates. Once Story 28-1's db-per-tenant
+        // rollout ships, these configurations move to TenantDbContext.
         TammaModelConfiguration.ConfigureTenantEntities(modelBuilder);
     }
 }
