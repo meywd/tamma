@@ -25,8 +25,15 @@ public static class Permissions
         ["apikeys:manage"] = ["admin", "owner"],
     };
 
-    public static bool HasPermission(string role, string permission)
+    public static bool HasPermission(string? role, string? permission)
     {
+        // Story 16-5 audit: defensive null handling. Callers (RoleCheck endpoint,
+        // PermissionHandler) already short-circuit when the role claim is missing,
+        // but HasPermission itself must not throw on null inputs — failing
+        // closed (return false) is the safe default for an authz primitive.
+        if (role is null || permission is null)
+            return false;
+
         if (!RoleHierarchy.TryGetValue(role, out var roleRank))
             return false;
 
@@ -43,8 +50,9 @@ public static class Permissions
         return roleRank >= minRank;
     }
 
-    public static string[] GetRolePermissions(string role)
+    public static string[] GetRolePermissions(string? role)
     {
+        if (role is null) return Array.Empty<string>();
         return Matrix
             .Where(kv => HasPermission(role, kv.Key))
             .Select(kv => kv.Key)
