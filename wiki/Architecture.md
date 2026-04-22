@@ -1,824 +1,331 @@
-# Tamma System Architecture
+# Tamma Architecture Overview
 
-_Last updated: 2026-04-22._
+Tamma's architecture is a **dual-stack** system: TypeScript (Node.js 22 LTS) for AI providers, CLI, API, and dashboard; C# (.NET 8) for ELSA workflow orchestration. The two stacks communicate via HTTP APIs and shared PostgreSQL storage.
 
-This page is the definitive map of the running system. Every claim is grounded in code paths you can open. The page is heavy on **"where it lives"** — pair it with the [Epic pages](Epics.md) for "why it exists" and the sprint stories for "how far we got."
+## High-Level Architecture
 
-Tamma is a **dual-stack** platform:
+```
+CLI / Web / Mobile / GitHub / GitLab / Gitea
+                    |
+               NORMALIZE TO EVENT
+                    |
+                    v
++----------------------------------------------------------+
+|  TAMMA ENGINE (TypeScript)                                |
+|                                                           |
+|  +-- @tamma/cli ----------+  +-- @tamma/api -----------+ |
+|  | tamma start (CLI)      |  | Fastify REST API        | |
+|  | tamma server (HTTP)    |  | GitHub OAuth             | |
+|  | tamma api (SaaS)       |  | Webhook handlers         | |
+|  +------------------------+  | Settings/Admin routes     | |
+|                               | Knowledge base routes     | |
+|  +-- @tamma/orchestrator -+  | SaaS routes (LLM proxy)  | |
+|  | Engine brain            |  +-------------------------+ |
+|  | ElsaClient bridge       |                              |
+|  | SaaS coordinator        |  +-- @tamma/dashboard ----+ |
+|  +------------------------+  | React SPA (Vite)         | |
+|                               | Admin panel              | |
+|  +-- @tamma/providers ----+  | Settings management      | |
+|  | Claude Code (CLI agent) |  | Knowledge base UI        | |
+|  | OpenCode (CLI agent)    |  +-------------------------+ |
+|  | OpenRouter (LLM API)    |                              |
+|  | Zen MCP (LLM API)       |                              |
+|  | Role-based resolver      |                              |
+|  | Provider chain + circuit |                              |
+|  | breaker health tracking  |                              |
+|  +------------------------+                              |
+|                                                           |
+|  +-- @tamma/shared -------+  +-- @tamma/intelligence --+ |
+|  | Content sanitizer       |  | Codebase indexer        | |
+|  | URL validator            |  | Vector DB integration   | |
+|  | Action gating            |  | RAG pipeline            | |
+|  | Secure fetch             |  | Knowledge base          | |
+|  | Diagnostics queue        |  | Context aggregator      | |
+|  | Agent config types       |  +------------------------+ |
+|  +------------------------+                              |
+|                                                           |
+|  +-- @tamma/platforms ----+  +-- @tamma/mcp-client ----+ |
+|  | IGitPlatform interface  |  | MCP protocol client     | |
+|  | GitHub implementation   |  | Tool interceptor chain  | |
+|  | (GitLab, Gitea planned) |  | Transport layer         | |
+|  +------------------------+  +------------------------+ |
+|                                                           |
+|  +-- @tamma/cost-monitor -+  +-- @tamma/gates ---------+ |
+|  | Cost calculator         |  | Permission enforcer     | |
+|  | Usage tracker            |  | Violation recorder      | |
+|  | Alert manager            |  | Tool/command matchers   | |
+|  +------------------------+  +------------------------+ |
+|                                                           |
+|  +-- @tamma/scrum-master -+  +-- @tamma/observability -+ |
+|  | Task supervisor          |  | Pino structured logger  | |
+|  | Approval workflow        |  +------------------------+ |
+|  | Learning capture          |                              |
+|  | Agent coordinator         |                              |
+|  +------------------------+                              |
++----------------------------------------------------------+
+                    |
+          HTTP API (ElsaClient)
+                    |
+                    v
++----------------------------------------------------------+
+|  ELSA WORKFLOW ENGINE (C# / .NET 8)                       |
+|                                                           |
+|  +-- Tamma.ElsaServer ----+  +-- Tamma.Studio ---------+ |
+|  | 20+ code-first workflows|  | Custom Blazor WASM      | |
+|  | Workflow seeder          |  | Tamma-branded UI        | |
+|  | REST API                 |  | UI hint handlers        | |
+|  +------------------------+  +------------------------+ |
+|                                                           |
+|  +-- Tamma.Activities ----+  +-- Tamma.Core -----------+ |
+|  | ADL (issue selection,   |  | Enums (MentorshipState) | |
+|  |   branch, PR, merge)   |  | Models                  | |
+|  | AI (Claude, context,    |  +------------------------+ |
+|  |   suggestions)          |                              |
+|  | Assessment              |  +-- Tamma.Data -----------+ |
+|  | Blocker diagnosis       |  | DB context               | |
+|  | Context gathering       |  | Migrations               | |
+|  | Debug pipeline          |  +------------------------+ |
+|  | Integration (GitHub,    |                              |
+|  |   Slack, Jira, Email)  |  +-- Tamma.Api ------------+ |
+|  | LLM Call (inline,       |  | .NET REST API            | |
+|  |   tools, budget,       |                              |
+|  |   circuit breaker)     |                              |
+|  | Mentorship              |                              |
+|  | Review                  |                              |
+|  | Security                |                              |
+|  | TDD / Testing           |                              |
+|  | Tool Execution          |                              |
+|  +------------------------+                              |
+|                                                           |
+|  Code-First Workflows:                                    |
+|  - AdlOrchestratorWorkflow (main ADL loop)               |
+|  - SingleIssueCycleWorkflow (full issue lifecycle)        |
+|  - LlmCallWorkflow (provider chain + budget + circuit)   |
+|  - MentorshipWorkflow (28-state mentorship)              |
+|  - TddWorkflow, TddWithDebugRetryWorkflow               |
+|  - TestingWorkflow, CiWithDebugRetryWorkflow             |
+|  - ContextGatheringWorkflow                               |
+|  - PlanGenerationWorkflow                                 |
+|  - CodeReviewWorkflow, ReviewFixWorkflow                  |
+|  - BranchCreationWorkflow, PullRequestWorkflow            |
+|  - MergeWorkflow, MergeApprovalWorkflow                  |
+|  - AssessmentWorkflow, BlockerDiagnosisWorkflow           |
+|  - DebuggingWorkflow                                      |
++----------------------------------------------------------+
+                    |
+                    v
++----------------------------------------------------------+
+|  INFRASTRUCTURE                                           |
+|                                                           |
+|  PostgreSQL 17  |  RabbitMQ  |  ChromaDB  |  OpenSearch  |
+|  (data, events, |  (message  |  (vector   |  (log        |
+|   ELSA state)   |   broker)  |   store)   |   aggregation)|
+|                                                           |
+|  nginx-proxy    |  Cloudflare DNS                         |
+|  (reverse proxy |  (app/api/elsa.tamma.dev, Full SSL)    |
+|   + dashboard)  |                                         |
++----------------------------------------------------------+
+```
 
-- **C# / .NET 8** (`apps/tamma-elsa/`) hosts the workflow engine, the REST API, persistent durable state, and every auth / tenancy / secret plane added since Epic 18.
-- **TypeScript / Node 22 LTS** (`packages/`, `apps/tamma-engine`, `apps/wiki-site`, `apps/marketing-site`) hosts AI-provider abstractions, CLI agents, the Ink CLI, the React dashboard, a Fastify intelligence sidecar, the wiki/marketing sites, and the engine worker loop.
+## Core Components
 
-The two stacks talk over HTTP via a narrow seam (`packages/orchestrator/src/elsa-client.ts` + `apps/tamma-elsa/src/Tamma.Api/Services/KnowledgeBase/IntelligenceHttpClient.cs`); nothing shares in-process state.
+### 1. TypeScript Layer
+
+#### AI Provider Abstraction (`@tamma/providers`)
+
+**Interface-Based Design:**
+- `IAIProvider` interface defines standard LLM operations (synchronous and streaming messages)
+- `IAgentProvider` interface defines task-based agent operations (tool-calling CLI agents)
+- `ICLIAgentProvider` for providers that manage their own subprocess execution
+
+**Implemented Providers:**
+
+| Provider | Class | Type | Status |
+|----------|-------|------|--------|
+| Anthropic Claude Code | `ClaudeAgentProvider` | CLI agent (IAgentProvider) | Implemented |
+| OpenCode | `OpenCodeProvider` | CLI agent (IAgentProvider) | Implemented |
+| OpenRouter | `OpenRouterProvider` | LLM provider (IAIProvider) | Implemented |
+| Zen MCP | `ZenMCPProvider` | LLM provider (IAIProvider) | Implemented |
+
+LLM providers are auto-wrapped via `wrapAsAgent()` to satisfy the `IAgentProvider` contract.
+
+#### Config-Driven Multi-Agent System (Epic 9)
+
+See [Epic 9 wiki page](Epics/Epic-9-Agent-Management) for full details. Key components:
+- `RoleBasedAgentResolver` -- maps workflow phases to agent roles to provider chains
+- `ProviderChain` -- ordered fallback with health and budget checks
+- `ProviderHealthTracker` -- three-state circuit breaker per provider+model
+- `AgentPromptRegistry` -- 6-level resolution chain with template interpolation
+- `AgentProviderFactory` -- creates providers by name from configuration
+
+#### Security Layer (`@tamma/shared/security`)
+
+Defense-in-depth with four components:
+- **ContentSanitizer**: HTML stripping, zero-width char removal, prompt injection detection (4 categories), NFKD normalization
+- **URL Validator**: Numeric octet parsing for RFC 1918 ranges, IPv6 support, SSRF protection
+- **Action Gating**: Shell command blocklist with normalization (no regex, no ReDoS risk)
+- **Secure Fetch**: SSRF-protected HTTP with redirect re-validation, Content-Type allowlist, size limits
+
+#### Context & Knowledge (`@tamma/intelligence`)
+
+- **Codebase Indexer**: File discovery, TypeScript-aware chunking, embedding service (OpenAI, Cohere, Ollama)
+- **Vector Store**: Base interface with 5 providers (ChromaDB, pgvector, Pinecone, Qdrant, Weaviate)
+- **RAG Pipeline**: Query processing, retrieval, ranking, assembly with hybrid search
+- **Knowledge Base**: Recommendations, prohibitions, learnings with pattern matching and relevance ranking
+- **Context Aggregator**: Multi-source context assembly with token budget management
+
+#### MCP Client (`@tamma/mcp-client`)
+
+- Full MCP protocol client with stdio, SSE, and WebSocket transports
+- Connection pooling and health monitoring
+- `ToolInterceptorChain` with pre/post hooks for sanitization and URL validation
+- Server registry and capability caching
+
+#### Git Platform (`@tamma/platforms`)
+
+- `IGitPlatform` interface with GitHub implementation
+- Operations: PR creation, comments, merge, issue management, branch creation, CI triggering
+- Rate limiting, pagination, error mapping
+
+#### Cost Monitoring (`@tamma/cost-monitor`)
+
+- Usage tracking per provider+model
+- Cost calculation with configurable pricing
+- Limit management with budget alerts
+- File and in-memory storage backends
+
+#### Permissions (`@tamma/gates`)
+
+- Permission enforcer with tool, command, and glob matchers
+- Violation recording and alerting
+- Configurable default permission sets
+
+#### Scrum Master (`@tamma/scrum-master`)
+
+- Task supervisor for agent coordination
+- Approval workflow management
+- Learning capture from completed tasks
+- Alert management
+
+### 2. C# / ELSA Layer
+
+The ELSA workflow engine (apps/tamma-elsa/) provides the orchestration backbone. ELSA 3 is a .NET workflow engine that supports code-first workflow definitions, visual designer (ELSA Studio), persistence, and bookmarks for long-running processes.
+
+**Activity Categories:**
+
+| Category | Activities | Purpose |
+|----------|-----------|---------|
+| ADL | SelectIssue, CreateBranch, CreatePR, MergePR, WaitForApproval, AnalyzeReview, CheckLimits | Autonomous Development Loop steps |
+| AI | ClaudeAnalysis, ContextGathering, SuggestionGenerator | AI-powered analysis |
+| Assessment | GenerateQuestions, DeliverQuestions, WaitForResponse, AnalyzeResponse, ClassifyResult, UpdateSkillProfile | Developer skill assessment |
+| Blocker | ClassifyBlocker, CollectCIStatus, CollectGitActivity, CollectInactivity, DetectProgress, EscalateToSenior | Blocker diagnosis and resolution |
+| Context | FetchFileContents, FetchRecentCommits, FetchSessionHistory, FetchSimilarPatterns, FetchStoryMetadata, FetchTestResults, AssembleContext, ApplyBudget | Context gathering pipeline |
+| Debug | CollectErrorMessages, CollectGitHistory, CollectRelevantCode, CollectReproductionSteps, CollectTestResults, ClassifyDebugContext, SelectHypothesis, RefineHypothesis, AIDiagnosis, WriteRegressionTest, CompileDebugReport, RecordResolution | Systematic debugging pipeline |
+| Integration | GitHub, Slack, Jira, Email | External service integration |
+| LlmCall | CallLlm, CallLlmInline, CheckBudget, CheckCircuitBreaker, RecordDiagnostics, ResolveAgentConfig, ResolveLlmPrompt, ResolveTools | LLM interaction with agentic tool loop |
+| Mentorship | AssessJuniorCapability, MonitorImplementation, DiagnoseBlocker, ProvideGuidance, QualityGateCheck, CodeReview, MergeComplete | Mentorship workflow steps |
+| Review | (via ADL) AnalyzeReview, ApplyReviewFixes | Code review cycle |
+| Security | (in LlmCall) CommandValidator, PathValidator | Security enforcement in workflows |
+| TDD / Testing | (via workflows) TDD cycle management, test execution | Test-first development |
+| Tool Execution | FileRead, FileWrite, SearchCode, ShellExecute, RunTests, GitOperations, ToolExecutorRegistry, ContextCompactor, TokenEstimator | In-process tool execution for agentic LLM calls |
+| Agent Dispatch (Epic 19) | DispatchAgentWorkflow, MonitorAgentWorkflow, CollectAgentResults, ExecuteAgent | Out-of-process agent execution via `IAgentExecutor` (Local subprocess or GitHub Actions). Webhook-mode monitor resume via `WebhookSignalRegistry`; tenant-scoped `install:{id}:` prefix. |
+
+### 3. Infrastructure
+
+#### Docker Compose Stack
+
+The production deployment runs on Hetzner CPX42 (16GB RAM):
+
+| Service | Technology | Memory | Purpose |
+|---------|-----------|--------|---------|
+| PostgreSQL | 17 | 2GB | Data, events, ELSA state |
+| RabbitMQ | Latest | 512MB | Message broker |
+| ChromaDB | Latest | 1GB | Vector store |
+| elsa-server | .NET 8 | 1GB | ELSA workflow engine |
+| tamma-api-dotnet | .NET 8 | 512MB | .NET REST API |
+| tamma-api | Node.js 22 | 512MB | Fastify REST API |
+| tamma-engine | Node.js 22 | 1GB | TypeScript engine |
+| tamma-dashboard | nginx | 256MB | React SPA |
+| elsa-studio | nginx | 128MB | Custom Blazor WASM |
+| nginx-proxy | nginx | 128MB | Reverse proxy |
+| OpenSearch (opt-in) | 2.x | 3GB | Log aggregation |
+
+Total: ~7.1GB without observability, ~11.8GB with OpenSearch.
+
+#### CI/CD Pipelines (GitHub Actions)
+
+| Workflow | Purpose |
+|----------|---------|
+| ci.yml | Build, lint, test on PRs |
+| deploy.yml | Deploy to VPS via SSH |
+| docker-publish.yml | Build and push Docker images to GHCR |
+| docker-smoke-test.yml | Smoke test Docker Compose stack |
+| release.yml | Create GitHub releases |
+| tamma-worker.yml | GitHub Actions worker template |
+| codeql.yml | Code security scanning |
 
 ---
 
-## 1. Three deployment modes
+## Deployment Modes (Three-Mode Architecture)
 
-Tamma ships the same codebase under three operational topologies. `IAgentExecutor` (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/IAgentExecutor.cs`) and `AgentExecutorFactory` (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/AgentExecutorFactory.cs`) pick the execution surface at runtime from: explicit override → `TAMMA_AGENT_MODE` env → `Agent:ExecutorMode` config → auto-detection (GitHub-Actions when `GitHub:AppId` + `GitHub:PrivateKey` are set, Local otherwise).
-
-```
- Mode                 Processes                                DBs                         Executor
- ───────────────────  ───────────────────────────────────────  ──────────────────────────  ────────────────────────
- CLI (standalone)     tamma start (Ink CLI)                    none                        LocalExecutor
-                      tamma-elsa/ElsaServer (embedded / local)  (or ephemeral tamma_dev pg)
-
- Self-hosted SaaS     tamma-api (.NET 8)                       tamma (central Postgres)    GitHubActionsExecutor
- (single-tenant)      elsa-server (.NET 8)                     tamma_control (CP, opt)     or LocalExecutor
-                      tamma-engine (TS Node 22)                per-tenant (Epic 28 only)
-                      tamma-dashboard (nginx + React)
-                      intelligence-server (TS Fastify)
-                      nginx-proxy / oauth2-proxy
-                      postgres + rabbitmq + chromadb
-                      opensearch (optional, profile=observability)
-
- Multi-tenant SaaS    tamma-api                                tamma_control (CP)          GitHubActionsExecutor
- (db-per-tenant)      elsa-server                              tenant_<guid> × N (TP)      (agent code runs on
-                      intelligence-server                      (Cranl / Hetzner / CF / BYO  tenant's own Actions
-                      nginx-proxy                               per Epic 30 backend)        runners — never on the
-                      + every service above                                                  control plane)
-```
-
-| Facet                | CLI                             | Self-hosted SaaS                             | Multi-tenant SaaS                                    |
-| -------------------- | ------------------------------- | -------------------------------------------- | ---------------------------------------------------- |
-| Entry point          | `packages/cli/src/index.tsx`    | `apps/tamma-elsa/src/Tamma.Api/Program.cs`   | Same as self-hosted + `Cranl:ApiKey` set             |
-| DB layout            | optional dev Postgres           | Central Postgres (single schema)             | `tamma_control` CP + per-tenant DBs (Epic 28)        |
-| Tenant isolation     | none (single user)              | Epic 17 RLS scaffold (dormant / superseded)  | Epic 28 DB-per-tenant (authoritative)                |
-| Agent execution      | `LocalExecutor` subprocess      | `LocalExecutor` or `GitHubActionsExecutor`   | Only `GitHubActionsExecutor` (user code stays on their runner) |
-| Provisioning         | n/a                             | Seed schema at startup                       | `ITenantInfrastructureProvider` (Epic 30)            |
-| GitHub App required  | No                              | Optional (LocalExecutor fallback)            | Yes (mandatory for dispatch)                         |
-
-CLI startup path: `packages/cli/src/index.tsx` → `packages/cli/src/commands/start.tsx` / `server.ts` / `api.ts`. The LocalExecutor shell-out protocol is implemented on both sides: C# writes `exec-request-<sessionId>.json`, invokes `packages/cli/src/commands/execute-agent.ts`, and collects `exec-result-<sessionId>.json`. See `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/LocalExecutor.cs` for the full protocol comment.
-
----
-
-## 2. Component map
-
-Every running process. Cited paths are the concrete entry points.
-
-### 2.1 C# plane (`apps/tamma-elsa/`)
-
-| Service              | Code home                                                        | Purpose                                                                 | Key config keys                                                |
-| -------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `tamma-api`          | `apps/tamma-elsa/src/Tamma.Api/Program.cs`                       | REST API: auth, tenants, engine callbacks, admin, KB proxy, SaaS        | `ConnectionStrings:TammaDb`, `:TammaAppDb`, `:ControlPlane`; `Jwt:Secret`; `GitHub:AppId`, `:PrivateKey`, `:WebhookSecret`; `Dashboard:Url`; `TAMMA_SECRET_STORE_KEK_PRIMARY` |
-| `elsa-server`        | `apps/tamma-elsa/src/Tamma.ElsaServer/Program.cs`                | Elsa 3.5.3 workflow engine + 35 code-first workflows + agent seeder    | `ConnectionStrings:DefaultConnection`; `Elsa:Identity:SigningKey`; `Elsa:Identity:AdminUser:Password`; `ELSA_SEED_FORCE` |
-| `elsa-studio`        | `apps/tamma-elsa/src/Tamma.Studio/` (+ docker nginx wrapper)      | Blazor WASM workflow designer                                           | `ELSASERVER__URL`; `ELSA_ADMIN_PASSWORD`                       |
-| `Tamma.Activities`   | `apps/tamma-elsa/src/Tamma.Activities/`                          | Activities used by workflows (ADL, LlmCall, Tools, AgentDispatch, etc.) | (library — no config of its own)                               |
-| `Tamma.Data`         | `apps/tamma-elsa/src/Tamma.Data/`                                | EF Core DbContexts + migrations + repositories                          | (library)                                                      |
-| `Tamma.Core`         | `apps/tamma-elsa/src/Tamma.Core/`                                | Shared entities / enums / interfaces (MentorshipSession, etc.)          | (library)                                                      |
-
-### 2.2 TypeScript plane
-
-| Service                        | Code home                                                    | Purpose                                                                  | Key config                                    |
-| ------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------ | --------------------------------------------- |
-| `tamma-engine`                 | `apps/tamma-engine/src/index.ts`                             | Autonomous issue-processing loop (boots into a worker that polls work)   | `DATABASE_URL`, `TAMMA_API_URL`, `GITHUB_APP_*` |
-| `intelligence-server`          | `packages/intelligence-server/src/server.ts`                 | Fastify sidecar exposing `/kb/*` so the C# API can delegate KB endpoints | `INTELLIGENCE_PORT`, `CHROMADB_URL`           |
-| `tamma-dashboard`              | `packages/dashboard/src/index.tsx` → Vite SPA                | React admin UI (nginx-served static bundle)                              | `VITE_API_URL` (build-time)                   |
-| `tamma-cli`                    | `packages/cli/src/index.tsx` (Ink 5 React CLI)               | `tamma start`, `tamma server`, `tamma api`, `tamma execute-agent`, etc.  | `~/.tamma/config.json` layered config         |
-| `wiki-site`                    | `apps/wiki-site/src/worker.ts` + `App.tsx`                   | Docs site (Vite SPA on Cloudflare Workers at wiki.tamma.dev)             | `wrangler.jsonc`                              |
-| `marketing-site`               | `apps/marketing-site/src/index.ts`                           | Landing site (Cloudflare Worker + KV for signups at tamma.dev)           | `wrangler.toml`                               |
-| Providers (`@tamma/providers`) | `packages/providers/src/`                                    | `IAgentProvider` / `IAIProvider` impls (Claude Code, OpenCode, OpenRouter, Zen MCP) | n/a (invoked via config)                      |
-| Platforms (`@tamma/platforms`) | `packages/platforms/src/github/`                             | `IGitPlatform` impl — Octokit-based PR / issue / branch ops              | GitHub token / App                            |
-| Orchestrator                   | `packages/orchestrator/src/engine.ts` + `elsa-client.ts`      | In-process engine brain + HTTP bridge to ElsaServer                      | `ELSA_SERVER_URL`, `ELSA_API_KEY`             |
-
-### 2.3 Workflows (`apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/`)
-
-Thirty-five code-first workflows (all are `WorkflowBase` subclasses registered via `elsa.AddWorkflowsFrom<LlmCallWorkflow>()` in `ElsaServer/Program.cs:112`):
-
-| Workflow                                   | Entry role                                                           |
-| ------------------------------------------ | -------------------------------------------------------------------- |
-| `AdlOrchestratorWorkflow`                  | Main autonomous-development loop                                     |
-| `SingleIssueCycleWorkflow`                 | End-to-end lifecycle of a single issue (refactored to call `ExecuteAgentActivity`) |
-| `LlmCallWorkflow`                          | See §7.5                                                             |
-| `BranchCreationWorkflow` / `PullRequestWorkflow` / `MergeWorkflow` / `MergeApprovalWorkflow` | Git platform ADL steps                              |
-| `CodeReviewWorkflow` / `ReviewFixWorkflow` | Review cycle                                                         |
-| `TddWorkflow` / `TddWithDebugRetryWorkflow`| TDD cycle                                                            |
-| `TestingWorkflow` / `CiWithDebugRetryWorkflow` | Test + CI retry loop                                             |
-| `ContextGatheringWorkflow`                 | Multi-source context assembly                                        |
-| `PlanGenerationWorkflow` / `PlanReviewWorkflow` | Planning + human review                                         |
-| `AssessmentWorkflow` / `BlockerDiagnosisWorkflow` / `DebuggingWorkflow` | Diagnostic workflows                          |
-| `DeploymentPipelineWorkflow`               | Deploy pipeline                                                      |
-| `IssueTriageWorkflow` / `TriageContextGatheringWorkflow` / `TriagePanelReviewWorkflow` / `TriagePODecisionWorkflow` / `TriageItemCycleWorkflow` | Triage cascade |
-| `MentorshipWorkflow`                       | 28-state mentorship state machine                                    |
-| `TaskCreationWorkflow` / `TaskReviewWorkflow` / `TestCaseCreationWorkflow` | Upstream work-item cycle                             |
-| `UpdateIssueStatusWorkflow`                | Status mirror back to the Git platform                               |
-| `CreateTenantWorkflow` / `DeleteTenantWorkflow` | Tenant lifecycle (composed from `Tamma.Activities/TenantLifecycle/`) |
-
-Activity categories (`apps/tamma-elsa/src/Tamma.Activities/`):
-
-| Category        | Dir                 | Activity count / notable members                                                              |
-| --------------- | ------------------- | --------------------------------------------------------------------------------------------- |
-| ADL             | `ADL/`              | 23 activities — SelectWorkItem, CreateBranch, CreatePR, MergePR, WaitForApproval, …            |
-| Agent Dispatch  | `AgentDispatch/`    | 4 activities (Dispatch / Monitor / Collect / ExecuteAgent) + executors + WebhookSignalRegistry |
-| AI              | `AI/`               | ClaudeAnalysis, ContextGathering, SuggestionGenerator                                          |
-| Assessment      | `Assessment/`       | Developer skill assessment                                                                     |
-| Blocker         | `Blocker/`          | ClassifyBlocker, DetectProgress, EscalateToSenior                                              |
-| Context         | `Context/`          | FetchFileContents, FetchRecentCommits, AssembleContext, ApplyBudget                            |
-| Debug           | `Debug/`            | 12 activities — Collect*, SelectHypothesis, AIDiagnosis, WriteRegressionTest, …                |
-| Integration     | `Integration/`      | GitHub, Slack, Jira, Email                                                                     |
-| LlmCall         | `LlmCall/`          | 9 activities — see §7.5                                                                        |
-| Mentorship      | `Mentorship/`       | AssessJuniorCapability, ProvideGuidance, QualityGateCheck, …                                   |
-| Review          | `Review/`           | (via ADL) AnalyzeReview, ApplyReviewFixes                                                      |
-| Security        | `Security/`         | `ContentSanitizer`, `ErrorRedactor`, `ActionGate`, `ToolCallValidator`, `ProviderAllowlist`    |
-| TDD / Testing   | `TDD/`, `Testing/`  | TDD cycle management, test execution                                                           |
-| Tool Execution  | `ToolExecution/`    | `ParallelToolExecutor`, `IFileSystemTool`, `IToolLoopEventSink`                                |
-| Tenant Lifecycle| `TenantLifecycle/`  | 15 activities — BuildConnectionString, CreateDatabase, Encrypt, Migrate, Seed, WarmPool, …      |
-| Code Index      | `CodeIndex/`        | Codebase indexing hooks                                                                        |
-| Core            | `Core/`             | Shared primitives                                                                              |
-
-### 2.4 REST API surface (`apps/tamma-elsa/src/Tamma.Api/Program.cs:728-1080`)
-
-~170 routes grouped:
-
-| Group                | Prefix                           | Policy                   | File                                   |
-| -------------------- | -------------------------------- | ------------------------ | -------------------------------------- |
-| Health               | `/api/health`, `/health*`        | none                     | `Endpoints/HealthEndpoints.cs`         |
-| Auth                 | `/api/v1/auth/*`, `/api/auth/*`  | mostly none + member     | `Endpoints/AuthEndpoints.cs` (982 lines) |
-| Admin                | `/api/admin/*`                   | AdminAccess / OwnerAccess | `Endpoints/AdminEndpoints.cs`          |
-| Admin analytics      | `/api/admin/analytics/*`         | OwnerAccess              | `Services/Analytics/`                  |
-| Admin tenant provisioning | `/api/admin/tenants/*`      | OwnerAccess              | `Endpoints/AdminEndpoints.cs` + `Services/Provisioning/` |
-| Admin KEK rotation   | `/api/admin/kek/rotate/*`        | OwnerAccess              | `Endpoints/KekRotationEndpoints.cs`    |
-| Orgs / Tenants       | `/api/v1/orgs/*`                 | MemberAccess + membership filter | `Endpoints/OrgEndpoints.cs` (844 lines) |
-| Onboarding wizard    | `/api/v1/onboarding/*`           | MemberAccess             | `Endpoints/OnboardingEndpoints.cs`     |
-| Agents config        | `/api/v1/agents/*`               | SettingsView / Manage    | `Endpoints/AgentEndpoints.cs`          |
-| Prompts              | `/api/prompts/*`                 | SettingsView / Manage    | `Endpoints/PromptEndpoints.cs`         |
-| Convention templates | `/api/convention-templates/*`    | none                     | `Endpoints/ConventionEndpoints.cs`     |
-| Config               | `/api/config/*`                  | SettingsView / Manage    | `Endpoints/SettingsEndpoints.cs`       |
-| Providers            | `/api/providers/*`               | SettingsView / Manage    | `Endpoints/ProviderEndpoints.cs`       |
-| Engine               | `/api/engine/*`                  | WorkflowsView / Manage   | `Endpoints/EngineEndpoints.cs`         |
-| Workflows            | `/api/workflows/*`               | WorkflowsView / Manage / Delete | `Endpoints/WorkflowEndpoints.cs` |
-| GitHub App           | `/api/github/webhooks`, `/api/github/callback` | rate-limited only | `Endpoints/GitHubEndpoints.cs` |
-| SaaS (API key)       | `/api/v1/llm/chat`, `/api/v1/workflows/*/*` | API key auth | `Endpoints/SaaSEndpoints.cs`           |
-| Dashboard            | `/api/dashboard/*`               | DashboardView            | `Endpoints/DashboardEndpoints.cs`      |
-| Knowledge base       | `/api/kb/*` (30 routes)          | SettingsView / Manage    | `Endpoints/KbEndpoints.cs` → `IntelligenceHttpClient` |
-
-### 2.5 Infrastructure
-
-| Service        | Image                                       | Purpose                                    | Where configured                                         |
-| -------------- | ------------------------------------------- | ------------------------------------------ | -------------------------------------------------------- |
-| postgres       | `postgres:16-alpine`                         | Primary data store, Elsa runtime, events   | `docker/docker-compose.yml` + `docker/init-db.sql`       |
-| rabbitmq       | `rabbitmq:3.13-management-alpine`           | Message broker (Elsa optional bus)         | `docker/docker-compose.yml`                              |
-| chromadb       | `chromadb/chroma:0.6.3`                     | Vector store for `intelligence-server`     | `docker/docker-compose.yml`                              |
-| opensearch     | `opensearchproject/opensearch:2.19.0`       | Structured-log aggregation (Serilog sink)  | `docker/docker-compose.yml` profile `observability`      |
-| opensearch-dashboards | `opensearchproject/opensearch-dashboards:2.19.0` | Log visualization                          | same profile                                             |
-| nginx-proxy    | `nginx:1.27-alpine`                         | Reverse proxy + origin SSL termination     | `docker/nginx-proxy.conf.template`                       |
-| oauth2-proxy   | `quay.io/oauth2-proxy/oauth2-proxy:v7.7.1`  | GitHub OAuth for nginx `auth_request`      | `docker/oauth2-proxy.cfg`                                |
-
-Memory budget (from `docker/docker-compose.yml` + production overrides in `docker-compose.prod.yml`): ~7.1 GB without OpenSearch, ~11.8 GB with. Hetzner CPX42 (16 GB) comfortably runs the full stack.
-
----
-
-## 3. Data storage layout
-
-There are **four** EF Core DbContexts, corresponding to two different epochs of tenancy design. The current direction (Epic 28) is db-per-tenant; the older `TammaDbContext` / `TammaAppDbContext` pair is **scheduled for deletion in Wave A.5** (see §13).
-
-### 3.1 Control-plane DB (Epic 28, authoritative)
-
-Code: `apps/tamma-elsa/src/Tamma.Data/ControlPlaneDbContext.cs`.
-Connection string: `ConnectionStrings:ControlPlane`. Falls back to the admin connection for local dev (logged at startup).
-Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/ControlPlane/`.
-
-**14 tables** (all CP-resident, no tenant query filters — the CP is not tenant-scoped):
-
-| Table                          | Entity                       | Purpose                                                   |
-| ------------------------------ | ---------------------------- | --------------------------------------------------------- |
-| `users`                        | `User`                       | Platform identities (email, github_id, settings jsonb)    |
-| `refresh_tokens`               | `RefreshToken`               | Session refresh token hashes                              |
-| `password_reset_tokens`        | `PasswordResetToken`         | Forgot-password reset hashes                              |
-| `tenants`                      | `Tenant` (+6 shadow props)   | Tenant directory. Epic-28 shadow cols: `PlanId`, `Status`, `EncryptedConnectionString`, `KekVersion`, `FailureReason`, `DeleteRequestedAt` |
-| `tenant_memberships`           | `TenantMembership`           | User ↔ tenant with per-tenant role                        |
-| `user_invites`                 | `UserInvite`                 | Pending email-invite tokens                               |
-| `api_keys`                     | `ApiKey` (Scope != 'tenant') | Platform-scoped + user-scoped API keys only               |
-| `github_installations`         | `GitHubInstallation`         | GitHub App install records                                |
-| `github_installation_repos`    | `GitHubInstallationRepo`     | Per-installation repo activation                          |
-| `github_webhook_deliveries`    | `GitHubWebhookDelivery`      | Replay-protection ledger for webhook deliveries           |
-| `plans`                        | `Plan`                       | Billing plans (free / team / enterprise) + quotas jsonb   |
-| `platform_events`              | `PlatformEvent`              | Cross-tenant audit log (admin analytics)                  |
-| `platform_queued_tasks`        | `PlatformQueuedTask`         | CP-scoped background jobs (provisioning, etc.)            |
-| `platform_email_outbox`        | `PlatformEmailOutboxMessage` | CP-scoped outbound mail (invites, verifications)          |
+Tamma can run in three topologies, all supported via the `IAgentExecutor` abstraction (Epic 19). The agent executor picks which surface to dispatch work to at runtime based on `TAMMA_AGENT_MODE` / `Agent:ExecutorMode` config / auto-detection of a GitHub App. See [Agent Dispatch](Agent-Dispatch) for executor selection details.
 
 ```
-control-plane schema (text ER)
-──────────────────────────────
-users ──< tenant_memberships >── tenants ──< user_invites
-  │                                 │
-  │                                 ├── github_installations ──< github_installation_repos
-  │                                 │
-  ├── refresh_tokens                └── (shadow) PlanId ─→ plans
-  ├── password_reset_tokens
-  └── api_keys  (Scope ∈ {'platform','user'})
-
-github_webhook_deliveries  (orphan — delivery-id uniqueness only)
-platform_events            (orphan — audit)
-platform_queued_tasks      (orphan — job queue)
-platform_email_outbox      (orphan — SMTP outbox)
+┌───────────────────────────────────────────────────────────────────┐
+│  CLI Mode                                                          │
+│    tamma start --config ~/.tamma/config.json                       │
+│    ┌─ LocalExecutor ─────┐      (subprocess on operator machine)   │
+│    └─────────────────────┘                                          │
+│                                                                     │
+│  SaaS single-tenant                                                │
+│    tamma server / tamma api  + central Postgres + RLS              │
+│    ┌─ GitHubActionsExecutor ─┐  (dispatch → tenant's Actions)      │
+│    └────────────────────────┘                                       │
+│                                                                     │
+│  SaaS multi-tenant                                                 │
+│    tamma api + Cranl / Hetzner / Cloudflare / BYO (Epic 30)        │
+│    ┌─ GitHubActionsExecutor ─┐  (same executor; different infra)   │
+│    └────────────────────────┘                                       │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Per-tenant DB (Epic 28, authoritative)
+### 1. CLI Mode (`tamma start`)
 
-Code: `apps/tamma-elsa/src/Tamma.Data/TenantDbContext.cs`.
-Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Each tenant lives in its own Postgres DB, so there is no `TenantId` column on any row — **the discriminator is the connection string**.
-Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/`.
-
-**16 tables**:
-
-| Table                    | Entity               | Purpose                                                                 |
-| ------------------------ | -------------------- | ----------------------------------------------------------------------- |
-| `agent_configs`          | `AgentConfig`        | Per-tenant role → provider-chain mapping                                |
-| `prompt_overrides`       | `PromptOverride`     | 3-layer prompt store overrides (user × scope × role × action)           |
-| `provider_health`        | `ProviderHealth`     | Three-state circuit-breaker per provider+model                          |
-| `provider_diagnostics`   | `ProviderDiagnostic` | Per-call cost + latency + success samples                               |
-| `sanitization_rules`     | `SanitizationRule`   | Per-tenant content-sanitizer rule overrides                             |
-| `workflow_definitions`   | `WorkflowDefinition` | Elsa workflow JSON (synced from ElsaServer)                             |
-| `workflow_instances`     | `WorkflowInstance`   | Live + completed workflow runs (variables + result jsonb)               |
-| `domain_events`          | `DomainEvent`        | DCB event-sourcing stream (tagged jsonb)                                |
-| `queued_tasks`           | `QueuedTask`         | Per-tenant background job queue (DbTaskQueue consumer)                  |
-| `email_outbox`           | `EmailOutboxMessage` | Per-tenant outbound mail (SMTP retry ladder)                            |
-| `budget_configs`         | `BudgetConfig`       | Per-account LLM budget + alert threshold                                |
-| `api_keys`               | `ApiKey`             | **Scope='tenant' only** (enforced by `ck_api_keys_tenant_scope` check)  |
-| `mentorship_sessions`    | `MentorshipSession`  | 28-state mentorship state machine                                       |
-| `mentorship_events`      | `MentorshipEvent`    | State-transition log                                                    |
-| `junior_developers`      | `JuniorDeveloper`    | Mentee profiles + skill level                                           |
-| `stories`                | `Story`              | Work-item metadata consumed by workflows                                |
-
-```
-per-tenant schema (text ER)
-───────────────────────────
-workflow_definitions ──< workflow_instances
-     (no TenantId; one DB = one tenant)
-
-domain_events ───┐
-queued_tasks ────┤   all flat, indexed by (Type, CreatedAt)
-email_outbox ────┘
-
-agent_configs
-prompt_overrides
-provider_health ───< provider_diagnostics
-sanitization_rules
-budget_configs
-api_keys  (CHECK Scope='tenant')
-
-stories ──< mentorship_sessions ──< mentorship_events
-                 │                      (session_id FK)
-                 └─→ junior_developers
+```bash
+tamma start --config ~/.tamma/config.json
 ```
 
-### 3.3 Legacy contexts (scheduled for deletion in Wave A.5)
-
-Two DbContexts predate Epic 28 and still compile into the binary:
-
-- **`TammaDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaDbContext.cs`. The original single-DB context holding the union of everything CP + tenant. Still used by admin paths, migrations, background services, and most Story 18 endpoints. Carries the legacy `TenantId` column on every row and a permissive query filter.
-- **`TammaAppDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaAppDbContext.cs`. Subclass of `TammaDbContext` that connects as `tamma_app` (non-superuser) so the **Epic 17 RLS** policies installed by migration `20260419021119_Phase2RlsAndTriggers` bite. Fail-closed query filter (`EnforceTenantFilter => true`).
-
-Both are flagged for removal once every endpoint migrates to the CP + tenant split. The long code comment at the top of `TammaDbContext.EnforceTenantFilter` documents the transition plan. The RLS approach from Epic 17 is **superseded** by the db-per-tenant model (Epic 28) — see §6.
-
-The `Phase-2 RLS` migration (`20260419021119`) also installed a `prevent_tenant_id_change()` trigger and six BEFORE-UPDATE triggers that block any mutation of `TenantId` on established rows. Those triggers remain useful during the transition (they enforce the "personal tenant bootstrap is a one-way NULL → uuid" invariant) and will be dropped with the legacy context.
-
----
-
-## 4. Runtime architecture — request flow
-
-End-to-end path for a dashboard API call. Services are columns; time flows downward.
-
-```
-browser (app.tamma.dev)
-   │  cookie: tamma_session=<jwt>
-   │  Origin: app.tamma.dev
-   ▼
-nginx-proxy                                 [docker/nginx-proxy.conf.template]
-   │  TLS termination via Cloudflare origin cert
-   │  auth_request → oauth2-proxy (for cross-subdomain)
-   │  proxy_pass → tamma-api:3100
-   ▼
-tamma-api (Tamma.Api/Program.cs)
-   ├─ JwtBearer middleware                  [reads Authorization OR tamma_session cookie]
-   ├─ Rate limiter (per-IP fixed window)    [ConfigRead, ConfigWrite, ProviderIngest, ProviderExecute, GitHubWebhook, OAuthStart]
-   ├─ TenantContextMiddleware               [Middleware/TenantContextMiddleware.cs]
-   │     · resolves tenant from: AuthPrincipal → JWT active_tenant_id → Installation → users.tenant_id
-   │     · warms per-tenant connection pool via ITenantConnectionResolver
-   │     · adds Activity baggage tag tamma.tenant_id
-   │     · 401 on stale/deleted/unprovisioned tenant (fail-fast)
-   ├─ EnsurePersonalTenantMiddleware        [boots a personal tenant for first-time users]
-   ├─ Endpoint routing                      [Program.cs maps ~170 routes]
-   │
-   ▼ endpoint handlers branch on storage target
-   │
-   ├─► ControlPlaneDbContext                [users, tenants, api_keys, …]
-   │      └─ NpgsqlDataSource → ConnectionStrings:ControlPlane
-   │
-   ├─► TenantDbContext (via ITenantDbContextFactory)
-   │      └─ NpgsqlDataSource from ITenantConnectionResolver (per-tenant pool cache)
-   │           └─ reads tenants.EncryptedConnectionString → IConnectionStringDecryptor (AesGcm)
-   │               └─ IKekProvider.GetKek(kekId) → TAMMA_SECRET_STORE_KEK_PRIMARY / _SECONDARY
-   │
-   ├─► TammaAppDbContext / TammaDbContext   [legacy — scheduled Wave A.5 deletion]
-   │      └─ ConnectionStrings:TammaAppDb / :TammaDb
-   │
-   ├─► ElsaClient                            [packages/orchestrator/src/elsa-client.ts — used by TS engine only]
-   │      └─ http(s)://elsa-server:5000/api/workflow-definitions/…
-   │
-   ├─► IntelligenceHttpClient                [Services/KnowledgeBase/IntelligenceHttpClient.cs]
-   │      └─ http://intelligence-server:4100/kb/…  (30 endpoints; 10 s timeout; empty-payload fallback on 5xx)
-   │
-   └─► Octokit GitHub App                    [Services/GitHub/OctokitGitHubAppClient.cs + OctokitGitHubEngineCallbackService.cs]
-          └─ api.github.com (installation token per request; rate-limit headers tracked)
-
-elsa-server (ElsaServer/Program.cs)
-   ├─ Elsa 3.5.3 Workflow Engine (EF Core + PostgreSQL)
-   ├─ AgentSeeder + WorkflowSeeder (IHostedService; run once at startup)
-   └─ Hosts ~35 code-first workflows from Tamma.ElsaServer/Workflows/
-         └─ Each workflow composes activities from Tamma.Activities/
-              ├─ LlmCall/     (resolve → check-budget → check-breaker → call → record-diagnostics)
-              ├─ ADL/         (select-issue → plan → branch → PR → merge)
-              ├─ AgentDispatch/ (dispatch → monitor → collect via IAgentExecutor)
-              ├─ ToolExecution/ (file-read, file-write, search, shell-exec, run-tests, git-ops)
-              └─ Security/, Integration/, Debug/, Context/, Mentorship/, TDD/, Testing/
-```
-
-Load-bearing facts:
-
-- **`tamma-api` and `elsa-server` are separate processes** sharing Postgres. The API does not host the Elsa runtime. This lets the API scale horizontally for request load while Elsa keeps its bookmarks and scheduling.
-- **Only Option B for agent dispatch** is wired. `GitHubActionsExecutor` calls `IAgentDispatchService` / `IAgentMonitorService` / `IAgentResultCollectorService` directly — it does not programmatically invoke Elsa activities. The Elsa activities and the executor share those services, so there's one implementation of each phase.
-- **Intelligence server is stateless.** The C# API proxies 30 `/api/kb/*` endpoints 1:1 to the TS sidecar. A sidecar failure returns an empty payload and logs the incident — the dashboard renders a degraded view instead of erroring.
-
----
-
-## 5. Authentication flow
-
-JWT is the primary credential. The `tamma_session` cookie is a fallback read by `JwtBearerEvents.OnMessageReceived` so cross-subdomain dashboard requests work without an `Authorization` header. API keys use a separate scheme handler.
-
-### 5.1 JWT / password flow
-
-```
-POST /api/v1/auth/register            [AuthEndpoints.Register]
-   │  Argon2id hash (Konscious.Security.Cryptography.Argon2)  [Auth/PasswordService.cs]
-   ▼
-users row (CP)
-   │  + email-verify token → platform_email_outbox (CP)
-   │
-   └─ email link → POST /api/v1/auth/verify-email → EmailVerified = true
-
-POST /api/v1/auth/login               [AuthEndpoints.Login]
-   │  LoginLockoutService check (fail-open after 5 failures, 15-min window)  [Auth/LoginLockoutService.cs]
-   │  PasswordService.Verify(password, hash)
-   │  LoadTenantClaimsAsync(membershipRepo, userId)            [projects memberships → JwtTenantClaim[]]
-   ▼
-JwtService.GenerateAccessToken                                 [Auth/JwtService.cs:57]
-   │  claims: { sub, tenantId, role, platformRole, email, name, authMethod,
-   │            active_tenant_id, tenants: [{tenantId, role}…] }
-   │  alg: HS256   signing key: Jwt:Secret   15-min expiry
-   │
-   ├─► 200 { accessToken, refreshToken, user, tenants }
-   └─► Set-Cookie: tamma_session=<jwt>  (HttpOnly, Secure, SameSite=Lax, Domain=.tamma.dev)
-
-POST /api/v1/auth/refresh             [AuthEndpoints.Refresh]
-   │  hash(refresh) = SHA256   →   RefreshTokenRepository.GetByHashAsync
-   │  rotate: old row deleted, new pair minted
-   │
-   └─► 200 { accessToken, refreshToken }
-
-POST /api/v1/auth/switch-org          [AuthEndpoints.SwitchOrg — Story 28-9]
-   │  validate tenant is in the user's membership list
-   │  PersistActiveTenantAsync (users.Settings.activeTenantId — trigger blocks uuid→uuid on column)
-   │  mint new JWT with new active_tenant_id
-   │  rotate refresh token
-   │
-   └─► 200 { accessToken, refreshToken, activeTenantId }
-```
-
-### 5.2 GitHub OAuth flow
-
-```
-GET /api/auth/github                                        [AuthEndpoints.GitHubAuth]
-   │  OAuthStateCodec.Encode(returnTo, tenantId)            [Auth/OAuthStateCodec.cs]
-   │  302 → github.com/login/oauth/authorize?state=<signed>
-   │
-   └─ user consents
-      │
-GET /api/auth/github/callback?code&state                    [AuthEndpoints.GitHubCallback]
-   │  RedirectUrlSanitizer.IsSameOrigin(returnTo)            [Auth/RedirectUrlSanitizer.cs]
-   │  GitHubOAuthService.ExchangeCodeForTokenAsync           [Services/OAuth/GitHubOAuthService.cs]
-   │  GitHubOAuthService.GetUserProfileAsync
-   │  UserRepository.UpsertByGitHubIdAsync
-   │  LoadTenantClaimsAsync + JwtService.GenerateAccessToken
-   │  Set-Cookie: tamma_session                                [Auth/SessionCookieWriter.cs]
-   │
-   └─► 302 → Dashboard:Url + returnTo
-```
-
-### 5.3 API-key flow
-
-```
-Authorization: ApiKey <key>
-   │
-   ▼
-ApiKeyAuthHandler                                           [Auth/ApiKeyAuthHandler.cs]
-   │  parse prefix (first 12 chars)                         [Auth/ApiKeyPrefixParser.cs]
-   │  ApiKeyRepository.GetByPrefixAsync (CP or tenant DB by Scope)
-   │  ApiKeyHasher.Verify(raw, row.KeyHash)                 [Auth/ApiKeyHasher.cs]
-   │  revoked? → 401
-   │
-   └─► ClaimsPrincipal with permissions[] from ApiKey.Permissions
-```
-
-Platform scopes (`api_keys.Scope`): `'platform'` / `'user'` live in CP; `'tenant'` keys live in the tenant DB with a CHECK constraint enforcing the bifurcation.
-
-### 5.4 Authorization policies (`Program.cs:562-642`)
-
-| Policy                    | Requirement                                                  | Used by                            |
-| ------------------------- | ------------------------------------------------------------ | ---------------------------------- |
-| `AdminAccess`             | `admin:access` permission                                    | `/api/admin/**`                    |
-| `OwnerAccess`             | `users:manage` permission                                    | User role mutations, KEK rotation, tenant provisioning |
-| `SettingsView` / `Manage` | `settings:view` / `settings:manage`                          | `/api/config/**`, `/api/agents/**` |
-| `WorkflowsView` / `Manage` / `Delete` | `workflows:view` / `:manage` / `:delete`            | `/api/workflows/**`                |
-| `SelfOrApiKeysManage`     | `apikeys:manage` OR path-user == token-user                  | `/api/admin/users/{id}/keys`       |
-| `SelfOrUsersView`         | `users:view` OR self                                         | `/api/admin/users/{id}`            |
-| `AuthenticatedAny`        | any authenticated scheme                                     | `/api/auth/role-check` (nginx auth_request) |
-
-Path-tenant routes (`/api/v1/orgs/{tenantId}/**`) additionally run `RequireTenantMembershipFilter` (`Authorization/RequireTenantMembershipFilter.cs`) to verify membership and stash role in `HttpContext.Items["TenantRole"]`.
-
----
-
-## 6. Tenant isolation (Epic 28 — authoritative direction)
-
-The current architecture is **one Postgres database per tenant, plus a shared control plane**. This supersedes the Epic 17 RLS scaffold that is still present in code for backward compatibility.
-
-```
-resolution pipeline (per request)
-─────────────────────────────────
-JWT / AuthPrincipal / user row
-        │
-        ▼
-TenantContextMiddleware (Middleware/TenantContextMiddleware.cs)
-        │  SetTenantId on ITenantContext
-        │  await ITenantConnectionResolver.GetDataSourceAsync(tenantId)
-        │       ├─ LRU pool cache (Story 28-4)
-        │       ├─ CP round-trip: SELECT EncryptedConnectionString, KekVersion
-        │       │                 FROM tenants WHERE Id = @tenantId
-        │       └─ IConnectionStringDecryptor.Decrypt → NpgsqlDataSource
-        ▼
-Endpoint handler
-        │  await using var ctx = await factory.CreateAsync(tenantId, ct)
-        ▼
-TenantDbContext bound to the tenant-specific NpgsqlDataSource
-        │  no TenantId column on rows
-        │  no HasQueryFilter
-        │  isolation comes from the CONNECTION, not the row
-```
-
-Key files:
-
-- **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
-- **CP shadow columns** (Doc 01 §8.1): declared on `Tenant` entity in `ControlPlaneDbContext.ConfigureTenants` — `PlanId`, `Status` (state machine `pending_verification` → `provisioning` → `active` → `suspended` → `deleting` → `deleted`), `EncryptedConnectionString` (bytea), `KekVersion`, `FailureReason`, `DeleteRequestedAt`.
-- **Interceptors**: `Tamma.Data/Interceptors/TenantContextInterceptor.cs` runs `SET LOCAL app.current_tenant_id = '...'` on every connection open (used on the legacy `TammaAppDbContext` path to make the Phase-2 RLS policies enforce).
-
-### 6.1 Epic 17 RLS — superseded
-
-The Epic 17 Phase-2 scaffold shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). The RLS scaffold remains live for admin / legacy paths still bound to `TammaDbContext` and will be removed with those contexts in Wave A.5.
-
-### 6.2 KEK rotation (Story 28-12)
-
-`KekRotationCoordinator` (`apps/tamma-elsa/src/Tamma.Api/Services/Secrets/KekRotationCoordinator.cs`) drives platform-wide KEK rotation:
-
-1. Mint a fresh 32-byte KEK, stage it as the `KekProvider` secondary so concurrent decrypt traffic can fall back to the old primary.
-2. List every `tenants` row with `EncryptedConnectionString IS NOT NULL AND KekVersion < target`.
-3. Per row: decrypt with old primary, re-encrypt under new primary, bump `KekVersion`, evict the tenant's warm pool.
-4. When every row is rewrapped, promote secondary → primary, clear secondary.
-
-Endpoints: `POST /api/admin/kek/rotate/start`, `GET /api/admin/kek/rotate/status` (owner-only). `apps/tamma-elsa/src/Tamma.Api/Endpoints/KekRotationEndpoints.cs`.
-
-See [Epic 28 — DB-per-Tenant](Epics/Epic-28-DB-Per-Tenant.md) for the full 14-story plan and [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) for the onboarding UX.
-
----
-
-## 7. Agent dispatch (Epic 19 — complete)
-
-`IAgentExecutor` (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/IAgentExecutor.cs`) is the abstraction over "actually run the agent." Two implementations ship:
-
-| Executor                  | File                                                                                   | When used                                         |
-| ------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `LocalExecutor`           | `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/LocalExecutor.cs`                  | CLI mode or self-hosted with agent on same host   |
-| `GitHubActionsExecutor`   | `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/GitHubActionsExecutor.cs`          | SaaS — agent runs on tenant's GitHub Actions      |
-
-Both are picked by `AgentExecutorFactory` from the precedence rules in §1.
-
-### 7.1 LocalExecutor sequence
-
-```
-Elsa activity ExecuteAgentActivity
-   │  AgentExecutorFactory.Create() → LocalExecutor (auto: no GitHub App)
-   ▼
-LocalExecutor.ExecuteAsync
-   │  serialize request → .tamma/exec-request-<sessionId>.json
-   │  spawn: node packages/cli/dist/index.js execute-agent
-   │           --request .tamma/exec-request-<sessionId>.json
-   │           --output  .tamma/exec-result-<sessionId>.json
-   │  (via IProcessRunner — wrapped so tests can substitute a fake)
-   │
-   ▼   (subprocess)
-packages/cli/src/commands/execute-agent.ts
-   │  read request
-   │  resolve provider via RoleBasedAgentResolver → AgentProviderFactory
-   │  provider.executeTask(request.task)  ── @tamma/providers ──
-   │  write AgentResultArtifact → output path
-   │  exit 0 on success / non-zero on fail
-   │
-   ▼
-LocalExecutor reads result file → AgentExecutionResult
-   │  cleanup temp files
-   └─► returns to Elsa activity
-```
-
-### 7.2 GitHubActionsExecutor sequence
-
-```
-Elsa activity ExecuteAgentActivity
-   │  AgentExecutorFactory.Create() → GitHubActionsExecutor (GitHub App configured)
-   ▼
-GitHubActionsExecutor.ExecuteAsync
-   │
-   ├─► IAgentDispatchService.DispatchAsync
-   │     · Octokit.CreateWorkflowDispatch(owner, repo, workflow.yml, ref, inputs)
-   │     · inputs embed tamma_session_id, task, plan, agent_provider, timeout
-   │     · tenant-scoped install token via InstallationRepoResolver
-   │
-   ├─► IAgentMonitorService.MonitorAsync
-   │     mode=Auto → try WebhookSignalRegistry first (workflow_run.completed)
-   │              → fall back to polling listWorkflowRunsByWorkflow
-   │     · install:{id}:<session> key prefix (review finding 5)
-   │     · max 60 polls / timeout
-   │
-   └─► IAgentResultCollectorService.CollectAsync
-         · download artifacts/result-<sessionId>.json
-         · 4 MB cap per artifact via LimitedStream  (review finding 6)
-         · parse → AgentExecutionResult
-```
-
-Webhook resume path: `POST /api/github/webhooks` (`GitHubEndpoints.Webhooks`) deserializes `workflow_run.completed`, extracts the run-id + installation-id, calls `WebhookSignalRegistry.Signal(key)` which wakes the monitor's `TaskCompletionSource`. The registry is a singleton; multi-pod fanout awaits a Postgres LISTEN/NOTIFY bridge.
-
-See [Agent Dispatch](Agent-Dispatch.md) for the complete story and [Epic 19](Epics/Epic-19-Agent-Dispatch.md) for acceptance criteria.
-
-### 7.3 LLM call pipeline (Epic 12 — complete)
-
-The `LlmCallWorkflow` is the canonical entry point for every LLM interaction. It's a Sequence-based retry loop that composes **nine activities** from `apps/tamma-elsa/src/Tamma.Activities/LlmCall/`:
-
-```
-LlmCallWorkflow (apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/LlmCallWorkflow.cs)
-   │
-   ├─► CheckLlmConcurrencyActivity        — gate on process-wide semaphore
-   │   └─ ConcurrencyWaitDelayActivity    — back off + retry when saturated
-   │
-   ├─► ResolveAgentConfigActivity         — maps phase → role → provider chain
-   │   └─ reads AgentConfigRepository     — per-tenant override > default
-   │
-   ├─► ResolveLlmPromptActivity           — PromptStore 3-layer resolution
-   │   └─ ResolvePromptFromRegistryActivity  — user override → system default
-   │
-   ├─► ResolveToolsActivity               — selects tools from the registry
-   │   └─ ToolExecutorRegistry            — file-read, file-write, search-code,
-   │                                        shell-execute, run-tests, git-ops
-   │
-   ├─► CheckBudgetActivity                — budget_configs row + spend window
-   │   └─ fail-closed on over-budget
-   │
-   ├─► CheckCircuitBreakerActivity        — provider_health three-state breaker
-   │   └─ fail-closed when OPEN
-   │
-   ├─► CallLlmInlineActivity              — the actual HTTP call
-   │   └─ optional agentic tool loop (EnableToolLoop=true):
-   │      · parse tool_calls from response
-   │      · ToolCallValidator (Security/) → ActionGate → argument-schema check
-   │      · ParallelToolExecutor dispatches to IToolExecutor impls
-   │      · tool results fed back as a new message
-   │      · loop until text-only response or maxSteps
-   │      · ContextCompactor when near token limit (TokenEstimator)
-   │
-   └─► RecordDiagnosticsActivity          — provider_diagnostics row + budget delta
-       · cost calculated via ProviderPricingService
-       · success? → ProviderHealth success counter
-       · failure? → breaker opens after N consecutive failures
-```
-
-Key files:
-
-- `apps/tamma-elsa/src/Tamma.Activities/LlmCall/CallLlmInlineActivity.cs` — the synchronous HTTP activity. Sanitization via `IContentSanitizer` + `IErrorRedactor` before any logging.
-- `apps/tamma-elsa/src/Tamma.Activities/LlmCall/Tools/ToolExecutorRegistry.cs` — singleton registry of `IToolExecutor` impls.
-- `apps/tamma-elsa/src/Tamma.Activities/Security/ActionGate.cs` + `ToolCallValidator.cs` — substring-blocklist + argument-schema validation. No regex, no ReDoS.
-- `apps/tamma-elsa/src/Tamma.Activities/LlmCall/Tools/ContextCompactor.cs` — emergency context shrinkage when approaching provider token limits.
-- `apps/tamma-elsa/src/Tamma.Api/Services/Providers/HttpProviderClient.cs` — shared Named HttpClient wrapper (OpenAI, Anthropic, Copilot, Gemini, OpenRouter, z.ai, local).
-
-HTTP provider clients are registered in `Tamma.Api/Program.cs:90-168` as Named HttpClients, one per provider with its own base URL + auth header. CLI-agent providers (Claude Code, OpenCode) and the Zen MCP provider require subprocess / MCP transports and live on the TS side in `packages/providers/src/`.
-
----
-
-## 8. Cross-language bridge (C# ↔ TypeScript)
-
-Two HTTP bridges, narrow and unidirectional:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        C# plane                                             │
-│                                                                             │
-│   Tamma.Api (tamma-api:3100)                                                │
-│     ├── IntelligenceHttpClient ──────────────────────┐                     │
-│     │   [Services/KnowledgeBase/IntelligenceHttpClient.cs]                 │
-│     │                                                 │                     │
-│   Tamma.ElsaServer (elsa-server:5000)                │                     │
-│     (Elsa HTTP API consumed by ElsaClient)           │                     │
-│                                                       │                     │
-└───────────────────────────────────────────────────────┼─────────────────────┘
-                                                        │
-                                          HTTP (JSON, camelCase)
-                                                        │
-┌───────────────────────────────────────────────────────┼─────────────────────┐
-│                        TypeScript plane               │                     │
-│                                                       ▼                     │
-│   intelligence-server (Fastify on :4100)                                    │
-│     [packages/intelligence-server/src/server.ts]                            │
-│     30 routes under /kb/* matching KbEndpoints 1:1                          │
-│       /kb/index/*        → @tamma/intelligence IndexManagementService       │
-│       /kb/vector-db/*    → VectorDbManagementService                        │
-│       /kb/rag/*          → RagManagementService                             │
-│       /kb/mcp/*          → McpManagementService (@tamma/mcp-client)         │
-│       /kb/context/*      → ContextTestingService                            │
-│       /kb/analytics/*    → AnalyticsService                                 │
-│                                                                             │
-│   tamma-engine (TS worker)                                                  │
-│     [apps/tamma-engine/src/index.ts]                                        │
-│     └── ElsaClient ─────────────────┐                                       │
-│         [packages/orchestrator/src/elsa-client.ts]                          │
-│                                     │                                       │
-└─────────────────────────────────────┼───────────────────────────────────────┘
-                                      │
-                                      ▼  HTTP back to elsa-server:5000
-                                          (api-key scheme via Authorization: ApiKey <elsa-admin-key>)
-```
-
-The bridge is **stateless in both directions**. If the intelligence sidecar is down, the C# API returns an empty payload for `/kb/*` calls and logs the incident — the dashboard renders a degraded KB view rather than erroring. Timeout: 10 s (`IntelligenceServer:TimeoutSeconds`).
-
-The TS engine talks to the Elsa workflow engine via `ElsaClient` for workflow lifecycle (start / suspend / resume / cancel / signal) with 3× exponential-backoff retries on transient failures.
-
----
-
-## 9. Secret management (Epic 29 — shipping)
-
-Platform secrets live in a Postgres-backed, envelope-encrypted cabinet.
-
-### 9.1 Abstractions
-
-- `ISecretStore` (`Services/Secrets/ISecretStore.cs`) — typed read/write/rotate/retire surface. Plaintext never crosses the public signature; revealed only via out-of-band rotation handler callbacks and the reveal-once UX.
-- `ISecretStoreBackend` (`Services/Secrets/ISecretStoreBackend.cs`) — pluggable backend. Two impls ship:
-  - `InMemorySecretStoreBackend` — test fixture.
-  - `PostgresSecretStoreBackend` (`Services/Secrets/Postgres/PostgresSecretStoreBackend.cs`) — production. Stores each version as an AES-256-GCM envelope.
-
-### 9.2 Envelope format (`Services/Secrets/Postgres/SecretEnvelope.cs`)
-
-```
-offset  bytes  field
-──────  ─────  ─────────────────────────────────────────────
-0       1      format_version   (currently 1)
-1       1      kek_id           (which KEK slot wrapped the DEK)
-2       12     wrap_nonce       (AES-GCM nonce for the DEK wrap)
-14      32     wrapped_dek      (AES-256-GCM ciphertext of DEK)
-46      16     wrap_tag         (AES-GCM tag for the DEK wrap)
-62      12     value_nonce      (AES-GCM nonce for the value)
-74      N      value_ct         (AES-256-GCM ciphertext of plaintext)
-74+N    16     value_tag        (AES-GCM tag for the value)
-```
-
-Fresh DEK per row bounds blast radius; KEK rotation rewraps DEKs only (O(rows) AES-GCM ops, not O(bytes)).
-
-### 9.3 KEK provider
-
-`EnvKekProvider` (`Services/Secrets/Postgres/EnvKekProvider.cs`) reads two env vars:
-
-- `TAMMA_SECRET_STORE_KEK_PRIMARY` — required. Format: `kekId:base64(32-byte-key)`. Used for writes.
-- `TAMMA_SECRET_STORE_KEK_SECONDARY` — optional. Same format. Decrypt-only during rotation overlap.
-
-Validation at startup: exact 32-byte AES-256 decode, slot id ∈ [0, 255], slots unique. Fails fast if misconfigured. OpenBao-backed provider is deferred to Story 28-13 until a trigger fires (see `MEMORY.md`).
-
-### 9.4 Rotation
-
-`KekRotationCoordinator` (`Services/Secrets/KekRotationCoordinator.cs`) — singleton coordinator. See §6.2. Admin endpoints at `/api/admin/kek/rotate/{start,status}` (owner-only).
-
-See [Secret Management](Secret-Management.md) for the full story and [Epic 29](Epics/Epic-29-Secret-Management.md) for the roadmap.
-
----
-
-## 10. External integrations
-
-| Integration        | Entry point                                                                                    | Purpose                                                         |
-| ------------------ | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| GitHub App         | `Services/GitHub/OctokitGitHubAppClient.cs`, `OctokitGitHubEngineCallbackService.cs`, `OctokitGitHubActionsClient.cs` | PR / issue / workflow / artifact + installation tokens (via Octokit 14) |
-| GitHub OAuth       | `Services/OAuth/GitHubOAuthService.cs`                                                         | User sign-in                                                    |
-| GitHub Webhooks    | `Endpoints/GitHubEndpoints.Webhooks`                                                           | HMAC-SHA256 verification + replay-protection in `github_webhook_deliveries` |
-| Cranl API          | `Services/Provisioning/Cranl/CranlApiClient.cs` + `CranlTenantProvisioner.cs`                   | Per-tenant Postgres + Elsa app provisioning (current shipping backend) |
-| Slack              | `Services/SlackIntegrationService.cs`                                                          | Mentorship notifications                                        |
-| Jira               | `Services/JiraIntegrationService.cs`                                                           | Issue mirror (legacy integration)                               |
-| Email (Resend)     | `Services/Email/ResendEmailService.cs`                                                         | Transactional email (invites, verifications)                    |
-| Email (SMTP/MailKit)| `Services/Email/SmtpEmailService.cs` + `MailKitSmtpTransport.cs`                              | Fallback transactional email                                    |
-| Cloudflare Workers | `apps/wiki-site/wrangler.jsonc`, `apps/marketing-site/wrangler.toml`                            | Hosts wiki.tamma.dev + tamma.dev                                |
-| Hetzner Cloud      | _not yet implemented_ — Epic 30-4                                                              | Planned dedicated-VPS-per-tenant backend                        |
-
-Epic 30 introduces `ITenantInfrastructureProvider` v2 with four backends (Cranl active today, Hetzner / Cloudflare / BYO planned). Each declares a capability matrix (`DatabaseOnly` / `DedicatedCompute` / `Managed`); the onboarding UI filters valid (backend, topology) combos.
-
----
-
-## 11. Observability
-
-| Surface          | Tech                                                   | Where wired                                                               |
-| ---------------- | ------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Structured logs  | Serilog (+ Console + File + OpenSearch sinks)          | `Tamma.Api/Program.cs:29-59`, `Tamma.ElsaServer/Program.cs:19-48`         |
-| Log aggregation  | OpenSearch 2.19.0 + OpenSearch Dashboards 2.19.0       | `docker/docker-compose.yml` profile=observability + `docker/opensearch/` setup |
-| OpenTelemetry    | `Activity` baggage tag `tamma.tenant_id`               | `Middleware/TenantContextMiddleware.cs`                                   |
-| Health probes    | ASP.NET `/health`, `/health/live`, `/health/ready`     | `Tamma.Api/Program.cs:718-726`                                            |
-| Rate-limit state | In-process (default) or Redis (when `ConnectionStrings:Redis` set) | `Program.cs:257-269`, `Services/RateLimit/`                               |
-| Pino logs (TS)   | `@tamma/observability` + Pino                          | All TS packages import from `packages/observability/src/`                 |
-| Request logging  | `UseSerilogRequestLogging()`                           | `Program.cs:699`                                                          |
-
-Index prefixes per service: `tamma-api`, `tamma-api-dotnet`, `tamma-elsa`, `tamma-ts`. Buffer file: `./logs/opensearch-buffer` (50 MB cap). Self-log emits to `Console.Error` on sink failure.
-
-Engine lifecycle SSE (`Services/Engine/Lifecycle/`) fans workflow / task-queue / engine-registry events to dashboard `EventSource` clients at `/api/engine/events/state` and `/api/engine/events/logs`.
-
----
-
-## 12. Technology stack
-
-### 12.1 C# plane (`.NET 8`)
-
-| Component                 | Version  | Source                                                |
-| ------------------------- | -------- | ----------------------------------------------------- |
-| .NET                      | 8.0      | `Tamma.Api.csproj`, `Tamma.ElsaServer.csproj`         |
-| Elsa Workflows            | 3.5.3    | `Tamma.ElsaServer.csproj` (8 Elsa packages)           |
-| Entity Framework Core     | 8.0.0    | `Tamma.Data.csproj`                                   |
-| Npgsql.EntityFrameworkCore| 8.0.0    | `Tamma.Data.csproj`                                   |
-| JwtBearer                 | 8.0.15   | `Tamma.Api.csproj`                                    |
-| System.IdentityModel.Tokens.Jwt | 8.3.0 | `Tamma.Api.csproj`                                 |
-| Octokit                   | 14.0.0   | `Tamma.Api.csproj`                                    |
-| Sodium.Core               | 1.4.0    | `Tamma.Api.csproj` (libsodium sealed-box)             |
-| Konscious Argon2          | 1.3.1    | `Tamma.Api.csproj` (password hashing)                 |
-| BouncyCastle.Cryptography | 2.6.2    | `Tamma.Api.csproj`                                    |
-| MailKit                   | 4.16.0   | `Tamma.Api.csproj`                                    |
-| StackExchange.Redis       | 2.12.14  | `Tamma.Api.csproj`                                    |
-| Serilog.AspNetCore        | 8.0.0    | `Tamma.Api.csproj`, `Tamma.ElsaServer.csproj`         |
-| Serilog.Sinks.OpenSearch  | 1.3.0    | same                                                  |
-| Swashbuckle.AspNetCore    | 6.5.0    | `Tamma.Api.csproj`                                    |
-
-### 12.2 TypeScript plane (Node 22 LTS)
-
-| Component                 | Version   | Source                                                |
-| ------------------------- | --------- | ----------------------------------------------------- |
-| Node.js                   | ≥22       | `package.json` engines                                |
-| TypeScript                | ~5.7.2    | Root `package.json`                                   |
-| pnpm                      | 9.15.0    | `packageManager`                                      |
-| Vitest                    | 3.x       | Root `vitest.config.ts`                               |
-| Fastify                   | 5.x       | `packages/intelligence-server/package.json`           |
-| React                     | 18.3.1    | `packages/cli`, `packages/dashboard`                  |
-| Ink                       | 5.0.1     | `packages/cli/package.json`                           |
-| Vite                      | 6.0.7     | `packages/dashboard`                                  |
-| Tailwind CSS              | 4.2.1     | `packages/dashboard`                                  |
-| Zustand                   | 5.0.11    | `packages/dashboard` (state)                          |
-| react-router              | 7.x       | `apps/wiki-site`, `packages/dashboard`                |
-| react-markdown            | (latest)  | `apps/wiki-site/src/components/MarkdownPage.tsx`      |
-| remark-gfm, rehype-raw    | latest    | `apps/wiki-site/src/components/MarkdownPage.tsx`      |
-
-### 12.3 Infrastructure
-
-| Component                 | Version           | Source                              |
-| ------------------------- | ----------------- | ----------------------------------- |
-| PostgreSQL                | 16-alpine         | `docker/docker-compose.yml`         |
-| RabbitMQ                  | 3.13-management   | same                                |
-| ChromaDB                  | 0.6.3             | same                                |
-| OpenSearch                | 2.19.0            | same (profile=observability)        |
-| nginx                     | 1.27-alpine       | same                                |
-| oauth2-proxy              | v7.7.1            | same                                |
-
-Note: `CLAUDE.md` documents "PostgreSQL 17" as the target. The shipped compose file pins `postgres:16-alpine` as of 2026-04-22 (drift called out in §13).
-
----
-
-## 13. Current vs future state
-
-### 13.1 Wave A.5 cleanup (not done — flagged)
-
-The following are **in the codebase but scheduled for deletion**:
-
-1. **`TammaDbContext`** (`Tamma.Data/TammaDbContext.cs`) — legacy monolithic context. Still used by admin paths, migrations, background services, and most Story 18 endpoints. To be removed once every endpoint migrates to the CP + tenant split.
-2. **`TammaAppDbContext`** (`Tamma.Data/TammaAppDbContext.cs`) — RLS-enforcing subclass. Obsolete once db-per-tenant covers every path.
-3. **Phase-2 RLS artefacts** — the `tamma_app` role, 8 RLS policies, 6 tenant-id triggers installed by migration `20260419021119`. The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant.
-4. **`CranlProvisioningColumns` migration (20260419204924)** — single-DB columns (`cranl_project_id`, `cranl_database_id`, etc.) on `tenants`. They are explicitly `.Ignore()`'d by `ControlPlaneDbContext` but still exist on the POCO. Wave A.5 removes them as Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns.
-5. **Mentorship single-DB path** — `MentorshipSessionRepository` + `MentorshipController` still reference `TammaDbContext`. Move to `TenantDbContext` when the mentorship stories get re-validated.
-
-Until Wave A.5 lands, the app runs on a **hybrid**: new Epic 28 endpoints use the CP + tenant contexts; legacy endpoints use the shared `TammaDbContext`. Both write to the same Postgres cluster in practice.
-
-### 13.2 Coming in Epic 30
-
-Cloudflare / Hetzner / BYO backends for `ITenantInfrastructureProvider`. The interface shape (Epic 30 preview):
+- Self-hosted engine running locally.
+- `LocalExecutor` runs agent tasks as subprocesses on the operator's machine (Claude Code, OpenCode).
+- Subprocess entry point: the TS `packages/cli/src/commands/execute-agent.ts` CLI reads `exec-request-<sessionId>.json`, calls the agent provider, writes `exec-result-<sessionId>.json` back for the executor to collect.
+- No cloud dependencies required; ELSA workflow engine embedded or connected locally.
+
+### 2. SaaS single-tenant (`tamma server` / `tamma api`, shared infra)
+
+- Self-hosted HTTP server with REST API and React dashboard.
+- One central Postgres; every tenant's data lives in the shared schema and is isolated by **Phase-3 row-level security** (the app connects as the non-superuser `tamma_app` role + a per-request `SET LOCAL app.current_tenant_id`).
+- Phase-3 scaffolding is shipped but endpoint/repository wiring to `TammaAppDbContext` is pending Story 19-6 (see review finding 1 in [Port Audit](Port-Audit)).
+- `GitHubActionsExecutor` dispatches agent work to the tenant's GitHub Actions runners.
+- Default for "just deploy Tamma and let a few orgs use it" scenarios.
+- No per-tenant Cranl provisioning required.
+
+### 3. SaaS multi-tenant (`tamma api` with pluggable backends)
+
+- Same API surface, but each tenant gets its own **backend-provisioned** Postgres + engine. Backends are pluggable via Epic 30's `ITenantInfrastructureProvider` v2:
+  - **Cranl** — today's shipping backend (per-tenant Postgres + Elsa workflow app).
+  - **Hetzner Cloud** — planned (Epic 30-4) for dedicated-VPS-per-tenant data-residency customers.
+  - **Cloudflare** — planned (Epic 30-5) for edge-deployed engine + D1 DB (lowest-cost tier).
+  - **BYO** — planned (Epic 30-6) for enterprise tenants on their own Postgres + their own Elsa runner.
+- `GitHubActionsExecutor` dispatches agent work to the tenant's GitHub Actions runners — user code never leaves their infrastructure.
+- Activated today for Cranl when `Cranl:ApiKey` + `Cranl:OrganizationId` are set **and** a GitHub App is configured. Otherwise the Null seam keeps every tenant on the shared central Postgres via RLS.
+- Admin endpoint `POST /api/admin/tenants/{id}/provision` kicks off provisioning. See [Deployment → Cranl activation](Deployment#cranl-per-tenant-provisioning-optional) and [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) for the roadmap.
+
+### Pluggable backends (Epic 30 preview)
 
 ```csharp
 public interface ITenantInfrastructureProvider
 {
-    string ProviderKey { get; }                              // "cranl" | "hetzner" | "cloudflare" | "byo"
+    string ProviderKey { get; }                 // "cranl" | "hetzner" | "cloudflare" | "byo"
     ProvisioningTopologyCapabilities Capabilities { get; }
     Task<ProvisionResult> ProvisionAsync(ProvisionRequest req, CancellationToken ct);
     Task<HealthStatus> ProbeAsync(Guid tenantId, CancellationToken ct);
@@ -828,72 +335,104 @@ public interface ITenantInfrastructureProvider
 public enum ProvisioningTopology { DatabaseOnly, DedicatedCompute, Managed }
 ```
 
-See [Epic 30 — Pluggable Provisioning](Epics/Epic-30-Pluggable-Provisioning.md).
+Each backend declares its capability matrix (`DatabaseOnly` / `DedicatedCompute` / `Managed`); onboarding UI (Story 30-7) filters to the valid (backend, topology) combos. See [Multi-Tenant Provisioning](Multi-Tenant-Provisioning).
+
+## Tenancy & Data Isolation
+
+All tenant-scoped tables carry a `tenant_id` column, an EF query filter, and a Postgres RLS policy against `current_setting('app.current_tenant_id')`. Two connection strings ship:
+
+| Connection | Role | Used for |
+|------------|------|----------|
+| `ConnectionStrings:TammaDb` | superuser | migrations, background services, admin flows |
+| `ConnectionStrings:TammaAppDb` | `tamma_app` (non-superuser) | per-request `DbContext`s; RLS policies bite because the role lacks `BYPASSRLS` |
+
+A DbCommand interceptor emits `SET LOCAL app.current_tenant_id = '...'` before each request's first query. Query filters **fail-closed** when no tenant is in scope — a missing tenant returns an empty set instead of the default "show everything" EF behaviour. See [Deployment → Phase-3 RLS runbook](Deployment#phase-3-rls-runbook) for the operator activation steps.
+
+## Agent Dispatch (Epic 19 — complete)
+
+`IAgentExecutor` is the abstraction over "actually run the agent" — it hides whether that's a local subprocess, a GitHub Actions workflow, or anything else. `AgentExecutorFactory` picks between:
+
+- `LocalExecutor` — `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/LocalExecutor.cs`. Spawns the CLI agent as a subprocess; wraps `IProcessRunner` so tests can substitute a fake. Subprocess entry: `packages/cli/src/commands/execute-agent.ts`.
+- `GitHubActionsExecutor` — `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/GitHubActionsExecutor.cs`. Dispatches a `workflow_dispatch` to the tenant's repo; monitors via polling **or** webhook-mode resume through `WebhookSignalRegistry` (tenant-scoped keys after review finding 5); collects artifacts with a 4 MB size cap (review finding 6).
+
+Four Elsa activities compose the lifecycle: `DispatchAgentWorkflowActivity`, `MonitorAgentWorkflowActivity`, `CollectAgentResultsActivity`, and the orchestrator wrapper `ExecuteAgentActivity`. The factory resolves mode from (in order) explicit override → `TAMMA_AGENT_MODE` env → `Agent:ExecutorMode` config → auto-detection (GitHubActions if the GitHub App is wired, else Local). `SingleIssueCycleWorkflow` has been refactored to call `ExecuteAgentActivity` directly. See [Agent Dispatch](Agent-Dispatch) for the full story.
 
 ---
 
-## 14. Deployment topology
-
-### 14.1 Production VPS (current)
+## Security Model
 
 ```
- Hetzner CPX42 (204.168.131.39)  — 16 GB RAM, amd64, Docker Compose
- ─────────────────────────────────────────────────────────────────
- nginx-proxy       :443/:80    ← TLS terminates Cloudflare origin cert
- oauth2-proxy      :4180       ← auth_request for cross-subdomain
- tamma-api         :3100       ← .NET 8 REST API
- tamma-dashboard   :8080       ← React SPA behind nginx
- elsa-server       :5000       ← Elsa workflow engine
- elsa-studio       :8081       ← Blazor WASM workflow designer
- intelligence-server :4100     ← TS Fastify sidecar
- tamma-engine      (no port)   ← TS autonomous worker (pulls from DB)
- postgres          :5432       ← internal
- rabbitmq          :5672/:15672← internal
- chromadb          :8000       ← internal
- opensearch        :9200       ← internal (profile=observability)
- opensearch-dashboards :5601   ← internal (profile=observability)
+External Input (issue body, PR comments, MCP tool results)
+         |
+         v
+MCP ToolInterceptorChain
+  Pre: URL validation (block private IPs in tool args)
+  Post: ContentSanitizer.sanitizeOutput() (strip HTML from results)
+         |
+         v
+SecureAgentProvider (ContentSanitizer.sanitize())
+  - Null byte removal (always)
+  - HTML stripping
+  - Zero-width char removal (bidi override protection)
+  - Prompt injection detection (4 categories + encoding evasion)
+         |
+         v
+IAgentProvider.executeTask()  [claude-code, opencode, openrouter, zen-mcp]
+         |
+         v
+SecureAgentProvider post-call (ContentSanitizer.sanitizeOutput())
+  - Strip HTML outside code blocks
+  - Remove zero-width chars
+         |
+         v
+AgentTaskResult -> engine logic
+
+Shell commands: evaluateAction() with substring blocklist (no regex, no ReDoS)
+Outbound HTTP: secureFetch() with SSRF protection and redirect re-validation
 ```
 
-DNS (Cloudflare, Full SSL with origin cert):
-
-- `app.tamma.dev` → dashboard (via nginx-proxy)
-- `api.tamma.dev` → `tamma-api`
-- `elsa.tamma.dev` → `elsa-server` + `elsa-studio`
-- `wiki.tamma.dev` → Cloudflare Worker serving `apps/wiki-site` static bundle
-- `tamma.dev` → Cloudflare Worker serving `apps/marketing-site`
-
-Compose layering: `docker/docker-compose.yml` (base) + `docker-compose.override.yml` (dev auto-load) or `-f docker-compose.prod.yml` (production tuning). Observability is opt-in: `docker compose --profile observability up -d`.
-
-### 14.2 CI/CD (`.github/workflows/`)
-
-| Workflow                       | Purpose                                                     |
-| ------------------------------ | ----------------------------------------------------------- |
-| `ci.yml`                       | TS build + lint + test on PRs                               |
-| `codeql.yml`                   | CodeQL security scan                                        |
-| `deploy.yml`                   | VPS deploy via SSH                                          |
-| `docker-publish.yml`           | Build + push images to GHCR                                 |
-| `docker-smoke-test.yml`        | Full-stack smoke test on PR                                 |
-| `e2e-deploy.yml`               | E2E suite against deployed stack                            |
-| `release.yml`                  | GitHub release cutting                                      |
-| `tamma-worker.yml`             | GitHub Actions worker template (agent runs)                 |
-| `ai-provider-benchmark.yml`    | Nightly provider benchmark                                  |
-| `claude.yml`                   | Claude-assisted CI                                          |
-| `create-story.yml`             | Story template generator                                    |
-| `wiki-deploy.yml`              | Deploy `apps/wiki-site` to Cloudflare                       |
-
-Edge services deploy via `wrangler publish` to Cloudflare Workers; the main stack deploys via SSH to the VPS (see [Deployment](Deployment.md) runbook).
+C# ELSA layer has its own security pipeline (Epic 11):
+- LLM input sanitization in prompt resolution activities
+- Tool call validation (name allowlist, argument schema, size cap)
+- Output sanitization before storage/display
+- Fail-closed guards on circuit breaker and budget checks
 
 ---
 
-## For more detail
+## Technology Stack
 
-- [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, Phase-3 RLS runbook
-- [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) — Epic 30 backend selection
-- [Agent Dispatch](Agent-Dispatch.md) — Epic 19 implementation detail
-- [Secret Management](Secret-Management.md) — Epic 29 cabinet + rotation
-- [Port Audit](Port-Audit.md) — C# port-gap findings from the 2026-04 audit
-- [Epic 28 — DB-per-Tenant](Epics/Epic-28-DB-Per-Tenant.md)
-- [Epic 29 — Secret Management](Epics/Epic-29-Secret-Management.md)
-- [Epic 30 — Pluggable Provisioning](Epics/Epic-30-Pluggable-Provisioning.md)
-- [All Epics](Epics.md)
-- [Docs source](https://github.com/meywd/tamma/blob/main/docs/architecture.md)
+### TypeScript (Node.js 22 LTS)
+- **Language:** TypeScript 5.7+ (strict mode)
+- **Framework:** Fastify 5.x (HTTP server)
+- **Package Manager:** pnpm 9+ (monorepo)
+- **Testing:** Vitest 3.x
+- **Build:** esbuild + tsc
+- **CLI:** Custom command system
+- **Logging:** Pino
+- **Date/Time:** dayjs
+
+### C# (.NET 8)
+- **Workflow Engine:** ELSA Workflows 3.x
+- **Studio:** Custom Blazor WASM (MudBlazor)
+- **ORM:** Entity Framework Core
+- **Database:** PostgreSQL (Npgsql)
+
+### Infrastructure
+- **Database:** PostgreSQL 17
+- **Message Broker:** RabbitMQ
+- **Vector Store:** ChromaDB (production), pgvector/Pinecone/Qdrant/Weaviate (supported)
+- **Log Aggregation:** OpenSearch (optional)
+- **Reverse Proxy:** nginx
+- **DNS/SSL:** Cloudflare
+- **Container Registry:** GHCR
+- **CI/CD:** GitHub Actions
+
+---
+
+## For More Details
+
+- [Full Architecture Document](https://github.com/meywd/tamma/blob/main/docs/architecture.md)
+- [Epic 9: Agent Management](Epics/Epic-9-Agent-Management)
+- [Epic 10: Engine Core](Epics/Epic-10-Engine-Core)
+- [Stories Index](Stories)
+- [PRD](https://github.com/meywd/tamma/blob/main/docs/PRD.md)

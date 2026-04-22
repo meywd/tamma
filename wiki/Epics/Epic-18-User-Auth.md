@@ -122,11 +122,7 @@ ONBOARDING.COMPLETED.SUCCESS event
 | **RedirectUrlSanitizer** | `Tamma.Api/Auth/RedirectUrlSanitizer.cs` | 18-2 | Open-redirect guard on post-login `?next=` |
 | **DeleteConfirmationService** | `Tamma.Api/Auth/DeleteConfirmationService.cs` | 18-3 | "Type your tenant slug to confirm" challenge for destructive actions |
 | **EmailService + OutboxSmtpSender** | `Tamma.Api/Services/` | 18-1 | Email outbox pattern; SMTP-agnostic |
-<<<<<<< Updated upstream
 | **UserStore / UserRepository** | `Tamma.Data/Repositories/UserRepository.cs` | 18-1 | `User` entity with `PasswordHash`, `EmailVerified`, `AuthMethod`, `ActiveTenantId` |
-=======
-| **UserRepository** | `Tamma.Data/Repositories/UserRepository.cs` | 18-1 | `User` entity with `PasswordHash`, `EmailVerified`, `AuthMethod`, `ActiveTenantId` |
->>>>>>> Stashed changes
 | **TenantMembershipRepository** | `Tamma.Data/Repositories/TenantMembershipRepository.cs` | 18-3 | M:N user↔tenant with role |
 | **InviteRepository** | `Tamma.Data/Repositories/InviteRepository.cs` | 18-3, 18-7 | `user_invites` with token, role, expiry |
 | **UserDashboard SPA** | `packages/dashboard/src/user/` | 18-5, 18-8 | Dashboard shell at `dash.tamma.dev` — projects, members, invites, audit |

@@ -177,7 +177,7 @@ Elsa workflow        Secret Broker          TammaVaultStore       GitHub Actions
 - The original Epic 1.5 scope was 10 stories (Core Deployment). It grew to 45 stories after the secret-management track was pulled in from what was initially planned as Epic 29. Epic 29 now owns only the operator-facing cabinet; Epic 1.5 owns the pipeline.
 - The original Story 1.5-4 brief bundled "Web Server API" and "Secret Management Integration" together. In practice, secret-management moved entirely into the 1.5-16..1.5-45 track and 1.5-4 delivered only the Fastify API scaffolding.
 - KMS-backed root key (1.5-36) is deferred per project decision (`MEMORY.md`: `Epic 28 KEK backend — ship env-var KEK, defer OpenBao/KMS`). The story stays in the epic but does not ship until a trigger fires (paying tenant with breach clause, compliance finding, threat-model change).
-- Production deployment uses `elsa-server` for workflow execution; the TypeScript `@tamma/orchestrator` package dispatches to Elsa rather than re-implementing the state machine in TS. Stories assume TS engine; actual execution is a 60/40 split TS/C#.
+- Production deployment uses `elsa-server` for workflow execution; the TypeScript `@tamma/orchestrator` package dispatches to Elsa rather than re-implementing the state machine in TS. Stories assume TS engine; actual execution is 60/40 split TS/C#.
 
 ## See also
 
