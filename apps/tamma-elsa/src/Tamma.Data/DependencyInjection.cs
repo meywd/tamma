@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Npgsql;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Interceptors;
 using Tamma.Data.Repositories;
 
@@ -131,6 +133,27 @@ public static class DependencyInjection
             options.UseNpgsql(cpConnectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
         });
+
+        // ── Epic 28: Per-tenant context factory + stub resolver (Story 28-3) ──
+        //
+        // The factory builds a fresh <see cref="TenantDbContext"/> per call,
+        // resolving the per-tenant <see cref="NpgsqlDataSource"/> via the
+        // <see cref="ITenantConnectionResolver"/>. Story 28-4 replaces the
+        // stub resolver with the LRU pool cache backed by
+        // <c>tenants.EncryptedConnectionString</c>; until then every tenant
+        // routes to the same dev DataSource (the central admin connection
+        // string), which is correct for compile-time wiring + dev-laptop
+        // smoke runs but does NOT enforce per-tenant isolation.
+        //
+        // Singleton lifetime: the resolver owns long-lived data sources and
+        // a process-wide pool cache; the factory is cheap and stateless and
+        // can also live as a singleton.
+        services.AddSingleton<ITenantConnectionResolver>(sp =>
+        {
+            var dataSource = NpgsqlDataSource.Create(adminConnectionString);
+            return new StubTenantConnectionResolver(dataSource);
+        });
+        services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
