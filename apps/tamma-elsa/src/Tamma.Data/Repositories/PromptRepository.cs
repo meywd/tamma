@@ -3,7 +3,10 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class PromptRepository(TammaDbContext db) : IPromptRepository
+// Story 19-6: per-request reads/writes route through TammaAppDbContext so
+// the EF fail-closed query filter + Phase-2 RLS policies (when the
+// connection binds as tamma_app) both fire.
+public class PromptRepository(TammaAppDbContext db) : IPromptRepository
 {
     public async Task<PromptOverride?> GetAsync(Guid? userId, string scope, string? role, string? action)
         => await db.PromptOverrides

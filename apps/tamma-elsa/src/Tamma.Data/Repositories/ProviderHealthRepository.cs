@@ -8,7 +8,12 @@ namespace Tamma.Data.Repositories;
 /// state-machine behaviour lives in <c>CircuitBreakerService</c>; this class
 /// only reads/writes persistent rows.
 /// </summary>
-public class ProviderHealthRepository(TammaDbContext db) : IProviderHealthRepository
+// Story 19-6: per-request circuit-breaker state binds to TammaAppDbContext
+// so RLS + fail-closed EF filter both fire. IgnoreQueryFilters() is still
+// honoured for the per-tenant lookups below — those queries explicitly
+// constrain on TenantId already, but they bypass the global filter so the
+// platform-default (TenantId == null) row is reachable.
+public class ProviderHealthRepository(TammaAppDbContext db) : IProviderHealthRepository
 {
     public async Task<ProviderHealth?> GetStatusAsync(string providerKey, Guid? tenantId)
         => await db.ProviderHealths.IgnoreQueryFilters()
