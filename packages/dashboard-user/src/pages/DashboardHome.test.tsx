@@ -99,13 +99,15 @@ describe('DashboardHome', () => {
 
     renderHome();
 
+    // Wait for all three widget fetches to resolve (summary + runs + stats).
+    // Using the summary's numeric tile as the gate avoids a race where the
+    // /stats fetch completes first and "success rate" appears before the
+    // summary's totalEvents has hydrated.
     await waitFor(() => {
-      // Success rate widget
-      expect(screen.getByText(/success rate/i)).toBeInTheDocument();
+      expect(screen.getByText('42')).toBeInTheDocument();
     });
 
-    // Stats values render (777 is 7/9 ≈ 78%).
+    expect(screen.getByText(/success rate/i)).toBeInTheDocument();
     expect(screen.getByText(/total events/i)).toBeInTheDocument();
-    expect(screen.getByText('42')).toBeInTheDocument();
   });
 });

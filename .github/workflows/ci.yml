@@ -43,6 +43,9 @@ jobs:
       - name: Run tests
         run: pnpm vitest run
 
+      - name: Run dashboard-user tests (jsdom + jest-dom; own vitest config)
+        run: pnpm --filter @tamma/dashboard-user test
+
       - name: Verify CLI bundle builds
         run: pnpm --filter @tamma/cli run build:bundle
 

@@ -13,6 +13,10 @@ export default defineConfig({
       // Dashboard has its own vitest.config.ts with jsdom + jest-dom setup.
       // Run via: pnpm --filter @tamma/dashboard test
       'packages/dashboard/**',
+      // dashboard-user (Story 18-5) also has its own vitest.config.ts with
+      // jsdom + jest-dom + matchMedia/ResizeObserver setup. Run via:
+      // pnpm --filter @tamma/dashboard-user test
+      'packages/dashboard-user/**',
     ],
     coverage: {
       provider: 'v8',
