@@ -331,6 +331,120 @@ public class ProviderHealthEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    // ── Story 9-5 — recommendedProvider / allExhausted / entries[] ──────────
+
+    [Test]
+    public async Task ResolveChain_HealthyChain_ReturnsRecommendedProviderAndEntries()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [
+              {"provider": "anthropic", "model": "claude-sonnet-4"},
+              {"provider": "openai",    "model": "gpt-4o"}
+            ]
+          }
+        }
+        """);
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").GetString().Should().Be("anthropic");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeFalse();
+
+        // entries[] mirrors ordered[] and surfaces per-entry status.
+        var entries = body.RootElement.GetProperty("entries");
+        entries.GetArrayLength().Should().Be(2);
+        entries[0].GetProperty("recommended").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("budgetAllowed").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("healthy").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("circuitOpen").GetBoolean().Should().BeFalse();
+        entries[1].GetProperty("recommended").GetBoolean().Should().BeFalse();
+    }
+
+    [Test]
+    public async Task ResolveChain_AllOpen_ReturnsAllExhaustedTrue()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [
+              {"provider": "anthropic"},
+              {"provider": "openai"}
+            ]
+          }
+        }
+        """);
+        for (var i = 0; i < 3; i++) await PostFailureAsync("anthropic");
+        for (var i = 0; i < 3; i++) await PostFailureAsync("openai");
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").ValueKind
+            .Should().Be(JsonValueKind.Null);
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("error").GetString().Should().Be("NO_AVAILABLE_PROVIDER");
+
+        // skipped[] entries carry full status — circuitOpen=true and the
+        // open-until timestamp is preserved on the wire.
+        var skipped = body.RootElement.GetProperty("skipped");
+        skipped.GetArrayLength().Should().Be(2);
+        skipped[0].GetProperty("circuitOpen").GetBoolean().Should().BeTrue();
+        skipped[0].GetProperty("circuitOpenUntil").ValueKind
+            .Should().NotBe(JsonValueKind.Null);
+    }
+
+    [Test]
+    public async Task ResolveChain_EmptyConfig_ReturnsAllExhaustedTrue()
+    {
+        // No agent_config row at all — empty chain still surfaces the new
+        // shape so dashboards can render the "no providers" state without
+        // branching.
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("error").GetString().Should().Be("EMPTY_PROVIDER_CHAIN");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("recommendedProvider").ValueKind
+            .Should().Be(JsonValueKind.Null);
+    }
+
+    [Test]
+    public async Task ResolveChain_HalfOpenProbe_SurfacesAsRecommendedAtTail()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [{"provider": "anthropic"}]
+          }
+        }
+        """);
+        // Trip the breaker, then advance past the cooldown so it flips to
+        // HalfOpen — only one provider configured so the probe is the
+        // recommended choice.
+        for (var i = 0; i < 3; i++) await PostFailureAsync("anthropic");
+        _clock.Advance(TimeSpan.FromSeconds(301));
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").GetString().Should().Be("anthropic");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeFalse();
+        var entries = body.RootElement.GetProperty("entries");
+        entries[0].GetProperty("reason").GetString().Should().Be("HalfOpenProbeCandidate");
+        entries[0].GetProperty("recommended").GetBoolean().Should().BeTrue();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static void RemoveAll<T>(IServiceCollection services) =>
@@ -389,21 +503,30 @@ public class ProviderHealthEndpointsIntegrationTests
 
                         var resolver = ctx.RequestServices.GetRequiredService<IProviderChainResolver>();
                         var tenantCtx = ctx.RequestServices.GetRequiredService<ITenantContext>();
+
+                        // Story 9-5 — opt-in accountId override on the body.
+                        Guid? accountId = null;
+                        if (!string.IsNullOrWhiteSpace(req.AccountId) &&
+                            Guid.TryParse(req.AccountId, out var parsed))
+                        {
+                            accountId = parsed;
+                        }
+                        var options = new ChainResolveOptions(AccountId: accountId);
                         var result = await resolver.ResolveAsync(
-                            tenantCtx.TenantId, req.Role, req.Action);
+                            tenantCtx.TenantId, req.Role, req.Action, options);
+
+                        var orderedDtos = result.Ordered.Select(MapEntry).ToList();
+                        var skippedDtos = result.Skipped.Select(MapEntry).ToList();
 
                         if (!result.HasCandidates)
                         {
                             await ctx.Response.WriteAsJsonAsync(new
                             {
                                 ordered = Array.Empty<object>(),
-                                skipped = result.Skipped.Select(e => new
-                                {
-                                    provider = e.Provider.Provider,
-                                    model = e.Provider.Model,
-                                    key = e.Provider.Key,
-                                    reason = e.Reason.ToString(),
-                                }),
+                                entries = orderedDtos,
+                                skipped = skippedDtos,
+                                recommendedProvider = (string?)null,
+                                allExhausted = true,
                                 error = result.ErrorCode,
                                 message = result.ErrorMessage,
                             });
@@ -412,20 +535,11 @@ public class ProviderHealthEndpointsIntegrationTests
 
                         await ctx.Response.WriteAsJsonAsync(new
                         {
-                            ordered = result.Ordered.Select(e => new
-                            {
-                                provider = e.Provider.Provider,
-                                model = e.Provider.Model,
-                                key = e.Provider.Key,
-                                reason = e.Reason.ToString(),
-                            }),
-                            skipped = result.Skipped.Select(e => new
-                            {
-                                provider = e.Provider.Provider,
-                                model = e.Provider.Model,
-                                key = e.Provider.Key,
-                                reason = e.Reason.ToString(),
-                            }),
+                            ordered = orderedDtos,
+                            entries = orderedDtos,
+                            skipped = skippedDtos,
+                            recommendedProvider = result.RecommendedProvider,
+                            allExhausted = result.AllExhausted,
                         });
                         return;
                     }
@@ -436,6 +550,26 @@ public class ProviderHealthEndpointsIntegrationTests
                 next(app);
             };
         }
+
+        /// <summary>
+        /// Project a <see cref="ChainEntry"/> into the wire DTO that mirrors
+        /// the production <c>ProviderEndpoints.MapEntryToDto</c> shape (Story
+        /// 9-5: <c>healthy</c> / <c>circuitOpen</c> / <c>circuitOpenUntil</c> /
+        /// <c>budgetAllowed</c> / <c>budgetSpent</c> / <c>recommended</c>).
+        /// </summary>
+        private static object MapEntry(ChainEntry e) => new
+        {
+            provider = e.Provider.Provider,
+            model = e.Provider.Model,
+            key = e.Provider.Key,
+            reason = e.Reason.ToString(),
+            healthy = e.Healthy,
+            circuitOpen = e.CircuitOpen,
+            circuitOpenUntil = e.CircuitOpenUntil,
+            budgetAllowed = e.BudgetAllowed,
+            budgetSpent = e.BudgetSpent,
+            recommended = e.Recommended,
+        };
     }
 
     private async Task SeedAgentConfigAsync(string configJson)
