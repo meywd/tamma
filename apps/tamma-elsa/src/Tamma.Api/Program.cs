@@ -309,6 +309,23 @@ builder.Services.AddTenantProvisioning(builder.Configuration);
 // real auditor.
 builder.Services.AddTammaSecrets();
 
+// Story 29-3 reveal-once pipeline. Registers:
+//   • IDbContextFactory<SecretRevealDbContext> on the secret-store
+//     connection string (falls back to ControlPlane).
+//   • ISecretRevealService — issues + consumes reveal tokens.
+//   • RevealTokenSweeper — 30s background sweep for expired rows.
+// Only wired when the secret-store schema is actually reachable
+// (i.e. the same ConnectionStrings:SecretStore / ControlPlane is
+// available); the extension throws on missing config so a mis-
+// configured host fails fast instead of returning 500s at runtime.
+if (!string.IsNullOrWhiteSpace(
+        builder.Configuration.GetConnectionString("SecretStore"))
+    || !string.IsNullOrWhiteSpace(
+        builder.Configuration.GetConnectionString("ControlPlane")))
+{
+    builder.Services.AddTammaSecretReveal(builder.Configuration);
+}
+
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
 //
@@ -468,6 +485,18 @@ builder.Services.AddRateLimiter(options =>
     options.AddFixedWindowLimiter("OAuthStart", o =>
     {
         o.PermitLimit = 60;
+        o.Window = TimeSpan.FromMinutes(1);
+        o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+        o.QueueLimit = 0;
+    });
+    // Story 29-3 — reveal-once token exchange. 10/min matches the plan
+    // AC7: a brute-force attacker on the 256-bit token search space
+    // trips 429 well before exhausting a meaningful slice of the key
+    // space, and the low limit keeps the audit log noisier for the
+    // attempted guesses.
+    options.AddFixedWindowLimiter("SecretReveal", o =>
+    {
+        o.PermitLimit = 10;
         o.Window = TimeSpan.FromMinutes(1);
         o.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
         o.QueueLimit = 0;
@@ -801,6 +830,17 @@ admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
     .RequireAuthorization("OwnerAccess");
 
+// Story 29-3 — platform-scope secret-cabinet create + rotate. Both
+// return the newly-minted plaintext via a one-shot reveal token in
+// the response (no plaintext bytes in the body); the caller must
+// exchange the token through GET /api/v1/secrets/reveal/{token}
+// within 60 seconds. OwnerAccess policy matches the KEK rotation
+// precedent — a platform admin operator action.
+admin.MapPost("/secrets", SecretEndpoints.CreatePlatformSecret)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/secrets/{id:guid}/rotate", SecretEndpoints.RotateSecret)
+    .RequireAuthorization("OwnerAccess");
+
 // ── Orgs / Tenants ──
 // Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the
 // RequireTenantMembershipFilter so the handler body can trust the route
@@ -840,7 +880,22 @@ orgs.MapPost("/{tenantId}/transfer-ownership", OrgEndpoints.TransferOwnership)
 orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
+// Story 29-3 — tenant-scope secret create. Caller must be a member of
+// {tenantId} (RequireTenantMembershipFilter); the endpoint handler
+// derives the tenant-role gating from HttpContext.Items["TenantRole"]
+// if the admin+ requirement needs enforcing (deferred to 29-4 UI).
+orgs.MapPost("/{tenantId:guid}/secrets", SecretEndpoints.CreateTenantSecret)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
+
+// Story 29-3 — reveal-once token exchange. The token IS the auth (a
+// 256-bit bearer secret) so the route is not behind MemberAccess — a
+// caller with the token can exchange it exactly once, and the rate
+// limit on SecretReveal (10/min/user or anon) frustrates brute-force
+// guessing attempts without needing a login.
+app.MapGet("/api/v1/secrets/reveal/{token}", SecretEndpoints.RevealSecret)
+    .RequireRateLimiting("SecretReveal");
 
 // ── Onboarding wizard (Story 18-4) ──
 // Status is the polling endpoint the dashboard wizard hits every few
