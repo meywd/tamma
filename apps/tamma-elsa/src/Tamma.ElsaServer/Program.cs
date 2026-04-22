@@ -105,10 +105,15 @@ builder.Services.AddElsa(elsa =>
             httpOptions.BaseUrl = new Uri(
                 builder.Configuration["Elsa:Server:BaseUrl"] ?? "http://localhost:5000"));
 
-    // Register all custom Tamma activities from the Activities assembly
+    // Register all custom Tamma activities from the Activities assembly.
+    // AddActivitiesFrom<T>() registers every [Activity]-marked type in T's
+    // assembly, so ClaudeAnalysisActivity brings along the Analytics
+    // (Story 28-10) activities too without an extra call.
     elsa.AddActivitiesFrom<ClaudeAnalysisActivity>();
 
-    // Register all code-first WorkflowBase subclasses from the ElsaServer assembly
+    // Register all code-first WorkflowBase subclasses from the ElsaServer
+    // assembly. HourlyAnalyticsRollupWorkflow (Story 28-10) is picked up
+    // by the same assembly sweep as LlmCallWorkflow.
     elsa.AddWorkflowsFrom<LlmCallWorkflow>();
 });
 

@@ -54,6 +54,14 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
 
+    /// <summary>
+    /// Story 28-10 fact table — one row per <c>(Hour, TenantId)</c> tuple,
+    /// populated hourly by <c>HourlyAnalyticsRollupWorkflow</c>. Platform-wide
+    /// rows carry <c>TenantId = null</c>. See
+    /// <see cref="Entities.PlatformAnalyticsHourly"/> for the column catalogue.
+    /// </summary>
+    public DbSet<PlatformAnalyticsHourly> PlatformAnalyticsHourly => Set<PlatformAnalyticsHourly>();
+
     // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
     //
     // These DbSets cover per-tenant business data that still lives on the
@@ -102,5 +110,58 @@ public class ControlPlaneDbContext : DbContext
         // with explicit tenant predicates. Once Story 28-1's db-per-tenant
         // rollout ships, these configurations move to TenantDbContext.
         TammaModelConfiguration.ConfigureTenantEntities(modelBuilder);
+
+        ConfigurePlatformAnalyticsHourly(modelBuilder);
+    }
+
+    private static void ConfigurePlatformAnalyticsHourly(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformAnalyticsHourly>(entity =>
+        {
+            entity.ToTable("platform_analytics_hourly");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Hour).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.TenantId);
+            entity.Property(e => e.WorkflowsStarted).HasDefaultValue(0L);
+            entity.Property(e => e.WorkflowsCompleted).HasDefaultValue(0L);
+            entity.Property(e => e.WorkflowsFailed).HasDefaultValue(0L);
+            entity.Property(e => e.AgentDispatches).HasDefaultValue(0L);
+            entity.Property(e => e.TokensIn).HasDefaultValue(0L);
+            entity.Property(e => e.TokensOut).HasDefaultValue(0L);
+            entity.Property(e => e.CostUsd).HasPrecision(20, 4).HasDefaultValue(0m);
+            entity.Property(e => e.ActiveTenantsAtHourEnd).HasDefaultValue(0);
+            entity.Property(e => e.ComputedAt).HasDefaultValueSql("now()");
+
+            // Per-tenant time-series lookup — "show me tenant X's last
+            // 30d of workflows" on the admin dashboard. The filter keeps
+            // the index tight (one platform-wide row per hour is routed
+            // through UX_*_PlatformWide below instead). Descending on the
+            // Hour leg matches "most-recent-first" scans.
+            entity.HasIndex(e => new { e.TenantId, e.Hour })
+                .HasDatabaseName("IX_platform_analytics_hourly_TenantId_Hour")
+                .HasFilter("\"TenantId\" IS NOT NULL")
+                .IsDescending(false, true);
+
+            // Idempotency key — the rollup fan-out writes at most one row
+            // per (Hour, TenantId). Two partial unique indexes cover both
+            // the tenant-scoped path and the NULL-TenantId platform-wide
+            // slot without needing a COALESCE expression that some older
+            // Postgres servers reject on unique indexes. Combined, they
+            // also serve descending "last N hours" scans because Postgres
+            // can use a partial index for an `ORDER BY Hour DESC` with a
+            // matching predicate.
+            entity.HasIndex(e => new { e.Hour, e.TenantId })
+                .HasDatabaseName("UX_platform_analytics_hourly_Hour_TenantId")
+                .HasFilter("\"TenantId\" IS NOT NULL")
+                .IsDescending(true, false)
+                .IsUnique();
+
+            entity.HasIndex(e => e.Hour)
+                .HasDatabaseName("UX_platform_analytics_hourly_Hour_PlatformWide")
+                .HasFilter("\"TenantId\" IS NULL")
+                .IsDescending(true)
+                .IsUnique();
+        });
     }
 }

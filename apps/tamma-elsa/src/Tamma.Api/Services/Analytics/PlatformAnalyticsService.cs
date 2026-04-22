@@ -5,16 +5,27 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Services.Analytics;
 
 /// <summary>
-/// Story 28-10 — on-demand implementation of
-/// <see cref="IPlatformAnalyticsService"/>. Aggregates from the
+/// Story 28-10 — hybrid implementation of
+/// <see cref="IPlatformAnalyticsService"/>. Prefers the
+/// <c>platform_analytics_hourly</c> fact table (populated hourly by
+/// <c>HourlyAnalyticsRollupWorkflow</c>) for the summary tiles when it
+/// is recent; falls back to on-demand aggregation over the
 /// <see cref="ControlPlaneDbContext"/> (tenants + platform_events +
-/// legacy-shared workflow_instances + domain_events) until the full
-/// <c>platform_analytics_hourly</c> fact table + hourly rollup workflow
-/// from Story 28-10 §AC1–AC4 lands. Wave A.5 removed the separate
-/// <c>TammaAppDbContext</c>; the legacy DbSets remain exposed on
-/// <see cref="ControlPlaneDbContext"/> as "shared-table" passthroughs so
-/// this cross-tenant admin service can still aggregate without a per-
-/// tenant factory fan-out.
+/// legacy-shared workflow_instances + domain_events) when the rollup
+/// is stale or missing (fresh deployment, cron disabled, first hour
+/// after turn-on). Wave A.5 removed the separate <c>TammaAppDbContext</c>;
+/// the legacy DbSets remain exposed on <see cref="ControlPlaneDbContext"/>
+/// as "shared-table" passthroughs so this cross-tenant admin service can
+/// still aggregate without a per-tenant factory fan-out.
+///
+/// <para>The fact-table read path is an O(30 × 24) = 720-row scan
+/// over a partial unique index, answering "last 30 days" in a single
+/// cheap query; the live path scans <c>workflow_instances</c> +
+/// <c>domain_events</c> over the same window which is 100–1000× more
+/// rows. The <see cref="GetTopTenantsAsync"/> and
+/// <see cref="GetEventHistogramAsync"/> paths stay live — they need
+/// per-tenant / per-type breakdowns that the fact table does not
+/// carry on a single row.</para>
 ///
 /// <para>Every query is bounded by a UTC window derived from
 /// <see cref="DateTime.UtcNow"/> at the call site so results are
@@ -74,12 +85,191 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         var t30d = now.AddDays(-30);
 
         var tenantCounts = await GetTenantCountsAsync(ct).ConfigureAwait(false);
-        var workflows = await GetWorkflowCountsAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
-        var agents = await GetAgentDispatchCountsAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
-        var costs = await GetCostAggregatesAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
+
+        // Story 28-10 fact-table-first read path — try to answer the
+        // workflow / agent-dispatch / cost tiles from
+        // platform_analytics_hourly (written hourly by
+        // HourlyAnalyticsRollupWorkflow). Falls back to live aggregation
+        // when the table is empty or the most recent hour is missing —
+        // see ShouldPreferFactTableAsync for the gating logic so a freshly
+        // deployed instance (no rollup rows yet) doesn't degrade to all
+        // zeros.
+        var preferFactTable = await ShouldPreferFactTableAsync(now, ct).ConfigureAwait(false);
+
+        var workflows = preferFactTable
+            ? await GetWorkflowCountsFromFactTableAsync(now, t24h, t7d, t30d, ct).ConfigureAwait(false)
+            : await GetWorkflowCountsAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
+
+        var agents = preferFactTable
+            ? await GetAgentDispatchCountsFromFactTableAsync(now, t24h, t7d, t30d, ct).ConfigureAwait(false)
+            : await GetAgentDispatchCountsAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
+
+        var costs = preferFactTable
+            ? await GetCostAggregatesFromFactTableAsync(now, t24h, t7d, t30d, ct).ConfigureAwait(false)
+            : await GetCostAggregatesAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
 
         return new PlatformAnalyticsSummary(tenantCounts, workflows, agents, costs, now);
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when the fact table is recent enough to trust
+    /// as a primary source. The rollup writes at minute 5 of each hour,
+    /// so the most recent expected bucket is <c>now-90min</c> (one full
+    /// hour bucket of lag + a cushion). If the newest row is older than
+    /// that, the rollup is failing or the instance is new — fall back to
+    /// the live aggregation so the admin dashboard doesn't show a dead
+    /// fleet.
+    /// </summary>
+    internal async Task<bool> ShouldPreferFactTableAsync(DateTime now, CancellationToken ct)
+    {
+        var mostRecent = await _cp.PlatformAnalyticsHourly
+            .AsNoTracking()
+            .OrderByDescending(r => r.Hour)
+            .Select(r => (DateTime?)r.Hour)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (mostRecent is null) return false;
+        return mostRecent.Value >= now.AddMinutes(-90);
+    }
+
+    /// <summary>
+    /// Per-tenant rows in the fact table sum to the fleet-wide workflow
+    /// counters for a window. The platform-wide row (TenantId IS NULL)
+    /// carries the directory-size gauge, not workflow counters, so we
+    /// filter it out here.
+    /// </summary>
+    internal async Task<WorkflowCounts> GetWorkflowCountsFromFactTableAsync(
+        DateTime now,
+        DateTime t24h,
+        DateTime t7d,
+        DateTime t30d,
+        CancellationToken ct)
+    {
+        var rows = await _cp.PlatformAnalyticsHourly
+            .AsNoTracking()
+            .Where(r => r.TenantId != null && r.Hour >= t30d && r.Hour < now)
+            .Select(r => new { r.Hour, r.WorkflowsStarted, r.WorkflowsCompleted, r.WorkflowsFailed })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        long c24 = 0, f24 = 0, s24 = 0;
+        long c7 = 0, f7 = 0, s7 = 0;
+        long c30 = 0, f30 = 0, s30 = 0;
+
+        foreach (var r in rows)
+        {
+            if (r.Hour >= t30d)
+            {
+                c30 += r.WorkflowsCompleted;
+                f30 += r.WorkflowsFailed;
+                s30 += r.WorkflowsStarted;
+            }
+            if (r.Hour >= t7d)
+            {
+                c7 += r.WorkflowsCompleted;
+                f7 += r.WorkflowsFailed;
+                s7 += r.WorkflowsStarted;
+            }
+            if (r.Hour >= t24h)
+            {
+                c24 += r.WorkflowsCompleted;
+                f24 += r.WorkflowsFailed;
+                s24 += r.WorkflowsStarted;
+            }
+        }
+
+        // "Running" was a storage-state count in the live path; the fact
+        // table only tracks terminal counts (started / completed / failed),
+        // so Running = started - completed - failed. Clamp at zero in
+        // case the running-count straddles the bucket boundary (an
+        // instance started in the bucket but completes after it).
+        return new WorkflowCounts(
+            new WorkflowWindowCounts(ClampInt(c24), ClampInt(f24), ClampInt(s24 - c24 - f24)),
+            new WorkflowWindowCounts(ClampInt(c7), ClampInt(f7), ClampInt(s7 - c7 - f7)),
+            new WorkflowWindowCounts(ClampInt(c30), ClampInt(f30), ClampInt(s30 - c30 - f30)));
+    }
+
+    internal async Task<AgentDispatchCounts> GetAgentDispatchCountsFromFactTableAsync(
+        DateTime now,
+        DateTime t24h,
+        DateTime t7d,
+        DateTime t30d,
+        CancellationToken ct)
+    {
+        // Agent dispatches are recorded on BOTH the per-tenant rows (from
+        // tenant domain_events) AND the platform-wide row (from
+        // platform_events). Sum all rows in the window — per-tenant
+        // captures tenant-scoped dispatches, platform-wide captures
+        // cross-tenant ones, the intersection is empty by construction.
+        var attempts = await _cp.PlatformAnalyticsHourly
+            .AsNoTracking()
+            .Where(r => r.Hour >= t30d && r.Hour < now)
+            .Select(r => new { r.Hour, r.AgentDispatches })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        long a24 = 0, a7 = 0, a30 = 0;
+        foreach (var r in attempts)
+        {
+            if (r.Hour >= t30d) a30 += r.AgentDispatches;
+            if (r.Hour >= t7d) a7 += r.AgentDispatches;
+            if (r.Hour >= t24h) a24 += r.AgentDispatches;
+        }
+
+        // The fact table does not separately record SUCCESS vs FAILED
+        // dispatches (it only stores the total attempt count per bucket).
+        // To fill the Success / Failed breakdown we still go live —
+        // the 30-day window across platform_events is cheap because
+        // there's a (Type, CreatedAt) composite index.
+        var live = await GetAgentDispatchCountsAsync(t24h, t7d, t30d, ct).ConfigureAwait(false);
+
+        return new AgentDispatchCounts(
+            new AgentDispatchWindowCounts(
+                Attempted: ClampInt(a24),
+                Success: live.Last24h.Success,
+                Failed: live.Last24h.Failed),
+            new AgentDispatchWindowCounts(
+                Attempted: ClampInt(a7),
+                Success: live.Last7d.Success,
+                Failed: live.Last7d.Failed),
+            new AgentDispatchWindowCounts(
+                Attempted: ClampInt(a30),
+                Success: live.Last30d.Success,
+                Failed: live.Last30d.Failed));
+    }
+
+    internal async Task<CostAggregates> GetCostAggregatesFromFactTableAsync(
+        DateTime now,
+        DateTime t24h,
+        DateTime t7d,
+        DateTime t30d,
+        CancellationToken ct)
+    {
+        var rows = await _cp.PlatformAnalyticsHourly
+            .AsNoTracking()
+            .Where(r => r.TenantId != null && r.Hour >= t30d && r.Hour < now)
+            .Select(r => new { r.Hour, r.CostUsd })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        decimal c24 = 0m, c7 = 0m, c30 = 0m;
+        foreach (var r in rows)
+        {
+            if (r.Hour >= t30d) c30 += r.CostUsd;
+            if (r.Hour >= t7d) c7 += r.CostUsd;
+            if (r.Hour >= t24h) c24 += r.CostUsd;
+        }
+
+        return new CostAggregates(Round4(c24), Round4(c7), Round4(c30));
+    }
+
+    private static int ClampInt(long value) => value switch
+    {
+        > int.MaxValue => int.MaxValue,
+        < 0 => 0,
+        _ => (int)value,
+    };
 
     public async Task<IReadOnlyList<TenantAnalyticsRow>> GetTopTenantsAsync(
         int limit = 25,
