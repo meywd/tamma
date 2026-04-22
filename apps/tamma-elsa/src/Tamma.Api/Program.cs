@@ -274,6 +274,12 @@ builder.Services.AddSaaSServices();
 // the per-tenant provisioning flow.
 builder.Services.AddTenantProvisioning(builder.Configuration);
 
+// Platform secret cabinet (Epic 29). Story 29-1 wires only the
+// abstraction + a null auditor + an in-memory backend placeholder;
+// Story 29-2 swaps in the Postgres envelope-encrypted backend and the
+// real auditor.
+builder.Services.AddTammaSecrets();
+
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
 //
