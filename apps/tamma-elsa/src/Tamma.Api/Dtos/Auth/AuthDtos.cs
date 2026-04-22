@@ -12,8 +12,9 @@ public record RefreshResponse(string AccessToken, string RefreshToken, int Expir
 /// Carries the target tenant id plus an optional current refresh token; when
 /// present the rotator revokes only that specific token (precise rotation),
 /// when absent it revokes every refresh token for the user (defensive
-/// rotation). Distinct from <see cref="Tamma.Api.Dtos.Orgs.SwitchOrgRequest"/>
-/// (Story 18-3) which only carried <c>TenantId</c>.
+/// rotation). The Story-18-3 <c>Dtos.Orgs.SwitchOrgRequest</c> (TenantId only)
+/// was deleted alongside the latent-bug <c>OrgEndpoints.SwitchOrg</c> handler;
+/// this is now the only switch-org request shape.
 /// </summary>
 public record SwitchOrgRequest(Guid TenantId, string? RefreshToken = null);
 

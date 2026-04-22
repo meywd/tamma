@@ -165,6 +165,39 @@ Error paths:
   - Audit consumers / add `.IgnoreQueryFilters()` where needed: 1h
   - Tests: 1.5h
 
+## Repositories with split-usage follow-up
+
+Story 19-6 migrated 3 of 21 tenant-scoped repositories to `TammaAppDbContext` and classified the remaining 18 as *legitimately admin* (auth-time / middleware / background-service paths where `ITenantContext` is not bound or safe to bind). That blanket classification is correct at the file level but hides a real architectural split: **6 of those 18 repositories have BOTH an admin call path and one or more per-request, tenant-scoped call paths**. Keeping them on `TammaDbContext` means the per-request paths bypass the fail-closed EF filter and (when `ConnectionStrings:TammaAppDb` is set) the `tamma_app` DB role + RLS defence. Each of these should be split into an admin-only repository + an app-role repository in a follow-up pass.
+
+This section is **documentation only** — it does not mandate the work. Implementation is tracked as a separate follow-up story candidate so this audit doc stays the canonical list for the next pass.
+
+### Repositories needing an admin + app-role split
+
+| # | Repository | Admin path (stays on `TammaDbContext`) | App-role path (move to `TammaAppDbContext`) |
+| - | ---------- | -------------------------------------- | ------------------------------------------- |
+| 1 | `EmailOutboxRepository` | Drainer / dispatcher loop (outbox worker — tenant context not set when the BackgroundService fires) | `EnqueueAsync` called from request handlers (Register, PasswordReset, CreateInvite, ResendInvite, ResendVerification, TenantInviteEmail, etc.) — tenant context IS bound here |
+| 2 | `QueuedTaskRepository` | `TaskQueueProcessor` drain loop (BackgroundService, singleton scope — tenant context deliberately unbound so the processor can see every tenant's queue) | Per-request enqueue sites: webhook dispatch, provisioning trigger, agent-dispatch handlers — all already carry a bound tenant context |
+| 3 | `EventRepository` | Cross-tenant platform-wide reads (DCB time-travel / audit aggregation where the platform operator must see every tenant), migration backfills | Per-request domain-event append from handlers (`AppendAsync` in `OrgEndpoints`, `AuthEndpoints`, `AgentEndpoints`, etc.) and scoped reads like `ListByTenantAsync` hit from `OrgEndpoints.ListTenantAudit` |
+| 4 | `WorkflowRepository` | Elsa engine wiring (Elsa persistence provider runs outside the request pipeline; the engine needs to see every workflow instance across tenants for dispatch / resume) | Per-tenant workflow CRUD surfaced via `WorkflowEndpoints` (create / list / delete for the path tenant) — caller's tenant is already bound by `TenantContextMiddleware` |
+| 5 | `AgentConfigRepository` | System-default config seeding + platform-wide `UpsertSystemDefaultAsync` admin surface | Tenant-override CRUD exposed via `AgentEndpoints` (`PutTenantOverrideAsync`, `GetResolvedAsync`, `DeleteTenantOverrideAsync`) — these are per-request and tenant-scoped by definition |
+| 6 | `DiagnosticsRepository` | Platform-wide aggregate views (cross-tenant rollups consumed by the platform-admin dashboard — legitimately needs every tenant's rows) | Per-tenant diagnostics reads surfaced via `DiagnosticsEndpoints` (`GetTenantSummaryAsync`, `GetRecentFailuresForTenantAsync`, etc.) — these should be guarded by the fail-closed filter, not the permissive admin one |
+
+### Why this is deferred, not done
+
+1. **Cost of the split is non-trivial per repo**: each one needs an `I{Name}AdminRepository` + `I{Name}Repository` interface pair, two implementations (one bound to `TammaDbContext`, one to `TammaAppDbContext`), DI rewiring at every call site, and a test suite covering both paths under the Phase-3 Postgres testcontainer (mirrors the `AppRoleRegressionTests` suite Story 19-6 added for the migrated trio).
+2. **None of these are P0 right now**: the immediate fail-open exposure (tenant context not bound → filter returns every row) was closed for the three hot repositories in 19-6 (`DashboardRepository`, `OrgRepository`, and the prompt/provider-health/sanitization trio). The 6 repos listed here still rely on the admin filter, but they are only reachable through admin-gated endpoints today — the gap is architectural rather than an immediate leak vector.
+3. **Blocker**: requires one audit pass per repo to enumerate every call site and classify it admin vs per-request. Budget: ≈ 0.5 day per repo (discover + split + DI + tests) = 3 dev-days total. Worth scheduling as a standalone audit-pass story once the Phase-3 RLS policies from finding 003 land, because the follow-up story's acceptance criteria can then be written as "app-role path must fail closed under the RLS policies" (a testable DB-layer contract) rather than "app-role path must use `TammaAppDbContext`" (a structural claim that requires code review to verify).
+
+### Follow-up story sketch
+
+> **Title**: Split 6 dual-use repositories into admin + app-role halves.
+>
+> **Scope**: the 6 repositories listed above. Each gets two interfaces, two implementations, and a migration of call sites from the old one-name-for-both pattern to the new split. No behavioral change at runtime — the admin half keeps the current connection binding, the app-role half picks up the fail-closed filter and the `tamma_app` role binding.
+>
+> **Out of scope**: the other 12 admin-classified repositories (`UserRepository`, `ApiKeyRepository`, `RefreshTokenRepository`, `PasswordResetRepository`, `TenantRepository`, `TenantMembershipRepository`, `InviteRepository`, `InstallationRepository`, `GitHubWebhookDeliveryRepository`, `BudgetConfigRepository`, `MentorshipSessionRepository`, plus whichever of `EmailOutboxRepository` / `QueuedTaskRepository` ultimately stays admin-only). These are genuinely admin-only in every call site.
+>
+> **Tests**: per split, an `AppRoleRegressionTests`-shaped suite that exercises (a) the app-role path under a bound tenant context returns only that tenant's rows, (b) the app-role path with no tenant context returns zero rows, (c) the admin path under no tenant context returns every tenant's rows (deliberate).
+
 ## References
 
 - TS source: `packages/api/src/middleware/tenant-context.ts:58-132` (commit `9e9a57c~1`)
