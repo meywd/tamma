@@ -35,7 +35,7 @@ public static class UserDashboardEndpoints
     /// </summary>
     public static async Task<IResult> GetOrgSummary(
         Guid tenantId,
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         IEventRepository eventRepo,
         IWorkflowRepository workflowRepo)
     {
@@ -109,7 +109,7 @@ public static class UserDashboardEndpoints
     /// </summary>
     public static async Task<IResult> GetStats(
         Guid tenantId,
-        TammaDbContext db)
+        ControlPlaneDbContext db)
     {
         var rows = await db.WorkflowInstances
             .Where(i => i.TenantId == tenantId)
