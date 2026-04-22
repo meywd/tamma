@@ -128,6 +128,11 @@ builder.Services.AddCors(options =>
 // HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
 builder.Services.AddHttpClient();
 
+// Story 9-11: Tamma API client — used by simplified activities to delegate
+// agent config, health, diagnostics, and provider execution to the central
+// Fastify/ASP.NET API plane.
+builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
+
 // Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
 // All tools are stateless singletons. The registry (also Singleton) captures them via
 // IEnumerable<IToolExecutor>, so they must share the same lifetime to avoid a captive dependency.

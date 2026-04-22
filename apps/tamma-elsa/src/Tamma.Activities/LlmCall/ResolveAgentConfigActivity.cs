@@ -57,7 +57,46 @@ public class ResolveAgentConfigActivity : CodeActivity
             return;
         }
 
-        // Priority 2: DB lookup
+        // Priority 2a (Story 9-11): Tamma API resolver — if TammaApiClient is
+        // registered in DI we consult the central API plane first. On any
+        // failure we fall through to the legacy DB lookup (AC 5 backward
+        // compat). Pass X-Tenant-Id when a tenant context is carried in
+        // workflow variables so resolution is tenant-scoped.
+        var apiClient = context.GetService<TammaApiClient>();
+        if (apiClient is not null)
+        {
+            try
+            {
+                var tenantId = context.GetVariable<string>("TenantId");
+                var resolved = await apiClient
+                    .ResolveAgentAsync(role, tenantId, context.CancellationToken)
+                    .ConfigureAwait(false);
+                if (resolved is not null && !string.IsNullOrWhiteSpace(resolved.SystemPrompt))
+                {
+                    context.SetVariable("ResolvedSystemPrompt",
+                        PromptHardening.Harden(resolved.SystemPrompt));
+                    if (!string.IsNullOrWhiteSpace(resolved.Provider))
+                    {
+                        context.SetVariable("ResolvedProvider", resolved.Provider);
+                    }
+                    if (!string.IsNullOrWhiteSpace(resolved.Model))
+                    {
+                        context.SetVariable("ResolvedModel", resolved.Model);
+                    }
+                    logger.LogInformation(
+                        "Resolved agent config via Tamma API for role '{Role}': provider={Provider}, model={Model}, source={Source}",
+                        role, resolved.Provider, resolved.Model, resolved.Source ?? "api");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex,
+                    "Tamma API agent resolve failed for role '{Role}', falling back to DB", role);
+            }
+        }
+
+        // Priority 2b: DB lookup (legacy path, backward-compatible fallback)
         try
         {
             var agentManager = context.GetRequiredService<IAgentManager>();
