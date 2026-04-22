@@ -964,6 +964,25 @@ orgs.MapDelete("/{tenantId:guid}", OrgEndpoints.DeleteOrg)
 orgs.MapPost("/{tenantId:guid}/secrets", SecretEndpoints.CreateTenantSecret)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
+// Story 29-5 — tenant-admin query + lifecycle surface consumed by the
+// dash.tamma.dev /secrets UI. Read (list / detail / versions) is
+// available to any member; write (rotate / retire) is gated to admin+
+// inside each handler. RequireTenantMembershipFilter provides the
+// membership proof; the handler body does the admin check.
+orgs.MapGet("/{tenantId:guid}/secrets", SecretEndpoints.ListTenantSecrets)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/secrets/{id:guid}", SecretEndpoints.GetTenantSecret)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/secrets/{id:guid}/versions",
+        SecretEndpoints.ListTenantVersions)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId:guid}/secrets/{id:guid}/rotate",
+        SecretEndpoints.RotateTenantSecret)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId:guid}/secrets/{id:guid}/retire-version/{versionNumber:int}",
+        SecretEndpoints.RetireTenantVersion)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
 // Story 28-7 deferred-item — tenant-scoped API keys. Membership filter
 // guards path-tenant access; the handler body enforces admin+ role before
 // mutations (minting credentials is destructive).
