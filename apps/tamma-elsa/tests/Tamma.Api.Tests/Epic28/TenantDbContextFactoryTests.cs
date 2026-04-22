@@ -7,20 +7,20 @@ using Tamma.Data.Abstractions;
 namespace Tamma.Api.Tests.Epic28;
 
 /// <summary>
-/// Story 28-3 — exercises <see cref="TenantDbContextFactory"/> against
-/// the <see cref="StubTenantConnectionResolver"/>. The stub points at a
-/// fake DataSource; we never connect, only verify the factory wiring.
+/// Story 28-3 test suite — exercises <see cref="TenantDbContextFactory"/>
+/// against a tiny in-memory <see cref="ITenantConnectionResolver"/>
+/// double. The Story 28-3 stub was deleted in Story 28-4 once the real
+/// LRU-pooled resolver shipped; these tests are kept because the
+/// factory contract itself didn't change — only the resolver
+/// implementation it delegates to did.
 ///
-/// <para>Per-tenant isolation tests live with Story 28-4 once the real
-/// resolver lands.</para>
+/// <para>The real resolver (<see cref="Tamma.Data.Pooling.LruPooledTenantConnectionResolver"/>)
+/// has its own dedicated suite that doesn't go through the factory.</para>
 /// </summary>
 [TestFixture]
 public class TenantDbContextFactoryTests
 {
-    // The DataSource is owned by the StubTenantConnectionResolver and
-    // disposed via the resolver's DisposeAsync in TearDown — analyzer
-    // is satisfied because we don't track it as a separate field.
-    private StubTenantConnectionResolver _resolver = null!;
+    private FakeTenantConnectionResolver _resolver = null!;
     private TenantDbContextFactory _factory = null!;
 
     [SetUp]
@@ -28,7 +28,7 @@ public class TenantDbContextFactoryTests
     {
         var dataSource = NpgsqlDataSource.Create(
             "Host=stub.invalid;Port=5432;Database=tamma_factory_test;Username=tamma;Password=tamma");
-        _resolver = new StubTenantConnectionResolver(dataSource);
+        _resolver = new FakeTenantConnectionResolver(dataSource);
         _factory = new TenantDbContextFactory(_resolver);
     }
 
@@ -59,7 +59,7 @@ public class TenantDbContextFactoryTests
     }
 
     [Test]
-    public async Task CreateAsync_Stub_Routes_All_Tenants_To_Same_DataSource()
+    public async Task CreateAsync_Routes_All_Tenants_To_Same_DataSource_In_Test_Double()
     {
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
@@ -68,7 +68,7 @@ public class TenantDbContextFactoryTests
         var sourceB = await _resolver.GetDataSourceAsync(tenantB);
 
         ReferenceEquals(sourceA, sourceB).Should().BeTrue(
-            "stub resolver must route every tenant to the single dev DataSource until 28-4 lands");
+            "the test-double resolver hands every tenant the single fixture DataSource");
     }
 
     [Test]
@@ -79,38 +79,21 @@ public class TenantDbContextFactoryTests
     }
 
     [Test]
-    public void StubResolver_NullDataSource_Throws()
+    public async Task EvictAsync_Is_NoOp_For_Test_Double()
     {
-        Action act = () => _ = new StubTenantConnectionResolver(null!);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Test]
-    public void Stub_GetStats_Reports_Single_Warm_Pool()
-    {
-        var stats = _resolver.GetStats();
-        stats.WarmPoolCount.Should().Be(1);
-        stats.TotalPoolsEvictedSinceStartup.Should().Be(0);
-    }
-
-    [Test]
-    public async Task Stub_EvictAsync_Is_NoOp_For_Now()
-    {
-        // EvictAsync is a stub until Story 28-4. Should complete without
-        // throwing, and the pool count should not change.
         await _resolver.EvictAsync(Guid.NewGuid());
         _resolver.GetStats().WarmPoolCount.Should().Be(1);
     }
 
     [Test]
-    public async Task Stub_GetElsaDataSourceAsync_Returns_Same_Source()
+    public async Task GetElsaDataSourceAsync_Returns_Same_Source_In_Test_Double()
     {
         var tenantId = Guid.NewGuid();
         var app = await _resolver.GetDataSourceAsync(tenantId);
         var elsa = await _resolver.GetElsaDataSourceAsync(tenantId);
 
         ReferenceEquals(app, elsa).Should().BeTrue(
-            "stub Elsa resolver mirrors the app resolver until Story 28-5 ships per-tenant Elsa DBs");
+            "the test-double resolver mirrors the app source for Elsa");
     }
 
     [Test]
@@ -119,10 +102,50 @@ public class TenantDbContextFactoryTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // Stub resolver does not actually connect, so the cancel-after-create
-        // path must still surface a successful return — the real resolver in
-        // 28-4 will respect the token during pool acquisition.
+        // The fixture resolver does not actually connect, so the
+        // cancel-after-create path must still surface a successful
+        // return — the real LRU-pooled resolver respects the token
+        // during pool acquisition (covered by its own suite).
         await using var ctx = await _factory.CreateAsync(Guid.NewGuid(), cts.Token);
         ctx.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Minimal in-memory <see cref="ITenantConnectionResolver"/> for
+    /// factory-level wiring tests. Owns a single
+    /// <see cref="NpgsqlDataSource"/> and routes every tenant to it —
+    /// no DB connection is ever opened.
+    /// </summary>
+    private sealed class FakeTenantConnectionResolver : ITenantConnectionResolver, IAsyncDisposable
+    {
+        private readonly NpgsqlDataSource _dataSource;
+
+        public FakeTenantConnectionResolver(NpgsqlDataSource dataSource)
+        {
+            ArgumentNullException.ThrowIfNull(dataSource);
+            _dataSource = dataSource;
+        }
+
+        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(_dataSource);
+
+        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(_dataSource);
+
+        public ValueTask EvictAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public TenantConnectionPoolStats GetStats() =>
+            new(WarmPoolCount: 1,
+                TotalPoolsOpenedSinceStartup: 1,
+                TotalPoolsEvictedSinceStartup: 0);
+
+        public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
     }
 }

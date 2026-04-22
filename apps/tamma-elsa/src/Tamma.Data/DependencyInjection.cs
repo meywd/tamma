@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Npgsql;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Interceptors;
+using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Data;
@@ -128,31 +130,76 @@ public static class DependencyInjection
         var cpConnectionString = string.IsNullOrWhiteSpace(controlPlaneConnectionString)
             ? adminConnectionString
             : controlPlaneConnectionString;
-        services.AddDbContext<ControlPlaneDbContext>(options =>
-        {
-            options.UseNpgsql(cpConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
-        });
+        // The LRU pooled resolver is a singleton and needs short-lived
+        // ControlPlaneDbContext instances on cache miss — register the
+        // pooled factory pointing at the same connection so the resolver
+        // doesn't depend on a request scope. We register the factory
+        // FIRST with optionsLifetime: Singleton so DbContextOptions is
+        // singleton-scoped (the factory needs that). The subsequent
+        // AddDbContext call uses the same singleton DbContextOptions
+        // for the scoped context registration the seeder needs.
+        services.AddDbContextFactory<ControlPlaneDbContext>(
+            options =>
+            {
+                options.UseNpgsql(cpConnectionString, npgsql =>
+                    npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+            },
+            lifetime: ServiceLifetime.Singleton);
+        services.AddDbContext<ControlPlaneDbContext>(
+            options =>
+            {
+                options.UseNpgsql(cpConnectionString, npgsql =>
+                    npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+            },
+            // contextLifetime stays Scoped — handlers and seeders inject
+            // ControlPlaneDbContext per-request. optionsLifetime must be
+            // Singleton to coexist with the factory above (DbContextOptions
+            // is keyed by closed generic type, so two different lifetimes
+            // would collide).
+            contextLifetime: ServiceLifetime.Scoped,
+            optionsLifetime: ServiceLifetime.Singleton);
 
-        // ── Epic 28: Per-tenant context factory + stub resolver (Story 28-3) ──
+        // ── Epic 28: Per-tenant context factory + LRU pool resolver (Story 28-4) ──
         //
         // The factory builds a fresh <see cref="TenantDbContext"/> per call,
-        // resolving the per-tenant <see cref="NpgsqlDataSource"/> via the
-        // <see cref="ITenantConnectionResolver"/>. Story 28-4 replaces the
-        // stub resolver with the LRU pool cache backed by
-        // <c>tenants.EncryptedConnectionString</c>; until then every tenant
-        // routes to the same dev DataSource (the central admin connection
-        // string), which is correct for compile-time wiring + dev-laptop
-        // smoke runs but does NOT enforce per-tenant isolation.
+        // resolving the per-tenant <see cref="Npgsql.NpgsqlDataSource"/>
+        // via the <see cref="ITenantConnectionResolver"/>. Story 28-3
+        // shipped a stub resolver that routed every tenant to the central
+        // admin connection; Story 28-4 replaces that with
+        // <see cref="LruPooledTenantConnectionResolver"/> — a process-wide
+        // LRU cache of warm Npgsql data sources keyed by tenant id, sized
+        // by <c>TenantConnectionPool:MaxEntries</c> (default 500), with
+        // per-tenant pool sizing from <c>TenantConnectionPool:MaxPoolSize</c>
+        // (default 5).
         //
-        // Singleton lifetime: the resolver owns long-lived data sources and
-        // a process-wide pool cache; the factory is cheap and stateless and
-        // can also live as a singleton.
-        services.AddSingleton<ITenantConnectionResolver>(sp =>
-        {
-            var dataSource = NpgsqlDataSource.Create(adminConnectionString);
-            return new StubTenantConnectionResolver(dataSource);
-        });
+        // The decryption seam (<see cref="IConnectionStringDecryptor"/>)
+        // defaults to <see cref="PassthroughConnectionStringDecryptor"/>
+        // so dev/local runs work without any AES-GCM ceremony. The API
+        // composition root is expected to override the binding with an
+        // adapter over <c>TenantSecretProtector</c> when production-grade
+        // KEK encryption is wired (Story 28-12).
+        //
+        // Singleton lifetime: the resolver owns long-lived data sources
+        // and a process-wide pool cache. Metrics is a singleton too —
+        // it owns the OTel <c>Meter</c>.
+        // Bind TenantConnectionPool options from the host IConfiguration if
+        // available, falling back to compiled defaults if the host doesn't
+        // register IConfiguration (unit tests). Using AddOptions + Configure
+        // pattern so operators can override via env vars / appsettings.json
+        // without touching the AddTammaData call site.
+        services.AddOptions<TenantConnectionPoolOptions>()
+            .Configure<IServiceProvider>((opts, sp) =>
+            {
+                var cfg = sp.GetService<IConfiguration>();
+                cfg?.GetSection(TenantConnectionPoolOptions.SectionName).Bind(opts);
+            });
+
+        services.AddSingleton<TenantConnectionPoolMetrics>();
+        // Decryptor registered via TryAdd so the API composition root can
+        // pre-register the production AES-GCM-backed implementation
+        // before AddTammaData runs and have it win.
+        services.TryAddSingleton<IConnectionStringDecryptor, PassthroughConnectionStringDecryptor>();
+        services.AddSingleton<ITenantConnectionResolver, LruPooledTenantConnectionResolver>();
         services.AddSingleton<ITenantDbContextFactory, TenantDbContextFactory>();
 
         services.AddScoped<IUserRepository, UserRepository>();
