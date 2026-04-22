@@ -7,11 +7,10 @@
 
 ## Remediation status
 
-- **Confirmed**: 2026-04-18 by agent; downgraded 2026-04-20 after code review.
-- **Outcome**: Partial — scaffold only, not live
-- **Notes**: Role exists in the migration but is not enforced at runtime. `Phase2RlsAndTriggers` migration creates `tamma_app` role idempotently via `pg_roles` probe + grants `CONNECT`, `USAGE` on schema, `SELECT/INSERT/UPDATE/DELETE` on all current and future tables, `USAGE/SELECT` on sequences. Password is a placeholder; production deploys must `ALTER ROLE tamma_app PASSWORD '<secret>'` before activation.
-- **Why "scaffold only"**: the role is the login identity for `TammaAppDbContext`, but zero production code paths inject `TammaAppDbContext`. All 21 repositories and every endpoint consume `TammaDbContext` (admin/superuser). The role therefore never carries request traffic. Full activation requires threading `TammaAppDbContext` through per-request endpoints and repositories — tracked as follow-up story `docs/stories/epic-19/story-19-6-wire-app-role-context.md`.
-- **Scaffold shape (unchanged)**: **Phase-3 (2026-04-18, commits e53c5a1 / 9e20e05 / 159f12a)**: the role is wired as the login identity for the new `TammaAppDbContext` (registered via `ConnectionStrings:TammaAppDb`). `TammaDbContext` keeps using the admin connection for migrations and background services (`TaskQueueProcessor`, `OutboxSmtpSender`, `WorkflowSyncService`, `EnsurePersonalTenantMiddleware`). Fallback: if `TammaAppDb` is unset, `AddTammaData` logs a warning and points the app context at the admin connection — day-1 bring-up works without operator action but RLS stays inactive until the app-role password is rotated and the connection string wired. **Even with `TammaAppDb` wired, the runtime won't benefit from RLS until per-request endpoints migrate to `TammaAppDbContext` (see follow-up story 19-6).**
+- **Confirmed**: 2026-04-18 by agent; downgraded 2026-04-20 after code review; re-promoted 2026-04-18 after Story 19-6 endpoint + repo swap.
+- **Outcome**: Fixed
+- **Notes**: Role exists in the migration AND now carries per-request traffic. `Phase2RlsAndTriggers` migration creates `tamma_app` role idempotently via `pg_roles` probe + grants `CONNECT`, `USAGE` on schema, `SELECT/INSERT/UPDATE/DELETE` on all current and future tables, `USAGE/SELECT` on sequences. Production deploys must `ALTER ROLE tamma_app PASSWORD '<secret>'` to take the role off the placeholder; without that step `ConnectionStrings:TammaAppDb` will fail auth at startup and the API container won't come up.
+- **Live runtime contract**: per-request endpoints (`DashboardEndpoints`, `OrgEndpoints` tx contexts) and the migrated repositories (`PromptRepository`, `ProviderHealthRepository`, `SanitizationRepository`) resolve `TammaAppDbContext`, which binds the `tamma_app` connection string. Background services + auth-time + webhook-dispatch repositories intentionally stay on `TammaDbContext` (admin role) — see Story 19-6 commit messages for the explicit allow-list rationale. `AppRoleRegressionTests` covers the regression vectors against a Phase-3 Postgres testcontainer.
 
 ### Deployment runbook (operator-driven)
 
