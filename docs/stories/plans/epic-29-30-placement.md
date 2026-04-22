@@ -219,6 +219,34 @@ Cross-reference of 2026-04-20 review findings to closing stories:
 - Next step: when a team is ready, convert each brief into a full
   implementation plan (same shape as `docs/stories/epic-19/19-1-phase-1-impl-plan.md`).
 
+## Prioritization
+
+Wave assignment + cross-epic ranking for every Epic 29 and Epic 30
+story — including where they land relative to Epic 28, 18, 9, 12 —
+lives in
+[`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md).
+
+Summary of placement decisions that doc makes for Epic 29 / 30:
+
+- **Epic 29 (10 stories, 170h)**: 29-1..29-3 in **Wave A** (secret
+  store abstraction + Postgres store + reveal-once — co-requires
+  Epic 28 Phase A/B). 29-4..29-10 in **Wave B** (admin/tenant UIs,
+  rotation primitives, stopgap migration, stopgap deletion).
+  Rationale: 29-1 is a shape contract that unblocks 31-2, and 29-9
+  closes P1 review findings 15 + 16.
+- **Epic 30 (10 stories, 229h)**: interface foundation 30-1, 30-2,
+  30-3 in **Wave C** (after Cranl keeps working via v2 refactor,
+  parallel with Epic 31 driver work). Drivers 30-4 (Hetzner),
+  30-5 (Cloudflare), 30-6 (BYO), plus routing 30-8, onboarding
+  30-7, deprovisioning 30-9, cost dashboard 30-10 in **Wave D**
+  (launch-adjacent; validates multi-backend matrix during Layer 5).
+- **19-6** co-requisite for 29-7 pool drain and 30-8 full-finding-1
+  closure — sits in **Wave A** as the unblocking security story.
+
+See [`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md)
+§4 for ordered per-wave lists and §6 for the five open questions
+that gate re-ordering.
+
 ## See also
 
 - [`epic-31-33-placement.md`](./epic-31-33-placement.md) — layer
@@ -229,3 +257,5 @@ Cross-reference of 2026-04-20 review findings to closing stories:
   findings.
 - [`tenant-user-mgmt-audit.md`](./tenant-user-mgmt-audit.md) — gap
   audit behind Stories 18-7 + 18-8.
+- [`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md)
+  — prioritization across all Layer 4 + Layer 5 stories.

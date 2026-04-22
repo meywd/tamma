@@ -265,3 +265,32 @@ Post-launch (trigger-gated):
 **Next step**: when a team is ready, convert each Epic 31 brief into
 a full implementation plan (same shape as
 `docs/stories/epic-19/19-1-phase-1-impl-plan.md`).
+
+## Prioritization
+
+Wave assignment + cross-epic ranking for Epic 31 / 33 and tenant
+user-mgmt stories lives in
+[`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md).
+
+Summary of placement decisions that doc makes for Epic 31 / 33 and
+the tenant user-mgmt add-ons:
+
+- **Tenant user-mgmt (18-7 + 18-8, 46h)**: **Wave A**. Closes the
+  P1 "user can't add users to their tenant" review-sweep finding;
+  18-5 dashboard shell is the shared surface, so both stories sit
+  in Wave A alongside 18-4 / 18-5 / Epic 28 auth plane.
+- **Epic 31 (10 active stories, 253h)**: foundation 31-1 + 31-2 +
+  31-3 + 31-7 + 31-8 in **Wave C** (abstraction + GitHub refactor +
+  webhook abstraction + CI-secrets abstraction); drivers 31-4
+  (Gitea) + 31-5 (Forgejo) + 31-10 (test harness) in **Wave C**;
+  31-9 (onboarding UI) spans late-Wave-C into **Wave D**; 31-6
+  (GitLab) in **Wave D** (heaviest driver, external-API risk
+  lands late). Optional 31-11 / 31-12 remain **deferred**.
+- **Epic 33 (deferred)**: activation gated on the five trigger
+  conditions enumerated in this doc. No scoring until triggered.
+
+See [`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md)
+§4 for ordered per-wave lists; §5.2 for the Epic 31 ↔ Epic 29 /
+Epic 28 dependency tensions; §6 for the open question "Do we ship
+GitLab at launch or defer?" that would reshuffle 31-6 from Wave D
+to Wave C.
