@@ -220,6 +220,17 @@ public static class DependencyInjection
         services.AddScoped<IEventRepository, EventRepository>();
         services.AddScoped<IBudgetConfigRepository, BudgetConfigRepository>();
 
+        // ── Epic 28 Story 28-6: control-plane repositories ──
+        //
+        // Each platform-* repo is a thin wrapper over ControlPlaneDbContext
+        // (registered above by Story 28-2). TryAdd* lets adjacent stories
+        // (28-4 owns the tenant connection resolver registration) re-enter
+        // this method or replace these in tests without conflict — the
+        // first registration wins and tests can pre-stage doubles.
+        services.TryAddScoped<IPlatformEventRepository, PlatformEventRepository>();
+        services.TryAddScoped<IPlatformQueuedTaskRepository, PlatformQueuedTaskRepository>();
+        services.TryAddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
+
         return services;
     }
 }
