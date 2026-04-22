@@ -126,6 +126,19 @@ Visitor                tamma.dev         api.tamma.dev        Stripe         app
   │                       │                  │◀══════════════════════════════════▶│
 ```
 
+## What the Midnight Ocean landing page actually ships
+
+The production landing page (`public/index.html`) has:
+
+- **Hero**: headline "Autonomous development, without the autonomy theatre", subheadline, primary CTA "Get started free" linking to `app.tamma.dev`, secondary CTA "View on GitHub".
+- **Stats band**: 3× faster, 70%+ autonomous tasks, zero vendor lock-in.
+- **Feature grid (6 cards)**: autonomous workflows, multi-provider AI, multi-platform Git, event-sourced audit trail, self-maintaining, quality gates.
+- **How it works (4 steps)**: connect repo → assign issue → autonomous development → review & merge.
+- **Email capture**: `/api/signup` posts to Cloudflare KV (5 signups/hr/IP, 3600s TTL).
+- **Dark mode**: toggle + `prefers-color-scheme` support.
+- **SEO**: Open Graph, Twitter Cards, JSON-LD `SoftwareApplication` + `Organization`, `sitemap.xml` generated at build.
+- **Performance**: Lighthouse >= 90 on all four categories; zero JS on initial render; image assets pre-optimised with `sharp`.
+
 ## Use cases
 
 1. **Prospect lands on tamma.dev** and sees Midnight Ocean hero, features, how-it-works, and "Get started free" CTA. Submitting the email form POSTs to `api/signup` which writes to Cloudflare KV with a 5-per-hour IP rate limit. (Live today.)
@@ -147,6 +160,30 @@ Visitor                tamma.dev         api.tamma.dev        Stripe         app
 | `/user/settings` | Own profile + keys | Org settings | Org + danger zone |
 | `/user/billing` | View plan | Manage plan | Manage + cancel |
 | `/admin/*` (existing) | Denied | Allowed | Allowed |
+
+## Data model (user dashboard — planned)
+
+Reuses Epic 17 tenants + Epic 18 users. New API-facing projections:
+
+| Projection | Source | Shape |
+|-----------|--------|-------|
+| `RepoCard` | `github_installations` + `repo_metadata` + last-run aggregate | `{ id, ownerRepo, platform, status, lastRunAt, totalRuns }` |
+| `RunRow` | `workflow_instances` + engine `domain_events` | `{ runId, repo, issueNumber, issueTitle, status, provider, startedAt, duration }` |
+| `RunDetail` | `domain_events` filtered by `issueId` + `workflow_steps` | `{ events[], steps[], logs[], filesChanged[], prUrl }` |
+| `Subscription` | Stripe + `billing_state` table | `{ plan, status, currentPeriodEnd, seats, usage }` |
+| `Invoice` | Stripe customer | `{ id, amount, status, hostedUrl }` |
+| `ApiKey` | `user_api_keys` | `{ id, name, prefix, createdAt, lastUsedAt }` (secret shown once on create) |
+
+## Deployment topology
+
+| Host | What runs there | TLS | DNS |
+|------|------------------|-----|-----|
+| Cloudflare Workers (`tamma-marketing-site`) | Static HTML + `/api/signup` + KV | Cloudflare edge | `tamma.dev` custom domain |
+| Cloudflare Workers (`tamma-wiki-site`) | SPA (Epic 25) | Cloudflare edge | `wiki.tamma.dev`, `wiki.its-done.dev` |
+| Hetzner CPX42 via Docker Compose | API (Fastify), Dashboard SPA, Postgres, RabbitMQ, OpenSearch, ChromaDB, Nginx | CF Full + origin cert | `app.tamma.dev`, `api.tamma.dev`, `elsa.tamma.dev` |
+| External | Stripe Checkout, Stripe Customer Portal | Stripe-hosted | — |
+
+The SPA at `app.tamma.dev` is served by Nginx from the shared VPS; the marketing site and wiki both live at the edge. The `/webhooks/stripe` endpoint is on `api.tamma.dev` — the only VPS surface Stripe needs to reach. The `tamma_session` JWT cookie is issued with `domain=.tamma.dev; Secure; HttpOnly; SameSite=Lax` so both the marketing site (when logged-in) and the dashboard share it.
 
 ## Stories
 
@@ -170,11 +207,20 @@ Visitor                tamma.dev         api.tamma.dev        Stripe         app
 | Wiki Site | Epic 25 | Shared documentation surface at wiki.tamma.dev |
 | Multi-Tenancy | Epic 17 | All user-scoped queries carry tenant context |
 
+## Open risks
+
+1. **Stripe webhook ordering** — `checkout.session.completed` may arrive before `customer.subscription.created`; 21-2 must handle both orders idempotently via a correlated `tenant_id`.
+2. **Cookie-scope confusion** — Safari's ITP can block third-party cookies; the cookie must stay first-party on `.tamma.dev` so marketing → dashboard redirects carry the session.
+3. **Pricing page SEO** — pricing is a high-intent landing target; 21-2 must ship with JSON-LD `PriceSpecification` + `Offer` structured data to surface rich results.
+4. **Run detail latency** — for repos with thousands of runs, `/user/runs/:runId` needs server-side pagination of the event timeline; 21-4 spec defines a default window (last 1000 events) with "load more".
+5. **SSE connection limits** — Nginx default is 1k concurrent; the user dashboard plus admin dashboard plus potential voice WebSockets (Epic 24) could stack; 21-4 assumes one SSE per authenticated session with heartbeat-based reuse across tabs.
+6. **Docs drift** — the marketing-side docs section (21-3) could duplicate the wiki; the current plan is to deep-link from marketing to `wiki.tamma.dev` rather than re-host identical content.
+
 ## Current state
 
-- **Live**: marketing site at tamma.dev with Midnight Ocean redesign (hero, features, how-it-works, 6-feature grid, 4-step flow, CTA, dark mode, Lighthouse >= 90). Email signup backed by Cloudflare KV with IP rate limiting. Full SEO metadata (Open Graph, Twitter, JSON-LD). wiki.tamma.dev also live via Epic 25.
+- **Live**: marketing site at tamma.dev with Midnight Ocean redesign (hero, features, how-it-works, 6-feature grid, 4-step flow, CTA, dark mode, Lighthouse >= 90). Email signup backed by Cloudflare KV with IP rate limiting. Full SEO metadata (Open Graph, Twitter, JSON-LD). wiki.tamma.dev also live via Epic 25. Admin dashboard at app.tamma.dev already hosts `/admin/prompts` (Epic 27 Story 27-4 landed 2026-04-22).
 - **In progress**: documentation site — marketing docs section scope still planned; the standalone wiki at wiki.tamma.dev (Epic 25) covers public documentation today.
-- **Drafted**: pricing page with Stripe Checkout (21-2), user dashboard repos + runs (21-4), user dashboard settings + billing (21-5).
+- **Drafted**: pricing page with Stripe Checkout (21-2), user dashboard repos + runs (21-4), user dashboard settings + billing (21-5). All three are additive — no existing admin surface breaks.
 - **Deferred**: blog / changelog (will likely land inside the wiki site rather than marketing-site to avoid duplicating markdown renderers).
 
 ## See also
