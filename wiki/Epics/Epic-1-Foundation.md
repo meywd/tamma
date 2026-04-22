@@ -1,6 +1,6 @@
 # Epic 1: Foundation & Core Infrastructure
 
-**Status:** Completed
+**Status:** Near Complete (10/15 done; 1-10 in progress with OpenCode/OpenRouter/Zen MCP done; remaining providers planned)
 **Stories:** 15 (1-0 through 1-14)
 **Milestone:** [Epic 1 Milestone](https://github.com/meywd/tamma/milestone/1)
 
@@ -154,7 +154,11 @@ CLI modes implemented:
 ### Story 1-10: Additional AI Provider Implementations
 **Status:** In Progress | **Tasks:** 10
 
-OpenCode, OpenRouter, and Zen MCP providers implemented with 108+ tests passing. OpenAI, Copilot, Gemini, z.ai, and local LLMs still in progress.
+OpenCode, OpenRouter, and Zen MCP providers implemented and tested (108 tests passing across all three). OpenAI, Copilot, Gemini, z.ai, and local LLMs still planned. See `packages/providers/src/` for source.
+
+Key lessons (from project memory):
+- `vi.mock()` factory must be self-contained (hoisted) — put mock classes inside factory, use async helper to retrieve them
+- Two provider hierarchies: `IAIProvider` (LLM APIs) and `IAgentProvider` / `ICLIAgentProvider` (CLI agents). Tests cover both surfaces independently.
 
 - [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-10)
 
