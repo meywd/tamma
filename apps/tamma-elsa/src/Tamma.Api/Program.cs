@@ -815,6 +815,17 @@ orgs.MapDelete("/{tenantId}", OrgEndpoints.DeleteOrg)
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
 
+// ── Onboarding wizard (Story 18-4) ──
+// Status is the polling endpoint the dashboard wizard hits every few
+// seconds while the user is on the GitHub install page; install-github is
+// a 302 → github.com/apps/<slug>/installations/new with a signed `state`
+// param so the existing GitHubEndpoints.Callback can re-bind the new
+// install to the user's active tenant.
+app.MapGet("/api/v1/onboarding/status", OnboardingEndpoints.GetStatus)
+    .RequireAuthorization("MemberAccess");
+app.MapGet("/api/v1/onboarding/install-github", OnboardingEndpoints.InstallGitHub)
+    .RequireAuthorization("MemberAccess");
+
 // ── Agents Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
 // override on the PUT.
