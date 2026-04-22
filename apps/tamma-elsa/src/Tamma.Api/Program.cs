@@ -569,6 +569,13 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("workflows:manage"));
         });
+        // Story 16-5 AC 7: DELETE /api/workflows/* must be owner-only.
+        // workflows:delete maps to ["owner"] in the permission matrix.
+        options.AddPolicy("WorkflowsDelete", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("workflows:delete"));
+        });
         options.AddPolicy("DashboardView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -628,7 +635,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "WorkflowsView", "WorkflowsManage", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -942,7 +949,9 @@ workflows.MapPost("/instances", WorkflowEndpoints.CreateInstance).RequireAuthori
 workflows.MapPut("/instances/{id}", WorkflowEndpoints.UpdateInstance).RequireAuthorization("WorkflowsManage");
 workflows.MapGet("/instances", WorkflowEndpoints.ListInstances);
 workflows.MapPost("/instances/{id}/cancel", WorkflowEndpoints.CancelInstance).RequireAuthorization("WorkflowsManage");
-workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).RequireAuthorization("WorkflowsManage");
+// Story 16-5 AC 7: workflow instance deletion is owner-only via WorkflowsDelete
+// (workflows:delete -> ["owner"]). Cancel stays admin/owner via WorkflowsManage.
+workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).RequireAuthorization("WorkflowsDelete");
 workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 
 // ── GitHub App (no auth, webhook signature verification) ──
