@@ -104,6 +104,16 @@ public sealed class CranlApiClient : ICranlApiClient
             new EnvironmentRequest { Env = envText },
             ct);
 
+    public async Task<string> GetEnvironmentAsync(string id, CancellationToken ct = default)
+    {
+        var envelope = await SendNoBodyAsync<EnvironmentRequest>(
+                HttpMethod.Get,
+                $"applications/{Uri.EscapeDataString(id)}/environment",
+                ct)
+            .ConfigureAwait(false);
+        return envelope.Env ?? string.Empty;
+    }
+
     public Task<CranlAppDomains> GetApplicationDomainsAsync(string id, CancellationToken ct = default)
         => SendNoBodyAsync<CranlAppDomains>(
             HttpMethod.Get,
