@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import InlineMarkdown from './InlineMarkdown';
 
 interface ManifestEntry {
   path: string;
@@ -278,6 +279,14 @@ export default function EpicDetailPage() {
     () => sections.find((s) => s.heading.toLowerCase().includes('overview')),
     [sections]
   );
+  // First paragraph of overview, preserving inline markdown (bold, links, code)
+  const overviewFirstParagraph = useMemo(() => {
+    if (!overviewSection) return '';
+    const blankIdx = overviewSection.content.search(/\n\s*\n/);
+    return blankIdx === -1
+      ? overviewSection.content
+      : overviewSection.content.slice(0, blankIdx);
+  }, [overviewSection]);
 
   // Parse goals
   const goalsSection = useMemo(
@@ -466,9 +475,9 @@ export default function EpicDetailPage() {
         </div>
 
         {overviewSection && (
-          <p className="text-[15px] text-zinc-400 leading-relaxed max-w-3xl">
-            {overviewSection.content.split('\n')[0]}
-          </p>
+          <div className="text-[15px] text-zinc-400 leading-relaxed max-w-3xl line-clamp-4">
+            <InlineMarkdown>{overviewFirstParagraph}</InlineMarkdown>
+          </div>
         )}
       </div>
 
@@ -509,7 +518,9 @@ export default function EpicDetailPage() {
                 <span className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-xs font-medium text-blue-400 shrink-0 mt-0.5">
                   {i + 1}
                 </span>
-                <span className="text-[14px] text-zinc-300 leading-relaxed">{goal}</span>
+                <span className="text-[14px] text-zinc-300 leading-relaxed">
+                  <InlineMarkdown>{goal}</InlineMarkdown>
+                </span>
               </div>
             ))}
           </div>
@@ -542,14 +553,7 @@ export default function EpicDetailPage() {
                       <tr key={ri} className="hover:bg-zinc-800/30 transition-colors">
                         {row.map((cell, ci) => (
                           <td key={ci} className="px-4 py-2.5 text-zinc-300 border-b border-zinc-800/50">
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: cell
-                                  .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>')
-                                  .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100 font-medium">$1</strong>')
-                                  .replace(/--/g, '\u2014'),
-                              }}
-                            />
+                            <InlineMarkdown>{cell}</InlineMarkdown>
                           </td>
                         ))}
                       </tr>
@@ -583,15 +587,9 @@ export default function EpicDetailPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d={getDeliverableIcon(item)} />
                         </svg>
                       </div>
-                      <span
-                        className="text-[14px] text-zinc-300 leading-relaxed"
-                        dangerouslySetInnerHTML={{
-                          __html: item
-                            .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>')
-                            .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100">$1</strong>')
-                            .replace(/--/g, '\u2014'),
-                        }}
-                      />
+                      <span className="text-[14px] text-zinc-300 leading-relaxed">
+                        <InlineMarkdown>{item}</InlineMarkdown>
+                      </span>
                     </div>
                   ))}
                 </div>

@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import InlineMarkdown from './InlineMarkdown';
 
 interface ManifestEntry {
   path: string;
@@ -493,14 +494,9 @@ export default function StoryDetailPage() {
                 <span className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-[11px] font-medium text-blue-400 shrink-0 mt-0.5">
                   {i + 1}
                 </span>
-                <span
-                  className="text-[14px] text-zinc-300 leading-relaxed"
-                  dangerouslySetInnerHTML={{
-                    __html: item
-                      .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>')
-                      .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100">$1</strong>'),
-                  }}
-                />
+                <span className="text-[14px] text-zinc-300 leading-relaxed">
+                  <InlineMarkdown>{item}</InlineMarkdown>
+                </span>
               </div>
             ))}
           </div>
@@ -532,13 +528,24 @@ export default function StoryDetailPage() {
                     className={`text-[13px] leading-relaxed ${
                       item.checked ? 'text-zinc-500 line-through' : 'text-zinc-300'
                     } ${item.indent > 0 ? 'text-[12px]' : 'font-medium'}`}
-                    dangerouslySetInnerHTML={{
-                      __html: item.text
-                        .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1 py-0.5 rounded">$1</code>')
-                        .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100 font-medium">$1</strong>')
-                        .replace(/\(AC:\s*([\d,\s]+)\)/g, '<span class="text-[11px] text-zinc-600 ml-1">(AC: $1)</span>'),
-                    }}
-                  />
+                  >
+                    {(() => {
+                      const acMatch = item.text.match(/\(AC:\s*([\d,\s]+)\)\s*$/);
+                      const body = acMatch
+                        ? item.text.slice(0, acMatch.index).trim()
+                        : item.text;
+                      return (
+                        <>
+                          <InlineMarkdown>{body}</InlineMarkdown>
+                          {acMatch && (
+                            <span className="text-[11px] text-zinc-600 ml-1">
+                              (AC: {acMatch[1]})
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </span>
                 </div>
               ))}
             </div>
@@ -572,14 +579,7 @@ export default function StoryDetailPage() {
                       <tr key={ri} className="hover:bg-zinc-800/30 transition-colors">
                         {row.map((cell, ci) => (
                           <td key={ci} className="px-4 py-2.5 text-zinc-300 border-b border-zinc-800/50">
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: cell
-                                  .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>')
-                                  .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100 font-medium">$1</strong>')
-                                  .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-400 hover:underline">$1</a>'),
-                              }}
-                            />
+                            <InlineMarkdown>{cell}</InlineMarkdown>
                           </td>
                         ))}
                       </tr>
