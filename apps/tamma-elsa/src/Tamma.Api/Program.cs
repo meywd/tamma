@@ -210,7 +210,24 @@ if (controlPlaneConnectionString is null)
         + "must point at the dedicated tamma_control database (Story 28-1).");
 }
 
+// ── Story 28-12: AES-GCM connection-string decryptor + KEK cabinet ──
+//
+// The KekProvider is the single source of truth for the platform's
+// primary + (optional) secondary KEK. The AesGcmConnectionStringDecryptor
+// adapter is the production override for the Story 28-4 resolver's
+// IConnectionStringDecryptor seam — registered BEFORE AddTammaData so
+// the resolver's TryAddSingleton<IConnectionStringDecryptor, Passthrough>
+// fallback does not win.
+builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekProvider>();
+builder.Services.AddSingleton<
+    Tamma.Data.Abstractions.IConnectionStringDecryptor,
+    Tamma.Api.Services.Secrets.AesGcmConnectionStringDecryptor>();
+
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
+
+// Coordinator drives the platform-wide KEK rotation flow. Singleton —
+// only one rotation can be in flight at a time.
+builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationCoordinator>();
 
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
@@ -772,6 +789,16 @@ admin.MapPost("/tenants/{tenantId:guid}/provision", AdminEndpoints.ProvisionTena
 admin.MapGet("/tenants/{tenantId:guid}/provisioning", AdminEndpoints.GetTenantProvisioning)
     .RequireAuthorization("OwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/deprovision", AdminEndpoints.DeprovisionTenant)
+    .RequireAuthorization("OwnerAccess");
+
+// Story 28-12 — KEK rotation. Platform-owner only because rotating
+// the master key is a once-per-quarter operator action with global
+// blast radius. POST /start kicks off the re-encrypt loop and returns
+// 202; GET /status reports progress so the runbook can poll until the
+// phase flips to Completed (or Failed).
+admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
     .RequireAuthorization("OwnerAccess");
 
 // ── Orgs / Tenants ──
