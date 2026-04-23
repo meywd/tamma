@@ -6,6 +6,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Tamma.Core.Enums;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Mentorship;
@@ -199,6 +200,19 @@ public class ClarifyRequirementsActivity : Activity
             if (attempt >= maxAttempts)
             {
                 logger.LogWarning("Max clarification attempts reached for session {SessionId}", sessionId);
+                // Wave C.4 §3 — retry envelope exhausted. Emit
+                // WORKFLOW.RETRY_EXCEEDED so the critical-severity rule
+                // can fan out to PagerDuty/email.
+                await WorkflowRetryEmitter.EmitAsync(
+                    context.GetService<IAlertEventEmitter>(),
+                    ReadMentorshipTenantId(context),
+                    workflowDefinitionId: ExtractWorkflowDefinitionId(context),
+                    workflowInstanceId: ExtractWorkflowInstanceId(context),
+                    attempts: attempt,
+                    maxAttempts: maxAttempts,
+                    finalError: "clarify_requirements_max_attempts_reached",
+                    activityId: context.Activity.Id,
+                    ct: context.CancellationToken).ConfigureAwait(false);
                 await context.CompleteActivityWithOutcomesAsync("MaxRetries");
                 return;
             }
@@ -211,6 +225,43 @@ public class ClarifyRequirementsActivity : Activity
             await context.CompleteActivityWithOutcomesAsync("Error");
         }
     }
+
+    // Wave C.4 §3 — shared tenant-resolver helper for mentorship
+    // FlowNode activities. The Mentorship workflows don't accept a
+    // TenantId input today; the session repository knows it, but
+    // resolving that at every retry-exhaustion site would mean a DB
+    // hit per failure. We fall back to the workflow variable names
+    // used across Tamma when present.
+    internal static Guid? ReadMentorshipTenantId(ActivityExecutionContext context)
+    {
+        string?[] candidates =
+        {
+            context.GetVariable<string>("TenantId"),
+            context.GetVariable<string>("tenantId"),
+        };
+        foreach (var s in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(s) && Guid.TryParse(s, out var g))
+                return g;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Best-effort extraction of the workflow definition id as a Guid.
+    /// Elsa stores definition ids as strings that are usually (but not
+    /// always) Guid-parseable — returns Guid.Empty on non-Guid ids so
+    /// the emission still fires with a predictable sentinel.
+    /// </summary>
+    internal static Guid ExtractWorkflowDefinitionId(ActivityExecutionContext context)
+    {
+        var id = context.WorkflowExecutionContext.Workflow.Identity.DefinitionId;
+        return Guid.TryParse(id, out var g) ? g : Guid.Empty;
+    }
+
+    /// <summary>Similar best-effort for the instance id.</summary>
+    internal static Guid ExtractWorkflowInstanceId(ActivityExecutionContext context) =>
+        Guid.TryParse(context.WorkflowExecutionContext.Id, out var g) ? g : Guid.Empty;
 }
 
 /// <summary>
@@ -259,6 +310,19 @@ public class ReExplainStoryActivity : Activity
             if (attempt >= maxAttempts)
             {
                 logger.LogWarning("Max re-explanation attempts reached for session {SessionId}", sessionId);
+                // Wave C.4 §3 — retry envelope exhausted.
+                await WorkflowRetryEmitter.EmitAsync(
+                    context.GetService<IAlertEventEmitter>(),
+                    ClarifyRequirementsActivity.ReadMentorshipTenantId(context),
+                    workflowDefinitionId:
+                        ClarifyRequirementsActivity.ExtractWorkflowDefinitionId(context),
+                    workflowInstanceId:
+                        ClarifyRequirementsActivity.ExtractWorkflowInstanceId(context),
+                    attempts: attempt,
+                    maxAttempts: maxAttempts,
+                    finalError: "re_explain_story_max_attempts_reached",
+                    activityId: context.Activity.Id,
+                    ct: context.CancellationToken).ConfigureAwait(false);
                 await context.CompleteActivityWithOutcomesAsync("MaxRetries");
                 return;
             }
@@ -575,6 +639,21 @@ public class AutoFixIssuesActivity : Activity
             }
             else if (attempt >= maxAttempts)
             {
+                // Wave C.4 §3 — auto-fix retry envelope exhausted;
+                // downstream outcome routes to manual fix. Emit the
+                // alert event so operators see the escalation.
+                await WorkflowRetryEmitter.EmitAsync(
+                    context.GetService<IAlertEventEmitter>(),
+                    ClarifyRequirementsActivity.ReadMentorshipTenantId(context),
+                    workflowDefinitionId:
+                        ClarifyRequirementsActivity.ExtractWorkflowDefinitionId(context),
+                    workflowInstanceId:
+                        ClarifyRequirementsActivity.ExtractWorkflowInstanceId(context),
+                    attempts: attempt,
+                    maxAttempts: maxAttempts,
+                    finalError: "auto_fix_max_attempts_reached",
+                    activityId: context.Activity.Id,
+                    ct: context.CancellationToken).ConfigureAwait(false);
                 await context.CompleteActivityWithOutcomesAsync("ManualFixNeeded");
             }
             else
