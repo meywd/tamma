@@ -564,6 +564,17 @@ builder.Services.AddTammaAlerts();
 // DCB event stream and emits AlertPayloads through IAlertSink.
 builder.Services.AddTammaAlertRuleEngine();
 
+// Wave C.4 §4 — per-process health monitor for TammaApiClient.
+// Singleton so the rolling 5-min failure window is shared across every
+// call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
+// sustained failures cross the threshold. The ScopedAlertEventEmitter
+// adapter resolves the scoped IAlertEventEmitter per emission (bridge
+// between singleton monitor + scoped emitter lifetime).
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp =>
+    new Tamma.Activities.LlmCall.TammaApiHealthMonitor(
+        new Tamma.Activities.LlmCall.ScopedAlertEventEmitter(sp),
+        sp.GetService<TimeProvider>()));
+
 // Story 28-10 — platform-wide analytics rollup behind the
 // /api/admin/analytics/* endpoints. Reads the CP context
 // (tenants + platform_events) and the app context (workflow_instances +

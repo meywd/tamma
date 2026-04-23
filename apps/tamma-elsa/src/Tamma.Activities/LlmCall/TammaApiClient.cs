@@ -31,6 +31,7 @@ public class TammaApiClient
     private readonly HttpClient _httpClient;
     private readonly ILogger<TammaApiClient> _logger;
     private readonly string _baseUrl;
+    private readonly TammaApiHealthMonitor? _healthMonitor;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -40,10 +41,12 @@ public class TammaApiClient
     public TammaApiClient(
         HttpClient httpClient,
         ILogger<TammaApiClient> logger,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        TammaApiHealthMonitor? healthMonitor = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _healthMonitor = healthMonitor;
 
         _baseUrl = configuration?["Tamma:ApiUrl"]
                    ?? Environment.GetEnvironmentVariable("TAMMA_API_URL")
@@ -174,11 +177,15 @@ public class TammaApiClient
             using var request = new HttpRequestMessage(HttpMethod.Delete, url);
             AddTenantHeader(request, tenantId);
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Tamma API DELETE failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
             return false;
         }
     }
@@ -195,6 +202,9 @@ public class TammaApiClient
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             AddTenantHeader(request, tenantId);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 // URL is intentionally omitted — the path carries interpolated
@@ -216,6 +226,7 @@ public class TammaApiClient
             // URL omitted for the same reason as above; the exception type
             // and message are the operator-useful signal.
             _logger.LogWarning(ex, "Tamma API GET failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
             return null;
         }
     }
@@ -234,6 +245,9 @@ public class TammaApiClient
             };
             AddTenantHeader(request, tenantId);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
@@ -248,6 +262,7 @@ public class TammaApiClient
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             _logger.LogWarning(ex, "Tamma API POST failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
             return null;
         }
     }
@@ -266,6 +281,9 @@ public class TammaApiClient
             };
             AddTenantHeader(request, tenantId);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
@@ -278,8 +296,21 @@ public class TammaApiClient
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             _logger.LogWarning(ex, "Tamma API POST failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Wave C.4 §4 — pipe the observed response into the health monitor
+    /// so PLATFORM.API.UNHEALTHY can fire on sustained failure bursts.
+    /// The monitor is optional; when unwired the call is a no-op.
+    /// </summary>
+    private Task RecordHealthAsync(
+        bool success, int? statusCode, string? exceptionType, CancellationToken ct)
+    {
+        if (_healthMonitor is null) return Task.CompletedTask;
+        return _healthMonitor.RecordAsync(success, statusCode, exceptionType, ct);
     }
 
     private static void AddTenantHeader(HttpRequestMessage request, string? tenantId)
