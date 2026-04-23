@@ -553,6 +553,12 @@ builder.Services.AddHealthChecks()
 // Mirrors the TS /api/admin/health behavior.
 builder.Services.AddScoped<IAdminHealthService, AdminHealthService>();
 
+// Story 5.6 / 1.5-37 (Wave C.1) — alert core: sink, dispatcher,
+// four channels (email / slack / pagerduty / webhook), rate
+// limiter, secret reader. Registered before any caller so
+// IAlertSink can be injected by future wave-C.4 activity edits.
+builder.Services.AddTammaAlerts();
+
 // Story 28-10 — platform-wide analytics rollup behind the
 // /api/admin/analytics/* endpoints. Reads the CP context
 // (tenants + platform_events) and the app context (workflow_instances +
@@ -919,6 +925,32 @@ admin.MapPost("/tenants/{tenantId:guid}/actions/force-delete",
     .RequireAuthorization("OwnerAccess");
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
+    .RequireAuthorization("OwnerAccess");
+
+// Story 5.6 / 1.5-37 (Wave C.1) — alert-system admin surface.
+// Platform-owner only because alert acknowledgment + channel
+// configuration carries cross-tenant blast radius. Mounted under
+// /api/v1/admin/* per the Wave C.1 brief (new prefix — the
+// existing /api/admin routes keep their legacy paths so CI tests
+// don't churn).
+var v1Admin = app.MapGroup("/api/v1/admin").RequireAuthorization("AdminAccess");
+v1Admin.MapGet("/alerts", AlertEndpoints.ListAlerts)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapGet("/alerts/{id:guid}", AlertEndpoints.GetAlert)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alerts/{id:guid}/acknowledge", AlertEndpoints.AcknowledgeAlert)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alerts/{id:guid}/resolve", AlertEndpoints.ResolveAlert)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alerts/_test", AlertEndpoints.TestRaiseAlert)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapGet("/alert-channels", AlertEndpoints.ListChannels)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alert-channels", AlertEndpoints.CreateChannel)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPatch("/alert-channels/{id:guid}", AlertEndpoints.UpdateChannel)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapDelete("/alert-channels/{id:guid}", AlertEndpoints.DeleteChannel)
     .RequireAuthorization("OwnerAccess");
 
 // Story 29-3 — platform-scope secret-cabinet create + rotate. Both
@@ -1305,6 +1337,7 @@ using (var scope = app.Services.CreateScope())
             Log.Information("Wiping Tamma-managed public-schema tables (TAMMA_PRESERVE_DB not set)");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
+                    alert_delivery_attempts, alert_channels, alerts,
                     api_keys, agent_configs, budget_configs, domain_events,
                     email_outbox,
                     github_installation_repos, github_installations,
