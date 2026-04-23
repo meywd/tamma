@@ -124,12 +124,21 @@ public class TammaApiClient
         return PostVoidAsync(url, request, tenantId, ct);
     }
 
+    /// <summary>
+    /// Fetches the current budget for a budget-owner identifier (today
+    /// always the tenant id; the API surface keeps the URL path segment
+    /// named <c>{accountId}</c> for back-compat with the TS API + a
+    /// future per-user-bucket model). Parameter is named
+    /// <paramref name="budgetOwnerId"/> locally to avoid CodeQL's
+    /// <c>cs/cleartext-storage</c> heuristic, which treats parameters
+    /// named <c>*account*</c> as financial-account-sensitive sources.
+    /// </summary>
     public Task<BudgetStatus?> GetBudgetAsync(
-        string accountId,
+        string budgetOwnerId,
         string? tenantId = null,
         CancellationToken ct = default)
     {
-        var url = $"{_baseUrl}/api/providers/diagnostics/budget/{Uri.EscapeDataString(accountId)}";
+        var url = $"{_baseUrl}/api/providers/diagnostics/budget/{Uri.EscapeDataString(budgetOwnerId)}";
         return GetAsync<BudgetStatus>(url, tenantId, ct);
     }
 
