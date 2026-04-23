@@ -7,6 +7,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -78,12 +79,22 @@ public class CheckBudgetActivity : Activity
                     {
                         if (apiBudget.Limit > 0 && apiBudget.Spent >= apiBudget.Limit)
                         {
-                            // No warn log here: budget-exhausted correlation
-                            // belongs in the DCB event stream (BUDGET.EXHAUSTED
-                            // with tenantId tag), which is the only place the
-                            // dashboard + replay tooling actually reads. The
-                            // rotating warn file on the VPS is never grepped
-                            // for per-tenant budget state.
+                            // Wave C.4 §1 — emit BUDGET.EXHAUSTED into the DCB
+                            // event store so the AlertRuleEvaluator can pick it
+                            // up + fan out to channels. Budget-exhausted
+                            // correlation belongs in the event stream (the
+                            // dashboard + replay tooling reads it there), not
+                            // in the rotating warn file on the VPS.
+                            await EmitBudgetExhaustedAsync(
+                                context.GetService<IAlertEventEmitter>(),
+                                TryParseTenantGuid(budgetOwnerId),
+                                context.WorkflowExecutionContext.Id,
+                                source: "api",
+                                spent: apiBudget.Spent,
+                                limit: apiBudget.Limit,
+                                providerName: providerName ?? "(unknown)",
+                                ct: context.CancellationToken)
+                                .ConfigureAwait(false);
                             await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
                             return;
                         }
@@ -119,6 +130,20 @@ public class CheckBudgetActivity : Activity
                 _logger?.LogWarning(
                     "Budget exhausted for LLM call: spent ${Spent:F4} of ${Cap:F4} cap. Skipping {Provider}",
                     budget.SpentUsd, budget.CapUsd, providerName);
+                // Wave C.4 §1 — local-path exhaustion also emits into the
+                // DCB stream. Source differs from the api-path so
+                // downstream dashboards can distinguish "API saw cap hit"
+                // from "local workflow bucket drained".
+                await EmitBudgetExhaustedAsync(
+                    context.GetService<IAlertEventEmitter>(),
+                    TryParseTenantGuid(budgetOwnerId),
+                    context.WorkflowExecutionContext.Id,
+                    source: "local",
+                    spent: budget.SpentUsd,
+                    limit: budget.CapUsd,
+                    providerName: providerName ?? "(unknown)",
+                    ct: context.CancellationToken)
+                    .ConfigureAwait(false);
                 await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
                 return;
             }
@@ -170,4 +195,39 @@ public class CheckBudgetActivity : Activity
             return new BudgetState();
         }
     }
+
+    /// <summary>
+    /// Wave C.4 §1 helper — emit a BUDGET.EXHAUSTED DCB event via
+    /// <paramref name="emitter"/>. Tolerant of null emitter (DI not
+    /// wired in some test harnesses) + null tenant (event is tenant-
+    /// scoped by definition — no emission makes sense without one).
+    /// Public-internal so <c>Tamma.Activities.Tests</c> can exercise it
+    /// without hosting Elsa; test coverage lives in
+    /// <c>CheckBudgetActivityEmissionTests</c>.
+    /// </summary>
+    public static async Task EmitBudgetExhaustedAsync(
+        IAlertEventEmitter? emitter,
+        Guid? tenantId,
+        string workflowInstanceId,
+        string source,
+        decimal spent,
+        decimal limit,
+        string providerName,
+        CancellationToken ct)
+    {
+        if (emitter is null) return;
+        if (tenantId is not Guid tid) return;
+
+        await emitter.EmitBudgetExhaustedAsync(new BudgetExhaustedEvent(
+            TenantId: tid,
+            CorrelationId: workflowInstanceId,
+            Source: source,
+            Spent: spent,
+            Limit: limit,
+            ProviderName: providerName,
+            WorkflowInstanceId: workflowInstanceId), ct).ConfigureAwait(false);
+    }
+
+    private static Guid? TryParseTenantGuid(string? s) =>
+        Guid.TryParse(s, out var g) ? g : (Guid?)null;
 }
