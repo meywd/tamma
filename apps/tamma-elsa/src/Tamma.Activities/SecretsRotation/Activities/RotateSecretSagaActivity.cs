@@ -5,6 +5,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
 using Tamma.Activities.SecretsRotation.Contracts;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Activities.SecretsRotation.Activities;
 
@@ -104,7 +105,14 @@ public class RotateSecretSagaActivity : TammaAsyncActivity
             context.GetRequiredService<IRetireScheduler>(),
             PushRetryDelays,
             ProbeRetryDelays,
-            logger);
+            logger,
+            // Wave C.4 §5 — optional alert emitter. When wired by
+            // AddTammaAlerts the saga fires SECRET.ROTATION.FAILED with
+            // the Wave-C alert-shaped payload (targetKind, cabinetName,
+            // handlerType, failureStage, compensationApplied, lastError).
+            // In unit-test harnesses the emitter is usually absent and
+            // the runner degrades to RotationAuditEmitter-only.
+            context.GetService<IAlertEventEmitter>());
         var outcome = await runner.ExecuteAsync(
             state,
             suppliedPlaintext: NewPlaintext.Get(context),
@@ -139,6 +147,7 @@ internal sealed class SagaRunner
     private readonly IReadOnlyList<TimeSpan> _pushDelays;
     private readonly IReadOnlyList<TimeSpan> _probeDelays;
     private readonly ILogger<RotateSecretSagaActivity>? _logger;
+    private readonly IAlertEventEmitter? _alertEmitter;
 
     // Per-run state — populated in ExecuteAsync so the runner is
     // stateless across different rotation sagas.
@@ -152,7 +161,8 @@ internal sealed class SagaRunner
         IRetireScheduler scheduler,
         IReadOnlyList<TimeSpan> pushDelays,
         IReadOnlyList<TimeSpan> probeDelays,
-        ILogger<RotateSecretSagaActivity>? logger)
+        ILogger<RotateSecretSagaActivity>? logger,
+        IAlertEventEmitter? alertEmitter = null)
     {
         _gateway = gateway;
         _registry = registry;
@@ -161,6 +171,7 @@ internal sealed class SagaRunner
         _pushDelays = pushDelays;
         _probeDelays = probeDelays;
         _logger = logger;
+        _alertEmitter = alertEmitter;
     }
 
     public async Task<SagaOutcome> ExecuteAsync(
@@ -183,6 +194,7 @@ internal sealed class SagaRunner
             _state.Error = "secret_not_found";
             _state.Result = "failed";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error).ConfigureAwait(false);
+            await EmitAlertFailedAsync("mint", compensationApplied: false).ConfigureAwait(false);
             return SagaOutcome.Failed;
         }
 
@@ -196,6 +208,7 @@ internal sealed class SagaRunner
             _state.Error = "handler_not_registered";
             _state.Result = "failed";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error).ConfigureAwait(false);
+            await EmitAlertFailedAsync("mint", compensationApplied: false).ConfigureAwait(false);
             return SagaOutcome.Failed;
         }
         _state.HandlerSystem = handler.System;
@@ -227,6 +240,7 @@ internal sealed class SagaRunner
             _state.Error = $"mint_failed:{ex.GetType().Name}";
             _state.Result = "failed";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error).ConfigureAwait(false);
+            await EmitAlertFailedAsync("mint", compensationApplied: false).ConfigureAwait(false);
             return SagaOutcome.Failed;
         }
 
@@ -248,6 +262,7 @@ internal sealed class SagaRunner
             _state.Result = "compensated";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error,
                 versionNumber: newVersion).ConfigureAwait(false);
+            await EmitAlertFailedAsync("push", compensationApplied: true).ConfigureAwait(false);
             return SagaOutcome.Compensated;
         }
 
@@ -260,6 +275,7 @@ internal sealed class SagaRunner
             _state.Result = "compensated";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error,
                 versionNumber: newVersion).ConfigureAwait(false);
+            await EmitAlertFailedAsync("probe", compensationApplied: true).ConfigureAwait(false);
             return SagaOutcome.Compensated;
         }
 
@@ -281,6 +297,7 @@ internal sealed class SagaRunner
             _state.Result = "compensated";
             await EmitAsync(auditor, RotationAuditEvents.Failed, detail: _state.Error,
                 versionNumber: newVersion).ConfigureAwait(false);
+            await EmitAlertFailedAsync("activate", compensationApplied: true).ConfigureAwait(false);
             return SagaOutcome.Compensated;
         }
 
@@ -518,6 +535,43 @@ internal sealed class SagaRunner
                 detail,
                 data),
             _ct);
+
+    /// <summary>
+    /// Wave C.4 §5 — emit the alert-shaped SECRET.ROTATION.FAILED event
+    /// alongside the rotation-audit event. The audit event is consumed
+    /// by Story 29-6 admin tooling (rotation timeline); the alert event
+    /// is consumed by the Wave-C AlertRuleEvaluator. They share a source
+    /// of truth (the saga's failure state) but serve different consumers
+    /// so the shapes can diverge.
+    ///
+    /// <para>Invoked only when the saga is in a terminal failure state.
+    /// <paramref name="failureStage"/> is the short machine-readable
+    /// stage name ("mint" | "push" | "probe" | "activate" | "retire").
+    /// </para>
+    /// </summary>
+    private async Task EmitAlertFailedAsync(
+        string failureStage, bool compensationApplied)
+    {
+        if (_alertEmitter is null) return;
+
+        // targetKind maps 1:1 with the RotationHandler.System key in
+        // today's registry. Default to "unknown" pre-snapshot (when
+        // the saga failed before it could resolve the handler).
+        var targetKind = _state.HandlerSystem ?? "unknown";
+        var cabinetName = _state.Snapshot?.Name ?? "(unresolved)";
+        var handlerType = _state.HandlerSystem ?? "unknown";
+
+        await _alertEmitter.EmitSecretRotationFailedAsync(
+            new SecretRotationFailedEvent(
+                TenantId: _state.Snapshot?.TenantId,
+                CorrelationId: _state.RotationCorrelationId,
+                TargetKind: targetKind,
+                CabinetName: cabinetName,
+                HandlerType: handlerType,
+                FailureStage: failureStage,
+                CompensationApplied: compensationApplied,
+                LastError: _state.Error), _ct).ConfigureAwait(false);
+    }
 
     private static string GenerateRandom(int length)
     {
