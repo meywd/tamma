@@ -4,6 +4,7 @@ using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Channels;
 using Tamma.Api.Services.Alerts.Rules;
 using Tamma.Api.Services.Secrets.Postgres;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Api.Extensions;
 
@@ -64,6 +65,11 @@ public static class AlertServiceCollectionExtensions
         // Alert sink — scoped because it depends on the
         // ControlPlaneDbContext + IEventRepository, both scoped.
         services.TryAddScoped<IAlertSink, PostgresAlertSink>();
+
+        // Wave C.4 — emitter used by activities/clients to push the 5
+        // built-in rule-trigger events into the DCB store. Scoped
+        // because the inner IEventRepository is scoped.
+        services.TryAddScoped<IAlertEventEmitter, AlertEventEmitter>();
 
         // Channel registry — singleton facade over the channel
         // implementations registered below. All four channels resolve
