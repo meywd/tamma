@@ -6,6 +6,9 @@
 #   - test fixtures (tests/ and *.test.* / *.spec.*)
 #   - markdown / documentation
 #   - SystemSanitizationRules.cs — legitimate SAST regexes
+#   - CredentialRedactor.cs + its test — Wave C.4 scrubbing utility;
+#     same category as the SAST regexes (references prefixes to MATCH
+#     and strip them, not because they're leaked).
 #   - common-passwords.txt — password blocklist (contains 'changeme'
 #     as a blocked value, not a real credential)
 #   - init-fullstack.ts / config.ts — env-file templates that ship

@@ -34,11 +34,14 @@ if command -v rg >/dev/null 2>&1; then
            --glob '!**/*.spec.ts' \
            --glob '!**/*.fixture.*' \
            --glob '!**/SystemSanitizationRules.cs' \
+           --glob '!**/CredentialRedactor.cs' \
+           --glob '!**/CredentialRedactorTests.cs' \
            --glob '!**/common-passwords.txt' \
            --glob '!**/init-fullstack.ts' \
            --glob '!**/config.ts' \
            --glob '!**/docker-compose*.yml' \
            --glob '!**/keys/**' \
+           --glob '!**/node_modules/**' \
            --glob '!ci/forbidden-symbols.txt' \
            apps/ packages/ 2>/dev/null || true
     )"
@@ -54,11 +57,14 @@ else
               | grep -v '\.spec\.' \
               | grep -v '\.fixture\.' \
               | grep -v 'SystemSanitizationRules\.cs' \
+              | grep -v 'CredentialRedactor\.cs' \
+              | grep -v 'CredentialRedactorTests\.cs' \
               | grep -v 'common-passwords\.txt' \
               | grep -v 'init-fullstack\.ts' \
               | grep -v 'packages/cli/src/config\.ts' \
               | grep -v 'docker-compose.*\.yml' \
               | grep -v '/keys/' \
+              | grep -v '/node_modules/' \
               | grep -v 'ci/forbidden-symbols\.txt' \
               || true
         )"
