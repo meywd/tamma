@@ -69,6 +69,35 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<PlatformApiKeyIndex> PlatformApiKeyIndex => Set<PlatformApiKeyIndex>();
 
+    // ── Story 5.6 + 1.5-37 (Wave C.1) — alert system ──
+    //
+    // The three alert tables are CP-resident: alert rules + channels
+    // fan out across tenants, and platform-scoped alerts (TenantId=null)
+    // must live somewhere every tenant dashboard can't read directly.
+    // Tenant-scoped alerts still carry TenantId and are routed into the
+    // tenant-facing UI (Wave C.3) via explicit TenantId filters.
+
+    /// <summary>
+    /// Story 5.6 — raised alerts. One row per lifecycle (active →
+    /// acknowledged → resolved).
+    /// </summary>
+    public DbSet<Alert> Alerts => Set<Alert>();
+
+    /// <summary>
+    /// Story 1.5-37 — configured delivery targets. Credentials live
+    /// in the secret store via <c>CredentialsSecretId</c>, never in
+    /// the <c>Config</c> column.
+    /// </summary>
+    public DbSet<AlertChannel> AlertChannels => Set<AlertChannel>();
+
+    /// <summary>
+    /// Story 1.5-37 — audit log of every delivery attempt.
+    /// <c>NotificationDispatcher</c> drains <c>pending</c>/<c>failed</c>
+    /// rows; <c>dropped_rate_limit</c> rows are audited-only.
+    /// </summary>
+    public DbSet<AlertDeliveryAttempt> AlertDeliveryAttempts =>
+        Set<AlertDeliveryAttempt>();
+
     // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
     //
     // These DbSets cover per-tenant business data that still lives on the
@@ -120,6 +149,170 @@ public class ControlPlaneDbContext : DbContext
 
         ConfigurePlatformAnalyticsHourly(modelBuilder);
         ConfigurePlatformApiKeyIndex(modelBuilder);
+        ConfigureAlerts(modelBuilder);
+        ConfigureAlertChannels(modelBuilder);
+        ConfigureAlertDeliveryAttempts(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 5.6 (Wave C.1) — <c>alerts</c> table configuration.
+    /// CHECK constraints pin severity + status to their enums so a
+    /// buggy write path can't stash an unknown value and confuse the
+    /// admin feed. Indexes cover the two hot reads: the admin feed
+    /// (by status + recency) and the tenant feed (tenant-filtered +
+    /// recency).
+    /// </summary>
+    private static void ConfigureAlerts(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Alert>(entity =>
+        {
+            entity.ToTable("alerts", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_alerts_severity",
+                    "\"Severity\" IN ('critical','warning','info')");
+                t.HasCheckConstraint(
+                    "CK_alerts_status",
+                    "\"Status\" IN ('active','acknowledged','resolved')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Severity).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.CorrelationId).HasMaxLength(255);
+            entity.Property(e => e.Metadata)
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Status)
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasDefaultValue("active");
+            entity.Property(e => e.Resolution).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Admin feed — "show me the last 50 active alerts" hits
+            // this index. Descending on CreatedAt avoids an in-memory
+            // reverse sort.
+            entity.HasIndex(e => new { e.Status, e.CreatedAt })
+                .HasDatabaseName("IX_alerts_Status_CreatedAt")
+                .IsDescending(false, true);
+
+            // Tenant feed — partial index keeps the tenant-scoped
+            // rows tight; platform-wide alerts (TenantId=null) don't
+            // waste space here because they're served by the admin
+            // feed index above.
+            entity.HasIndex(e => new { e.TenantId, e.CreatedAt })
+                .HasDatabaseName("IX_alerts_TenantId_CreatedAt")
+                .HasFilter("\"TenantId\" IS NOT NULL")
+                .IsDescending(false, true);
+
+            // Severity-first dashboards (e.g. "all criticals this
+            // week") get their own ordering.
+            entity.HasIndex(e => new { e.Severity, e.CreatedAt })
+                .HasDatabaseName("IX_alerts_Severity_CreatedAt")
+                .IsDescending(false, true);
+
+            // CorrelationId lookup — "show me every alert tied to
+            // this workflow retry storm". Partial so the null
+            // majority doesn't bloat the index.
+            entity.HasIndex(e => e.CorrelationId)
+                .HasDatabaseName("IX_alerts_CorrelationId")
+                .HasFilter("\"CorrelationId\" IS NOT NULL");
+        });
+    }
+
+    /// <summary>
+    /// Story 1.5-37 (Wave C.1) — <c>alert_channels</c> table.
+    /// </summary>
+    private static void ConfigureAlertChannels(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AlertChannel>(entity =>
+        {
+            entity.ToTable("alert_channels", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_alert_channels_channel_type",
+                    "channel_type IN ('email','slack','pagerduty','webhook')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ChannelType)
+                .IsRequired()
+                .HasMaxLength(32)
+                .HasColumnName("channel_type");
+            entity.Property(e => e.IsEnabled)
+                .HasDefaultValue(true);
+            entity.Property(e => e.Config)
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => new { e.TenantId, e.IsEnabled })
+                .HasDatabaseName("IX_alert_channels_TenantId_IsEnabled");
+
+            entity.HasIndex(e => new { e.ChannelType, e.IsEnabled })
+                .HasDatabaseName("IX_alert_channels_ChannelType_IsEnabled");
+        });
+    }
+
+    /// <summary>
+    /// Story 1.5-37 (Wave C.1) — <c>alert_delivery_attempts</c>
+    /// table. The partial index on <c>(Status, CreatedAt)</c>
+    /// covers the dispatcher poll query
+    /// (<c>WHERE status IN ('pending','failed')</c>) — Postgres can
+    /// scan the index top-down with no table hits until it has the
+    /// batch size.
+    /// </summary>
+    private static void ConfigureAlertDeliveryAttempts(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AlertDeliveryAttempt>(entity =>
+        {
+            entity.ToTable("alert_delivery_attempts", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_alert_delivery_attempts_status",
+                    "\"Status\" IN ('pending','success','failed','dropped_rate_limit')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.AttemptNumber).IsRequired();
+            entity.Property(e => e.Status)
+                .IsRequired()
+                .HasMaxLength(32)
+                .HasDefaultValue("pending");
+            entity.Property(e => e.Error).HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => e.AlertId)
+                .HasDatabaseName("IX_alert_delivery_attempts_AlertId");
+
+            // Dispatcher hot path — filter on status keeps the
+            // successful attempts (the vast majority after steady
+            // state) out of the index.
+            entity.HasIndex(e => new { e.Status, e.CreatedAt })
+                .HasDatabaseName("IX_alert_delivery_attempts_Status_CreatedAt")
+                .HasFilter("\"Status\" IN ('pending','failed')")
+                .IsDescending(false, true);
+
+            // FK cascade from alerts keeps delivery-attempt rows
+            // honest when an alert is hard-deleted (tenant purge).
+            entity.HasOne<Alert>()
+                .WithMany()
+                .HasForeignKey(e => e.AlertId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Preserve delivery history even when a channel is
+            // soft-deleted — the admin can still audit who received
+            // what. Enforced by RESTRICT; soft-delete is the
+            // contracted deprovisioning path.
+            entity.HasOne<AlertChannel>()
+                .WithMany()
+                .HasForeignKey(e => e.ChannelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void ConfigurePlatformAnalyticsHourly(ModelBuilder modelBuilder)
