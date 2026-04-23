@@ -78,9 +78,12 @@ public class CheckBudgetActivity : Activity
                     {
                         if (apiBudget.Limit > 0 && apiBudget.Spent >= apiBudget.Limit)
                         {
-                            _logger?.LogWarning(
-                                "Tamma API reports budget exhausted for {BudgetOwner}: spent ${Spent:F4} of ${Limit:F4}",
-                                budgetOwnerId, apiBudget.Spent, apiBudget.Limit);
+                            // No warn log here: budget-exhausted correlation
+                            // belongs in the DCB event stream (BUDGET.EXHAUSTED
+                            // with tenantId tag), which is the only place the
+                            // dashboard + replay tooling actually reads. The
+                            // rotating warn file on the VPS is never grepped
+                            // for per-tenant budget state.
                             await context.CompleteActivityWithOutcomesAsync("BudgetExhausted");
                             return;
                         }
@@ -90,9 +93,12 @@ public class CheckBudgetActivity : Activity
                 }
                 catch (Exception apiEx)
                 {
+                    // System-health signal worth keeping: "Tamma API is
+                    // unhealthy" is the operator-useful part. Identifier is
+                    // stripped — per-tenant correlation is via the event
+                    // store, not this rotating log file.
                     _logger?.LogWarning(apiEx,
-                        "Tamma API budget check failed for {BudgetOwner}, falling back to local state",
-                        budgetOwnerId);
+                        "Tamma API budget check failed, falling back to local state");
                 }
             }
 

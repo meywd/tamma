@@ -178,7 +178,7 @@ public class TammaApiClient
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Tamma API DELETE failed: {Url}", url);
+            _logger.LogWarning(ex, "Tamma API DELETE failed");
             return false;
         }
     }
@@ -197,9 +197,14 @@ public class TammaApiClient
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // URL is intentionally omitted — the path carries interpolated
+                // identifiers (tenant/budget-owner/provider-handle/etc.), and
+                // the rotating warn log on the VPS is the wrong plane for per-
+                // resource correlation (event store is). The status code alone
+                // is what an operator triaging "API unhealthy?" actually needs.
                 _logger.LogWarning(
-                    "Tamma API GET {Url} returned {Status}",
-                    url, (int)response.StatusCode);
+                    "Tamma API GET returned {Status}",
+                    (int)response.StatusCode);
                 return null;
             }
             return await response.Content
@@ -208,7 +213,9 @@ public class TammaApiClient
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger.LogWarning(ex, "Tamma API GET failed: {Url}", url);
+            // URL omitted for the same reason as above; the exception type
+            // and message are the operator-useful signal.
+            _logger.LogWarning(ex, "Tamma API GET failed");
             return null;
         }
     }
@@ -230,8 +237,8 @@ public class TammaApiClient
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "Tamma API POST {Url} returned {Status}",
-                    url, (int)response.StatusCode);
+                    "Tamma API POST returned {Status}",
+                    (int)response.StatusCode);
                 return null;
             }
             return await response.Content
@@ -240,7 +247,7 @@ public class TammaApiClient
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger.LogWarning(ex, "Tamma API POST failed: {Url}", url);
+            _logger.LogWarning(ex, "Tamma API POST failed");
             return null;
         }
     }
@@ -262,15 +269,15 @@ public class TammaApiClient
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "Tamma API POST {Url} returned {Status}",
-                    url, (int)response.StatusCode);
+                    "Tamma API POST returned {Status}",
+                    (int)response.StatusCode);
                 return false;
             }
             return true;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Tamma API POST failed: {Url}", url);
+            _logger.LogWarning(ex, "Tamma API POST failed");
             return false;
         }
     }
