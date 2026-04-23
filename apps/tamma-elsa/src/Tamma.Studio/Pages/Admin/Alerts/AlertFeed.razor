@@ -1,0 +1,262 @@
+@page "/admin/alerts"
+@using Tamma.Studio.Services
+@inject AlertAdminApiService Api
+@inject NavigationManager Nav
+
+<PageTitle>Alerts · Tamma admin</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
+    <MudText Typo="Typo.h4" Class="mb-2">Alert feed</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+        Platform-wide alert raise/acknowledge/resolve log. Live-refreshes every 15 s.
+    </MudText>
+
+    <MudPaper Elevation="0" Class="pa-4 mb-4" Outlined="true">
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4" md="3">
+                <MudSelect T="string" @bind-Value="_severityFilter"
+                           Label="Severity" Dense="true"
+                           Clearable="true"
+                           Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("critical")">Critical</MudSelectItem>
+                    <MudSelectItem Value="@("warning")">Warning</MudSelectItem>
+                    <MudSelectItem Value="@("info")">Info</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="3">
+                <MudSelect T="string" @bind-Value="_statusFilter"
+                           Label="Status" Dense="true"
+                           Clearable="true"
+                           Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("active")">Active</MudSelectItem>
+                    <MudSelectItem Value="@("acknowledged")">Acknowledged</MudSelectItem>
+                    <MudSelectItem Value="@("resolved")">Resolved</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="3">
+                <MudSelect T="string" @bind-Value="_windowFilter"
+                           Label="Time window" Dense="true"
+                           Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("hour")">Last hour</MudSelectItem>
+                    <MudSelectItem Value="@("day")">Last 24 h</MudSelectItem>
+                    <MudSelectItem Value="@("week")">Last 7 days</MudSelectItem>
+                    <MudSelectItem Value="@("all")">All</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex align-end">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="RefreshAsync"
+                           StartIcon="@Icons.Material.Filled.Refresh">
+                    Refresh
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+    }
+
+    <MudTable Items="_alerts" Dense="true" Striped="true" Hover="true"
+              Loading="_isLoading" OnRowClick="OnRowClick" T="AlertDto">
+        <HeaderContent>
+            <MudTh>Time</MudTh>
+            <MudTh>Severity</MudTh>
+            <MudTh>Title</MudTh>
+            <MudTh>Tenant</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.CreatedAt.ToString("u")</MudTd>
+            <MudTd>
+                <MudChip T="string" Color="@SeverityColor(context.Severity)" Size="Size.Small">
+                    @context.Severity
+                </MudChip>
+            </MudTd>
+            <MudTd>@context.Title</MudTd>
+            <MudTd>@(context.TenantId?.ToString()[..8] ?? "platform")</MudTd>
+            <MudTd>@context.Status</MudTd>
+            <MudTd Style="text-align:right">
+                @if (context.Status == "active")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                               OnClick="@(() => OpenAckAsync(context))">Ack</MudButton>
+                }
+                @if (context.Status != "resolved")
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success"
+                               Class="ml-1"
+                               OnClick="@(() => OpenResolveAsync(context))">Resolve</MudButton>
+                }
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    <MudText Typo="Typo.caption" Class="mt-3" Color="Color.Secondary">
+        @_alerts.Count alerts · auto-refresh every 15 s
+    </MudText>
+</MudContainer>
+
+@* ── Ack dialog ── *@
+<MudDialog @bind-Visible="_ackOpen">
+    <TitleContent>Acknowledge alert</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">@_selected?.Title</MudText>
+        <MudTextField T="string" @bind-Value="_ackNote"
+                      Label="Note (optional)"
+                      Lines="3" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _ackOpen = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="ConfirmAckAsync">Acknowledge</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ── Resolve dialog ── *@
+<MudDialog @bind-Visible="_resolveOpen">
+    <TitleContent>Resolve alert</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2">@_selected?.Title</MudText>
+        <MudTextField T="string" @bind-Value="_resolveText"
+                      Label="Resolution" Required="true"
+                      Lines="3" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _resolveOpen = false)">Cancel</MudButton>
+        <MudButton Color="Color.Success" Variant="Variant.Filled"
+                   OnClick="ConfirmResolveAsync"
+                   Disabled="@string.IsNullOrWhiteSpace(_resolveText)">
+            Resolve
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<AlertDto> _alerts = new();
+    private bool _isLoading;
+    private string? _error;
+
+    private string? _severityFilter;
+    private string? _statusFilter;
+    private string _windowFilter = "day";
+
+    private AlertDto? _selected;
+    private bool _ackOpen;
+    private bool _resolveOpen;
+    private string _ackNote = string.Empty;
+    private string _resolveText = string.Empty;
+
+    private System.Threading.Timer? _refreshTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _refreshTimer = new System.Threading.Timer(
+            async _ => await InvokeAsync(RefreshAsync),
+            null,
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromSeconds(15));
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _isLoading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            DateTimeOffset? since = _windowFilter switch
+            {
+                "hour" => DateTimeOffset.UtcNow.AddHours(-1),
+                "day" => DateTimeOffset.UtcNow.AddDays(-1),
+                "week" => DateTimeOffset.UtcNow.AddDays(-7),
+                _ => null,
+            };
+            var resp = await Api.ListAlertsAsync(
+                status: _statusFilter,
+                severity: _severityFilter,
+                tenantId: null,
+                since: since,
+                limit: 200);
+            _alerts = resp.Items;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load alerts: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnRowClick(TableRowClickEventArgs<AlertDto> args)
+    {
+        if (args.Item is not null)
+            Nav.NavigateTo($"/admin/alerts/{args.Item.Id}");
+    }
+
+    private Task OpenAckAsync(AlertDto alert)
+    {
+        _selected = alert;
+        _ackNote = string.Empty;
+        _ackOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private Task OpenResolveAsync(AlertDto alert)
+    {
+        _selected = alert;
+        _resolveText = string.Empty;
+        _resolveOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task ConfirmAckAsync()
+    {
+        if (_selected is null) return;
+        try
+        {
+            await Api.AcknowledgeAsync(_selected.Id, _ackNote);
+            _ackOpen = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to acknowledge: {ex.Message}";
+        }
+    }
+
+    private async Task ConfirmResolveAsync()
+    {
+        if (_selected is null) return;
+        if (string.IsNullOrWhiteSpace(_resolveText)) return;
+        try
+        {
+            await Api.ResolveAsync(_selected.Id, _resolveText);
+            _resolveOpen = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to resolve: {ex.Message}";
+        }
+    }
+
+    private static Color SeverityColor(string sev) => sev switch
+    {
+        "critical" => Color.Error,
+        "warning" => Color.Warning,
+        "info" => Color.Info,
+        _ => Color.Default,
+    };
+}

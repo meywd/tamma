@@ -1,0 +1,108 @@
+@page "/admin/alerts/{Id:guid}"
+@using Tamma.Studio.Services
+@inject AlertAdminApiService Api
+@inject NavigationManager Nav
+
+<PageTitle>Alert detail · Tamma admin</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
+    <MudLink OnClick="@(() => Nav.NavigateTo("/admin/alerts"))" Class="mb-2">
+        &larr; Back to feed
+    </MudLink>
+
+    @if (_detail is null && _error is null)
+    {
+        <MudProgressLinear Indeterminate="true" Class="my-4" />
+    }
+    else if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    }
+    else if (_detail is not null)
+    {
+        <MudPaper Class="pa-4 mb-4" Outlined="true">
+            <MudText Typo="Typo.h5">@_detail.Alert.Title</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                @_detail.Alert.CreatedAt.ToString("u") · @_detail.Alert.Status
+            </MudText>
+            <MudChip T="string" Color="@SeverityColor(_detail.Alert.Severity)"
+                     Size="Size.Small" Class="ml-2">
+                @_detail.Alert.Severity
+            </MudChip>
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.body1" Class="mb-2">@_detail.Alert.Description</MudText>
+            @if (!string.IsNullOrWhiteSpace(_detail.Alert.Metadata)
+                && _detail.Alert.Metadata != "{}")
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-3">Metadata</MudText>
+                <pre class="mud-typography-body2"
+                     style="background:#f5f5f5;padding:8px;border-radius:4px;overflow-x:auto">
+@_detail.Alert.Metadata
+                </pre>
+            }
+            @if (!string.IsNullOrWhiteSpace(_detail.Alert.Resolution))
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-3">Resolution</MudText>
+                <MudText Typo="Typo.body2">@_detail.Alert.Resolution</MudText>
+            }
+        </MudPaper>
+
+        <MudText Typo="Typo.h6" Class="mb-2">Delivery attempts</MudText>
+        @if (_detail.DeliveryAttempts.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                No delivery attempts yet.
+            </MudText>
+        }
+        else
+        {
+            <MudTable Items="_detail.DeliveryAttempts" Dense="true" T="DeliveryAttemptDto">
+                <HeaderContent>
+                    <MudTh>Channel</MudTh>
+                    <MudTh>Attempt</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Error</MudTh>
+                    <MudTh>Delivered</MudTh>
+                    <MudTh>Next retry</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.ChannelId.ToString()[..8]</MudTd>
+                    <MudTd>@context.AttemptNumber</MudTd>
+                    <MudTd>@context.Status</MudTd>
+                    <MudTd>@(context.Error ?? "—")</MudTd>
+                    <MudTd>@(context.DeliveredAt?.ToString("u") ?? "—")</MudTd>
+                    <MudTd>@(context.NextAttemptAt?.ToString("u") ?? "—")</MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private AlertDetailResponse? _detail;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _detail = null;
+        _error = null;
+        try
+        {
+            _detail = await Api.GetAlertAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load alert detail: {ex.Message}";
+        }
+    }
+
+    private static Color SeverityColor(string sev) => sev switch
+    {
+        "critical" => Color.Error,
+        "warning" => Color.Warning,
+        "info" => Color.Info,
+        _ => Color.Default,
+    };
+}

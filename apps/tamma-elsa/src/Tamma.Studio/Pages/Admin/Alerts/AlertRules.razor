@@ -1,0 +1,365 @@
+@page "/admin/alert-rules"
+@using System.Text.Json
+@using Tamma.Studio.Services
+@inject AlertAdminApiService Api
+
+<PageTitle>Alert rules · Tamma admin</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudText Typo="Typo.h4">Alert rules</MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenNewDialog">
+            New rule
+        </MudButton>
+    </MudStack>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+        Built-in rules may be enabled/disabled and have their channel list or severity
+        changed; predicate + event type + rule key are read-only.
+    </MudText>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+    }
+
+    <MudTable Items="_rules" Dense="true" Hover="true" T="RuleDto"
+              Loading="_isLoading">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Event type</MudTh>
+            <MudTh>Severity</MudTh>
+            <MudTh>Enabled</MudTh>
+            <MudTh>Throttle (s)</MudTh>
+            <MudTh>Channels</MudTh>
+            <MudTh>Origin</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Name</MudTd>
+            <MudTd><code>@context.EventType</code></MudTd>
+            <MudTd>
+                <MudChip T="string" Color="@SeverityColor(context.Severity)" Size="Size.Small">
+                    @context.Severity
+                </MudChip>
+            </MudTd>
+            <MudTd>
+                <MudSwitch T="bool" Value="context.IsEnabled"
+                           ValueChanged="@(enabled => ToggleEnabledAsync(context, enabled))"
+                           Color="Color.Success" />
+            </MudTd>
+            <MudTd>@context.ThrottleSeconds</MudTd>
+            <MudTd>@context.ChannelIds.Count</MudTd>
+            <MudTd>
+                @if (context.IsBuiltIn)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">built-in</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small">custom</MudChip>
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           OnClick="@(() => OpenEditDialog(context))">Edit</MudButton>
+                <MudTooltip Text="@(context.IsBuiltIn
+                        ? "Built-in rules cannot be deleted; disable them instead."
+                        : "Delete this custom rule.")">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                               Color="Color.Error" Class="ml-1"
+                               Disabled="@context.IsBuiltIn"
+                               OnClick="@(() => DeleteAsync(context))">
+                        Delete
+                    </MudButton>
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+</MudContainer>
+
+@* ── New/Edit dialog ── *@
+<MudDialog @bind-Visible="_dialogOpen"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>@(_editing is null ? "New alert rule" : "Edit alert rule")</TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_form.Name" Label="Name"
+                      Required="true" Variant="Variant.Outlined" Class="mb-2" />
+
+        @if (_editing is null || !_editing.IsBuiltIn)
+        {
+            <MudTextField T="string" @bind-Value="_form.EventType" Label="Event type"
+                          Placeholder="CODE.GENERATED.FAILED"
+                          Variant="Variant.Outlined" Class="mb-2" />
+        }
+        else
+        {
+            <MudTextField T="string" Value="@_editing.EventType" Label="Event type"
+                          ReadOnly="true" Variant="Variant.Outlined" Class="mb-2" />
+        }
+
+        <MudSelect T="string" @bind-Value="_form.Severity" Label="Severity"
+                   Variant="Variant.Outlined" Class="mb-2">
+            <MudSelectItem Value="@("critical")">Critical</MudSelectItem>
+            <MudSelectItem Value="@("warning")">Warning</MudSelectItem>
+            <MudSelectItem Value="@("info")">Info</MudSelectItem>
+        </MudSelect>
+
+        <MudNumericField T="int" @bind-Value="_form.ThrottleSeconds"
+                         Label="Throttle (seconds)" Min="0" Max="3600"
+                         Variant="Variant.Outlined" Class="mb-2" />
+
+        <MudSwitch T="bool" @bind-Value="_form.IsEnabled" Label="Enabled"
+                   Color="Color.Success" Class="mb-2" />
+
+        @if (_editing is null || !_editing.IsBuiltIn)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-2">Predicate (JSON)</MudText>
+            <MudTextField T="string" @bind-Value="_form.PredicateJson"
+                          Lines="6" Variant="Variant.Outlined"
+                          Placeholder='{"kind":"always"}'
+                          Style="font-family:monospace;font-size:12px" />
+        }
+
+        <MudText Typo="Typo.subtitle2" Class="mt-3">Channels</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">
+            Pick one or more channels that alerts from this rule fan out to.
+        </MudText>
+        <MudSelect T="Guid" MultiSelection="true" SelectedValues="_selectedChannels"
+                   SelectedValuesChanged="OnChannelsChanged"
+                   Variant="Variant.Outlined" Label="Channels" Dense="true">
+            @foreach (var ch in _channels)
+            {
+                <MudSelectItem Value="@ch.Id">@($"{ch.Name} ({ch.ChannelType})")</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_editing is not null)
+        {
+            <MudButton Class="mt-3" Variant="Variant.Outlined" OnClick="RunTestFireAsync">
+                Test rule with sample event
+            </MudButton>
+            @if (!string.IsNullOrEmpty(_testResult))
+            {
+                <MudAlert Severity="Severity.Info" Class="mt-2">@_testResult</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogOpen = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<RuleDto> _rules = new();
+    private List<ChannelDto> _channels = new();
+    private bool _isLoading;
+    private string? _error;
+
+    private bool _dialogOpen;
+    private RuleDto? _editing;
+    private RuleFormModel _form = new();
+    private IEnumerable<Guid> _selectedChannels = Array.Empty<Guid>();
+    private string? _testResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _isLoading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var rulesResp = await Api.ListRulesAsync();
+            var channelsResp = await Api.ListChannelsAsync();
+            _rules = rulesResp.Items;
+            _channels = channelsResp.Items;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load rules: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenNewDialog()
+    {
+        _editing = null;
+        _form = new RuleFormModel
+        {
+            Severity = "warning",
+            PredicateJson = """{"kind":"always"}""",
+            IsEnabled = true,
+            ThrottleSeconds = 60,
+        };
+        _selectedChannels = Array.Empty<Guid>();
+        _testResult = null;
+        _dialogOpen = true;
+    }
+
+    private void OpenEditDialog(RuleDto rule)
+    {
+        _editing = rule;
+        _form = new RuleFormModel
+        {
+            Name = rule.Name,
+            EventType = rule.EventType,
+            Severity = rule.Severity,
+            PredicateJson = rule.PredicateJson,
+            IsEnabled = rule.IsEnabled,
+            ThrottleSeconds = rule.ThrottleSeconds,
+        };
+        _selectedChannels = rule.ChannelIds.ToArray();
+        _testResult = null;
+        _dialogOpen = true;
+    }
+
+    private void OnChannelsChanged(IEnumerable<Guid> selected)
+    {
+        _selectedChannels = selected?.ToArray() ?? Array.Empty<Guid>();
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            if (_editing is null)
+            {
+                var body = new CreateRuleBody(
+                    Name: _form.Name ?? string.Empty,
+                    EventType: _form.EventType ?? string.Empty,
+                    Severity: _form.Severity ?? "warning",
+                    PredicateJson: _form.PredicateJson ?? "{\"kind\":\"always\"}",
+                    IsEnabled: _form.IsEnabled,
+                    ThrottleSeconds: _form.ThrottleSeconds,
+                    ChannelIds: _selectedChannels.ToList());
+                var resp = await Api.CreateRuleAsync(body);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _error = $"Create failed: {resp.StatusCode}";
+                    return;
+                }
+            }
+            else
+            {
+                // Built-in rules: only severity, throttle, enabled, channels mutable.
+                var body = _editing.IsBuiltIn
+                    ? new UpdateRuleBody(
+                        Name: _form.Name,
+                        Severity: _form.Severity,
+                        PredicateJson: null,
+                        IsEnabled: _form.IsEnabled,
+                        ThrottleSeconds: _form.ThrottleSeconds,
+                        ChannelIds: _selectedChannels.ToList())
+                    : new UpdateRuleBody(
+                        Name: _form.Name,
+                        Severity: _form.Severity,
+                        PredicateJson: _form.PredicateJson,
+                        IsEnabled: _form.IsEnabled,
+                        ThrottleSeconds: _form.ThrottleSeconds,
+                        ChannelIds: _selectedChannels.ToList());
+                var resp = await Api.UpdateRuleAsync(_editing.Id, body);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _error = $"Update failed: {resp.StatusCode}";
+                    return;
+                }
+            }
+            _dialogOpen = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Save failed: {ex.Message}";
+        }
+    }
+
+    private async Task ToggleEnabledAsync(RuleDto rule, bool enabled)
+    {
+        try
+        {
+            var body = new UpdateRuleBody(
+                Name: null, Severity: null, PredicateJson: null,
+                IsEnabled: enabled, ThrottleSeconds: null, ChannelIds: null);
+            var resp = await Api.UpdateRuleAsync(rule.Id, body);
+            if (!resp.IsSuccessStatusCode)
+                _error = $"Toggle failed: {resp.StatusCode}";
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Toggle failed: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteAsync(RuleDto rule)
+    {
+        if (rule.IsBuiltIn) return;
+        try
+        {
+            var resp = await Api.DeleteRuleAsync(rule.Id);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Delete failed: {resp.StatusCode}";
+                return;
+            }
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete failed: {ex.Message}";
+        }
+    }
+
+    private async Task RunTestFireAsync()
+    {
+        if (_editing is null) return;
+        _testResult = null;
+        try
+        {
+            var sample = new
+            {
+                type = _editing.EventType,
+                tags = new Dictionary<string, string>(),
+                data = new Dictionary<string, object>(),
+            };
+            var resp = await Api.TestFireRuleAsync(_editing.Id, sample);
+            var body = await resp.Content.ReadAsStringAsync();
+            _testResult = $"HTTP {(int)resp.StatusCode}: {body}";
+        }
+        catch (Exception ex)
+        {
+            _testResult = $"Test failed: {ex.Message}";
+        }
+    }
+
+    private static Color SeverityColor(string sev) => sev switch
+    {
+        "critical" => Color.Error,
+        "warning" => Color.Warning,
+        "info" => Color.Info,
+        _ => Color.Default,
+    };
+
+    private sealed class RuleFormModel
+    {
+        public string? Name { get; set; }
+        public string? EventType { get; set; }
+        public string? Severity { get; set; }
+        public string? PredicateJson { get; set; }
+        public bool IsEnabled { get; set; } = true;
+        public int ThrottleSeconds { get; set; } = 60;
+    }
+}
