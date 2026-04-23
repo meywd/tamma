@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Channels;
+using Tamma.Api.Services.Alerts.Rules;
 using Tamma.Api.Services.Secrets.Postgres;
 
 namespace Tamma.Api.Extensions;
@@ -89,6 +90,47 @@ public static class AlertServiceCollectionExtensions
         // Background service — hosted singleton. Dispatch work runs
         // in a scoped DI context spawned per tick.
         services.AddHostedService<NotificationDispatcher>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Story 5.6 (Wave C.2) — register the alert rule engine on top
+    /// of <see cref="AddTammaAlerts"/>. Idempotent: safe to call in
+    /// addition to AddTammaAlerts.
+    /// </summary>
+    public static IServiceCollection AddTammaAlertRuleEngine(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton(TimeProvider.System);
+
+        // Rolling-window counter — singleton so all rule evaluations
+        // in the process share the same bucket. The InMemory impl is
+        // thread-safe.
+        services.TryAddSingleton<IRuleWindowStore, InMemoryRuleWindowStore>();
+
+        // Evaluator options — configurable via post-configure in
+        // tests, defaults suit production.
+        services.TryAddSingleton<AlertRuleEvaluatorOptions>();
+
+        // Registry — singleton facade that caches rules + hot-swaps
+        // snapshots on refresh. Lifetime singleton because readers
+        // must see a consistent snapshot across scopes; internal
+        // reads use copy-on-write.
+        services.TryAddSingleton<IAlertRuleRegistry, AlertRuleRegistry>();
+
+        // Seeder runs at startup and emits the five built-ins. Must
+        // be registered BEFORE the evaluator hosted service so its
+        // StartAsync completes first.
+        services.AddHostedService<BuiltInAlertRuleSeeder>();
+
+        // Evaluator background service. Uses IServiceProvider to
+        // spawn per-tick scopes so the scoped ControlPlaneDbContext /
+        // IAlertSink / IEventRepository dependencies are fresh each
+        // tick.
+        services.AddHostedService<AlertRuleEvaluator>();
 
         return services;
     }

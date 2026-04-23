@@ -98,6 +98,19 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AlertDeliveryAttempt> AlertDeliveryAttempts =>
         Set<AlertDeliveryAttempt>();
 
+    // ── Story 5.6 (Wave C.2) — alert rule engine ──
+    //
+    // Rules + evaluator cursor both live on the control plane: rules
+    // fan out across tenants, and the cursor is the single control-
+    // plane-wide progress marker for the <c>AlertRuleEvaluator</c>.
+
+    /// <summary>Story 5.6 (Wave C.2) — alert rules.</summary>
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+
+    /// <summary>Story 5.6 (Wave C.2) — evaluator progress cursor.</summary>
+    public DbSet<AlertEvaluatorCursor> AlertEvaluatorCursors =>
+        Set<AlertEvaluatorCursor>();
+
     // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
     //
     // These DbSets cover per-tenant business data that still lives on the
@@ -152,6 +165,86 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlerts(modelBuilder);
         ConfigureAlertChannels(modelBuilder);
         ConfigureAlertDeliveryAttempts(modelBuilder);
+        ConfigureAlertRules(modelBuilder);
+        ConfigureAlertEvaluatorCursor(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 5.6 (Wave C.2) — <c>alert_rules</c> table. CHECK
+    /// constraint pins severity to its enum; unique index on the
+    /// human-readable <c>Name</c>; partial unique index on
+    /// <c>BuiltInKey</c> so seeder upserts are idempotent without
+    /// colliding on admin-created rules (which carry NULL
+    /// <c>BuiltInKey</c>).
+    /// </summary>
+    private static void ConfigureAlertRules(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AlertRule>(entity =>
+        {
+            entity.ToTable("alert_rules", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_alert_rules_severity",
+                    "\"Severity\" IN ('critical','warning','info')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.IsEnabled).HasDefaultValue(true);
+            entity.Property(e => e.Severity).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Predicate)
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.ThrottleSeconds).HasDefaultValue(0);
+            entity.Property(e => e.ChannelIds)
+                .HasColumnType("uuid[]")
+                .HasDefaultValueSql("ARRAY[]::uuid[]");
+            entity.Property(e => e.IsBuiltIn).HasDefaultValue(false);
+            entity.Property(e => e.BuiltInKey).HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Hot read: the evaluator fetches by (EventType, IsEnabled).
+            entity.HasIndex(e => new { e.EventType, e.IsEnabled })
+                .HasDatabaseName("IX_alert_rules_EventType_IsEnabled");
+
+            // Idempotent seeder upserts key off BuiltInKey. Partial
+            // unique keeps admin-created NULL-key rules from colliding.
+            entity.HasIndex(e => e.BuiltInKey)
+                .HasDatabaseName("UX_alert_rules_BuiltInKey")
+                .HasFilter("\"BuiltInKey\" IS NOT NULL")
+                .IsUnique();
+
+            // Human-readable uniqueness — admin UI rejects a duplicate
+            // name at write time via the 409 handler; the DB-level
+            // index is defence in depth.
+            entity.HasIndex(e => e.Name)
+                .HasDatabaseName("UX_alert_rules_Name")
+                .IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// Story 5.6 (Wave C.2) — evaluator cursor. Composite key on
+    /// <see cref="AlertEvaluatorCursor.EvaluatorId"/> so each logical
+    /// evaluator owns one row; multi-process deployments share the
+    /// single <c>"default"</c> evaluator id today.
+    /// </summary>
+    private static void ConfigureAlertEvaluatorCursor(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AlertEvaluatorCursor>(entity =>
+        {
+            entity.ToTable("alert_evaluator_cursor");
+            entity.HasKey(e => e.EvaluatorId);
+            entity.Property(e => e.EvaluatorId)
+                .IsRequired()
+                .HasMaxLength(64);
+            entity.Property(e => e.LastEventAt)
+                .HasColumnType("timestamp with time zone");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+        });
     }
 
     /// <summary>
