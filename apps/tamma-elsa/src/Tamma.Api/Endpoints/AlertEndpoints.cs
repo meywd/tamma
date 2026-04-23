@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Tamma.Api.Authorization;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Postgres;
@@ -558,6 +559,476 @@ public static class AlertEndpoints
             // Event emission failures are logged inside the repo;
             // don't fail the caller's state transition on audit failure.
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Wave C.3 — tenant-scope surface for
+    // /api/v1/orgs/{tenantId}/alerts/* and /alert-channels/*.
+    // These endpoints sit behind `RequireTenantMembershipFilter`;
+    // mutation paths additionally require admin+ (enforced inline via
+    // <see cref="RequireTenantAdmin"/>). Cross-tenant leak prevention
+    // is the #1 invariant — every query filters
+    // <c>tenant_id = {tenantId}</c> and every lookup 404s cross-tenant.
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Tenant-scope list: <c>GET /api/v1/orgs/{tenantId}/alerts</c>.
+    /// Only returns alerts whose <c>tenant_id</c> matches the route
+    /// path tenant exactly — platform-scoped alerts (tenant_id null)
+    /// are invisible from the tenant surface.
+    /// </summary>
+    public static async Task<IResult> ListTenantAlerts(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        Guid tenantId,
+        string? status = null,
+        string? severity = null,
+        DateTimeOffset? since = null,
+        int? limit = null)
+    {
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+
+        var take = Math.Min(
+            limit is > 0 ? limit.Value : DefaultPageSize,
+            MaxPageSize);
+
+        var query = db.Alerts.AsNoTracking()
+            .Where(a => a.TenantId == tenantId);
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(a => a.Status == status);
+        if (!string.IsNullOrWhiteSpace(severity))
+            query = query.Where(a => a.Severity == severity);
+        if (since is { } cutoff)
+            query = query.Where(a => a.CreatedAt >= cutoff.UtcDateTime);
+
+        var rows = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .Take(take)
+            .ToListAsync(http.RequestAborted)
+            .ConfigureAwait(false);
+
+        var items = rows.Select(ToDto).ToList();
+        return Results.Ok(new { items, count = items.Count, limit = take });
+    }
+
+    /// <summary>
+    /// Tenant-scope detail: <c>GET /api/v1/orgs/{tenantId}/alerts/{id}</c>.
+    /// 404s if the alert belongs to another tenant — no cross-tenant
+    /// read.
+    /// </summary>
+    public static async Task<IResult> GetTenantAlert(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        Guid tenantId,
+        Guid id)
+    {
+        var alert = await db.Alerts.AsNoTracking()
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == tenantId,
+                http.RequestAborted)
+            .ConfigureAwait(false);
+        if (alert is null)
+            return Results.NotFound(new { error = "alert not found" });
+
+        var attempts = await db.AlertDeliveryAttempts.AsNoTracking()
+            .Where(a => a.AlertId == id)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync(http.RequestAborted)
+            .ConfigureAwait(false);
+
+        return Results.Ok(new
+        {
+            alert = ToDto(alert),
+            deliveryAttempts = attempts.Select(a => new
+            {
+                id = a.Id,
+                channelId = a.ChannelId,
+                attemptNumber = a.AttemptNumber,
+                status = a.Status,
+                error = a.Error,
+                deliveredAt = a.DeliveredAt,
+                nextAttemptAt = a.NextAttemptAt,
+                createdAt = a.CreatedAt,
+            }).ToList(),
+        });
+    }
+
+    /// <summary>
+    /// Tenant-scope acknowledge:
+    /// <c>POST /api/v1/orgs/{tenantId}/alerts/{id}/acknowledge</c>.
+    /// Requires admin+ role in the path tenant. Rejects cross-tenant
+    /// acks with 404 so a tenant admin can never acknowledge another
+    /// tenant's alert.
+    /// </summary>
+    public static async Task<IResult> AcknowledgeTenantAlert(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        IEventRepository events,
+        TimeProvider timeProvider,
+        Guid tenantId,
+        Guid id,
+        [FromBody] AcknowledgeAlertRequest? body)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        var alert = await db.Alerts
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == tenantId,
+                http.RequestAborted)
+            .ConfigureAwait(false);
+        if (alert is null)
+            return Results.NotFound(new { error = "alert not found" });
+
+        if (alert.Status == AlertStatus.Resolved)
+            return Results.Conflict(new
+            {
+                error = "alert already resolved; cannot acknowledge.",
+            });
+
+        var userId = ResolveUserId(http);
+        alert.Status = AlertStatus.Acknowledged;
+        alert.AcknowledgedBy = userId;
+        alert.AcknowledgedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(http.RequestAborted).ConfigureAwait(false);
+
+        await TryEmitAsync(events, new DomainEvent
+        {
+            Type = AlertEventTypes.Acknowledged,
+            TenantId = alert.TenantId,
+            Tags = System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, string?>
+                {
+                    ["alertId"] = alert.Id.ToString("N"),
+                    ["userId"] = userId?.ToString("N"),
+                    ["tenantId"] = tenantId.ToString("N"),
+                }),
+            Metadata = """{"eventSource":"system"}""",
+            Data = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                note = body?.Note,
+            }),
+        });
+
+        return Results.Ok(ToDto(alert));
+    }
+
+    /// <summary>
+    /// Tenant-scope resolve:
+    /// <c>POST /api/v1/orgs/{tenantId}/alerts/{id}/resolve</c>.
+    /// Admin+. Cross-tenant resolve → 404.
+    /// </summary>
+    public static async Task<IResult> ResolveTenantAlert(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        IEventRepository events,
+        TimeProvider timeProvider,
+        Guid tenantId,
+        Guid id,
+        [FromBody] ResolveAlertRequest? body)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (string.IsNullOrWhiteSpace(body?.Resolution))
+            return Results.BadRequest(new { error = "resolution is required" });
+
+        var alert = await db.Alerts
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == tenantId,
+                http.RequestAborted)
+            .ConfigureAwait(false);
+        if (alert is null)
+            return Results.NotFound(new { error = "alert not found" });
+
+        if (alert.Status == AlertStatus.Resolved)
+            return Results.Conflict(new { error = "alert already resolved" });
+
+        var userId = ResolveUserId(http);
+        alert.Status = AlertStatus.Resolved;
+        alert.ResolvedBy = userId;
+        alert.ResolvedAt = timeProvider.GetUtcNow().UtcDateTime;
+        alert.Resolution = body.Resolution.Length > 2000
+            ? body.Resolution[..2000]
+            : body.Resolution;
+        await db.SaveChangesAsync(http.RequestAborted).ConfigureAwait(false);
+
+        await TryEmitAsync(events, new DomainEvent
+        {
+            Type = AlertEventTypes.Resolved,
+            TenantId = alert.TenantId,
+            Tags = System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, string?>
+                {
+                    ["alertId"] = alert.Id.ToString("N"),
+                    ["userId"] = userId?.ToString("N"),
+                    ["tenantId"] = tenantId.ToString("N"),
+                }),
+            Metadata = """{"eventSource":"system"}""",
+            Data = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                resolution = alert.Resolution,
+            }),
+        });
+
+        return Results.Ok(ToDto(alert));
+    }
+
+    /// <summary>
+    /// Tenant-scope channel list:
+    /// <c>GET /api/v1/orgs/{tenantId}/alert-channels</c>. Returns only
+    /// channels whose <c>tenant_id</c> matches the route tenant.
+    /// </summary>
+    public static async Task<IResult> ListTenantChannels(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        Guid tenantId,
+        string? channelType = null)
+    {
+        var query = db.AlertChannels.AsNoTracking()
+            .Where(c => c.TenantId == tenantId);
+
+        if (!string.IsNullOrWhiteSpace(channelType))
+            query = query.Where(c => c.ChannelType == channelType);
+
+        var rows = await query
+            .OrderByDescending(c => c.CreatedAt)
+            .ToListAsync(http.RequestAborted)
+            .ConfigureAwait(false);
+
+        return Results.Ok(new
+        {
+            items = rows.Select(ToChannelDto).ToList(),
+            count = rows.Count,
+        });
+    }
+
+    /// <summary>
+    /// Tenant-scope channel create:
+    /// <c>POST /api/v1/orgs/{tenantId}/alert-channels</c>. Forces
+    /// <c>tenant_id = {tenantId}</c> server-side — any
+    /// <see cref="CreateChannelRequest.TenantId"/> in the body that
+    /// differs triggers a 400 so a caller cannot hop tenants. Admin+.
+    /// </summary>
+    public static async Task<IResult> CreateTenantChannel(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        TimeProvider timeProvider,
+        Guid tenantId,
+        [FromBody] CreateChannelRequest body,
+        [FromServices] IDbContextFactory<SecretsDbContext>? secretsFactory = null)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (body is null)
+            return Results.BadRequest(new { error = "body is required" });
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+
+        // Reject attempts to create a platform-scope channel from the
+        // tenant endpoint, or to target a different tenant via the
+        // body payload.
+        if (body.TenantId is Guid bodyTid && bodyTid != tenantId)
+        {
+            return Results.BadRequest(new
+            {
+                error = "body.tenantId must match path tenantId " +
+                        "(or be omitted) on the tenant-scope create path.",
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(body.Name))
+            return Results.BadRequest(new { error = "name is required" });
+        if (body.Name.Length > 255)
+            return Results.BadRequest(
+                new { error = "name must be <= 255 characters" });
+        if (string.IsNullOrWhiteSpace(body.ChannelType))
+            return Results.BadRequest(
+                new { error = "channelType is required" });
+        if (!AlertChannelType.All.Contains(
+                body.ChannelType, StringComparer.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new
+            {
+                error = $"channelType must be one of: " +
+                        $"{string.Join(", ", AlertChannelType.All)}",
+            });
+        }
+
+        var requiresSecret = body.ChannelType != AlertChannelType.Email;
+        if (requiresSecret && body.CredentialsSecretId is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"channelType '{body.ChannelType}' requires " +
+                        $"credentialsSecretId (secret must exist in the store).",
+            });
+        }
+
+        if (ContainsPlaintextCredential(body.Config))
+        {
+            return Results.BadRequest(new
+            {
+                error = "config must not contain plaintext credentials " +
+                        "(webhookUrl/routingKey/password/apiKey/secret). " +
+                        "Use credentialsSecretId instead.",
+            });
+        }
+
+        if (body.CredentialsSecretId is Guid sid && secretsFactory is not null)
+        {
+            try
+            {
+                await using var secretsCtx = await secretsFactory
+                    .CreateDbContextAsync(http.RequestAborted)
+                    .ConfigureAwait(false);
+                var exists = await secretsCtx.Secrets
+                    .AsNoTracking()
+                    .AnyAsync(s => s.Id == sid, http.RequestAborted)
+                    .ConfigureAwait(false);
+                if (!exists)
+                    return Results.NotFound(new
+                    {
+                        error = $"credentialsSecretId {sid} not found in secret store.",
+                    });
+            }
+            catch (Npgsql.PostgresException pex) when (pex.SqlState == "42P01")
+            {
+                // secrets table not present — tolerated (tests / degraded envs)
+            }
+        }
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        var channel = new AlertChannel
+        {
+            TenantId = tenantId, // force path-tenant ownership
+            Name = body.Name,
+            ChannelType = body.ChannelType.ToLowerInvariant(),
+            IsEnabled = true,
+            Config = string.IsNullOrWhiteSpace(body.Config) ? "{}" : body.Config!,
+            CredentialsSecretId = body.CredentialsSecretId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.AlertChannels.Add(channel);
+        await db.SaveChangesAsync(http.RequestAborted).ConfigureAwait(false);
+        return Results.Created(
+            $"/api/v1/orgs/{tenantId}/alert-channels/{channel.Id}",
+            ToChannelDto(channel));
+    }
+
+    /// <summary>
+    /// Tenant-scope channel patch:
+    /// <c>PATCH /api/v1/orgs/{tenantId}/alert-channels/{id}</c>.
+    /// 404 if the channel belongs to another tenant or is platform-
+    /// scoped. Admin+.
+    /// </summary>
+    public static async Task<IResult> UpdateTenantChannel(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        TimeProvider timeProvider,
+        Guid tenantId,
+        Guid id,
+        [FromBody] UpdateChannelRequest body)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (body is null)
+            return Results.BadRequest(new { error = "body is required" });
+
+        var channel = await db.AlertChannels
+            .FirstOrDefaultAsync(
+                c => c.Id == id && c.TenantId == tenantId,
+                http.RequestAborted)
+            .ConfigureAwait(false);
+        if (channel is null)
+            return Results.NotFound(new { error = "channel not found" });
+
+        if (body.IsEnabled is bool enabled)
+            channel.IsEnabled = enabled;
+
+        if (body.Config is not null)
+        {
+            if (ContainsPlaintextCredential(body.Config))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "config must not contain plaintext credentials.",
+                });
+            }
+            channel.Config = string.IsNullOrWhiteSpace(body.Config)
+                ? "{}"
+                : body.Config;
+        }
+
+        if (body.Name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(body.Name) || body.Name.Length > 255)
+                return Results.BadRequest(
+                    new { error = "name must be 1..255 characters" });
+            channel.Name = body.Name;
+        }
+
+        channel.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(http.RequestAborted).ConfigureAwait(false);
+        return Results.Ok(ToChannelDto(channel));
+    }
+
+    /// <summary>
+    /// Tenant-scope channel soft-delete:
+    /// <c>DELETE /api/v1/orgs/{tenantId}/alert-channels/{id}</c>.
+    /// Admin+. Cross-tenant → 404.
+    /// </summary>
+    public static async Task<IResult> DeleteTenantChannel(
+        HttpContext http,
+        ControlPlaneDbContext db,
+        TimeProvider timeProvider,
+        Guid tenantId,
+        Guid id)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        var channel = await db.AlertChannels
+            .FirstOrDefaultAsync(
+                c => c.Id == id && c.TenantId == tenantId,
+                http.RequestAborted)
+            .ConfigureAwait(false);
+        if (channel is null)
+            return Results.NotFound(new { error = "channel not found" });
+
+        channel.IsEnabled = false;
+        channel.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(http.RequestAborted).ConfigureAwait(false);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Tenant-role gate for mutations — admin+ required. The membership
+    /// filter has already run and stashed
+    /// <c>HttpContext.Items["TenantRole"]</c> with the caller's role.
+    /// Returns <c>false</c> (with <paramref name="forbid"/> populated)
+    /// when the caller is a plain member; <c>true</c> otherwise.
+    /// </summary>
+    private static bool RequireTenantAdmin(HttpContext http, out IResult? forbid)
+    {
+        var role = http.Items[RequireTenantMembershipFilter.TenantRoleItemKey]
+            as string;
+        if (role is null)
+        {
+            forbid = Results.Json(
+                new { error = "Tenant role not resolved" },
+                statusCode: StatusCodes.Status500InternalServerError);
+            return false;
+        }
+        if (!TenantRoleHierarchy.IsAtLeast(role, TenantRoleHierarchy.Admin))
+        {
+            forbid = Results.Json(
+                new { error = "Requires admin role or higher" },
+                statusCode: StatusCodes.Status403Forbidden);
+            return false;
+        }
+        forbid = null;
+        return true;
     }
 }
 

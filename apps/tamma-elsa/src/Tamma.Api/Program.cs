@@ -1095,6 +1095,33 @@ orgs.MapGet("/{tenantId:guid}/dashboard/runs", UserDashboardEndpoints.GetRecentR
 orgs.MapGet("/{tenantId:guid}/dashboard/stats", UserDashboardEndpoints.GetStats)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
+// Story 5.6 / 1.5-37 (Wave C.3) — tenant-scope alert surface.
+// The path-tenant membership filter proves the caller is a member;
+// admin+ gating for mutations lives inline in the handlers
+// (AlertEndpoints.RequireTenantAdmin). Cross-tenant leaks are
+// prevented by hard-coded `TenantId == tenantId` filters on every
+// query — a plain `FindAsync(id)` would have been a bug.
+orgs.MapGet("/{tenantId:guid}/alerts", AlertEndpoints.ListTenantAlerts)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/alerts/{id:guid}", AlertEndpoints.GetTenantAlert)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId:guid}/alerts/{id:guid}/acknowledge",
+        AlertEndpoints.AcknowledgeTenantAlert)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId:guid}/alerts/{id:guid}/resolve",
+        AlertEndpoints.ResolveTenantAlert)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/alert-channels", AlertEndpoints.ListTenantChannels)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPost("/{tenantId:guid}/alert-channels", AlertEndpoints.CreateTenantChannel)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapPatch("/{tenantId:guid}/alert-channels/{id:guid}",
+        AlertEndpoints.UpdateTenantChannel)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapDelete("/{tenantId:guid}/alert-channels/{id:guid}",
+        AlertEndpoints.DeleteTenantChannel)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
 
 // Story 29-3 — reveal-once token exchange. The token IS the auth (a

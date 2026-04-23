@@ -42,6 +42,32 @@ public class TammaMenuProvider : IMenuProvider
                 GroupName = "general",
                 Order = 102,
             },
+            // Wave C.3 (Story 5.6 / 1.5-37) — platform-admin alert surface.
+            // Separate group so the operator sees alert tools clustered.
+            new()
+            {
+                Text = "Alert feed",
+                Href = "/admin/alerts",
+                Icon = "NotificationsActive",
+                GroupName = "alerts",
+                Order = 200,
+            },
+            new()
+            {
+                Text = "Alert rules",
+                Href = "/admin/alert-rules",
+                Icon = "Rule",
+                GroupName = "alerts",
+                Order = 201,
+            },
+            new()
+            {
+                Text = "Alert channels",
+                Href = "/admin/alert-channels",
+                Icon = "Campaign",
+                GroupName = "alerts",
+                Order = 202,
+            },
         };
 
         return ValueTask.FromResult<IEnumerable<MenuItem>>(items);
