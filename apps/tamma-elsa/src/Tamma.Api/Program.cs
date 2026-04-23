@@ -559,6 +559,11 @@ builder.Services.AddScoped<IAdminHealthService, AdminHealthService>();
 // IAlertSink can be injected by future wave-C.4 activity edits.
 builder.Services.AddTammaAlerts();
 
+// Story 5.6 (Wave C.2) — alert rule engine: evaluator, registry,
+// window store, and the built-in rule seeder. Subscribes to the
+// DCB event stream and emits AlertPayloads through IAlertSink.
+builder.Services.AddTammaAlertRuleEngine();
+
 // Story 28-10 — platform-wide analytics rollup behind the
 // /api/admin/analytics/* endpoints. Reads the CP context
 // (tenants + platform_events) and the app context (workflow_instances +
@@ -953,6 +958,22 @@ v1Admin.MapPatch("/alert-channels/{id:guid}", AlertEndpoints.UpdateChannel)
 v1Admin.MapDelete("/alert-channels/{id:guid}", AlertEndpoints.DeleteChannel)
     .RequireAuthorization("OwnerAccess");
 
+// Story 5.6 (Wave C.2) — alert rule CRUD + synthetic-fire. Same
+// OwnerAccess policy as alerts/channels — configuration here
+// carries cross-tenant blast radius.
+v1Admin.MapGet("/alert-rules", AlertRuleEndpoints.ListRules)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapGet("/alert-rules/{id:guid}", AlertRuleEndpoints.GetRule)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alert-rules", AlertRuleEndpoints.CreateRule)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPatch("/alert-rules/{id:guid}", AlertRuleEndpoints.UpdateRule)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapDelete("/alert-rules/{id:guid}", AlertRuleEndpoints.DeleteRule)
+    .RequireAuthorization("OwnerAccess");
+v1Admin.MapPost("/alert-rules/{id:guid}/_test", AlertRuleEndpoints.TestFireRule)
+    .RequireAuthorization("OwnerAccess");
+
 // Story 29-3 — platform-scope secret-cabinet create + rotate. Both
 // return the newly-minted plaintext via a one-shot reveal token in
 // the response (no plaintext bytes in the body); the caller must
@@ -1338,6 +1359,7 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     alert_delivery_attempts, alert_channels, alerts,
+                    alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,
                     email_outbox,
                     github_installation_repos, github_installations,
