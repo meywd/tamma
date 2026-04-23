@@ -7,6 +7,7 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.AgentDispatch.Models;
 using Tamma.Activities.Core;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Activities.AgentDispatch;
 
@@ -136,6 +137,18 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
             _logger?.LogError(msg);
             SetFailure(context, msg, DateTime.UtcNow);
             TammaEventEmitter.EmitFailure(context, this, this, _logger, DateTime.UtcNow - startedAt, msg);
+            // Wave C.4 §2 — terminal dispatch failure (DI unwired): emit
+            // AGENT.DISPATCH.FAILED into the DCB stream so the rule
+            // evaluator's 3x/5min window counter still observes it.
+            await EmitAgentDispatchFailedAsync(
+                context.GetService<IAlertEventEmitter>(),
+                ReadTenantIdFromContext(context),
+                correlationId: SessionId.Get(context) ?? string.Empty,
+                agentHandle: AgentProvider.Get(context) ?? "(unknown)",
+                reason: "dispatch_service_not_registered",
+                attemptNumber: 1,
+                lastError: msg,
+                ct: context.CancellationToken).ConfigureAwait(false);
             await context.CompleteActivityWithOutcomesAsync("Failed");
             return;
         }
@@ -175,6 +188,18 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
                 TammaEventEmitter.EmitFailure(
                     context, this, this, _logger,
                     DateTime.UtcNow - startedAt, result.ErrorMessage ?? "unknown");
+                // Wave C.4 §2 — terminal failure after IAgentDispatchService
+                // exhausted its 3 internal retries. Emit into the DCB event
+                // store so the 3x/5min tenant-scoped rule can fire.
+                await EmitAgentDispatchFailedAsync(
+                    context.GetService<IAlertEventEmitter>(),
+                    ReadTenantIdFromContext(context),
+                    correlationId: request.SessionId ?? string.Empty,
+                    agentHandle: request.AgentProvider ?? "(unknown)",
+                    reason: ClassifyDispatchReason(result.ErrorMessage),
+                    attemptNumber: 1,
+                    lastError: result.ErrorMessage,
+                    ct: context.CancellationToken).ConfigureAwait(false);
                 await context.CompleteActivityWithOutcomesAsync("Failed");
             }
         }
@@ -186,6 +211,19 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
             SetFailure(context, $"Unexpected error: {ex.Message}", DateTime.UtcNow);
             TammaEventEmitter.EmitFailure(
                 context, this, this, _logger, DateTime.UtcNow - startedAt, ex.Message);
+            // Wave C.4 §2 — unexpected-exception terminal path. The
+            // try/catch envelope means this is the third and final
+            // terminal site; every code path exiting with "Failed"
+            // outcome also emits the DCB event.
+            await EmitAgentDispatchFailedAsync(
+                context.GetService<IAlertEventEmitter>(),
+                ReadTenantIdFromContext(context),
+                correlationId: request.SessionId ?? string.Empty,
+                agentHandle: request.AgentProvider ?? "(unknown)",
+                reason: ex.GetType().Name,
+                attemptNumber: 1,
+                lastError: ex.Message,
+                ct: context.CancellationToken).ConfigureAwait(false);
             await context.CompleteActivityWithOutcomesAsync("Failed");
         }
     }
@@ -196,5 +234,76 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
         WorkflowRunUrl.Set(context, null);
         DispatchedAt.Set(context, dispatchedAt);
         ErrorMessage.Set(context, message);
+    }
+
+    /// <summary>
+    /// Wave C.4 §2 helper — emit AGENT.DISPATCH.FAILED via
+    /// <paramref name="emitter"/>. Tolerant of null emitter (DI not
+    /// wired) and null tenant (alert rule groups by tenantId, so a
+    /// null-tenant event would defeat the 3x/5min window — skip it).
+    /// </summary>
+    public static async Task EmitAgentDispatchFailedAsync(
+        IAlertEventEmitter? emitter,
+        Guid? tenantId,
+        string correlationId,
+        string agentHandle,
+        string reason,
+        int attemptNumber,
+        string? lastError,
+        CancellationToken ct)
+    {
+        if (emitter is null) return;
+        if (tenantId is not Guid tid) return;
+
+        await emitter.EmitAgentDispatchFailedAsync(new AgentDispatchFailedEvent(
+            TenantId: tid,
+            CorrelationId: correlationId,
+            AgentHandle: agentHandle,
+            Reason: reason,
+            AttemptNumber: attemptNumber,
+            LastError: lastError), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Best-effort tenant resolution for an activity running inside an
+    /// Elsa workflow. Checks the common workflow-variable names used
+    /// across Tamma (TenantId, tenantId, Tamma:TenantId) and returns
+    /// null when none resolve to a Guid.
+    /// </summary>
+    private static Guid? ReadTenantIdFromContext(ActivityExecutionContext context)
+    {
+        string?[] candidates =
+        {
+            context.GetVariable<string>("TenantId"),
+            context.GetVariable<string>("tenantId"),
+            context.GetVariable<string>("Tamma:TenantId"),
+        };
+        foreach (var s in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(s) && Guid.TryParse(s, out var g))
+                return g;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Map a dispatch error-message into a stable machine-readable
+    /// <c>reason</c> tag. Keeps the cardinality bounded so dashboards
+    /// can histogram it.
+    /// </summary>
+    private static string ClassifyDispatchReason(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage)) return "unknown";
+        if (errorMessage.Contains("404", StringComparison.Ordinal)) return "not_found";
+        if (errorMessage.Contains("403", StringComparison.Ordinal)) return "forbidden";
+        if (errorMessage.Contains("Invalid repository format", StringComparison.OrdinalIgnoreCase))
+            return "bad_repository";
+        if (errorMessage.Contains("not configured", StringComparison.OrdinalIgnoreCase))
+            return "not_configured";
+        if (errorMessage.Contains("cancelled", StringComparison.OrdinalIgnoreCase))
+            return "cancelled";
+        if (errorMessage.StartsWith("GitHub dispatch failed with HTTP", StringComparison.Ordinal))
+            return "github_http_error";
+        return "dispatch_error";
     }
 }

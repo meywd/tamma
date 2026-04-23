@@ -281,9 +281,13 @@ public class SagaRunnerTests
     }
 
     // ─── Stubs ───────────────────────────────────────────────────────────
+    // (moved to SagaRunnerTestStubs.cs so Wave-C.4 alert-emission tests
+    // can reuse them — NUnit doesn't allow private nested types to be
+    // shared across fixtures.)
+}
 
-    private sealed class StubGateway : ISecretRotationGateway
-    {
+internal sealed class StubGateway : ISecretRotationGateway
+{
         public Dictionary<Guid, SecretRotationSnapshot> Secrets { get; } = new();
         public Dictionary<(Guid, int), string> Versions { get; } = new();
         public Dictionary<(Guid, int), string> Plaintexts { get; } = new();
@@ -341,7 +345,7 @@ public class SagaRunnerTests
             Task.FromResult(Plaintexts.TryGetValue((secretId, versionNumber), out var p) ? p : null);
     }
 
-    private sealed class StubHandler : IRotationHandler
+internal sealed class StubHandler : IRotationHandler
     {
         public StubHandler(string system) => System = system;
 
@@ -381,7 +385,7 @@ public class SagaRunnerTests
         }
     }
 
-    private sealed class StubRegistry : IRotationHandlerRegistry
+internal sealed class StubRegistry : IRotationHandlerRegistry
     {
         private readonly Dictionary<string, IRotationHandler> _handlers = new();
         public IRotationHandler? Resolve(string system) =>
@@ -393,7 +397,7 @@ public class SagaRunnerTests
         }
     }
 
-    private sealed class StubAuditor : IRotationAuditEmitter
+internal sealed class StubAuditor : IRotationAuditEmitter
     {
         public ConcurrentBag<RotationAuditEvent> Events { get; } = new();
         public Task EmitAsync(RotationAuditEvent evt, CancellationToken ct)
@@ -403,7 +407,7 @@ public class SagaRunnerTests
         }
     }
 
-    private sealed class StubRetireScheduler : IRetireScheduler
+internal sealed class StubRetireScheduler : IRetireScheduler
     {
         public List<(Guid SecretId, int VersionNumber, DateTimeOffset RunAfter)> Scheduled { get; } = new();
 
@@ -415,6 +419,5 @@ public class SagaRunnerTests
             return Task.FromResult(Guid.NewGuid());
         }
 
-        public Task<int> SweepDueRetireTasksAsync(CancellationToken ct) => Task.FromResult(0);
-    }
+    public Task<int> SweepDueRetireTasksAsync(CancellationToken ct) => Task.FromResult(0);
 }

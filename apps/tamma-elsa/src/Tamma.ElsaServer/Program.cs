@@ -138,6 +138,16 @@ builder.Services.AddHttpClient();
 // Fastify/ASP.NET API plane.
 builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
 
+// Wave C.4 §4 — per-process health monitor for TammaApiClient. Singleton
+// so the rolling 5-min window is shared across every call site. Fires
+// PLATFORM.API.UNHEALTHY via IAlertEventEmitter when sustained failures
+// cross threshold. Only wired if alerts are registered (Scoped
+// IAlertEventEmitter resolved per-call via IServiceProvider).
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp =>
+    new Tamma.Activities.LlmCall.TammaApiHealthMonitor(
+        new Tamma.Activities.LlmCall.ScopedAlertEventEmitter(sp),
+        sp.GetService<TimeProvider>()));
+
 // Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
 // All tools are stateless singletons. The registry (also Singleton) captures them via
 // IEnumerable<IToolExecutor>, so they must share the same lifetime to avoid a captive dependency.
