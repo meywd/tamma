@@ -229,6 +229,86 @@ public class AlertRuleEvaluatorTests
     }
 
     [Test]
+    public async Task ProcessOnce_CountGte_PlatformTypedRule_ThreeDifferentTenants_DoNotAggregateIntoSingleBucket()
+    {
+        // Regression — pre-fix, a count_gte rule on a platform event
+        // type with default group_by pooled all tenants into a shared
+        // "(null)" bucket because DomainEvent.TenantId backfilled
+        // into the tenantId tag only when non-null, and ComputeGroupKey
+        // returned literal "(null)" for missing tags. With the scope
+        // tag + default group_by=["scope","tenantId"] fix, three
+        // different tenants emitting the same (nominally platform)
+        // event type get three distinct correlation buckets, so a
+        // threshold-of-3 rule must NOT fire.
+        await AddRuleAsync(MakeRule(
+            "PLATFORM.API.UNHEALTHY",
+            predicate:
+                """{"op":"count_gte","window_seconds":300,"threshold":3}"""));
+        await _registry.RefreshAsync(default);
+
+        var now = _time.GetUtcNow().UtcDateTime;
+        await AddEventAsync(MakeEvent(
+            "PLATFORM.API.UNHEALTHY", tenantId: Guid.NewGuid(),
+            at: now.AddSeconds(0)));
+        await AddEventAsync(MakeEvent(
+            "PLATFORM.API.UNHEALTHY", tenantId: Guid.NewGuid(),
+            at: now.AddSeconds(1)));
+        await AddEventAsync(MakeEvent(
+            "PLATFORM.API.UNHEALTHY", tenantId: Guid.NewGuid(),
+            at: now.AddSeconds(2)));
+
+        await _evaluator.ProcessOnceAsync(default);
+
+        _sink.Raised.Should().BeEmpty(
+            "three different tenants share no bucket under the scope+tenantId correlation");
+    }
+
+    [Test]
+    public async Task ProcessOnce_CountGte_TrulyPlatformEvents_AggregateUnderScopePlatform()
+    {
+        // Companion to the above — three events that ARE actually
+        // platform-scoped (TenantId == null) share scope="platform"
+        // and correctly aggregate into a single bucket so the
+        // threshold is met and the rule fires exactly once.
+        await AddRuleAsync(MakeRule(
+            "PLATFORM.API.UNHEALTHY",
+            predicate:
+                """{"op":"count_gte","window_seconds":300,"threshold":3}"""));
+        await _registry.RefreshAsync(default);
+
+        var now = _time.GetUtcNow().UtcDateTime;
+        await AddPlatformEventAsync(new PlatformEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "PLATFORM.API.UNHEALTHY",
+            TenantId = null,
+            Tags = "{}", Metadata = "{}", Data = "{}",
+            CreatedAt = now.AddSeconds(0),
+        });
+        await AddPlatformEventAsync(new PlatformEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "PLATFORM.API.UNHEALTHY",
+            TenantId = null,
+            Tags = "{}", Metadata = "{}", Data = "{}",
+            CreatedAt = now.AddSeconds(1),
+        });
+        await AddPlatformEventAsync(new PlatformEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "PLATFORM.API.UNHEALTHY",
+            TenantId = null,
+            Tags = "{}", Metadata = "{}", Data = "{}",
+            CreatedAt = now.AddSeconds(2),
+        });
+
+        await _evaluator.ProcessOnceAsync(default);
+
+        _sink.Raised.Should().ContainSingle(
+            "three platform-scoped events share scope=platform and meet the threshold");
+    }
+
+    [Test]
     public async Task ProcessOnce_ThrottlePerTenant_DoesNotBlockOtherTenants()
     {
         await AddRuleAsync(MakeRule("BUDGET.EXHAUSTED", throttle: 60));

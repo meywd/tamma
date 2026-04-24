@@ -38,6 +38,13 @@ public sealed class AlertRuleContext
     /// Tenant id is materialised into the tag dict under
     /// <c>"tenantId"</c> even when the JSON blob omits it, so
     /// <c>count_gte.group_by=["tenantId"]</c> correlates as documented.
+    /// The synthesised <c>"scope"</c> tag is always present:
+    /// <c>"platform"</c> when <see cref="DomainEvent.TenantId"/> is
+    /// null, <c>"tenant:&lt;guid-N&gt;"</c> otherwise. This lets
+    /// <c>count_gte</c> partition platform events by scope (so two
+    /// tenants' tenant-scoped events never collide on a missing
+    /// <c>tenantId</c> tag, and platform-wide events still group
+    /// globally under <c>scope=platform</c>).
     /// </summary>
     public bool TryGetTag(string key, out string? value)
     {
@@ -81,6 +88,18 @@ public sealed class AlertRuleContext
         if (!dict.ContainsKey("tenantId") && Event.TenantId.HasValue)
         {
             dict["tenantId"] = Event.TenantId.Value.ToString("N");
+        }
+        // Synthesise the "scope" tag. This partitions the count_gte
+        // correlation domain between platform-wide events (TenantId ==
+        // null) and tenant-scoped events. Without this, a count_gte
+        // rule defaulting to group_by=["tenantId"] pooled every tenant's
+        // platform-scoped events into one shared "(null)" bucket.
+        // Event-supplied "scope" wins if the emitter already set it.
+        if (!dict.ContainsKey("scope"))
+        {
+            dict["scope"] = Event.TenantId.HasValue
+                ? $"tenant:{Event.TenantId.Value:N}"
+                : "platform";
         }
         return dict;
     }

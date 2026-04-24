@@ -39,8 +39,13 @@ public abstract record AlertRulePredicate
     /// <summary>
     /// Match when <see cref="Threshold"/> or more events of the rule's
     /// event type land within <see cref="WindowSeconds"/>, correlated
-    /// by <see cref="GroupBy"/> (default <c>["tenantId"]</c>). The
-    /// current event counts toward the threshold.
+    /// by <see cref="GroupBy"/> (default <c>["scope", "tenantId"]</c>).
+    /// The current event counts toward the threshold. The
+    /// <c>scope</c> tag (synthesised by
+    /// <see cref="AlertRuleContext"/>) partitions platform-wide events
+    /// (<c>scope="platform"</c>) from tenant-scoped events
+    /// (<c>scope="tenant:&lt;guid&gt;"</c>) so a platform-typed rule
+    /// never pools all tenants into a shared "(null)" bucket.
     /// </summary>
     public sealed record CountGte(
         int WindowSeconds,
@@ -189,7 +194,13 @@ public static class AlertRulePredicateParser
                 "required positive integer (count).");
         }
 
-        var groupBy = new List<string> { "tenantId" };  // default correlation
+        // Default correlation partitions on scope first, then
+        // tenantId. "scope" is always present in the tag dict
+        // ("platform" | "tenant:<guid-N>") so platform-scoped events
+        // (TenantId == null) group under "platform|(null)" and
+        // tenant-scoped events group under "tenant:<g>|<g>" — no
+        // cross-tenant collision on a missing tenantId tag.
+        var groupBy = new List<string> { "scope", "tenantId" };
         if (el.TryGetProperty("group_by", out var gEl))
         {
             if (gEl.ValueKind != JsonValueKind.Array)
