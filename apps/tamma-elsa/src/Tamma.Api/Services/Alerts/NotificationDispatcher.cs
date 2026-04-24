@@ -22,8 +22,12 @@ public sealed class NotificationDispatcherOptions
     /// <para>Defaults: <c>30s → 2m → 5m → 15m → 30m</c> (1 initial +
     /// 5 retries = 6 attempts total, ~52 minutes window) per Wave
     /// C.1 plan. Note there are 5 inter-attempt delays for 6
-    /// attempts, so <see cref="MaxAttempts"/> must be at least 6 for
-    /// every entry in this schedule to be reachable.</para></summary>
+    /// attempts. The terminal short-circuit fires when
+    /// <c>AttemptNumber &gt;= MaxAttempts</c>, AFTER the post-failure
+    /// increment — so to compute the 5th delay (idx=4 → 30m, set when
+    /// AttemptNumber=6) the terminal check must NOT fire at 6. That
+    /// requires <see cref="MaxAttempts"/> to be at least
+    /// <c>BackoffSchedule.Count + 2 = 7</c>.</para></summary>
     public IReadOnlyList<TimeSpan> BackoffSchedule { get; set; } = new[]
     {
         TimeSpan.FromSeconds(30),
@@ -33,12 +37,17 @@ public sealed class NotificationDispatcherOptions
         TimeSpan.FromMinutes(30),
     };
 
-    /// <summary>Max attempts per delivery. Default <b>6</b> (1 initial
-    /// + 5 retries) — after that the row stays <c>failed</c> for audit
-    /// and the dispatcher skips it. Must be ≥ <c>BackoffSchedule.Count
-    /// + 1</c> for every backoff entry to be reachable; with the
-    /// default 5-entry schedule that means MaxAttempts ≥ 6.</summary>
-    public int MaxAttempts { get; set; } = 6;
+    /// <summary>Terminal sentinel for retry exhaustion. Default <b>7</b>
+    /// — semantically "1 initial + 5 retries + 1 terminal-after slot".
+    /// The dispatcher picks rows where <c>AttemptNumber &lt; MaxAttempts</c>
+    /// (so the 6th attempt at AttemptNumber=6 IS picked); after the 6th
+    /// failure AttemptNumber becomes 7 and the terminal check
+    /// <c>AttemptNumber &gt;= MaxAttempts</c> fires, leaving the row
+    /// <c>failed</c> permanently for audit. Must be ≥
+    /// <c>BackoffSchedule.Count + 2</c> for every backoff entry to be
+    /// reachable; with the default 5-entry schedule that means
+    /// MaxAttempts ≥ 7.</summary>
+    public int MaxAttempts { get; set; } = 7;
 
     /// <summary>Max rows claimed per poll tick. Default 100 so a backlog
     /// doesn't starve the tick.</summary>

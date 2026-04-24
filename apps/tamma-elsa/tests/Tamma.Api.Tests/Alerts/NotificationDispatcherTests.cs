@@ -61,7 +61,7 @@ public class NotificationDispatcherTests
     private static NotificationDispatcherOptions DefaultOptions() => new()
     {
         PollInterval = TimeSpan.FromSeconds(10),
-        MaxAttempts = 6,
+        MaxAttempts = 7,
         BackoffSchedule = new[]
         {
             TimeSpan.FromSeconds(30),
@@ -124,11 +124,13 @@ public class NotificationDispatcherTests
     // Regression guard for the "dead delay entries" bug: before the
     // fix the default MaxAttempts=5 short-circuited the schedule
     // lookup before idx=3 (15m) and idx=4 (30m) were ever reached,
-    // so those two entries were effectively dead code. Raising the
-    // default to 6 unlocks idx=3; we also assert idx=4 here (with a
-    // larger MaxAttempts so the terminal gate doesn't swallow it) to
-    // pin the schedule contract as "5 delays, explicitly
-    // [30s, 2m, 5m, 15m, 30m]".
+    // so those two entries were effectively dead code. The default is
+    // now 7 (= BackoffSchedule.Count + 2) so all 5 delays are
+    // reachable in production. We override MaxAttempts=100 below
+    // purely as a defensive belt-and-suspenders so this test pins the
+    // schedule contract independently of the default — even if a
+    // future change lowered MaxAttempts below 7 again, this test
+    // would still catch a wrong delay value at any index.
     //
     // The parameter grid: pre-seed AttemptNumber = scheduleIndex + 1
     // (so the fail-and-increment produces post = scheduleIndex + 2,
@@ -179,15 +181,16 @@ public class NotificationDispatcherTests
     public async Task DispatchOnceAsync_AfterMaxAttempts_NextAttemptAt_IsMaxValue()
     {
         var attemptId = await SeedPendingAttemptAsync();
-        // Arrange: with the new default of MaxAttempts=6, put the row at
-        // attempt 5 so the next failure is the 6th (terminal) and the
-        // eligibility gate still lets it through (AttemptNumber <
-        // MaxAttempts, i.e. 5 < 6).
+        // Arrange: with the new default of MaxAttempts=7, put the row at
+        // attempt 6 so the next failure is the 7th increment (terminal)
+        // and the eligibility gate still lets it through (AttemptNumber <
+        // MaxAttempts, i.e. 6 < 7). After failure, AttemptNumber becomes
+        // 7 and the terminal short-circuit fires (7 >= 7).
         using (var scope = _sp.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             var row = await db.AlertDeliveryAttempts.FirstAsync(a => a.Id == attemptId);
-            row.AttemptNumber = 5;
+            row.AttemptNumber = 6;
             row.Status = "failed";
             row.NextAttemptAt = _time.GetUtcNow().UtcDateTime.AddSeconds(-1);
             await db.SaveChangesAsync();
@@ -197,7 +200,7 @@ public class NotificationDispatcherTests
         await NewDispatcher().DispatchOnceAsync(default);
 
         var refreshed = await ReadAttemptAsync();
-        refreshed.AttemptNumber.Should().Be(6);
+        refreshed.AttemptNumber.Should().Be(7);
         refreshed.Status.Should().Be("failed");
         refreshed.NextAttemptAt.Should().Be(DateTime.MaxValue,
             "terminal attempts must never be picked up again by the poll query");
@@ -211,8 +214,8 @@ public class NotificationDispatcherTests
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             var row = await db.AlertDeliveryAttempts.FirstAsync(a => a.Id == attemptId);
-            // With MaxAttempts=6, a terminal row sits at AttemptNumber=6.
-            row.AttemptNumber = 6;
+            // With MaxAttempts=7, a terminal row sits at AttemptNumber=7.
+            row.AttemptNumber = 7;
             row.Status = "failed";
             row.NextAttemptAt = DateTime.MaxValue;
             await db.SaveChangesAsync();
