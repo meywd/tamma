@@ -27,15 +27,27 @@ public class AlertEvaluatorCursor
     public string EvaluatorId { get; set; } = "default";
 
     /// <summary>
-    /// Timestamp of the last processed event. New events are fetched
-    /// via <c>CreatedAt &gt; LastEventAt</c>. Combined with the
-    /// secondary <see cref="LastEventId"/> tie-breaker so two events
-    /// sharing a millisecond-precision timestamp don't get skipped.
+    /// Last-processed <c>SequenceNumber</c> from the
+    /// <c>domain_events</c> stream. The next fetch tick selects rows
+    /// where <c>SequenceNumber &gt; LastDomainSequenceNumber</c>. Zero
+    /// means "no events processed yet — start from the beginning".
+    ///
+    /// <para>Replaced the original <c>(LastEventAt, LastEventId)</c>
+    /// composite cursor: timestamp + Guid lexicographic compare drops
+    /// rows whose Guid string sorts ≤ the cursor on the same-tick
+    /// boundary. Sequence numbers are monotonic per stream and immune
+    /// to that bug.</para>
     /// </summary>
-    public DateTime LastEventAt { get; set; }
+    public long LastDomainSequenceNumber { get; set; }
 
-    /// <summary>Secondary cursor to tie-break equal timestamps.</summary>
-    public Guid? LastEventId { get; set; }
+    /// <summary>
+    /// Last-processed <c>SequenceNumber</c> from the
+    /// <c>platform_events</c> stream. Tracked independently from
+    /// <see cref="LastDomainSequenceNumber"/> because the two tables
+    /// each have their own BIGSERIAL identity — there is no global
+    /// ordering between them, only per-stream monotonicity.
+    /// </summary>
+    public long LastPlatformSequenceNumber { get; set; }
 
     public DateTime UpdatedAt { get; set; }
 }

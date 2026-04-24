@@ -170,37 +170,46 @@ public sealed class AlertRuleEvaluator : BackgroundService
         if (batch.Count == 0) return 0;
 
         var processed = 0;
-        DateTime maxTime = cursor.LastEventAt;
-        Guid? lastId = cursor.LastEventId;
+        // Track per-stream high-water sequence numbers. Each entry in
+        // the batch carries its origin stream so the cursor can
+        // advance both monotonic streams independently — there is no
+        // global ordering between domain_events and platform_events.
+        long maxDomainSeq = cursor.LastDomainSequenceNumber;
+        long maxPlatformSeq = cursor.LastPlatformSequenceNumber;
 
-        foreach (var evt in batch)
+        foreach (var item in batch)
         {
             if (ct.IsCancellationRequested) break;
 
             try
             {
-                await ProcessEventAsync(evt, registry, sink, windowStore, ct)
+                await ProcessEventAsync(
+                        item.Event, registry, sink, windowStore, ct)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
                     "Rule evaluation for event {EventId} ({Type}) threw; " +
-                    "continuing.", evt.Id, evt.Type);
+                    "continuing.", item.Event.Id, item.Event.Type);
             }
 
-            if (evt.CreatedAt > maxTime ||
-                (evt.CreatedAt == maxTime && evt.Id != lastId))
+            if (item.Source == EventSource.Domain &&
+                item.Event.SequenceNumber > maxDomainSeq)
             {
-                maxTime = evt.CreatedAt;
-                lastId = evt.Id;
+                maxDomainSeq = item.Event.SequenceNumber;
+            }
+            else if (item.Source == EventSource.Platform &&
+                item.Event.SequenceNumber > maxPlatformSeq)
+            {
+                maxPlatformSeq = item.Event.SequenceNumber;
             }
             processed++;
         }
 
         if (processed > 0)
         {
-            await SaveCursorAsync(db, maxTime, lastId, ct)
+            await SaveCursorAsync(db, maxDomainSeq, maxPlatformSeq, ct)
                 .ConfigureAwait(false);
         }
         return processed;
@@ -352,15 +361,16 @@ public sealed class AlertRuleEvaluator : BackgroundService
             .ConfigureAwait(false);
         if (row is null)
         {
-            return new CursorState(DateTime.MinValue, null);
+            return new CursorState(0L, 0L);
         }
-        return new CursorState(row.LastEventAt, row.LastEventId);
+        return new CursorState(
+            row.LastDomainSequenceNumber, row.LastPlatformSequenceNumber);
     }
 
     private async Task SaveCursorAsync(
         ControlPlaneDbContext db,
-        DateTime lastEventAt,
-        Guid? lastEventId,
+        long lastDomainSeq,
+        long lastPlatformSeq,
         CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
@@ -373,40 +383,36 @@ public sealed class AlertRuleEvaluator : BackgroundService
             db.AlertEvaluatorCursors.Add(new AlertEvaluatorCursor
             {
                 EvaluatorId = _options.EvaluatorId,
-                LastEventAt = lastEventAt,
-                LastEventId = lastEventId,
+                LastDomainSequenceNumber = lastDomainSeq,
+                LastPlatformSequenceNumber = lastPlatformSeq,
                 UpdatedAt = now,
             });
         }
         else
         {
-            existing.LastEventAt = lastEventAt;
-            existing.LastEventId = lastEventId;
+            existing.LastDomainSequenceNumber = lastDomainSeq;
+            existing.LastPlatformSequenceNumber = lastPlatformSeq;
             existing.UpdatedAt = now;
         }
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task<List<DomainEvent>> FetchBatchAsync(
+    private async Task<List<BatchItem>> FetchBatchAsync(
         ControlPlaneDbContext db, CursorState cursor, CancellationToken ct)
     {
-        // Events strictly after the cursor: CreatedAt > cursor OR
-        // (CreatedAt == cursor AND Id > LastEventId). The second
-        // clause tie-breaks on equal-timestamp bursts (same-tick
-        // event storms) so no event slips past. We approximate the
-        // ordered OR in two simpler queries and merge in memory;
-        // Postgres doesn't need the UNION — EF translates the
-        // disjunction fine, but the flat form is easier to reason
-        // about and index-friendly on (CreatedAt, Id).
+        // Events strictly after the cursor in stream order. The
+        // monotonic SequenceNumber column (BIGSERIAL identity, set
+        // server-side on INSERT) is immune to same-millisecond
+        // CreatedAt collisions that previously dropped events when
+        // the tiebreak was a Guid lexicographic compare. Each stream
+        // tracks its own cursor because their sequences are
+        // independent — there is no global ordering between
+        // domain_events and platform_events.
 
         var domain = await db.DomainEvents.AsNoTracking()
             .IgnoreQueryFilters()
-            .Where(e => e.CreatedAt > cursor.LastEventAt ||
-                (e.CreatedAt == cursor.LastEventAt &&
-                 (cursor.LastEventId == null || e.Id != cursor.LastEventId) &&
-                 e.Id.ToString().CompareTo(
-                     (cursor.LastEventId ?? Guid.Empty).ToString()) > 0))
-            .OrderBy(e => e.CreatedAt).ThenBy(e => e.Id)
+            .Where(e => e.SequenceNumber > cursor.LastDomainSequenceNumber)
+            .OrderBy(e => e.SequenceNumber)
             .Take(_options.BatchSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -414,35 +420,70 @@ public sealed class AlertRuleEvaluator : BackgroundService
         // PlatformEvents share the same shape — project into
         // DomainEvent for uniform rule evaluation.
         var platform = await db.PlatformEvents.AsNoTracking()
-            .Where(e => e.CreatedAt > cursor.LastEventAt ||
-                (e.CreatedAt == cursor.LastEventAt &&
-                 (cursor.LastEventId == null || e.Id != cursor.LastEventId) &&
-                 e.Id.ToString().CompareTo(
-                     (cursor.LastEventId ?? Guid.Empty).ToString()) > 0))
-            .OrderBy(e => e.CreatedAt).ThenBy(e => e.Id)
+            .Where(e => e.SequenceNumber > cursor.LastPlatformSequenceNumber)
+            .OrderBy(e => e.SequenceNumber)
             .Take(_options.BatchSize)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // Project platform events into DomainEvent shape. The Id /
-        // CreatedAt / Type / Tags / Data fields map 1:1.
-        var projected = platform.Select(p => new DomainEvent
+        var items = new List<BatchItem>(domain.Count + platform.Count);
+        foreach (var d in domain)
         {
-            Id = p.Id,
-            Type = p.Type,
-            TenantId = p.TenantId,
-            Tags = p.Tags,
-            Metadata = p.Metadata,
-            Data = p.Data,
-            CreatedAt = p.CreatedAt,
+            items.Add(new BatchItem(d, EventSource.Domain));
+        }
+        foreach (var p in platform)
+        {
+            // Project the platform-event row into a DomainEvent shape
+            // so the rule pipeline stays uniform. SequenceNumber rides
+            // along so the cursor can pick the right per-stream high
+            // water mark after the rule loop.
+            var projected = new DomainEvent
+            {
+                Id = p.Id,
+                Type = p.Type,
+                TenantId = p.TenantId,
+                Tags = p.Tags,
+                Metadata = p.Metadata,
+                Data = p.Data,
+                CreatedAt = p.CreatedAt,
+                SequenceNumber = p.SequenceNumber,
+            };
+            items.Add(new BatchItem(projected, EventSource.Platform));
+        }
+
+        // Stable ordering across the two streams so equal-CreatedAt
+        // bursts have a deterministic interleave; the cursor advance
+        // is per-stream so the chosen interleave doesn't influence
+        // resume correctness.
+        items.Sort((a, b) =>
+        {
+            var c = a.Event.CreatedAt.CompareTo(b.Event.CreatedAt);
+            if (c != 0) return c;
+            // Within a same-CreatedAt tie, domain events come first;
+            // within a single stream, the per-stream SequenceNumber
+            // already gave us order from the DB query.
+            c = ((int)a.Source).CompareTo((int)b.Source);
+            if (c != 0) return c;
+            return a.Event.SequenceNumber.CompareTo(b.Event.SequenceNumber);
         });
 
-        return domain.Concat(projected)
-            .OrderBy(e => e.CreatedAt).ThenBy(e => e.Id)
-            .Take(_options.BatchSize)
-            .ToList();
+        if (items.Count > _options.BatchSize)
+        {
+            items.RemoveRange(
+                _options.BatchSize, items.Count - _options.BatchSize);
+        }
+        return items;
     }
 
+    private enum EventSource
+    {
+        Domain = 0,
+        Platform = 1,
+    }
+
+    private readonly record struct BatchItem(
+        DomainEvent Event, EventSource Source);
+
     private readonly record struct CursorState(
-        DateTime LastEventAt, Guid? LastEventId);
+        long LastDomainSequenceNumber, long LastPlatformSequenceNumber);
 }

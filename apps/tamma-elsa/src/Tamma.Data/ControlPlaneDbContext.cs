@@ -241,8 +241,13 @@ public class ControlPlaneDbContext : DbContext
             entity.Property(e => e.EvaluatorId)
                 .IsRequired()
                 .HasMaxLength(64);
-            entity.Property(e => e.LastEventAt)
-                .HasColumnType("timestamp with time zone");
+            // Per-stream BIGINT cursors. Default 0 means "fetch from
+            // the start" — a freshly-inserted row resumes at the head
+            // of each stream.
+            entity.Property(e => e.LastDomainSequenceNumber)
+                .HasDefaultValue(0L);
+            entity.Property(e => e.LastPlatformSequenceNumber)
+                .HasDefaultValue(0L);
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
         });
     }

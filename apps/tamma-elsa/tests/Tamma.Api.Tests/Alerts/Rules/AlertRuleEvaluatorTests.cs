@@ -273,7 +273,10 @@ public class AlertRuleEvaluatorTests
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var cursor = await db.AlertEvaluatorCursors.SingleAsync();
         cursor.EvaluatorId.Should().Be("test-eval");
-        cursor.LastEventId.Should().NotBeNull();
+        // Sequence-number cursor advanced past 0 (the initial state)
+        // proves the evaluator persisted progress for the
+        // domain_events stream.
+        cursor.LastDomainSequenceNumber.Should().BeGreaterThan(0);
     }
 
     [Test]
@@ -306,6 +309,87 @@ public class AlertRuleEvaluatorTests
         newSink.Raised.Should().BeEmpty();
 
         newSp.Dispose();
+    }
+
+    [Test]
+    public async Task ProcessOnce_SameTimestampBurst_NoEventSkippedOrDoubled()
+    {
+        // Regression: the previous (LastEventAt, LastEventId) cursor
+        // tiebroke same-CreatedAt bursts via Guid.ToString() string
+        // compare. String compare ≠ Guid binary order ≠ insertion
+        // order, so events whose Guid string sorted ≤ the cursor
+        // were permanently skipped after a crash + restart. With the
+        // sequence-number cursor each event has a strictly-monotonic
+        // BIGSERIAL key, immune to that bug.
+
+        await AddRuleAsync(MakeRule("BURST.HAPPENED"));
+        await _registry.RefreshAsync(default);
+
+        var tenantId = Guid.NewGuid();
+        var sameInstant = DateTime.SpecifyKind(
+            new DateTime(2026, 4, 23, 12, 0, 0), DateTimeKind.Utc);
+
+        // Three events with byte-identical CreatedAt — the bug
+        // surfaces precisely on equal-timestamp inserts.
+        await AddEventAsync(MakeEvent("BURST.HAPPENED", tenantId, at: sameInstant));
+        await AddEventAsync(MakeEvent("BURST.HAPPENED", tenantId, at: sameInstant));
+        await AddEventAsync(MakeEvent("BURST.HAPPENED", tenantId, at: sameInstant));
+
+        // First evaluator pass: should see all three events. Throttle
+        // is 0 on the rule so each match yields a sink fire.
+        var firstPassProcessed = await _evaluator.ProcessOnceAsync(default);
+        firstPassProcessed.Should().Be(3,
+            "all three same-CreatedAt events must enter the batch");
+        _sink.Raised.Should().HaveCount(3,
+            "each event must fire the sink — none silently dropped");
+
+        // Verify the cursor row was persisted with a monotonic seq#.
+        long persistedSeq;
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider
+                .GetRequiredService<ControlPlaneDbContext>();
+            var cursor = await db.AlertEvaluatorCursors.SingleAsync();
+            cursor.LastDomainSequenceNumber.Should().BeGreaterThan(0);
+            persistedSeq = cursor.LastDomainSequenceNumber;
+        }
+
+        // Simulate crash + restart on the same database — a fresh
+        // evaluator instance loads the persisted cursor and runs.
+        var newSink = new RecordingAlertSink();
+        var newSp = BuildContainerWithSharedDb(newSink);
+        try
+        {
+            using (var scope = newSp.CreateScope())
+            {
+                var reg = scope.ServiceProvider
+                    .GetRequiredService<IAlertRuleRegistry>();
+                await reg.RefreshAsync(default);
+            }
+            var fresh = new AlertRuleEvaluator(
+                newSp, _options, _time,
+                NullLogger<AlertRuleEvaluator>.Instance);
+
+            var secondPassProcessed = await fresh.ProcessOnceAsync(default);
+            secondPassProcessed.Should().Be(0,
+                "cursor advanced past every same-CreatedAt event — " +
+                "no replay, no skip");
+            newSink.Raised.Should().BeEmpty(
+                "crash-restart must not double-fire any of the burst events");
+
+            // And the cursor itself didn't drift.
+            using (var scope = newSp.CreateScope())
+            {
+                var db = scope.ServiceProvider
+                    .GetRequiredService<ControlPlaneDbContext>();
+                var cursor = await db.AlertEvaluatorCursors.SingleAsync();
+                cursor.LastDomainSequenceNumber.Should().Be(persistedSeq);
+            }
+        }
+        finally
+        {
+            newSp.Dispose();
+        }
     }
 
     private ServiceProvider BuildContainerWithSharedDb(

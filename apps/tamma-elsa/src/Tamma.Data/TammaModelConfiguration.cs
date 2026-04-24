@@ -331,11 +331,28 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Metadata).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.Data).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            // BIGSERIAL identity — Postgres assigns the next value on
+            // INSERT; EF reads it back. Used by AlertRuleEvaluator as
+            // a monotonic cursor that never collides on equal CreatedAt.
+            // The HasValueGenerator bridges the InMemory test provider
+            // (which doesn't honour UseSerialColumn for non-PK columns)
+            // to the same monotonic semantics; on Postgres the
+            // server-side RETURNING value overwrites it.
+            entity.Property(e => e.SequenceNumber)
+                .ValueGeneratedOnAdd()
+                .UseSerialColumn()
+                .HasValueGenerator<Internal.EventSequenceValueGenerator>();
 
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
             entity.HasIndex(e => e.UserId).HasFilter("\"UserId\" IS NOT NULL");
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
+            // Cursor scan by AlertRuleEvaluator — single-column index
+            // keeps the WHERE SequenceNumber > ? ORDER BY SequenceNumber
+            // path on a covering index.
+            entity.HasIndex(e => e.SequenceNumber)
+                .IsUnique()
+                .HasDatabaseName("UX_platform_events_SequenceNumber");
         });
 
         // ── PlatformQueuedTask (Story 28-6) ──
@@ -645,8 +662,18 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Metadata).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.Data).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            // BIGSERIAL identity — see PlatformEvent above for rationale.
+            entity.Property(e => e.SequenceNumber)
+                .ValueGeneratedOnAdd()
+                .UseSerialColumn()
+                .HasValueGenerator<Internal.EventSequenceValueGenerator>();
 
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
+            // Cursor scan by AlertRuleEvaluator — covering index on
+            // the monotonic stream key.
+            entity.HasIndex(e => e.SequenceNumber)
+                .IsUnique()
+                .HasDatabaseName("UX_domain_events_SequenceNumber");
 
             if (omitTenantIdColumn)
             {

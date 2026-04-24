@@ -27,4 +27,13 @@ public class PlatformEvent
     public string Metadata { get; set; } = "{}";
     public string Data { get; set; } = "{}";
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// Monotonic per-stream sequence populated server-side by a
+    /// PostgreSQL <c>BIGSERIAL</c> identity. See
+    /// <see cref="DomainEvent.SequenceNumber"/> for the rationale —
+    /// platform events get an independent sequence because they live
+    /// in their own table.
+    /// </summary>
+    public long SequenceNumber { get; set; }
 }
