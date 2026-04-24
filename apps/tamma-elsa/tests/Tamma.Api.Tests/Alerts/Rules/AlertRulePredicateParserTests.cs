@@ -32,7 +32,10 @@ public class AlertRulePredicateParserTests
         var c = ast.Should().BeOfType<AlertRulePredicate.CountGte>().Subject;
         c.WindowSeconds.Should().Be(300);
         c.Threshold.Should().Be(3);
-        c.GroupBy.Should().ContainSingle().Which.Should().Be("tenantId");
+        // Default correlation is ["scope", "tenantId"] — scope
+        // partitions platform vs tenant events so platform-typed
+        // rules don't collide on a null tenantId tag.
+        c.GroupBy.Should().Equal("scope", "tenantId");
     }
 
     [Test]
