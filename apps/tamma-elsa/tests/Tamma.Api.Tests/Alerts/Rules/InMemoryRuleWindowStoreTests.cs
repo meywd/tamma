@@ -81,10 +81,15 @@ public class InMemoryRuleWindowStoreTests
     }
 
     [Test]
-    public void NullStore_AlwaysReturnsOne()
+    public void NullStore_AlwaysReturnsZero_SoCountGteNeverFires()
     {
+        // Fail-safe: a count_gte rule wired to NullRuleWindowStore
+        // evaluates 0 >= threshold (with threshold >= 1 per parser
+        // validation), which is always false — the rule silently
+        // refuses to fire rather than always-firing. See
+        // NullRuleWindowStore XML doc.
         var store = new NullRuleWindowStore();
         store.RecordAndCount(Guid.NewGuid(), "any", DateTime.UtcNow, TimeSpan.FromMinutes(1))
-            .Should().Be(1);
+            .Should().Be(0);
     }
 }

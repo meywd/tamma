@@ -106,10 +106,17 @@ public sealed class InMemoryRuleWindowStore : IRuleWindowStore
 
 /// <summary>
 /// No-op window store for tests / rules that don't use
-/// <c>count_gte</c>. Always returns 1 (the threshold of a single-
-/// occurrence rule), so if <c>count_gte</c> is accidentally evaluated
-/// with this store, the predicate fires on every call — a loud bug
-/// rather than a silent mis-count.
+/// <c>count_gte</c>. Returns 0 unconditionally so that
+/// <c>count_gte threshold=N</c> (with N &gt;= 1, per parser validation)
+/// evaluates to <c>0 &gt;= N = false</c> — the predicate never fires.
+///
+/// <para>This is the defensive (fail-safe) choice: if
+/// <c>count_gte</c> is accidentally evaluated with this store, the
+/// rule silently refuses to fire rather than silently firing on every
+/// event (which the earlier always-return-1 implementation did — with
+/// threshold=1, the legal minimum, it produced alert-on-every-event
+/// noise). Rules that legitimately need <c>count_gte</c> must inject a
+/// real <see cref="InMemoryRuleWindowStore"/>.</para>
 /// </summary>
 public sealed class NullRuleWindowStore : IRuleWindowStore
 {
@@ -117,5 +124,5 @@ public sealed class NullRuleWindowStore : IRuleWindowStore
         Guid ruleId,
         string groupKey,
         DateTime eventTime,
-        TimeSpan window) => 1;
+        TimeSpan window) => 0;
 }
