@@ -19,8 +19,11 @@ public sealed class NotificationDispatcherOptions
     /// the Nth failure. After the last entry, the attempt stays in
     /// the <c>failed</c> state permanently.
     ///
-    /// <para>Defaults: <c>30s → 2m → 5m → 15m → 30m</c> (5 attempts
-    /// total = ~52 minutes window) per Wave C.1 plan.</para></summary>
+    /// <para>Defaults: <c>30s → 2m → 5m → 15m → 30m</c> (1 initial +
+    /// 5 retries = 6 attempts total, ~52 minutes window) per Wave
+    /// C.1 plan. Note there are 5 inter-attempt delays for 6
+    /// attempts, so <see cref="MaxAttempts"/> must be at least 6 for
+    /// every entry in this schedule to be reachable.</para></summary>
     public IReadOnlyList<TimeSpan> BackoffSchedule { get; set; } = new[]
     {
         TimeSpan.FromSeconds(30),
@@ -30,9 +33,12 @@ public sealed class NotificationDispatcherOptions
         TimeSpan.FromMinutes(30),
     };
 
-    /// <summary>Max attempts per delivery. Default 5 — after that the
-    /// row stays <c>failed</c> for audit and the dispatcher skips it.</summary>
-    public int MaxAttempts { get; set; } = 5;
+    /// <summary>Max attempts per delivery. Default <b>6</b> (1 initial
+    /// + 5 retries) — after that the row stays <c>failed</c> for audit
+    /// and the dispatcher skips it. Must be ≥ <c>BackoffSchedule.Count
+    /// + 1</c> for every backoff entry to be reachable; with the
+    /// default 5-entry schedule that means MaxAttempts ≥ 6.</summary>
+    public int MaxAttempts { get; set; } = 6;
 
     /// <summary>Max rows claimed per poll tick. Default 100 so a backlog
     /// doesn't starve the tick.</summary>
@@ -50,10 +56,10 @@ public sealed class NotificationDispatcherOptions
 /// <c>ALERT.DELIVERY_FAILED</c> DCB event.
 ///
 /// <para>Retry envelope: exponential backoff per
-/// <see cref="NotificationDispatcherOptions.BackoffSchedule"/>; 5
-/// attempts total, ~52 minutes wall-clock. On attempt 5 failure the
-/// row stays <c>failed</c> permanently — the dispatcher will skip it
-/// on subsequent polls because
+/// <see cref="NotificationDispatcherOptions.BackoffSchedule"/>; 6
+/// attempts total (1 initial + 5 retries), ~52 minutes wall-clock.
+/// On the final failure the row stays <c>failed</c> permanently — the
+/// dispatcher will skip it on subsequent polls because
 /// <c>AttemptNumber &gt;= MaxAttempts</c>.</para>
 /// </summary>
 public sealed class NotificationDispatcher : BackgroundService
