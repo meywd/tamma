@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -77,7 +78,17 @@ public class ApiTestFixture
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
 
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                // PR #329 wired three always-on hosted services into
+                // Program.cs (seeder + rule evaluator + dispatcher).
+                // Gate them off for the shared fixture so 75 tests
+                // don't each pay the per-host startup cost. Opt-in
+                // tests (E2EAlertFlowTests, AlertRuleEndpointsIntegrationTests)
+                // drive them via the public *Once / SeedAsync APIs.
+                builder.DisableAlertHostedServices();
+            });
 
         // The InitialSchema migration references uuid_generate_v4() (pre-existing
         // mentorship schema) which lives in the uuid-ossp extension. Enable it

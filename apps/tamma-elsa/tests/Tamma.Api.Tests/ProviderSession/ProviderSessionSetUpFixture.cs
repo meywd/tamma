@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Npgsql;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -64,7 +65,11 @@ public class ProviderSessionSetUpFixture
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
 
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                builder.DisableAlertHostedServices();
+            });
 
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();

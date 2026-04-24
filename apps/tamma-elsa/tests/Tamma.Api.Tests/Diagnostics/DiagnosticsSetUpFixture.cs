@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Npgsql;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -86,6 +87,7 @@ public class DiagnosticsSetUpFixture
                         ["Jwt:Secret"] = null
                     });
                 });
+                builder.DisableAlertHostedServices();
             });
 
         // Some migrations depend on uuid-ossp / pgcrypto. Ensure both are
