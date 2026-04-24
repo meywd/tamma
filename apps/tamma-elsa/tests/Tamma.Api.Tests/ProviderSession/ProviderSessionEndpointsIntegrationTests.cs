@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using NUnit.Framework;
 using Tamma.Api.Extensions;
 using Tamma.Api.Services.Providers;
+using Tamma.Api.Tests.Infrastructure;
 
 namespace Tamma.Api.Tests.ProviderSession;
 
@@ -39,6 +40,7 @@ public class ProviderSessionEndpointsIntegrationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
+                builder.DisableAlertHostedServices();
                 builder.ConfigureTestServices(services =>
                 {
                     RemoveAll<IProviderSessionService>(services);

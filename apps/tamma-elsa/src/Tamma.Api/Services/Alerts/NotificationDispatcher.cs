@@ -37,6 +37,16 @@ public sealed class NotificationDispatcherOptions
     /// <summary>Max rows claimed per poll tick. Default 100 so a backlog
     /// doesn't starve the tick.</summary>
     public int BatchSize { get; set; } = 100;
+
+    /// <summary>
+    /// When <c>true</c> (default) the dispatcher's
+    /// <see cref="BackgroundService.ExecuteAsync"/> polling loop runs
+    /// once the host starts. Tests that drive
+    /// <see cref="NotificationDispatcher.DispatchOnceAsync"/> directly
+    /// (or don't exercise channel delivery at all) override this to
+    /// <c>false</c> to skip the recurring background work.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
 }
 
 /// <summary>
@@ -77,6 +87,14 @@ public sealed class NotificationDispatcher : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "NotificationDispatcher gated off (RunOnStartup=false); " +
+                "polling loop will not start.");
+            return;
+        }
+
         _logger.LogInformation(
             "NotificationDispatcher starting — poll every {Interval}s, " +
             "max attempts {MaxAttempts}, batch size {BatchSize}.",

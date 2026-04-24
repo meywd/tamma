@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -69,7 +70,11 @@ public class ProvidersSetUpFixture
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
 
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                builder.DisableAlertHostedServices();
+            });
 
         // Force service resolution so Program.cs applies migrations.
         using var scope = Factory.Services.CreateScope();

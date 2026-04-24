@@ -5,6 +5,22 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Services.Alerts.Rules;
 
 /// <summary>
+/// Options for <see cref="BuiltInAlertRuleSeeder"/>.
+/// </summary>
+public sealed class BuiltInAlertRuleSeederOptions
+{
+    /// <summary>
+    /// When <c>true</c> (default) the seeder runs in <c>StartAsync</c>
+    /// during host bootstrap. Tests that don't need the built-in rules
+    /// override this to <c>false</c> to skip the per-factory DB
+    /// round-trip (~hundreds of ms × 75 factories in the API test
+    /// suite). The seeder method <see cref="BuiltInAlertRuleSeeder.SeedAsync"/>
+    /// is still callable directly for tests that opt back in.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
+}
+
+/// <summary>
 /// Story 5.6 (Wave C.2) — seeds the five built-in alert rules into
 /// <c>alert_rules</c> on app startup. Runs as an
 /// <see cref="IHostedService"/> before <see cref="AlertRuleEvaluator"/>
@@ -32,22 +48,41 @@ public sealed class BuiltInAlertRuleSeeder : IHostedService
     private readonly IServiceProvider _services;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<BuiltInAlertRuleSeeder> _logger;
+    private readonly BuiltInAlertRuleSeederOptions _options;
 
     public BuiltInAlertRuleSeeder(
         IServiceProvider services,
         TimeProvider timeProvider,
         ILogger<BuiltInAlertRuleSeeder> logger)
+        : this(services, timeProvider, logger, new BuiltInAlertRuleSeederOptions())
+    {
+    }
+
+    public BuiltInAlertRuleSeeder(
+        IServiceProvider services,
+        TimeProvider timeProvider,
+        ILogger<BuiltInAlertRuleSeeder> logger,
+        BuiltInAlertRuleSeederOptions options)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
         _services = services;
         _timeProvider = timeProvider;
         _logger = logger;
+        _options = options;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "BuiltInAlertRuleSeeder gated off (RunOnStartup=false); skipping startup seed.");
+            return;
+        }
+
         try
         {
             await SeedAsync(cancellationToken).ConfigureAwait(false);

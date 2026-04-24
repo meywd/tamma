@@ -35,6 +35,17 @@ public sealed class AlertRuleEvaluatorOptions
     /// <c>alert_evaluator_cursor</c>. Default <c>"default"</c>.
     /// </summary>
     public string EvaluatorId { get; set; } = "default";
+
+    /// <summary>
+    /// When <c>true</c> (default) the evaluator's
+    /// <see cref="BackgroundService.ExecuteAsync"/> polling loop runs
+    /// once the host starts. Tests that drive
+    /// <see cref="AlertRuleEvaluator.ProcessOnceAsync"/> directly (or
+    /// don't exercise the rule engine at all) override this to
+    /// <c>false</c> to skip the once-per-second background tick + the
+    /// startup registry refresh round-trip.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
 }
 
 /// <summary>
@@ -88,6 +99,14 @@ public sealed class AlertRuleEvaluator : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "AlertRuleEvaluator gated off (RunOnStartup=false); " +
+                "polling loop will not start.");
+            return;
+        }
+
         _logger.LogInformation(
             "AlertRuleEvaluator starting — poll every {Interval}s, " +
             "registry refresh every {Refresh}s, batch {Batch}, " +

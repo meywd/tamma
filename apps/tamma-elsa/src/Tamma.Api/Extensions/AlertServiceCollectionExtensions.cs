@@ -129,7 +129,10 @@ public static class AlertServiceCollectionExtensions
 
         // Seeder runs at startup and emits the five built-ins. Must
         // be registered BEFORE the evaluator hosted service so its
-        // StartAsync completes first.
+        // StartAsync completes first. Tests can swap
+        // BuiltInAlertRuleSeederOptions before the host starts to gate
+        // the startup seed off (e.g. shared ApiTestFixture).
+        services.TryAddSingleton<BuiltInAlertRuleSeederOptions>();
         services.AddHostedService<BuiltInAlertRuleSeeder>();
 
         // Evaluator background service. Uses IServiceProvider to

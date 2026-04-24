@@ -12,6 +12,7 @@ using NUnit.Framework;
 using Tamma.Api.Extensions;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Channels;
+using Tamma.Api.Services.Alerts.Rules;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -77,8 +78,25 @@ public class E2EAlertFlowTests
                 services.AddSingleton<IAlertChannelSecretReader>(
                     new StaticSecretReader("webhook-test-secret"));
 
+                // Parent ApiTestFixture gates the three alert hosted
+                // services off to save ~2 min across the 75 non-alert
+                // integration tests. E2E alert flow tests explicitly
+                // opt BACK IN by staging options with RunOnStartup=true
+                // AFTER the parent's DisableAlertHostedServices callback
+                // ran. RemoveAll+AddSingleton here wins over the parent
+                // because ConfigureTestServices runs later in the pipeline.
+
+                // Re-enable the seeder so built-in rules get planted.
+                services.RemoveAll<BuiltInAlertRuleSeederOptions>();
+                services.AddSingleton(new BuiltInAlertRuleSeederOptions
+                {
+                    RunOnStartup = true,
+                });
+
                 // Shorten the dispatcher poll so E2E tests complete
                 // within seconds rather than the production 10s cadence.
+                // RunOnStartup defaults to true on a fresh options
+                // instance, so no need to set it explicitly.
                 services.RemoveAll<NotificationDispatcherOptions>();
                 services.AddSingleton(new NotificationDispatcherOptions
                 {

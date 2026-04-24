@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Npgsql;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -100,7 +101,11 @@ public class TenancySetUpFixture
         }
 
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(b => b.UseEnvironment("Development"));
+            .WithWebHostBuilder(b =>
+            {
+                b.UseEnvironment("Development");
+                b.DisableAlertHostedServices();
+            });
 
         // Materialise the factory + run migrations via Program.cs.
         using (var scope = Factory.Services.CreateScope())

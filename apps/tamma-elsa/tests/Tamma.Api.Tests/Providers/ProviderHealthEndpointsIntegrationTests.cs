@@ -16,6 +16,7 @@ using NUnit.Framework;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Extensions;
 using Tamma.Api.Services.Providers;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Tamma.Data.Entities;
 
@@ -63,6 +64,7 @@ public class ProviderHealthEndpointsIntegrationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
+                builder.DisableAlertHostedServices();
                 builder.ConfigureTestServices(services =>
                 {
                     // Remove any previously registered clock/breaker/resolver so
