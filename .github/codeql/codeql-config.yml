@@ -18,13 +18,14 @@ query-filters:
   - exclude:
       id: js/regex-injection
   # cs/cleartext-storage-of-sensitive-information:
-  # 45 production log sites across apps/tamma-elsa/src use Serilog
+  # ~150+ production log sites across apps/tamma-elsa/src use Serilog
   # structured-logging placeholders {TenantId}, {UserId}, {OrgId},
-  # {KeyId}, {OwnerId} for distributed tracing. CodeQL's heuristic
-  # treats any identifier whose name contains "id"/"key"/"owner" near
-  # a logging sink as cleartext-storage of credentials, which produces
-  # 45 false positives because the values are opaque GUIDs, not
-  # secrets.
+  # {KeyId}, {OwnerId} for distributed tracing (audit 2026-04-25:
+  # 144 single-line matches via grep; multi-line calls add more).
+  # CodeQL's heuristic treats any identifier whose name contains
+  # "id"/"key"/"owner" near a logging sink as cleartext-storage of
+  # credentials, which produces a corresponding flood of false
+  # positives because the values are opaque GUIDs, not secrets.
   # Compensating control: literal credential leaks (sk_live_, ghp_,
   # cranl_sk_, AWS keys, etc.) are caught by the forbidden-symbols
   # guard at ci/check-forbidden-symbols.sh, run on every CI build.
