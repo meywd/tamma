@@ -60,11 +60,20 @@ public class JwtService : IJwtService
         string role,
         IEnumerable<TenantClaim>? tenants = null)
     {
-        // Derive the platform role: tenant-owners are also platform admins
-        // by convention (matches TS github-oauth.ts mapping). Anything else
-        // is a regular user. Update this when a dedicated platform-role
-        // column lands.
-        var platformRole = role == "owner" ? "platform_admin" : "user";
+        // Story 28-R2 / Finding C1 — the platform role is now sourced from the
+        // dedicated users.platform_role column (added by AddUsersPlatformRole
+        // migration), NOT from the per-tenant role. Before C1, this was
+        // `role == "owner" ? "platform_admin" : "user"` — but every signed-up
+        // user is auto-owner of their personal tenant, so that mapping let
+        // every user pass OwnerAccess on every /api/admin/* route.
+        //
+        // Defensive default: if the column ever ends up NULL/empty (legacy row
+        // pre-migration, hand-edited DB), treat it as the safest non-elevated
+        // value ("user"). Promoting a user to platform_admin requires an
+        // explicit DB write — never auto-derived from runtime state.
+        var platformRole = string.IsNullOrWhiteSpace(user.PlatformRole)
+            ? "user"
+            : user.PlatformRole;
         var displayName = user.DisplayName
             ?? user.GitHubLogin
             ?? user.Email.Split('@')[0];
