@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Tamma.Api.Services.Secrets;
 
@@ -25,10 +27,30 @@ public static class KekRotationEndpoints
     /// re-encrypt loop on a background task. Subsequent calls while a
     /// rotation is in flight return the running snapshot rather than
     /// stacking a second rotation.
+    ///
+    /// <para>Story 28-R2 / Finding M2 — captures the operator identity
+    /// from the JWT and threads it into the coordinator so the
+    /// <c>SECRETS.KEK.ROTATION.STARTED/COMPLETED/FAILED</c> events
+    /// record who kicked the rotation off.</para>
     /// </summary>
-    public static IResult Start(KekRotationCoordinator coordinator, HttpContext http)
+    public static IResult Start(
+        KekRotationCoordinator coordinator,
+        ClaimsPrincipal principal,
+        HttpContext http)
     {
-        var status = coordinator.StartAsync(newKek: null, cancellationToken: http.RequestAborted);
+        var actorUserId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var actorEmail = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal.FindFirst("email")?.Value;
+        var actorPlatformRole = principal.FindFirst("platformRole")?.Value;
+
+        var status = coordinator.StartAsync(
+            newKek: null,
+            cancellationToken: http.RequestAborted,
+            actorUserId: actorUserId,
+            actorEmail: actorEmail,
+            actorPlatformRole: actorPlatformRole);
         return Results.Accepted(uri: "/api/admin/kek/rotate/status", value: ToResponse(status));
     }
 

@@ -734,6 +734,8 @@ if (!string.IsNullOrEmpty(jwtSecret))
 
     builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
     builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
+    // Story 28-R2 / C1 — handler for the new PlatformOwnerAccess policy.
+    builder.Services.AddScoped<IAuthorizationHandler, PlatformPermissionHandler>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -751,6 +753,21 @@ if (!string.IsNullOrEmpty(jwtSecret))
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("users:manage"));
+        });
+        // Story 28-R2 / Finding C1 — platform-scoped admin gate. Distinct
+        // from OwnerAccess (which keys off the per-tenant role and lets
+        // every personal-tenant owner through). PlatformOwnerAccess
+        // requires the JWT `platformRole` claim to be `platform_admin`,
+        // which is sourced from the dedicated users.platform_role column.
+        // Every /api/admin/* route that performs platform-scoped work
+        // (tenant lifecycle, KEK rotation, alert config, pool diagnostics,
+        // platform secrets, analytics) MUST use this policy — not
+        // OwnerAccess. Keep OwnerAccess for tenant-scoped owner gates
+        // (e.g. tenant-level user management, settings:manage).
+        options.AddPolicy("PlatformOwnerAccess", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PlatformPermissionRequirement("platform_admin"));
         });
         options.AddPolicy("MemberAccess", p =>
         {
@@ -842,7 +859,7 @@ else if (builder.Environment.IsDevelopment())
             .AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement())
             .Build();
         // Register all named policies with permissive default
-        foreach (var name in new[] { "AdminAccess", "OwnerAccess", "MemberAccess", "SettingsView",
+        foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
             "SettingsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
@@ -982,99 +999,100 @@ admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).Req
 // tear them down (POST /deprovision). When Cranl:ApiKey is unset the Null
 // provisioner short-circuits to "shared infra" and these endpoints still
 // work — they just mark the tenant Ready without external API calls.
+//
+// Story 28-R2 / C1: switched from OwnerAccess → PlatformOwnerAccess. The
+// legacy OwnerAccess policy keys off the per-tenant role and admits every
+// signed-up user (auto-owner of their personal tenant); PlatformOwnerAccess
+// keys off the JWT `platformRole` claim sourced from users.platform_role.
 admin.MapPost("/tenants/{tenantId:guid}/provision", AdminEndpoints.ProvisionTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/tenants/{tenantId:guid}/provisioning", AdminEndpoints.GetTenantProvisioning)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/deprovision", AdminEndpoints.DeprovisionTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
-// Story 28-4 AC5 — per-tenant connection pool diagnostics. Owner-only
-// because the diagnostics expose cross-tenant infrastructure state +
-// the evict endpoint can disrupt any tenant's request path. The
-// handlers themselves return 503 when the stub resolver is wired (test
-// fixtures + non-cutover composition roots) so missing diagnostics
-// surface as a clean error rather than a 500.
+// Story 28-4 AC5 — per-tenant connection pool diagnostics.
+// Story 28-R2 / C1: PlatformOwnerAccess (cross-tenant infrastructure state +
+// the evict endpoint can disrupt any tenant's request path).
 admin.MapGet("/pools/stats", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.GetStats)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/pools/tenants", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.ListTenants)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/pools/{tenantId:guid}/evict", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.Evict)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-11 AC3 — SSE stream of platform events for one tenant.
-// Owner-only because it surfaces cross-tenant infra events. The
-// connection caps at 30 minutes; clients reconnect on close.
+// Story 28-R2 / C1: PlatformOwnerAccess (cross-tenant infra events).
 admin.MapGet("/tenants/{tenantId:guid}/events/stream",
         Tamma.Api.Endpoints.Admin.AdminTenantEventsSseEndpoint.StreamEvents)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-6 — admin diagnostics for platform-side queues
 // (platform_queued_tasks, platform_email_outbox, platform_events).
-// Owner-only because it exposes cross-tenant infra state.
+// Story 28-R2 / C1: PlatformOwnerAccess (cross-tenant infra state).
 admin.MapGet("/diagnostics/platform-queues",
         Tamma.Api.Endpoints.Admin.PlatformQueuesAdminEndpoints.GetDiagnostics)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-12 — KEK rotation. Platform-owner only because rotating
 // the master key is a once-per-quarter operator action with global
-// blast radius. POST /start kicks off the re-encrypt loop and returns
-// 202; GET /status reports progress so the runbook can poll until the
-// phase flips to Completed (or Failed).
+// blast radius.
+// Story 28-R2 / C1: PlatformOwnerAccess.
 admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 // R2-H3: retry a failed rotation (re-uses the persisted staged
 // secondary; idempotent re-run that does NOT mint a fresh KEK).
 admin.MapPost("/kek/rotate/retry", KekRotationEndpoints.Retry)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
-// Story 28-7 deferred-item — platform API-keys CRUD. Owner-only because
-// platform keys carry global auth; a regular admin must not be able to
-// mint them. Reveal-once-on-create.
-admin.MapPost("/api-keys", AdminApiKeysEndpoints.CreateApiKey).RequireAuthorization("OwnerAccess");
-admin.MapGet("/api-keys", AdminApiKeysEndpoints.ListApiKeys).RequireAuthorization("OwnerAccess");
-admin.MapGet("/api-keys/{id:guid}", AdminApiKeysEndpoints.GetApiKey).RequireAuthorization("OwnerAccess");
-admin.MapDelete("/api-keys/{id:guid}", AdminApiKeysEndpoints.DeleteApiKey).RequireAuthorization("OwnerAccess");
+// Story 28-7 deferred-item — platform API-keys CRUD. Platform keys carry
+// global auth; only platform admins may mint them.
+// Story 28-R2 / C1: PlatformOwnerAccess.
+admin.MapPost("/api-keys", AdminApiKeysEndpoints.CreateApiKey).RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/api-keys", AdminApiKeysEndpoints.ListApiKeys).RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/api-keys/{id:guid}", AdminApiKeysEndpoints.GetApiKey).RequireAuthorization("PlatformOwnerAccess");
+admin.MapDelete("/api-keys/{id:guid}", AdminApiKeysEndpoints.DeleteApiKey).RequireAuthorization("PlatformOwnerAccess");
 
-// Story 28-10 — platform-wide analytics rollup. Owner-only because each
-// handler reads across every tenant regardless of the caller's
-// TenantId — a regular member/admin must not see fleet-level volume.
+// Story 28-10 — platform-wide analytics rollup. Each handler reads across
+// every tenant regardless of the caller's TenantId.
+// Story 28-R2 / C1: PlatformOwnerAccess.
 admin.MapGet("/analytics/summary", AdminAnalyticsEndpoints.GetSummary)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
 // FailureReason, DeleteRequestedAt); action endpoints re-drive the Story
 // 28-5 workflows (retry / delete / force-delete) under a state-gate that
-// returns 409 for illegal transitions. Platform-owner only.
+// returns 409 for illegal transitions.
+// Story 28-R2 / C1: PlatformOwnerAccess.
 admin.MapGet("/tenants", Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ListTenants)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/tenants/{tenantId:guid}/detail",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantDetail)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/actions/retry",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.RetryTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/actions/delete",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.DeleteTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/actions/force-delete",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ForceDeleteTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 // Story 28-5 AC7 — operator-triggered cleanup of damaged tenants.
-// Owner-only because cleanup runs destructive DDL.
+// Story 28-R2 / C1: PlatformOwnerAccess (destructive DDL across DBs).
 admin.MapPost("/tenants/{tenantId:guid}/cleanup",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.CleanupTenant)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 5.6 / 1.5-37 (Wave C.1) — alert-system admin surface.
 // Platform-owner only because alert acknowledgment + channel
@@ -1082,65 +1100,70 @@ admin.MapPatch("/tenants/{tenantId:guid}/plan",
 // /api/v1/admin/* per the Wave C.1 brief (new prefix — the
 // existing /api/admin routes keep their legacy paths so CI tests
 // don't churn).
+//
+// Story 28-R2 / C1: switched OwnerAccess → PlatformOwnerAccess for every
+// alert / channel / rule route.
 var v1Admin = app.MapGroup("/api/v1/admin").RequireAuthorization("AdminAccess");
 v1Admin.MapGet("/alerts", AlertEndpoints.ListAlerts)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapGet("/alerts/{id:guid}", AlertEndpoints.GetAlert)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alerts/{id:guid}/acknowledge", AlertEndpoints.AcknowledgeAlert)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alerts/{id:guid}/resolve", AlertEndpoints.ResolveAlert)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alerts/_test", AlertEndpoints.TestRaiseAlert)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapGet("/alert-channels", AlertEndpoints.ListChannels)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alert-channels", AlertEndpoints.CreateChannel)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPatch("/alert-channels/{id:guid}", AlertEndpoints.UpdateChannel)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapDelete("/alert-channels/{id:guid}", AlertEndpoints.DeleteChannel)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 5.6 (Wave C.2) — alert rule CRUD + synthetic-fire. Same
-// OwnerAccess policy as alerts/channels — configuration here
+// PlatformOwnerAccess policy as alerts/channels — configuration here
 // carries cross-tenant blast radius.
 v1Admin.MapGet("/alert-rules", AlertRuleEndpoints.ListRules)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapGet("/alert-rules/{id:guid}", AlertRuleEndpoints.GetRule)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alert-rules", AlertRuleEndpoints.CreateRule)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPatch("/alert-rules/{id:guid}", AlertRuleEndpoints.UpdateRule)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapDelete("/alert-rules/{id:guid}", AlertRuleEndpoints.DeleteRule)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alert-rules/{id:guid}/_test", AlertRuleEndpoints.TestFireRule)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 29-3 — platform-scope secret-cabinet create + rotate. Both
 // return the newly-minted plaintext via a one-shot reveal token in
 // the response (no plaintext bytes in the body); the caller must
 // exchange the token through GET /api/v1/secrets/reveal/{token}
-// within 60 seconds. OwnerAccess policy matches the KEK rotation
-// precedent — a platform admin operator action.
+// within 60 seconds.
+// Story 28-R2 / C1: PlatformOwnerAccess (matches the KEK-rotation precedent
+// — a platform-admin operator action with global blast radius).
 admin.MapPost("/secrets", SecretEndpoints.CreatePlatformSecret)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/secrets/{id:guid}/rotate", SecretEndpoints.RotateSecret)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 29-4 — platform-admin query + lifecycle surface consumed by
 // the /admin/secrets UI. Metadata-only; no plaintext ever leaves
 // these endpoints (reveal-once is the /reveal/{token} path).
+// Story 28-R2 / C1: PlatformOwnerAccess.
 admin.MapGet("/secrets", SecretEndpoints.ListPlatformSecrets)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/secrets/{id:guid}", SecretEndpoints.GetPlatformSecret)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/secrets/{id:guid}/versions", SecretEndpoints.ListPlatformVersions)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/secrets/{id:guid}/retire-version/{versionNumber:int}",
         SecretEndpoints.RetirePlatformVersion)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // ── Orgs / Tenants ──
 // Path-tenant routes (i.e. /api/v1/orgs/{tenantId}/*) attach the

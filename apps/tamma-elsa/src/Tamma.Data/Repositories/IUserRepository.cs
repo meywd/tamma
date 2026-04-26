@@ -17,6 +17,15 @@ public interface IUserRepository
     Task<User?> GetByEmailVerificationTokenHashAsync(string tokenHash);
 
     Task<(List<User> Users, int Total)> ListAsync(int limit, int offset, string? role);
+
+    /// <summary>
+    /// Story 28-R2 / Finding C1 — total non-soft-deleted user count. Used by
+    /// the registration / GitHub OAuth bootstrap to decide whether to promote
+    /// the *first* user to <c>platform_admin</c> (every subsequent user
+    /// defaults to <c>"user"</c>). Cheap aggregate query — never paginates.
+    /// </summary>
+    Task<int> CountAsync();
+
     Task<User> UpdateAsync(User user);
     Task SoftDeleteAsync(Guid id);
     Task UpdateActiveTenantAsync(Guid userId, Guid tenantId);

@@ -130,7 +130,21 @@ public sealed class KekRotationCoordinator
     /// <see cref="RandomNumberGenerator.GetBytes(int)"/>. Tests pass an
     /// explicit value so they can assert the re-encrypted envelopes
     /// actually use the new key.</param>
-    public KekRotationStatus StartAsync(byte[]? newKek = null, CancellationToken cancellationToken = default)
+    /// <param name="actorUserId">Story 28-R2 / Finding M2 — JWT
+    /// <c>sub</c> of the operator who kicked off the rotation.
+    /// Captured into every emitted platform event so the audit trail
+    /// answers "who rotated the KEK?". Optional because tests + the
+    /// CLI migrate-secrets path both lack a bound principal.</param>
+    /// <param name="actorEmail">JWT <c>email</c> claim, see
+    /// <paramref name="actorUserId"/>.</param>
+    /// <param name="actorPlatformRole">JWT <c>platformRole</c> claim,
+    /// see <paramref name="actorUserId"/>.</param>
+    public KekRotationStatus StartAsync(
+        byte[]? newKek = null,
+        CancellationToken cancellationToken = default,
+        string? actorUserId = null,
+        string? actorEmail = null,
+        string? actorPlatformRole = null)
     {
         lock (_lock)
         {
@@ -168,13 +182,25 @@ public sealed class KekRotationCoordinator
                 CompletedAt: null,
                 FailureReason: null);
 
+            var actor = new RotationActor(actorUserId, actorEmail, actorPlatformRole);
             _runningTask = Task.Run(
-                () => RunRotationAsync(generated, fromVersion, toVersion, isRetry: false, cancellationToken),
+                () => RunRotationAsync(generated, fromVersion, toVersion, isRetry: false, actor, cancellationToken),
                 cancellationToken);
 
             return _status;
         }
     }
+
+    /// <summary>
+    /// Story 28-R2 / Finding M2 — projection of the JWT-bound operator
+    /// identity captured at <see cref="StartAsync"/> time and replayed
+    /// into every platform event emitted during the rotation. Threaded
+    /// through <see cref="RunRotationAsync"/> so the background task
+    /// can attach the actor to STARTED / STEP / COMPLETED / FAILED
+    /// rows without re-reading any HTTP context.
+    /// </summary>
+    private readonly record struct RotationActor(
+        string? UserId, string? Email, string? PlatformRole);
 
     /// <summary>
     /// R2-H3: re-attempt a previously-failed rotation. The coordinator
@@ -293,8 +319,14 @@ public sealed class KekRotationCoordinator
                 CompletedAt: null,
                 FailureReason: null);
             _activeRotationId = failedRow.Id;
+            // R2 merge — retry path has no fresh ClaimsPrincipal (the
+            // failed run's actor was already captured on the original
+            // STARTED event). Pass an empty actor and rely on the
+            // RotationId tag to chain retry events back to the original
+            // operator. Follow-up: thread ClaimsPrincipal through
+            // RetryAsync the same way StartAsync does.
             _runningTask = Task.Run(
-                () => RunRotationAsync(stagedSecondary, fromVersion, toVersion, isRetry: true, cancellationToken),
+                () => RunRotationAsync(stagedSecondary, fromVersion, toVersion, isRetry: true, default, cancellationToken),
                 cancellationToken);
         }
 
@@ -332,6 +364,7 @@ public sealed class KekRotationCoordinator
         int fromVersion,
         int toVersion,
         bool isRetry,
+        RotationActor actor,
         CancellationToken ct)
     {
         // R2-H14: scope the advisory lock to a dedicated DbContext +
@@ -414,6 +447,7 @@ public sealed class KekRotationCoordinator
                     ["to_version"] = toVersion.ToString(),
                 },
                 data: new(),
+                actor: actor,
                 ct);
 
             // Pull tenant ids that still need rotation. We project to a
@@ -499,6 +533,7 @@ public sealed class KekRotationCoordinator
                             ["to_version"] = toVersion.ToString(),
                         },
                         data: new(),
+                        actor: actor,
                         ct);
 
                     reencrypted++;
@@ -546,6 +581,7 @@ public sealed class KekRotationCoordinator
                         ["reencrypted"] = reencrypted,
                         ["total"] = rotationRows.Count,
                     },
+                    actor: actor,
                     ct);
 
                 _logger.LogInformation(
@@ -586,6 +622,7 @@ public sealed class KekRotationCoordinator
                         ["total"] = rotationRows.Count,
                         ["reason"] = reason,
                     },
+                    actor: actor,
                     ct);
 
                 _logger.LogWarning(
@@ -809,6 +846,13 @@ public sealed class KekRotationCoordinator
         }
     }
 
+    /// <summary>
+    /// Story 28-R2 / Finding M2 — emits a KEK-rotation platform event with
+    /// the operator identity (sub + email + platformRole) baked into both
+    /// <c>tags</c> (for SQL filtering) and <c>data</c> (immutable record).
+    /// The actor is captured at <see cref="StartAsync"/> time and threaded
+    /// through every subsequent emit on the rotation's background task.
+    /// </summary>
     private static async Task EmitPlatformEventAsync(
         IPlatformEventRepository repo,
         IPlatformEventBus? bus,
@@ -816,15 +860,34 @@ public sealed class KekRotationCoordinator
         Guid? tenantId,
         Dictionary<string, string?> tags,
         Dictionary<string, object?> data,
+        RotationActor actor,
         CancellationToken ct)
     {
+        // Mutate copies so a caller-built dictionary isn't unexpectedly
+        // augmented in place — RunRotationAsync re-uses tag dictionaries
+        // across emits in tight loops.
+        var tagsWithActor = new Dictionary<string, string?>(tags);
+        if (!string.IsNullOrEmpty(actor.UserId))
+            tagsWithActor["actorUserId"] = actor.UserId;
+        if (!string.IsNullOrEmpty(actor.Email))
+            tagsWithActor["actorEmail"] = actor.Email;
+        if (!string.IsNullOrEmpty(actor.PlatformRole))
+            tagsWithActor["actorPlatformRole"] = actor.PlatformRole;
+
+        var dataWithActor = new Dictionary<string, object?>(data)
+        {
+            ["actorUserId"] = actor.UserId,
+            ["actorEmail"] = actor.Email,
+            ["actorPlatformRole"] = actor.PlatformRole,
+        };
+
         var evt = new PlatformEvent
         {
             Type = type,
             TenantId = tenantId,
-            Tags = JsonSerializer.Serialize(tags),
+            Tags = JsonSerializer.Serialize(tagsWithActor),
             Metadata = """{"eventSource":"system"}""",
-            Data = JsonSerializer.Serialize(data),
+            Data = JsonSerializer.Serialize(dataWithActor),
         };
 
         if (bus is not null)

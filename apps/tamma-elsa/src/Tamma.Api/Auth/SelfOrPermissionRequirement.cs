@@ -56,6 +56,16 @@ public class SelfOrPermissionHandler(IHttpContextAccessor httpContextAccessor)
         if (permClaims.Contains(requirement.Permission) || permClaims.Contains("*"))
         {
             context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
+        // Story 28-R2 / Finding C1 — platform admins are superusers; they
+        // pass every permission gate (including SelfOrPermission). Mirrors
+        // the bypass added to PermissionHandler.
+        var platformRole = context.User.FindFirst("platformRole")?.Value;
+        if (string.Equals(platformRole, "platform_admin", StringComparison.Ordinal))
+        {
+            context.Succeed(requirement);
         }
 
         return Task.CompletedTask;

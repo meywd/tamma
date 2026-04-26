@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -109,6 +111,28 @@ public class AdminTenantsTests
 
     [TearDown]
     public void TearDown() => _db.Dispose();
+
+    /// <summary>
+    /// Story 28-R2 / Finding M2 — actor-bearing principal for handler tests.
+    /// Mints a <see cref="ClaimsPrincipal"/> with <c>sub</c>, <c>email</c>,
+    /// and <c>platformRole</c> claims so <see cref="AdminTenantsEndpoints.BuildAdminEvent"/>
+    /// has something to project into the audit-event tags + data.
+    /// </summary>
+    internal static ClaimsPrincipal AdminPrincipal(
+        Guid? userId = null,
+        string email = "ops@tamma.dev",
+        string platformRole = "platform_admin")
+    {
+        var id = userId ?? Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, id.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, email),
+            new Claim("platformRole", platformRole),
+        }, authenticationType: "Test");
+        return new ClaimsPrincipal(identity);
+    }
 
     // ── Fixture helpers ──
 
@@ -392,7 +416,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(
             "Retryable", status: "failed", failureReason: "db-create-timeout");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("pending_verification");
@@ -421,7 +445,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
         _publisher.Events.Should().BeEmpty();
@@ -430,7 +454,7 @@ public class AdminTenantsTests
     [Test]
     public async Task RetryTenant_Returns404_WhenTenantMissing()
     {
-        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
     }
@@ -442,7 +466,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -466,7 +490,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "failed");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -476,7 +500,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "deleting");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -489,7 +513,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(status: "failed");
         var http = new DefaultHttpContext();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -501,7 +525,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = Guid.NewGuid().ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -513,7 +537,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -532,7 +556,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }

@@ -2,12 +2,14 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.OAuth;
 using Tamma.Api.Services.RateLimit;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -173,6 +175,18 @@ public static class AuthEndpoints
         var verificationToken = Guid.NewGuid().ToString("N");
         var tokenHash = HashToken(verificationToken);
 
+        // Story 28-R2 / Finding C1 — bootstrap superadmin promotion. The very
+        // first user in the system gets `platform_role = 'platform_admin'` so
+        // a fresh deploy has at least one operator who can hit the
+        // /api/admin/* surface. Every subsequent user defaults to
+        // `'user'` (the column default; we set it explicitly anyway).
+        // The CountAsync race window between two concurrent first-user
+        // registrations is tolerable — the worst case is two platform
+        // admins, which is fine; it's NOT a privilege escalation because
+        // both rows are honest first-time registrants.
+        var existingUserCount = await userRepo.CountAsync();
+        var bootstrapPlatformRole = existingUserCount == 0 ? "platform_admin" : "user";
+
         User user;
         try
         {
@@ -182,6 +196,7 @@ public static class AuthEndpoints
                 PasswordHash = passwordService.HashPassword(req.Password),
                 DisplayName = req.DisplayName,
                 Role = "member",
+                PlatformRole = bootstrapPlatformRole,
                 AuthMethod = "email",
                 EmailVerificationTokenHash = tokenHash,
                 EmailVerificationExpiresAt = DateTime.UtcNow.AddHours(24),
@@ -493,6 +508,8 @@ public static class AuthEndpoints
     public static async Task<IResult> Logout(
         IRefreshTokenRepository refreshTokenRepo,
         [FromServices] IConfiguration config,
+        [FromServices] IPlatformEventPublisher eventPublisher,
+        [FromServices] IRateLimitService rateLimit,
         ClaimsPrincipal principal,
         HttpContext httpContext)
     {
@@ -509,6 +526,11 @@ public static class AuthEndpoints
         // dashboard's "sign out everywhere" affordance and by admin
         // forced-logout. Falls back to the per-token revocation when
         // `?all=true` is absent (or the user isn't authenticated).
+        //
+        // Story 28-R2 / Finding H2 — emit a USER.LOGOUT_ALL.SUCCESS audit
+        // event when the bulk-revoke path actually runs, AND rate-limit it
+        // (3/hour per user) so a logout-bombed token cannot churn the
+        // refresh table or the audit log.
         var revokeAll = string.Equals(
             httpContext.Request.Query["all"].ToString(),
             "true",
@@ -520,8 +542,29 @@ public static class AuthEndpoints
                 ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (Guid.TryParse(userIdRaw, out var userId))
             {
-                await refreshTokenRepo.RevokeAllForUserAsync(userId);
-                return Results.Ok(new { message = "Logged out everywhere", revokedAll = true });
+                // Per-user rate limit on `?all=true` only. The same shared
+                // 3/hour window used by password-reset / verification-resend.
+                // Fall through to per-token revocation when over-limit so
+                // the user can still terminate the *current* session.
+                var rateKey = userId.ToString("D");
+                if (rateLimit.IsLimited("logout-all", rateKey))
+                    return Results.Json(
+                        new { error = "logout_all_rate_limited",
+                            message = "Too many sign-out-everywhere requests. Please retry later." },
+                        statusCode: StatusCodes.Status429TooManyRequests);
+
+                var revokedCount = await refreshTokenRepo.RevokeAllForUserAsync(userId);
+                rateLimit.Record("logout-all", rateKey);
+
+                await PublishLogoutAllEventAsync(
+                    eventPublisher, principal, userId, httpContext, revokedCount);
+
+                return Results.Ok(new
+                {
+                    message = "Logged out everywhere",
+                    revokedAll = true,
+                    revokedTokenCount = revokedCount,
+                });
             }
             // Fall through to per-token path if we can't identify the user.
         }
@@ -546,6 +589,111 @@ public static class AuthEndpoints
         }
 
         return Results.Ok(new { message = "Logged out" });
+    }
+
+    /// <summary>
+    /// Story 28-R2 / Finding H2 — publishes a <c>USER.LOGOUT_ALL.SUCCESS</c>
+    /// platform event capturing the actor identity, the revoke count, and
+    /// the request fingerprint (IP + user-agent + JTI). Best-effort: if the
+    /// publisher throws (DB outage, downstream timeout) we swallow the error
+    /// because the bulk revoke already succeeded and we must not mask that
+    /// from the caller. The event row is the audit-log breadcrumb; the
+    /// actual logout happened in the DB.
+    /// </summary>
+    private static async Task PublishLogoutAllEventAsync(
+        IPlatformEventPublisher publisher,
+        ClaimsPrincipal principal,
+        Guid userId,
+        HttpContext httpContext,
+        int revokedCount)
+    {
+        try
+        {
+            var evt = BuildAuthAuditEvent(
+                "USER.LOGOUT_ALL.SUCCESS",
+                principal,
+                userId,
+                httpContext,
+                extraData: new Dictionary<string, object?>
+                {
+                    ["revokedTokenCount"] = revokedCount,
+                });
+            await publisher.AppendAndPublishAsync(evt);
+        }
+        catch
+        {
+            // Audit failures must not break the user's logout flow. The
+            // structured logger picks these up via Serilog request logging.
+        }
+    }
+
+    /// <summary>
+    /// Story 28-R2 / Finding H2 — common shape for auth-domain audit events
+    /// (<c>USER.LOGOUT_ALL.SUCCESS</c>, <c>USER.ORG_SWITCHED.SUCCESS</c>).
+    /// Captures actor identity (sub + email), request fingerprint
+    /// (actorIp + userAgent + jti), and lets callers attach event-specific
+    /// extras via <paramref name="extraData"/>.
+    ///
+    /// <para>Both <c>tags</c> and <c>data</c> carry the actor — tags for
+    /// SQL filtering (<c>WHERE tags->>'userId' = ?</c>), data for the
+    /// immutable event-store record. <c>tenantId</c> is optional because
+    /// these events are user-scoped, not tenant-scoped (a logout
+    /// terminates sessions across all of the user's tenants in one shot).</para>
+    /// </summary>
+    private static PlatformEvent BuildAuthAuditEvent(
+        string eventType,
+        ClaimsPrincipal principal,
+        Guid userId,
+        HttpContext httpContext,
+        Guid? tenantId = null,
+        IReadOnlyDictionary<string, object?>? extraData = null)
+    {
+        var email = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal.FindFirst("email")?.Value;
+        var jti = principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+        // X-Forwarded-For wins when present (reverse-proxy edge); fall back
+        // to the socket peer. Truncate to 64 chars so a forged header
+        // stuffed with kilobytes of garbage can't bloat the event.
+        var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].ToString();
+        var actorIp = string.IsNullOrWhiteSpace(forwardedFor)
+            ? httpContext.Connection.RemoteIpAddress?.ToString()
+            : forwardedFor.Split(',')[0].Trim();
+        if (!string.IsNullOrEmpty(actorIp) && actorIp.Length > 64)
+            actorIp = actorIp[..64];
+        if (userAgent.Length > 256) userAgent = userAgent[..256];
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["source"] = "auth",
+        };
+        if (!string.IsNullOrEmpty(email)) tags["actorEmail"] = email;
+        if (!string.IsNullOrEmpty(actorIp)) tags["actorIp"] = actorIp;
+        if (!string.IsNullOrEmpty(jti)) tags["jti"] = jti;
+        if (tenantId is not null && tenantId.Value != Guid.Empty)
+            tags["tenantId"] = tenantId.Value.ToString("D");
+
+        var data = new Dictionary<string, object?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["actorEmail"] = email,
+            ["actorIp"] = actorIp,
+            ["userAgent"] = userAgent,
+            ["jti"] = jti,
+        };
+        if (extraData is not null)
+            foreach (var kv in extraData) data[kv.Key] = kv.Value;
+
+        return new PlatformEvent
+        {
+            Type = eventType,
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        };
     }
 
     public static async Task<IResult> PasswordResetRequest(
@@ -647,6 +795,7 @@ public static class AuthEndpoints
         IJwtService jwtService,
         IRefreshTokenRepository refreshTokenRepo,
         ISessionCookieWriter cookieWriter,
+        IPlatformEventPublisher eventPublisher,
         ClaimsPrincipal principal,
         HttpContext httpContext)
     {
@@ -671,6 +820,13 @@ public static class AuthEndpoints
         if (user is null)
             return Results.Json(new { error = "User not found" }, statusCode: 401);
 
+        // Story 28-R2 / Finding H2 — capture the "previous active tenant" for
+        // the audit event BEFORE the persist call rebinds it. The user's
+        // current active tenant lives either on users.TenantId (first-time
+        // bootstrap) or in users.Settings.activeTenantId (post-bootstrap
+        // when the prevent_tenant_id_change trigger pinned the column).
+        var fromTenantId = ExtractActiveTenantId(user) ?? user.TenantId;
+
         // Persist new active tenant before issuing the token so a refresh
         // racing with switch-org converges on the same tenant. Goes through
         // PersistActiveTenantAsync because the Phase-2
@@ -686,6 +842,8 @@ public static class AuthEndpoints
         // the user's existing refresh tokens are revoked so a stale tab
         // can't keep re-issuing access tokens for the previous tenant.
         var presented = req.RefreshToken;
+        int revokedAllCount = 0;
+        bool revokedAllPath = false;
         if (!string.IsNullOrEmpty(presented))
         {
             var presentedHash = HashToken(presented);
@@ -700,7 +858,11 @@ public static class AuthEndpoints
             // No refresh token in the request body — revoke all active
             // refresh tokens for this user so stale clients can't keep the
             // old tenant alive. Same shape as a password-reset.
-            await refreshTokenRepo.RevokeAllForUserAsync(userId);
+            //
+            // Story 28-R2 / Finding H2: capture the count + flip a flag so
+            // the audit event records the "switch-org-no-refresh" reason.
+            revokedAllCount = await refreshTokenRepo.RevokeAllForUserAsync(userId);
+            revokedAllPath = true;
         }
 
         var newRefresh = jwtService.GenerateRefreshToken();
@@ -718,12 +880,85 @@ public static class AuthEndpoints
         // the canonical surface for the switch).
         cookieWriter.WriteSession(httpContext, accessToken);
 
+        // Story 28-R2 / Finding H2 — emit USER.ORG_SWITCHED.SUCCESS once the
+        // mutation is durable. Best-effort: an audit-publisher failure must
+        // not invalidate an otherwise-successful org switch.
+        await PublishOrgSwitchedEventAsync(
+            eventPublisher, principal, userId, httpContext,
+            fromTenantId, req.TenantId, role, revokedAllPath, revokedAllCount);
+
         return Results.Ok(new SwitchOrgResponse(
             AccessToken: accessToken,
             RefreshToken: newRefresh,
             TenantId: req.TenantId,
             Role: role,
             ExpiresIn: 900));
+    }
+
+    /// <summary>
+    /// Story 28-R2 / Finding H2 — projects the user's currently-active tenant
+    /// from <c>users.Settings.activeTenantId</c> if present (the post-bootstrap
+    /// stash), falling back to <c>users.TenantId</c> at the call site.
+    /// Returns <c>null</c> when the JSON is malformed or the field is absent.
+    /// </summary>
+    private static Guid? ExtractActiveTenantId(User user)
+    {
+        if (string.IsNullOrWhiteSpace(user.Settings)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(user.Settings);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            if (!doc.RootElement.TryGetProperty("activeTenantId", out var prop)) return null;
+            if (prop.ValueKind != JsonValueKind.String) return null;
+            return Guid.TryParse(prop.GetString(), out var id) ? id : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task PublishOrgSwitchedEventAsync(
+        IPlatformEventPublisher publisher,
+        ClaimsPrincipal principal,
+        Guid userId,
+        HttpContext httpContext,
+        Guid? fromTenantId,
+        Guid toTenantId,
+        string role,
+        bool revokedAllPath,
+        int revokedAllCount)
+    {
+        try
+        {
+            var extra = new Dictionary<string, object?>
+            {
+                ["fromTenantId"] = fromTenantId?.ToString("D"),
+                ["toTenantId"] = toTenantId.ToString("D"),
+                ["role"] = role,
+            };
+            if (revokedAllPath)
+            {
+                // Tag explicitly so SIEM can spot mass-revocations driven by
+                // the switch-org-no-refresh path (legacy clients, dashboard
+                // tab without a refresh token).
+                extra["reason"] = "switch-org-no-refresh";
+                extra["revokedTokenCount"] = revokedAllCount;
+            }
+
+            var evt = BuildAuthAuditEvent(
+                "USER.ORG_SWITCHED.SUCCESS",
+                principal,
+                userId,
+                httpContext,
+                tenantId: toTenantId,
+                extraData: extra);
+            await publisher.AppendAndPublishAsync(evt);
+        }
+        catch
+        {
+            // Audit failures must not break the org switch.
+        }
     }
 
     public static async Task<IResult> GetMe(
@@ -750,8 +985,13 @@ public static class AuthEndpoints
         var role = principal.FindFirst("role")?.Value
             ?? principal.FindFirst(ClaimTypes.Role)?.Value
             ?? user.Role;
+        // Story 28-R2 / Finding C1 — fall back to the dedicated
+        // users.platform_role column instead of the legacy
+        // `role == "owner"` inference, which let every signed-up user
+        // pass platform-admin gates (every user is auto-owner of their
+        // personal tenant).
         var platformRole = principal.FindFirst("platformRole")?.Value
-            ?? (role == "owner" ? "platform_admin" : "user");
+            ?? (string.IsNullOrWhiteSpace(user.PlatformRole) ? "user" : user.PlatformRole);
 
         var payload = new MeUserPayload(
             user.Id,
@@ -936,6 +1176,12 @@ public static class AuthEndpoints
                 ? $"{profile.Id}+{profile.Login}@users.noreply.github.com"
                 : profile.Email.ToLowerInvariant();
 
+            // Story 28-R2 / Finding C1 — first-user-via-GitHub also gets
+            // platform_admin (matches the email-registration bootstrap path).
+            // Race tolerance: see the email-Register comment.
+            var existingUserCount = await userRepo.CountAsync();
+            var bootstrapPlatformRole = existingUserCount == 0 ? "platform_admin" : "user";
+
             user = await userRepo.CreateAsync(new User
             {
                 Email = placeholderEmail,
@@ -946,6 +1192,7 @@ public static class AuthEndpoints
                 AuthMethod = "github",
                 EmailVerified = true,
                 Role = "member",
+                PlatformRole = bootstrapPlatformRole,
             });
 
             // Auto-create personal tenant.

@@ -37,6 +37,12 @@ public class UserRepository(ControlPlaneDbContext db) : IUserRepository
         return (users, total);
     }
 
+    /// <inheritdoc />
+    public Task<int> CountAsync()
+        // The default soft-delete query filter on User excludes DeletedAt
+        // rows; CountAsync over the filtered set is what we want.
+        => db.Users.CountAsync();
+
     public async Task<User> UpdateAsync(User user)
     {
         user.UpdatedAt = DateTime.UtcNow;

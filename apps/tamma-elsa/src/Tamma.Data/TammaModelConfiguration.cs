@@ -56,6 +56,14 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Role).IsRequired().HasMaxLength(20).HasDefaultValue("member");
+            // Story 28-R2/C1 — separate platform-admin column. The DB-level
+            // CHECK constraint is installed by the AddUsersPlatformRole
+            // migration; here we just declare the EF projection.
+            entity.Property(e => e.PlatformRole)
+                .HasColumnName("platform_role")
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasDefaultValue("user");
             entity.Property(e => e.AuthMethod).IsRequired().HasMaxLength(20).HasDefaultValue("email");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             // GitHubId widened to bigint (long) — see entity comment.
