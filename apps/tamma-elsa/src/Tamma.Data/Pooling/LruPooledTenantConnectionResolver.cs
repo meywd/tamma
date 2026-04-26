@@ -360,7 +360,15 @@ public sealed class LruPooledTenantConnectionResolver
             sem.Dispose();
         _buildLocks.Clear();
 
-        _metrics.Dispose();
+        // Round-2 review M12: do NOT dispose <see cref="_metrics"/>.
+        // <see cref="TenantConnectionPoolMetrics"/> is registered as a
+        // singleton in DI; its lifetime belongs to the
+        // <see cref="IServiceProvider"/>, not this resolver. The host
+        // disposes the singleton when the container itself disposes,
+        // so reaching across that boundary here would double-dispose
+        // (today <c>Meter.Dispose</c> is idempotent, but the contract
+        // is "DI owns the singleton") and break composition roots that
+        // share the metrics instance with other consumers.
     }
 
     // ── IAdminPoolDiagnostics (Story 28-4 AC5) ────────────────────────

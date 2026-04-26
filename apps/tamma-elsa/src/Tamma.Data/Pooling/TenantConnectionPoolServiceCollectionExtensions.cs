@@ -87,6 +87,19 @@ public static class TenantConnectionPoolServiceCollectionExtensions
         // DbContext registered by AddTammaData. Pooled factory caches
         // recent contexts so cold-miss CP lookups don't pay
         // construction cost on every request.
+        //
+        // Round-2 review H10: AddTammaData registers a plain
+        // <c>AddDbContextFactory&lt;ControlPlaneDbContext&gt;</c> as the
+        // default. Strip the factory + options registrations before
+        // <c>AddPooledDbContextFactory</c> wires the pooled variant so
+        // there's exactly one factory + options pipeline registered for
+        // <c>ControlPlaneDbContext</c>. Without the cleanup the second
+        // <c>AddPooledDbContextFactory</c> call layers another
+        // <c>IDbContextFactory&lt;ControlPlaneDbContext&gt;</c>
+        // descriptor on top of the existing one and both options
+        // pipelines run on construction.
+        services.RemoveAll<IDbContextFactory<ControlPlaneDbContext>>();
+        services.RemoveAll<DbContextOptions<ControlPlaneDbContext>>();
         services.AddPooledDbContextFactory<ControlPlaneDbContext>(opts =>
         {
             opts.UseNpgsql(controlPlaneConnectionString, npgsql =>

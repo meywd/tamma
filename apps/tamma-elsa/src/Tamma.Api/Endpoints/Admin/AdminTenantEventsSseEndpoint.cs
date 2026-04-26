@@ -50,6 +50,7 @@ public static class AdminTenantEventsSseEndpoint
     public static async Task StreamEvents(
         Guid tenantId,
         [FromServices] ControlPlaneDbContext db,
+        [FromServices] TimeProvider timeProvider,
         HttpContext http,
         CancellationToken ct)
     {
@@ -91,7 +92,7 @@ public static class AdminTenantEventsSseEndpoint
         // byte before rendering "connected").
         await WriteAsync(http, $": stream-open tenantId={tenantId:D} cursor={lastSequence}\n\n", token);
 
-        var lastKeepalive = DateTimeOffset.UtcNow;
+        var lastKeepalive = timeProvider.GetUtcNow();
 
         while (!token.IsCancellationRequested)
         {
@@ -130,10 +131,10 @@ public static class AdminTenantEventsSseEndpoint
 
                 // Keepalive every 30s so proxies don't drop the
                 // connection during a quiet period.
-                if (DateTimeOffset.UtcNow - lastKeepalive >= KeepaliveInterval)
+                if (timeProvider.GetUtcNow() - lastKeepalive >= KeepaliveInterval)
                 {
                     await WriteAsync(http, ": keepalive\n\n", token);
-                    lastKeepalive = DateTimeOffset.UtcNow;
+                    lastKeepalive = timeProvider.GetUtcNow();
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)

@@ -265,6 +265,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -277,9 +278,10 @@ public static class AdminTenantsEndpoints
         if (!IsRetryable(current))
             return IllegalTransition(current, "retry");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusPendingVerification;
         db.Entry(tenant).Property("FailureReason").CurrentValue = null;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         // Story 28-8 — drop the cached status so the next request sees
         // the new state immediately (per-pod; sibling pods converge
@@ -292,7 +294,7 @@ public static class AdminTenantsEndpoints
                 tenantId,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-retry",
                 }),
             ct);
@@ -316,6 +318,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -328,9 +331,10 @@ public static class AdminTenantsEndpoints
         if (!IsDeletable(current))
             return IllegalTransition(current, "delete");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusDeleting;
-        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = now;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
 
@@ -340,7 +344,7 @@ public static class AdminTenantsEndpoints
                 tenantId,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-delete",
                 }),
             ct);
@@ -366,6 +370,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
         // 2FA-lite: the caller must echo the tenant id in a header so a
@@ -391,9 +396,10 @@ public static class AdminTenantsEndpoints
         if (!IsForceDeletable(current))
             return IllegalTransition(current, "force-delete");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusDeleting;
-        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = now;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
 
@@ -403,7 +409,7 @@ public static class AdminTenantsEndpoints
                 tenantId,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-force-delete",
                     ["previousStatus"] = current,
                 }),
@@ -439,6 +445,7 @@ public static class AdminTenantsEndpoints
         HttpContext http,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
         // 2FA-lite per the force-delete pattern — cleanup runs
@@ -470,7 +477,7 @@ public static class AdminTenantsEndpoints
                 tenantId,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = timeProvider.GetUtcNow().UtcDateTime,
                     ["source"] = "admin-cleanup",
                     ["note"] = string.IsNullOrWhiteSpace(note) ? null : note,
                     ["currentStatus"] = (string?)db.Entry(tenant).Property("Status").CurrentValue,
@@ -490,6 +497,7 @@ public static class AdminTenantsEndpoints
         UpdateTenantPlanRequest req,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
         if (req.PlanId == Guid.Empty)
@@ -517,7 +525,7 @@ public static class AdminTenantsEndpoints
         // Keep the legacy string column in lockstep so dashboards that still
         // read it render the same plan.
         tenant.Plan = plan.Slug;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        tenant.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct);
 
         await publisher.AppendAndPublishAsync(

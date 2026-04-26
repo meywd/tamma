@@ -39,8 +39,8 @@ public sealed class PoolWarmupOptions
 }
 
 /// <summary>
-/// Story 28-4 AC (warmup) — optional <see cref="IHostedService"/> that
-/// pre-warms the per-tenant connection pool for the top-N
+/// Story 28-4 AC (warmup) — optional <see cref="BackgroundService"/>
+/// that pre-warms the per-tenant connection pool for the top-N
 /// most-recently-active tenants on process boot. The first request from
 /// each warmed tenant skips the cold-miss build path (CP lookup +
 /// decrypt + Npgsql data-source build), which can cut p95 cold-start
@@ -59,8 +59,17 @@ public sealed class PoolWarmupOptions
 /// and skipped — the warmup loop continues. Startup never blocks on a
 /// per-tenant build; each pool gets <see cref="PoolWarmupOptions.PerTenantTimeoutSeconds"/>
 /// before the warmup moves on.</para>
+///
+/// <para><b>Lifetime (round-2 M11)</b>: extends
+/// <see cref="BackgroundService"/> rather than implementing
+/// <see cref="IHostedService"/> directly. The host runtime starts
+/// <see cref="ExecuteAsync"/> on its own background task and threads
+/// the <c>stoppingToken</c> through to the warmup loop, so a
+/// shutdown mid-warmup cancels the loop cleanly and
+/// <c>BackgroundService.StopAsync</c> awaits the warmup task before
+/// the host disposes scopes the warmup is still using.</para>
 /// </summary>
-public sealed class PoolWarmupService : IHostedService
+public sealed class PoolWarmupService : BackgroundService
 {
     private readonly IServiceProvider _services;
     private readonly IOptions<PoolWarmupOptions> _options;
@@ -79,7 +88,14 @@ public sealed class PoolWarmupService : IHostedService
         _logger = logger;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The host runtime invokes <c>ExecuteAsync</c> with a stopping
+    /// token tied to host shutdown. The warmup runs on this task; if
+    /// the host shuts down mid-warmup the token cancels and the loop
+    /// exits gracefully. <see cref="BackgroundService.StopAsync"/>
+    /// awaits this task during shutdown so scopes outlive the warmup.
+    /// </summary>
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var opts = _options.Value;
         if (!opts.Enabled)
@@ -89,14 +105,8 @@ public sealed class PoolWarmupService : IHostedService
             return;
         }
 
-        // Run the warmup on a background task — startup must not block
-        // on Postgres availability. If the resolver build fails for
-        // every tenant (e.g. CP unreachable on boot), warmup logs the
-        // failure and the API still serves traffic for the cold path.
-        _ = Task.Run(() => WarmupAsync(opts, cancellationToken), cancellationToken);
+        await WarmupAsync(opts, stoppingToken).ConfigureAwait(false);
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async Task WarmupAsync(
         PoolWarmupOptions opts,
