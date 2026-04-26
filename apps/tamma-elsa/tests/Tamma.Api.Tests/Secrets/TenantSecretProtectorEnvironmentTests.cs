@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
@@ -8,10 +9,14 @@ using Tamma.Api.Services.Provisioning;
 namespace Tamma.Api.Tests.Secrets;
 
 /// <summary>
-/// R2-H11 — environment-aware production hard-fail for
-/// <see cref="TenantSecretProtector.FromConfiguration(IConfiguration, IHostEnvironment?, ILogger?)"/>.
+/// R2-H11 + R2 post-fix PF-S4 — environment-aware production hard-fail
+/// for <see cref="TenantSecretProtector.FromConfiguration(IConfiguration, IHostEnvironment?, ILogger?)"/>.
 /// Production deploys must set <c>Cranl:EncryptionKey</c> explicitly;
 /// the silent HKDF fallback is dev-only.
+///
+/// <para>PF-S4 deleted the single-arg overload (no IHostEnvironment).
+/// All call sites now flow IHostEnvironment via DI, so the dispatcher
+/// bypass that silently HKDF'd in production is closed.</para>
 /// </summary>
 [TestFixture]
 public class TenantSecretProtectorEnvironmentTests
@@ -104,12 +109,15 @@ public class TenantSecretProtectorEnvironmentTests
     [Test]
     public void Null_Environment_Falls_Back_To_HKDF_Like_Development()
     {
-        // The single-arg overload (legacy callers) flows null
-        // environment, which preserves the pre-H11 dev-time
-        // semantics — does not hard-fail.
+        // PF-S4: the single-arg legacy overload was deleted. Callers
+        // that genuinely have no environment context (e.g. test
+        // helpers, ad-hoc utilities) MUST pass `environment: null`
+        // explicitly. The signature still accepts null — the gate
+        // hard-fails ONLY in true production env.
         var cfg = BuildConfig(apiKey: "cranl_sk_legacyvalue");
 
-        var protector = TenantSecretProtector.FromConfiguration(cfg, NullLogger.Instance);
+        var protector = TenantSecretProtector.FromConfiguration(
+            cfg, environment: null, logger: NullLogger.Instance);
 
         protector.Should().NotBeNull();
         var encoded = protector.Encrypt("hello");
@@ -139,6 +147,58 @@ public class TenantSecretProtectorEnvironmentTests
 
         var protector = TenantSecretProtector.FromConfiguration(cfg, env, NullLogger.Instance);
 
+        protector.Should().NotBeNull();
+    }
+
+    // ── Story 28-R2 / PF-S4 — Single-arg overload deletion ──────────
+
+    [Test]
+    public void PlatformEventsServiceCollection_Production_NoKey_ThrowsOnResolution()
+    {
+        // PF-S4 — the H11 dispatcher-bypass came from
+        // PlatformEventsServiceCollectionExtensions.AddPlatformEventBus
+        // calling the single-arg `FromConfiguration` overload that
+        // silently HKDF'd from Cranl:ApiKey. The single-arg overload
+        // has been DELETED; the extension now flows IHostEnvironment.
+        // Pin the production hard-fail behaviour by booting a service
+        // collection in Production with no encryption key and
+        // verifying the resolution throws.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton<IConfiguration>(BuildConfig(apiKey: "cranl_sk_anything"));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostEnvironment>(
+            new StubEnvironment { EnvironmentName = Environments.Production });
+        services.AddLogging();
+        Tamma.Api.Extensions.PlatformEventsServiceCollectionExtensions
+            .AddPlatformEventBus(services);
+
+        using var sp = services.BuildServiceProvider();
+
+        // PF-S4: production resolution MUST throw because there is no
+        // Cranl:EncryptionKey. The previous single-arg-overload path
+        // silently fell back to HKDF; the new path bubbles the
+        // InvalidOperationException out of the factory closure.
+        Action act = () => sp.GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Cranl:EncryptionKey is REQUIRED in production*");
+    }
+
+    [Test]
+    public void PlatformEventsServiceCollection_Development_NoKey_BuildsProtectorViaHKDF()
+    {
+        // Mirror — in Development, the same wiring path falls back to
+        // HKDF (the dev convenience that PF-S4 explicitly preserves).
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton<IConfiguration>(BuildConfig(apiKey: "cranl_sk_anything"));
+        services.AddSingleton<Microsoft.Extensions.Hosting.IHostEnvironment>(
+            new StubEnvironment { EnvironmentName = Environments.Development });
+        services.AddLogging();
+        Tamma.Api.Extensions.PlatformEventsServiceCollectionExtensions
+            .AddPlatformEventBus(services);
+
+        using var sp = services.BuildServiceProvider();
+
+        var protector = sp.GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
         protector.Should().NotBeNull();
     }
 }

@@ -249,4 +249,115 @@ public class JwtServiceTests
         var parsed = System.Text.Json.JsonDocument.Parse(raw).RootElement;
         parsed.GetArrayLength().Should().Be(2);
     }
+
+    // ── Story 28-R2 / PF-S3 — Impersonation JWT scope reduction ────
+
+    [Test]
+    public void ImpersonationJwt_DoesNotCarryPlatformAdminClaim()
+    {
+        // PF-S3 regression — the operator is a real platform admin, but
+        // when minting a token for an impersonation session the JWT
+        // must NOT carry platformRole=platform_admin. Otherwise the
+        // impersonation token doubles as an unscoped platform-admin
+        // ticket (KEK rotation, alerts, every PlatformOwnerAccess
+        // route). The JWT must instead carry platformRole="user".
+        var operatorUser = MakeUser(platformRole: "platform_admin");
+        var impId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var targetTenantId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+
+        var token = _service.GenerateAccessToken(
+            operatorUser,
+            tenantId: targetTenantId,
+            role: "owner",
+            tenants: null,
+            impId: impId);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        // Critical assertion — platformRole MUST be "user" inside an
+        // impersonation session, regardless of operator's actual role.
+        jwt.Claims.Should().Contain(c => c.Type == "platformRole" && c.Value == "user",
+            "PF-S3: impersonation JWTs must not carry platform_admin");
+        jwt.Claims.Should().NotContain(c => c.Type == "platformRole" && c.Value == "platform_admin");
+    }
+
+    [Test]
+    public void ImpersonationJwt_CarriesActorUserIdClaim()
+    {
+        // PF-S3 — alongside imp_id we emit actor_user_id +
+        // actor_email so audit-event enrichers can attribute the
+        // request to the operator without re-querying the
+        // admin_impersonations table.
+        var operatorUser = MakeUser(platformRole: "platform_admin");
+        var impId = Guid.NewGuid();
+
+        var token = _service.GenerateAccessToken(
+            operatorUser, Guid.NewGuid(), "owner", tenants: null, impId: impId);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().Contain(c => c.Type == "imp_id" && c.Value == impId.ToString("D"));
+        jwt.Claims.Should().Contain(c => c.Type == "actor_user_id"
+            && c.Value == operatorUser.Id.ToString());
+        jwt.Claims.Should().Contain(c => c.Type == "actor_email"
+            && c.Value == operatorUser.Email);
+    }
+
+    [Test]
+    public void NonImpersonationJwt_DoesNotCarryActorClaims()
+    {
+        // The actor_* claims are scoped to impersonation sessions only.
+        // A normal session's `sub` already identifies the user; emitting
+        // actor_user_id on every token would dilute the signal that
+        // "this request is inside an impersonation session".
+        var operatorUser = MakeUser(platformRole: "platform_admin");
+
+        var token = _service.GenerateAccessToken(
+            operatorUser, Guid.NewGuid(), "owner");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().NotContain(c => c.Type == "imp_id");
+        jwt.Claims.Should().NotContain(c => c.Type == "actor_user_id");
+        jwt.Claims.Should().NotContain(c => c.Type == "actor_email");
+    }
+
+    [Test]
+    public void ImpersonationJwt_PreservesTargetTenantAndPerTenantRole()
+    {
+        // PF-S3 design note: scope-reduction of platformRole is the
+        // strict change. The per-tenant `role` claim (passed via the
+        // `role` parameter) is still emitted as-is so the operator,
+        // INSIDE the target tenant, can act with the role they're
+        // impersonating. The `tenantId` / `active_tenant_id` claims
+        // also reflect the impersonation target.
+        var operatorUser = MakeUser(platformRole: "platform_admin");
+        var impId = Guid.NewGuid();
+        var targetTenantId = Guid.NewGuid();
+
+        var token = _service.GenerateAccessToken(
+            operatorUser, targetTenantId, role: "admin", tenants: null, impId: impId);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().Contain(c => c.Type == "role" && c.Value == "admin");
+        jwt.Claims.Should().Contain(c => c.Type == "tenantId"
+            && c.Value == targetTenantId.ToString());
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_id"
+            && c.Value == targetTenantId.ToString());
+    }
+
+    [Test]
+    public void ImpersonationJwt_EmptyImpId_DoesNotTriggerScopeReduction()
+    {
+        // Defence-in-depth — Guid.Empty must be treated as "not an
+        // impersonation token". A platform admin minting a normal
+        // session must keep their platform_admin claim.
+        var operatorUser = MakeUser(platformRole: "platform_admin");
+
+        var token = _service.GenerateAccessToken(
+            operatorUser, Guid.NewGuid(), "owner",
+            tenants: null,
+            impId: Guid.Empty);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().Contain(c => c.Type == "platformRole" && c.Value == "platform_admin");
+        jwt.Claims.Should().NotContain(c => c.Type == "imp_id");
+    }
 }

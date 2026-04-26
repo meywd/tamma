@@ -1028,8 +1028,17 @@ admin.MapGet("/users", AdminEndpoints.ListUsers);
 // SelfOrUsersView allows a regular member to GET their own profile via the
 // admin-prefixed route (audit finding 016 — TS requireSelfOrRole behavior).
 admin.MapGet("/users/{id}", AdminEndpoints.GetUser).RequireAuthorization("SelfOrUsersView");
-admin.MapPut("/users/{id}/role", AdminEndpoints.UpdateUserRole).RequireAuthorization("OwnerAccess");
-admin.MapDelete("/users/{id}", AdminEndpoints.DeleteUser).RequireAuthorization("OwnerAccess");
+// Story 28-R2 / PF-S1 — these mutate the GLOBAL `users` table (cross-
+// tenant identity), so they must require platform-admin scope. The
+// previous OwnerAccess gate keyed off the per-tenant role; every
+// signed-up user is auto-`owner` of their personal tenant, which let
+// any user call PUT /api/admin/users/{id}/role and DELETE
+// /api/admin/users/{id} against any other platform user. The handler
+// bodies also defend-in-depth against demoting platform admins —
+// only the same caller can demote themselves; one platform admin
+// cannot strip another's platform role through this surface.
+admin.MapPut("/users/{id}/role", AdminEndpoints.UpdateUserRole).RequireAuthorization("PlatformOwnerAccess");
+admin.MapDelete("/users/{id}", AdminEndpoints.DeleteUser).RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/users/invite", AdminEndpoints.InviteUser);
 admin.MapGet("/users/invites", AdminEndpoints.ListInvites);
 admin.MapDelete("/users/invites/{id}", AdminEndpoints.DeleteInvite);

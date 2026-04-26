@@ -56,41 +56,31 @@ public sealed class TenantSecretProtector
     }
 
     /// <summary>
-    /// Build a protector from configuration. Reads
-    /// <c>Cranl:EncryptionKey</c> (base64) when present.
-    ///
-    /// <para>R2-H11 hardening: in production the
-    /// <see cref="IHostEnvironment"/>-aware overload below is the
-    /// supported entry point. When <c>Cranl:EncryptionKey</c> is absent
-    /// the production path throws — the silent HKDF fallback that the
-    /// round-2 review flagged is now strictly behind
-    /// <see cref="HostEnvironmentEnvExtensions.IsDevelopment(IHostEnvironment)"/>.</para>
-    ///
-    /// <para>The legacy single-arg overload remains for callers that
-    /// don't have access to <see cref="IHostEnvironment"/> (chiefly the
-    /// dev-time helper in <c>NullTenantProvisioner</c>). It always
-    /// behaves as the dev/test path — the silent HKDF fallback is
-    /// active. Production composition roots MUST inject
-    /// <see cref="IHostEnvironment"/> via the two-arg overload.</para>
-    /// </summary>
-    public static TenantSecretProtector FromConfiguration(
-        IConfiguration cfg, ILogger? logger = null)
-    {
-        // No environment hint — assume dev/test. This preserves the
-        // pre-H11 semantics for callers that do not flow IHostEnvironment.
-        return FromConfiguration(cfg, environment: null, logger);
-    }
-
-    /// <summary>
     /// Build a protector from configuration with environment-aware
-    /// fail-closed semantics. R2-H11: production deploys must set
-    /// <c>Cranl:EncryptionKey</c> explicitly — the HKDF fallback is
-    /// strictly a dev-time convenience and is never used in production.
+    /// fail-closed semantics. R2-H11 + R2 post-fix PF-S4: production
+    /// deploys must set <c>Cranl:EncryptionKey</c> explicitly — the
+    /// HKDF fallback is strictly a dev-time convenience and is never
+    /// used in production.
+    ///
+    /// <para><b>PF-S4 (this file):</b> the previous single-arg
+    /// overload (<c>FromConfiguration(IConfiguration, ILogger?)</c>)
+    /// has been deleted. It silently flowed <c>environment: null</c>
+    /// into this method, which fell through to the dev/test HKDF
+    /// path regardless of the actual deployment environment — a
+    /// dispatcher-bypass for the production hard-fail. Every caller
+    /// MUST now flow <see cref="IHostEnvironment"/> (it is registered
+    /// by <c>WebApplicationBuilder</c> before composition root runs,
+    /// so DI resolution always succeeds in real deployments). Tests
+    /// + helpers that genuinely have no environment context can pass
+    /// <c>null</c> explicitly via this two-arg overload — the
+    /// signature still accepts a nullable, but the call site is now
+    /// audit-grep-able.</para>
     /// </summary>
     /// <param name="cfg">Application configuration.</param>
     /// <param name="environment">Host environment. When null, assumes
-    /// development semantics. When <see cref="IHostEnvironment.IsProduction"/>,
-    /// throws if <c>Cranl:EncryptionKey</c> is unset.</param>
+    /// development semantics (HKDF fallback path). When
+    /// <see cref="HostEnvironmentEnvExtensions.IsProduction(IHostEnvironment)"/>
+    /// is true, throws if <c>Cranl:EncryptionKey</c> is unset.</param>
     /// <param name="logger">Optional logger.</param>
     public static TenantSecretProtector FromConfiguration(
         IConfiguration cfg, IHostEnvironment? environment, ILogger? logger = null)

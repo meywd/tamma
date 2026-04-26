@@ -19,9 +19,10 @@ namespace Tamma.Api.Services.Secrets;
 ///     <see cref="Provisioning.TenantSecretProtector"/> already reads
 ///     so an existing deployment does not need a second secret. When
 ///     unset the provider falls back to a derived key (matches the
-///     <see cref="Provisioning.TenantSecretProtector.FromConfiguration(IConfiguration, ILogger?)"/>
-///     behaviour) so dev rigs and the Null provisioner path keep
-///     working.</description></item>
+///     <see cref="Provisioning.TenantSecretProtector.FromConfiguration(IConfiguration, IHostEnvironment?, ILogger?)"/>
+///     behaviour in dev) so dev rigs and the Null provisioner path keep
+///     working. In production the protector hard-fails when this is
+///     unset (Story 28-R2 / PF-S4); KekProvider follows suit.</description></item>
 ///   <item><description><c>Tamma:Kek:Secondary</c> — base64-encoded
 ///     32 bytes. Optional; populated during a rotation window so the
 ///     decryptor can fall back when an envelope was encrypted under

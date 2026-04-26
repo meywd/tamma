@@ -219,6 +219,58 @@ public class ImpersonationContextMiddlewareTests
         http.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
     }
 
+    // ── Story 28-R2 / PF-S3 — ActorIdentity propagation ─────────────
+
+    [Test]
+    public async Task ImpersonationContextMiddleware_AppendsActorIdentityToAuditEvents()
+    {
+        // PF-S3 — when the JWT carries the actor_user_id + actor_email
+        // claims (minted by JwtService for impersonation sessions) the
+        // middleware must surface them via HttpContext.Items so audit
+        // enrichers can attribute the request to the operator.
+        var impId = await SeedActiveSessionAsync();
+        var (mw, next) = BuildMiddleware();
+        var http = new DefaultHttpContext();
+        http.User = WithImpClaimAndActor(impId);
+        http.Response.Body = new MemoryStream();
+
+        await mw.InvokeAsync(http, _service, _config, _time,
+            NullLogger<ImpersonationContextMiddleware>.Instance);
+
+        next.Invoked.Should().BeTrue();
+        ImpersonationContextMiddleware.GetImpersonationId(http).Should().Be(impId);
+        ImpersonationContextMiddleware.GetActorUserId(http).Should().Be(OperatorId);
+        ImpersonationContextMiddleware.GetActorEmail(http).Should().Be("ops@tamma.dev");
+    }
+
+    [Test]
+    public async Task ActorIdentity_FallsBackToImpersonationRow_WhenJwtClaimMissing()
+    {
+        // Defence-in-depth — older tokens (or test fixtures) may not
+        // carry the actor_user_id claim. The middleware re-reads the
+        // operator id from the impersonation row in that case so the
+        // audit attribution is never dropped.
+        var impId = await SeedActiveSessionAsync();
+        var (mw, next) = BuildMiddleware();
+        var http = new DefaultHttpContext();
+        // Explicitly omit the actor_user_id claim.
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, OperatorId.ToString()),
+            new Claim("imp_id", impId.ToString("D")),
+        }, authenticationType: "Test");
+        http.User = new ClaimsPrincipal(identity);
+        http.Response.Body = new MemoryStream();
+
+        await mw.InvokeAsync(http, _service, _config, _time,
+            NullLogger<ImpersonationContextMiddleware>.Instance);
+
+        next.Invoked.Should().BeTrue();
+        // Even without the claim, the middleware re-derives the actor
+        // from the impersonation row that was already loaded.
+        ImpersonationContextMiddleware.GetActorUserId(http).Should().Be(OperatorId);
+    }
+
     private static ClaimsPrincipal WithImpClaim(Guid impId)
     {
         var identity = new ClaimsIdentity(new[]
@@ -227,6 +279,27 @@ public class ImpersonationContextMiddlewareTests
             new Claim(JwtRegisteredClaimNames.Email, "ops@tamma.dev"),
             new Claim("platformRole", "platform_admin"),
             new Claim("imp_id", impId.ToString("D")),
+        }, authenticationType: "Test");
+        return new ClaimsPrincipal(identity);
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S3 — claims shape minted by the real JwtService
+    /// for an impersonation session: platformRole=user (scope-reduced),
+    /// imp_id present, actor_user_id + actor_email carrying the
+    /// operator's identity.
+    /// </summary>
+    private static ClaimsPrincipal WithImpClaimAndActor(Guid impId)
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, OperatorId.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, "ops@tamma.dev"),
+            // PF-S3: scope-reduced inside an impersonation session.
+            new Claim("platformRole", "user"),
+            new Claim("imp_id", impId.ToString("D")),
+            new Claim("actor_user_id", OperatorId.ToString()),
+            new Claim("actor_email", "ops@tamma.dev"),
         }, authenticationType: "Test");
         return new ClaimsPrincipal(identity);
     }
