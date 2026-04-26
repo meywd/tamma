@@ -37,12 +37,15 @@ public sealed class PlatformTaskWorkerOptions
     public TimeSpan ReaperInterval { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// When <c>true</c> (default) the worker's polling loop runs at
-    /// host startup. Tests that drive <see cref="PlatformTaskWorker.ProcessOnceAsync"/>
-    /// directly (or don't exercise the worker at all) override this to
-    /// <c>false</c> to keep the test suite fast.
+    /// Round-2 H8 — when <c>true</c> the worker's polling loop runs at
+    /// host startup. <b>Default <c>false</c></b>: an operator must opt
+    /// in once their <c>IPlatformTaskHandler</c> registrations are in
+    /// place, otherwise every queued task observes a no-handler tick
+    /// and parks itself (Round-2 H8). Set
+    /// <c>PlatformTaskWorker:RunOnStartup = true</c> in the host
+    /// configuration once handlers are wired.
     /// </summary>
-    public bool RunOnStartup { get; set; } = true;
+    public bool RunOnStartup { get; set; } = false;
 }
 
 /// <summary>
@@ -166,13 +169,21 @@ public sealed class PlatformTaskWorker : BackgroundService
         var handler = registry.Resolve(task.Type);
         if (handler is null)
         {
+            // Round-2 H8 — DO NOT immediately dead-letter on missing
+            // handler. Park the row in 'pending' with an
+            // UnprocessableAt timestamp so a deploy that subsequently
+            // registers the handler can pick the work up. The retry
+            // budget still applies — after MaxRetries no-handler
+            // observations the row falls through to dead_letter.
             _logger.LogWarning(
-                "platform_task.no_handler taskId={TaskId} type={TaskType}",
+                "platform_task.no_handler taskId={TaskId} type={TaskType} retry={RetryCount}",
                 task.Id,
-                task.Type);
-            await repo.DeadLetterAsync(
+                task.Type,
+                task.RetryCount);
+            await repo.ParkUnprocessableAsync(
                 task.Id,
                 $"No IPlatformTaskHandler registered for task type '{task.Type}'.",
+                _options.MaxRetries,
                 ct).ConfigureAwait(false);
             return true;
         }

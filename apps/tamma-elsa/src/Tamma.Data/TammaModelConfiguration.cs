@@ -355,7 +355,7 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("UX_platform_events_SequenceNumber");
         });
 
-        // ── PlatformQueuedTask (Story 28-6) ──
+        // ── PlatformQueuedTask (Story 28-6 + Round-2 M8/H8) ──
         modelBuilder.Entity<PlatformQueuedTask>(entity =>
         {
             entity.ToTable("platform_queued_tasks");
@@ -367,6 +367,12 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.RetryCount).HasDefaultValue(0);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            // Round-2 M8 — record which worker holds the row's lease.
+            entity.Property(e => e.ClaimedBy).HasMaxLength(128);
+            // Round-2 H8 — last time the worker observed "no handler".
+            // Nullable; non-null only on rows currently parked waiting
+            // for a handler to be deployed.
+            entity.Property(e => e.UnprocessableAt);
 
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
             entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");

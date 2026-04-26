@@ -33,7 +33,11 @@ public static class PlatformTaskServiceCollectionExtensions
                     .Bind(opts));
 
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
-        services.TryAddSingleton<IPlatformTaskHandlerRegistry, PlatformTaskHandlerRegistry>();
+        // Round-2 M10 — registry is Scoped so it can resolve
+        // scope-bound IPlatformTaskHandlers each tick. The worker
+        // already opens a per-task async scope, so this is the right
+        // shape for handlers that take a DbContext.
+        services.TryAddScoped<IPlatformTaskHandlerRegistry, PlatformTaskHandlerRegistry>();
 
         // Use TryAddEnumerable on a hosted-service descriptor so a
         // double Add doesn't spawn two background pollers.
@@ -48,16 +52,21 @@ public static class PlatformTaskServiceCollectionExtensions
     /// <summary>
     /// Register a concrete <see cref="IPlatformTaskHandler"/>. Each call
     /// adds a separate registration so the registry sees every handler
-    /// at startup. Singleton lifetime — handlers must be stateless or
-    /// thread-safe; the worker invokes them concurrently across multiple
-    /// requests/processes.
+    /// at startup.
+    ///
+    /// <para>Round-2 M10 — handlers are registered as <b>Scoped</b> so
+    /// they may take scoped dependencies (most importantly
+    /// <c>ControlPlaneDbContext</c>) without a captive-dependency
+    /// surprise. <see cref="PlatformTaskWorker.ProcessOnceAsync"/>
+    /// opens a fresh <c>AsyncScope</c> per claimed task so the handler
+    /// instance is not shared across ticks.</para>
     /// </summary>
     public static IServiceCollection AddPlatformTaskHandler<THandler>(
         this IServiceCollection services)
         where THandler : class, IPlatformTaskHandler
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddSingleton<IPlatformTaskHandler, THandler>();
+        services.AddScoped<IPlatformTaskHandler, THandler>();
         return services;
     }
 }

@@ -57,6 +57,25 @@ public interface IAdminPoolDiagnostics
 /// <param name="MissesTotal">Cache misses.</param>
 /// <param name="HitRatio">Lifetime <c>hits / (hits + misses)</c>; 0 when
 /// no requests have been served.</param>
+/// <param name="DeferredDisposeBacklog">Round-2 H5 — number of
+/// background <c>NpgsqlDataSource.DisposeAsync</c> tasks that have been
+/// scheduled but not yet completed. A persistently high value indicates
+/// either a slow Postgres or a leaking consumer that's preventing the
+/// dispose path from making progress. Drained at process shutdown
+/// before the resolver's own dispose returns.</param>
+/// <param name="MaxOutstandingLeases">Round-2 M7 — configured
+/// per-tenant lease ceiling. Surfaces the value of
+/// <see cref="TenantConnectionPoolOptions.MaxOutstandingLeases"/> so
+/// admins can tune from the diagnostics endpoint without re-reading
+/// appsettings.</param>
+/// <param name="TotalOutstandingLeases">Round-2 M7 — sum of outstanding
+/// leases across every warm tenant. A leading indicator of cache
+/// pressure / leaking SSE consumers.</param>
+/// <param name="BuildLocksRetained">Round-2 M13 — number of per-tenant
+/// build-time semaphores currently held in the resolver's
+/// <c>_buildLocks</c> dictionary. Should converge to roughly the warm
+/// pool count over time; persistent growth signals the M13 trim path
+/// is broken.</param>
 public sealed record DetailedPoolStats(
     int WarmPoolCount,
     long OpenedTotal,
@@ -65,7 +84,11 @@ public sealed record DetailedPoolStats(
     long EvictedExplicit,
     long HitsTotal,
     long MissesTotal,
-    double HitRatio);
+    double HitRatio,
+    int DeferredDisposeBacklog,
+    int MaxOutstandingLeases,
+    int TotalOutstandingLeases,
+    int BuildLocksRetained);
 
 /// <summary>
 /// Per-tenant entry in <see cref="IAdminPoolDiagnostics.ListWarmTenants"/>.
