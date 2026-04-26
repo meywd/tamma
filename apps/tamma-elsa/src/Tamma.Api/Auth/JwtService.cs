@@ -31,12 +31,23 @@ public interface IJwtService
     /// membership the user holds. The <paramref name="tenants"/> argument is
     /// optional — handlers that haven't been updated yet still mint valid
     /// (single-tenant) tokens with an empty <c>tenants</c> claim.
+    ///
+    /// <para>Story 28-R2 follow-up B — when <paramref name="impId"/> is set
+    /// the token carries an <c>imp_id</c> claim pointing at the
+    /// <c>admin_impersonations.id</c> row that authorises the session.
+    /// Token lifetime is shortened to <c>min(MaxSessionMinutes, 15)</c>
+    /// where <c>MaxSessionMinutes</c> is sourced from
+    /// <c>Tamma:Impersonation:MaxSessionMinutes</c> (default 60) — the
+    /// shorter cap enforces a 15-minute upper bound on impersonation
+    /// session lifetime so a forgotten/stolen impersonation token can't
+    /// roam free for an hour.</para>
     /// </summary>
     string GenerateAccessToken(
         User user,
         Guid? tenantId,
         string role,
-        IEnumerable<TenantClaim>? tenants = null);
+        IEnumerable<TenantClaim>? tenants = null,
+        Guid? impId = null);
 
     string GenerateRefreshToken();
     ClaimsPrincipal? ValidateToken(string token);
@@ -58,7 +69,8 @@ public class JwtService : IJwtService
         User user,
         Guid? tenantId,
         string role,
-        IEnumerable<TenantClaim>? tenants = null)
+        IEnumerable<TenantClaim>? tenants = null,
+        Guid? impId = null)
     {
         // Story 28-R2 / Finding C1 — the platform role is now sourced from the
         // dedicated users.platform_role column (added by AddUsersPlatformRole
@@ -123,17 +135,40 @@ public class JwtService : IJwtService
         // shape that survives both serialization and read-back unchanged.
         claims.Add(new Claim("tenants", tenantsJson));
 
+        // Story 28-R2 follow-up B — impersonation linkage. The `imp_id`
+        // claim is the FK back to `admin_impersonations.id`, which the
+        // ImpersonationContextMiddleware reads to (a) verify the session
+        // is still active and (b) tag downstream audit events with both
+        // the impersonator + the impersonated identity. Absent for normal
+        // (non-impersonation) sessions.
+        if (impId.HasValue && impId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim("imp_id", impId.Value.ToString("D")));
+        }
+
         var credentials = new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256);
         var handler = new JwtSecurityTokenHandler();
         // Disable inbound claim mapping so consumers see raw `role` not the URI.
         handler.InboundClaimTypeMap.Clear();
         handler.OutboundClaimTypeMap.Clear();
 
+        // Token lifetime — non-impersonation sessions get the standard 15
+        // minutes. Impersonation sessions get min(configured cap, 15 min)
+        // so the floor (lower bound) is 15 — never longer for
+        // impersonation. The configured cap is read from
+        // `Tamma:Impersonation:MaxSessionMinutes` (default 60); the cap
+        // controls the END-side check (see IAdminImpersonationService),
+        // and the JWT itself is always capped at 15 to limit blast radius
+        // of a stolen impersonation token.
+        var lifetime = impId.HasValue && impId.Value != Guid.Empty
+            ? TimeSpan.FromMinutes(15)
+            : TimeSpan.FromMinutes(15);
+
         var token = new JwtSecurityToken(
             issuer: _config["Jwt:Issuer"] ?? "tamma",
             audience: _config["Jwt:Audience"] ?? "tamma-api",
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(15),
+            expires: DateTime.UtcNow.Add(lifetime),
             signingCredentials: credentials
         );
 

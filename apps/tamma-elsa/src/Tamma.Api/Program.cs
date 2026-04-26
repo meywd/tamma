@@ -304,6 +304,15 @@ builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
 // Two-phase delete confirmation (finding 021) + session cookie writer (finding 018).
 builder.Services.AddSingleton<IDeleteConfirmationService, DeleteConfirmationService>();
 builder.Services.AddScoped<ISessionCookieWriter, SessionCookieWriter>();
+// Story 28-R2 follow-up B — admin impersonation. Scoped because it
+// depends on the per-request ControlPlaneDbContext for the audit
+// table inserts/updates and on the singleton IJwtService for token
+// minting. The ImpersonationContextMiddleware reads via this same
+// service so a "revoke" by another platform-admin lands on the very
+// next request.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Auth.IAdminImpersonationService,
+    Tamma.Api.Services.Auth.AdminImpersonationService>();
 // Path-tenant gate: every /api/v1/orgs/{tenantId}/* endpoint runs this
 // filter to verify caller membership (findings 001, 024).
 builder.Services.AddScoped<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
@@ -908,6 +917,11 @@ app.UseCors("AllowDashboard");
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
+// Story 28-R2 follow-up B — verify the impersonation row backing any
+// `imp_id` JWT claim is still active. Runs AFTER auth (so HttpContext.User
+// is bound) and BEFORE TenantContextMiddleware (so a stale impersonation
+// token blows up here, not after the request has bound a tenant).
+app.UseMiddleware<ImpersonationContextMiddleware>();
 app.UseMiddleware<TenantContextMiddleware>();
 app.UseMiddleware<EnsurePersonalTenantMiddleware>();
 
@@ -1093,6 +1107,23 @@ admin.MapPost("/tenants/{tenantId:guid}/cleanup",
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
     .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 28-R2 follow-up B — platform-admin impersonation surface (SOC2
+// audit table + middleware). Begin requires PlatformOwnerAccess (only a
+// real platform-admin can mint an impersonation session); end is gated by
+// AuthenticatedAny because the impersonation JWT itself carries
+// platformRole=user from the target's POV — proof-of-possession of the
+// `imp_id` claim is the authorisation. Active-list is platform-owner-only:
+// it's the incident-response surface.
+admin.MapPost("/tenants/{tenantId:guid}/impersonate",
+        Tamma.Api.Endpoints.Admin.AdminImpersonationsEndpoints.BeginImpersonation)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/impersonations/active",
+        Tamma.Api.Endpoints.Admin.AdminImpersonationsEndpoints.ListActive)
+    .RequireAuthorization("PlatformOwnerAccess");
+app.MapPost("/api/auth/impersonate/end",
+        Tamma.Api.Endpoints.Admin.AdminImpersonationsEndpoints.EndImpersonation)
+    .RequireAuthorization("AuthenticatedAny");
 
 // Story 5.6 / 1.5-37 (Wave C.1) — alert-system admin surface.
 // Platform-owner only because alert acknowledgment + channel
@@ -1559,13 +1590,15 @@ using (var scope = app.Services.CreateScope())
             Log.Information("Wiping Tamma-managed public-schema tables (TAMMA_PRESERVE_DB not set)");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
+                    admin_impersonations,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,
                     email_outbox,
                     github_installation_repos, github_installations,
                     github_webhook_deliveries,
-                    junior_developers, mentorship_events, mentorship_sessions,
+                    junior_developers, kek_rotations,
+                    mentorship_events, mentorship_sessions,
                     password_reset_tokens, plans,
                     platform_analytics_hourly,
                     platform_api_key_index,

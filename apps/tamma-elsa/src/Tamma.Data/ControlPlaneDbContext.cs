@@ -77,6 +77,18 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<KekRotation> KekRotations => Set<KekRotation>();
 
+    /// <summary>
+    /// Story 28-R2 follow-up B — SOC2 / ISO 27001 audit table for
+    /// platform-admin impersonation sessions. One row per session
+    /// (start = INSERT; end = UPDATE setting <c>EndedAt</c> /
+    /// <c>EndedReason</c>). The active subset is indexed via a
+    /// partial index on <c>EndedAt IS NULL</c> for cheap
+    /// incident-response queries. See
+    /// <see cref="Entities.AdminImpersonation"/> for column semantics.
+    /// </summary>
+    public DbSet<AdminImpersonation> AdminImpersonations =>
+        Set<AdminImpersonation>();
+
     // ── Story 5.6 + 1.5-37 (Wave C.1) — alert system ──
     //
     // The three alert tables are CP-resident: alert rules + channels
