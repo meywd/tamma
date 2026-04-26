@@ -138,4 +138,79 @@ public class MemoryTenantStatusCacheTests
             ids.Select(id => Task.Run(() =>
                 cache.TryGet(id, out _).Should().BeTrue())));
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  M6 — real LRU semantics
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public void LruEviction_RemovesLeastRecentlyAccessed_WhenOverCap()
+    {
+        // Cap=3. Insert 4 entries; the FIRST one (least recently
+        // touched) must be the eviction victim.
+        var cache = NewCache(TimeProvider.System, maxEntries: 3);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var d = Guid.NewGuid();
+
+        cache.Set(a, "active");
+        cache.Set(b, "active");
+        cache.Set(c, "active");
+        // a is now LRU. Inserting d should evict a.
+        cache.Set(d, "active");
+
+        cache.TryGet(a, out _).Should().BeFalse(
+            "the least-recently-set entry must be evicted under cap pressure");
+        cache.TryGet(b, out _).Should().BeTrue();
+        cache.TryGet(c, out _).Should().BeTrue();
+        cache.TryGet(d, out _).Should().BeTrue();
+    }
+
+    [Test]
+    public void LruEviction_TouchedEntry_SurvivesEvictionWave()
+    {
+        // Cap=3. Insert a, b, c → touch a → insert d. d should evict
+        // b (the new LRU after a was touched), not a.
+        var cache = NewCache(TimeProvider.System, maxEntries: 3);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var d = Guid.NewGuid();
+
+        cache.Set(a, "active");
+        cache.Set(b, "active");
+        cache.Set(c, "active");
+        // Touch a — moves it to the front of the LRU.
+        cache.TryGet(a, out _).Should().BeTrue();
+        cache.Set(d, "active");
+
+        cache.TryGet(a, out _).Should().BeTrue(
+            "TryGet move-to-front must save 'a' from being the LRU victim");
+        cache.TryGet(b, out _).Should().BeFalse(
+            "after the move-to-front, 'b' is the new LRU victim");
+        cache.TryGet(c, out _).Should().BeTrue();
+        cache.TryGet(d, out _).Should().BeTrue();
+    }
+
+    [Test]
+    public void Set_RefreshesEntry_WithoutChangingMembership()
+    {
+        // Re-Setting the same id at cap should NOT evict anything —
+        // the entry is updated in place + repositioned to MRU.
+        var cache = NewCache(TimeProvider.System, maxEntries: 3);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+
+        cache.Set(a, "provisioning");
+        cache.Set(b, "active");
+        cache.Set(c, "active");
+        cache.Set(a, "active");  // refresh — should overwrite, not evict
+
+        cache.TryGet(a, out var aStatus).Should().BeTrue();
+        aStatus.Should().Be("active");
+        cache.TryGet(b, out _).Should().BeTrue();
+        cache.TryGet(c, out _).Should().BeTrue();
+    }
 }

@@ -657,9 +657,23 @@ builder.Services.AddOptions<Tamma.Api.Services.TenantStatus.TenantStatusCacheOpt
     .Configure(opts => builder.Configuration
         .GetSection(Tamma.Api.Services.TenantStatus.TenantStatusCacheOptions.SectionName)
         .Bind(opts));
+builder.Services.AddSingleton<Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>();
+builder.Services.AddSingleton<Tamma.Api.Services.TenantStatus.ITenantStatusCache>(
+    sp => sp.GetRequiredService<Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>());
+// Story 28-8 H12 — surface the same cache to the resolver hot path so
+// status flips force a cold CP refresh instead of returning a stale
+// pool. Lives under Tamma.Data.Abstractions.ITenantStatusProbe so the
+// resolver's project doesn't take a reference on Tamma.Api.
+builder.Services.AddSingleton<Tamma.Data.Abstractions.ITenantStatusProbe>(
+    sp => sp.GetRequiredService<Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>());
+
+// M1 — IErrorRedactor scrubs sensitive material from exception messages
+// before they cross the long-lived storage boundary (event store +
+// ProvisioningDetail column). Used by CleanUpFailedTenantActivity and
+// any other activity that publishes exception text to platform_events.
 builder.Services.AddSingleton<
-    Tamma.Api.Services.TenantStatus.ITenantStatusCache,
-    Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>();
+    Tamma.Activities.Security.IErrorRedactor,
+    Tamma.Activities.Security.ErrorRedactor>();
 
 // Story 28-6 — platform-task worker (drains platform_queued_tasks via
 // IPlatformTaskHandler routing). Concrete handlers are registered by

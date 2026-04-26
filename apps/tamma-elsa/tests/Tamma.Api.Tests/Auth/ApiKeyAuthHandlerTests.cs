@@ -230,8 +230,13 @@ public class ApiKeyAuthHandlerTests
     }
 
     [Test]
-    public async Task TenantPrefixedKey_TenantNotFound_Returns401()
+    public async Task TenantPrefixedKey_TenantNotFound_Returns404()
     {
+        // H7 — tenant-not-found in the prefix-routing path now writes a
+        // structured 404 response (Doc 04 §8.1) directly to the
+        // response stream, then fails the auth result. The failure
+        // message changed from the historical "Invalid API key" to
+        // "Tenant not found" so logs distinguish the two failure modes.
         var tid = Guid.NewGuid();
         var rawKey = ApiKeyPrefixGenerator.GenerateTenantKey(tid);
         var apiKey = BuildKey(scope: "user", tenantId: tid);
@@ -243,25 +248,28 @@ public class ApiKeyAuthHandlerTests
         var (result, _) = await RunAsync($"Bearer {rawKey}");
 
         result.Succeeded.Should().BeFalse();
-        result.Failure!.Message.Should().Be("Invalid API key",
-            "tenant-not-found surfaces as the same opaque 401 as a hash mismatch");
+        result.Failure!.Message.Should().Be("Tenant not found");
     }
 
     [Test]
-    public async Task TenantPrefixedKey_TenantSuspended_Returns401()
+    public async Task TenantPrefixedKey_TenantSuspended_Returns503_WithStatusCode()
     {
+        // H7 — non-active tenant now surfaces as the proper Doc 04 §8.1
+        // status (e.g. 503 for suspended/provisioning, 410 for deleted)
+        // instead of a generic 401. Auth still fails so the request
+        // pipeline short-circuits.
         var tid = Guid.NewGuid();
         var rawKey = ApiKeyPrefixGenerator.GenerateTenantKey(tid);
         var apiKey = BuildKey(scope: "user", tenantId: tid);
         SeedKeyLookup(rawKey, apiKey);
 
         _resolver.Setup(r => r.GetDataSourceAsync(tid, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TenantNotProvisionedException(tid, "suspended"));
+            .ThrowsAsync(new TenantNotProvisionedException(tid, "provisioning"));
 
         var (result, _) = await RunAsync($"Bearer {rawKey}");
 
         result.Succeeded.Should().BeFalse();
-        result.Failure!.Message.Should().Be("Invalid API key");
+        result.Failure!.Message.Should().Be("Tenant not in active state");
     }
 
     [Test]
