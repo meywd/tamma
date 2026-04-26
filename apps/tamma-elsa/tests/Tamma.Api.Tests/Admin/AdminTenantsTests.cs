@@ -34,6 +34,10 @@ public class AdminTenantsTests
     // Story 28-8 — admin endpoints take an ITenantStatusCache to
     // invalidate the cached status on flip. Tests use a no-op stub.
     private RecordingStatusCache _statusCache = null!;
+    // H12 #2 — admin endpoints also evict the connection-resolver pool
+    // on Status flip. Tests use a recording resolver to assert the
+    // EvictAsync call.
+    private RecordingConnectionResolver _connectionResolver = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -47,6 +51,7 @@ public class AdminTenantsTests
         _db = new ControlPlaneDbContext(options);
         _publisher = new RecordingEventPublisher();
         _statusCache = new RecordingStatusCache();
+        _connectionResolver = new RecordingConnectionResolver();
 
         await PlansSeeder.SeedAsync(_db);
     }
@@ -63,6 +68,37 @@ public class AdminTenantsTests
         { status = null; return false; }
         public void Set(Guid tenantId, string? status) { }
         public void Invalidate(Guid tenantId) => Invalidations.Add(tenantId);
+    }
+
+    /// <summary>
+    /// H12 #2 — Test double for the resolver. Records every
+    /// <c>EvictAsync</c> call so tests can assert the admin endpoints
+    /// invalidate the pool after a Status flip.
+    /// </summary>
+    private sealed class RecordingConnectionResolver : ITenantConnectionResolver
+    {
+        public List<Guid> Evictions { get; } = new();
+
+        public ValueTask<Npgsql.NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
+
+        public ValueTask<Npgsql.NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
+
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
+
+        public ValueTask EvictAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Evictions.Add(tenantId);
+            return ValueTask.CompletedTask;
+        }
+
+        public TenantConnectionPoolStats GetStats() => default;
     }
 
     [TearDown]
@@ -350,7 +386,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(
             "Retryable", status: "failed", failureReason: "db-create-timeout");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("pending_verification");
@@ -366,6 +402,12 @@ public class AdminTenantsTests
         // Platform event emitted
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.PROVISIONING_REQUESTED" && e.TenantId == tenantId);
+
+        // H7 + H12 #2 — status cache invalidated AND resolver pool evicted.
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId,
+            "the resolver's data-source pool must be torn down so the next " +
+            "request rebuilds against the post-flip CP row");
     }
 
     [Test]
@@ -373,7 +415,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
         _publisher.Events.Should().BeEmpty();
@@ -382,7 +424,7 @@ public class AdminTenantsTests
     [Test]
     public async Task RetryTenant_Returns404_WhenTenantMissing()
     {
-        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
     }
@@ -394,7 +436,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -408,6 +450,9 @@ public class AdminTenantsTests
 
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.DELETE.REQUESTED" && e.TenantId == tenantId);
+
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId);
     }
 
     [Test]
@@ -415,7 +460,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "failed");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -425,7 +470,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "deleting");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -438,7 +483,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(status: "failed");
         var http = new DefaultHttpContext();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -450,7 +495,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = Guid.NewGuid().ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -462,13 +507,16 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
 
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.DELETE.REQUESTED" && e.TenantId == tenantId);
+
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId);
     }
 
     [Test]
@@ -478,7 +526,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }

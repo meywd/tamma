@@ -5,6 +5,7 @@ using Elsa.Workflows.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.Security;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Pooling;
@@ -73,8 +74,14 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
         var note = Note.Get(context);
         var logger = context.GetService<ILogger<CleanUpFailedTenantActivity>>();
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
+        // M1 — IErrorRedactor scrubs bearer tokens, internal URLs, and
+        // stack traces from any exception message that crosses the
+        // long-lived storage boundary (ProvisioningDetail column +
+        // platform_events.data JSONB). Resolved from DI so the redactor
+        // can be replaced in tests.
+        var redactor = context.GetService<IErrorRedactor>();
         var failedSteps = new List<string>();
-        var stepDetails = new Dictionary<string, string>();
+        var stepDetails = new Dictionary<string, CleanupFailureRecord>();
 
         // The four cleanup steps. Each step is wrapped in a try-catch
         // so a downstream failure doesn't abort the cleanup — the
@@ -105,12 +112,18 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
             catch (Exception ex)
             {
                 failedSteps.Add(step);
-                stepDetails[step] = $"{ex.GetType().Name}: {ex.Message}";
+                // M1 — store the structured failure code + a short,
+                // redacted snippet of the message in long-lived storage.
+                // Full text (with stack) goes to ILogger only, where
+                // log retention is bounded and PII rules apply.
+                var record = ClassifyFailure(step, ex, redactor);
+                stepDetails[step] = record;
                 logger?.LogWarning(
                     ex,
-                    "tenant.cleanup.step_failed step={Step} tenantId={TenantId}",
+                    "tenant.cleanup.step_failed step={Step} tenantId={TenantId} failureCode={FailureCode}",
                     step,
-                    tenantId);
+                    tenantId,
+                    record.FailureCode);
                 try
                 {
                     await publisher.AppendAndPublishAsync(
@@ -122,7 +135,12 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
                             data: new Dictionary<string, object?>
                             {
                                 ["errorType"] = ex.GetType().Name,
-                                ["message"] = ex.Message,
+                                // Long-lived event store — code only +
+                                // redacted message snippet (capped at
+                                // 200 chars). The full ex.Message is
+                                // intentionally NOT serialised here.
+                                ["failureCode"] = record.FailureCode,
+                                ["message"] = record.RedactedSnippet,
                             }),
                         context.CancellationToken).ConfigureAwait(false);
                 }
@@ -238,6 +256,16 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
         }
         else
         {
+            // M1 — project the redacted records into a plain dictionary
+            // before serialising. Keeps the long-lived event payload to
+            // {step → {failureCode, message}} only.
+            var stepDetailsForEvent = stepDetails.ToDictionary(
+                kv => kv.Key,
+                kv => (object?)new Dictionary<string, string>
+                {
+                    ["failureCode"] = kv.Value.FailureCode,
+                    ["message"] = kv.Value.RedactedSnippet,
+                });
             await publisher.AppendAndPublishAsync(
                 TenantLifecycleEvents.BuildEvent(
                     "TENANT.DELETE.FAILED",
@@ -246,7 +274,7 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
                     {
                         ["source"] = "cleanup-workflow",
                         ["failedSteps"] = failedSteps,
-                        ["stepDetails"] = stepDetails,
+                        ["stepDetails"] = stepDetailsForEvent,
                         ["note"] = note,
                         ["requiresManualCleanup"] = true,
                     }),
@@ -259,15 +287,112 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
         }
     }
 
+    /// <summary>
+    /// Build the operator-readable summary that lands in
+    /// <c>tenants.ProvisioningDetail</c>. M1 — uses the structured
+    /// failure code + redacted snippet, never the raw exception message.
+    /// Capped at 1900 chars to fit typical column limits with headroom.
+    /// </summary>
     private static string BuildFailureSummary(
         IReadOnlyList<string> failedSteps,
-        IReadOnlyDictionary<string, string> details)
+        IReadOnlyDictionary<string, CleanupFailureRecord> details)
     {
-        // Cap at 1900 chars to fit comfortably within typical column
-        // limits + leave headroom for diagnostic prefixes.
         var summary = $"Cleanup partial — {failedSteps.Count} step(s) failed: " +
             string.Join("; ",
-                failedSteps.Select(s => $"{s}: {details.GetValueOrDefault(s, "(no detail)")}"));
+                failedSteps.Select(s =>
+                {
+                    if (!details.TryGetValue(s, out var rec))
+                        return $"{s}: (no detail)";
+                    return $"{s}: {rec.FailureCode} — {rec.RedactedSnippet}";
+                }));
         return summary.Length > 1900 ? summary[..1900] : summary;
+    }
+
+    /// <summary>
+    /// M1 — Structured failure record. <see cref="FailureCode"/> is a
+    /// short, fixed-vocabulary identifier suitable for long-lived
+    /// storage + dashboards; <see cref="RedactedSnippet"/> is at most
+    /// 200 chars of redacted exception text. Raw <see cref="System.Exception.Message"/>
+    /// is intentionally NOT carried — full text goes to
+    /// <see cref="ILogger"/> only.
+    /// </summary>
+    internal sealed record CleanupFailureRecord(string FailureCode, string RedactedSnippet);
+
+    /// <summary>
+    /// Maps an exception thrown by a cleanup step to a structured
+    /// failure code. Codes are stable across releases so dashboards +
+    /// alerts can group on them. Order of checks: step-specific failure
+    /// (DROP DATABASE / DROP ROLE / network) first, then generic.
+    /// </summary>
+    internal static CleanupFailureRecord ClassifyFailure(
+        string step,
+        Exception ex,
+        IErrorRedactor? redactor)
+    {
+        var typeName = ex.GetType().Name;
+        var rawMessage = ex.Message ?? string.Empty;
+        // Trim the redacted message to a bounded snippet so the long-
+        // lived store doesn't accumulate verbose Postgres / network
+        // diagnostics. The full text remains in ILogger.
+        var redacted = redactor?.Redact(rawMessage) ?? rawMessage;
+        var snippet = redacted.Length > 200 ? redacted[..200] : redacted;
+
+        // Step-specific classifiers — these dominate the operator UX
+        // because the cleanup workflow has well-known failure shapes.
+        var code = step switch
+        {
+            "evict-pool" => "evict_pool_failed",
+            "drop-tenant-db" => ClassifyDatabaseFailure(typeName, rawMessage),
+            "drop-tenant-role" => ClassifyRoleFailure(typeName, rawMessage),
+            _ => ClassifyGeneric(typeName, rawMessage),
+        };
+        return new CleanupFailureRecord(code, snippet);
+    }
+
+    private static string ClassifyDatabaseFailure(string typeName, string rawMessage)
+    {
+        if (LooksLikeNetwork(typeName, rawMessage))
+            return "network_error";
+        if (LooksLikeAuth(rawMessage))
+            return "permission_denied";
+        return "drop_database_failed";
+    }
+
+    private static string ClassifyRoleFailure(string typeName, string rawMessage)
+    {
+        if (LooksLikeNetwork(typeName, rawMessage))
+            return "network_error";
+        if (LooksLikeAuth(rawMessage))
+            return "permission_denied";
+        return "drop_role_failed";
+    }
+
+    private static string ClassifyGeneric(string typeName, string rawMessage)
+    {
+        if (LooksLikeNetwork(typeName, rawMessage))
+            return "network_error";
+        if (string.Equals(typeName, "OperationCanceledException", StringComparison.Ordinal)
+            || string.Equals(typeName, "TaskCanceledException", StringComparison.Ordinal))
+            return "cancelled";
+        return "step_failed";
+    }
+
+    private static bool LooksLikeNetwork(string typeName, string rawMessage)
+    {
+        if (string.Equals(typeName, "TimeoutException", StringComparison.Ordinal)
+            || string.Equals(typeName, "SocketException", StringComparison.Ordinal)
+            || string.Equals(typeName, "IOException", StringComparison.Ordinal))
+            return true;
+        return rawMessage.Contains("connection", StringComparison.OrdinalIgnoreCase)
+            && (rawMessage.Contains("refused", StringComparison.OrdinalIgnoreCase)
+                || rawMessage.Contains("reset", StringComparison.OrdinalIgnoreCase)
+                || rawMessage.Contains("timeout", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool LooksLikeAuth(string rawMessage)
+    {
+        return rawMessage.Contains("permission", StringComparison.OrdinalIgnoreCase)
+            || rawMessage.Contains("must be owner", StringComparison.OrdinalIgnoreCase)
+            || rawMessage.Contains("not allowed", StringComparison.OrdinalIgnoreCase);
     }
 }

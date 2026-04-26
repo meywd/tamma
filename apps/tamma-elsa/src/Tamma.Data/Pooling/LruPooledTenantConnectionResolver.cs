@@ -106,6 +106,7 @@ public sealed class LruPooledTenantConnectionResolver
     private readonly TenantConnectionPoolMetrics _metrics;
     private readonly TenantConnectionPoolOptions _options;
     private readonly ILogger<LruPooledTenantConnectionResolver> _logger;
+    private readonly ITenantStatusProbe? _statusProbe;
 
     /// <summary>
     /// Hot-path lookup. Value is the <see cref="LinkedListNode{T}"/>
@@ -141,7 +142,8 @@ public sealed class LruPooledTenantConnectionResolver
         IConnectionStringDecryptor decryptor,
         TenantConnectionPoolMetrics metrics,
         IOptions<TenantConnectionPoolOptions> options,
-        ILogger<LruPooledTenantConnectionResolver>? logger = null)
+        ILogger<LruPooledTenantConnectionResolver>? logger = null,
+        ITenantStatusProbe? statusProbe = null)
     {
         ArgumentNullException.ThrowIfNull(cpFactory);
         ArgumentNullException.ThrowIfNull(decryptor);
@@ -153,6 +155,7 @@ public sealed class LruPooledTenantConnectionResolver
         _metrics = metrics;
         _options = options.Value;
         _logger = logger ?? NullLogger<LruPooledTenantConnectionResolver>.Instance;
+        _statusProbe = statusProbe;
 
         if (_options.MaxEntries <= 0)
         {
@@ -177,6 +180,26 @@ public sealed class LruPooledTenantConnectionResolver
         // Fast path. ConcurrentDictionary.TryGetValue is lock-free.
         if (_pools.TryGetValue(tenantId, out var node))
         {
+            // Story 28-8 H12 — before serving a cached pool, consult the
+            // status cache. A cache HIT with a non-active value means an
+            // admin endpoint or workflow flipped the tenant since we
+            // last warmed the pool; falling through to the cold path
+            // forces a fresh CP read which raises
+            // TenantNotProvisionedException with the correct status.
+            // We DO NOT poll CP on every hit — only when the status
+            // probe explicitly reports a non-active value. Probe miss
+            // (no cached entry) keeps the fast-path semantics intact.
+            if (_statusProbe is not null
+                && _statusProbe.TryGet(tenantId, out var cachedStatus)
+                && !IsActiveStatus(cachedStatus))
+            {
+                // Evict-then-rebuild — synchronously sequence the
+                // eviction before the cold CP read so the slow path's
+                // double-check doesn't observe the stale entry.
+                return new ValueTask<NpgsqlDataSource>(
+                    EvictThenResolveAsync(tenantId, cancellationToken));
+            }
+
             // Reposition the LRU under a short lock. We re-check the
             // dictionary after taking the lock because EvictAsync /
             // BuildOrEvict may have removed the entry while we were
@@ -196,6 +219,29 @@ public sealed class LruPooledTenantConnectionResolver
         return new ValueTask<NpgsqlDataSource>(
             ResolveSlowAsync(tenantId, cancellationToken));
     }
+
+    /// <summary>
+    /// H12 — sequenced evict-then-rebuild for the status-flip detection
+    /// path. Runs the eviction first so <see cref="ResolveSlowAsync"/>'s
+    /// double-check inside the build-lock can't observe the stale entry.
+    /// </summary>
+    private async Task<NpgsqlDataSource> EvictThenResolveAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        await EvictAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        return await ResolveSlowAsync(tenantId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Mirror of <see cref="ResolveTenantRowAsync"/>'s active-status
+    /// rule (Doc 04 §2.2). NULL is treated as 'active' so legacy rows
+    /// without the shadow column populated keep working without a
+    /// status backfill.
+    /// </summary>
+    private static bool IsActiveStatus(string? status) =>
+        status is null
+        || string.Equals(status, "active", StringComparison.OrdinalIgnoreCase);
 
     public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
         Guid tenantId,

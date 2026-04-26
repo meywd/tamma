@@ -265,6 +265,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -285,6 +286,12 @@ public static class AdminTenantsEndpoints
         // the new state immediately (per-pod; sibling pods converge
         // via TTL).
         statusCache.Invalidate(tenantId);
+        // H12 #2 — also evict the resolver's data-source pool. The
+        // status cache alone doesn't unwind a warm NpgsqlDataSource —
+        // without this, in-flight handlers continue holding a pool
+        // built against the now-stale connection envelope until the
+        // pool's natural eviction kicks in.
+        await connectionResolver.EvictAsync(tenantId, ct);
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -316,6 +323,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -333,6 +341,7 @@ public static class AdminTenantsEndpoints
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
+        await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -366,6 +375,7 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
         CancellationToken ct = default)
     {
         // 2FA-lite: the caller must echo the tenant id in a header so a
@@ -396,6 +406,7 @@ public static class AdminTenantsEndpoints
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
+        await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
