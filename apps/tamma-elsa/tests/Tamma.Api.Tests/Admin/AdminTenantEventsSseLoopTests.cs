@@ -51,7 +51,7 @@ public class AdminTenantEventsSseLoopTests
         http.RequestAborted = cts.Token;
 
         await AdminTenantEventsSseEndpoint.StreamEvents(
-            tenantId, factory, jsonOpts, loggerFactory, http, cts.Token);
+            tenantId, factory, jsonOpts, loggerFactory, TimeProvider.System, http, cts.Token);
 
         var body = ReadBody(http);
         body.Should().Contain("event: end",
@@ -74,7 +74,7 @@ public class AdminTenantEventsSseLoopTests
         http.RequestAborted = cts.Token;
 
         await AdminTenantEventsSseEndpoint.StreamEvents(
-            Guid.Empty, factory, jsonOpts, new NullLoggerFactory(), http, cts.Token);
+            Guid.Empty, factory, jsonOpts, new NullLoggerFactory(), TimeProvider.System, http, cts.Token);
 
         http.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
     }

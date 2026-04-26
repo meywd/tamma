@@ -573,7 +573,7 @@ public class AdminTenantsTests
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
             _publisher,
-            _timeProvider);
+            _timeProvider, AdminPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await _db.Tenants.IgnoreQueryFilters()
@@ -594,7 +594,7 @@ public class AdminTenantsTests
             new UpdateTenantPlanRequest(Guid.NewGuid()),
             _db,
             _publisher,
-            _timeProvider);
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -609,7 +609,7 @@ public class AdminTenantsTests
             new UpdateTenantPlanRequest(Guid.Empty),
             _db,
             _publisher,
-            _timeProvider);
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -624,7 +624,7 @@ public class AdminTenantsTests
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
             _publisher,
-            _timeProvider);
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }

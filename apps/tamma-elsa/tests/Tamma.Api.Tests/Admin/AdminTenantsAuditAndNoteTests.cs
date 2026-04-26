@@ -33,6 +33,8 @@ public class AdminTenantsAuditAndNoteTests
     private ControlPlaneDbContext _db = null!;
     private RecordingEventPublisher _publisher = null!;
     private RecordingStatusCache _statusCache = null!;
+    private RecordingConnectionResolver _connectionResolver = null!;
+    private TimeProvider _timeProvider = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -46,6 +48,8 @@ public class AdminTenantsAuditAndNoteTests
         _db = new ControlPlaneDbContext(options);
         _publisher = new RecordingEventPublisher();
         _statusCache = new RecordingStatusCache();
+        _connectionResolver = new RecordingConnectionResolver();
+        _timeProvider = TimeProvider.System;
         await PlansSeeder.SeedAsync(_db);
     }
 
@@ -96,7 +100,7 @@ public class AdminTenantsAuditAndNoteTests
         var tenantId = await SeedTenantAsync(status: "failed");
 
         await AdminTenantsEndpoints.RetryTenant(
-            tenantId, _db, _publisher, _statusCache, Operator());
+            tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle();
         var evt = _publisher.Events[0];
@@ -110,7 +114,7 @@ public class AdminTenantsAuditAndNoteTests
         var tenantId = await SeedTenantAsync(status: "active");
 
         await AdminTenantsEndpoints.DeleteTenant(
-            tenantId, _db, _publisher, _statusCache, Operator());
+            tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.DELETE.REQUESTED");
         AssertActorTagsAndData(_publisher.Events[0]);
@@ -124,7 +128,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
         await AdminTenantsEndpoints.ForceDeleteTenant(
-            tenantId, http, _db, _publisher, _statusCache, Operator());
+            tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.DELETE.REQUESTED");
         AssertActorTagsAndData(_publisher.Events[0]);
@@ -138,7 +142,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
         await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.CLEANUP.REQUESTED");
         AssertActorTagsAndData(_publisher.Events[0]);
@@ -154,6 +158,7 @@ public class AdminTenantsAuditAndNoteTests
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
             _publisher,
+            _timeProvider,
             Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "PLAN.UPDATED");
@@ -188,7 +193,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Note"] = "Cleanup approved by SRE on-call.";
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         _publisher.Events.Should().ContainSingle();
@@ -206,7 +211,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Note"] = "phase1\nphase2";  // log-forging payload
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
         _publisher.Events.Should().BeEmpty(
@@ -222,7 +227,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Note"] = "<script>alert(1)</script>";
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -236,7 +241,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Note"] = "data truncated";  // NUL byte
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -250,7 +255,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Note"] = new string('a', 501);
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -264,7 +269,7 @@ public class AdminTenantsAuditAndNoteTests
         // No X-Admin-Note set — must still succeed.
 
         var result = await AdminTenantsEndpoints.CleanupTenant(
-            tenantId, http, _db, _publisher, Operator());
+            tenantId, http, _db, _publisher, _timeProvider, Operator());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
     }
@@ -300,4 +305,31 @@ public class AdminTenantsAuditAndNoteTests
         public void Set(Guid tenantId, string? status) { }
         public void Invalidate(Guid tenantId) { }
     }
+
+    private sealed class RecordingConnectionResolver : ITenantConnectionResolver
+    {
+        public List<Guid> Evictions { get; } = new();
+
+        public ValueTask<Npgsql.NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in audit-event tests.");
+
+        public ValueTask<Npgsql.NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in audit-event tests.");
+
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Not used in audit-event tests.");
+
+        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Evictions.Add(tenantId);
+            return ValueTask.CompletedTask;
+        }
+
+        public TenantConnectionPoolStats GetStats() =>
+            new TenantConnectionPoolStats(0, 0, 0);
+    }
+
 }
