@@ -10,16 +10,21 @@ using Tamma.ElsaServer.Workflows;
 namespace Tamma.Activities.Tests.TenantLifecycle;
 
 /// <summary>
-/// Story 28-5 AC7 — structural assertions on
-/// <see cref="CleanUpFailedTenantWorkflow"/>: the workflow starts with
-/// the cleanup-event trigger, binds inputs, and runs the composite
-/// cleanup activity. Cleanup logic itself lives in the activity for
-/// unit-testability without an Elsa runtime.
+/// H6 + M3 / Story 28-5 AC7 — structural assertions on
+/// <see cref="CleanUpFailedTenantWorkflow"/>: the workflow is a
+/// <see cref="Sequence"/> that starts with the cleanup-event trigger,
+/// binds inputs, and runs four sibling continue-on-error cleanup
+/// activities followed by one terminal activity.
 ///
-/// <para>Round-2 review M3: the first activity is now an
+/// <para><b>Round-2 review fix (H6)</b>: the previous shape was a single
+/// composite <c>CleanUpFailedTenantActivity</c> wrapping a hand-rolled
+/// mini-orchestrator. The new shape decomposes into per-step activities
+/// so Elsa can suspend / replay / cancel between steps.</para>
+///
+/// <para><b>Round-2 review M3</b>: the first activity is an
 /// <see cref="Event"/> bound to
-/// <see cref="CleanUpFailedTenantWorkflow.CleanupRequestedEventName"/>
-/// so the workflow is dispatched when the bridge re-publishes the
+/// <see cref="CleanUpFailedTenantWorkflow.CleanupRequestedEventName"/> so
+/// the workflow is dispatched when the bridge re-publishes the
 /// <c>TENANT.CLEANUP.REQUESTED</c> platform event through
 /// <c>IEventPublisher</c>.</para>
 /// </summary>
@@ -28,9 +33,13 @@ public class CleanUpFailedTenantWorkflowStructureTests
 {
     private static readonly Type[] ExpectedActivitiesInOrder = new[]
     {
-        typeof(Event),                        // round-2 M3 — starter trigger
-        typeof(SetVariable),                  // initInputs
-        typeof(CleanUpFailedTenantActivity),  // composite cleanup step
+        typeof(Event),                                    // round-2 M3 — starter trigger
+        typeof(SetVariable),                              // initInputs
+        typeof(EvictTenantPoolForCleanupActivity),        // step 1
+        typeof(DropTenantDatabaseForCleanupActivity),     // step 2
+        typeof(DropTenantRoleForCleanupActivity),         // step 3
+        typeof(SoftDeleteTenantRowActivity),              // step 4
+        typeof(EmitCleanupTerminalEventActivity),         // terminal
     };
 
     [Test]
@@ -39,14 +48,15 @@ public class CleanUpFailedTenantWorkflowStructureTests
         var workflow = new CleanUpFailedTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
 
-        builder.Object.DefinitionId.Should().Be("clean-up-failed-tenant");
+        builder.Object.DefinitionId.Should().Be("clean-up-failed-tenant",
+            "the API endpoint that publishes TENANT.CLEANUP.REQUESTED binds on this id — DO NOT rename");
         builder.Object.Name.Should().Be("Clean Up Failed Tenant");
         builder.Object.Version.Should().Be(WorkflowVersions.ComputedVersion);
         builder.Object.Description.Should().NotBeNullOrWhiteSpace();
     }
 
     [Test]
-    public void Build_RootIsSequenceWithCompositeStep()
+    public void Build_RootIsSequenceWithExpectedSteps()
     {
         var workflow = new CleanUpFailedTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
@@ -83,5 +93,99 @@ public class CleanUpFailedTenantWorkflowStructureTests
         // via the public EventName property's expression.
         var raw = trigger.EventName.Expression?.Value?.ToString();
         raw.Should().Be(CleanUpFailedTenantWorkflow.CleanupRequestedEventName);
+    }
+
+    [Test]
+    public void Build_EvictPoolPrecedesDropDatabase()
+    {
+        var workflow = new CleanUpFailedTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root!;
+        var activities = sequence.Activities.ToList();
+
+        var evictIdx = activities.FindIndex(a => a is EvictTenantPoolForCleanupActivity);
+        var dropDbIdx = activities.FindIndex(a => a is DropTenantDatabaseForCleanupActivity);
+
+        evictIdx.Should().BeGreaterThan(0);
+        dropDbIdx.Should().BeGreaterThan(0);
+        evictIdx.Should().BeLessThan(dropDbIdx,
+            "the resolver pool must be evicted before DROP DATABASE WITH (FORCE) "
+            + "so the cached NpgsqlDataSource is released first");
+    }
+
+    [Test]
+    public void Build_DropDatabasePrecedesDropRole()
+    {
+        var workflow = new CleanUpFailedTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root!;
+        var activities = sequence.Activities.ToList();
+
+        var dropDbIdx = activities.FindIndex(a => a is DropTenantDatabaseForCleanupActivity);
+        var dropRoleIdx = activities.FindIndex(a => a is DropTenantRoleForCleanupActivity);
+
+        dropDbIdx.Should().BeGreaterThan(0);
+        dropRoleIdx.Should().BeGreaterThan(0);
+        dropDbIdx.Should().BeLessThan(dropRoleIdx,
+            "DROP OWNED BY in DropTenantRoleForCleanupActivity fails if the role still owns the DB");
+    }
+
+    [Test]
+    public void Build_TerminalActivityIsLastInSequence()
+    {
+        // Story 28-5 single-terminal-event invariant: only
+        // EmitCleanupTerminalEventActivity emits a terminal event, and
+        // it must run AFTER every per-step activity has had a chance
+        // to record success/failure into the workflow accumulator.
+        var workflow = new CleanUpFailedTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root!;
+        var activities = sequence.Activities.ToList();
+
+        activities.Last().Should().BeOfType<EmitCleanupTerminalEventActivity>(
+            "the terminal event must fire after every per-step activity has run");
+    }
+
+    [Test]
+    public void Build_SoftDeleteRowImmediatelyPrecedesTerminal()
+    {
+        // Sanity check: the soft-delete is the last "work" step,
+        // followed by the terminal event. Anything between them would
+        // open a window where the terminal event reports success but
+        // the row isn't yet in the deleted state.
+        var workflow = new CleanUpFailedTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root!;
+        var activities = sequence.Activities.ToList();
+
+        var softDeleteIdx = activities.FindIndex(a => a is SoftDeleteTenantRowActivity);
+        var terminalIdx = activities.FindIndex(a => a is EmitCleanupTerminalEventActivity);
+        softDeleteIdx.Should().BeGreaterThan(0);
+        terminalIdx.Should().Be(softDeleteIdx + 1,
+            "the terminal event must immediately follow the soft-delete step");
+    }
+
+    [Test]
+    public void Build_AllStepActivitiesAreContinueOnError()
+    {
+        // Defining-feature assertion for H6: every per-step activity
+        // in the cleanup Sequence inherits from CleanupStepActivity
+        // (which catches internally) — none of them inherits from
+        // TenantLifecycleActivity (which throws on failure). This is
+        // what gives the workflow continue-on-error semantics step by
+        // step.
+        var workflow = new CleanUpFailedTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root!;
+        var stepActivities = sequence.Activities
+            .Where(a => a is not SetVariable and not EmitCleanupTerminalEventActivity and not Event)
+            .ToList();
+
+        stepActivities.Should().HaveCount(4);
+        foreach (var step in stepActivities)
+        {
+            step.Should().BeAssignableTo<CleanupStepActivity>(
+                $"{step.GetType().Name} must inherit from CleanupStepActivity for continue-on-error semantics");
+        }
     }
 }
