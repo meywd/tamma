@@ -345,6 +345,10 @@ public class KekRotationCoordinatorTests
             return ValueTask.CompletedTask;
         }
 
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException("not exercised by these tests");
+
         public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
     }
 

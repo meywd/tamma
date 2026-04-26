@@ -45,14 +45,16 @@ namespace Tamma.Data.Pooling;
 /// </para>
 ///
 /// <para><b>Eviction</b>: <see cref="EvictAsync"/> removes a tenant from
-/// the cache and disposes its data source. Npgsql's
-/// <c>NpgsqlDataSource.DisposeAsync()</c> waits for in-flight
-/// <see cref="NpgsqlConnection"/>s to be returned before tearing the
-/// pool down, so a request mid-query is not yanked. Story 28-4 does NOT
-/// implement the brief's ref-counted handle (AC4) — that's deferred to
-/// the SSE/streaming work in 28-5/28-8 where indefinite handle lifetimes
-/// are a real concern. Best-effort grace plus Npgsql's own draining is
-/// sufficient for the request/response paths shipped in Wave A.</para>
+/// the cache. Npgsql's <c>NpgsqlDataSource.DisposeAsync()</c> waits for
+/// in-flight <see cref="NpgsqlConnection"/>s to be returned before
+/// tearing the pool down, which covers the realistic concurrency window
+/// for short-lived request/response handlers. For long-running consumers
+/// (SSE streams, hosted services that hold a data-source reference
+/// across awaits) the resolver also offers <see cref="LeaseAsync"/>
+/// returning a ref-counted <see cref="TenantConnectionHandle"/>; eviction
+/// while a handle is open marks the entry pending-dispose and defers the
+/// actual <c>NpgsqlDataSource.DisposeAsync()</c> until the final handle
+/// releases (Story 28-4 AC4).</para>
 ///
 /// <para><b>Per-tenant Elsa schema</b> (<see cref="GetElsaDataSourceAsync"/>)
 /// currently mirrors the app data source — Story 28-5 wires the
@@ -70,17 +72,33 @@ namespace Tamma.Data.Pooling;
 /// arrives.</para>
 /// </summary>
 public sealed class LruPooledTenantConnectionResolver
-    : ITenantConnectionResolver, IAsyncDisposable
+    : ITenantConnectionResolver, IAdminPoolDiagnostics, IAsyncDisposable
 {
     /// <summary>
-    /// LRU node payload — the cached data source, the tenant id, and a
-    /// monotonic last-access stamp. The <see cref="_lru"/> linked list
+    /// LRU node payload — the cached data source, the tenant id, and an
+    /// optional master <see cref="TenantConnectionHandle"/> covering any
+    /// outstanding ref-counted leases. The <see cref="_lru"/> linked list
     /// orders these from most- to least-recently used.
+    ///
+    /// <para>The master handle is lazily created on the first
+    /// <see cref="LeaseAsync"/> call for the tenant; bare
+    /// <see cref="GetDataSourceAsync"/> consumers don't allocate a handle
+    /// (and don't gain ref-count protection — they rely on Npgsql's own
+    /// draining for short-lived requests).</para>
     /// </summary>
     private sealed class CacheEntry
     {
         public required Guid TenantId { get; init; }
         public required NpgsqlDataSource DataSource { get; init; }
+
+        // Lazily created on first LeaseAsync. The master starts with
+        // ref count = 1 (representing "the cache still holds the
+        // entry"); LeaseAsync acquires sibling handles by incrementing.
+        // EvictAsync (or LRU eviction) calls MarkPendingDispose() on
+        // the master + disposes the master to release the cache lease;
+        // the underlying NpgsqlDataSource is torn down when the final
+        // sibling lease releases (or immediately if none were taken).
+        public TenantConnectionHandle? MasterHandle;
     }
 
     private readonly IDbContextFactory<ControlPlaneDbContext> _cpFactory;
@@ -186,6 +204,87 @@ public sealed class LruPooledTenantConnectionResolver
         // Story 28-5 splits these once dedicated Elsa DBs land.
         => GetDataSourceAsync(tenantId, cancellationToken);
 
+    /// <summary>
+    /// Story 28-4 AC4 — acquire a ref-counted lease over the tenant's
+    /// per-tenant data source. Use this for long-running consumers
+    /// (SSE streams, hosted services, Elsa long-running activities)
+    /// that hold the data-source reference across multiple awaits and
+    /// could otherwise be yanked by a mid-stream
+    /// <see cref="EvictAsync"/>.
+    ///
+    /// <para>Short-lived request/response handlers should keep using
+    /// <see cref="GetDataSourceAsync"/> — it's cheaper and Npgsql's own
+    /// connection draining covers the eviction race for that pattern.</para>
+    ///
+    /// <para>Disposal rules: always wrap the returned handle in
+    /// <c>await using</c>. Once disposed, <see cref="TenantConnectionHandle.DataSource"/>
+    /// throws <see cref="ObjectDisposedException"/> on access — do not
+    /// cache the data source past handle disposal.</para>
+    /// </summary>
+    public async ValueTask<ITenantConnectionLease> LeaseAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        // Reuse the same fast/slow path as GetDataSourceAsync. The
+        // public method handles the LRU reposition + cold-build path;
+        // we then ensure the cache entry has a master handle and
+        // mint a sibling.
+        await GetDataSourceAsync(tenantId, cancellationToken).ConfigureAwait(false);
+
+        // After the await above, the entry MUST be in the cache (modulo
+        // a pathological race with eviction — handled by the loop).
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_pools.TryGetValue(tenantId, out var node))
+            {
+                // Evicted between our build and our handle acquisition.
+                // Re-build by recursing into the cold path.
+                await GetDataSourceAsync(tenantId, cancellationToken)
+                    .ConfigureAwait(false);
+                continue;
+            }
+
+            // Lazily create the master handle. Use Interlocked.CompareExchange
+            // so two concurrent LeaseAsync callers don't race to create
+            // two masters (only the first one wins; the second is GC'd).
+            var entry = node.Value;
+            var master = entry.MasterHandle;
+            if (master is null)
+            {
+                var fresh = new TenantConnectionHandle(
+                    tenantId,
+                    entry.DataSource,
+                    onDisposed: HandleFinalLeaseReleased);
+                master = Interlocked.CompareExchange(ref entry.MasterHandle, fresh, null) ?? fresh;
+                if (!ReferenceEquals(master, fresh))
+                {
+                    // Lost the race — discard our fresh handle. Its
+                    // ref count is 1 with no callback target; explicit
+                    // dispose to honour IAsyncDisposable semantics.
+                    await fresh.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+
+            try
+            {
+                return master.Acquire();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Master was being torn down concurrently. Re-loop.
+                continue;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"LeaseAsync({tenantId:N}) failed after 3 retries — repeated " +
+            "race against eviction. This indicates an eviction storm; " +
+            "check tamma.tenant_pools.evicted_total.");
+    }
+
     public async ValueTask EvictAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default)
@@ -193,13 +292,13 @@ public sealed class LruPooledTenantConnectionResolver
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        NpgsqlDataSource? toDispose = null;
+        CacheEntry? evicted = null;
         lock (_lruLock)
         {
             if (_pools.TryRemove(tenantId, out var node))
             {
                 _lru.Remove(node);
-                toDispose = node.Value.DataSource;
+                evicted = node.Value;
             }
         }
 
@@ -207,13 +306,13 @@ public sealed class LruPooledTenantConnectionResolver
         // the rotation case where the encrypted CS changed.
         _tenantRowCache.TryRemove(tenantId, out _);
 
-        if (toDispose is not null)
+        if (evicted is not null)
         {
             _metrics.RecordEviction("explicit");
             _logger.LogInformation(
                 "tenant.pool.evicted tenantId={TenantId} reason=explicit",
                 tenantId);
-            await toDispose.DisposeAsync().ConfigureAwait(false);
+            await DisposeEvictedEntryAsync(evicted).ConfigureAwait(false);
         }
     }
 
@@ -229,25 +328,31 @@ public sealed class LruPooledTenantConnectionResolver
 
         // Snapshot under the lock so we don't observe partially-evicted
         // state while disposing.
-        List<NpgsqlDataSource> sources;
+        List<CacheEntry> entries;
         lock (_lruLock)
         {
-            sources = _lru.Select(e => e.DataSource).ToList();
+            entries = _lru.ToList();
             _lru.Clear();
             _pools.Clear();
         }
 
-        foreach (var ds in sources)
+        foreach (var entry in entries)
         {
+            // Use the same eviction path so any open ref-counted leases
+            // (LeaseAsync) hold the data source open until they release.
+            // Resolver shutdown is best-effort — outstanding handles
+            // typically belong to background services that have already
+            // received the shutdown signal.
             try
             {
-                await ds.DisposeAsync().ConfigureAwait(false);
+                await DisposeEvictedEntryAsync(entry).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
                     ex,
-                    "tenant.pool.dispose_failed during resolver shutdown");
+                    "tenant.pool.dispose_failed during resolver shutdown for tenant {TenantId}",
+                    entry.TenantId);
             }
         }
 
@@ -256,6 +361,55 @@ public sealed class LruPooledTenantConnectionResolver
         _buildLocks.Clear();
 
         _metrics.Dispose();
+    }
+
+    // ── IAdminPoolDiagnostics (Story 28-4 AC5) ────────────────────────
+
+    public DetailedPoolStats GetDetailedStats()
+    {
+        var hits = _metrics.HitsTotal;
+        var misses = _metrics.MissesTotal;
+        var total = hits + misses;
+        var ratio = total == 0 ? 0d : (double)hits / total;
+        return new DetailedPoolStats(
+            WarmPoolCount: (int)_metrics.WarmPoolCount,
+            OpenedTotal: _metrics.OpenedTotal,
+            EvictedTotal: _metrics.EvictedTotal,
+            EvictedByLru: _metrics.EvictedByLruTotal,
+            EvictedExplicit: _metrics.EvictedExplicitTotal,
+            HitsTotal: hits,
+            MissesTotal: misses,
+            HitRatio: ratio);
+    }
+
+    public IReadOnlyList<WarmTenantEntry> ListWarmTenants(int limit)
+    {
+        // Clamp 1..1000 — the cache is bounded by MaxEntries (default
+        // 500) but explicit clamps keep the surface area predictable
+        // across deploys.
+        if (limit < 1) limit = 1;
+        if (limit > 1000) limit = 1000;
+
+        // Snapshot under the LRU lock. The list ordering is MRU-first
+        // because LinkedList is rebuilt to match every cache hit's
+        // reposition (AddFirst on hit, Remove last on overflow).
+        lock (_lruLock)
+        {
+            var result = new List<WarmTenantEntry>(Math.Min(limit, _lru.Count));
+            foreach (var entry in _lru)
+            {
+                if (result.Count >= limit) break;
+                // RefCount = 1 (cache lease) + N (outstanding handles).
+                // Surface only N (outstanding) to keep the meaning
+                // intuitive for operators — "0 means safe to evict
+                // immediately, >0 means deferral required".
+                var leases = entry.MasterHandle is null
+                    ? 0
+                    : Math.Max(0, entry.MasterHandle.RefCount - 1);
+                result.Add(new WarmTenantEntry(entry.TenantId, leases));
+            }
+            return result;
+        }
     }
 
     // ── private helpers ───────────────────────────────────────────────
@@ -332,17 +486,7 @@ public sealed class LruPooledTenantConnectionResolver
                     "tenant.pool.evicted tenantId={TenantId} reason=lru",
                     evicted.TenantId);
                 _tenantRowCache.TryRemove(evicted.TenantId, out _);
-                try
-                {
-                    await evicted.DataSource.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "tenant.pool.dispose_failed for evicted tenant {TenantId}",
-                        evicted.TenantId);
-                }
+                await DisposeEvictedEntryAsync(evicted).ConfigureAwait(false);
             }
 
             return dataSource;
@@ -457,6 +601,96 @@ public sealed class LruPooledTenantConnectionResolver
     {
         if (Volatile.Read(ref _disposed) == 1)
             throw new ObjectDisposedException(nameof(LruPooledTenantConnectionResolver));
+    }
+
+    /// <summary>
+    /// Dispose path for an entry that has just been removed from the
+    /// cache (either by <see cref="EvictAsync"/> or the LRU-overflow
+    /// branch in <see cref="ResolveSlowAsync"/>). If a master handle
+    /// exists, marks it pending-dispose and disposes it (releasing the
+    /// implicit cache lease); the underlying <c>NpgsqlDataSource</c>
+    /// is then torn down either immediately (no outstanding sibling
+    /// leases) or once the last sibling releases (deferred-dispose
+    /// path through <see cref="HandleFinalLeaseReleased"/>). When no
+    /// master exists, the data source is disposed inline because no
+    /// long-running consumer can be holding it open via
+    /// <see cref="LeaseAsync"/>.
+    /// </summary>
+    private async Task DisposeEvictedEntryAsync(CacheEntry entry)
+    {
+        var master = entry.MasterHandle;
+        if (master is null)
+        {
+            // No leases ever taken — short-lived request/response
+            // consumers only. Npgsql's own draining covers in-flight
+            // queries; just dispose the data source.
+            try
+            {
+                await entry.DataSource.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "tenant.pool.dispose_failed for tenant {TenantId}",
+                    entry.TenantId);
+            }
+            return;
+        }
+
+        // Master exists. Mark pending so the deferred-dispose callback
+        // fires when the last sibling releases. The MarkPendingDispose
+        // return value tells us how many leases were outstanding when
+        // we marked — useful for the deferred-vs-immediate decision +
+        // for ops logging.
+        var outstanding = master.MarkPendingDispose();
+
+        // Release the implicit cache lease. If outstanding > 0, the
+        // master's ref count drops to outstanding (still > 0) — the
+        // callback fires later. If outstanding == 0 (only the cache
+        // lease itself), the callback fires synchronously (well,
+        // through the sync ValueTask path) and we dispose the data
+        // source right away.
+        if (outstanding > 1)
+        {
+            _logger.LogInformation(
+                "tenant.pool.dispose_deferred tenantId={TenantId} outstandingLeases={Leases}",
+                entry.TenantId,
+                outstanding - 1);
+        }
+        await master.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Callback wired into every master <see cref="TenantConnectionHandle"/>
+    /// at creation. Fires when the final sibling lease releases AND the
+    /// resolver has marked the entry pending-dispose. Disposes the
+    /// underlying <c>NpgsqlDataSource</c> on a fire-and-forget task so
+    /// the lease-releasing thread doesn't block on Postgres I/O.
+    /// </summary>
+    private void HandleFinalLeaseReleased(TenantConnectionHandle handle)
+    {
+        // Capture the data source via the internal accessor — the
+        // handle's public DataSource getter throws because the handle
+        // is now disposed. Fire-and-forget: the lease-release path is
+        // synchronous from the consumer's perspective (DisposeAsync
+        // returns ValueTask.CompletedTask) so we move the actual
+        // Postgres-I/O dispose onto a background task.
+        var ds = handle.UnsafeRawDataSource;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ds.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "tenant.pool.dispose_failed (deferred) for tenant {TenantId}",
+                    handle.TenantId);
+            }
+        });
     }
 
     private readonly record struct ResolvedTenantRow(byte[] Envelope, int? KekVersion);

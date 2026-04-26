@@ -39,10 +39,32 @@ public interface ITenantConnectionResolver
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Story 28-4 AC4 — acquire a ref-counted lease over the tenant's
+    /// per-tenant data source. Use for long-running consumers (SSE
+    /// streams, hosted services, Elsa long-running activities) that
+    /// hold the data-source reference across multiple awaits.
+    /// Short-lived request/response handlers should keep using
+    /// <see cref="GetDataSourceAsync"/> — it's cheaper and Npgsql's
+    /// own connection draining covers the eviction race for that
+    /// pattern.
+    ///
+    /// <para>Disposal rules: always wrap the returned lease in
+    /// <c>await using</c>. While at least one lease is open, the
+    /// resolver defers the actual <c>NpgsqlDataSource.DisposeAsync()</c>
+    /// until the final lease releases; eviction still removes the
+    /// entry from the LRU cache so subsequent calls build a fresh
+    /// pool.</para>
+    /// </summary>
+    ValueTask<ITenantConnectionLease> LeaseAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Drops a tenant from the pool cache (called after delete or after
     /// connection-string rotation). No-op if the tenant has no warm
     /// pool. Implementation must <see cref="IAsyncDisposable.DisposeAsync"/>
-    /// the evicted data source.
+    /// the evicted data source — or defer the dispose if any lease
+    /// (see <see cref="LeaseAsync"/>) is still outstanding.
     /// </summary>
     ValueTask EvictAsync(
         Guid tenantId,

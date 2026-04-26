@@ -117,6 +117,19 @@ builder.Services.AddElsa(elsa =>
     elsa.AddWorkflowsFrom<LlmCallWorkflow>();
 });
 
+// Story 28-10 — scheduler that fires HourlyAnalyticsRollupWorkflow on
+// the configured cron offset (default: minute 5 of every hour, UTC).
+// Lightweight in-process scheduler — preferred over an external cron
+// dependency since the Elsa host is the only consumer.
+builder.Services.AddOptions<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupSchedulerOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupSchedulerOptions.SectionName)
+            .Bind(opts));
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<TimeProvider>(builder.Services, _ => TimeProvider.System);
+builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler>();
+
 // CORS for Tamma API and Dashboard
 builder.Services.AddCors(options =>
 {

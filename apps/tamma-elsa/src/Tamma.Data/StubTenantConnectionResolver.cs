@@ -63,6 +63,16 @@ public sealed class StubTenantConnectionResolver
         CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_dataSource);
 
+    public ValueTask<ITenantConnectionLease> LeaseAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default) =>
+        // Stub doesn't track ref counts (single shared data source) —
+        // hand back a no-op lease that wraps the shared data source.
+        // The real LRU resolver overrides this to return a proper
+        // ref-counted handle.
+        ValueTask.FromResult<ITenantConnectionLease>(
+            new NoopLease(tenantId, _dataSource));
+
     public ValueTask EvictAsync(
         Guid tenantId,
         CancellationToken cancellationToken = default) =>
@@ -75,4 +85,39 @@ public sealed class StubTenantConnectionResolver
 
     public ValueTask DisposeAsync() =>
         _owned ? _dataSource.DisposeAsync() : ValueTask.CompletedTask;
+
+    /// <summary>
+    /// Trivial <see cref="ITenantConnectionLease"/> for the stub
+    /// resolver — wraps the shared data source without ref counting.
+    /// Disposing the lease is a no-op because the shared data source's
+    /// lifetime is owned by the resolver, not the lease.
+    /// </summary>
+    private sealed class NoopLease : ITenantConnectionLease
+    {
+        private int _disposed;
+        public NoopLease(Guid tenantId, NpgsqlDataSource dataSource)
+        {
+            TenantId = tenantId;
+            _dataSource = dataSource;
+        }
+
+        public Guid TenantId { get; }
+        private readonly NpgsqlDataSource _dataSource;
+
+        public NpgsqlDataSource DataSource
+        {
+            get
+            {
+                if (Volatile.Read(ref _disposed) == 1)
+                    throw new ObjectDisposedException(nameof(NoopLease));
+                return _dataSource;
+            }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Exchange(ref _disposed, 1);
+            return ValueTask.CompletedTask;
+        }
+    }
 }

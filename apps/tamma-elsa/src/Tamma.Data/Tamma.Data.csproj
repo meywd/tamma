@@ -26,4 +26,15 @@
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
   </ItemGroup>
 
+  <!--
+    Story 28-4 — expose internals (TenantConnectionHandle.Acquire,
+    MarkPendingDispose, ctor) to the API test project so tests can
+    drive the ref-count state machine directly. The handle's Acquire +
+    MarkPendingDispose surface is intentionally internal — only the
+    LRU resolver should mint/demote handles in production.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tamma.Api.Tests" />
+  </ItemGroup>
+
 </Project>

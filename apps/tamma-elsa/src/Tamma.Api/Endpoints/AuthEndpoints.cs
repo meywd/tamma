@@ -493,6 +493,7 @@ public static class AuthEndpoints
     public static async Task<IResult> Logout(
         IRefreshTokenRepository refreshTokenRepo,
         [FromServices] IConfiguration config,
+        ClaimsPrincipal principal,
         HttpContext httpContext)
     {
         // Logout accepts an optional body refresh token to revoke it.
@@ -502,6 +503,28 @@ public static class AuthEndpoints
         if (!string.IsNullOrEmpty(domain))
             deleteOptions.Domain = domain;
         httpContext.Response.Cookies.Delete("tamma_session", deleteOptions);
+
+        // Story 28-9 AC6 — `?all=true` revokes EVERY active refresh token
+        // for the user, across all tenants and devices. Used by the
+        // dashboard's "sign out everywhere" affordance and by admin
+        // forced-logout. Falls back to the per-token revocation when
+        // `?all=true` is absent (or the user isn't authenticated).
+        var revokeAll = string.Equals(
+            httpContext.Request.Query["all"].ToString(),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (revokeAll)
+        {
+            var userIdRaw = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (Guid.TryParse(userIdRaw, out var userId))
+            {
+                await refreshTokenRepo.RevokeAllForUserAsync(userId);
+                return Results.Ok(new { message = "Logged out everywhere", revokedAll = true });
+            }
+            // Fall through to per-token path if we can't identify the user.
+        }
 
         if (httpContext.Request.HasJsonContentType())
         {

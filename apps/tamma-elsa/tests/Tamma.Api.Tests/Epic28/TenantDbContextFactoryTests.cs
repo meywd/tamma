@@ -141,11 +141,26 @@ public class TenantDbContextFactoryTests
             CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
 
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<ITenantConnectionLease>(
+                new FakeLease(tenantId, _dataSource));
+
         public TenantConnectionPoolStats GetStats() =>
             new(WarmPoolCount: 1,
                 TotalPoolsOpenedSinceStartup: 1,
                 TotalPoolsEvictedSinceStartup: 0);
 
         public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
+    }
+
+    private sealed class FakeLease : ITenantConnectionLease
+    {
+        public FakeLease(Guid tenantId, NpgsqlDataSource ds)
+        { TenantId = tenantId; DataSource = ds; }
+        public Guid TenantId { get; }
+        public NpgsqlDataSource DataSource { get; }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

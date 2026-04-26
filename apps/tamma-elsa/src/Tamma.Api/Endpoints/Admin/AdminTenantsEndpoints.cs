@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Dtos.Admin;
+using Tamma.Api.Services.TenantStatus;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -263,6 +264,7 @@ public static class AdminTenantsEndpoints
         Guid tenantId,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        ITenantStatusCache statusCache,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -279,6 +281,10 @@ public static class AdminTenantsEndpoints
         db.Entry(tenant).Property("FailureReason").CurrentValue = null;
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        // Story 28-8 — drop the cached status so the next request sees
+        // the new state immediately (per-pod; sibling pods converge
+        // via TTL).
+        statusCache.Invalidate(tenantId);
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -309,6 +315,7 @@ public static class AdminTenantsEndpoints
         Guid tenantId,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        ITenantStatusCache statusCache,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -325,6 +332,7 @@ public static class AdminTenantsEndpoints
         db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        statusCache.Invalidate(tenantId);  // Story 28-8
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -357,6 +365,7 @@ public static class AdminTenantsEndpoints
         HttpContext http,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        ITenantStatusCache statusCache,
         CancellationToken ct = default)
     {
         // 2FA-lite: the caller must echo the tenant id in a header so a
@@ -386,6 +395,7 @@ public static class AdminTenantsEndpoints
         db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        statusCache.Invalidate(tenantId);  // Story 28-8
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -403,6 +413,74 @@ public static class AdminTenantsEndpoints
             tenantId,
             StatusDeleting,
             "Force-delete queued — destructive drop runs immediately (cooling-off waived)."));
+    }
+
+    // ── POST /api/admin/tenants/{id}/cleanup ──
+
+    /// <summary>
+    /// Story 28-5 AC7 — operator-triggered "best effort" cleanup for a
+    /// tenant left in a damaged state (half-provisioned, half-deleted,
+    /// or failed compensation). Emits <c>TENANT.CLEANUP.REQUESTED</c>;
+    /// the global-Elsa <c>CleanUpFailedTenantWorkflow</c> picks it up
+    /// and runs the idempotent teardown sequence with continue-on-error
+    /// semantics. The workflow emits a single terminal event
+    /// (<c>TENANT.DELETED.SUCCESS</c> or <c>TENANT.DELETE.FAILED</c>)
+    /// and, on partial failure, sets
+    /// <c>tenants.ProvisioningState='requires_manual_cleanup'</c> +
+    /// <c>ProvisioningDetail=&lt;summary&gt;</c>.
+    ///
+    /// <para>Unlike <c>delete</c> / <c>force-delete</c>, this does NOT
+    /// require a particular <c>Status</c> — cleanup is for tenants
+    /// already known to be damaged. The endpoint just verifies the
+    /// tenant row exists + isn't already soft-deleted.</para>
+    /// </summary>
+    public static async Task<IResult> CleanupTenant(
+        Guid tenantId,
+        HttpContext http,
+        ControlPlaneDbContext db,
+        IPlatformEventPublisher publisher,
+        CancellationToken ct = default)
+    {
+        // 2FA-lite per the force-delete pattern — cleanup runs
+        // destructive DDL (DROP DATABASE, DROP ROLE) and a fat-finger
+        // POST should not nuke a tenant by accident.
+        var confirm = http.Request.Headers["X-Admin-Confirm"].ToString();
+        if (!string.Equals(confirm, tenantId.ToString(), StringComparison.OrdinalIgnoreCase))
+            return Results.Json(
+                new
+                {
+                    error = "confirmation_required",
+                    message = "X-Admin-Confirm header must echo the tenant id to authorise cleanup.",
+                },
+                statusCode: StatusCodes.Status400BadRequest);
+
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        // Optional operator note for the audit trail.
+        var note = http.Request.Headers["X-Admin-Note"].ToString();
+        if (note.Length > 500) note = note[..500];
+
+        await publisher.AppendAndPublishAsync(
+            BuildAdminEvent(
+                "TENANT.CLEANUP.REQUESTED",
+                tenantId,
+                new Dictionary<string, object?>
+                {
+                    ["requestedAt"] = DateTime.UtcNow,
+                    ["source"] = "admin-cleanup",
+                    ["note"] = string.IsNullOrWhiteSpace(note) ? null : note,
+                    ["currentStatus"] = (string?)db.Entry(tenant).Property("Status").CurrentValue,
+                }),
+            ct);
+
+        return Results.Ok(new AdminTenantActionResponse(
+            tenantId,
+            (string?)db.Entry(tenant).Property("Status").CurrentValue ?? "unknown",
+            "Cleanup queued — global-Elsa workflow will run best-effort teardown."));
     }
 
     // ── PATCH /api/admin/tenants/{id}/plan ──

@@ -14,7 +14,9 @@ using Tamma.Api.Infrastructure;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
 using Tamma.Core.Interfaces;
+using Tamma.Api.Services.PlatformTasks;
 using Tamma.Data;
+using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -224,6 +226,46 @@ builder.Services.AddSingleton<
     Tamma.Api.Services.Secrets.AesGcmConnectionStringDecryptor>();
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
+
+// ── Story 28-4 — production tenant connection pool (LRU + handles) ──
+//
+// Replaces the StubTenantConnectionResolver registered by AddTammaData
+// with the LRU-cached LruPooledTenantConnectionResolver. Callers (every
+// per-tenant DbContext build, every TenantDbContextFactory.CreateAsync)
+// gain warm-pool reuse + ref-counted leases for SSE/streaming consumers.
+//
+// Wired AFTER AddTammaData so this Replace+AddSingleton wins over the
+// stub's TryAddSingleton fallback. The CP connection string drives the
+// resolver's pooled IDbContextFactory<ControlPlaneDbContext> for cold-
+// miss tenant-row lookups.
+//
+// Test fixtures and dev environments without a real CP connection
+// string keep the StubTenantConnectionResolver wiring (good enough for
+// the EF query-filter fallback that the existing tests rely on).
+if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
+{
+    builder.Services.AddTenantConnectionPool(
+        builder.Configuration,
+        controlPlaneConnectionString);
+
+    // Optional pre-warm of top-N most-active tenants on startup. Off
+    // by default (TenantConnectionPool:Warmup:Enabled=false). Reads
+    // the top-tenants list from Story 28-10's IPlatformAnalyticsService
+    // — fresh installs see an empty list and skip cleanly.
+    builder.Services.Configure<Tamma.Api.Services.PoolWarmupOptions>(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
+            .Bind(opts));
+    builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
+}
+else
+{
+    Log.Information(
+        "Story 28-4 — no ControlPlane connection string configured; " +
+        "tenant connection pool stays on the StubTenantConnectionResolver. " +
+        "Set ConnectionStrings:ControlPlane to enable the LRU pool + " +
+        "/api/admin/pools/* diagnostics.");
+}
 
 // Coordinator drives the platform-wide KEK rotation flow. Singleton —
 // only one rotation can be in flight at a time.
@@ -584,6 +626,24 @@ builder.Services.AddScoped<
     Tamma.Api.Services.Analytics.IPlatformAnalyticsService,
     Tamma.Api.Services.Analytics.PlatformAnalyticsService>();
 
+// Story 28-8 AC3 — short-TTL tenant status cache (per-pod, in-memory).
+// Cuts CP round-trips in TenantContextMiddleware on hot tenant requests.
+// Cluster-wide invalidation (RabbitMQ pub/sub) is a future enhancement —
+// per-pod cache + 10s TTL provides eventual consistency in the meantime.
+builder.Services.AddOptions<Tamma.Api.Services.TenantStatus.TenantStatusCacheOptions>()
+    .Configure(opts => builder.Configuration
+        .GetSection(Tamma.Api.Services.TenantStatus.TenantStatusCacheOptions.SectionName)
+        .Bind(opts));
+builder.Services.AddSingleton<
+    Tamma.Api.Services.TenantStatus.ITenantStatusCache,
+    Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>();
+
+// Story 28-6 — platform-task worker (drains platform_queued_tasks via
+// IPlatformTaskHandler routing). Concrete handlers are registered by
+// each capability owner (e.g. webhook routing in Story 28-7); the
+// worker itself is hosted-service singleton + registry singleton.
+builder.Services.AddPlatformTaskWorker(builder.Configuration);
+
 // ────────────────────────────────────────────────────────────────────────────
 // Authentication + Authorization
 // ────────────────────────────────────────────────────────────────────────────
@@ -892,6 +952,33 @@ admin.MapGet("/tenants/{tenantId:guid}/provisioning", AdminEndpoints.GetTenantPr
 admin.MapPost("/tenants/{tenantId:guid}/deprovision", AdminEndpoints.DeprovisionTenant)
     .RequireAuthorization("OwnerAccess");
 
+// Story 28-4 AC5 — per-tenant connection pool diagnostics. Owner-only
+// because the diagnostics expose cross-tenant infrastructure state +
+// the evict endpoint can disrupt any tenant's request path. The
+// handlers themselves return 503 when the stub resolver is wired (test
+// fixtures + non-cutover composition roots) so missing diagnostics
+// surface as a clean error rather than a 500.
+admin.MapGet("/pools/stats", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.GetStats)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/pools/tenants", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.ListTenants)
+    .RequireAuthorization("OwnerAccess");
+admin.MapPost("/pools/{tenantId:guid}/evict", Tamma.Api.Endpoints.Admin.PoolsAdminEndpoints.Evict)
+    .RequireAuthorization("OwnerAccess");
+
+// Story 28-11 AC3 — SSE stream of platform events for one tenant.
+// Owner-only because it surfaces cross-tenant infra events. The
+// connection caps at 30 minutes; clients reconnect on close.
+admin.MapGet("/tenants/{tenantId:guid}/events/stream",
+        Tamma.Api.Endpoints.Admin.AdminTenantEventsSseEndpoint.StreamEvents)
+    .RequireAuthorization("OwnerAccess");
+
+// Story 28-6 — admin diagnostics for platform-side queues
+// (platform_queued_tasks, platform_email_outbox, platform_events).
+// Owner-only because it exposes cross-tenant infra state.
+admin.MapGet("/diagnostics/platform-queues",
+        Tamma.Api.Endpoints.Admin.PlatformQueuesAdminEndpoints.GetDiagnostics)
+    .RequireAuthorization("OwnerAccess");
+
 // Story 28-12 — KEK rotation. Platform-owner only because rotating
 // the master key is a once-per-quarter operator action with global
 // blast radius. POST /start kicks off the re-encrypt loop and returns
@@ -938,6 +1025,11 @@ admin.MapPost("/tenants/{tenantId:guid}/actions/delete",
     .RequireAuthorization("OwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/actions/force-delete",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ForceDeleteTenant)
+    .RequireAuthorization("OwnerAccess");
+// Story 28-5 AC7 — operator-triggered cleanup of damaged tenants.
+// Owner-only because cleanup runs destructive DDL.
+admin.MapPost("/tenants/{tenantId:guid}/cleanup",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.CleanupTenant)
     .RequireAuthorization("OwnerAccess");
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
@@ -1134,6 +1226,13 @@ orgs.MapDelete("/{tenantId:guid}/alert-channels/{id:guid}",
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");
+// Story 28-5 AC6 — public polling endpoint for the onboarding flow.
+// Allow-listed for users with a membership for {id} (or platform
+// owner). Accessible during provisioning so the onboarding poller can
+// see step progress before the tenant flips to active.
+app.MapGet("/api/v1/tenants/{tenantId:guid}/status",
+        TenantStatusEndpoint.GetStatus)
+    .RequireAuthorization("AuthenticatedAny");
 
 // Story 29-3 — reveal-once token exchange. The token IS the auth (a
 // 256-bit bearer secret) so the route is not behind MemberAccess — a

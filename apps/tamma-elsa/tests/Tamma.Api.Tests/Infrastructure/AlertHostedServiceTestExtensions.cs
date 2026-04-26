@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Rules;
+using Tamma.Api.Services.PlatformTasks;
 
 namespace Tamma.Api.Tests.Infrastructure;
 
@@ -42,6 +43,13 @@ internal static class AlertHostedServiceTestExtensions
 
             services.RemoveAll<NotificationDispatcherOptions>();
             services.AddSingleton(new NotificationDispatcherOptions
+            {
+                RunOnStartup = false,
+            });
+
+            // Story 28-6 — gate the platform task worker the same way.
+            services.RemoveAll<PlatformTaskWorkerOptions>();
+            services.AddSingleton(new PlatformTaskWorkerOptions
             {
                 RunOnStartup = false,
             });

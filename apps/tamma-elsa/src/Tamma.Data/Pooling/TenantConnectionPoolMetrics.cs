@@ -43,6 +43,8 @@ public sealed class TenantConnectionPoolMetrics : IDisposable
     private long _misses;
     private long _openedTotal;
     private long _evictedTotal;
+    private long _evictedByLru;
+    private long _evictedExplicit;
 
     public TenantConnectionPoolMetrics()
     {
@@ -86,6 +88,13 @@ public sealed class TenantConnectionPoolMetrics : IDisposable
     /// <summary>Lifetime evictions (any reason).</summary>
     public long EvictedTotal => Interlocked.Read(ref _evictedTotal);
 
+    /// <summary>Lifetime evictions caused by the LRU cap.</summary>
+    public long EvictedByLruTotal => Interlocked.Read(ref _evictedByLru);
+
+    /// <summary>Lifetime evictions caused by an explicit
+    /// <c>EvictAsync</c> call (delete / rotation flows).</summary>
+    public long EvictedExplicitTotal => Interlocked.Read(ref _evictedExplicit);
+
     /// <summary>Lifetime cache hits.</summary>
     public long HitsTotal => Interlocked.Read(ref _hits);
 
@@ -118,6 +127,20 @@ public sealed class TenantConnectionPoolMetrics : IDisposable
     {
         Interlocked.Increment(ref _evictedTotal);
         Interlocked.Decrement(ref _warm);
+        // Break down by reason for the admin diagnostics endpoint
+        // (Story 28-4 AC5). The OTel counter still carries the reason
+        // tag for dashboards; these fields are read by the resolver
+        // when populating IAdminPoolDiagnostics.GetDetailedStats().
+        switch (reason)
+        {
+            case "lru":
+                Interlocked.Increment(ref _evictedByLru);
+                break;
+            case "explicit":
+            case "rotation":
+                Interlocked.Increment(ref _evictedExplicit);
+                break;
+        }
         _evicted.Add(1, new KeyValuePair<string, object?>("reason", reason));
     }
 
