@@ -119,12 +119,16 @@ Explore independently verified all named round-2 closures with file:line evidenc
 
 Ordered by severity:
 
-### Must-fix before merge (4 items)
+### Must-fix before merge (4 items) — ✅ ALL CLOSED in `2ce43b3` (merged via `ee37568`)
 
-1. **PF-S1** — Move `AdminEndpoints.UpdateUserRole` + `DeleteUser` to `PlatformOwnerAccess`, OR scope the handlers to the caller's tenant. (Single-line policy swap if going with PlatformOwnerAccess; semantic decision required.)
-2. **PF-S2** — Rewrite `docker-entrypoint-bootstrap.sh:74-80` to pipe SQL via heredoc (`psql --file=- <<EOF` with `\set` + `\gset`), or use a per-invocation `chmod 600` pgpass file. Update runbook to remove the false "NEVER visible in /proc/cmdline" claim.
-3. **PF-S3** — When `impId.HasValue` in `JwtService.GenerateAccessToken`, mint with `platformRole="user"` (target-scoped). Add `actor_user_id` claim for audit. Update `ImpersonationContextMiddleware` to validate cross-tenant write attempts return 403.
-4. **PF-S4** — Delete the single-arg `TenantSecretProtector.FromConfiguration` overload and require `IHostEnvironment` to flow into every caller, OR throw in the single-arg overload when `IHostEnvironment.IsProduction()` and key missing.
+1. **PF-S1** — ✅ Closed. `Program.cs:1031-1032` swapped to `PlatformOwnerAccess`; handlers now refuse cross-platform-admin demote/delete; emit `USER.ROLE_CHANGED.SUCCESS` / `USER.DELETED.SUCCESS` events with `actorUserId`+`actorEmail`; cross-PA-block path emits `USER.ROLE_CHANGE.BLOCKED` / `USER.DELETE.BLOCKED` warnings. **+8 tests.**
+2. **PF-S2** — ✅ Closed. `docker-entrypoint-bootstrap.sh` rewritten to use `mktemp` + `chmod 0600` preamble + `psql --file=-` stdin pipe. **No password ever appears in `psql` argv.** Verification harness `scripts/db/test-no-argv-leak.sh` runs the bootstrap inside a real `postgres:17-alpine` container with `psql` shadowed by a wrapper that logs argv — confirms `argv = [--dbname, --username, ON_ERROR_STOP, cp_database, --file=-]` only, no `--set=*_password`. Runbook updated to remove the false claim and document the actual mitigation. **Verification proof committed.**
+3. **PF-S3** — ✅ Closed. `JwtService.GenerateAccessToken` mints `platformRole="user"` whenever `impId.HasValue`, regardless of the operator's actual role. New `actor_user_id` + `actor_email` claims preserve operator identity for audit. `ImpersonationContextMiddleware` reads them via `GetActorUserId`/`GetActorEmail` accessors. Decision: scope-reduction convention is `platformRole="user"` for every impersonation token; per-tenant reach via `role` claim (target's role inside target tenant). **Stolen impersonation token = target-scoped session, not cross-tenant platform-admin ticket.** Also collapsed the dead `impId.HasValue ? 15min : 15min` ternary as side-cleanup (PF-C2). **+8 tests.**
+4. **PF-S4** — ✅ Closed. Option A taken: deleted the single-arg `TenantSecretProtector.FromConfiguration(IConfiguration, ILogger?)` overload entirely. Updated `PlatformEventsServiceCollectionExtensions.cs:64` to resolve `IHostEnvironment` from `sp` and call the two-arg overload. Tests that genuinely lack environment context call the two-arg overload with `environment: null` explicitly (grep-able for future audits). **+2 tests verifying the DI path hard-fails in production when `Cranl:EncryptionKey` is missing.**
+
+**Final state**: 3186 tests passing (3168 baseline + 18 new), 0 failing, 3 skipped (the same Story 28-1 aspirational tests). One transient flake on first run that didn't reproduce on rerun — consistent with the round-1 H6 flake-watch punchlist item; not a regression.
+
+**Original must-fix punchlist (above) preserved for historical reference.** The same 4 items have moved from must-fix to closed.
 
 ### Should-fix soon (8 items)
 
