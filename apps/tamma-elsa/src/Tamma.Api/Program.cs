@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
@@ -267,9 +268,22 @@ else
         "/api/admin/pools/* diagnostics.");
 }
 
+// R2-M1: register IErrorRedactor so KekRotationCoordinator can scrub
+// ex.Message before it lands in platform_events.data or
+// kek_rotations.FailureReason. Idempotent — TryAdd lets ElsaServer
+// or Tamma.Activities own the singleton when those projects also
+// register it.
+builder.Services.TryAddSingleton<
+    Tamma.Activities.Security.IErrorRedactor,
+    Tamma.Activities.Security.ErrorRedactor>();
+
 // Coordinator drives the platform-wide KEK rotation flow. Singleton —
 // only one rotation can be in flight at a time.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationCoordinator>();
+
+// R2-H13 — readiness probe refuses to flip green when there are
+// tenant rows further behind than the cabinet history can decrypt.
+builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>();
 
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
@@ -588,8 +602,17 @@ builder.Services.AddCors(options =>
 // Health checks. Tag the Postgres check as "ready" so the readiness probe
 // fails when the DB is unreachable; the liveness probe (no DB dependency)
 // only verifies the process is up.
+//
+// R2-H13: KekCabinetHealthCheck refuses to flip to "ready" when there
+// are tenant rows whose KekVersion is more than
+// KekProvider.RetainedHistorySize behind the active primary — those
+// rows would be undecryptable on the next rotation.
 builder.Services.AddHealthChecks()
-    .AddNpgSql(connectionString, tags: new[] { "ready" });
+    .AddNpgSql(connectionString, tags: new[] { "ready" })
+    .AddCheck<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>(
+        name: "kek-cabinet",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+        tags: new[] { "ready" });
 
 // Admin health aggregator (per-service ping fan-out for the dashboard).
 // Mirrors the TS /api/admin/health behavior.
@@ -987,6 +1010,10 @@ admin.MapGet("/diagnostics/platform-queues",
 admin.MapPost("/kek/rotate/start", KekRotationEndpoints.Start)
     .RequireAuthorization("OwnerAccess");
 admin.MapGet("/kek/rotate/status", KekRotationEndpoints.GetStatus)
+    .RequireAuthorization("OwnerAccess");
+// R2-H3: retry a failed rotation (re-uses the persisted staged
+// secondary; idempotent re-run that does NOT mint a fresh KEK).
+admin.MapPost("/kek/rotate/retry", KekRotationEndpoints.Retry)
     .RequireAuthorization("OwnerAccess");
 
 // Story 28-7 deferred-item — platform API-keys CRUD. Owner-only because

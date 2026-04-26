@@ -193,4 +193,186 @@ public class KekProviderTests
         snap.Secondary.Should().BeEquivalentTo(SecondaryKey);
         snap.ActiveVersion.Should().Be(3);
     }
+
+    // ── R2-H13: GetByVersion lookup tests ────────────────────────────
+
+    [Test]
+    public void GetByVersion_Returns_Primary_For_Active_Version()
+    {
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 5);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        var slot = sut.GetByVersion(5);
+
+        slot.Should().NotBeNull();
+        slot!.Version.Should().Be(5);
+        slot.Material.Should().BeEquivalentTo(PrimaryKey);
+        slot.Kind.Should().Be(KekSlotKind.Primary);
+    }
+
+    [Test]
+    public void GetByVersion_Returns_Secondary_For_Previous_Version_When_Configured_At_Startup()
+    {
+        // When the secondary is configured at startup (rotation step 1
+        // shape), the cabinet treats the secondary as the
+        // "previous primary" — secondaryVersion = activeVersion - 1.
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            secondary: Convert.ToBase64String(SecondaryKey),
+            activeVersion: 5);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        var slot = sut.GetByVersion(4);
+
+        slot.Should().NotBeNull();
+        slot!.Material.Should().BeEquivalentTo(SecondaryKey);
+        slot.Kind.Should().Be(KekSlotKind.Secondary);
+    }
+
+    [Test]
+    public void GetByVersion_Returns_Secondary_For_Staged_Plus_One_After_StageSecondary()
+    {
+        // After StageSecondary (rotation step 2), the secondary is the
+        // upcoming primary — secondaryVersion = activeVersion + 1.
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 5);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        sut.StageSecondary(SecondaryKey);
+
+        var slot = sut.GetByVersion(6);
+        slot.Should().NotBeNull();
+        slot!.Material.Should().BeEquivalentTo(SecondaryKey);
+        slot.Kind.Should().Be(KekSlotKind.Secondary);
+    }
+
+    [Test]
+    public void GetByVersion_Returns_Retired_Slot_After_Promotion()
+    {
+        // After PromoteSecondaryToPrimary, the previous primary moves
+        // into the retired-keys ring.
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 5);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+        sut.StageSecondary(SecondaryKey);
+        sut.PromoteSecondaryToPrimary(6);
+
+        // Active is now SecondaryKey at version 6; PrimaryKey is in
+        // the retired ring at version 5.
+        var activeSlot = sut.GetByVersion(6);
+        activeSlot!.Material.Should().BeEquivalentTo(SecondaryKey);
+        activeSlot.Kind.Should().Be(KekSlotKind.Primary);
+
+        var retiredSlot = sut.GetByVersion(5);
+        retiredSlot.Should().NotBeNull();
+        retiredSlot!.Material.Should().BeEquivalentTo(PrimaryKey);
+        retiredSlot.Kind.Should().Be(KekSlotKind.Retired);
+    }
+
+    [Test]
+    public void GetByVersion_Returns_Null_For_Pruned_Or_Unknown_Version()
+    {
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 5);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        sut.GetByVersion(99).Should().BeNull("99 is not in the cabinet");
+        sut.GetByVersion(0).Should().BeNull("0 is not a valid version");
+        sut.GetByVersion(-1).Should().BeNull("negative versions are invalid");
+    }
+
+    [Test]
+    public void GetByVersion_Returns_Defensive_Copy_Of_Material()
+    {
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 1);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        var slot1 = sut.GetByVersion(1)!;
+        slot1.Material[0] = 0xFF;
+        var slot2 = sut.GetByVersion(1)!;
+        slot2.Material[0].Should().Be(PrimaryKey[0],
+            "mutating the returned material must not corrupt the cabinet");
+    }
+
+    [Test]
+    public void RetainedHistorySize_Bounds_The_Retired_Ring()
+    {
+        // History size of 1 means after two promotions, only the most
+        // recent retired key is kept.
+        var dict = new Dictionary<string, string?>
+        {
+            [KekProvider.PrimaryConfigKey] = Convert.ToBase64String(PrimaryKey),
+            [KekProvider.ActiveVersionConfigKey] = "1",
+            [KekProvider.RetainedHistorySizeConfigKey] = "1",
+        };
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        var k2 = new byte[32]; for (var i = 0; i < 32; i++) k2[i] = (byte)(i + 50);
+        var k3 = new byte[32]; for (var i = 0; i < 32; i++) k3[i] = (byte)(i + 100);
+
+        sut.StageSecondary(k2);
+        sut.PromoteSecondaryToPrimary(2);
+        // After this: active=v2 (k2), retired=[v1 (PrimaryKey)]
+
+        sut.StageSecondary(k3);
+        sut.PromoteSecondaryToPrimary(3);
+        // After this: active=v3 (k3), retired=[v2 (k2)] — v1 pruned
+
+        sut.GetByVersion(3).Should().NotBeNull("v3 is the primary");
+        sut.GetByVersion(2).Should().NotBeNull("v2 is the only retired slot kept");
+        sut.GetByVersion(1).Should().BeNull(
+            "v1 is older than RetainedHistorySize=1 — it was pruned");
+        sut.RetainedHistorySize.Should().Be(1);
+    }
+
+    [Test]
+    public void RestoreStagedSecondary_Loads_Persisted_Material_Across_Restart()
+    {
+        // R2-H14: simulate a restart where the in-memory secondary was
+        // lost but kek_rotations row still has it. The coordinator
+        // calls RestoreStagedSecondary at startup to repopulate the
+        // cabinet. After this the version-explicit decrypt path can
+        // answer for the staged version.
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 1);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        sut.RestoreStagedSecondary(SecondaryKey, newSecondaryVersion: 2);
+
+        sut.GetSecondary().Should().BeEquivalentTo(SecondaryKey);
+        var slot = sut.GetByVersion(2);
+        slot.Should().NotBeNull();
+        slot!.Material.Should().BeEquivalentTo(SecondaryKey);
+        slot.Kind.Should().Be(KekSlotKind.Secondary);
+    }
+
+    [Test]
+    public void GetAllSlots_Returns_Active_Plus_Secondary_Plus_Retired_NewestFirst()
+    {
+        var cfg = BuildConfig(
+            primary: Convert.ToBase64String(PrimaryKey),
+            activeVersion: 1);
+        var sut = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        var k2 = new byte[32]; for (var i = 0; i < 32; i++) k2[i] = (byte)(i + 50);
+        sut.StageSecondary(k2);
+        sut.PromoteSecondaryToPrimary(2);
+
+        var slots = sut.GetAllSlots();
+
+        slots.Should().HaveCount(2, "primary v2 + retired v1");
+        slots[0].Version.Should().Be(2);
+        slots[0].Kind.Should().Be(KekSlotKind.Primary);
+        slots[1].Version.Should().Be(1);
+        slots[1].Kind.Should().Be(KekSlotKind.Retired);
+    }
 }

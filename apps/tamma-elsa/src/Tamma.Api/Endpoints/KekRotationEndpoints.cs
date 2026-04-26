@@ -11,7 +11,11 @@ namespace Tamma.Api.Endpoints;
 ///
 /// <para><c>POST /api/admin/kek/rotate/start</c> kicks off a rotation
 /// (returns 202 with the snapshot). <c>GET /api/admin/kek/rotate/status</c>
-/// reports progress.</para>
+/// reports progress. R2-H3 adds <c>POST /api/admin/kek/rotate/retry</c>
+/// — re-attempts a previously-failed rotation by re-using the staged
+/// secondary that's still on disk (idempotent re-run; does NOT mint a
+/// new KEK because that would orphan rows already re-encrypted under
+/// the failed run's secondary).</para>
 /// </summary>
 public static class KekRotationEndpoints
 {
@@ -36,6 +40,30 @@ public static class KekRotationEndpoints
     {
         var status = coordinator.GetStatus();
         return Results.Ok(ToResponse(status));
+    }
+
+    /// <summary>
+    /// R2-H3 — retry the last failed rotation. Returns 202 on success,
+    /// 409 when the current phase is not <see cref="KekRotationPhase.Failed"/>
+    /// (e.g. the rotation is currently Running, or the previous one
+    /// completed cleanly). The retry re-uses the staged secondary
+    /// persisted in <c>kek_rotations</c> by the failed run; it does
+    /// NOT mint a fresh KEK.
+    /// </summary>
+    public static async Task<IResult> Retry(KekRotationCoordinator coordinator, HttpContext http)
+    {
+        var response = await coordinator.RetryAsync(http.RequestAborted);
+        if (!response.Success)
+        {
+            return Results.Conflict(new
+            {
+                reason = response.Reason,
+                status = ToResponse(response.Status),
+            });
+        }
+        return Results.Accepted(
+            uri: "/api/admin/kek/rotate/status",
+            value: ToResponse(response.Status));
     }
 
     private static object ToResponse(KekRotationStatus status) => new

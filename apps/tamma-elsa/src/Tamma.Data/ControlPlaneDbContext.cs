@@ -69,6 +69,14 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<PlatformApiKeyIndex> PlatformApiKeyIndex => Set<PlatformApiKeyIndex>();
 
+    /// <summary>
+    /// R2-H14: durable record of in-flight + completed KEK rotations.
+    /// The <c>StagedSecondaryProtected</c> column lets a coordinator
+    /// recover from a process crash mid-rotation without losing the
+    /// new KEK material.
+    /// </summary>
+    public DbSet<KekRotation> KekRotations => Set<KekRotation>();
+
     // ── Story 5.6 + 1.5-37 (Wave C.1) — alert system ──
     //
     // The three alert tables are CP-resident: alert rules + channels
@@ -167,6 +175,47 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlertDeliveryAttempts(modelBuilder);
         ConfigureAlertRules(modelBuilder);
         ConfigureAlertEvaluatorCursor(modelBuilder);
+        ConfigureKekRotations(modelBuilder);
+    }
+
+    /// <summary>
+    /// R2-H14 — <c>kek_rotations</c> table. One row per rotation; the
+    /// active row is identified by a partial unique index on
+    /// <c>Status IN ('pending', 'running')</c>. The
+    /// <c>StagedSecondaryProtected</c> column is encrypted by the OLD
+    /// primary KEK at write time so the row is always readable after a
+    /// restart.
+    /// </summary>
+    private static void ConfigureKekRotations(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<KekRotation>(entity =>
+        {
+            entity.ToTable("kek_rotations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_kek_rotations_status",
+                    "\"Status\" IN ('pending','running','completed','failed','cancelled')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.VersionOld).IsRequired();
+            entity.Property(e => e.VersionNew).IsRequired();
+            entity.Property(e => e.StagedSecondaryProtected).HasColumnType("bytea");
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.Property(e => e.StartedAt);
+
+            // Hot read: status transitions on the in-flight row. Partial
+            // index keeps the index tight (most rows are completed/failed).
+            entity.HasIndex(e => e.Status)
+                .HasDatabaseName("IX_kek_rotations_Status")
+                .HasFilter("\"Status\" IN ('pending','running')");
+
+            // Reverse-chronological list for the operator dashboard.
+            entity.HasIndex(e => e.StartedAt)
+                .HasDatabaseName("IX_kek_rotations_StartedAt")
+                .IsDescending(true);
+        });
     }
 
     /// <summary>
