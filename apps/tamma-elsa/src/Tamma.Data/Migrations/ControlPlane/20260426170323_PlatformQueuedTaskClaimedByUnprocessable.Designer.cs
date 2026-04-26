@@ -2,18 +2,21 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
 
 #nullable disable
 
-namespace Tamma.Data.Migrations
+namespace Tamma.Data.Migrations.ControlPlane
 {
     [DbContext(typeof(ControlPlaneDbContext))]
-    partial class ControlPlaneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260426170323_PlatformQueuedTaskClaimedByUnprocessable")]
+    partial class PlatformQueuedTaskClaimedByUnprocessable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1094,55 +1097,6 @@ namespace Tamma.Data.Migrations
                     b.HasIndex("InstallationId", "ReceivedAt");
 
                     b.ToTable("github_webhook_deliveries", (string)null);
-                });
-
-            modelBuilder.Entity("Tamma.Data.Entities.KekRotation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("FailureReason")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<byte[]>("StagedSecondaryProtected")
-                        .HasColumnType("bytea");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<int>("VersionNew")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("VersionOld")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StartedAt")
-                        .IsDescending(true)
-                        .HasDatabaseName("IX_kek_rotations_StartedAt");
-
-                    b.HasIndex("Status")
-                        .HasDatabaseName("IX_kek_rotations_Status")
-                        .HasFilter("\"Status\" IN ('pending','running')");
-
-                    b.ToTable("kek_rotations", null, t =>
-                        {
-                            t.HasCheckConstraint(
-                                "CK_kek_rotations_status",
-                                "\"Status\" IN ('pending','running','completed','failed','cancelled')");
-                        });
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.PasswordResetToken", b =>

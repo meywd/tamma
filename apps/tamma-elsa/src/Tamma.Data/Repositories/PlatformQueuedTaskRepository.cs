@@ -40,6 +40,8 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
         task.RetryCount = 0;
         task.Error = null;
         task.ClaimedAt = null;
+        task.ClaimedBy = null;
+        task.UnprocessableAt = null;
         task.CreatedAt = now;
         task.UpdatedAt = now;
 
@@ -56,16 +58,22 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
 
         if (string.Equals(_db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
         {
-            return await ReserveViaPostgresAsync(ct);
+            return await ReserveViaPostgresAsync(workerId, ct);
         }
 
-        return await ReserveViaNaivePathAsync(ct);
+        return await ReserveViaNaivePathAsync(workerId, ct);
     }
 
-    private async Task<PlatformQueuedTask?> ReserveViaPostgresAsync(CancellationToken ct)
+    private async Task<PlatformQueuedTask?> ReserveViaPostgresAsync(
+        string workerId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
 
+        // Round-2 M8 — persist the worker id alongside the timestamp so
+        // ops can identify the original claimant on a stuck row. The
+        // workerId is parameterised through FromSqlInterpolated so the
+        // value is bound (no SQL injection).
+        //
         // Single-statement atomic reserve: grab the oldest pending row,
         // flip to processing, return every column. FOR UPDATE SKIP LOCKED
         // lets concurrent workers in a multi-pod deploy each pick a
@@ -74,6 +82,7 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
             UPDATE platform_queued_tasks
             SET "Status" = 'processing',
                 "ClaimedAt" = {now},
+                "ClaimedBy" = {workerId},
                 "UpdatedAt" = {now}
             WHERE "Id" = (
                 SELECT "Id" FROM platform_queued_tasks
@@ -88,7 +97,8 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
         return rows.FirstOrDefault();
     }
 
-    private async Task<PlatformQueuedTask?> ReserveViaNaivePathAsync(CancellationToken ct)
+    private async Task<PlatformQueuedTask?> ReserveViaNaivePathAsync(
+        string workerId, CancellationToken ct)
     {
         var task = await _db.PlatformQueuedTasks
             .Where(t => t.Status == "pending")
@@ -100,6 +110,7 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
         var now = DateTime.UtcNow;
         task.Status = "processing";
         task.ClaimedAt = now;
+        task.ClaimedBy = workerId;
         task.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);
         return task;
@@ -135,6 +146,41 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
         {
             task.Status = "pending";
             task.ClaimedAt = null;
+            // Round-2 M8 — clear the worker id when the row returns to
+            // the pending pool so a future claim is unambiguously the
+            // new owner.
+            task.ClaimedBy = null;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return task;
+    }
+
+    public async Task<PlatformQueuedTask?> ParkUnprocessableAsync(
+        Guid id, string reason, int maxRetries, CancellationToken ct = default)
+    {
+        var task = await _db.PlatformQueuedTasks.FindAsync(new object[] { id }, ct);
+        if (task is null) return null;
+
+        var now = DateTime.UtcNow;
+        task.RetryCount += 1;
+        task.Error = reason;
+        task.UpdatedAt = now;
+        task.UnprocessableAt = now;
+
+        // Round-2 H8 — only fall through to dead_letter once the retry
+        // ceiling is hit. The intent is that an absent handler is a
+        // deploy gap, not a permanent malformed-payload condition; the
+        // next deploy that registers the handler picks the row up.
+        if (task.RetryCount >= Math.Max(1, maxRetries))
+        {
+            task.Status = "dead_letter";
+        }
+        else
+        {
+            task.Status = "pending";
+            task.ClaimedAt = null;
+            task.ClaimedBy = null;
         }
 
         await _db.SaveChangesAsync(ct);
@@ -157,6 +203,76 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
 
     public async Task<int> ReapStaleProcessingAsync(
         TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default)
+    {
+        if (string.Equals(_db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        {
+            return await ReapStaleViaPostgresAsync(visibilityTimeout, maxRetries, ct);
+        }
+
+        return await ReapStaleViaNaivePathAsync(visibilityTimeout, maxRetries, ct);
+    }
+
+    /// <summary>
+    /// Round-2 M9 — atomic, multi-pod-safe reaper. Uses
+    /// <c>FOR UPDATE SKIP LOCKED</c> in a subquery so two reapers
+    /// across pods can't double-decrement the same row's retry count
+    /// (which used to dead-letter rows that were one retry shy of
+    /// recovery). Single statement; no read-modify-write loop.
+    ///
+    /// <para>The CASE expression mirrors the FailAsync semantics: if
+    /// <c>RetryCount + 1</c> reaches <paramref name="maxRetries"/>,
+    /// the row flips to <c>dead_letter</c>; otherwise it returns to
+    /// <c>pending</c> with <c>ClaimedAt</c> cleared so the next
+    /// reservation may pick it up. <c>ClaimedBy</c> is also cleared
+    /// (Round-2 M8) so the new claimant is unambiguous.</para>
+    /// </summary>
+    private async Task<int> ReapStaleViaPostgresAsync(
+        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct)
+    {
+        var threshold = DateTime.UtcNow - visibilityTimeout;
+        var now = DateTime.UtcNow;
+        var ceiling = Math.Max(1, maxRetries);
+        var reason =
+            $"reaped after {visibilityTimeout.TotalSeconds:0}s visibility timeout";
+
+        // Single UPDATE with FOR UPDATE SKIP LOCKED in the subquery so
+        // two pods reaping concurrently each grab a disjoint set.
+        // ExecuteSqlInterpolatedAsync returns the row count of the
+        // outer UPDATE — exactly what we need to log.
+        var rowCount = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE platform_queued_tasks
+            SET "Status" = CASE
+                    WHEN "RetryCount" + 1 >= {ceiling} THEN 'dead_letter'
+                    ELSE 'pending'
+                END,
+                "RetryCount" = "RetryCount" + 1,
+                "Error" = {reason},
+                "ClaimedAt" = CASE
+                    WHEN "RetryCount" + 1 >= {ceiling} THEN "ClaimedAt"
+                    ELSE NULL
+                END,
+                "ClaimedBy" = CASE
+                    WHEN "RetryCount" + 1 >= {ceiling} THEN "ClaimedBy"
+                    ELSE NULL
+                END,
+                "UpdatedAt" = {now}
+            WHERE "Id" IN (
+                SELECT "Id" FROM platform_queued_tasks
+                WHERE "Status" = 'processing'
+                  AND ("ClaimedAt" IS NULL OR "ClaimedAt" < {threshold})
+                FOR UPDATE SKIP LOCKED
+            )
+            """, ct);
+        return rowCount;
+    }
+
+    /// <summary>
+    /// Naive single-writer fallback for the EF InMemory provider used
+    /// by unit tests. Mirrors the Postgres path's semantics; safe
+    /// because in-process tests never run two reapers concurrently.
+    /// </summary>
+    private async Task<int> ReapStaleViaNaivePathAsync(
+        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct)
     {
         var threshold = DateTime.UtcNow - visibilityTimeout;
         var stale = await _db.PlatformQueuedTasks
@@ -181,6 +297,7 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
             {
                 task.Status = "pending";
                 task.ClaimedAt = null;
+                task.ClaimedBy = null;
             }
         }
         await _db.SaveChangesAsync(ct);

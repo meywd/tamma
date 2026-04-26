@@ -66,4 +66,30 @@ public sealed class TenantConnectionPoolOptions
     /// Default 30.
     /// </summary>
     public int TenantRowCacheSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Round-2 M7 — number of retry attempts <c>LeaseAsync</c> makes when
+    /// a race against eviction is observed (the cache entry vanishes
+    /// between the cold-build and the handle acquisition). Each retry
+    /// rebuilds via the cold path. Default 5; bumped from the previous
+    /// hard-coded 3 because real eviction storms can knock out 4-5
+    /// consecutive builds on a small cache.
+    ///
+    /// <para>Inter-attempt delay is <c>5ms × attempt</c> (so attempt 1
+    /// waits 5ms, attempt 2 waits 10ms, …). Empirically this gives the
+    /// LRU resolver enough breathing room without inflating tail
+    /// latency on the success path.</para>
+    /// </summary>
+    public int LeaseRetryAttempts { get; set; } = 5;
+
+    /// <summary>
+    /// Round-2 M7 — per-tenant ceiling on outstanding
+    /// <see cref="TenantConnectionHandle"/> instances. <c>LeaseAsync</c>
+    /// throws <see cref="TenantLeaseLimitExceededException"/> when a new
+    /// lease would push the live count above this value. Default 200 —
+    /// generous enough for a busy SSE / long-running-consumer workload
+    /// but low enough to alert on a leaking consumer before it starves
+    /// other tenants.
+    /// </summary>
+    public int MaxOutstandingLeases { get; set; } = 200;
 }

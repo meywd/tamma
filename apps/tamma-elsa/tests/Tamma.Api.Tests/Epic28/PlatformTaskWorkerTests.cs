@@ -171,17 +171,160 @@ public class PlatformTaskWorkerTests
     }
 
     [Test]
-    public async Task ProcessOnce_NoHandler_RowDeadLetteredWithExplanation()
+    public async Task ProcessOnce_NoHandler_RowParkedAsPendingWithUnprocessableAtStamp()
     {
+        // Round-2 H8 — first observation of a no-handler row parks it
+        // in 'pending' with UnprocessableAt set + RetryCount bumped.
+        // It does NOT dead-letter immediately; that happens only after
+        // MaxRetries observations.
         var registry = new PlatformTaskHandlerRegistry(Array.Empty<IPlatformTaskHandler>());
         var id = await EnqueueAsync("orphan.task");
-        var worker = NewWorker(registry);
+        var worker = NewWorker(registry, new PlatformTaskWorkerOptions
+        {
+            RunOnStartup = false,
+            MaxRetries = 5,
+        });
 
         await worker.ProcessOnceAsync(default);
 
         var row = await GetAsync(id);
-        row!.Status.Should().Be("dead_letter");
+        row!.Status.Should().Be(
+            "pending",
+            "missing handlers are a deploy gap, not a permanent failure — keep the row pending until a deploy ships the handler");
+        row.UnprocessableAt.Should().NotBeNull(
+            "a no-handler observation must stamp the row so ops can see parked work");
+        row.RetryCount.Should().Be(1,
+            "the no-handler observation consumes one retry so a permanently-orphan task eventually dead-letters");
         row.Error.Should().Contain("orphan.task");
         row.Error.Should().Contain("No IPlatformTaskHandler");
+        row.ClaimedBy.Should().BeNull(
+            "ClaimedBy is cleared when the row returns to pending");
+    }
+
+    [Test]
+    public async Task ProcessOnce_NoHandler_AfterMaxRetries_RowFallsThroughToDeadLetter()
+    {
+        // After MaxRetries no-handler observations the row finally
+        // gives up and dead-letters so the queue doesn't accumulate
+        // permanent zombies.
+        var registry = new PlatformTaskHandlerRegistry(Array.Empty<IPlatformTaskHandler>());
+        var id = await EnqueueAsync("permanently.orphan");
+        var worker = NewWorker(registry, new PlatformTaskWorkerOptions
+        {
+            RunOnStartup = false,
+            MaxRetries = 2,
+        });
+
+        await worker.ProcessOnceAsync(default);
+        await worker.ProcessOnceAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Status.Should().Be("dead_letter");
+        row.RetryCount.Should().Be(2);
+    }
+
+    [Test]
+    public async Task ProcessOnce_PersistsWorkerId_OnReservedRow()
+    {
+        // Round-2 M8 — workerId argument must land in the row's
+        // ClaimedBy column so ops can identify the original claimant.
+        var handler = new CountingHandler("identity.task");
+        var registry = new PlatformTaskHandlerRegistry(new[] { handler });
+        var id = await EnqueueAsync("identity.task");
+        var worker = NewWorker(registry, new PlatformTaskWorkerOptions
+        {
+            RunOnStartup = false,
+            WorkerId = "agent-d-test-pod",
+        });
+
+        // Hold a barrier inside the handler so we can inspect the
+        // claimed row mid-processing (when ClaimedBy is set).
+        var midProcessTcs = new TaskCompletionSource();
+        var releaseTcs = new TaskCompletionSource();
+        handler.Behavior = async (_, _) =>
+        {
+            midProcessTcs.SetResult();
+            await releaseTcs.Task.ConfigureAwait(false);
+        };
+
+        var processTask = worker.ProcessOnceAsync(default);
+        await midProcessTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var midRow = await GetAsync(id);
+        midRow!.Status.Should().Be("processing");
+        midRow.ClaimedBy.Should().Be("agent-d-test-pod");
+
+        releaseTcs.SetResult();
+        await processTask;
+
+        var finalRow = await GetAsync(id);
+        finalRow!.Status.Should().Be("completed");
+    }
+
+    [Test]
+    public async Task ProcessOnce_HandlerReceivesFreshScopedDbContext_PerTick()
+    {
+        // Round-2 M10 — verify handlers can take scoped dependencies
+        // (canonical case: ControlPlaneDbContext). The worker opens an
+        // AsyncScope per tick, the registry resolves the handler from
+        // that scope, and the handler's scoped DbContext is alive for
+        // the duration of HandleAsync.
+        var seenDbContexts = new List<ControlPlaneDbContext>();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<ControlPlaneDbContext>(o =>
+            o.UseInMemoryDatabase(_dbName));
+        services.AddScoped<IPlatformQueuedTaskRepository, PlatformQueuedTaskRepository>();
+        services.AddScoped<IPlatformTaskHandlerRegistry, PlatformTaskHandlerRegistry>();
+        services.AddScoped<IPlatformTaskHandler>(sp =>
+        {
+            var ctx = sp.GetRequiredService<ControlPlaneDbContext>();
+            seenDbContexts.Add(ctx);
+            return new CountingHandler("scoped.task");
+        });
+        var sp = services.BuildServiceProvider();
+
+        await EnqueueAsync("scoped.task");
+        await EnqueueAsync("scoped.task");
+
+        var worker = new PlatformTaskWorker(
+            sp,
+            Options.Create(new PlatformTaskWorkerOptions { RunOnStartup = false }),
+            TimeProvider.System,
+            NullLogger<PlatformTaskWorker>.Instance);
+
+        await worker.ProcessOnceAsync(default);
+        await worker.ProcessOnceAsync(default);
+
+        seenDbContexts.Should().HaveCount(2,
+            "each tick resolves a fresh scoped handler");
+        ReferenceEquals(seenDbContexts[0], seenDbContexts[1]).Should().BeFalse(
+            "scoped DbContext must not be shared across ticks");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_DoesNothing_WhenRunOnStartupFalse()
+    {
+        // Round-2 H8 — default RunOnStartup=false means the polling
+        // loop never starts, so a queue with no handlers doesn't
+        // immediately dead-letter every row.
+        var registry = new PlatformTaskHandlerRegistry(Array.Empty<IPlatformTaskHandler>());
+        var id = await EnqueueAsync("untouched.task");
+        var worker = NewWorker(registry, new PlatformTaskWorkerOptions
+        {
+            RunOnStartup = false,
+        });
+
+        await ((Microsoft.Extensions.Hosting.IHostedService)worker)
+            .StartAsync(default);
+        // Give the (gated) ExecuteAsync a moment to early-return.
+        await Task.Delay(50);
+        await ((Microsoft.Extensions.Hosting.IHostedService)worker)
+            .StopAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Status.Should().Be(
+            "pending",
+            "RunOnStartup=false must not run the polling loop");
     }
 }

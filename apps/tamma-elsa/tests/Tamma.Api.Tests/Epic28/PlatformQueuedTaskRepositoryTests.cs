@@ -82,6 +82,35 @@ public class PlatformQueuedTaskRepositoryTests
     }
 
     [Test]
+    public async Task ReserveNextAsync_PersistsWorkerId_OnTheRow()
+    {
+        // Round-2 M8 — workerId must land in the row's ClaimedBy
+        // column so ops can identify the original claimant on a stuck
+        // row. Previously the parameter was accepted by the API but
+        // silently discarded.
+        var task = await _repo.EnqueueAsync(NewTask("identity"));
+
+        var claimed = await _repo.ReserveNextAsync("agent-d-test");
+
+        claimed!.ClaimedBy.Should().Be("agent-d-test");
+        var stored = await _repo.GetAsync(task.Id);
+        stored!.ClaimedBy.Should().Be("agent-d-test");
+    }
+
+    [Test]
+    public async Task FailAsync_BelowCeiling_ClearsClaimedBy_AlongWithClaimedAt()
+    {
+        var task = await _repo.EnqueueAsync(NewTask("retry"));
+        await _repo.ReserveNextAsync("worker-1");
+
+        var updated = await _repo.FailAsync(task.Id, "transient", maxRetries: 5);
+
+        updated!.ClaimedBy.Should().BeNull(
+            "Round-2 M8 — when the row returns to pending, ClaimedBy is cleared so the next claim is unambiguous");
+        updated.ClaimedAt.Should().BeNull();
+    }
+
+    [Test]
     public async Task ReserveNextAsync_ReturnsNull_WhenQueueEmpty()
     {
         var claimed = await _repo.ReserveNextAsync("worker-1");
@@ -168,6 +197,42 @@ public class PlatformQueuedTaskRepositoryTests
         updated.Should().BeNull();
     }
 
+    // ── ParkUnprocessableAsync (Round-2 H8) ───────────────────────────────────
+
+    [Test]
+    public async Task ParkUnprocessableAsync_KeepsRowPending_StampsTimestamp_BumpsRetryCount()
+    {
+        var task = await _repo.EnqueueAsync(NewTask("orphan"));
+        await _repo.ReserveNextAsync("w");
+
+        var parked = await _repo.ParkUnprocessableAsync(
+            task.Id, "no handler", maxRetries: 5);
+
+        parked!.Status.Should().Be("pending",
+            "a missing handler is a deploy gap, not a permanent failure");
+        parked.UnprocessableAt.Should().NotBeNull();
+        parked.RetryCount.Should().Be(1);
+        parked.Error.Should().Contain("no handler");
+        parked.ClaimedBy.Should().BeNull();
+        parked.ClaimedAt.Should().BeNull();
+    }
+
+    [Test]
+    public async Task ParkUnprocessableAsync_AtCeiling_FallsThroughToDeadLetter()
+    {
+        var task = await _repo.EnqueueAsync(NewTask("orphan-permanent"));
+        await _repo.ReserveNextAsync("w");
+
+        await _repo.ParkUnprocessableAsync(task.Id, "no handler", maxRetries: 2);
+        await _repo.ReserveNextAsync("w");
+        var terminal = await _repo.ParkUnprocessableAsync(
+            task.Id, "still no handler", maxRetries: 2);
+
+        terminal!.Status.Should().Be("dead_letter",
+            "after MaxRetries no-handler observations the row finally gives up");
+        terminal.RetryCount.Should().Be(2);
+    }
+
     // ── DeadLetterAsync ───────────────────────────────────────────────────────
 
     [Test]
@@ -214,5 +279,47 @@ public class PlatformQueuedTaskRepositoryTests
         await _repo.EnqueueAsync(NewTask());
         var reaped = await _repo.ReapStaleProcessingAsync(TimeSpan.FromMinutes(10), 5);
         reaped.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ReapStaleProcessingAsync_ConcurrentInvocations_DoNotDoubleDecrement()
+    {
+        // Round-2 M9 — two reapers across pods racing the same row
+        // must not both bump RetryCount. The InMemory provider is
+        // single-threaded so this test asserts the EF path of the
+        // naive reaper still increments by exactly one per stale row.
+        // The Postgres-native path uses FOR UPDATE SKIP LOCKED in a
+        // single UPDATE so two pods each grab disjoint sets — covered
+        // by integration tests with a real PG container.
+        var t1 = await _repo.EnqueueAsync(NewTask("a"));
+        var t2 = await _repo.EnqueueAsync(NewTask("b"));
+        await _repo.ReserveNextAsync("w");
+        await _repo.ReserveNextAsync("w");
+
+        // Push both claims into the past.
+        using (var db = new ControlPlaneDbContext(_options))
+        {
+            foreach (var t in db.PlatformQueuedTasks)
+            {
+                t.ClaimedAt = DateTime.UtcNow.AddMinutes(-30);
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var firstRun = await _repo.ReapStaleProcessingAsync(
+            TimeSpan.FromMinutes(10), maxRetries: 5);
+        firstRun.Should().Be(2);
+
+        var t1After = await _repo.GetAsync(t1.Id);
+        var t2After = await _repo.GetAsync(t2.Id);
+        t1After!.RetryCount.Should().Be(1);
+        t2After!.RetryCount.Should().Be(1);
+        t1After.ClaimedBy.Should().BeNull("reaper clears ClaimedBy when row returns to pending");
+
+        // Second run must reap zero — both rows are now pending +
+        // their ClaimedAt is null so they don't pass the threshold.
+        var secondRun = await _repo.ReapStaleProcessingAsync(
+            TimeSpan.FromMinutes(10), maxRetries: 5);
+        secondRun.Should().Be(0);
     }
 }
