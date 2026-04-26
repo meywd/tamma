@@ -248,7 +248,7 @@ public class QuickWinsRound2Tests
         var statusCache = new NoopStatusCache();
 
         var result = await AdminTenantsEndpoints.RetryTenant(
-            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), time, EmptyPrincipal());
+            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await db.Tenants.IgnoreQueryFilters()
@@ -293,7 +293,7 @@ public class QuickWinsRound2Tests
         var statusCache = new NoopStatusCache();
 
         var result = await AdminTenantsEndpoints.DeleteTenant(
-            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), time, EmptyPrincipal());
+            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await db.Tenants.IgnoreQueryFilters()

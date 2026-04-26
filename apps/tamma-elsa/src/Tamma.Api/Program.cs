@@ -676,6 +676,37 @@ builder.Services.AddSingleton<Tamma.Api.Services.TenantStatus.ITenantStatusCache
 builder.Services.AddSingleton<Tamma.Data.Abstractions.ITenantStatusProbe>(
     sp => sp.GetRequiredService<Tamma.Api.Services.TenantStatus.MemoryTenantStatusCache>());
 
+// Round-2 follow-up — cluster-wide tenant-status invalidation. Pairs
+// with the per-pod cache above so a status flip on pod A propagates
+// to sibling pods within milliseconds via Postgres LISTEN/NOTIFY,
+// instead of converging only after the 10s TTL.
+//
+// AddTenantConnectionPool already registered the publish-side bus +
+// the singleton CP NpgsqlDataSource. Here we register the subscribe
+// side: a BackgroundService that LISTENs on the channel and
+// dispatches into ITenantStatusCache + ITenantConnectionResolver.
+//
+// In environments without a CP connection string (test fixtures,
+// single-pod dev), AddTenantStatusInvalidation registered the
+// NullTenantStatusInvalidationBus and skipped the data source — so
+// the listener registration is gated on the same condition.
+if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
+{
+    builder.Services.AddSingleton<
+        Tamma.Api.Services.TenantStatus.TenantStatusInvalidationListener>();
+    builder.Services.AddHostedService(sp =>
+        sp.GetRequiredService<
+            Tamma.Api.Services.TenantStatus.TenantStatusInvalidationListener>());
+}
+else
+{
+    // Make sure the bus is registered as Null even when
+    // AddTenantConnectionPool was skipped (it's the one that wires
+    // AddTenantStatusInvalidation today). Keeps the admin endpoints'
+    // `bus.PublishAsync` calls compile-time + runtime safe.
+    builder.Services.AddTenantStatusInvalidation(controlPlaneConnectionString: null);
+}
+
 // M1 — IErrorRedactor scrubs sensitive material from exception messages
 // before they cross the long-lived storage boundary (event store +
 // ProvisioningDetail column). Used by CleanUpFailedTenantActivity and

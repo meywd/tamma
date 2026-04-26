@@ -34,6 +34,7 @@ public class AdminTenantsAuditAndNoteTests
     private RecordingEventPublisher _publisher = null!;
     private RecordingStatusCache _statusCache = null!;
     private RecordingConnectionResolver _connectionResolver = null!;
+    private RecordingInvalidationBus _invalidationBus = null!;
     private TimeProvider _timeProvider = null!;
 
     [SetUp]
@@ -49,6 +50,7 @@ public class AdminTenantsAuditAndNoteTests
         _publisher = new RecordingEventPublisher();
         _statusCache = new RecordingStatusCache();
         _connectionResolver = new RecordingConnectionResolver();
+        _invalidationBus = new RecordingInvalidationBus();
         _timeProvider = TimeProvider.System;
         await PlansSeeder.SeedAsync(_db);
     }
@@ -100,7 +102,7 @@ public class AdminTenantsAuditAndNoteTests
         var tenantId = await SeedTenantAsync(status: "failed");
 
         await AdminTenantsEndpoints.RetryTenant(
-            tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
+            tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle();
         var evt = _publisher.Events[0];
@@ -114,7 +116,7 @@ public class AdminTenantsAuditAndNoteTests
         var tenantId = await SeedTenantAsync(status: "active");
 
         await AdminTenantsEndpoints.DeleteTenant(
-            tenantId, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
+            tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.DELETE.REQUESTED");
         AssertActorTagsAndData(_publisher.Events[0]);
@@ -128,7 +130,7 @@ public class AdminTenantsAuditAndNoteTests
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
         await AdminTenantsEndpoints.ForceDeleteTenant(
-            tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _timeProvider, Operator());
+            tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, Operator());
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.DELETE.REQUESTED");
         AssertActorTagsAndData(_publisher.Events[0]);
@@ -330,6 +332,16 @@ public class AdminTenantsAuditAndNoteTests
 
         public TenantConnectionPoolStats GetStats() =>
             new TenantConnectionPoolStats(0, 0, 0);
+    }
+
+    private sealed class RecordingInvalidationBus : ITenantStatusInvalidationBus
+    {
+        public List<Guid> Publishes { get; } = new();
+        public ValueTask PublishAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            Publishes.Add(tenantId);
+            return ValueTask.CompletedTask;
+        }
     }
 
 }

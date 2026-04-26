@@ -269,6 +269,7 @@ public static class AdminTenantsEndpoints
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
         ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
         [FromServices] TimeProvider timeProvider,
         ClaimsPrincipal principal,
         CancellationToken ct = default)
@@ -298,6 +299,13 @@ public static class AdminTenantsEndpoints
         // built against the now-stale connection envelope until the
         // pool's natural eviction kicks in.
         await connectionResolver.EvictAsync(tenantId, ct);
+        // Round-2 follow-up — cluster-wide fan-out via Postgres
+        // LISTEN/NOTIFY so sibling pods drop their copy + evict their
+        // resolver pool within milliseconds, not the 10s TTL window.
+        // Best-effort: a Postgres failure is logged + swallowed inside
+        // the bus; this admin action does not fail on a transient
+        // notify hiccup.
+        await invalidationBus.PublishAsync(tenantId, ct);
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -331,6 +339,7 @@ public static class AdminTenantsEndpoints
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
         ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
         [FromServices] TimeProvider timeProvider,
         ClaimsPrincipal principal,
         CancellationToken ct = default)
@@ -352,6 +361,7 @@ public static class AdminTenantsEndpoints
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
         await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
+        await invalidationBus.PublishAsync(tenantId, ct);  // R2 follow-up — cluster fan-out
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
@@ -387,6 +397,7 @@ public static class AdminTenantsEndpoints
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
         ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
         [FromServices] TimeProvider timeProvider,
         ClaimsPrincipal principal,
         CancellationToken ct = default)
@@ -421,6 +432,7 @@ public static class AdminTenantsEndpoints
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
         await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
+        await invalidationBus.PublishAsync(tenantId, ct);  // R2 follow-up — cluster fan-out
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
