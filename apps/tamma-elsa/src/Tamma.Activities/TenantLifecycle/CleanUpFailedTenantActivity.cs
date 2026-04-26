@@ -179,6 +179,13 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
 
         // ── Step 4: terminal CP-row updates + terminal event ────────
         var factory = context.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        // Round-2 review M16: prefer the DI-registered TimeProvider over
+        // raw DateTime.UtcNow so tests can advance the clock and so the
+        // activity participates in TimeProvider-driven behaviour
+        // testing the rest of the codebase already does. Fall back to
+        // <see cref="TimeProvider.System"/> if DI doesn't have one.
+        var timeProvider = context.GetService<TimeProvider>() ?? TimeProvider.System;
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
         await using (var db = await factory.CreateDbContextAsync(context.CancellationToken))
         {
             var tenant = await db.Tenants
@@ -192,13 +199,13 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
                     // (matching EmitDeletedSuccessActivity's terminal
                     // contract).
                     if (tenant.DeletedAt is null)
-                        tenant.DeletedAt = DateTime.UtcNow;
+                        tenant.DeletedAt = nowUtc;
                     db.Entry(tenant).Property("Status").CurrentValue = "deleted";
                     db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = (byte[]?)null;
                     db.Entry(tenant).Property("KekVersion").CurrentValue = (int?)null;
                     tenant.ProvisioningState = "none";
                     tenant.ProvisioningDetail = note ?? "Cleaned up via /api/admin/tenants/{id}/cleanup.";
-                    tenant.ProvisioningUpdatedAt = DateTime.UtcNow;
+                    tenant.ProvisioningUpdatedAt = nowUtc;
                 }
                 else
                 {
@@ -210,9 +217,9 @@ public sealed class CleanUpFailedTenantActivity : Elsa.Workflows.Activity
                     // cleanup signal.
                     tenant.ProvisioningState = "requires_manual_cleanup";
                     tenant.ProvisioningDetail = BuildFailureSummary(failedSteps, stepDetails);
-                    tenant.ProvisioningUpdatedAt = DateTime.UtcNow;
+                    tenant.ProvisioningUpdatedAt = nowUtc;
                 }
-                tenant.UpdatedAt = DateTime.UtcNow;
+                tenant.UpdatedAt = nowUtc;
                 await db.SaveChangesAsync(context.CancellationToken)
                     .ConfigureAwait(false);
             }

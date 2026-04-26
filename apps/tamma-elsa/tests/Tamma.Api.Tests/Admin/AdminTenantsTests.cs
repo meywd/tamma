@@ -34,6 +34,11 @@ public class AdminTenantsTests
     // Story 28-8 — admin endpoints take an ITenantStatusCache to
     // invalidate the cached status on flip. Tests use a no-op stub.
     private RecordingStatusCache _statusCache = null!;
+    // Round-2 review M16 — admin endpoints take a TimeProvider so the
+    // tests can pin / advance the clock. Default to TimeProvider.System
+    // for tests that don't care about the wall-clock value; the
+    // dedicated TimeProvider tests below use a fake provider.
+    private TimeProvider _timeProvider = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -47,6 +52,7 @@ public class AdminTenantsTests
         _db = new ControlPlaneDbContext(options);
         _publisher = new RecordingEventPublisher();
         _statusCache = new RecordingStatusCache();
+        _timeProvider = TimeProvider.System;
 
         await PlansSeeder.SeedAsync(_db);
     }
@@ -350,7 +356,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(
             "Retryable", status: "failed", failureReason: "db-create-timeout");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _timeProvider);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("pending_verification");
@@ -373,7 +379,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
         _publisher.Events.Should().BeEmpty();
@@ -382,7 +388,7 @@ public class AdminTenantsTests
     [Test]
     public async Task RetryTenant_Returns404_WhenTenantMissing()
     {
-        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
     }
@@ -394,7 +400,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _timeProvider);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -415,7 +421,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "failed");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -425,7 +431,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "deleting");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -438,7 +444,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(status: "failed");
         var http = new DefaultHttpContext();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -450,7 +456,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = Guid.NewGuid().ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -462,7 +468,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _timeProvider);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -478,7 +484,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -494,7 +500,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider);
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await _db.Tenants.IgnoreQueryFilters()
@@ -514,7 +521,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.NewGuid()),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -528,7 +536,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.Empty),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -542,7 +551,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
