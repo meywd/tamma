@@ -192,4 +192,162 @@ public class PlatformOwnerAccessPolicyTests
         var response = await client.GetAsync("/api/admin/tenants");
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    // ── Story 28-R2 / PF-S1 — UpdateUserRole + DeleteUser regression ──
+    //
+    // The post-fix review found that PUT /api/admin/users/{id}/role and
+    // DELETE /api/admin/users/{id} were still gated by the legacy
+    // OwnerAccess policy (round-1 swept ~30 routes but missed these two).
+    // Both mutate the global `users` table — they MUST require
+    // PlatformOwnerAccess.
+
+    [Test]
+    public async Task UpdateUserRole_WithoutPlatformAdmin_Returns403_PF_S1()
+    {
+        // PF-S1 regression — a regular tenant-owner who is NOT a platform
+        // admin must not be able to mutate another platform user's role.
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer",
+                MintToken(role: "owner", platformRole: "user"));
+
+        var targetId = Guid.NewGuid();
+        var content = new StringContent(
+            "{\"role\":\"member\"}",
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var response = await client.PutAsync($"/api/admin/users/{targetId}/role", content);
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "PF-S1: tenant-owner-only must NOT pass the platform-admin gate on /api/admin/users/{id}/role");
+    }
+
+    [Test]
+    public async Task DeleteUser_WithoutPlatformAdmin_Returns403_PF_S1()
+    {
+        // PF-S1 regression — a regular tenant-owner must not be able to
+        // delete an arbitrary platform user. The route now requires
+        // PlatformOwnerAccess.
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer",
+                MintToken(role: "owner", platformRole: "user"));
+
+        var targetId = Guid.NewGuid();
+        var response = await client.DeleteAsync($"/api/admin/users/{targetId}");
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden,
+            "PF-S1: tenant-owner-only must NOT pass the platform-admin gate on /api/admin/users/{id}");
+    }
+
+    [Test]
+    public async Task UpdateUserRole_WithPlatformAdmin_PassesGate_PF_S1()
+    {
+        // The mirror — a platform-admin JWT must clear the policy gate.
+        // The handler may still 400/404 (e.g. user doesn't exist in the
+        // bare-bones test composition root) but it MUST NOT 403.
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer",
+                MintToken(role: "owner", platformRole: "platform_admin"));
+
+        var targetId = Guid.NewGuid();
+        var content = new StringContent(
+            "{\"role\":\"member\"}",
+            System.Text.Encoding.UTF8,
+            "application/json");
+        var response = await client.PutAsync($"/api/admin/users/{targetId}/role", content);
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+            "PF-S1: platform_admin must clear the gate (handler may still 400/404)");
+        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized,
+            "PF-S1: platform_admin token is signed with the test secret");
+    }
+
+    [Test]
+    public async Task DeleteUser_WithPlatformAdmin_PassesGate_PF_S1()
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer",
+                MintToken(role: "owner", platformRole: "platform_admin"));
+
+        var targetId = Guid.NewGuid();
+        var response = await client.DeleteAsync($"/api/admin/users/{targetId}");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+            "PF-S1: platform_admin must clear the gate on DELETE /api/admin/users/{id}");
+        response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+    }
+
+    // ── Story 28-R2 / PF-S3 — Impersonation token cannot escalate ──
+
+    /// <summary>
+    /// Mints a JWT shaped like an impersonation session token: the
+    /// operator's `sub`/`email` are preserved, but `platformRole` is
+    /// scope-reduced to "user" (the JwtService.GenerateAccessToken
+    /// mints this when impId is set). The `imp_id` claim is included
+    /// so the test reflects the real shape minted by
+    /// AdminImpersonationService.BeginImpersonationAsync.
+    /// </summary>
+    private static string MintImpersonationToken(Guid impId)
+    {
+        var jwt = new JwtSecurityToken(
+            issuer: "tamma",
+            audience: "tamma-api",
+            claims: new[]
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()),
+                new Claim("tenantId", Guid.NewGuid().ToString()),
+                new Claim("role", "owner"),
+                // PF-S3: scope-reduced. NOT "platform_admin".
+                new Claim("platformRole", "user"),
+                new Claim(JwtRegisteredClaimNames.Email, "actor@example.com"),
+                new Claim("name", "Actor"),
+                new Claim("authMethod", "email"),
+                new Claim("tenants", "[]"),
+                new Claim("imp_id", impId.ToString("D")),
+                new Claim("actor_user_id", Guid.NewGuid().ToString()),
+                new Claim("actor_email", "actor@example.com"),
+            },
+            expires: DateTime.UtcNow.AddMinutes(15),
+            signingCredentials: new SigningCredentials(
+                SigningKey, SecurityAlgorithms.HmacSha256));
+        return new JwtSecurityTokenHandler().WriteToken(jwt);
+    }
+
+    [Test]
+    public async Task ImpersonationJwt_BlockedFromCrossTenantAdminRoute_PF_S3()
+    {
+        // PF-S3 regression — the entire premise of impersonation scope
+        // reduction is that an impersonation JWT cannot reach
+        // PlatformOwnerAccess routes. Even though the operator behind
+        // this token IS a platform admin (the AdminImpersonationService
+        // verified that before minting), the token itself carries
+        // platformRole=user. Every PlatformOwnerAccess-gated route
+        // must 403 on this token.
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer",
+                MintImpersonationToken(Guid.NewGuid()));
+
+        // We intentionally do NOT exercise routes whose pipeline runs
+        // ImpersonationContextMiddleware (which would 401 because the
+        // imp_id doesn't reference a real DB row in the test factory).
+        // The point of this test is the policy gate; pick the routes
+        // that don't depend on the impersonation table existing.
+        foreach (var path in PlatformAdminRoutes)
+        {
+            var response = await client.GetAsync(path);
+            // 403 == policy gate rejected (PF-S3 in action).
+            // 401 == ImpersonationContextMiddleware rejected the
+            //        unverified imp_id — also acceptable (different
+            //        gate, same defence-in-depth outcome).
+            response.StatusCode.Should().BeOneOf(
+                new[] { HttpStatusCode.Forbidden, HttpStatusCode.Unauthorized },
+                $"PF-S3: impersonation JWT must NOT reach {path} as a platform admin");
+        }
+    }
 }

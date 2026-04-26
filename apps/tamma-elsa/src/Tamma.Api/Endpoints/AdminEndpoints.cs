@@ -162,9 +162,13 @@ public static class AdminEndpoints
             ?? principal.FindFirst(ClaimTypes.Role)?.Value
             ?? "member";
 
-        // Owner-only promotions: route is gated OwnerAccess in Program.cs so
-        // this is mostly defense-in-depth — but it makes the policy explicit
-        // for readers.
+        // Owner-only promotions: route is gated PlatformOwnerAccess in
+        // Program.cs (Story 28-R2 / PF-S1) so this is mostly defense-in-
+        // depth — but it makes the policy explicit for readers. Note: the
+        // per-tenant `role` claim is still consulted here because per-
+        // tenant role assignments (owner/admin/member) flow through this
+        // route too; the platform-admin gate at the route layer keeps
+        // non-platform users out altogether.
         if ((req.Role == "owner" || req.Role == "admin") && callerRole != "owner")
             return Results.Json(
                 new { error = "Only owners can promote to admin or owner" },
@@ -173,6 +177,31 @@ public static class AdminEndpoints
         var user = await userRepo.GetByIdAsync(id);
         if (user is null) return Results.NotFound(new { error = "User not found" });
 
+        // Story 28-R2 / PF-S1 — defense-in-depth: refuse to demote another
+        // platform admin via this surface. The route is gated
+        // PlatformOwnerAccess so the caller IS a platform admin; without
+        // this guard one platform admin could strip the per-tenant role
+        // of another platform admin (the platform_role column itself is
+        // not editable from this endpoint, but combined with future
+        // `platformRole` editing this becomes a privilege-escalation
+        // primitive). Self-demotion is allowed; cross-platform-admin
+        // demotion is not.
+        if (string.Equals(user.PlatformRole, "platform_admin", StringComparison.Ordinal)
+            && Guid.TryParse(callerSub, out var actor) && actor != id)
+        {
+            loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
+                .LogWarning(
+                    "USER.ROLE_CHANGE.BLOCKED targetUserId={TargetUserId} targetPlatformRole={TargetPlatformRole} actor={Actor} reason=cross_platform_admin_demote",
+                    id, user.PlatformRole, callerSub ?? "(unknown)");
+            return Results.Json(
+                new
+                {
+                    error = "cross_platform_admin_demote_blocked",
+                    message = "Cannot change the per-tenant role of another platform admin via this endpoint."
+                },
+                statusCode: 403);
+        }
+
         var oldRole = user.Role;
         if (tenantContext.TenantId.HasValue)
             await membershipRepo.UpdateRoleAsync(tenantContext.TenantId.Value, id, req.Role);
@@ -180,10 +209,17 @@ public static class AdminEndpoints
         user.Role = req.Role;
         await userRepo.UpdateAsync(user);
 
+        // Story 28-R2 / PF-S1 — structured audit log for the platform-
+        // admin-scoped mutation. Includes the actor's principal id, the
+        // actor's email (if present in the JWT), the target user, both
+        // roles. Audit log search-friendly key is USER.ROLE_CHANGED.SUCCESS.
+        var actorEmail = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? "(unknown)";
         loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
             .LogInformation(
-                "USER.ROLE_CHANGED.SUCCESS targetUserId={TargetUserId} oldRole={OldRole} newRole={NewRole} changedBy={ChangedBy}",
-                id, oldRole, req.Role, callerSub ?? "(unknown)");
+                "USER.ROLE_CHANGED.SUCCESS targetUserId={TargetUserId} targetPlatformRole={TargetPlatformRole} oldRole={OldRole} newRole={NewRole} actorUserId={ActorUserId} actorEmail={ActorEmail}",
+                id, user.PlatformRole, oldRole, req.Role, callerSub ?? "(unknown)", actorEmail);
 
         return Results.Ok(new { message = "Role updated" });
     }
@@ -206,6 +242,31 @@ public static class AdminEndpoints
         var user = await userRepo.GetByIdAsync(id);
         if (user is null)
             return Results.NotFound(new { error = "User not found" });
+
+        // Story 28-R2 / PF-S1 — defense-in-depth: refuse to delete another
+        // platform admin via this surface. The route is gated
+        // PlatformOwnerAccess so the caller IS a platform admin; that
+        // does not authorise one platform admin to nuke another. Removing
+        // a platform admin requires an explicit DB-side update of
+        // users.platform_role first (or running this endpoint against the
+        // same caller — self-deletion is already refused above for other
+        // reasons). Self-deletion of one's own platform-admin role would
+        // never reach this guard.
+        if (string.Equals(user.PlatformRole, "platform_admin", StringComparison.Ordinal))
+        {
+            loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
+                .LogWarning(
+                    "USER.DELETE.BLOCKED targetUserId={TargetUserId} targetPlatformRole={TargetPlatformRole} actor={Actor} reason=cross_platform_admin_delete",
+                    id, user.PlatformRole, callerSub ?? "(unknown)");
+            return Results.Json(
+                new
+                {
+                    error = "cross_platform_admin_delete_blocked",
+                    message = "Cannot delete a platform admin via this endpoint. "
+                        + "Demote the user (set users.platform_role = 'user') first."
+                },
+                statusCode: 403);
+        }
 
         // Sole-owner guard (audit finding auth/019 follow-up). If this user
         // is the only owner of ANY tenant, refuse the delete with a 409 +
@@ -237,10 +298,15 @@ public static class AdminEndpoints
         // sole-owner guard above ruled out orphaning any tenant.
         await membershipRepo.RemoveAllForUserAsync(id);
 
+        // Story 28-R2 / PF-S1 — structured audit log for the platform-
+        // admin-scoped mutation.
+        var actorEmail = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? "(unknown)";
         loggerFactory.CreateLogger(typeof(AdminEndpoints).FullName!)
             .LogInformation(
-                "USER.DELETED.SUCCESS targetUserId={TargetUserId} deletedBy={DeletedBy}",
-                id, callerSub ?? "(unknown)");
+                "USER.DELETED.SUCCESS targetUserId={TargetUserId} actorUserId={ActorUserId} actorEmail={ActorEmail}",
+                id, callerSub ?? "(unknown)", actorEmail);
 
         return Results.Ok(new { ok = true });
     }

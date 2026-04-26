@@ -23,12 +23,15 @@
 --                        tenant roles (tamma_t_<hex>) get their own
 --                        privileges scoped to their own database.
 --
--- Passwords (Story 28-12 + R2 fix H1): the docker-entrypoint hook
--- threads passwords into psql via -v variables (`-v admin_password=…`
--- + `-v provisioner_password=…` + `-v app_password=…`). psql
--- substitutes :'admin_password' inline as a properly-quoted SQL
--- literal at parse time, so the plaintext NEVER appears on the command
--- line, in pg_stat_activity, or in /proc/<pid>/cmdline.
+-- Passwords (Story 28-12 + R2 fix H1 + R2 post-fix PF-S2): the
+-- docker-entrypoint hook composes a chmod-0600 preamble file that
+-- contains three psql `\set` directives binding the role passwords
+-- to in-process variables. The preamble + this file are concatenated
+-- and piped to psql via stdin (`--file=-`). psql substitutes
+-- :'admin_password' inline as a properly-quoted SQL literal at parse
+-- time. The plaintext NEVER appears on the psql command line; the
+-- only argv elements left are the dbname, username, the literal
+-- `--file=-`, and the cp_database variable (not a secret).
 --
 -- The CREATE ROLE statements are wrapped in transactions that begin
 -- with `SET LOCAL log_statement = 'none'` so the statement does not
@@ -37,18 +40,15 @@
 -- the plaintext is never persisted at rest (pg_authid stores the
 -- scram-sha-256 hash).
 --
--- IMPORTANT: This script MUST be invoked with all three -v variables
--- set. Direct operator use:
---
---   PGPASSWORD=… psql \
---     -v admin_password='…' \
---     -v provisioner_password='…' \
---     -v app_password='…' \
---     -v cp_database=tamma_control \
---     -f postgres-roles.sql
---
--- The values must NOT be set on the shell line as ENV=value before
--- psql — that pollutes /proc/<pid>/environ. Use -v explicitly.
+-- IMPORTANT: This script expects three psql variables to be already
+-- set in the session — `admin_password`, `provisioner_password`, and
+-- `app_password`. The docker-entrypoint hook composes them via the
+-- chmod-0600 preamble approach above. Direct operator invocation
+-- should follow the same shape (write a chmod-0600 preamble, pipe
+-- preamble+roles.sql into psql via stdin) — see
+-- `.dev/runbooks/postgres-bootstrap.md`. The previous "use psql
+-- --set on the command line" pattern leaked plaintext via
+-- /proc/<pid>/cmdline; do NOT regress to it.
 --
 -- Note on psql variable substitution: psql substitutes :'var' OUTSIDE
 -- dollar-quoted strings ($$…$$). The previous shape used DO …
@@ -81,7 +81,9 @@ SET LOCAL log_min_duration_statement = -1;
 -- psql substitutes :'admin_password' as a properly-escaped SQL literal
 -- (proper single-quote escaping, no SQL-injection risk). The cluster
 -- session-log line for this CREATE ROLE has been silenced via SET
--- LOCAL log_statement = 'none' above.
+-- LOCAL log_statement = 'none' above. The variable itself is bound by
+-- the preamble file the docker-entrypoint hook composes (chmod 0600),
+-- not by `psql --set` argv (which would leak via /proc/<pid>/cmdline).
 CREATE ROLE tamma_admin LOGIN SUPERUSER ENCRYPTED PASSWORD :'admin_password';
 COMMIT;
 \endif

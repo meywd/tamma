@@ -57,6 +57,20 @@ public sealed class ImpersonationContextMiddleware
     public const string ImpersonationIdItem = "ImpersonationId";
 
     /// <summary>
+    /// Story 28-R2 / PF-S3 — key under which the impersonator's user id
+    /// is stashed for audit-event enrichers. Sourced from the JWT's
+    /// <see cref="ActorUserIdClaim"/> claim (which the JwtService mints
+    /// alongside <see cref="ImpersonationClaim"/>).
+    /// </summary>
+    public const string ActorUserIdItem = "ImpersonationActorUserId";
+
+    /// <summary>
+    /// Story 28-R2 / PF-S3 — key under which the impersonator's email is
+    /// stashed for audit-event enrichers.
+    /// </summary>
+    public const string ActorEmailItem = "ImpersonationActorEmail";
+
+    /// <summary>
     /// Response header surfaced to the dashboard so it can render the
     /// "currently impersonating" banner without parsing the JWT.
     /// </summary>
@@ -64,6 +78,12 @@ public sealed class ImpersonationContextMiddleware
 
     /// <summary>JWT claim name carrying the impersonation row id.</summary>
     public const string ImpersonationClaim = "imp_id";
+
+    /// <summary>JWT claim name carrying the impersonator's user id (Story 28-R2 / PF-S3).</summary>
+    public const string ActorUserIdClaim = "actor_user_id";
+
+    /// <summary>JWT claim name carrying the impersonator's email (Story 28-R2 / PF-S3).</summary>
+    public const string ActorEmailClaim = "actor_email";
 
     private readonly RequestDelegate _next;
 
@@ -156,6 +176,38 @@ public sealed class ImpersonationContextMiddleware
         // All gates passed. Stash the impersonation id for downstream
         // observability + tag the response header.
         context.Items[ImpersonationIdItem] = impId;
+
+        // Story 28-R2 / PF-S3 — stash the impersonator's identity so
+        // audit-event constructors and log enrichers can attribute the
+        // request to the operator without re-querying the
+        // admin_impersonations table. We trust the JWT for these
+        // breadcrumbs because the token signature has already been
+        // validated by the JwtBearer handler upstream — and we already
+        // re-verified the impersonation row above (so a forged JWT with
+        // a junk `actor_user_id` but a real `imp_id` would have been
+        // caught by the row's existence check). When the claim is
+        // absent (legacy token, test fixture), fall back to the
+        // operator id stored on the impersonation row itself.
+        var actorUserIdClaim = context.User?.FindFirst(ActorUserIdClaim)?.Value;
+        if (Guid.TryParse(actorUserIdClaim, out var actorUserId))
+        {
+            context.Items[ActorUserIdItem] = actorUserId;
+        }
+        else
+        {
+            context.Items[ActorUserIdItem] = row.ImpersonatorUserId;
+        }
+
+        var actorEmailClaim = context.User?.FindFirst(ActorEmailClaim)?.Value;
+        if (!string.IsNullOrWhiteSpace(actorEmailClaim))
+        {
+            context.Items[ActorEmailItem] = actorEmailClaim;
+        }
+        else if (!string.IsNullOrWhiteSpace(row.ImpersonatorEmail))
+        {
+            context.Items[ActorEmailItem] = row.ImpersonatorEmail;
+        }
+
         if (!context.Response.HasStarted)
         {
             context.Response.Headers[ImpersonationHeader] = impId.ToString("D");
@@ -177,6 +229,40 @@ public sealed class ImpersonationContextMiddleware
             && raw is Guid id)
         {
             return id;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S3 — convenience accessor for the impersonator's
+    /// user id stashed by this middleware. Returns <c>null</c> when the
+    /// request is not inside an impersonation session.
+    /// Audit-event constructors call this to attach the operator's
+    /// identity to events emitted while the operator is "becoming" the
+    /// target user/tenant.
+    /// </summary>
+    public static Guid? GetActorUserId(HttpContext? context)
+    {
+        if (context?.Items.TryGetValue(ActorUserIdItem, out var raw) == true
+            && raw is Guid id)
+        {
+            return id;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S3 — convenience accessor for the impersonator's
+    /// email stashed by this middleware. Returns <c>null</c> when the
+    /// request is not inside an impersonation session.
+    /// </summary>
+    public static string? GetActorEmail(HttpContext? context)
+    {
+        if (context?.Items.TryGetValue(ActorEmailItem, out var raw) == true
+            && raw is string email
+            && !string.IsNullOrWhiteSpace(email))
+        {
+            return email;
         }
         return null;
     }
