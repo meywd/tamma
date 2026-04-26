@@ -10,38 +10,39 @@ namespace Tamma.Api.Services.Secrets;
 /// adapter that wraps <see cref="TenantSecretProtector"/> for the
 /// <see cref="Tamma.Data.Pooling.LruPooledTenantConnectionResolver"/>.
 ///
-/// <para>The 28-4 resolver's seam is implementation-defined on both
-/// the envelope layout and the slot indicator (<c>kekVersion</c>). This
-/// adapter chooses the simplest interpretation that lines up with the
-/// existing protector format
-/// (<c>nonce ‖ ciphertext ‖ tag</c>):</para>
+/// <para>R2-H13 fix: the adapter now consumes <c>kekVersion</c> when
+/// the caller supplies it. The decryptor first asks the
+/// <see cref="KekProvider"/> for the slot at that exact version (which
+/// looks up active/secondary/retired in one step) and tries ONLY that
+/// key. The two-key heuristic fallback is reserved for legacy rows
+/// where <c>kekVersion</c> is null — those carry no version hint, so
+/// trying primary then secondary is the only safe choice. After more
+/// than one rotation, however, retired keys must be reachable by
+/// version: <see cref="KekProvider.GetByVersion"/> returns the matching
+/// retired slot when one is in the cabinet ring.</para>
 ///
 /// <list type="bullet">
 ///   <item><description><b>Steady state</b> — every envelope was
-///     encrypted under the primary KEK exposed by
-///     <see cref="KekProvider.GetPrimary"/>. Decrypt happens with the
-///     primary; no fallback is needed.</description></item>
-///   <item><description><b>Rotation window</b> — when the operator
-///     stages a secondary KEK (Doc 01 §8.2 step 2), envelopes written
-///     before the rotation kicked off still need the previous KEK to
-///     decrypt. The adapter tries the primary first; on
-///     <see cref="CryptographicException"/> (auth-tag failure) it
-///     retries with the secondary. The adapter does NOT know which
-///     KEK encrypted any given row at rest — it relies on the GCM tag
-///     to fail-closed if both options are wrong.</description></item>
-///   <item><description><b>Re-encrypt path</b> — the rotation worker
-///     (<see cref="KekRotationCoordinator"/>) holds both KEKs at the
-///     same time; it explicitly calls
-///     <see cref="DecryptWithKey"/> + <see cref="EncryptWithKey"/> so
-///     the fallback heuristic doesn't apply during the actual rotation
-///     loop.</description></item>
+///     encrypted under the active primary KEK. <c>kekVersion</c> on
+///     the row matches <see cref="KekProvider.GetActiveVersion"/>.
+///     <see cref="KekProvider.GetByVersion"/> returns the primary slot
+///     and the decrypt succeeds in one shot.</description></item>
+///   <item><description><b>Rotation window</b> — a row may carry the
+///     previous primary's <c>KekVersion</c>. The cabinet still holds
+///     the previous primary in the secondary slot (rotation step 2 in
+///     the runbook). <see cref="KekProvider.GetByVersion"/> returns
+///     the secondary slot and the decrypt succeeds.</description></item>
+///   <item><description><b>Post-rotation, pre-cleanup</b> — a row was
+///     added or unreachable during the previous rotation and is now
+///     two versions behind. The cabinet keeps a small ring of retired
+///     keys for exactly this case — see
+///     <see cref="KekProvider.RetainedHistorySize"/>.</description></item>
+///   <item><description><b>Legacy row (kekVersion=null)</b> — try
+///     primary first; on auth-tag failure try secondary. This is the
+///     pre-H13 heuristic; it stays for migration safety but logs a
+///     warning so operators can see how many rows still lack a
+///     version stamp.</description></item>
 /// </list>
-///
-/// <para>The <c>kekVersion</c> argument from the resolver is recorded
-/// in structured logs but does NOT gate decryption — it is purely an
-/// informational hint. This keeps the adapter forward-compatible with
-/// future envelope versions (Story 28-13 OpenBao) without breaking the
-/// 28-4 interface.</para>
 ///
 /// <para>The adapter NEVER logs the envelope contents or the recovered
 /// plaintext. On failure the wrapping
@@ -73,13 +74,54 @@ public sealed class AesGcmConnectionStringDecryptor : IConnectionStringDecryptor
                 nameof(envelope));
         }
 
+        // R2-H13: when the caller supplies a kekVersion, look it up
+        // directly. This avoids the post-multi-rotation hole where a row
+        // is two-versions-back and primary+secondary are both wrong.
+        if (kekVersion is not null && kekVersion.Value > 0)
+        {
+            var slot = _kekProvider.GetByVersion(kekVersion.Value);
+            if (slot is null)
+            {
+                _logger.LogWarning(
+                    "tenant.kek.decrypt_failed kekVersion={KekVersion} reason=unknown_version "
+                    + "activeVersion={ActiveVersion}",
+                    kekVersion, _kekProvider.GetActiveVersion());
+                throw new CryptographicException(
+                    $"KEK version {kekVersion} is not present in the cabinet. "
+                    + "The retired-keys ring may have been pruned past this version — "
+                    + "operator must restore the historical key or re-encrypt the row.");
+            }
+
+            var keyCopy = slot.Material;
+            try
+            {
+                return DecryptWithKey(envelope, keyCopy);
+            }
+            catch (CryptographicException primaryFailure)
+            {
+                _logger.LogWarning(
+                    "tenant.kek.decrypt_failed kekVersion={KekVersion} slotKind={Kind} "
+                    + "reason=auth_tag_mismatch errorType={ErrorType}",
+                    kekVersion, slot.Kind, primaryFailure.GetType().Name);
+                throw;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(keyCopy);
+            }
+        }
+
+        // Legacy / passthrough path: kekVersion is null. We don't know
+        // which slot encrypted the envelope, so fall back to primary
+        // then secondary. This is the pre-H13 heuristic.
+        return DecryptLegacyHeuristic(envelope);
+    }
+
+    private string DecryptLegacyHeuristic(byte[] envelope)
+    {
         var primary = _kekProvider.GetPrimary();
         if (primary is null)
         {
-            // No primary configured — surface a terse error. Production
-            // deployments must set Cranl:EncryptionKey; the resolver
-            // wraps this in TenantConnectionDecryptionException so the
-            // envelope contents never leak.
             throw new InvalidOperationException(
                 "No primary KEK is configured. Set "
                 + KekProvider.PrimaryConfigKey
@@ -99,9 +141,8 @@ public sealed class AesGcmConnectionStringDecryptor : IConnectionStringDecryptor
                 if (secondary is null)
                 {
                     _logger.LogWarning(
-                        "tenant.kek.decrypt_failed kekVersionHint={KekVersion} "
-                        + "fallback=none reason=primary_only",
-                        kekVersion);
+                        "tenant.kek.decrypt_failed kekVersionHint=null "
+                        + "fallback=none reason=primary_only");
                     throw;
                 }
 
@@ -109,18 +150,16 @@ public sealed class AesGcmConnectionStringDecryptor : IConnectionStringDecryptor
                 {
                     var plaintext = DecryptWithKey(envelope, secondary);
                     _logger.LogInformation(
-                        "tenant.kek.decrypt_fallback kekVersionHint={KekVersion} "
-                        + "slot=secondary — envelope predates the current rotation",
-                        kekVersion);
+                        "tenant.kek.decrypt_fallback kekVersionHint=null "
+                        + "slot=secondary — envelope predates the current rotation");
                     return plaintext;
                 }
                 catch (CryptographicException secondaryFailure)
                 {
                     _logger.LogWarning(
-                        "tenant.kek.decrypt_failed kekVersionHint={KekVersion} "
+                        "tenant.kek.decrypt_failed kekVersionHint=null "
                         + "fallback=secondary reason=auth_tag_mismatch primaryError={PrimaryError} "
                         + "secondaryError={SecondaryError}",
-                        kekVersion,
                         primaryFailure.GetType().Name,
                         secondaryFailure.GetType().Name);
                     throw new CryptographicException(

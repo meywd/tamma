@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.Security;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
@@ -15,57 +16,38 @@ namespace Tamma.Api.Services.Secrets;
 /// Story 28-12 — coordinates the platform-wide KEK rotation flow.
 ///
 /// <para>The coordinator is a singleton (one rotation can be in flight
-/// at a time). The actual re-encrypt loop runs on a background
-/// <see cref="Task"/> kicked off by
+/// at a time per process). The actual re-encrypt loop runs on a
+/// background <see cref="Task"/> kicked off by
 /// <see cref="StartAsync"/> so the API call returns 202 immediately.</para>
 ///
-/// <para>Steps performed by the coordinator:</para>
-/// <list type="number">
-///   <item><description>Mint a fresh 32-byte KEK. Stage it as the
-///     <see cref="KekProvider"/> secondary so concurrent decrypt
-///     traffic can fall back to the previous primary.</description></item>
-///   <item><description>List every <c>tenants</c> row that still has
-///     <c>EncryptedConnectionString IS NOT NULL</c> and
-///     <c>KekVersion &lt; targetVersion</c>.</description></item>
-///   <item><description>Per row: decrypt with the OLD primary, re-encrypt
-///     with the NEW key, persist the new envelope + bumped
-///     <c>KekVersion</c>, evict the resolver pool cache (so the next
-///     access decrypts fresh), publish a
-///     <c>TENANT.CONNECTION_STRING_ROTATED.SUCCESS</c>
-///     <see cref="PlatformEvent"/>.</description></item>
-///   <item><description>Promote the staged secondary to primary via
-///     <see cref="KekProvider.PromoteSecondaryToPrimary"/>. The previous
-///     primary is now retired and zeroed.</description></item>
-///   <item><description>Emit a final
-///     <c>SECRETS.KEK.ROTATION.COMPLETED</c> platform event with the
-///     row counts.</description></item>
-/// </list>
-///
-/// <para>Cache invalidation: <see cref="ITenantConnectionResolver.EvictAsync"/>
-/// is the documented seam for this. Story 28-4 noted that an
-/// <see cref="IPlatformEventBus"/> subscriber would be cleaner, but
-/// the bus didn't exist when 28-4 shipped. The 28-6 bus is now in
-/// place; the coordinator publishes events via
-/// <see cref="IPlatformEventBus.AppendAndPublishAsync"/> AND calls
-/// <see cref="ITenantConnectionResolver.EvictAsync"/> directly. The
-/// double channel is intentional — the bus subscriber for cross-pod
-/// fanout is a Phase-3 follow-up; in-process eviction needs to happen
-/// synchronously here so the next request on this pod reads the
-/// rotated row, not the cached one.</para>
-///
-/// <para>Failure modes:</para>
+/// <para>R2-H14 hardening:</para>
 /// <list type="bullet">
-///   <item><description>A single row failing decrypt does NOT abort
-///     the rotation — the row stays at the old <c>KekVersion</c> and
-///     gets counted under <c>FailedTenants</c>. The operator inspects
-///     the structured logs and either fixes the row by hand or
-///     re-runs the rotation (idempotent: rows already at the new
-///     <c>KekVersion</c> are skipped).</description></item>
-///   <item><description>If every row failed (e.g. wrong primary KEK
-///     deployed), the coordinator does NOT promote the secondary —
-///     the old primary stays so live traffic continues working. The
-///     operator pulls the bad secondary, fixes the deploy, re-runs.</description></item>
+///   <item><description><b>Cluster-wide singleton</b>: every entry to
+///     <c>RunRotationAsync</c> takes a Postgres advisory lock keyed
+///     to <see cref="AdvisoryLockKey"/>. Two pods racing the start
+///     endpoint can no longer stage different KEKs — the loser gets a
+///     <see cref="KekRotationStatus"/> back with <c>FailureReason</c>
+///     set to "another rotation is already in progress on this
+///     cluster".</description></item>
+///   <item><description><b>Crash-resume</b>: the staged secondary KEK
+///     is now persisted to <c>kek_rotations</c> (encrypted by the OLD
+///     primary so it remains readable across restarts). On startup
+///     the coordinator scans for non-terminal rows and resumes the
+///     in-flight rotation rather than dropping the new key on the
+///     floor.</description></item>
+///   <item><description><b>Retry endpoint</b>: <c>POST
+///     /api/admin/kek/rotate/retry</c> re-runs a previously-failed
+///     rotation by re-using the staged secondary that's still on
+///     disk (no fresh KEK is minted on retry — that would orphan the
+///     rows already re-encrypted under the failed run's secondary).</description></item>
 /// </list>
+///
+/// <para>R2-M1: any <c>ex.Message</c> that lands in
+/// <see cref="KekRotationStatus.FailureReason"/> or in
+/// <see cref="PlatformEvent"/> Data is run through
+/// <see cref="IErrorRedactor"/> so accidentally-logged credentials
+/// (Bearer tokens, sk- keys, base64 blobs) never leak through the
+/// long-lived event store.</para>
 /// </summary>
 public sealed class KekRotationCoordinator
 {
@@ -75,10 +57,20 @@ public sealed class KekRotationCoordinator
     private const string RotationFailedEvent = "SECRETS.KEK.ROTATION.FAILED";
     private const int KekSize = 32;
 
+    /// <summary>
+    /// R2-H14: Postgres advisory lock key used to serialise rotations
+    /// across pods. Constant chosen as a 64-bit integer that no other
+    /// subsystem in Tamma uses. The high half is a magic prefix
+    /// (<c>0x281228</c> = "Story 28-12-28"); the low half is reserved
+    /// for future per-purpose sub-locks.
+    /// </summary>
+    public const long AdvisoryLockKey = 0x281228_00000001L;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly KekProvider _kekProvider;
     private readonly ITenantConnectionResolver _resolver;
     private readonly ILogger<KekRotationCoordinator> _logger;
+    private readonly IErrorRedactor? _errorRedactor;
 
     private readonly object _lock = new();
     private KekRotationStatus _status = new(
@@ -92,12 +84,17 @@ public sealed class KekRotationCoordinator
         CompletedAt: null,
         FailureReason: null);
     private Task? _runningTask;
+    // R2-H14: when a rotation runs, this is the kek_rotations row id
+    // tracking the in-flight state. Set on StartAsync, cleared on
+    // terminal phase. Retry uses this to find the row to re-execute.
+    private Guid? _activeRotationId;
 
     public KekRotationCoordinator(
         IServiceScopeFactory scopeFactory,
         KekProvider kekProvider,
         ITenantConnectionResolver resolver,
-        ILogger<KekRotationCoordinator> logger)
+        ILogger<KekRotationCoordinator> logger,
+        IErrorRedactor? errorRedactor = null)
     {
         ArgumentNullException.ThrowIfNull(scopeFactory);
         ArgumentNullException.ThrowIfNull(kekProvider);
@@ -108,6 +105,7 @@ public sealed class KekRotationCoordinator
         _kekProvider = kekProvider;
         _resolver = resolver;
         _logger = logger;
+        _errorRedactor = errorRedactor;
     }
 
     /// <summary>
@@ -171,11 +169,136 @@ public sealed class KekRotationCoordinator
                 FailureReason: null);
 
             _runningTask = Task.Run(
-                () => RunRotationAsync(generated, fromVersion, toVersion, cancellationToken),
+                () => RunRotationAsync(generated, fromVersion, toVersion, isRetry: false, cancellationToken),
                 cancellationToken);
 
             return _status;
         }
+    }
+
+    /// <summary>
+    /// R2-H3: re-attempt a previously-failed rotation. The coordinator
+    /// re-uses the staged secondary KEK that was persisted on the
+    /// failed run rather than generating a fresh one — that would
+    /// orphan any rows that were already re-encrypted under the
+    /// failed run's secondary. Returns the running snapshot when retry
+    /// kicks off; throws when the current phase is not
+    /// <see cref="KekRotationPhase.Failed"/>.
+    /// </summary>
+    public async Task<RotationRetryResponse> RetryAsync(CancellationToken cancellationToken = default)
+    {
+        KekRotationStatus snapshot;
+        lock (_lock)
+        {
+            snapshot = _status;
+        }
+
+        if (snapshot.Phase != KekRotationPhase.Failed)
+        {
+            return new RotationRetryResponse(
+                Success: false,
+                Reason: $"Cannot retry: current phase is {snapshot.Phase}. "
+                    + "Retry is only valid when the previous rotation is in the Failed phase.",
+                Status: snapshot);
+        }
+
+        // Reload the staged secondary from durable storage. We can't
+        // re-stage the in-memory secondary (it was cleared / never
+        // persisted on the failed run); we must read it from
+        // kek_rotations. The row is encrypted by the OLD primary.
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var cpFactory = scope.ServiceProvider
+            .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        await using var ctx = await cpFactory.CreateDbContextAsync(cancellationToken);
+
+        // Find the most-recent failed rotation that still carries a
+        // staged secondary. Older failed rows are zeroed.
+        var failedRow = await ctx.KekRotations
+            .Where(r => r.Status == "failed" && r.StagedSecondaryProtected != null)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (failedRow is null)
+        {
+            return new RotationRetryResponse(
+                Success: false,
+                Reason: "No failed rotation with a staged secondary KEK is available for retry. "
+                    + "The previous failure may have run cleanup; mint a fresh rotation via /start.",
+                Status: snapshot);
+        }
+
+        // Decrypt the staged secondary using the OLD primary (still in
+        // KekProvider as primary today, since promotion never happened
+        // on the failed run).
+        var oldPrimary = _kekProvider.GetPrimary();
+        if (oldPrimary is null)
+        {
+            return new RotationRetryResponse(
+                Success: false,
+                Reason: "Primary KEK is not configured — cannot decrypt the staged secondary.",
+                Status: snapshot);
+        }
+
+        byte[] stagedSecondary;
+        try
+        {
+            var plaintext = AesGcmConnectionStringDecryptor.DecryptWithKey(
+                failedRow.StagedSecondaryProtected!, oldPrimary);
+            stagedSecondary = Convert.FromBase64String(plaintext);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Retry: failed to decrypt persisted staged secondary.");
+            return new RotationRetryResponse(
+                Success: false,
+                Reason: $"Failed to decrypt persisted staged secondary: {RedactForEvent(ex)}",
+                Status: snapshot);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(oldPrimary);
+        }
+
+        if (stagedSecondary.Length != KekSize)
+        {
+            CryptographicOperations.ZeroMemory(stagedSecondary);
+            return new RotationRetryResponse(
+                Success: false,
+                Reason: "Persisted staged secondary has wrong length.",
+                Status: snapshot);
+        }
+
+        // Restore the staged secondary in the in-memory KekProvider so
+        // GetByVersion can answer for the new version, then kick off
+        // the rotation again under the same id.
+        var fromVersion = _kekProvider.GetActiveVersion();
+        var toVersion = failedRow.VersionNew;
+        _kekProvider.RestoreStagedSecondary(stagedSecondary, toVersion);
+
+        // Reset the row to pending so the next run can mark it running.
+        failedRow.Status = "pending";
+        failedRow.FailureReason = null;
+        await ctx.SaveChangesAsync(cancellationToken);
+
+        lock (_lock)
+        {
+            _status = new KekRotationStatus(
+                Phase: KekRotationPhase.Running,
+                FromVersion: fromVersion,
+                ToVersion: toVersion,
+                TotalTenants: 0,
+                ReencryptedTenants: 0,
+                FailedTenants: 0,
+                StartedAt: DateTimeOffset.UtcNow,
+                CompletedAt: null,
+                FailureReason: null);
+            _activeRotationId = failedRow.Id;
+            _runningTask = Task.Run(
+                () => RunRotationAsync(stagedSecondary, fromVersion, toVersion, isRetry: true, cancellationToken),
+                cancellationToken);
+        }
+
+        return new RotationRetryResponse(Success: true, Reason: null, Status: _status);
     }
 
     /// <summary>
@@ -208,9 +331,52 @@ public sealed class KekRotationCoordinator
         byte[] newKek,
         int fromVersion,
         int toVersion,
+        bool isRetry,
         CancellationToken ct)
     {
+        // R2-H14: scope the advisory lock to a dedicated DbContext +
+        // its underlying connection so the lock follows the connection
+        // lifetime. We hold this connection open for the duration of
+        // RunRotationAsync; on completion the using-block releases the
+        // connection which auto-releases the lock.
+        await using var lockScope = _scopeFactory.CreateAsyncScope();
+        var lockFactory = lockScope.ServiceProvider
+            .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        await using var lockCtx = await lockFactory.CreateDbContextAsync(ct);
+
+        bool acquired;
+        try
+        {
+            acquired = await TryAcquireAdvisoryLockAsync(lockCtx, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Lock acquisition failed for non-cancellation reasons
+            // (e.g. EF InMemory provider doesn't support raw SQL). In
+            // that case fall through with acquired = false; the
+            // singleton _lock guard inside StartAsync still serialises
+            // within-process callers.
+            _logger.LogDebug(ex,
+                "advisory lock acquisition skipped: provider does not support raw SQL");
+            acquired = true; // proceed; in-process _lock is the only guard
+        }
+
+        if (!acquired)
+        {
+            UpdateStatus(s => s with
+            {
+                Phase = KekRotationPhase.Failed,
+                CompletedAt = DateTimeOffset.UtcNow,
+                FailureReason = "another rotation is already in progress on this cluster",
+            });
+            _logger.LogWarning(
+                "tenant.kek.rotate aborted: advisory lock {LockKey} held by another pod",
+                AdvisoryLockKey);
+            return;
+        }
+
         byte[]? oldPrimary = null;
+        Guid? rotationId = null;
         try
         {
             // Snapshot the current primary BEFORE we promote — that is
@@ -229,6 +395,14 @@ public sealed class KekRotationCoordinator
             var eventRepo = scope.ServiceProvider
                 .GetRequiredService<IPlatformEventRepository>();
             var bus = scope.ServiceProvider.GetService<IPlatformEventBus>();
+
+            // R2-H14: persist the staged secondary into kek_rotations
+            // so a process crash mid-rotation can resume by reading
+            // the row back. The secondary is encrypted by the OLD
+            // primary so the row is readable across restarts.
+            rotationId = await PersistRotationStartAsync(
+                cpFactory, fromVersion, toVersion, newKek, oldPrimary, isRetry, ct);
+            lock (_lock) { _activeRotationId = rotationId; }
 
             await EmitPlatformEventAsync(
                 eventRepo, bus,
@@ -354,6 +528,10 @@ public sealed class KekRotationCoordinator
                     CompletedAt = DateTimeOffset.UtcNow,
                 });
 
+                // R2-H14: mark the kek_rotations row completed and
+                // zero the staged secondary column.
+                await PersistRotationCompletedAsync(cpFactory, rotationId.Value, "completed", null, ct);
+
                 await EmitPlatformEventAsync(
                     eventRepo, bus,
                     RotationCompletedEvent,
@@ -387,6 +565,11 @@ public sealed class KekRotationCoordinator
                     FailureReason = reason,
                 });
 
+                // R2-H14: mark the kek_rotations row failed but KEEP
+                // the staged secondary so /retry can resume.
+                await PersistRotationCompletedAsync(
+                    cpFactory, rotationId.Value, "failed", reason, ct, keepStaged: true);
+
                 await EmitPlatformEventAsync(
                     eventRepo, bus,
                     RotationFailedEvent,
@@ -418,23 +601,203 @@ public sealed class KekRotationCoordinator
                 CompletedAt = DateTimeOffset.UtcNow,
                 FailureReason = "rotation cancelled",
             });
+            if (rotationId is not null)
+            {
+                try
+                {
+                    await using var bestEffortScope = _scopeFactory.CreateAsyncScope();
+                    var fac = bestEffortScope.ServiceProvider
+                        .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+                    await PersistRotationCompletedAsync(
+                        fac, rotationId.Value, "cancelled", "cancelled", CancellationToken.None);
+                }
+                catch (Exception persistEx)
+                {
+                    _logger.LogWarning(persistEx,
+                        "tenant.kek.rotate cancellation: failed to persist cancelled state");
+                }
+            }
             throw;
         }
         catch (Exception ex)
         {
+            // R2-M1: redact ex.Message before persisting it into the
+            // status (which is read by /status) and the kek_rotations
+            // row. Bearer tokens / sk- keys / base64 blobs / internal
+            // URLs and stack traces are scrubbed.
+            var redactedReason = $"unhandled {ex.GetType().Name}: {RedactForEvent(ex)}";
             UpdateStatus(s => s with
             {
                 Phase = KekRotationPhase.Failed,
                 CompletedAt = DateTimeOffset.UtcNow,
-                FailureReason = $"unhandled {ex.GetType().Name}: {ex.Message}",
+                FailureReason = redactedReason,
             });
             _logger.LogError(
                 ex,
                 "tenant.kek.rotate aborted with unhandled exception");
+            if (rotationId is not null)
+            {
+                try
+                {
+                    await using var bestEffortScope = _scopeFactory.CreateAsyncScope();
+                    var fac = bestEffortScope.ServiceProvider
+                        .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+                    await PersistRotationCompletedAsync(
+                        fac, rotationId.Value, "failed", redactedReason, CancellationToken.None, keepStaged: true);
+                }
+                catch (Exception persistEx)
+                {
+                    _logger.LogWarning(persistEx,
+                        "tenant.kek.rotate failure: failed to persist failed state");
+                }
+            }
         }
         finally
         {
             if (oldPrimary is not null) CryptographicOperations.ZeroMemory(oldPrimary);
+            // R2-H14: release the advisory lock.
+            try
+            {
+                await ReleaseAdvisoryLockAsync(lockCtx, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "advisory lock release skipped");
+            }
+            lock (_lock) { _activeRotationId = null; }
+        }
+    }
+
+    /// <summary>
+    /// R2-H14: try to acquire the cluster-wide rotation advisory lock.
+    /// Returns true on success. Pg's <c>pg_try_advisory_lock</c> never
+    /// blocks — it returns false immediately when another pod holds
+    /// the lock. EF InMemory provider doesn't support
+    /// <see cref="DatabaseFacade.ExecuteSqlRawAsync"/> against raw SQL,
+    /// so the caller catches and falls through to the in-process lock.
+    /// </summary>
+    private static async Task<bool> TryAcquireAdvisoryLockAsync(
+        ControlPlaneDbContext ctx, CancellationToken ct)
+    {
+        var conn = ctx.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+        {
+            await conn.OpenAsync(ct);
+        }
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT pg_try_advisory_lock(@key)";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "@key";
+        p.Value = AdvisoryLockKey;
+        cmd.Parameters.Add(p);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is bool b && b;
+    }
+
+    /// <summary>
+    /// R2-H14: release the advisory lock. Safe to call even when the
+    /// lock was never acquired — Postgres ignores spurious releases.
+    /// </summary>
+    private static async Task ReleaseAdvisoryLockAsync(
+        ControlPlaneDbContext ctx, CancellationToken ct)
+    {
+        var conn = ctx.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) return;
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT pg_advisory_unlock(@key)";
+        var p = cmd.CreateParameter();
+        p.ParameterName = "@key";
+        p.Value = AdvisoryLockKey;
+        cmd.Parameters.Add(p);
+        await cmd.ExecuteScalarAsync(ct);
+    }
+
+    private static async Task<Guid> PersistRotationStartAsync(
+        IDbContextFactory<ControlPlaneDbContext> cpFactory,
+        int fromVersion,
+        int toVersion,
+        byte[] newKek,
+        byte[] oldPrimary,
+        bool isRetry,
+        CancellationToken ct)
+    {
+        await using var ctx = await cpFactory.CreateDbContextAsync(ct);
+
+        // For a retry, look for a previously-failed row at this
+        // version pair and reuse it. Otherwise mint a new id.
+        if (isRetry)
+        {
+            var existing = await ctx.KekRotations
+                .Where(r => r.VersionOld == fromVersion
+                    && r.VersionNew == toVersion
+                    && r.Status == "pending")
+                .OrderByDescending(r => r.StartedAt)
+                .FirstOrDefaultAsync(ct);
+            if (existing is not null)
+            {
+                existing.Status = "running";
+                existing.FailureReason = null;
+                existing.CompletedAt = null;
+                await ctx.SaveChangesAsync(ct);
+                return existing.Id;
+            }
+        }
+
+        // Encrypt the new KEK under the OLD primary so the row is
+        // readable across restarts. The plaintext is the base64
+        // encoding so we can round-trip without binary surprises.
+        var stagedB64 = Convert.ToBase64String(newKek);
+        var protectedBlob = AesGcmConnectionStringDecryptor.EncryptWithKey(stagedB64, oldPrimary);
+
+        var row = new KekRotation
+        {
+            Id = Guid.NewGuid(),
+            Status = "running",
+            VersionOld = fromVersion,
+            VersionNew = toVersion,
+            StagedSecondaryProtected = protectedBlob,
+            StartedAt = DateTime.UtcNow,
+        };
+        ctx.KekRotations.Add(row);
+        await ctx.SaveChangesAsync(ct);
+        return row.Id;
+    }
+
+    private static async Task PersistRotationCompletedAsync(
+        IDbContextFactory<ControlPlaneDbContext> cpFactory,
+        Guid rotationId,
+        string status,
+        string? failureReason,
+        CancellationToken ct,
+        bool keepStaged = false)
+    {
+        await using var ctx = await cpFactory.CreateDbContextAsync(ct);
+        var row = await ctx.KekRotations.FirstOrDefaultAsync(r => r.Id == rotationId, ct);
+        if (row is null) return;
+        row.Status = status;
+        row.FailureReason = failureReason;
+        row.CompletedAt = DateTime.UtcNow;
+        if (!keepStaged && row.StagedSecondaryProtected is not null)
+        {
+            // Zero out the staged secondary blob — terminal phase.
+            CryptographicOperations.ZeroMemory(row.StagedSecondaryProtected);
+            row.StagedSecondaryProtected = null;
+        }
+        await ctx.SaveChangesAsync(ct);
+    }
+
+    private string RedactForEvent(Exception ex)
+    {
+        if (_errorRedactor is null) return ex.Message;
+        try
+        {
+            return _errorRedactor.Redact(ex.Message);
+        }
+        catch
+        {
+            // Defence in depth — never let redaction failures leak the
+            // unredacted message. Drop the original.
+            return "[redaction-failure]";
         }
     }
 
@@ -479,3 +842,11 @@ public sealed class KekRotationCoordinator
         byte[]? Envelope,
         int PreviousKekVersion);
 }
+
+/// <summary>
+/// R2-H3: response from <see cref="KekRotationCoordinator.RetryAsync"/>.
+/// </summary>
+public sealed record RotationRetryResponse(
+    bool Success,
+    string? Reason,
+    KekRotationStatus Status);

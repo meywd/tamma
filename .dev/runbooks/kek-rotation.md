@@ -27,14 +27,25 @@ Tamma encrypts every per-tenant database connection string at rest with AES-256-
 
 ## Architecture refresher (read before first rotation)
 
-The KEK is loaded via two environment variables on every Tamma process:
+The KEK is loaded via two configuration keys on every Tamma process. The
+ASP.NET Core configuration system maps each `:`-separated key to either
+an env var with `__` separators (e.g. `Cranl__EncryptionKey`) or to an
+appsettings.json entry. Pick whichever your deployment substrate
+prefers.
 
-| Variable | Slot | Purpose |
-|---|---|---|
-| `TAMMA_TENANT_KEK` | primary | Encrypts new + re-encrypts existing rows. Decrypts rows tagged with the matching `KekVersion`. |
-| `TAMMA_TENANT_KEK_SECONDARY` | secondary | Fallback decrypt path. Lets the rotation overlap window decrypt rows tagged with the previous version. |
+| Configuration key | Env-var form | Slot | Purpose |
+|---|---|---|---|
+| `Cranl:EncryptionKey` | `Cranl__EncryptionKey` | primary | Encrypts new + re-encrypts existing rows. Decrypts rows tagged with the matching `KekVersion`. |
+| `Tamma:Kek:Secondary` | `Tamma__Kek__Secondary` | secondary | Fallback decrypt path. Lets the rotation overlap window decrypt rows tagged with the previous version. |
+| `Tamma:Kek:ActiveVersion` | `Tamma__Kek__ActiveVersion` | meta | Operator-managed integer; the rotation worker bumps this after promotion. Default 1. |
+| `Tamma:Kek:RetainedHistorySize` | `Tamma__Kek__RetainedHistorySize` | meta | How many retired KEKs the cabinet keeps in memory. Default 2. R2-H13. |
 
-Each `tenants.EncryptedConnectionString` row carries a one-byte `KekVersion` that names which slot encrypted it. The decryptor tries the slot named by the version first; on auth-tag mismatch it tries the other slot. Both slots present → both versions decryptable.
+Each `tenants.EncryptedConnectionString` row carries an integer
+`KekVersion` that names which version encrypted it. R2-H13: when the
+caller passes a `kekVersion` to the decryptor, the cabinet looks up
+THAT exact slot (primary / secondary / retired-history); only legacy
+rows with `kekVersion=null` use the primary-then-secondary fallback
+heuristic.
 
 **The encrypted envelope shape** (`AesGcmConnectionStringDecryptor`):
 
@@ -65,11 +76,12 @@ The byte format is forward-compatible — bumping the version byte is the migrat
 
 ### Step 1 — Stage the new KEK as the secondary slot
 
-Rolling deploy / config update across every Tamma pod:
+Rolling deploy / config update across every Tamma pod (env-var form
+shown; appsettings.json equivalents work too):
 
 ```
-TAMMA_TENANT_KEK=<old-kek-base64>          # unchanged
-TAMMA_TENANT_KEK_SECONDARY=<new-kek-base64>  # NEW
+Cranl__EncryptionKey=<old-kek-base64>          # unchanged
+Tamma__Kek__Secondary=<new-kek-base64>         # NEW
 ```
 
 Verify each pod loads both keys at startup. The log line is:
@@ -85,32 +97,35 @@ If only `primaryVersion` shows, the pod didn't pick up the new env — fix befor
 Same env update across every Tamma pod:
 
 ```
-TAMMA_TENANT_KEK=<new-kek-base64>           # was secondary; now primary
-TAMMA_TENANT_KEK_SECONDARY=<old-kek-base64> # was primary; now secondary
+Cranl__EncryptionKey=<new-kek-base64>          # was secondary; now primary
+Tamma__Kek__Secondary=<old-kek-base64>         # was primary; now secondary
 ```
 
-After this rolling deploy, every NEW write is encrypted with the new KEK. Existing rows are still readable (they carry the old `KekVersion`, decryptor falls back to the secondary slot).
+After this rolling deploy, every NEW write is encrypted with the new KEK. Existing rows are still readable (they carry the old `KekVersion`, decryptor uses the secondary slot via the version-explicit path R2-H13 added).
 
 ### Step 3 — Trigger the re-encrypt loop
 
+R2-H3: the live route is `/api/admin/kek/rotate/start`, NOT
+`/api/admin/secrets/rekey/*`. The runbook used to reference the
+secrets-rekey path that was never wired.
+
 ```bash
-curl -X POST https://api.tamma.dev/api/admin/secrets/rekey \
-  -H "Authorization: Bearer $OWNER_JWT" \
-  -H "X-Admin-Confirm: rekey" \
-  -d '{"reason": "Q1 2026 quarterly rotation"}'
+curl -X POST https://api.tamma.dev/api/admin/kek/rotate/start \
+  -H "Authorization: Bearer $OWNER_JWT"
 ```
 
-Returns a coordinator id. The coordinator:
+Returns 202 with the rotation snapshot. The coordinator:
 
-1. Emits `KEK.ROTATION.STARTED` to `platform_events`
-2. Iterates every `tenants` row, decrypts with whatever slot works, re-encrypts with the new primary, updates the row + `KekVersion`
-3. Emits `KEK.ROTATION.STEP_COMPLETED` per tenant batch
-4. Emits `KEK.ROTATION.COMPLETED` with a summary on the terminal step
+1. Acquires the cluster-wide `pg_try_advisory_lock(KekRotationCoordinator.AdvisoryLockKey)` so two pods cannot stage different KEKs (R2-H14).
+2. Persists the staged secondary KEK into the new `kek_rotations` table — encrypted by the OLD primary so a process crash mid-rotation can resume by reloading the row.
+3. Emits `SECRETS.KEK.ROTATION.STARTED` to `platform_events`.
+4. Iterates every `tenants` row, decrypts with the OLD primary, re-encrypts with the NEW key, updates the row + `KekVersion`, evicts the resolver pool cache for the tenant.
+5. Emits `TENANT.CONNECTION_STRING_ROTATED.SUCCESS` per tenant.
+6. Emits `SECRETS.KEK.ROTATION.COMPLETED` with the row counts on the terminal step (or `SECRETS.KEK.ROTATION.FAILED` if any row failed).
 
 Watch progress via:
-- `GET /api/admin/secrets/rekey/status` for the coordinator state
-- `tamma.kek_rotation.tenants_processed_total` metric
-- Tailing `KEK.ROTATION.*` events on the SSE stream
+- `GET /api/admin/kek/rotate/status` for the coordinator state
+- Tailing `SECRETS.KEK.*` + `TENANT.CONNECTION_STRING_ROTATED.*` events on the SSE stream
 
 A typical 100-tenant rotation completes in under a minute.
 
@@ -133,11 +148,19 @@ GROUP BY KekVersion;
 After every row has been re-encrypted (Step 4 confirms), the old KEK is no longer needed:
 
 ```
-TAMMA_TENANT_KEK=<new-kek-base64>       # unchanged
-# TAMMA_TENANT_KEK_SECONDARY removed entirely
+Cranl__EncryptionKey=<new-kek-base64>     # unchanged
+# Tamma__Kek__Secondary removed entirely
 ```
 
 Roll out across every pod. Verify the startup log now shows only `primaryVersion=N+1` (no secondary).
+
+R2-H13 note: even after dropping the secondary env var, the cabinet
+keeps the previous primary in its in-memory retired ring (default
+`Tamma:Kek:RetainedHistorySize=2`) so any tenant row still tagged with
+the older `KekVersion` remains decryptable. The `kek-cabinet` health
+check refuses to mark "ready" if a tenant row is older than the ring
+size — operators see this fail before traffic hits an undecryptable
+row.
 
 ### Step 6 — Securely destroy the old KEK material
 
@@ -154,32 +177,105 @@ The old KEK has zero value once the secondary slot is gone. Destroy the off-disk
 
 ### "Some tenants still on old KekVersion after Step 3"
 
-1. Check `KEK.ROTATION.STEP_FAILED` events for the affected tenant ids
-2. If the failure was a transient DB error: re-run the coordinator (`POST /api/admin/secrets/rekey/retry`)
+1. Check `SECRETS.KEK.ROTATION.FAILED` + per-row warning logs for the affected tenant ids
+2. If the failure was a transient DB error: re-run the coordinator via `POST /api/admin/kek/rotate/retry` (R2-H3). The retry endpoint re-uses the staged secondary KEK that was persisted in `kek_rotations` rather than minting a fresh one — this keeps idempotency: rows already re-encrypted under the failed run's secondary stay valid.
 3. If the failure was a decrypt failure: the row's envelope is corrupted or its `KekVersion` is wrong — investigate the row directly; do NOT proceed to Step 5 until resolved
 
 ### "API pods can't decrypt any tenant after Step 5"
 
-Almost certainly Step 4's check was wrong — some row was still on the old KEK and the secondary slot was needed. Recovery:
+Almost certainly Step 4's check was wrong — some row was still on the old KEK and the cabinet's retired-ring size doesn't cover it. Recovery:
 
-1. Re-add `TAMMA_TENANT_KEK_SECONDARY=<old-kek>` to the env on every pod
+1. Re-add `Tamma__Kek__Secondary=<old-kek-base64>` to the env on every pod
 2. Roll restart
-3. Re-run the coordinator (it'll skip already-rotated rows + handle the laggards)
+3. Re-run the coordinator: `POST /api/admin/kek/rotate/retry` (R2-H3; idempotent re-attempt of the failed run)
 4. Repeat Step 4 verification
 
 ### "Rotation coordinator is stuck partway"
 
-The coordinator records progress in `platform_events`. To inspect:
+The coordinator records progress in `platform_events` AND in the new `kek_rotations` CP table (R2-H14). To inspect:
+
+```sql
+SELECT id, status, version_old, version_new, started_at, completed_at, failure_reason
+FROM kek_rotations
+ORDER BY started_at DESC
+LIMIT 10;
+```
+
+If the latest row is `running` and there's no API pod actually running, the previous coordinator crashed mid-rotation. Two recovery paths:
+
+1. **Resume**: restart any API pod. On startup the coordinator scans for non-terminal `kek_rotations` rows and resumes the in-flight rotation by re-loading the staged secondary from the row's `staged_secondary_protected` blob (encrypted by the OLD primary, so it's readable across restarts). The advisory lock is connection-scoped — a crashed pod's lock is released by Postgres automatically.
+2. **Manual retry**: if the row is `failed`, run `POST /api/admin/kek/rotate/retry`. It re-uses the staged secondary in the row.
 
 ```sql
 SELECT type, tags, data, created_at
 FROM platform_events
-WHERE type LIKE 'KEK.ROTATION.%'
+WHERE type LIKE 'SECRETS.KEK.%' OR type LIKE 'TENANT.CONNECTION_STRING_ROTATED.%'
 ORDER BY sequence_number DESC
 LIMIT 50;
 ```
 
-If the last event is `STEP_STARTED` for a tenant (not followed by COMPLETED or FAILED), the coordinator likely crashed mid-tenant. Restart the API pod — the coordinator picks up where it left off via the next manual `POST /api/admin/secrets/rekey/retry`.
+---
+
+## Rollback
+
+R2-H14 + R2-H3: if a rotation fails partway through, the operator has two
+recovery levers depending on the failure shape.
+
+### Path A — Re-attempt via /retry (preferred)
+
+This is the right call when the failure was transient (DB blip, network
+hiccup) and the staged secondary in `kek_rotations.staged_secondary_protected`
+is still valid.
+
+```bash
+curl -X POST https://api.tamma.dev/api/admin/kek/rotate/retry \
+  -H "Authorization: Bearer $OWNER_JWT"
+```
+
+Returns 202 when the retry kicks off (re-using the persisted secondary)
+or 409 with a `reason` field when the current phase is not `failed`
+(e.g. another rotation is currently running, or the previous one
+completed cleanly). The retry never mints a fresh KEK — that would
+orphan rows already re-encrypted under the failed run's secondary.
+
+Watch the same `GET /api/admin/kek/rotate/status` endpoint as in
+step 3.
+
+### Path B — Drop the staged secondary and start fresh
+
+This is the right call when the staged secondary itself is bad (e.g.
+the operator suspects the secondary KEK material was tampered with, or
+the encrypted blob in `kek_rotations` is corrupt).
+
+The schema is intentionally minimal so an operator can drop the row
+manually:
+
+```sql
+-- Identify the failed row.
+SELECT id, status, version_old, version_new, failure_reason, started_at
+FROM kek_rotations
+WHERE status = 'failed'
+ORDER BY started_at DESC
+LIMIT 1;
+
+-- Mark it cancelled and zero the staged secondary blob. Do NOT DELETE
+-- the row — the audit trail must survive for SOC2 evidence.
+UPDATE kek_rotations
+SET status = 'cancelled',
+    staged_secondary_protected = NULL,
+    failure_reason = COALESCE(failure_reason, 'manually cancelled') || ' (operator dropped staged secondary)',
+    completed_at = now()
+WHERE id = '<failed-id>';
+```
+
+After the row is `cancelled`, kick off a fresh rotation via `POST
+/api/admin/kek/rotate/start` — the coordinator generates a new
+secondary KEK and runs the loop from scratch.
+
+Operator note: tenant rows that were already re-encrypted under the
+failed run's secondary now hold envelopes that no live KEK can decrypt
+(both secondary slots have been retired). Recover them from the most
+recent `tenants` table backup (Pre-rotation checklist step 3).
 
 ---
 
