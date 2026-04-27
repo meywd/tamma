@@ -367,22 +367,32 @@ public abstract class CleanupStepActivity : TammaAsyncActivity
         }
         catch (Exception ex)
         {
-            var errorType = ex.GetType().Name;
+            // PF — re-port of the per-step failure classifier. Restores
+            // the rich, fixed-vocabulary failure codes
+            // (drop_database_failed / drop_role_failed / network_error /
+            // permission_denied / evict_pool_failed / cancelled /
+            // step_failed) lost when the original
+            // CleanUpFailedTenantActivity classifier was deleted during
+            // the H6 decomposition merge. Dashboards + alerting group
+            // on these codes; reverting to ex.GetType().Name regressed
+            // the operator UX from "permission_denied" to
+            // "InvalidOperationException".
             var redactor = context.GetService<IErrorRedactor>();
-            var redactedMessage = redactor?.Redact(ex.Message ?? string.Empty) ?? string.Empty;
+            var (failureCode, redactedSnippet) = CleanupFailureClassifier
+                .ClassifyFailure(StepName, ex, redactor);
 
-            CleanupWorkflowState.RecordFailure(context, StepName, errorType, redactedMessage);
+            CleanupWorkflowState.RecordFailure(context, StepName, failureCode, redactedSnippet);
 
             Logger?.LogWarning(
                 ex,
-                "tenant.cleanup.step_failed step={Step} tenantId={TenantId} errorType={ErrorType}",
-                StepName, tenantId, errorType);
+                "tenant.cleanup.step_failed step={Step} tenantId={TenantId} failureCode={FailureCode}",
+                StepName, tenantId, failureCode);
 
             await SafePublish(publisher, BuildStepEvent(
                 TenantLifecycleEvents.DeleteStepFailed,
                 tenantId, attempt,
-                errorType: errorType,
-                redactedMessage: redactedMessage));
+                errorType: failureCode,
+                redactedMessage: redactedSnippet));
             // SWALLOW — continue-on-error contract.
         }
     }

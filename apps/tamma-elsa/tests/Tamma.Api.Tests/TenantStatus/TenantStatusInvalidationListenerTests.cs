@@ -240,6 +240,295 @@ public class TenantStatusInvalidationListenerTests
         }
     }
 
+    /// <summary>
+    /// PF-C1 — slow resolver double that holds <c>EvictAsync</c> open
+    /// until a release signal fires. Lets the test verify the listener
+    /// (a) tracks the in-flight task in its drain dictionary, (b)
+    /// awaits the task during <see cref="TenantStatusInvalidationListener.StopAsync"/>,
+    /// (c) reports the in-flight gauge accurately while the eviction
+    /// is in flight, and (d) cancels the eviction via the threaded
+    /// stoppingToken when the host shuts down.
+    /// </summary>
+    private sealed class SlowResolver : ITenantConnectionResolver
+    {
+        private readonly TaskCompletionSource _release = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly object _lock = new();
+        private readonly List<Guid> _started = new();
+        private readonly List<Guid> _completed = new();
+        private readonly List<bool> _cancelled = new();
+
+        public IReadOnlyList<Guid> Started
+        {
+            get { lock (_lock) return _started.ToArray(); }
+        }
+
+        public IReadOnlyList<Guid> Completed
+        {
+            get { lock (_lock) return _completed.ToArray(); }
+        }
+
+        public IReadOnlyList<bool> CancelledOutcomes
+        {
+            get { lock (_lock) return _cancelled.ToArray(); }
+        }
+
+        /// <summary>Fire to let queued evictions complete.</summary>
+        public void ReleaseAll() => _release.TrySetResult();
+
+        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public async ValueTask EvictAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            lock (_lock) _started.Add(tenantId);
+
+            // Hold here until either the test releases us or the
+            // listener cancels via stoppingToken propagation.
+            try
+            {
+                using var reg = cancellationToken.Register(
+                    () => _release.TrySetResult());
+                await _release.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_lock)
+                {
+                    _completed.Add(tenantId);
+                    _cancelled.Add(cancellationToken.IsCancellationRequested);
+                }
+            }
+        }
+
+        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
+    }
+
+    [Test]
+    public async Task StopAsync_Drains_InFlight_Eviction_Tasks_Within_Bounded_Timeout()
+    {
+        // PF-C1 — host shutdown must wait for fire-and-forget evictions
+        // spawned by OnNotification. Without the drain, StopAsync
+        // returns while NpgsqlDataSource.DisposeAsync is still racing
+        // downstream and we leak Postgres backend slots.
+        await using var publisherDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+        await using var listenerDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+
+        var bus = new PostgresTenantStatusInvalidationBus(
+            publisherDataSource, NullLogger<PostgresTenantStatusInvalidationBus>.Instance);
+        var cache = NewCache();
+        var slow = new SlowResolver();
+        var listener = new TenantStatusInvalidationListener(
+            listenerDataSource, cache, slow,
+            NullLogger<TenantStatusInvalidationListener>.Instance)
+        {
+            // Generous drain budget — we'll release manually below.
+            ShutdownEvictionDrainTimeout = TimeSpan.FromSeconds(5),
+        };
+
+        using var stoppingCts = new CancellationTokenSource();
+        await listener.StartAsync(stoppingCts.Token);
+
+        try
+        {
+            await WaitUntilListening(publisherDataSource);
+
+            // Trigger an eviction that won't complete until we say so.
+            var tenantId = Guid.NewGuid();
+            await bus.PublishAsync(tenantId);
+
+            // The eviction must enter SlowResolver.EvictAsync — i.e. be
+            // tracked by the listener's in-flight dictionary.
+            (await WaitUntil(
+                () => slow.Started.Contains(tenantId),
+                TimeSpan.FromSeconds(3)))
+                .Should().BeTrue("listener must dispatch the resolver eviction");
+
+            listener.InFlightEvictionCount.Should().BeGreaterThan(0,
+                "in-flight gauge must report the active eviction");
+
+            // Release the eviction in parallel — StopAsync should
+            // observe the completion via the drain.
+            var releaseTask = Task.Run(async () =>
+            {
+                await Task.Delay(250);
+                slow.ReleaseAll();
+            });
+
+            await listener.StopAsync(stoppingCts.Token);
+            await releaseTask;
+
+            // After StopAsync returns, the eviction must have actually
+            // completed (not just been signalled). This is the crux of
+            // the drain — without it, the eviction would still be
+            // pending after StopAsync.
+            slow.Completed.Should().Contain(tenantId,
+                "StopAsync must await in-flight evictions before returning");
+            listener.InFlightEvictionCount.Should().Be(0,
+                "in-flight tracker must be empty after StopAsync drains");
+        }
+        finally
+        {
+            slow.ReleaseAll();
+            listener.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task OnNotification_Threads_StoppingToken_To_Resolver_Eviction()
+    {
+        // PF-C1 — fire-and-forget evictions used to receive
+        // CancellationToken.None, so a host shutdown couldn't
+        // cooperatively cancel an in-flight eviction. The fix threads
+        // the listener's stoppingToken through. Verify by triggering a
+        // shutdown while an eviction is mid-flight: the resolver
+        // observes IsCancellationRequested=true.
+        await using var publisherDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+        await using var listenerDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+
+        var bus = new PostgresTenantStatusInvalidationBus(
+            publisherDataSource, NullLogger<PostgresTenantStatusInvalidationBus>.Instance);
+        var cache = NewCache();
+        var slow = new SlowResolver();
+        var listener = new TenantStatusInvalidationListener(
+            listenerDataSource, cache, slow,
+            NullLogger<TenantStatusInvalidationListener>.Instance)
+        {
+            // Tight drain budget so the test doesn't sit on a wedged
+            // eviction — the SlowResolver releases on cancellation
+            // anyway.
+            ShutdownEvictionDrainTimeout = TimeSpan.FromSeconds(2),
+        };
+
+        using var stoppingCts = new CancellationTokenSource();
+        await listener.StartAsync(stoppingCts.Token);
+
+        try
+        {
+            await WaitUntilListening(publisherDataSource);
+
+            var tenantId = Guid.NewGuid();
+            await bus.PublishAsync(tenantId);
+
+            (await WaitUntil(
+                () => slow.Started.Contains(tenantId),
+                TimeSpan.FromSeconds(3)))
+                .Should().BeTrue("eviction must reach the resolver");
+
+            // Trigger shutdown WITHOUT releasing the resolver — the
+            // stoppingToken must propagate and cooperatively cancel
+            // the in-flight eviction.
+            await listener.StopAsync(stoppingCts.Token);
+
+            // SlowResolver records IsCancellationRequested at the
+            // moment it returns. Must observe true here — proving the
+            // listener threaded the stoppingToken (not None) through.
+            slow.CancelledOutcomes.Should().Contain(true,
+                "the listener must thread its stoppingToken to the eviction so host shutdown propagates cancellation");
+        }
+        finally
+        {
+            slow.ReleaseAll();
+            listener.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task OnNotification_TracksAndCleansUp_InFlightTasks_Across_Multiple_Notifications()
+    {
+        // PF-C1 — the in-flight tracker must self-clean as evictions
+        // complete. A long-lived listener must not accumulate
+        // completed-task references between notifications, or the
+        // dictionary becomes a slow leak.
+        await using var publisherDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+        await using var listenerDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+
+        var bus = new PostgresTenantStatusInvalidationBus(
+            publisherDataSource, NullLogger<PostgresTenantStatusInvalidationBus>.Instance);
+        var cache = NewCache();
+        var resolver = new RecordingResolver(); // fast resolver — completes instantly
+        var listener = new TenantStatusInvalidationListener(
+            listenerDataSource, cache, resolver,
+            NullLogger<TenantStatusInvalidationListener>.Instance);
+
+        using var stoppingCts = new CancellationTokenSource();
+        await listener.StartAsync(stoppingCts.Token);
+
+        try
+        {
+            await WaitUntilListening(publisherDataSource);
+
+            // Fire 5 notifications in a row.
+            var tenantIds = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+            foreach (var id in tenantIds)
+                await bus.PublishAsync(id);
+
+            // All evictions must converge.
+            (await WaitUntil(
+                () => tenantIds.All(id => resolver.Evicted.Contains(id)),
+                TimeSpan.FromSeconds(5)))
+                .Should().BeTrue("all 5 evictions must dispatch through the listener");
+
+            // After all complete, the in-flight tracker must drain to 0.
+            // The self-cleaning ContinueWith fires async, so allow a
+            // short polling window.
+            (await WaitUntil(
+                () => listener.InFlightEvictionCount == 0,
+                TimeSpan.FromSeconds(2)))
+                .Should().BeTrue(
+                "the in-flight tracker must self-clean as evictions complete — otherwise long-lived listeners leak completed-task references");
+        }
+        finally
+        {
+            await listener.StopAsync(stoppingCts.Token);
+            listener.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StopAsync_With_NoInFlightEvictions_Returns_Immediately()
+    {
+        // Edge case: StopAsync on a listener that's never seen a
+        // notification must not block. The drain path takes a fast
+        // exit when the in-flight tracker is empty.
+        await using var listenerDataSource = new NpgsqlDataSourceBuilder(_connectionString).Build();
+
+        var listener = new TenantStatusInvalidationListener(
+            listenerDataSource, NewCache(), new RecordingResolver(),
+            NullLogger<TenantStatusInvalidationListener>.Instance);
+
+        using var stoppingCts = new CancellationTokenSource();
+        await listener.StartAsync(stoppingCts.Token);
+
+        try
+        {
+            // No notification fired → no in-flight evictions.
+            listener.InFlightEvictionCount.Should().Be(0);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await listener.StopAsync(stoppingCts.Token);
+            sw.Stop();
+
+            // Must NOT consume the drain budget.
+            sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2),
+                "with no in-flight evictions, StopAsync must return promptly without consuming the drain budget");
+        }
+        finally
+        {
+            listener.Dispose();
+        }
+    }
+
     [Test]
     public async Task Listener_Tolerates_Malformed_Payload_And_Stays_Alive()
     {

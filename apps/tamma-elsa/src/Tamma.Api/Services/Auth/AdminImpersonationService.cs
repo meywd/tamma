@@ -93,7 +93,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
         var tenantExists = await _db.Tenants
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .AnyAsync(t => t.Id == targetTenantId && t.DeletedAt == null, ct);
+            .AnyAsync(t => t.Id == targetTenantId && t.DeletedAt == null, ct)
+            .ConfigureAwait(false);
         if (!tenantExists)
         {
             throw new ArgumentException("target_tenant_not_found", nameof(targetTenantId));
@@ -108,7 +109,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
                 .AsNoTracking()
                 .AnyAsync(
                     m => m.TenantId == targetTenantId && m.UserId == targetUserId.Value,
-                    ct);
+                    ct)
+                .ConfigureAwait(false);
             if (!targetIsMember)
             {
                 throw new ArgumentException(
@@ -136,7 +138,7 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
             UserAgent = string.IsNullOrEmpty(userAgent) ? null : userAgent,
         };
         _db.AdminImpersonations.Add(row);
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         // 6. Mint the impersonation JWT. We need a User entity to hand to
         // JwtService.GenerateAccessToken — ideally the impersonator's row,
@@ -148,7 +150,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
         var impersonatorUser = await _db.Users
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(u => u.Id == userId.Value, ct);
+            .FirstOrDefaultAsync(u => u.Id == userId.Value, ct)
+            .ConfigureAwait(false);
         if (impersonatorUser is null)
         {
             // Defence-in-depth — should be unreachable given step 2.
@@ -167,7 +170,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
                 .AsNoTracking()
                 .Where(m => m.TenantId == targetTenantId && m.UserId == targetUserId.Value)
                 .Select(m => m.Role)
-                .FirstOrDefaultAsync(ct);
+                .FirstOrDefaultAsync(ct)
+                .ConfigureAwait(false);
             if (!string.IsNullOrEmpty(membershipRole))
                 sessionRole = membershipRole;
         }
@@ -218,12 +222,13 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
         // emits the targeted UPDATE.
         var row = await _db.AdminImpersonations
             .FirstOrDefaultAsync(
-                r => r.Id == impersonationId && r.EndedAt == null, ct);
+                r => r.Id == impersonationId && r.EndedAt == null, ct)
+            .ConfigureAwait(false);
         if (row is null) return null;
 
         row.EndedAt = _timeProvider.GetUtcNow().UtcDateTime;
         row.EndedReason = normalisedReason;
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
         return row;
     }
 
@@ -235,7 +240,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
         return await _db.AdminImpersonations
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                r => r.Id == impersonationId && r.EndedAt == null, ct);
+                r => r.Id == impersonationId && r.EndedAt == null, ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -247,7 +253,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
             .AsNoTracking()
             .Where(r => r.ImpersonatorUserId == impersonatorUserId && r.EndedAt == null)
             .OrderByDescending(r => r.StartedAt)
-            .ToListAsync(ct);
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -258,7 +265,8 @@ public sealed class AdminImpersonationService : IAdminImpersonationService
             .AsNoTracking()
             .Where(r => r.EndedAt == null)
             .OrderByDescending(r => r.StartedAt)
-            .ToListAsync(ct);
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
