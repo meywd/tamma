@@ -20,11 +20,14 @@ const mockEngineInitialize = vi.fn().mockResolvedValue(undefined);
 const mockEngineDispose = vi.fn().mockResolvedValue(undefined);
 const mockEngineRun = vi.fn().mockResolvedValue(undefined);
 vi.mock('../engine.js', () => ({
-  TammaEngine: vi.fn(() => ({
-    initialize: mockEngineInitialize,
-    dispose: mockEngineDispose,
-    run: mockEngineRun,
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  TammaEngine: vi.fn(function () {
+    return {
+      initialize: mockEngineInitialize,
+      dispose: mockEngineDispose,
+      run: mockEngineRun,
+    };
+  }),
 }));
 
 function createMockLogger(): ILogger {
