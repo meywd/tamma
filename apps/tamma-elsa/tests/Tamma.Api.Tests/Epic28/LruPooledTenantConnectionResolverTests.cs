@@ -502,7 +502,11 @@ public class LruPooledTenantConnectionResolverTests
 
     // ── test doubles ──────────────────────────────────────────────────
 
-    /// <summary>Read-only probe stub for the H12 hot-path checks.</summary>
+    /// <summary>Read-only probe stub for the H12 hot-path checks.
+    /// PF-C6: probe surface is strictly <c>TryGet</c>; the hidden
+    /// <c>Remove</c> below is test-side state management for arranging
+    /// arrange/act sequences and is intentionally NOT on the probe
+    /// contract.</summary>
     private sealed class RecordingProbe : ITenantStatusProbe
     {
         private readonly Dictionary<Guid, string?> _entries = new();
@@ -516,7 +520,8 @@ public class LruPooledTenantConnectionResolverTests
             return _entries.TryGetValue(tenantId, out status);
         }
 
-        public void Invalidate(Guid tenantId) => _entries.Remove(tenantId);
+        // Test-only helper — NOT part of ITenantStatusProbe (PF-C6).
+        public void Remove(Guid tenantId) => _entries.Remove(tenantId);
     }
 
     private sealed class RecordingDecryptor : IConnectionStringDecryptor
