@@ -341,6 +341,109 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         spyFactory.Calls.Should().OnlyContain(t => t == tenantId);
     }
 
+    // ── EventRepository optional-platform-repo fallback ─────────────
+
+    [Test]
+    public async Task EventRepository_QueryAsync_NullPlatformRepo_ReturnsLegacyOnly_NoThrow()
+    {
+        // #340 MEDIUM finding — exercise the optional ctor parameter
+        // (IPlatformEventRepository=null) directly. With no platform repo
+        // wired, the cross-tenant admin query MUST fall back to the
+        // legacy half (cp.DomainEvents filtered to TenantId == null) and
+        // MUST NOT throw an NRE on the platform half.
+        await using var fx = new InMemoryDbFixture();
+        var repo = new EventRepository(
+            fx.Factory,
+            new TenantContext(),
+            fx.Cp,
+            platformEvents: null);
+
+        var platformEventId = Guid.NewGuid();
+        // Seed a platform-scope row in the legacy CP DomainEvents table.
+        fx.Cp.DomainEvents.Add(new DomainEvent
+        {
+            Id = platformEventId,
+            Type = "EMAIL.QUEUED.SUCCESS",
+            TenantId = null,
+            CreatedAt = DateTime.UtcNow,
+        });
+        // Seed a tenant-scoped row that should NOT come back from a
+        // tenant-less query (the new TenantId == null filter in the
+        // legacy half is what guarantees that).
+        fx.Cp.DomainEvents.Add(new DomainEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "EMAIL.QUEUED.SUCCESS",
+            TenantId = Guid.NewGuid(),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await fx.Cp.SaveChangesAsync();
+
+        // Should return ONLY the platform-scope legacy row, no NRE on
+        // the platform half (which is skipped when platformEvents is null).
+        var rows = await repo.QueryAsync(
+            tenantId: null,
+            type: "EMAIL.QUEUED.SUCCESS",
+            issueNumber: null,
+            limit: 100);
+
+        rows.Should().ContainSingle()
+            .Which.Id.Should().Be(platformEventId);
+    }
+
+    [Test]
+    public async Task EventRepository_QueryAsync_LegacyHalf_FiltersTenantScopedEventsOut()
+    {
+        // #340 HIGH finding — the legacy UNION half MUST filter to
+        // TenantId == null. Without that filter, a caller passing a
+        // tenant-scoped event type with tenantId=null gets rows from
+        // every tenant via the legacy half. This test seeds a platform
+        // row + a tenant-scoped row in the SAME physical cp.DomainEvents
+        // table (the transitional shared-DB phase) and asserts that the
+        // tenant-less query returns ONLY the platform row.
+        await using var fx = new InMemoryDbFixture();
+        var repo = new EventRepository(
+            fx.Factory,
+            new TenantContext(),
+            fx.Cp,
+            new PlatformEventRepository(fx.Cp));
+
+        var platformEventId = Guid.NewGuid();
+        var tenantEventId = Guid.NewGuid();
+        var leakingTenant = Guid.NewGuid();
+
+        // Use a tenant-scoped event type ("CODE.GENERATED.SUCCESS") to
+        // make the leak vector concrete: pre-fix, a caller asking for
+        // this type with no tenant filter would see every tenant's
+        // generated-code events.
+        fx.Cp.DomainEvents.Add(new DomainEvent
+        {
+            Id = platformEventId,
+            Type = "CODE.GENERATED.SUCCESS",
+            TenantId = null,
+            CreatedAt = DateTime.UtcNow,
+        });
+        fx.Cp.DomainEvents.Add(new DomainEvent
+        {
+            Id = tenantEventId,
+            Type = "CODE.GENERATED.SUCCESS",
+            TenantId = leakingTenant,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await fx.Cp.SaveChangesAsync();
+
+        var rows = await repo.QueryAsync(
+            tenantId: null,
+            type: "CODE.GENERATED.SUCCESS",
+            issueNumber: null,
+            limit: 100);
+
+        rows.Should().ContainSingle();
+        rows.Should().NotContain(e => e.Id == tenantEventId,
+            "tenant-scoped rows must not bleed into cross-tenant admin views");
+        rows.Single().Id.Should().Be(platformEventId);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     /// <summary>

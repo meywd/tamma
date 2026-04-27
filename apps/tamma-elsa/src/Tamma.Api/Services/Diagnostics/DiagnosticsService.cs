@@ -83,6 +83,33 @@ public sealed class DiagnosticsService : IDiagnosticsService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Story 28-1 PR C audit (#340 MEDIUM finding): unlike
+    /// <see cref="GetDimensionReportAsync"/>, this overload does <em>not</em>
+    /// reject a <c>null</c> tenantId. The two methods reach
+    /// ProviderDiagnostics via different code paths:
+    /// <list type="bullet">
+    ///   <item><see cref="GetDimensionReportAsync"/> uses an EF
+    ///     <see cref="ITenantDbContextFactory"/> route — that path has no
+    ///     null-tenant code branch (the factory requires a tenant id), so
+    ///     the only honest answer is <see cref="NotSupportedException"/>.</item>
+    ///   <item><see cref="GetReportAsync"/> calls
+    ///     <see cref="IDiagnosticsRepository.AggregateAsync"/>, a CP-resident
+    ///     raw SQL aggregation whose <c>(@p_tenant IS NULL OR ...)</c>
+    ///     predicate already supports cross-tenant rollups for billing /
+    ///     ops dashboards. Cross-tenant time-series rollup IS a current
+    ///     user story (the <c>/api/providers/diagnostics/report</c> endpoint
+    ///     consumed by the platform-admin dashboard), so we keep the
+    ///     null-tenant code path here.</item>
+    /// </list>
+    /// PR D moves ProviderDiagnostics off CP entirely; at that point this
+    /// method must either grow a per-tenant fan-out via
+    /// <see cref="ITenantDbContextFactory"/>, or the cross-tenant rollup
+    /// query moves to a denormalized cross-tenant rollup table (the same
+    /// design decision Decision #2 defers — when a user story forces it).
+    /// Until then we accept the asymmetry rather than silently turn off a
+    /// shipped admin feature.
+    /// </remarks>
     public async Task<DiagnosticsReport> GetReportAsync(
         Guid? tenantId,
         DateTime from,

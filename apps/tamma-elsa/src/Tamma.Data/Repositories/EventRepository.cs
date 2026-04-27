@@ -32,10 +32,14 @@ namespace Tamma.Data.Repositories;
 ///
 /// <para>During the Story 28-1 transitional shared-DB phase the legacy
 /// <see cref="ControlPlaneDbContext.DomainEvents"/> DbSet still carries
-/// rows that were appended via the pre-PR-D code path. We UNION those
-/// rows with <c>platform_events</c> on tenant-less reads so the migration
-/// is invisible to callers — once PR D drops <c>cp.domain_events</c> the
-/// union side becomes a no-op (the table no longer exists in the model).</para>
+/// platform-scope rows (<c>TenantId == null</c>) that were appended via
+/// the pre-PR-D code path. We UNION <em>only those</em> rows with
+/// <c>platform_events</c> on tenant-less reads — the legacy half is
+/// explicitly filtered to <c>TenantId == null</c> so tenant-scoped rows
+/// that share the physical table during transition do not bleed into
+/// cross-tenant admin views. Once PR D drops <c>cp.domain_events</c>
+/// the union side becomes a no-op (the table no longer exists in the
+/// model).</para>
 /// </summary>
 public class EventRepository(
     ITenantDbContextFactory tenantDbFactory,
@@ -133,11 +137,38 @@ public class EventRepository(
 
         // Transitional UNION: the pre-Story-28-1 code path appended
         // tenant-less events to cp.DomainEvents. Until PR D drops the
-        // DbSet those rows must still be visible. Once the table leaves
-        // CP this branch returns empty and the union becomes a no-op.
-        var legacy = cp.DomainEvents.IgnoreQueryFilters().AsQueryable();
+        // DbSet those rows must still be visible.
+        //
+        // SECURITY: scope the legacy half to TenantId == null. During the
+        // transitional shared-DB phase, the physical cp.domain_events
+        // table mixes rows from every tenant — a tenant-less query with
+        // a tenant-scoped event type (e.g. CODE.GENERATED.SUCCESS) would
+        // otherwise leak rows from every tenant into the cross-tenant
+        // admin view. Per Decision #2 the supported answer here is
+        // platform-lifecycle events only; the issueNumber guard above
+        // catches one signal of tenant-scoped intent but a caller can
+        // still pass a tenant-scoped `type` with no `issueNumber`. The
+        // TenantId-null predicate makes the leak structurally
+        // impossible regardless of what `type` carries. Once PR D drops
+        // cp.DomainEvents this branch becomes a no-op.
+        //
+        // Type-predicate semantics: the platform half uses prefix-LIKE
+        // (`type%`) via IPlatformEventRepository.QueryAsync. The legacy
+        // half mirrors that here so the two routing branches return the
+        // same row shape for the same `type` argument. Reviewer note
+        // (#340 LOW): full event type strings like "EMAIL.QUEUED.SUCCESS"
+        // are only a prefix of themselves, so prefix-LIKE doesn't change
+        // behaviour for full strings; it lets short prefixes ("EMAIL")
+        // work consistently across both halves.
+        var legacy = cp.DomainEvents
+            .IgnoreQueryFilters()
+            .Where(e => e.TenantId == null)
+            .AsQueryable();
         if (!string.IsNullOrEmpty(type))
-            legacy = legacy.Where(e => e.Type == type);
+        {
+            var like = type + "%";
+            legacy = legacy.Where(e => EF.Functions.Like(e.Type, like));
+        }
         if (issueNumber.HasValue)
             legacy = legacy.Where(e => e.IssueNumber == issueNumber.Value);
         var legacyRows = await legacy
