@@ -63,9 +63,9 @@ public class EmailOutboxRepository(
 
         if (string.Equals(db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
         {
-            return await ClaimViaPostgresAsync(db, now, ct);
+            return await ClaimViaPostgresAsync(db, tenantId, now, ct);
         }
-        return await ClaimViaNaivePathAsync(db, now, ct);
+        return await ClaimViaNaivePathAsync(db, tenantId, now, ct);
     }
 
     public async Task<EmailOutboxMessage?> ClaimNextPendingFromAnyTenantAsync(
@@ -97,12 +97,14 @@ public class EmailOutboxRepository(
             {
                 row = await ClaimNextPendingAsync(tid, now, ct);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Tenant might be mid-deletion or have a transient
                 // connection failure; don't let one tenant's outage
                 // starve the rest. The caller (OutboxSmtpSender) logs
-                // and the next poll re-tries.
+                // and the next poll re-tries. Wave-4 review M2 —
+                // cooperative cancellation must propagate, not be
+                // swallowed as a "tenant outage".
                 continue;
             }
 
@@ -113,8 +115,13 @@ public class EmailOutboxRepository(
     }
 
     private static async Task<EmailOutboxMessage?> ClaimViaPostgresAsync(
-        TenantDbContext db, DateTime now, CancellationToken ct)
+        TenantDbContext db, Guid tenantId, DateTime now, CancellationToken ct)
     {
+        // Story 28-1 PR B fix (wave-4 review H1) — `WHERE "TenantId" = @tid`
+        // is REQUIRED on both the inner SELECT and the outer UPDATE while the
+        // per-tenant `email_outbox` table physically still co-resides on the
+        // CP DB. Without it tenant A's call would claim the globally oldest
+        // pending row regardless of which tenant owns it.
         var rows = await db.EmailOutbox.FromSqlInterpolated($"""
             UPDATE email_outbox
             SET "Status" = 'sending', "UpdatedAt" = {now}
@@ -122,10 +129,12 @@ public class EmailOutboxRepository(
                 SELECT "Id" FROM email_outbox
                 WHERE "Status" = 'pending'
                   AND "NextAttemptAt" <= {now}
+                  AND "TenantId" = {tenantId}
                 ORDER BY "NextAttemptAt" ASC, "CreatedAt" ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
+              AND "TenantId" = {tenantId}
             RETURNING *
             """).AsNoTracking().ToListAsync(ct);
 
@@ -133,10 +142,16 @@ public class EmailOutboxRepository(
     }
 
     private static async Task<EmailOutboxMessage?> ClaimViaNaivePathAsync(
-        TenantDbContext db, DateTime now, CancellationToken ct)
+        TenantDbContext db, Guid tenantId, DateTime now, CancellationToken ct)
     {
+        // Story 28-1 PR B fix (wave-4 review H1) — `&& m.TenantId == tenantId`
+        // is REQUIRED in the predicate while the per-tenant table still
+        // physically co-resides on the CP DB. EF-InMemory hides the missing
+        // predicate; the cross-tenant negative tests catch it.
         var candidate = await db.EmailOutbox
-            .Where(m => m.Status == "pending" && m.NextAttemptAt <= now)
+            .Where(m => m.Status == "pending"
+                && m.NextAttemptAt <= now
+                && m.TenantId == tenantId)
             .OrderBy(m => m.NextAttemptAt)
             .ThenBy(m => m.CreatedAt)
             .FirstOrDefaultAsync(ct);
@@ -155,7 +170,13 @@ public class EmailOutboxRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var msg = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H1) — FindAsync keys on PK
+        // only. While the per-tenant table physically co-resides on the
+        // CP DB, tenant A could mark tenant B's row sent. Predicate-based
+        // lookup makes the tenant id a hard guard.
+        var msg = await db.EmailOutbox
+            .Where(m => m.Id == id && m.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (msg is null) return;
 
         var now = DateTime.UtcNow;
@@ -173,7 +194,10 @@ public class EmailOutboxRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var msg = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H1) — see MarkSentAsync.
+        var msg = await db.EmailOutbox
+            .Where(m => m.Id == id && m.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (msg is null) return null;
 
         var now = DateTime.UtcNow;
@@ -201,7 +225,10 @@ public class EmailOutboxRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        return await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H1) — see MarkSentAsync.
+        return await db.EmailOutbox
+            .Where(m => m.Id == id && m.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task DeleteAsync(Guid tenantId, Guid id, CancellationToken ct = default)
@@ -210,7 +237,10 @@ public class EmailOutboxRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var row = await db.EmailOutbox.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H1) — see MarkSentAsync.
+        var row = await db.EmailOutbox
+            .Where(m => m.Id == id && m.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (row is null) return;
         db.EmailOutbox.Remove(row);
         await db.SaveChangesAsync(ct);

@@ -53,7 +53,13 @@ public class QueuedTaskRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        return await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — FindAsync keys on PK
+        // only. While the per-tenant queue physically still co-resides
+        // on the CP DB, tenant A's call could read tenant B's row.
+        // Predicate-based lookup makes the tenant id a hard guard.
+        return await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<List<QueuedTask>> ListPendingAsync(
@@ -93,12 +99,13 @@ public class QueuedTaskRepository(
                 var rows = await ListPendingAsync(tid, batchSizePerTenant, ct);
                 aggregate.AddRange(rows);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Tenant might be mid-deletion or have a transient
                 // connection failure; don't let one tenant's outage
                 // starve the rest. The caller logs and the next poll
-                // re-tries.
+                // re-tries. Wave-4 review M2 — cooperative cancellation
+                // must propagate, not be swallowed as a "tenant outage".
                 continue;
             }
         }
@@ -112,7 +119,10 @@ public class QueuedTaskRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return null;
         if (task.Status != "pending") return null;
 
@@ -179,10 +189,12 @@ public class QueuedTaskRepository(
             {
                 total += await ReapStaleProcessingAsync(tid, visibilityTimeout, maxRetries, ct);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Don't let one tenant's outage starve the reaper for
                 // the rest; the caller logs and the next poll re-tries.
+                // Wave-4 review M2 — cooperative cancellation must
+                // propagate, not be swallowed as a "tenant outage".
                 continue;
             }
         }
@@ -195,7 +207,10 @@ public class QueuedTaskRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return;
 
         task.Status = "completed";
@@ -210,7 +225,10 @@ public class QueuedTaskRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return;
 
         task.Status = "failed";
@@ -226,7 +244,10 @@ public class QueuedTaskRepository(
             throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
         await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return null;
 
         task.RetryCount += 1;

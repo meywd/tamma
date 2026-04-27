@@ -132,10 +132,7 @@ public sealed class OutboxSmtpSender : BackgroundService
     /// the platform outbox, returning <c>true</c> when a row was
     /// processed. Tenant outbox is drained first to preserve historical
     /// behaviour; platform outbox is checked only when the tenant queue
-    /// is empty so a heavy tenant load doesn't starve the platform
-    /// queue (the next poll cycle will visit the platform queue when
-    /// the tenant queue is drained). Exposed for tests so they don't
-    /// race the polling timer.
+    /// is empty. Exposed for tests so they don't race the polling timer.
     ///
     /// <para>Story 28-1 PR B — the tenant claim path now fans out
     /// across active tenants via
@@ -143,6 +140,19 @@ public sealed class OutboxSmtpSender : BackgroundService
     /// instead of the previous "scan a single shared CP table" path.
     /// Once PR D moves the per-tenant outbox into per-tenant DBs the
     /// fan-out becomes the only correct way to drain.</para>
+    ///
+    /// <para>Wave-4 review H3 — tenant-first ordering CAN starve the
+    /// platform queue indefinitely under continuous tenant traffic. Pre-PR
+    /// the direct-CP-scan path interleaved tenant + platform rows by
+    /// <c>NextAttemptAt</c>; the cycle-aware ordering here gives no
+    /// fairness guarantee. Acceptable today because (a) the platform
+    /// queue carries low-volume verification / password-reset / welcome
+    /// mail and (b) a busy tenant queue still drains one row per poll
+    /// so platform mail is delayed at most one poll cycle past the moment
+    /// the tenant queue empties. Round-robin (alternate tenant ↔
+    /// platform per cycle) is tracked as a follow-up. Re-evaluate when
+    /// EMAIL.QUEUED.SUCCESS rows pile up on the platform table without
+    /// EMAIL.SENT.SUCCESS catching up.</para>
     /// </summary>
     public async Task<bool> ProcessOnceAsync(CancellationToken ct)
     {
