@@ -17,11 +17,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tamma/shared": "workspace:*",
     "@tamma/events": "workspace:*",
     "@tamma/observability": "workspace:*",
+    "@tamma/shared": "workspace:*",
     "minimatch": "^10.0.1",
-    "nanoid": "^5.0.9"
+    "nanoid": "^5.1.9"
   },
   "devDependencies": {
     "typescript": "~5.7.2"
