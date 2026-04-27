@@ -53,6 +53,7 @@ public class OutboxSmtpSenderTests
         services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
+        services.AddScoped<IPlatformEventRepository, PlatformEventRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
 
         _transport = new Mock<ISmtpTransport>();
@@ -95,9 +96,14 @@ public class OutboxSmtpSenderTests
         => new(new TestTenantDbContextFactory(_tenantOptions),
                new TestControlPlaneDbContext(_cpOptions));
     private EventRepository FreshEvents()
-        => new(new TestTenantDbContextFactory(_tenantOptions),
-               new TenantContext(),
-               new TestControlPlaneDbContext(_cpOptions));
+    {
+        var cp = new TestControlPlaneDbContext(_cpOptions);
+        return new EventRepository(
+            new TestTenantDbContextFactory(_tenantOptions),
+            new TenantContext(),
+            cp,
+            new PlatformEventRepository(cp));
+    }
 
     private static EmailOutboxMessage NewRow(int maxAttempts = 5) => new()
     {

@@ -6,14 +6,42 @@ namespace Tamma.Data.Repositories;
 
 /// <summary>
 /// Tenant-scoped event store. Writes always go through the tenant factory;
-/// reads scope to the ambient tenant. Cross-tenant admin queries
-/// (<c>QueryAsync(tenantId: null)</c>) use <see cref="ControlPlaneDbContext"/>
-/// because the factory requires a specific tenant.
+/// reads scope to the ambient tenant.
+///
+/// <para>Cross-tenant admin queries (<c>QueryAsync(tenantId: null)</c>) are
+/// routed per Story 28-1 Decision #2 (see
+/// <c>.dev/decisions/story-28-1-design-calls.md</c>):</para>
+/// <list type="bullet">
+///   <item><b>Platform-lifecycle events</b> (TENANT.PROVISIONED.SUCCESS,
+///     EMAIL.QUEUED.SUCCESS, INSTALLATION.CREATED.SUCCESS, etc. — events
+///     emitted with <c>TenantId = null</c>) are read from
+///     <see cref="IPlatformEventRepository"/> (CP-resident
+///     <c>platform_events</c> table) and projected back into
+///     <see cref="DomainEvent"/> shape so existing callers stay
+///     unchanged.</item>
+///   <item><b>Cross-tenant tenant-scoped event search</b> (admin "show me
+///     all events across all tenants") is <b>not implemented</b> — it
+///     would need a per-tenant fan-out via
+///     <see cref="ITenantDbContextFactory"/> driven off the LRU pool's
+///     known-warm tenants. No current user story demands it; build when
+///     one does. Callers that pass <c>type == null</c> AND
+///     <c>tenantId == null</c> get a <see cref="NotSupportedException"/>
+///     — they almost certainly meant a platform-lifecycle scan and the
+///     missing type prefix is the bug.</item>
+/// </list>
+///
+/// <para>During the Story 28-1 transitional shared-DB phase the legacy
+/// <see cref="ControlPlaneDbContext.DomainEvents"/> DbSet still carries
+/// rows that were appended via the pre-PR-D code path. We UNION those
+/// rows with <c>platform_events</c> on tenant-less reads so the migration
+/// is invisible to callers — once PR D drops <c>cp.domain_events</c> the
+/// union side becomes a no-op (the table no longer exists in the model).</para>
 /// </summary>
 public class EventRepository(
     ITenantDbContextFactory tenantDbFactory,
     ITenantContext tenantContext,
-    ControlPlaneDbContext cp) : IEventRepository
+    ControlPlaneDbContext cp,
+    IPlatformEventRepository? platformEvents = null) : IEventRepository
 {
     public async Task<DomainEvent> AppendAsync(DomainEvent evt)
     {
@@ -67,13 +95,79 @@ public class EventRepository(
             return await query.OrderByDescending(e => e.CreatedAt).Take(limit).ToListAsync();
         }
 
-        // Cross-tenant admin view (system scope). CP context exposes all rows.
-        var q = cp.DomainEvents.IgnoreQueryFilters().AsQueryable();
-        if (!string.IsNullOrEmpty(type))
-            q = q.Where(e => e.Type == type);
+        // Tenant-less query — Story 28-1 Decision #2 (cross-tenant admin
+        // queries get a per-call answer). The supported answer here is
+        // platform-lifecycle events: read from platform_events and project
+        // back into DomainEvent shape so existing callers stay unchanged.
+        //
+        // A non-null `issueNumber` is meaningless for platform-scope events
+        // (those rows have no IssueNumber column) — that combination is
+        // almost certainly a per-tenant query someone forgot to scope, so
+        // we reject it loudly per Decision #2's "build when a story
+        // demands it" rule rather than silently returning no rows.
         if (issueNumber.HasValue)
-            q = q.Where(e => e.IssueNumber == issueNumber.Value);
-        return await q.OrderByDescending(e => e.CreatedAt).Take(limit).ToListAsync();
+        {
+            throw new NotSupportedException(
+                "Cross-tenant tenant-scoped event search is not implemented. " +
+                "`issueNumber` is a tenant-scoped predicate; pass a `tenantId` " +
+                "to scope to one tenant, or drop the issueNumber filter to " +
+                "query platform-lifecycle events. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2 for " +
+                "the per-call routing matrix.");
+        }
+
+        // Read the platform_events log (CP-resident; survives PR D).
+        // typePrefix matches DomainEvent's exact-type semantics for full
+        // event type strings (e.g. "EMAIL.QUEUED.SUCCESS") because no
+        // other event type starts with that string. A null/empty type
+        // returns every platform-scope event, capped at `limit`.
+        // PR-C/PR-B-fix: platformEvents is optional. When the platform
+        // repo isn't registered (some test scopes deliberately exclude
+        // it to verify graceful degradation), skip the platform-events
+        // half of the union and return only the legacy CP rows. Once
+        // PR D drops cp.DomainEvents, callers without IPlatformEventRepository
+        // simply get an empty result rather than a DI activation failure.
+        var platformRows = platformEvents is not null
+            ? await platformEvents.QueryAsync(typePrefix: type, limit: limit)
+            : (IReadOnlyList<PlatformEvent>)Array.Empty<PlatformEvent>();
+
+        // Transitional UNION: the pre-Story-28-1 code path appended
+        // tenant-less events to cp.DomainEvents. Until PR D drops the
+        // DbSet those rows must still be visible. Once the table leaves
+        // CP this branch returns empty and the union becomes a no-op.
+        var legacy = cp.DomainEvents.IgnoreQueryFilters().AsQueryable();
+        if (!string.IsNullOrEmpty(type))
+            legacy = legacy.Where(e => e.Type == type);
+        if (issueNumber.HasValue)
+            legacy = legacy.Where(e => e.IssueNumber == issueNumber.Value);
+        var legacyRows = await legacy
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(limit)
+            .ToListAsync();
+
+        // Merge both streams, newest-first, capped at `limit`. The
+        // PlatformEvent → DomainEvent projection drops the UserId column
+        // (DomainEvent has no equivalent slot) and synthesises a missing
+        // IssueNumber — callers already tolerate null IssueNumber on
+        // platform-scope events.
+        var merged = legacyRows
+            .Concat(platformRows.Select(p => new DomainEvent
+            {
+                Id = p.Id,
+                Type = p.Type,
+                TenantId = p.TenantId,
+                Tags = p.Tags,
+                Metadata = p.Metadata,
+                Data = p.Data,
+                CreatedAt = p.CreatedAt,
+                SequenceNumber = p.SequenceNumber,
+                IssueNumber = null,
+            }))
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(limit)
+            .ToList();
+
+        return merged;
     }
 
     public async Task<DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)

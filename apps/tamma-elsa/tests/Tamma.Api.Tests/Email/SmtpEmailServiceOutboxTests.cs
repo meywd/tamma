@@ -43,7 +43,11 @@ public class SmtpEmailServiceOutboxTests
         _tenantContext = new TenantContext();
         _db = _fx.Cp;
         _outbox = new EmailOutboxRepository(_fx.Factory, _db);
-        _events = new EventRepository(_fx.Factory, _tenantContext, _db);
+        _events = new EventRepository(
+            _fx.Factory,
+            _tenantContext,
+            _db,
+            new PlatformEventRepository(_db));
 
         _config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Diagnostics.Models;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -147,18 +148,46 @@ public sealed class DiagnosticsService : IDiagnosticsService
             return new DimensionReport(from, to, groupBy, Array.Empty<DimensionBucket>());
         }
 
+        // Story 28-1 PR C — Decision #2 (cross-tenant admin queries get a
+        // per-call answer). ProviderDiagnostics moves to the per-tenant DB
+        // in PR D, so:
+        //   • A non-null tenantId routes via ITenantDbContextFactory and
+        //     reads the per-tenant slice (works under both transitional
+        //     shared-DB and post-PR-D db-per-tenant topologies).
+        //   • A null tenantId is "show me every tenant's provider
+        //     diagnostics" — a cross-tenant tenant-scoped scan with no
+        //     current user story behind it. Defer per Decision #2 with a
+        //     loud NotSupportedException so callers (admin dashboards
+        //     that aggregate provider stats across the platform) surface
+        //     the gap and route a real fan-out implementation when one
+        //     ships. Until then, callers MUST scope to a tenant.
+        if (!tenantId.HasValue)
+        {
+            throw new NotSupportedException(
+                "Cross-tenant ProviderDiagnostics dimension reports are not " +
+                "implemented. ProviderDiagnostics is a tenant-scoped table " +
+                "(moves to per-tenant DB in Story 28-1 PR D); pass a tenantId " +
+                "to scope the report. See .dev/decisions/story-28-1-design-calls.md " +
+                "Decision #2.");
+        }
+
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.ControlPlaneDbContext>();
+        var tenantDbFactory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var db = await tenantDbFactory.CreateAsync(tenantId.Value);
 
         var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
         var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
 
+        // Defence-in-depth tenant predicate: the factory binds the tenant
+        // via the per-tenant Npgsql connection, but the transitional
+        // shared-DB phase still mixes rows from every tenant in one
+        // physical table — the explicit Where keeps the slice tight.
+        var tid = tenantId.Value;
         var query = db.ProviderDiagnostics
-            .Where(d => d.CreatedAt >= fromUtc && d.CreatedAt < toUtc);
-        if (tenantId.HasValue)
-        {
-            query = query.Where(d => d.TenantId == tenantId.Value);
-        }
+            .Where(d => d.TenantId == tid
+                        && d.CreatedAt >= fromUtc
+                        && d.CreatedAt < toUtc);
 
         // Group server-side and project to the bucket DTO. EF Core 8 supports
         // GroupBy → Select aggregation translation against Postgres.

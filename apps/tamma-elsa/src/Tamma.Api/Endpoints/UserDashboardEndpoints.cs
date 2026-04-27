@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
@@ -32,20 +33,36 @@ public static class UserDashboardEndpoints
     /// Dashboard home summary: total-events, total-workflows, workflow-defs
     /// count (across the whole platform — definitions aren't tenant-scoped
     /// yet), and the 10 most recent tenant-scoped events.
+    ///
+    /// <para>Story 28-1 PR C: <c>DomainEvents</c> + <c>WorkflowInstances</c>
+    /// counts route through <see cref="ITenantDbContextFactory"/> so they
+    /// land on the per-tenant DB once PR D moves the entities. The
+    /// transitional shared-DB topology returns the same rows; the factory
+    /// just makes the call site safe under both.</para>
     /// </summary>
     public static async Task<IResult> GetOrgSummary(
         Guid tenantId,
-        ControlPlaneDbContext db,
+        ITenantDbContextFactory tenantDbFactory,
         IEventRepository eventRepo,
         IWorkflowRepository workflowRepo)
     {
-        var totalEvents = await db.DomainEvents
-            .Where(e => e.TenantId == tenantId)
-            .CountAsync();
-
-        var totalWorkflows = await db.WorkflowInstances
-            .Where(i => i.TenantId == tenantId)
-            .CountAsync();
+        long totalEvents;
+        long totalWorkflows;
+        await using (var tdb = await tenantDbFactory.CreateAsync(tenantId))
+        {
+            // Defence-in-depth `Where(TenantId == tenantId)` predicate —
+            // the factory-issued context binds the tenant via the
+            // per-tenant Npgsql connection (the real isolation plane);
+            // explicit predicate is required during the transitional
+            // shared-DB phase where multiple tenants still share a
+            // physical database.
+            totalEvents = await tdb.DomainEvents
+                .Where(e => e.TenantId == tenantId)
+                .LongCountAsync();
+            totalWorkflows = await tdb.WorkflowInstances
+                .Where(i => i.TenantId == tenantId)
+                .LongCountAsync();
+        }
 
         var defs = await workflowRepo.ListDefinitionsAsync();
         var recent = await eventRepo.QueryAsync(tenantId, null, null, RecentEventsLimit);
@@ -106,11 +123,16 @@ public static class UserDashboardEndpoints
     /// <summary>
     /// Aggregate stats for the dashboard's "Quick stats" widget: total
     /// runs, terminal-state counts, success rate, and average duration.
+    ///
+    /// <para>Story 28-1 PR C: routed through <see cref="ITenantDbContextFactory"/>
+    /// so the read lands on the per-tenant DB once PR D moves
+    /// <c>WorkflowInstance</c> off the control plane.</para>
     /// </summary>
     public static async Task<IResult> GetStats(
         Guid tenantId,
-        ControlPlaneDbContext db)
+        ITenantDbContextFactory tenantDbFactory)
     {
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
         var rows = await db.WorkflowInstances
             .Where(i => i.TenantId == tenantId)
             .Select(i => new
