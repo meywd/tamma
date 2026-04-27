@@ -93,10 +93,12 @@ public class SanitizationEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task UpsertRule_ThenGetRules_MergesWithDefaults()
+    public async Task UpsertRule_PlatformScope_IsNoOp_AndDefaultsAreUnchanged()
     {
-        // Seed a tenant-scoped custom rule via the repository directly (the
-        // PUT /rules endpoint exercises the write path in a later assertion).
+        // Story 28-1 PR A (Decision #1): platform-default writes are no-ops
+        // because defaults moved to code (SystemSanitizationRules.DefaultRules).
+        // Attempting to seed a "platform override" via UpsertRuleAsync(null, …)
+        // is silently discarded; the default rule set keeps its shape.
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<ISanitizationRepository>();
 
@@ -109,7 +111,8 @@ public class SanitizationEndpointsIntegrationTests
             Enabled: true);
         await repo.UpsertRuleAsync(null, custom);
 
-        // GET merged rules — system defaults + tenant-null override
+        // GET rules (no auth → null tenant) returns ONLY the code-resident
+        // defaults; the platform write was discarded.
         var resp = await _client.GetAsync("/api/config/sanitize/rules");
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -117,14 +120,18 @@ public class SanitizationEndpointsIntegrationTests
         using var doc = JsonDocument.Parse(body);
         var rules = doc.RootElement.EnumerateArray().ToList();
 
-        rules.Should().Contain(r => r.GetProperty("name").GetString() == "custom-token");
+        rules.Should().NotContain(r => r.GetProperty("name").GetString() == "custom-token");
         rules.Should().Contain(r => r.GetProperty("name").GetString() == "email");
     }
 
     [Test]
-    public async Task UpdateSanitizationRules_ViaEndpoint_PersistsAndIsUsedBySanitize()
+    public async Task UpdateSanitizationRules_PlatformScope_ViaEndpoint_DoesNotShadowDefaults()
     {
-        // PUT a new rule via the endpoint, then POST /sanitize and expect it applied.
+        // Story 28-1 PR A: PUT /api/config/sanitize/rules without a tenant
+        // context (TenantId == null) is a no-op write — defaults stay intact
+        // and the subsequent /sanitize call still uses the canonical default
+        // rule set. Tenant-scoped overrides are still supported via the same
+        // endpoint when an authenticated tenant request is in flight.
         var rule = new
         {
             name = "internal-id",
@@ -138,6 +145,9 @@ public class SanitizationEndpointsIntegrationTests
         var putResp = await _client.PutAsJsonAsync(
             "/api/config/sanitize/rules",
             new { rules = new[] { rule } });
+        // The endpoint still answers 200 — it accepted the request shape — but
+        // the underlying repo dropped the write because tenantContext.TenantId
+        // is null. Default rules keep applying afterwards.
         putResp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var saniResp = await _client.PostAsJsonAsync(
@@ -147,8 +157,10 @@ public class SanitizationEndpointsIntegrationTests
 
         var body = await saniResp.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
+        // INT-9999 is NOT redacted because the platform-default override was
+        // discarded. The body comes back unchanged through the default rules.
         doc.RootElement.GetProperty("sanitizedText").GetString()
-            .Should().Be("ticket [INT_ID] is urgent");
+            .Should().Be("ticket INT-9999 is urgent");
     }
 
     [Test]

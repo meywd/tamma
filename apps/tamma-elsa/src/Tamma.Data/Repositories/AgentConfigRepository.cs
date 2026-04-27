@@ -1,21 +1,41 @@
 using Tamma.Data.Abstractions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Tamma.Data.Defaults;
 using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
 /// <summary>
 /// Tenant-scoped repo; uses <see cref="ITenantDbContextFactory"/> for
-/// tenant-bound reads/writes. Platform-default rows (<c>TenantId IS NULL</c>
-/// — the "system default" agent config row) are accessed through
-/// <see cref="ControlPlaneDbContext"/> since they are cross-tenant by
-/// definition and the tenant factory requires a tenant id.
+/// tenant-bound reads/writes.
+///
+/// <para>
+/// Story 28-1 PR A (Decision #1): the legacy
+/// <c>agent_configs.tenant_id IS NULL</c> CP row no longer carries the
+/// platform default. Reads with <c>tenantId == null</c> resolve to the
+/// in-code default in <see cref="AgentConfigDefaults"/> (and downstream
+/// <c>DefaultAgentConfig.ForRole</c> in Tamma.Api), matching the prompt-store
+/// pattern documented in CLAUDE.md.
+/// </para>
+///
+/// <para>
+/// Writes with <c>tenantId == null</c> were previously how operators "edited
+/// the platform default" via the SettingsEndpoints / AgentEndpoints surface.
+/// Defaults now live in code, so those writes are no-ops with a structured
+/// warning — the API surface is preserved (clients keep getting an
+/// <see cref="AgentConfig"/> back) but the value never persists. To truly
+/// change defaults, edit
+/// <c>Tamma.Api.Services.Agents.DefaultAgentConfig.ForRole</c>.
+/// </para>
 /// </summary>
 public class AgentConfigRepository(
     ITenantDbContextFactory tenantDbFactory,
-    ControlPlaneDbContext cp) : IAgentConfigRepository
+    ILogger<AgentConfigRepository>? logger = null) : IAgentConfigRepository
 {
+    private readonly ILogger<AgentConfigRepository>? _logger = logger;
+
     public async Task<AgentConfig?> GetAsync(Guid? tenantId)
     {
         if (tenantId is Guid tid)
@@ -24,9 +44,11 @@ public class AgentConfigRepository(
             return await db.AgentConfigs.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(c => c.TenantId == tid);
         }
-        // Platform-default row lives in the CP plane.
-        return await cp.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == null);
+        // Story 28-1 PR A: platform default lives in code now, not in CP.
+        // Returning null here (rather than the synthetic snapshot) preserves
+        // the existing "no row found → caller falls back to platform-default
+        // sentinel" contract used by SettingsEndpoints / AgentEndpoints.
+        return null;
     }
 
     public async Task<AgentConfig> UpsertAsync(Guid? tenantId, string configJson, Guid? userId)
@@ -58,33 +80,17 @@ public class AgentConfigRepository(
             await db.SaveChangesAsync();
             return config;
         }
-        else
-        {
-            // Platform default (TenantId == null) — CP plane.
-            var existing = await cp.AgentConfigs.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(c => c.TenantId == null);
-            if (existing is not null)
-            {
-                existing.Config = configJson;
-                existing.Version++;
-                existing.UpdatedAt = DateTime.UtcNow;
-                existing.UpdatedBy = userId;
-                await cp.SaveChangesAsync();
-                return existing;
-            }
-            var config = new AgentConfig
-            {
-                TenantId = null,
-                Config = configJson,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                CreatedBy = userId,
-                UpdatedBy = userId
-            };
-            cp.AgentConfigs.Add(config);
-            await cp.SaveChangesAsync();
-            return config;
-        }
+
+        // Story 28-1 PR A: platform default is code-resident; this write is
+        // a no-op so the legacy admin endpoint surface keeps responding 200
+        // (instead of breaking on a missing CP DbSet after PR D).
+        _logger?.LogWarning(
+            "AgentConfig.UpsertAsync called with tenantId=null — platform " +
+            "defaults moved to code (DefaultAgentConfig.ForRole) per Story " +
+            "28-1 Decision #1. Discarding the requested config (UpdatedBy={UserId}).",
+            userId);
+
+        return AgentConfigDefaults.Snapshot();
     }
 
     public async Task<bool> DeleteAsync(Guid tenantId)
@@ -108,12 +114,11 @@ public class AgentConfigRepository(
                 return (config, "tenant");
         }
 
-        var systemConfig = await cp.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == null);
-        if (systemConfig is not null)
-            return (systemConfig, "system");
-
-        return (new AgentConfig { Config = "{}" }, "default");
+        // Story 28-1 PR A: skip the CP "system" lookup; defaults live in code.
+        // The "default" branch is preserved as a stable sentinel for callers
+        // (e.g. ProviderChainResolver) that still expect a non-null
+        // AgentConfig back from the resolve API.
+        return (AgentConfigDefaults.Snapshot(), "default");
     }
 
     /// <inheritdoc />
@@ -128,8 +133,9 @@ public class AgentConfigRepository(
         }
         else
         {
-            row = await cp.AgentConfigs.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(c => c.TenantId == null);
+            // Story 28-1 PR A: no platform-default row to read; return null
+            // so the resolver layer falls through to its in-code defaults.
+            row = null;
         }
         if (row is null || string.IsNullOrWhiteSpace(row.Config))
         {

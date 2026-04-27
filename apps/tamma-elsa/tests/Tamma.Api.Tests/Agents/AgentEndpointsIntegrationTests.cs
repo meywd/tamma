@@ -116,8 +116,12 @@ public class AgentEndpointsIntegrationTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public async Task GetConfig_AfterUpdate_Returns_UpdatedConfig()
+    public async Task PutConfig_WithoutTenantContext_IsNoOp_AndGetReturnsPlatformDefault()
     {
+        // Story 28-1 PR A (Decision #1): platform-default writes are no-ops
+        // because defaults moved to code (DefaultAgentConfig.ForRole).
+        // Without auth → tenantContext.TenantId is null → the PUT is dropped
+        // and the subsequent GET returns the platform-default sentinel.
         var payload = new
         {
             config = new
@@ -134,14 +138,17 @@ public class AgentEndpointsIntegrationTests
         };
 
         var put = await _client.PutAsJsonAsync("/api/v1/agents/config", payload);
+        // Endpoint surface preserved — clients still see 200 OK with a
+        // synthetic AgentConfig payload. The underlying value did not persist.
         put.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var get = await _client.GetAsync("/api/v1/agents/config");
         get.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await get.Content.ReadFromJsonAsync<JsonElement>();
-        // The developer override must be present in returned config JSON.
-        body.GetProperty("config").GetProperty("roles").GetProperty("developer")
-            .GetProperty("provider").GetString().Should().Be("openai");
+
+        // GET surfaces the "platform-default" source marker; the PUT was a
+        // no-op so no developer override leaks through.
+        body.GetProperty("source").GetString().Should().Be("platform-default");
     }
 
     [Test]

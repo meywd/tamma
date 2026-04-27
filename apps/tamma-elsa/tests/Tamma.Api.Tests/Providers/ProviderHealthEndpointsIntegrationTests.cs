@@ -469,6 +469,16 @@ public class ProviderHealthEndpointsIntegrationTests
     /// <see cref="IStartupFilter"/> that wraps the production pipeline to
     /// inject a tiny middleware branch handling
     /// <c>POST /api/providers/chain/resolve</c>.
+    ///
+    /// <para>
+    /// Story 28-1 PR A: every request that touches the provider-health API
+    /// has its <see cref="ITenantContext"/> pre-populated with the test's
+    /// <see cref="Tenant"/> constant. The chain endpoint reads agent config
+    /// through <see cref="IAgentConfigRepository"/>, whose <c>tenantId == null</c>
+    /// path now returns null (defaults moved to code per Decision #1). Pinning
+    /// a tenant here lets the integration tests continue to seed a chain
+    /// config in the tenant DB and observe ordered resolution.
+    /// </para>
     /// </summary>
     private sealed class ProviderHealthStartupFilter : IStartupFilter
     {
@@ -476,6 +486,19 @@ public class ProviderHealthEndpointsIntegrationTests
         {
             return app =>
             {
+                // Pin a deterministic tenant for the entire test request lifetime.
+                // Without this, ITenantContext.TenantId is null and the agent-config
+                // lookup would resolve to in-code defaults that carry no chain.
+                app.Use(async (ctx, contNext) =>
+                {
+                    var tenantCtx = ctx.RequestServices.GetRequiredService<ITenantContext>();
+                    if (tenantCtx.TenantId is null)
+                    {
+                        tenantCtx.SetTenantId(Guid.Parse(Tenant));
+                    }
+                    await contNext();
+                });
+
                 // Branch middleware for the new chain-resolve route — terminal.
                 app.Use(async (ctx, contNext) =>
                 {
@@ -576,16 +599,46 @@ public class ProviderHealthEndpointsIntegrationTests
 
     private async Task SeedAgentConfigAsync(string configJson)
     {
+        // Story 28-1 PR A: agent-config "platform default" rows no longer
+        // exist on CP — defaults moved to code (DefaultAgentConfig.ForRole).
+        // Tests need a real tenant id; we use the class-level <see cref="Tenant"/>
+        // constant which the startup filter pins onto every request.
+        //
+        // Phase-1 hardening (finding 031) added an FK on agent_configs.TenantId
+        // → tenants.Id, so the tenant row must exist before the override insert.
+        var tid = Guid.Parse(Tenant);
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+
+        // Seed the tenant row (idempotent — keep it on CP).
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var existingTenant = await cp.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tid);
+        if (existingTenant is null)
+        {
+            cp.Tenants.Add(new Tamma.Data.Entities.Tenant
+            {
+                Id = tid,
+                Name = $"Test {tid:N}",
+                Slug = $"t-{tid:N}",
+                Plan = "free"
+            });
+            await cp.SaveChangesAsync();
+        }
+
+        // Upsert the agent-config row in the tenant DB (shared physical
+        // database during the transition window — the factory still hands
+        // back a tenant-scoped DbContext bound to the same connection).
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        await using var db = await factory.CreateAsync(tid);
         var existing = await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == null);
+            .FirstOrDefaultAsync(c => c.TenantId == tid);
         if (existing is null)
         {
             db.AgentConfigs.Add(new AgentConfig
             {
                 Id = Guid.NewGuid(),
-                TenantId = null,
+                TenantId = tid,
                 Config = configJson,
                 Version = 1,
                 CreatedAt = DateTime.UtcNow,
