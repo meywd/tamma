@@ -46,7 +46,7 @@
     "@react-router/node": "^7.14.2",
     "dayjs": "^1.11.20",
     "diff": "^7.0.0",
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "^0.45.2",
     "isbot": "^5.1.39",
     "lucide-react": "^0.553.0",
     "nanoid": "^5.1.9",
