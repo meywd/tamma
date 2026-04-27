@@ -20,7 +20,7 @@
     "@tamma/events": "workspace:*",
     "@tamma/observability": "workspace:*",
     "@tamma/shared": "workspace:*",
-    "minimatch": "^10.0.1",
+    "minimatch": "^10.2.5",
     "nanoid": "^5.1.9"
   },
   "devDependencies": {

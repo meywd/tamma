@@ -41,9 +41,9 @@
     "lighthouse:install": "npm install -g @lhci/cli@0.14.x"
   },
   "dependencies": {
-    "@react-router/cloudflare": "^7.9.5",
-    "@react-router/dev": "^7.9.5",
-    "@react-router/node": "^7.9.5",
+    "@react-router/cloudflare": "^7.14.2",
+    "@react-router/dev": "^7.14.2",
+    "@react-router/node": "^7.14.2",
     "dayjs": "^1.11.20",
     "diff": "^7.0.0",
     "drizzle-orm": "^0.44.7",
@@ -54,32 +54,32 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
-    "react-router": "^7.9.5",
+    "react-router": "^7.14.2",
     "rehype-highlight": "^7.0.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.0",
-    "resend": "^6.4.2"
+    "resend": "^6.12.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20251107.0",
-    "@playwright/test": "^1.56.1",
+    "@cloudflare/workers-types": "^4.20260426.1",
+    "@playwright/test": "^1.59.1",
     "@types/diff": "^6.0.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
-    "@vitest/ui": "^4.0.8",
+    "@vitest/ui": "^4.1.5",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
-    "happy-dom": "^20.0.10",
-    "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
+    "happy-dom": "^20.9.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.21.0",
     "typescript": "~5.7.2",
     "vite": "^6.0.7",
-    "vitest": "^4.0.8",
-    "wrangler": "^4.46.0"
+    "vitest": "^4.1.5",
+    "wrangler": "^4.85.0"
   },
   "engines": {
     "node": ">=22.0.0"

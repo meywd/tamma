@@ -40,14 +40,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tamma/shared": "workspace:*",
-    "@tamma/providers": "workspace:*",
     "@tamma/observability": "workspace:*",
+    "@tamma/providers": "workspace:*",
+    "@tamma/shared": "workspace:*",
     "chromadb": "^1.8.1",
-    "pg": "^8.13.1"
+    "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.20.0",
     "typescript": "~5.7.2",
     "vitest": "^3.0.6"
   },
