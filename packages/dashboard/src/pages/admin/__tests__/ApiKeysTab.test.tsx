@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { ApiKeysTab } from '../ApiKeysTab.js';
 import { ADMIN_USERS, API_KEYS, OWNER_USER } from '../../../test/fixtures.js';
 
+// CreateApiKeyDialog focuses its container via requestAnimationFrame on mount.
+// Flush one rAF cycle so the auto-focus happens BEFORE userEvent.type starts —
+// otherwise the rAF callback can steal focus mid-typing under vitest 4 + jsdom.
+const flushRaf = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
 // Mocks
 const mockRevoke = vi.fn();
 const mockCreate = vi.fn();
@@ -127,6 +132,7 @@ describe('ApiKeysTab', () => {
       setupDefaults();
       render(<ApiKeysTab />);
       await user.click(screen.getByText('Create API Key'));
+      await flushRaf();
 
       // Clear the user selection (set to empty)
       const userSelect = screen.getByDisplayValue(/owner-user/);
@@ -151,6 +157,7 @@ describe('ApiKeysTab', () => {
       setupDefaults();
       render(<ApiKeysTab />);
       await user.click(screen.getByText('Create API Key'));
+      await flushRaf();
 
       const labelInput = screen.getByPlaceholderText('e.g. CI Pipeline, Dev Machine');
       await user.type(labelInput, 'Test Key');
@@ -174,6 +181,7 @@ describe('ApiKeysTab', () => {
       const clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
       render(<ApiKeysTab />);
       await user.click(screen.getByText('Create API Key'));
+      await flushRaf();
 
       const labelInput = screen.getByPlaceholderText('e.g. CI Pipeline, Dev Machine');
       await user.type(labelInput, 'Test');
@@ -203,6 +211,7 @@ describe('ApiKeysTab', () => {
       setupDefaults();
       render(<ApiKeysTab />);
       await user.click(screen.getByText('Create API Key'));
+      await flushRaf();
 
       const labelInput = screen.getByPlaceholderText('e.g. CI Pipeline, Dev Machine');
       await user.type(labelInput, 'Test');

@@ -28,14 +28,17 @@ vi.mock('pg', () => {
     release: mockRelease,
   };
 
-  const MockPool = vi.fn().mockImplementation(() => ({
-    connect: mockConnect.mockResolvedValue(mockClient),
-    query: mockQuery,
-    end: mockEnd,
-    totalCount: 5,
-    idleCount: 3,
-    waitingCount: 0,
-  }));
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  const MockPool = vi.fn().mockImplementation(function () {
+    return {
+      connect: mockConnect.mockResolvedValue(mockClient),
+      query: mockQuery,
+      end: mockEnd,
+      totalCount: 5,
+      idleCount: 3,
+      waitingCount: 0,
+    };
+  });
 
   return {
     default: {

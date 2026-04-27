@@ -47,7 +47,10 @@ const mockOctokit = {
 };
 
 vi.mock('@octokit/rest', () => ({
-  Octokit: vi.fn(() => mockOctokit),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  Octokit: vi.fn(function () {
+    return mockOctokit;
+  }),
 }));
 
 vi.mock('@octokit/auth-app', () => ({
