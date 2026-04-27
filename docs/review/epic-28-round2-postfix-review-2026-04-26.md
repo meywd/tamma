@@ -130,30 +130,49 @@ Ordered by severity:
 
 **Original must-fix punchlist (above) preserved for historical reference.** The same 4 items have moved from must-fix to closed.
 
-### Should-fix soon (8 items)
+### Should-fix soon (8 items) — ✅ ALL CLOSED in Wave 3 (commits `139a5eb`, `c340b31`, `208ce49`, `b9d4d32`; merged via `48a3977`/`d7b8979`/`4e04d96`/`f4810fd`)
 
-5. **PF-S5 + PF-S8** — Move `RestoreStagedSecondary` and the rotation-row-status flip into `RunRotationAsync` AFTER advisory-lock acquisition. Remove the `acquired = true` fall-through (or limit it to detectable in-memory-provider scenarios).
-6. **PF-S6** — Honour `X-Forwarded-For` only when origin is in a configured trusted-proxy CIDR list.
-7. **PF-S7** — Add `(postgres|postgresql|mysql|mongodb)://[^:@\s]+:[^@\s]+@\S+` regex to `ErrorRedactor`.
-8. **PF-S9** — Use `INSERT ... WHERE NOT EXISTS` for bootstrap-superadmin promotion, OR a single dedicated `platform_bootstrap` row with unique-constraint enforcement.
-9. **PF-S10** — Treat `KekVersion IS NULL` as version 0 in `KekCabinetHealthCheck`; surface "n legacy rows lack version stamp" as `Unhealthy`.
-10. **PF-C1** — Track `TenantStatusInvalidationListener.OnNotification` tasks and drain in `StopAsync`. Use the listener's `stoppingToken`, not `CancellationToken.None`.
-11. **PF-C2** — Either implement the `min(MaxSessionMinutes, 15)` doc claim, or simplify to a single 15-min literal and rewrite the comment.
-12. **PF-C3** — Bind a single dedicated `NpgsqlConnection` for the rotation lock (bypass EF entirely), OR document that pooled-context disposal preserves session-level advisory locks (verify via Npgsql docs first).
+5. **PF-S5 + PF-S8** — ✅ Closed (Agent A `c340b31`). `RestoreStagedSecondary` and rotation-row-status flip moved INTO `RunRotationAsync` after lock acquisition. Catch-all `acquired=true` fall-through removed; transient `NpgsqlException` now fails closed. EF-InMemory test scenarios distinguished by checking whether `NpgsqlDataSource` is registered in DI rather than catching exception types.
+6. **PF-S6** — ✅ Closed (Agent B `b9d4d32`). New `TrustedProxyResolver` checks `Connection.RemoteIpAddress` against configurable CIDR allowlist (`Tamma:TrustedProxies:Cidrs`). Default empty = trust nothing. Multi-hop semantics: walk right-to-left through trusted proxies, return first untrusted hop. IPv4 + IPv6.
+7. **PF-S7** — ✅ Closed (Agent B `b9d4d32`). `ErrorRedactor` adds `DatabaseDsn` regex covering `postgres`/`postgresql`/`mysql`/`mongodb`/`mongodb+srv`/`redis`/`amqp`/`amqps` schemes; runs ahead of the URL/IP scrub. Tests cover URL-encoded passwords, special chars, multi-DSN messages, case-insensitive matching.
+8. **PF-S9** — ✅ Closed (Agent B `b9d4d32`). New `platform_bootstrap` table with unique-constraint enforcement (single-row `CHECK (id = 1)`). First registration races to insert into it; success → that user becomes `platform_admin`; conflict → `user`. New EF migration `AddPlatformBootstrap`. Concurrent-registration test verifies exactly one user ends up `platform_admin` under load.
+9. **PF-S10** — ✅ Closed (Agent B `b9d4d32`). `KekCabinetHealthCheck` treats `KekVersion IS NULL` as version 0; surfaces "n legacy rows lack version stamp" as `Unhealthy`. Test seeds `KekVersion=null` row + active KEK on v3 + retired ring v1-v3 → health check fails.
+10. **PF-C1** — ✅ Closed (Agent C `208ce49`). `TenantStatusInvalidationListener` tracks fire-and-forget evictions in `ConcurrentDictionary<Guid, Task> _inFlightEvictions`. Threads `stoppingToken` through to eviction. Overridden `StopAsync` drains with bounded 10s timeout. Exposes `InFlightEvictionCount` + observable gauge `tenant_status_invalidation.in_flight_evictions`.
+11. **PF-C2** — ✅ Closed earlier (must-fix `2ce43b3`, side-cleanup during PF-S3). Dead `impId.HasValue ? 15min : 15min` ternary collapsed to single literal.
+12. **PF-C3** — ✅ Closed (Agent A `c340b31`). Advisory lock now held on a dedicated `NpgsqlConnection` resolved from the registered `NpgsqlDataSource`. EF's pooled-context `DISCARD ALL` can no longer release the rotation lock mid-flight.
 
-### Hygiene cleanups (5 items)
+### Hygiene cleanups (5 items) — partial closure
 
-13. **PF-C4** — Promote shared test doubles into `Tamma.Api.Tests.TestDoubles` namespace (`internal`).
-14. **PF-C5** — Add `ConfigureAwait(false)` to every await in `KekRotationCoordinator`, `KekProvider`, `AesGcmConnectionStringDecryptor`, `KekCabinetHealthCheck`, `AdminImpersonationService`. Or codify via `.editorconfig` / CA2007.
-15. **PF-C6** — Remove `Invalidate` from `ITenantStatusProbe`; callers use `ITenantStatusCache.Invalidate` directly.
-16. **PF-C7** — Regenerate `KekRotations` migration via `dotnet ef migrations add` to produce the `.Designer.cs` companion + verify snapshot.
-17. **PF-C12** — `PlatformTaskWorker.FailAsync` should use `IErrorRedactor` (Round-2 M1 missed this caller).
+13. **PF-C4** — ⏳ Deferred. Test-double consolidation would have conflicted with the new tests A/B/C/D added; left for a follow-up cleanup pass once Wave 3 lands. ~13 duplicate doubles still scattered.
+14. **PF-C5** — ✅ Closed (Agent A `c340b31` covered `KekRotationCoordinator`; Agent B `b9d4d32` covered `KekCabinetHealthCheck`; Agent C `208ce49` covered `AdminImpersonationService`). `KekProvider` and `AesGcmConnectionStringDecryptor` are synchronous — no awaits to sweep.
+15. **PF-C6** — ✅ Closed (Agent C `208ce49`). `Invalidate` removed from `ITenantStatusProbe`; XML doc rewritten to make read-only contract explicit. Test stub renamed to preserve test-side state without contaminating the contract.
+16. **PF-C7** — ✅ Closed (Agent A `c340b31`). `20260426120000_KekRotations.Designer.cs` regenerated via `dotnet ef migrations add` against a temporary Postgres container. Verified zero model drift via `VerifyNoDrift` dry run. The two intermediate Designer files (`PlatformQueuedTaskClaimedByUnprocessable`, `AddUsersPlatformRole`) hand-merged with `KekRotation` entity snapshot to repair the chronological inconsistency.
+17. **PF-C12** — ✅ Closed (Agent B `b9d4d32`). `PlatformTaskWorker.FailAsync` and `DeadLetterAsync` now redact `ex.Message` via `IErrorRedactor` before persisting. Test verifies a Bearer-token-bearing exception ends up scrubbed in the persisted column.
 
 ### Plus (already noted in final-delta) — known punchlist
-- KEK retry path inherits original Started actor (no fresh ClaimsPrincipal in `RetryAsync`)
-- `*ForCleanupActivity` step uses `ex.GetType().Name` as failure code rather than the structured codes from C's deleted classifier
-- SSE `Last-Event-ID` resumption header still unused
-- Round-1 H6 flake-watch in CI not yet verified
+
+- ✅ KEK retry path now captures fresh `ClaimsPrincipal` actor identity (Agent A `c340b31`).
+- ✅ Cleanup step failure-code richness restored (Agent C `208ce49`). New `CleanupFailureClassifier` static class re-implements C's deleted classifier; `CleanupStepActivity.RunAsync` calls it instead of using `ex.GetType().Name`. 16 new classifier tests.
+- ✅ SSE `Last-Event-ID` resumption header now honored (Agent D `139a5eb`). Tenant-scoped lookup; soft-fail on every invalid case; opening comment reflects resolved cursor.
+- ⏳ Round-1 H6 flake-watch in CI — still not verified. The must-fix run saw 1 transient failure that didn't reproduce on rerun (consistent with H6 timing-dependence). Worth a CI investigation, not a code fix.
+
+---
+
+## Final state after Wave 3
+
+| Metric | Value |
+|---|---|
+| Integration tip | `f4810fd` (Wave 3 batch B merged) |
+| Build | green (0 errors) |
+| Tests | **3267 pass / 0 fail / 3 skip** (3186 baseline + 81 from Wave 3) |
+| Round-2 must-fix | All closed (`2ce43b3`) |
+| Wave 3 should-fix-soon | All 8 closed |
+| Wave 3 hygiene | 4 of 5 closed (PF-C4 test-double consolidation deferred) |
+| Original final-delta punchlist | 3 of 4 closed (H6 flake-watch open) |
+
+**Open items** (small backlog, none security/correctness blocking):
+- PF-C4: test-double consolidation (cosmetic — ~13 duplicates of `RecordingX` test helpers)
+- H6 flake-watch: CI investigation, not a code fix
 
 ---
 
