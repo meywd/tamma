@@ -71,10 +71,23 @@ public static class KekRotationEndpoints
     /// completed cleanly). The retry re-uses the staged secondary
     /// persisted in <c>kek_rotations</c> by the failed run; it does
     /// NOT mint a fresh KEK.
+    ///
+    /// <para>R2 post-fix (retry-actor-identity): the operator's
+    /// <see cref="ClaimsPrincipal"/> is now threaded into the
+    /// coordinator so retry-emitted events
+    /// (<c>SECRETS.KEK.ROTATION.STARTED/COMPLETED/FAILED</c>) carry
+    /// the caller's <c>sub</c>/<c>email</c>/<c>platformRole</c>
+    /// claims — the failed run's original actor lives on its own
+    /// STARTED row, and the retry's actor lives on its retry STARTED
+    /// row. This keeps the audit trail accurate when a different
+    /// operator retries someone else's failed rotation.</para>
     /// </summary>
-    public static async Task<IResult> Retry(KekRotationCoordinator coordinator, HttpContext http)
+    public static async Task<IResult> Retry(
+        KekRotationCoordinator coordinator,
+        ClaimsPrincipal principal,
+        HttpContext http)
     {
-        var response = await coordinator.RetryAsync(http.RequestAborted);
+        var response = await coordinator.RetryAsync(principal, http.RequestAborted);
         if (!response.Success)
         {
             return Results.Conflict(new
