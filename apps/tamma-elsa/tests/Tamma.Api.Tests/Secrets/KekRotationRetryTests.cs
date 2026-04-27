@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -84,7 +85,7 @@ public class KekRotationRetryTests
         var provider = BuildProvider(BuildKek(seed: 1));
         var coordinator = BuildCoordinator(provider);
 
-        var response = await coordinator.RetryAsync(CancellationToken.None);
+        var response = await coordinator.RetryAsync(principal: null, CancellationToken.None);
 
         response.Success.Should().BeFalse();
         response.Reason.Should().Contain("current phase is Idle");
@@ -105,7 +106,7 @@ public class KekRotationRetryTests
         var snapshot = coordinator.GetStatus();
         snapshot.Phase.Should().Be(KekRotationPhase.Completed);
 
-        var response = await coordinator.RetryAsync(CancellationToken.None);
+        var response = await coordinator.RetryAsync(principal: null, CancellationToken.None);
 
         response.Success.Should().BeFalse();
         response.Reason.Should().Contain("current phase is Completed");
@@ -123,7 +124,7 @@ public class KekRotationRetryTests
         var provider = BuildProvider(BuildKek(seed: 1));
         var coordinator = BuildCoordinator(provider);
 
-        var response = await coordinator.RetryAsync(CancellationToken.None);
+        var response = await coordinator.RetryAsync(principal: null, CancellationToken.None);
 
         response.Success.Should().BeFalse();
         response.Reason.Should().NotBeNull();
@@ -134,7 +135,7 @@ public class KekRotationRetryTests
         // it's directly invokable; calling ExecuteAsync requires a
         // ServiceProvider, but checking the runtime type does not.
         var ctx = new DefaultHttpContext();
-        var endpointResult = await KekRotationEndpoints.Retry(coordinator, ctx);
+        var endpointResult = await KekRotationEndpoints.Retry(coordinator, new ClaimsPrincipal(), ctx);
         // Type name carries the status (Conflict / Accepted) — assert
         // via the type rather than ExecuteAsync.
         var typeName = endpointResult.GetType().Name;
@@ -199,7 +200,7 @@ public class KekRotationRetryTests
         coordinator.GetStatus().Phase.Should().Be(KekRotationPhase.Failed);
 
         var ctx = new DefaultHttpContext();
-        var endpointResult = await KekRotationEndpoints.Retry(coordinator, ctx);
+        var endpointResult = await KekRotationEndpoints.Retry(coordinator, new ClaimsPrincipal(), ctx);
         var typeName = endpointResult.GetType().Name;
         typeName.Should().Contain("Accepted");
     }

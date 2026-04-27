@@ -99,11 +99,18 @@ public class KekRotationAdvisoryLockTests
 
         // Build a coordinator with an Npgsql-backed CP factory so it
         // hits the real pg_try_advisory_lock path.
+        //
+        // PF-C3 (R2 post-fix): the coordinator now resolves an
+        // NpgsqlDataSource for the dedicated lock connection rather
+        // than borrowing EF's pooled context. Register a
+        // singleton NpgsqlDataSource alongside the DbContext factory
+        // so the new path is exercised.
         var services = new ServiceCollection();
         services.AddDbContextFactory<ControlPlaneDbContext>(opts =>
             opts.UseNpgsql(_connectionString));
         services.AddLogging();
         services.AddSingleton<IPlatformEventRepository, NoopEventRepository>();
+        services.AddSingleton(NpgsqlDataSource.Create(_connectionString));
         var sp = services.BuildServiceProvider();
 
         var primaryKey = new byte[32];
