@@ -136,6 +136,13 @@ public sealed class OutboxSmtpSender : BackgroundService
     /// queue (the next poll cycle will visit the platform queue when
     /// the tenant queue is drained). Exposed for tests so they don't
     /// race the polling timer.
+    ///
+    /// <para>Story 28-1 PR B — the tenant claim path now fans out
+    /// across active tenants via
+    /// <see cref="IEmailOutboxRepository.ClaimNextPendingFromAnyTenantAsync"/>
+    /// instead of the previous "scan a single shared CP table" path.
+    /// Once PR D moves the per-tenant outbox into per-tenant DBs the
+    /// fan-out becomes the only correct way to drain.</para>
     /// </summary>
     public async Task<bool> ProcessOnceAsync(CancellationToken ct)
     {
@@ -144,7 +151,7 @@ public sealed class OutboxSmtpSender : BackgroundService
         var transport = scope.ServiceProvider.GetRequiredService<ISmtpTransport>();
         var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
 
-        var claimed = await outbox.ClaimNextPendingAsync(DateTime.UtcNow, ct);
+        var claimed = await outbox.ClaimNextPendingFromAnyTenantAsync(DateTime.UtcNow, ct);
         if (claimed is not null)
         {
             await ProcessTenantClaimedAsync(outbox, transport, events, claimed, ct);
@@ -162,10 +169,22 @@ public sealed class OutboxSmtpSender : BackgroundService
         EmailOutboxMessage claimed,
         CancellationToken ct)
     {
+        // ClaimNextPendingFromAnyTenantAsync always returns a row whose
+        // TenantId is set — the tenant outbox is strictly tenant-scoped
+        // post Story 28-1 PR B. Defensive null-check kept so a future
+        // contract change shows up at runtime not as a silent CP hit.
+        if (claimed.TenantId is not Guid tid)
+        {
+            _logger.LogError(
+                "Tenant-outbox row {TxnId} has no TenantId — refusing to mark sent",
+                claimed.Id);
+            return;
+        }
+
         try
         {
             await transport.SendAsync(claimed, ct);
-            await outbox.MarkSentAsync(claimed.Id, ct);
+            await outbox.MarkSentAsync(tid, claimed.Id, ct);
             await EmitSentAsync(events, claimed);
 
             // Purge the row now that the event store has the permanent audit.
@@ -173,7 +192,7 @@ public sealed class OutboxSmtpSender : BackgroundService
             // delivery — EMAIL.SENT.SUCCESS holds txn id + template metadata.
             // Failed rows (MarkFailedAsync → Status=failed) are NOT deleted;
             // operators need them for inspection.
-            await outbox.DeleteAsync(claimed.Id, ct);
+            await outbox.DeleteAsync(tid, claimed.Id, ct);
 
             _logger.LogInformation("Email delivered txn={TxnId}", claimed.Id);
         }
@@ -182,7 +201,7 @@ public sealed class OutboxSmtpSender : BackgroundService
             // NEVER log recipient / subject / body / host — only the txn id.
             var attempt = claimed.Attempts + 1;
             var backoff = PickBackoff(attempt);
-            var updated = await outbox.MarkFailedAsync(claimed.Id, ex.Message, backoff, ct);
+            var updated = await outbox.MarkFailedAsync(tid, claimed.Id, ex.Message, backoff, ct);
 
             if (updated is not null && updated.Status == "failed")
             {
@@ -196,7 +215,7 @@ public sealed class OutboxSmtpSender : BackgroundService
                 // txn id + error class). The row carries recipient / subject
                 // / body which aren't needed after the terminal outcome, so
                 // delete it too.
-                await outbox.DeleteAsync(claimed.Id, ct);
+                await outbox.DeleteAsync(tid, claimed.Id, ct);
             }
             else
             {

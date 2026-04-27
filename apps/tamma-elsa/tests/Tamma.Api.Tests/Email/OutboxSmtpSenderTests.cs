@@ -24,6 +24,7 @@ namespace Tamma.Api.Tests.Email;
 [TestFixture]
 public class OutboxSmtpSenderTests
 {
+    private static readonly Guid TestTenantId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     private ServiceProvider _services = null!;
     private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
     private DbContextOptions<TenantDbContext> _tenantOptions = null!;
@@ -59,6 +60,23 @@ public class OutboxSmtpSenderTests
         services.AddSingleton(_transport.Object);
 
         _services = services.BuildServiceProvider();
+
+        // Seed an active tenant — Story 28-1 PR B: the cross-tenant
+        // drain path enumerates active tenants from CP. Without one,
+        // the sender finds nothing to drain.
+        using (var seed = new TestControlPlaneDbContext(_cpOptions))
+        {
+            seed.Tenants.Add(new Tenant
+            {
+                Id = TestTenantId,
+                Name = "test",
+                Slug = "test",
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            seed.SaveChanges();
+        }
 
         _config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -101,6 +119,7 @@ public class OutboxSmtpSenderTests
 
     private static EmailOutboxMessage NewRow(int maxAttempts = 5) => new()
     {
+        TenantId = TestTenantId,
         Template = "verification",
         ToAddress = "u@example.com",
         Subject = "Verify",
@@ -129,7 +148,7 @@ public class OutboxSmtpSenderTests
         // Row is deleted after successful delivery — audit trail lives in the
         // event store (EMAIL.SENT.SUCCESS below), so recipient/subject/body
         // don't persist in the outbox past the successful-send moment.
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull();
 
         var sent = await FreshEvents().QueryAsync(null, EmailEventTypes.Sent, null, 10);
@@ -147,7 +166,7 @@ public class OutboxSmtpSenderTests
 
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull("the sent row must be purged so the recipient " +
                               "address and body don't linger beyond delivery");
     }
@@ -170,7 +189,7 @@ public class OutboxSmtpSenderTests
         var before = DateTime.UtcNow;
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored!.Status.Should().Be("pending", "requeued — not yet at max attempts");
         stored.Attempts.Should().Be(1);
         stored.LastError.Should().Contain("connect refused");
@@ -193,7 +212,7 @@ public class OutboxSmtpSenderTests
 
         // Attempt 1 — transient, requeued with backoff into the future.
         await _sender.ProcessOnceAsync(CancellationToken.None);
-        var afterFirst = await FreshOutbox().GetByIdAsync(enq.Id);
+        var afterFirst = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         afterFirst!.Status.Should().Be("pending");
 
         // Fast-forward NextAttemptAt so the next ProcessOnceAsync picks it up.
@@ -210,7 +229,7 @@ public class OutboxSmtpSenderTests
         // would mean recipient/subject/body lingering in the DB indefinitely.
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull("terminal failure purges the row — event store holds the audit");
 
         var failed = await FreshEvents().QueryAsync(null, EmailEventTypes.Failed, null, 10);

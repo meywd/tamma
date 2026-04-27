@@ -114,13 +114,15 @@ public class AuthRegisterLogAssertionTests
             m => m.Contains("user-under-test@example.com"),
             "recipient address must never appear in any log line");
 
-        // SendAsync was called with a message tagged with the template name,
-        // the user id, and the tenant id — verify the propagation contract.
+        // SendAsync was called with a message tagged with the template
+        // name and the user id. Story 28-1 PR B — TenantId is null on
+        // verification emails (platform-scope: no tenant DB exists yet
+        // at registration). The user id is preserved for correlation.
         emailSvc.Verify(s => s.SendAsync(
             It.Is<EmailMessage>(m =>
                 m.Template == "verification" &&
                 m.UserId == createdUserId &&
-                m.TenantId == createdTenantId),
+                m.TenantId == null),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 }

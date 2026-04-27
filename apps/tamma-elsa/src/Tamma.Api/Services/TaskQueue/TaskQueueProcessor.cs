@@ -122,9 +122,14 @@ public sealed class TaskQueueProcessor : BackgroundService
         // new work, so a worker that died mid-task does not leave the row
         // stuck forever. Exceptions here are logged but do not abort the
         // poll; reaping is best-effort.
+        //
+        // Story 28-1 PR B — the reaper now fans out across active tenants
+        // via ReapStaleProcessingAcrossAllTenantsAsync. Once PR D moves
+        // the per-tenant queue into per-tenant DBs the fan-out becomes
+        // the only correct way to reap.
         try
         {
-            var reaped = await repo.ReapStaleProcessingAsync(
+            var reaped = await repo.ReapStaleProcessingAcrossAllTenantsAsync(
                 _options.VisibilityTimeout, _options.MaxRetries, ct);
             if (reaped > 0)
             {
@@ -139,7 +144,9 @@ public sealed class TaskQueueProcessor : BackgroundService
             _logger.LogWarning(ex, "TaskQueueProcessor reaper pass failed");
         }
 
-        var pending = await repo.ListPendingAsync(tenantId: null, _options.BatchSize, ct);
+        // Story 28-1 PR B — fan out across active tenants. The per-tenant
+        // batch is bounded so a hot tenant can't starve the rest.
+        var pending = await repo.ListPendingFromAnyTenantAsync(_options.BatchSize, ct);
         if (pending.Count == 0) return 0;
 
         var processed = 0;
@@ -147,7 +154,19 @@ public sealed class TaskQueueProcessor : BackgroundService
         {
             if (ct.IsCancellationRequested) break;
 
-            var claimed = await repo.MarkProcessingAsync(task.Id, ct);
+            // Every tenant-scope task has a non-null TenantId (enforced
+            // at enqueue time by EmailOutboxRepository / DbTaskQueue).
+            // Defensive null-check kept so a future contract change shows
+            // up at runtime rather than as a silent CP hit.
+            if (task.TenantId is not Guid tid)
+            {
+                _logger.LogError(
+                    "Tenant-queue task {TaskId} has no TenantId — skipping",
+                    task.Id);
+                continue;
+            }
+
+            var claimed = await repo.MarkProcessingAsync(tid, task.Id, ct);
             if (claimed is null)
             {
                 // Someone else claimed it between list + mark; move on.
@@ -167,6 +186,7 @@ public sealed class TaskQueueProcessor : BackgroundService
             if (handler is null)
             {
                 await repo.MarkFailedAsync(
+                    tid,
                     claimed.Id,
                     $"no handler registered for task type '{claimed.Type}'",
                     ct);
@@ -185,7 +205,7 @@ public sealed class TaskQueueProcessor : BackgroundService
             try
             {
                 await handler.HandleAsync(claimed, ct);
-                await repo.MarkCompletedAsync(claimed.Id, ct);
+                await repo.MarkCompletedAsync(tid, claimed.Id, ct);
                 if (bus is not null)
                 {
                     await bus.PublishAsync(new EngineLifecycleEvent(
@@ -197,7 +217,7 @@ public sealed class TaskQueueProcessor : BackgroundService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await HandleFailureAsync(repo, claimed, ex, ct);
+                await HandleFailureAsync(repo, tid, claimed, ex, ct);
                 if (bus is not null)
                 {
                     await bus.PublishAsync(new EngineLifecycleEvent(
@@ -216,13 +236,14 @@ public sealed class TaskQueueProcessor : BackgroundService
 
     private async Task HandleFailureAsync(
         IQueuedTaskRepository repo,
+        Guid tenantId,
         QueuedTask claimed,
         Exception ex,
         CancellationToken ct)
     {
         // RetryCount is bumped on every failure — even the terminal one — so the
         // persisted row tells ops exactly how many attempts the task consumed.
-        var requeued = await repo.IncrementRetryAndRequeueAsync(claimed.Id, ex.Message, ct);
+        var requeued = await repo.IncrementRetryAndRequeueAsync(tenantId, claimed.Id, ex.Message, ct);
         var retryCount = requeued?.RetryCount ?? claimed.RetryCount + 1;
 
         if (retryCount >= _options.MaxRetries)
@@ -230,7 +251,7 @@ public sealed class TaskQueueProcessor : BackgroundService
             _logger.LogError(ex,
                 "Task {TaskId} ({Type}) failed after {Attempts} attempts — marking failed",
                 claimed.Id, claimed.Type, retryCount);
-            await repo.MarkFailedAsync(claimed.Id, ex.Message, ct);
+            await repo.MarkFailedAsync(tenantId, claimed.Id, ex.Message, ct);
             return;
         }
 

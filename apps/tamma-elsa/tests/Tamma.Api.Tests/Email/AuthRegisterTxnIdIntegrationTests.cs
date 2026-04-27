@@ -16,12 +16,17 @@ namespace Tamma.Api.Tests.Email;
 /// email pipeline. Registers a user against the real HTTP + Postgres stack
 /// configured for SMTP provider mode (outbox path) and asserts:
 /// <list type="bullet">
-///   <item><description>A <c>EMAIL.QUEUED.SUCCESS</c> row appears in
-///     <c>domain_events</c> with a <c>txn_id</c> tag.</description></item>
-///   <item><description>An <c>email_outbox</c> row exists whose <c>Id</c>
-///     equals that <c>txn_id</c> — proving end-to-end correlation through
-///     the pipeline.</description></item>
+///   <item><description>A <c>EMAIL.QUEUED.SUCCESS</c> row appears with a
+///     <c>txn_id</c> tag.</description></item>
+///   <item><description>A <c>platform_email_outbox</c> row exists whose
+///     <c>Id</c> equals that <c>txn_id</c> — proving end-to-end correlation
+///     through the pipeline.</description></item>
 /// </list>
+///
+/// <para>Story 28-1 PR B — verification email is now platform-scope
+/// (no tenant DB exists yet at registration). The row lands in
+/// <c>platform_email_outbox</c> not the per-tenant <c>email_outbox</c>;
+/// the QUEUED event uses the same txn-id as the platform-outbox row.</para>
 ///
 /// <para>The log-line-level assertion ("Register logs the txn id") lives in
 /// <see cref="AuthRegisterLogAssertionTests"/> (unit scope). Serilog's hosted
@@ -91,11 +96,15 @@ public class AuthRegisterTxnIdIntegrationTests
         txnIdStr.Should().NotBeNullOrEmpty();
         tags["template"].Should().Be("verification");
 
-        // The txn_id on the event MUST equal the outbox row id — that is the
-        // end-to-end correlation contract the pipeline promises.
-        var outboxRows = await db.EmailOutbox.ToListAsync();
+        // Story 28-1 PR B — verification email is platform-scope.
+        // The txn_id on the event MUST equal the platform-outbox row id.
+        var outboxRows = await db.PlatformEmailOutbox.ToListAsync();
         outboxRows.Should().ContainSingle();
         outboxRows[0].Id.ToString().Should().Be(txnIdStr);
+
+        // No tenant-scope email row should exist — verification email is
+        // strictly platform-scope.
+        (await db.EmailOutbox.ToListAsync()).Should().BeEmpty();
 
         // Event payload must NOT leak recipient / subject / body — CodeQL
         // would flag those. Tags and data are checked separately.
@@ -120,7 +129,9 @@ public class AuthRegisterTxnIdIntegrationTests
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var rows = await db.EmailOutbox.ToListAsync();
+        // Story 28-1 PR B — verification email is platform-scope; row
+        // lands in platform_email_outbox.
+        var rows = await db.PlatformEmailOutbox.ToListAsync();
         rows.Should().ContainSingle();
         rows[0].Status.Should().Be("pending");
         rows[0].Template.Should().Be("verification");
@@ -134,6 +145,6 @@ public class AuthRegisterTxnIdIntegrationTests
 
         var tags = JsonSerializer.Deserialize<Dictionary<string, string?>>(queued[0].Tags)!;
         tags["txn_id"].Should().Be(rows[0].Id.ToString(),
-            "outbox row id IS the transaction id emitted in the QUEUED event");
+            "platform-outbox row id IS the transaction id emitted in the QUEUED event");
     }
 }

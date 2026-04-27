@@ -30,6 +30,11 @@ public static class EmailServiceCollectionExtensions
     {
         // Shared repository — Scoped because ControlPlaneDbContext is Scoped.
         services.TryAddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
+        // Story 28-1 PR B — SmtpEmailService routes platform-scope email
+        // (verification, password reset, welcome) through the platform
+        // repo. TryAdd so callers that already register a custom impl
+        // win.
+        services.TryAddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
 
         // The production SMTP transport. Can be replaced in tests by
         // substituting a test-double ISmtpTransport before AddEmailServices
@@ -126,6 +131,7 @@ internal sealed class ScopedSmtpEmailService : IEmailService
         using var scope = _rootProvider.CreateScope();
         var inner = new SmtpEmailService(
             scope.ServiceProvider.GetRequiredService<IEmailOutboxRepository>(),
+            scope.ServiceProvider.GetRequiredService<IPlatformEmailOutboxRepository>(),
             scope.ServiceProvider.GetRequiredService<IEventRepository>(),
             scope.ServiceProvider.GetRequiredService<Tamma.Data.ITenantContext>(),
             scope.ServiceProvider.GetRequiredService<IConfiguration>(),
