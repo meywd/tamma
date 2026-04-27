@@ -24,15 +24,15 @@
   "license": "SEE LICENSE IN ../../LICENSE",
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
-    "@tailwindcss/vite": "^4.2.1",
+    "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.2.1",
-    "tsx": "^4.19.2",
+    "tailwindcss": "^4.2.4",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
-    "wrangler": "^4.79.0"
+    "wrangler": "^4.85.0"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -41,11 +41,11 @@
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",
-    "mermaid": "^11.13.0",
+    "mermaid": "^11.14.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
-    "react-router": "^7.9.5",
+    "react-router": "^7.14.2",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.0"
   }

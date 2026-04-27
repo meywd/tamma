@@ -17,13 +17,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tamma/shared": "workspace:*",
-    "@tamma/observability": "workspace:*",
-    "@tamma/cost-monitor": "workspace:*",
     "@anthropic-ai/sdk": "^0.68.0",
-    "openai": "^4.77.3",
-    "@opencode-ai/sdk": "^1.2.15",
-    "@modelcontextprotocol/sdk": "^1.27.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opencode-ai/sdk": "^1.14.26",
+    "@tamma/cost-monitor": "workspace:*",
+    "@tamma/observability": "workspace:*",
+    "@tamma/shared": "workspace:*",
+    "openai": "^4.77.3"
   },
   "devDependencies": {
     "typescript": "~5.7.2"
