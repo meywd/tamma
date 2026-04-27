@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Tamma.Api.Logging;
+using Tamma.Api.Services.TenantStatus;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -195,6 +196,31 @@ public class ApiKeyAuthHandler(
                 return AuthenticateResult.Fail("Invalid API key");
             }
 
+            // Story 28-8 H7 — consult the per-pod status cache before
+            // hitting the resolver. A cached non-active value short-
+            // circuits with the proper Doc 04 §8.1 status code (503 /
+            // 424 / 410 / 404) so callers get an actionable signal
+            // instead of a generic 401. The cache populates on the
+            // resolver-miss path below.
+            var statusCache = scope.ServiceProvider.GetService<ITenantStatusCache>();
+            if (statusCache is not null
+                && statusCache.TryGet(tenantIdFromPrefix, out var cachedStatus)
+                && !TenantStatusEvaluator.IsActive(cachedStatus))
+            {
+                Logger.LogWarning(
+                    "Auth gate: tenant-scoped key blocked by cached status keyId={KeyId} tenantId={TenantId} status={Status}",
+                    apiKey.Id,
+                    tenantIdFromPrefix,
+                    LogSanitizer.Clean(cachedStatus));
+                await TenantStatusEvaluator
+                    .WriteNonActiveResponseAsync(Context, tenantIdFromPrefix, cachedStatus, Context.RequestAborted)
+                    .ConfigureAwait(false);
+                // Response already written — fail the auth result so the
+                // pipeline short-circuits. Challenge handler is a no-op
+                // once HasStarted is true.
+                return AuthenticateResult.Fail("Tenant not in active state");
+            }
+
             var resolver = scope.ServiceProvider.GetService<ITenantConnectionResolver>();
             if (resolver is not null)
             {
@@ -202,32 +228,44 @@ public class ApiKeyAuthHandler(
                 {
                     // We don't need the data source value here — the call
                     // primes the LRU pool for downstream EF queries and
-                    // also surfaces TenantNotFound / NotProvisioned as 401
-                    // (no oracle: same shape as bad hash).
+                    // also surfaces TenantNotFound / NotProvisioned (caught
+                    // below + mapped to a Doc 04 §8.1 status code).
                     _ = await resolver.GetDataSourceAsync(tenantIdFromPrefix, Context.RequestAborted);
+                    // Active tenant — refresh the cache so siblings on
+                    // this pod skip the resolver round-trip on the next
+                    // request.
+                    statusCache?.Set(tenantIdFromPrefix, TenantStatusEvaluator.StatusActive);
                 }
                 catch (TenantNotFoundException)
                 {
                     Logger.LogWarning(
-                        "Auth failure: tenant-scoped key references unknown tenant keyId={KeyId} tenantId={TenantId}",
+                        "Auth gate: tenant-scoped key references unknown tenant keyId={KeyId} tenantId={TenantId}",
                         apiKey.Id,
                         tenantIdFromPrefix);
-                    return AuthenticateResult.Fail("Invalid API key");
+                    statusCache?.Set(tenantIdFromPrefix, "not_found");
+                    await TenantStatusEvaluator
+                        .WriteNonActiveResponseAsync(Context, tenantIdFromPrefix, status: "not_found", Context.RequestAborted)
+                        .ConfigureAwait(false);
+                    return AuthenticateResult.Fail("Tenant not found");
                 }
                 catch (TenantNotProvisionedException tnp)
                 {
                     Logger.LogWarning(
-                        "Auth failure: tenant-scoped key references suspended tenant keyId={KeyId} tenantId={TenantId} status={Status}",
+                        "Auth gate: tenant-scoped key references non-active tenant keyId={KeyId} tenantId={TenantId} status={Status}",
                         apiKey.Id,
                         tenantIdFromPrefix,
                         LogSanitizer.Clean(tnp.Status));
-                    return AuthenticateResult.Fail("Invalid API key");
+                    statusCache?.Set(tenantIdFromPrefix, tnp.Status);
+                    await TenantStatusEvaluator
+                        .WriteNonActiveResponseAsync(Context, tenantIdFromPrefix, tnp.Status, Context.RequestAborted)
+                        .ConfigureAwait(false);
+                    return AuthenticateResult.Fail("Tenant not in active state");
                 }
                 catch (TenantConnectionStringMissingException)
                 {
                     // Provisioning bug; treat as 503-equivalent for the
-                    // caller (still 401 to avoid leaking infra state) and
-                    // log loudly so ops sees it.
+                    // caller (no Doc 04 status mapping — closest match is
+                    // 503 unavailable) and log loudly so ops sees it.
                     Logger.LogError(
                         "Auth failure: tenant has no encrypted connection string keyId={KeyId} tenantId={TenantId}",
                         apiKey.Id,

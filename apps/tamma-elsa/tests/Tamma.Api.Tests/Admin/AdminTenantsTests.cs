@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -5,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Endpoints.Admin;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -30,10 +33,23 @@ namespace Tamma.Api.Tests.Admin;
 public class AdminTenantsTests
 {
     private ControlPlaneDbContext _db = null!;
-    private RecordingEventPublisher _publisher = null!;
+    private RecordingPlatformEventPublisher _publisher = null!;
     // Story 28-8 — admin endpoints take an ITenantStatusCache to
     // invalidate the cached status on flip. Tests use a no-op stub.
     private RecordingStatusCache _statusCache = null!;
+    // Round-2 review M16 — admin endpoints take a TimeProvider so the
+    // tests can pin / advance the clock. Default to TimeProvider.System
+    // for tests that don't care about the wall-clock value; the
+    // dedicated TimeProvider tests below use a fake provider.
+    private TimeProvider _timeProvider = null!;
+    // H12 #2 — admin endpoints also evict the connection-resolver pool
+    // on Status flip. Tests use a recording resolver to assert the
+    // EvictAsync call.
+    private RecordingTenantConnectionResolver _connectionResolver = null!;
+    // R2 follow-up — admin endpoints publish a NOTIFY for cluster-wide
+    // invalidation. Tests use a recording bus to assert the publish
+    // call wires through alongside the local invalidation.
+    private RecordingInvalidationBus _invalidationBus = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -45,28 +61,39 @@ public class AdminTenantsTests
             .Options;
 
         _db = new ControlPlaneDbContext(options);
-        _publisher = new RecordingEventPublisher();
+        _publisher = new RecordingPlatformEventPublisher();
         _statusCache = new RecordingStatusCache();
+        _timeProvider = TimeProvider.System;
+        _connectionResolver = new RecordingTenantConnectionResolver();
+        _invalidationBus = new RecordingInvalidationBus();
 
         await PlansSeeder.SeedAsync(_db);
     }
 
-    /// <summary>
-    /// Test double for the Story 28-8 status cache. Records every
-    /// invalidate call so tests can assert the admin endpoints flush
-    /// the cache after mutating <c>tenants.Status</c>.
-    /// </summary>
-    private sealed class RecordingStatusCache : Tamma.Api.Services.TenantStatus.ITenantStatusCache
-    {
-        public List<Guid> Invalidations { get; } = new();
-        public bool TryGet(Guid tenantId, out string? status)
-        { status = null; return false; }
-        public void Set(Guid tenantId, string? status) { }
-        public void Invalidate(Guid tenantId) => Invalidations.Add(tenantId);
-    }
-
     [TearDown]
     public void TearDown() => _db.Dispose();
+
+    /// <summary>
+    /// Story 28-R2 / Finding M2 — actor-bearing principal for handler tests.
+    /// Mints a <see cref="ClaimsPrincipal"/> with <c>sub</c>, <c>email</c>,
+    /// and <c>platformRole</c> claims so <see cref="AdminTenantsEndpoints.BuildAdminEvent"/>
+    /// has something to project into the audit-event tags + data.
+    /// </summary>
+    internal static ClaimsPrincipal AdminPrincipal(
+        Guid? userId = null,
+        string email = "ops@tamma.dev",
+        string platformRole = "platform_admin")
+    {
+        var id = userId ?? Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, id.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, email),
+            new Claim("platformRole", platformRole),
+        }, authenticationType: "Test");
+        return new ClaimsPrincipal(identity);
+    }
 
     // ── Fixture helpers ──
 
@@ -350,7 +377,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(
             "Retryable", status: "failed", failureReason: "db-create-timeout");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("pending_verification");
@@ -366,6 +393,16 @@ public class AdminTenantsTests
         // Platform event emitted
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.PROVISIONING_REQUESTED" && e.TenantId == tenantId);
+
+        // H7 + H12 #2 — status cache invalidated AND resolver pool evicted.
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId,
+            "the resolver's data-source pool must be torn down so the next " +
+            "request rebuilds against the post-flip CP row");
+        // R2 follow-up — cluster-wide NOTIFY also fans out so sibling
+        // pods invalidate their copies within ms.
+        _invalidationBus.Publishes.Should().Contain(tenantId,
+            "admin actions must publish a NOTIFY for cluster-wide invalidation");
     }
 
     [Test]
@@ -373,7 +410,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
         _publisher.Events.Should().BeEmpty();
@@ -382,7 +419,7 @@ public class AdminTenantsTests
     [Test]
     public async Task RetryTenant_Returns404_WhenTenantMissing()
     {
-        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.RetryTenant(Guid.NewGuid(), _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
     }
@@ -394,7 +431,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
@@ -408,6 +445,10 @@ public class AdminTenantsTests
 
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.DELETE.REQUESTED" && e.TenantId == tenantId);
+
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId);
+        _invalidationBus.Publishes.Should().Contain(tenantId);
     }
 
     [Test]
@@ -415,7 +456,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "failed");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -425,7 +466,7 @@ public class AdminTenantsTests
     {
         var tenantId = await SeedTenantAsync(status: "deleting");
 
-        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.DeleteTenant(tenantId, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -438,7 +479,7 @@ public class AdminTenantsTests
         var tenantId = await SeedTenantAsync(status: "failed");
         var http = new DefaultHttpContext();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -450,7 +491,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = Guid.NewGuid().ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -462,13 +503,17 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
         ok.Value!.Status.Should().Be("deleting");
 
         _publisher.Events.Should().ContainSingle(
             e => e.Type == "TENANT.DELETE.REQUESTED" && e.TenantId == tenantId);
+
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId);
+        _invalidationBus.Publishes.Should().Contain(tenantId);
     }
 
     [Test]
@@ -478,7 +523,7 @@ public class AdminTenantsTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Admin-Confirm"] = tenantId.ToString();
 
-        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache);
+        var result = await AdminTenantsEndpoints.ForceDeleteTenant(tenantId, http, _db, _publisher, _statusCache, _connectionResolver, _invalidationBus, _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -494,7 +539,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider, AdminPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await _db.Tenants.IgnoreQueryFilters()
@@ -514,7 +560,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.NewGuid()),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -528,7 +575,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.Empty),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -542,7 +590,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher);
+            _publisher,
+            _timeProvider, AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -568,20 +617,4 @@ public class AdminTenantsTests
             $"Result type {result.GetType().FullName} does not expose a status code.");
     }
 
-    // ── Test doubles ──
-
-    private sealed class RecordingEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt,
-            CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
 }

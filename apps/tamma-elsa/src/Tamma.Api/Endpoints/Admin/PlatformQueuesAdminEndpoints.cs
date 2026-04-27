@@ -32,6 +32,10 @@ public static class PlatformQueuesAdminEndpoints
             .Select(g => new { Status = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Status, x => x.Count, ct);
 
+        // Round-2 M8 — surface ClaimedBy alongside the existing fields
+        // so operators can identify the worker that last touched each
+        // pending row. UnprocessableAt (Round-2 H8) is also surfaced so
+        // a queue full of "no-handler" rows is visible at a glance.
         var oldestPending = await db.PlatformQueuedTasks
             .AsNoTracking()
             .Where(t => t.Status == "pending")
@@ -44,6 +48,26 @@ public static class PlatformQueuesAdminEndpoints
                 t.RetryCount,
                 t.CreatedAt,
                 t.TenantId,
+                t.ClaimedBy,
+                t.UnprocessableAt,
+            })
+            .ToListAsync(ct);
+
+        var deadLetterRecent = await db.PlatformQueuedTasks
+            .AsNoTracking()
+            .Where(t => t.Status == "dead_letter")
+            .OrderByDescending(t => t.UpdatedAt)
+            .Take(10)
+            .Select(t => new
+            {
+                t.Id,
+                t.Type,
+                t.RetryCount,
+                t.CreatedAt,
+                t.UpdatedAt,
+                t.TenantId,
+                t.ClaimedBy,
+                t.Error,
             })
             .ToListAsync(ct);
 
@@ -106,6 +130,7 @@ public static class PlatformQueuesAdminEndpoints
             {
                 statusCounts = taskStatusCounts,
                 oldestPending,
+                deadLetterRecent,
                 registeredHandlers,
                 unhandledPendingTypes,
             },

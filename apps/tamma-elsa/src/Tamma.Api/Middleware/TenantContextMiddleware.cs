@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Security.Claims;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.TenantStatus;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
@@ -104,6 +105,8 @@ public class TenantContextMiddleware(RequestDelegate next)
         ITenantRepository tenantRepo,
         IUserRepository userRepo,
         ITenantConnectionResolver connectionResolver,
+        ITenantStatusCache statusCache,
+        ControlPlaneDbContext controlPlane,
         ILogger<TenantContextMiddleware> logger)
     {
         var path = context.Request.Path.Value ?? string.Empty;
@@ -134,6 +137,70 @@ public class TenantContextMiddleware(RequestDelegate next)
 
         var tenantId = resolved.Value;
 
+        // Story 28-8 H7 — short-TTL status cache. On hit, gate the
+        // request with the proper non-active HTTP code WITHOUT touching
+        // CP. On miss, fall through to a single CP read that BOTH
+        // populates the cache AND short-circuits non-active states.
+        // Active / null statuses fall through to the resolver warm-up.
+        if (statusCache.TryGet(tenantId, out var cachedStatus))
+        {
+            if (!TenantStatusEvaluator.IsActive(cachedStatus))
+            {
+                logger.LogWarning(
+                    "tenant.middleware.status_gate_cached tenantId={TenantId} status={Status} source={Source} path={Path}",
+                    tenantId, cachedStatus, source, path);
+                await TenantStatusEvaluator
+                    .WriteNonActiveResponseAsync(context, tenantId, cachedStatus, context.RequestAborted)
+                    .ConfigureAwait(false);
+                return;
+            }
+        }
+        else
+        {
+            // Cold path: read tenants.Status (shadow column) once + cache
+            // the result. EF.Property keeps us free of an entity
+            // contract dependency for the shadow column.
+            var row = await controlPlane.Tenants
+                .AsNoTracking()
+                .IgnoreQueryFilters()
+                .Where(t => t.Id == tenantId)
+                .Select(t => new { t.DeletedAt, Status = EF.Property<string?>(t, "Status") })
+                .FirstOrDefaultAsync(context.RequestAborted)
+                .ConfigureAwait(false);
+
+            if (row is null)
+            {
+                // Stale JWT pointing at a vanished tenant. Cache the
+                // not-found marker so a flood of probes from the same
+                // stale token doesn't hammer CP.
+                statusCache.Set(tenantId, "not_found");
+                logger.LogWarning(
+                    "tenant.middleware.unknown_tenant tenantId={TenantId} source={Source} path={Path}",
+                    tenantId, source, path);
+                await TenantStatusEvaluator
+                    .WriteNonActiveResponseAsync(context, tenantId, status: "not_found", context.RequestAborted)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            // Soft-deleted rows behave as "deleted" regardless of Status.
+            var effectiveStatus = row.DeletedAt is not null
+                ? TenantStatusEvaluator.StatusDeleted
+                : row.Status;
+            statusCache.Set(tenantId, effectiveStatus);
+
+            if (!TenantStatusEvaluator.IsActive(effectiveStatus))
+            {
+                logger.LogWarning(
+                    "tenant.middleware.status_gate tenantId={TenantId} status={Status} source={Source} path={Path}",
+                    tenantId, effectiveStatus, source, path);
+                await TenantStatusEvaluator
+                    .WriteNonActiveResponseAsync(context, tenantId, effectiveStatus, context.RequestAborted)
+                    .ConfigureAwait(false);
+                return;
+            }
+        }
+
         // Pre-warm the per-tenant Npgsql pool. Resolver throws fast for
         // unknown / deleted / un-provisioned tenants — we translate those
         // into HTTP responses BEFORE binding the request scope so handlers
@@ -147,28 +214,32 @@ public class TenantContextMiddleware(RequestDelegate next)
                 .GetDataSourceAsync(tenantId, context.RequestAborted)
                 .ConfigureAwait(false);
         }
-        catch (TenantNotFoundException ex)
+        catch (TenantNotFoundException)
         {
+            // Race: the row vanished between the status read above and
+            // the resolver lookup. Invalidate the cache, write the same
+            // shape as the not-found path, and bail.
+            statusCache.Invalidate(tenantId);
             logger.LogWarning(
-                "tenant.middleware.unknown_tenant tenantId={TenantId} source={Source} path={Path}",
+                "tenant.middleware.unknown_tenant_race tenantId={TenantId} source={Source} path={Path}",
                 tenantId, source, path);
-            await WriteJsonStatusAsync(
-                context,
-                StatusCodes.Status401Unauthorized,
-                code: "tenant_not_found",
-                message: ex.Message).ConfigureAwait(false);
+            await TenantStatusEvaluator
+                .WriteNonActiveResponseAsync(context, tenantId, status: "not_found", context.RequestAborted)
+                .ConfigureAwait(false);
             return;
         }
         catch (TenantNotProvisionedException ex)
         {
+            // Race: status flipped between our cache read and the resolver
+            // lookup. Mirror the cache to the new value + return the
+            // proper non-active response.
+            statusCache.Set(tenantId, ex.Status);
             logger.LogWarning(
                 "tenant.middleware.tenant_not_provisioned tenantId={TenantId} status={Status} source={Source} path={Path}",
                 tenantId, ex.Status, source, path);
-            await WriteJsonStatusAsync(
-                context,
-                StatusCodes.Status401Unauthorized,
-                code: "tenant_not_provisioned",
-                message: ex.Message).ConfigureAwait(false);
+            await TenantStatusEvaluator
+                .WriteNonActiveResponseAsync(context, tenantId, ex.Status, context.RequestAborted)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -254,32 +325,4 @@ public class TenantContextMiddleware(RequestDelegate next)
         return (null, "none");
     }
 
-    private static async Task WriteJsonStatusAsync(
-        HttpContext context,
-        int statusCode,
-        string code,
-        string message)
-    {
-        if (context.Response.HasStarted)
-        {
-            // Can't replace headers — bail. Caller already logged.
-            return;
-        }
-
-        context.Response.Clear();
-        context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "application/json; charset=utf-8";
-
-        // Matches the error-shape used by the auth handler (single
-        // `error.code` + `error.message`). Serialised via System.Text.Json
-        // so any odd characters in the message survive the round-trip.
-        var payload = new
-        {
-            error = new { code, message },
-        };
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
-        await context.Response.Body
-            .WriteAsync(bytes, 0, bytes.Length, context.RequestAborted)
-            .ConfigureAwait(false);
-    }
 }

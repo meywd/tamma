@@ -59,6 +59,9 @@ public class AesGcmConnectionStringDecryptorTests
     [Test]
     public void Decrypt_Falls_Back_To_Secondary_When_Primary_Mismatches()
     {
+        // R2-H13 update: when kekVersion is null (legacy row), the
+        // adapter still walks primary then secondary. Test confirms
+        // that fallback path.
         var oldPrimary = BuildKek(seed: 1);
         var newPrimary = BuildKek(seed: 50);
 
@@ -71,9 +74,76 @@ public class AesGcmConnectionStringDecryptorTests
             NullLogger<KekProvider>.Instance);
         var sut = CreateSut(provider);
 
-        var result = sut.Decrypt(envelope, kekVersion: 1);
+        // kekVersion=null exercises the legacy heuristic: try primary,
+        // fall back to secondary.
+        var result = sut.Decrypt(envelope, kekVersion: null);
 
-        result.Should().Be(Plaintext, "fallback to secondary covers the rotation overlap");
+        result.Should().Be(Plaintext, "fallback to secondary covers the rotation overlap (legacy heuristic)");
+    }
+
+    [Test]
+    public void Decrypt_With_Version_Hint_Uses_Secondary_Slot_Directly()
+    {
+        // R2-H13: when the row carries a kekVersion that matches the
+        // SECONDARY slot's version (i.e. the row was written under the
+        // previous primary, which is now the secondary), the adapter
+        // uses GetByVersion() to look up the secondary directly — no
+        // primary-then-secondary heuristic needed.
+        var oldPrimary = BuildKek(seed: 1);
+        var newPrimary = BuildKek(seed: 50);
+
+        var envelope = AesGcmConnectionStringDecryptor.EncryptWithKey(Plaintext, oldPrimary);
+        var dict = new Dictionary<string, string?>
+        {
+            [KekProvider.PrimaryConfigKey] = Convert.ToBase64String(newPrimary),
+            [KekProvider.SecondaryConfigKey] = Convert.ToBase64String(oldPrimary),
+            [KekProvider.ActiveVersionConfigKey] = "2",
+        };
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+        var provider = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+        var sut = CreateSut(provider);
+
+        // The OLD primary version is 1 (active=2, secondary=active-1=1).
+        // GetByVersion(1) should return the secondary slot.
+        var result = sut.Decrypt(envelope, kekVersion: 1);
+        result.Should().Be(Plaintext);
+    }
+
+    [Test]
+    public void Decrypt_With_Version_Hint_Uses_Retired_Slot_After_Two_Rotations()
+    {
+        // R2-H13: a row two versions back must remain decryptable via
+        // the retired-keys ring after a rotation completes. Simulate by
+        // staging + promoting twice and confirming a row still tagged
+        // with the original version decrypts via the retired ring.
+        var v1Key = BuildKek(seed: 1);
+        var v2Key = BuildKek(seed: 50);
+        var v3Key = BuildKek(seed: 100);
+
+        var envelope = AesGcmConnectionStringDecryptor.EncryptWithKey(Plaintext, v1Key);
+        var dict = new Dictionary<string, string?>
+        {
+            [KekProvider.PrimaryConfigKey] = Convert.ToBase64String(v1Key),
+            [KekProvider.ActiveVersionConfigKey] = "1",
+            [KekProvider.RetainedHistorySizeConfigKey] = "5",
+        };
+        var cfg = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
+        var provider = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
+
+        // First rotation: v1 → v2. v1 moves into retired ring.
+        provider.StageSecondary(v2Key);
+        provider.PromoteSecondaryToPrimary(2);
+
+        // Second rotation: v2 → v3. v2 moves into retired ring.
+        provider.StageSecondary(v3Key);
+        provider.PromoteSecondaryToPrimary(3);
+
+        var sut = CreateSut(provider);
+
+        // Row was encrypted under v1; cabinet still holds v1 in the
+        // retired ring.
+        var result = sut.Decrypt(envelope, kekVersion: 1);
+        result.Should().Be(Plaintext, "retired-keys ring keeps v1 decryptable after two rotations");
     }
 
     [Test]
@@ -97,16 +167,40 @@ public class AesGcmConnectionStringDecryptorTests
     [Test]
     public void Decrypt_Without_Primary_Throws_Clear_Error()
     {
+        // R2-H13 update: with no primary configured and kekVersion=null
+        // (legacy path), the adapter throws InvalidOperationException
+        // with a clear message about the missing primary KEK.
         var provider = new KekProvider(
             BuildConfig(primary: null, secondary: null),
             NullLogger<KekProvider>.Instance);
         var sut = CreateSut(provider);
         var envelope = new byte[32];
 
-        Action act = () => sut.Decrypt(envelope, kekVersion: 1);
+        Action act = () => sut.Decrypt(envelope, kekVersion: null);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*No primary KEK*");
+    }
+
+    [Test]
+    public void Decrypt_With_Unknown_Version_Throws_Cryptographic_Error()
+    {
+        // R2-H13: when the caller supplies a kekVersion that's not in
+        // the cabinet (active / secondary / retired-ring), the adapter
+        // throws a CryptographicException with a clear message about
+        // the missing slot — it does NOT fall back to the legacy
+        // primary-then-secondary heuristic.
+        var primary = BuildKek(seed: 1);
+        var envelope = AesGcmConnectionStringDecryptor.EncryptWithKey(Plaintext, primary);
+        var provider = new KekProvider(
+            BuildConfig(primary, secondary: null),
+            NullLogger<KekProvider>.Instance);
+        var sut = CreateSut(provider);
+
+        Action act = () => sut.Decrypt(envelope, kekVersion: 99);
+
+        act.Should().Throw<CryptographicException>()
+            .WithMessage("*KEK version 99*not present*");
     }
 
     [Test]
@@ -166,11 +260,11 @@ public class AesGcmConnectionStringDecryptorTests
     }
 
     [Test]
-    public void Decrypt_Ignores_KekVersion_Hint()
+    public void Decrypt_Null_KekVersion_Uses_Legacy_Heuristic()
     {
-        // The version hint is informational — the adapter still tries
-        // primary first regardless. This test confirms a stale hint
-        // does not prevent a successful decrypt.
+        // R2-H13: kekVersion=null exercises the legacy primary-then-
+        // secondary heuristic. Used for rows that pre-date the
+        // KekVersion column.
         var primary = BuildKek(seed: 1);
         var envelope = AesGcmConnectionStringDecryptor.EncryptWithKey(Plaintext, primary);
         var provider = new KekProvider(
@@ -179,6 +273,5 @@ public class AesGcmConnectionStringDecryptorTests
         var sut = CreateSut(provider);
 
         sut.Decrypt(envelope, kekVersion: null).Should().Be(Plaintext);
-        sut.Decrypt(envelope, kekVersion: 99).Should().Be(Plaintext);
     }
 }

@@ -63,6 +63,19 @@ public interface IPlatformQueuedTaskRepository
     /// </summary>
     Task DeadLetterAsync(Guid id, string error, CancellationToken ct = default);
 
+    /// <summary>
+    /// Round-2 H8 — record a "no handler registered" observation
+    /// without dead-lettering the row. Increments
+    /// <see cref="PlatformQueuedTask.RetryCount"/>, sets
+    /// <see cref="PlatformQueuedTask.UnprocessableAt"/>, and returns the
+    /// row to <c>pending</c> so a deploy that subsequently registers
+    /// the handler can pick the work up. Falls through to
+    /// <c>dead_letter</c> once <see cref="PlatformQueuedTask.RetryCount"/>
+    /// reaches <paramref name="maxRetries"/>.
+    /// </summary>
+    Task<PlatformQueuedTask?> ParkUnprocessableAsync(
+        Guid id, string reason, int maxRetries, CancellationToken ct = default);
+
     /// <summary>Read a task by id, or <c>null</c>.</summary>
     Task<PlatformQueuedTask?> GetAsync(Guid id, CancellationToken ct = default);
 

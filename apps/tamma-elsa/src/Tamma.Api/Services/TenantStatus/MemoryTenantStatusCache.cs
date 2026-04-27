@@ -1,26 +1,43 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using Tamma.Data.Abstractions;
 
 namespace Tamma.Api.Services.TenantStatus;
 
 /// <summary>
-/// In-memory <see cref="ITenantStatusCache"/> backed by a
-/// <see cref="ConcurrentDictionary{TKey,TValue}"/> of expiry-tagged
-/// entries. Lock-free hot path; eviction runs lazily on read when the
-/// cache exceeds <see cref="TenantStatusCacheOptions.MaxEntries"/>.
+/// In-memory <see cref="ITenantStatusCache"/> backed by a true LRU
+/// (doubly-linked list ordered MRU→LRU + dictionary for O(1) lookup).
+///
+/// <para>Hot path is locked rather than lock-free because TryGet must
+/// perform a move-to-front under the same critical section that reads
+/// the entry — without that, two concurrent <c>TryGet</c>s could leave
+/// the linked list in an inconsistent state. The lock is short
+/// (single linked-list reposition) and the cache is per-pod, so the
+/// contention envelope is bounded by per-pod request concurrency.</para>
 ///
 /// <para>Coherence: per-pod only. <see cref="Invalidate"/> drops the
 /// entry on this pod immediately; sibling pods converge after the TTL.
 /// Acceptable for the 10-second-tier caching this story targets.</para>
 /// </summary>
-public sealed class MemoryTenantStatusCache : ITenantStatusCache
+public sealed class MemoryTenantStatusCache : ITenantStatusCache, ITenantStatusProbe
 {
     private readonly TimeProvider _time;
     private readonly TenantStatusCacheOptions _options;
 
-    private readonly ConcurrentDictionary<Guid, Entry> _entries = new();
+    /// <summary>
+    /// LRU node payload — the cached status + expiry. The list orders
+    /// these MRU-first; the dictionary maps tenant id to the list node
+    /// for O(1) reposition on access.
+    /// </summary>
+    private sealed class CacheEntry
+    {
+        public required Guid TenantId { get; init; }
+        public string? Status { get; set; }
+        public DateTimeOffset ExpiresAt { get; set; }
+    }
 
-    private readonly record struct Entry(string? Status, DateTimeOffset ExpiresAt);
+    private readonly Dictionary<Guid, LinkedListNode<CacheEntry>> _entries = new();
+    private readonly LinkedList<CacheEntry> _lru = new();
+    private readonly object _lock = new();
 
     public MemoryTenantStatusCache(
         IOptions<TenantStatusCacheOptions> options,
@@ -42,56 +59,79 @@ public sealed class MemoryTenantStatusCache : ITenantStatusCache
 
     public bool TryGet(Guid tenantId, out string? status)
     {
-        if (_entries.TryGetValue(tenantId, out var entry)
-            && entry.ExpiresAt > _time.GetUtcNow())
+        lock (_lock)
         {
-            status = entry.Status;
+            if (!_entries.TryGetValue(tenantId, out var node))
+            {
+                status = null;
+                return false;
+            }
+
+            if (node.Value.ExpiresAt <= _time.GetUtcNow())
+            {
+                // Expired — drop and report miss so caller re-fetches.
+                _entries.Remove(tenantId);
+                _lru.Remove(node);
+                status = null;
+                return false;
+            }
+
+            // Hot-path access: move-to-front so this entry survives the
+            // next eviction wave.
+            _lru.Remove(node);
+            _lru.AddFirst(node);
+            status = node.Value.Status;
             return true;
         }
-        // Lazily drop expired entries on miss so the cache doesn't grow
-        // unbounded between Set calls. _entries.TryRemove is no-op on
-        // already-evicted keys — safe across races.
-        _entries.TryRemove(tenantId, out _);
-        status = null;
-        return false;
     }
 
     public void Set(Guid tenantId, string? status)
     {
-        var expiry = _time.GetUtcNow()
-            .AddSeconds(_options.TtlSeconds);
-        _entries[tenantId] = new Entry(status, expiry);
+        var expiry = _time.GetUtcNow().AddSeconds(_options.TtlSeconds);
 
-        // Lazy cap enforcement. Triggered when we're well past the
-        // configured limit so we don't reap one entry per write.
-        if (_entries.Count > _options.MaxEntries * 11 / 10)
+        lock (_lock)
         {
-            EvictExpired();
-            // If still over the cap (everything is fresh), evict
-            // arbitrary entries until we're back under.
-            if (_entries.Count > _options.MaxEntries)
+            if (_entries.TryGetValue(tenantId, out var existing))
             {
-                var overflow = _entries.Count - _options.MaxEntries;
-                foreach (var key in _entries.Keys.Take(overflow))
-                {
-                    _entries.TryRemove(key, out _);
-                }
+                // Refresh in place + reposition.
+                existing.Value.Status = status;
+                existing.Value.ExpiresAt = expiry;
+                _lru.Remove(existing);
+                _lru.AddFirst(existing);
+                return;
+            }
+
+            var entry = new CacheEntry
+            {
+                TenantId = tenantId,
+                Status = status,
+                ExpiresAt = expiry,
+            };
+            var node = new LinkedListNode<CacheEntry>(entry);
+            _lru.AddFirst(node);
+            _entries[tenantId] = node;
+
+            // Evict the least-recently-used entry while we're over the
+            // cap. Real LRU: the list's last node is by definition the
+            // entry that was accessed least recently.
+            while (_lru.Count > _options.MaxEntries)
+            {
+                var victim = _lru.Last;
+                if (victim is null) break;
+                _lru.RemoveLast();
+                _entries.Remove(victim.Value.TenantId);
             }
         }
     }
 
     public void Invalidate(Guid tenantId)
     {
-        _entries.TryRemove(tenantId, out _);
-    }
-
-    private void EvictExpired()
-    {
-        var now = _time.GetUtcNow();
-        foreach (var kv in _entries)
+        lock (_lock)
         {
-            if (kv.Value.ExpiresAt <= now)
-                _entries.TryRemove(kv.Key, out _);
+            if (_entries.Remove(tenantId, out var node))
+            {
+                _lru.Remove(node);
+            }
         }
     }
 }

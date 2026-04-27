@@ -98,7 +98,7 @@ public static class TenantStatusEndpoint
                             || e.Type == "TENANT.DELETE.STEP_FAILED"))
             .OrderByDescending(e => e.CreatedAt)
             .Take(100)
-            .Select(e => new { e.Type, e.Tags, e.CreatedAt })
+            .Select(e => new StepEvent(e.Type, e.Tags, e.CreatedAt))
             .ToListAsync(ct);
 
         var ladder = BuildStepLadder(stepEvents);
@@ -142,8 +142,27 @@ public static class TenantStatusEndpoint
             Steps: ladder));
     }
 
-    private static List<TenantStepStatus> BuildStepLadder(
-        IEnumerable<dynamic> events)
+    /// <summary>
+    /// Strongly-typed projection of the platform_events row shape consumed
+    /// by <see cref="BuildStepLadder"/>. Keeping this typed (instead of
+    /// projecting into an anonymous type and feeding the reducer
+    /// <c>IEnumerable&lt;dynamic&gt;</c>) lets nullable analysis run on
+    /// every member access in the reducer and makes the reducer
+    /// directly unit-testable from the test project.
+    /// </summary>
+    /// <param name="Type">Event type — one of the
+    /// <c>TENANT.PROVISION.STEP_*</c> / <c>TENANT.DELETE.STEP_*</c>
+    /// markers.</param>
+    /// <param name="Tags">JSONB <c>tags</c> column. May be null or
+    /// <c>{}</c>; the <c>step</c> tag is the only one read.</param>
+    /// <param name="CreatedAt">Event wall-clock timestamp.</param>
+    internal sealed record StepEvent(
+        string Type,
+        string? Tags,
+        DateTime CreatedAt);
+
+    internal static List<TenantStepStatus> BuildStepLadder(
+        IEnumerable<StepEvent> events)
     {
         // Reduce: per (step), the LATEST event wins. Started → running.
         // Completed → done. Failed → failed.

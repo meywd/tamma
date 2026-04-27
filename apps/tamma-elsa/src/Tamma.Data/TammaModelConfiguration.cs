@@ -56,6 +56,14 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Role).IsRequired().HasMaxLength(20).HasDefaultValue("member");
+            // Story 28-R2/C1 — separate platform-admin column. The DB-level
+            // CHECK constraint is installed by the AddUsersPlatformRole
+            // migration; here we just declare the EF projection.
+            entity.Property(e => e.PlatformRole)
+                .HasColumnName("platform_role")
+                .IsRequired()
+                .HasMaxLength(20)
+                .HasDefaultValue("user");
             entity.Property(e => e.AuthMethod).IsRequired().HasMaxLength(20).HasDefaultValue("email");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             // GitHubId widened to bigint (long) — see entity comment.
@@ -355,7 +363,7 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("UX_platform_events_SequenceNumber");
         });
 
-        // ── PlatformQueuedTask (Story 28-6) ──
+        // ── PlatformQueuedTask (Story 28-6 + Round-2 M8/H8) ──
         modelBuilder.Entity<PlatformQueuedTask>(entity =>
         {
             entity.ToTable("platform_queued_tasks");
@@ -367,6 +375,12 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.RetryCount).HasDefaultValue(0);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            // Round-2 M8 — record which worker holds the row's lease.
+            entity.Property(e => e.ClaimedBy).HasMaxLength(128);
+            // Round-2 H8 — last time the worker observed "no handler".
+            // Nullable; non-null only on rows currently parked waiting
+            // for a handler to be deployed.
+            entity.Property(e => e.UnprocessableAt);
 
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
             entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");
@@ -393,6 +407,79 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+        });
+
+        // ── AdminImpersonation (Story 28-R2 follow-up B) ──
+        //
+        // SOC2 / ISO 27001 audit row: each platform-admin impersonation
+        // session writes one immutable INSERT here at start, and a single
+        // UPDATE setting (EndedAt, EndedReason) at session-end. The
+        // matching IMPERSONATION.STARTED / IMPERSONATION.ENDED platform
+        // events carry the same identity in their data/tags channels for
+        // defence-in-depth (Story 28-R2 / M2 pattern).
+        modelBuilder.Entity<AdminImpersonation>(entity =>
+        {
+            entity.ToTable("admin_impersonations", t =>
+            {
+                // Charset whitelist — same gate as X-Admin-Note (M17).
+                // Length 1..500 (NOT NULL + REQUIRED) keeps the table
+                // honest about every row carrying an SOC2 reason string.
+                t.HasCheckConstraint(
+                    "chk_impersonation_reason_charset",
+                    "\"Reason\" ~ '^[A-Za-z0-9 .,;:_!@#$%&()\\-]{1,500}$'");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ImpersonatorEmail)
+                .IsRequired()
+                .HasMaxLength(320);
+            entity.Property(e => e.Reason)
+                .IsRequired()
+                .HasMaxLength(500);
+            entity.Property(e => e.EndedReason).HasMaxLength(64);
+            entity.Property(e => e.IpAddress).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.Property(e => e.StartedAt)
+                .HasColumnType("timestamp with time zone");
+            entity.Property(e => e.EndedAt)
+                .HasColumnType("timestamp with time zone");
+
+            // Hot reads:
+            //   1. "what has Alice impersonated?" — by impersonator
+            //   2. "who has impersonated Acme Corp?" — by target tenant
+            //   3. "who is currently active?" — partial on EndedAt IS NULL
+            //      (the active set is small; the full table will grow over
+            //      time but the partial index keeps incident-response
+            //      lookups O(active-count)).
+            entity.HasIndex(e => e.ImpersonatorUserId)
+                .HasDatabaseName("idx_admin_impersonations_impersonator");
+            entity.HasIndex(e => e.TargetTenantId)
+                .HasDatabaseName("idx_admin_impersonations_target_tenant");
+            entity.HasIndex(e => e.EndedAt)
+                .HasDatabaseName("idx_admin_impersonations_active")
+                .HasFilter("\"EndedAt\" IS NULL");
+
+            // FK to users(id) — cascade nothing on user delete; we want
+            // the audit row to outlive the actor (SOC2 requirement: a
+            // departed admin's actions remain auditable). EF default
+            // is RESTRICT for required FKs, which is exactly right.
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(e => e.ImpersonatorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(e => e.TargetTenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Optional FK — TargetUserId may be null (full-tenant
+            // impersonation). When set, RESTRICT for the same reason
+            // (audit row outlives a deleted target user).
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(e => e.TargetUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

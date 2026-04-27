@@ -59,7 +59,11 @@ public static class ProvisioningServiceCollectionExtensions
             {
                 var cfg = sp.GetRequiredService<IConfiguration>();
                 var logger = sp.GetService<ILogger<TenantSecretProtector>>();
-                return TenantSecretProtector.FromConfiguration(cfg, logger);
+                // R2-H11: flow IHostEnvironment so production hard-fails
+                // when Cranl:EncryptionKey is unset. The HKDF fallback is
+                // strictly behind env.IsDevelopment().
+                var env = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+                return TenantSecretProtector.FromConfiguration(cfg, env, logger);
             });
             services.TryAddScoped<CranlProvisioningWorkflow>();
             services.TryAddScoped<ITenantProvisioner, CranlTenantProvisioner>();

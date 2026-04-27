@@ -3,20 +3,29 @@ namespace Tamma.Api.Services.PlatformTasks;
 /// <summary>
 /// Story 28-6 AC7 — registry that resolves an
 /// <see cref="IPlatformTaskHandler"/> for a given task type.
-/// Registered as a singleton; the registry takes a snapshot of every
-/// <c>IPlatformTaskHandler</c> registered via DI at construction time
-/// so resolution is lock-free dictionary lookup.
 ///
-/// <para>An unknown task type returns <c>null</c>; the worker handles
-/// the null case by moving the row to <c>dead_letter</c> with a
-/// "no handler registered" reason — operators can then either ship a
-/// handler or manually clear the queue.</para>
+/// <para>Round-2 M10 — the registry itself is registered as
+/// <b>Scoped</b> and so are the concrete handlers, because typical
+/// handlers need scoped EF DbContexts. The registry resolves every
+/// <c>IPlatformTaskHandler</c> from the same scope it lives in, so
+/// every request through <c>PlatformTaskWorker.ProcessOnceAsync</c>
+/// (which already opens a per-tick async scope) gets fresh
+/// scope-bound handler instances + scope-bound dependencies.</para>
+///
+/// <para>An unknown task type returns <c>null</c>; the worker parks
+/// the row in <c>pending</c> with an <c>UnprocessableAt</c> stamp
+/// (Round-2 H8) so a future deploy that registers the handler can
+/// pick the work up. After MaxRetries no-handler observations the
+/// row falls through to dead-letter.</para>
 /// </summary>
 public interface IPlatformTaskHandlerRegistry
 {
     /// <summary>
     /// Resolve a handler for <paramref name="taskType"/>. Returns
     /// <c>null</c> when no handler is registered for that type.
+    /// Handlers may take scoped dependencies (e.g. EF DbContext);
+    /// a fresh scope is created per task by
+    /// <see cref="PlatformTaskWorker.ProcessOnceAsync"/>.
     /// </summary>
     IPlatformTaskHandler? Resolve(string taskType);
 
@@ -30,8 +39,13 @@ public interface IPlatformTaskHandlerRegistry
 
 /// <summary>
 /// Default <see cref="IPlatformTaskHandlerRegistry"/> backed by a
-/// snapshot dictionary built from all <c>IPlatformTaskHandler</c>
-/// registrations at construction.
+/// snapshot dictionary built per scope from every
+/// <c>IPlatformTaskHandler</c> registered with the DI container.
+///
+/// <para>Round-2 M10 — registered as Scoped so handlers can take
+/// scoped dependencies (typically <c>ControlPlaneDbContext</c>). The
+/// duplicate-task-type detection still runs on the per-scope
+/// snapshot so a misconfiguration is caught on the first claim.</para>
 /// </summary>
 public sealed class PlatformTaskHandlerRegistry : IPlatformTaskHandlerRegistry
 {

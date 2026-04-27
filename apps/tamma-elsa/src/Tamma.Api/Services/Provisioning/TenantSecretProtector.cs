@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Hosting;
 
 namespace Tamma.Api.Services.Provisioning;
 
@@ -55,15 +56,37 @@ public sealed class TenantSecretProtector
     }
 
     /// <summary>
-    /// Build a protector from configuration. Reads
-    /// <c>Cranl:EncryptionKey</c> (base64) when present, otherwise derives
-    /// a fallback key from <c>Cranl:ApiKey</c> + a fixed salt via
-    /// HKDF-SHA256. The fallback path logs a warning so deployments
-    /// without an explicit key are visible in startup logs.
+    /// Build a protector from configuration with environment-aware
+    /// fail-closed semantics. R2-H11 + R2 post-fix PF-S4: production
+    /// deploys must set <c>Cranl:EncryptionKey</c> explicitly — the
+    /// HKDF fallback is strictly a dev-time convenience and is never
+    /// used in production.
+    ///
+    /// <para><b>PF-S4 (this file):</b> the previous single-arg
+    /// overload (<c>FromConfiguration(IConfiguration, ILogger?)</c>)
+    /// has been deleted. It silently flowed <c>environment: null</c>
+    /// into this method, which fell through to the dev/test HKDF
+    /// path regardless of the actual deployment environment — a
+    /// dispatcher-bypass for the production hard-fail. Every caller
+    /// MUST now flow <see cref="IHostEnvironment"/> (it is registered
+    /// by <c>WebApplicationBuilder</c> before composition root runs,
+    /// so DI resolution always succeeds in real deployments). Tests
+    /// + helpers that genuinely have no environment context can pass
+    /// <c>null</c> explicitly via this two-arg overload — the
+    /// signature still accepts a nullable, but the call site is now
+    /// audit-grep-able.</para>
     /// </summary>
+    /// <param name="cfg">Application configuration.</param>
+    /// <param name="environment">Host environment. When null, assumes
+    /// development semantics (HKDF fallback path). When
+    /// <see cref="HostEnvironmentEnvExtensions.IsProduction(IHostEnvironment)"/>
+    /// is true, throws if <c>Cranl:EncryptionKey</c> is unset.</param>
+    /// <param name="logger">Optional logger.</param>
     public static TenantSecretProtector FromConfiguration(
-        IConfiguration cfg, ILogger? logger = null)
+        IConfiguration cfg, IHostEnvironment? environment, ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(cfg);
+
         var explicitKey = cfg["Cranl:EncryptionKey"];
         if (!string.IsNullOrWhiteSpace(explicitKey))
         {
@@ -84,10 +107,21 @@ public sealed class TenantSecretProtector
             }
         }
 
-        // Fallback path: derive from the API key. Not a security boundary —
-        // this only protects against a casual dump-the-table read and
-        // matches the GitHub:PrivateKey ergonomics (one knob enables the
-        // whole subsystem).
+        // R2-H11: production hard-fail when Cranl:EncryptionKey is missing.
+        // The previous behaviour silently HKDF'd from Cranl:ApiKey and
+        // logged a warning; that is no longer acceptable for the
+        // production path because it allowed a deploy to ship with an
+        // AES-GCM key derived from the Cranl API token.
+        if (environment is not null && environment.IsProduction())
+        {
+            throw new InvalidOperationException(
+                "Cranl:EncryptionKey is REQUIRED in production. Set the env var "
+                + "(base64-encoded 32 random bytes) or migrate to OpenBao via "
+                + "Story 28-13. The HKDF-from-ApiKey fallback is dev-only.");
+        }
+
+        // Dev/test path — derive from the API key OR ship a non-functional
+        // protector when even the API key is unset.
         var apiKey = cfg["Cranl:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -103,8 +137,10 @@ public sealed class TenantSecretProtector
 
         logger?.LogWarning(
             "TenantSecretProtector: Cranl:EncryptionKey not set, deriving key "
-            + "from Cranl:ApiKey via HKDF. Set Cranl:EncryptionKey explicitly "
-            + "in production (32 random bytes, base64-encoded).");
+            + "from Cranl:ApiKey via HKDF. This path is DEV-ONLY — set "
+            + "Cranl:EncryptionKey explicitly before promoting to production "
+            + "(32 random bytes, base64-encoded). Production deploys with this "
+            + "fallback now fail at startup; see runbook .dev/runbooks/kek-rotation.md.");
         var derived = HKDF.DeriveKey(
             HashAlgorithmName.SHA256,
             ikm: Encoding.UTF8.GetBytes(apiKey),

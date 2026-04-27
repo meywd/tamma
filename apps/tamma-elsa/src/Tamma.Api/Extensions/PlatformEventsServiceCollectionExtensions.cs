@@ -53,6 +53,14 @@ public static class PlatformEventsServiceCollectionExtensions
         // works whether or not the Cranl extension already registered
         // the underlying TenantSecretProtector — when missing, we build
         // one from configuration here.
+        //
+        // Story 28-R2 / PF-S4 — flow IHostEnvironment so the production
+        // hard-fail in TenantSecretProtector.FromConfiguration runs
+        // when this fallback path is taken. The previous single-arg
+        // overload (now deleted) silently HKDF'd from Cranl:ApiKey in
+        // production, which was a dispatcher-bypass for the H11 fix
+        // when DI ordering registered this extension before the
+        // provisioning extension.
         services.TryAddSingleton<ITenantConnectionStringProtector>(sp =>
         {
             var existing = sp.GetService<TenantSecretProtector>();
@@ -61,7 +69,8 @@ public static class PlatformEventsServiceCollectionExtensions
 
             var cfg = sp.GetRequiredService<IConfiguration>();
             var logger = sp.GetService<ILogger<TenantSecretProtector>>();
-            var fresh = TenantSecretProtector.FromConfiguration(cfg, logger);
+            var env = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            var fresh = TenantSecretProtector.FromConfiguration(cfg, env, logger);
             return new TenantSecretProtectorAdapter(fresh);
         });
 

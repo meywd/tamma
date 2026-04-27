@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Postgres;
 using Tamma.Api.Services.Secrets.Query;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Tests.Secrets.Query;
@@ -32,14 +33,14 @@ public class SecretQueryServiceTests
     private static readonly Guid ActorUserId = Guid.Parse("cccccccc-3333-3333-3333-333333333333");
 
     private SecretsDbContextFactoryDouble _contextFactory = null!;
-    private RecordingAuditor _auditor = null!;
+    private RecordingSecretAccessAuditor _auditor = null!;
     private SecretQueryService _service = null!;
 
     [SetUp]
     public void SetUp()
     {
         _contextFactory = new SecretsDbContextFactoryDouble(Guid.NewGuid().ToString());
-        _auditor = new RecordingAuditor();
+        _auditor = new RecordingSecretAccessAuditor();
         _service = new SecretQueryService(
             _contextFactory,
             _auditor,
@@ -320,13 +321,4 @@ public class SecretQueryServiceTests
         }
     }
 
-    private sealed class RecordingAuditor : ISecretAccessAuditor
-    {
-        public List<SecretAuditEvent> Events { get; } = new();
-        public Task EmitAsync(SecretAuditEvent auditEvent, CancellationToken ct = default)
-        {
-            Events.Add(auditEvent);
-            return Task.CompletedTask;
-        }
-    }
 }

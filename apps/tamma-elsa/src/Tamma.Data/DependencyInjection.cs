@@ -44,13 +44,40 @@ public static class DependencyInjection
     {
         services.AddScoped<ITenantContext, TenantContext>();
 
-        // Control-plane context (migrations-owning). Scoped because auth
-        // handlers, admin endpoints and CP repos depend on it.
-        services.AddDbContext<ControlPlaneDbContext>(options =>
+        // Control-plane context (migrations-owning). The factory is the
+        // canonical seam — every scoped <see cref="ControlPlaneDbContext"/>
+        // is created from <see cref="IDbContextFactory{TContext}"/>.
+        //
+        // Two callers can wire this:
+        //
+        // <list type="bullet">
+        //   <item><description>The default (here) registers a plain
+        //     non-pooled <c>AddDbContextFactory&lt;ControlPlaneDbContext&gt;</c>.
+        //     Used in tests, dev, and any composition that hasn't opted
+        //     into the per-tenant connection pool.</description></item>
+        //   <item><description>Production wires
+        //     <c>AddTenantConnectionPool</c> after this method, which
+        //     calls <c>RemoveAll</c> on the factory + options
+        //     registrations and replaces them with the pooled factory
+        //     from <c>AddPooledDbContextFactory</c>.</description></item>
+        // </list>
+        //
+        // The scoped <see cref="ControlPlaneDbContext"/> registration
+        // resolves a context from the factory on demand. Consumers
+        // (auth handlers, admin endpoints, CP repos) keep the same DI
+        // shape — they still take a scoped CP context — but the
+        // underlying instance comes from the pool when one is wired.
+        // (Round-2 review H10: removed the parallel
+        // <c>AddDbContext&lt;ControlPlaneDbContext&gt;</c> registration
+        // that conflicted with the pooled factory.)
+        services.AddDbContextFactory<ControlPlaneDbContext>(options =>
         {
             options.UseNpgsql(adminConnectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
         });
+        services.AddScoped(sp =>
+            sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
+                .CreateDbContext());
 
         // Factory for per-tenant contexts. Uses the app connection when
         // provided, else falls back to the admin connection.
@@ -89,6 +116,9 @@ public static class DependencyInjection
         services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
+        // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
+        // Scoped because it leans on ControlPlaneDbContext.
+        services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
 
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();

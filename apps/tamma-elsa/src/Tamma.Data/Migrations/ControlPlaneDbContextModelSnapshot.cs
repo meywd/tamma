@@ -302,6 +302,70 @@ namespace Tamma.Data.Migrations
                     b.ToTable("stories", (string)null);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.AdminImpersonation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EndedReason")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ImpersonatorEmail")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<Guid>("ImpersonatorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TargetTenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TargetUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EndedAt")
+                        .HasDatabaseName("idx_admin_impersonations_active")
+                        .HasFilter("\"EndedAt\" IS NULL");
+
+                    b.HasIndex("ImpersonatorUserId")
+                        .HasDatabaseName("idx_admin_impersonations_impersonator");
+
+                    b.HasIndex("TargetTenantId")
+                        .HasDatabaseName("idx_admin_impersonations_target_tenant");
+
+                    b.HasIndex("TargetUserId");
+
+                    b.ToTable("admin_impersonations", null, t =>
+                        {
+                            t.HasCheckConstraint("chk_impersonation_reason_charset", "\"Reason\" ~ '^[A-Za-z0-9 .,;:_!@#$%&()\\-]{1,500}$'");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.AgentConfig", b =>
                 {
                     b.Property<Guid>("Id")
@@ -829,8 +893,9 @@ namespace Tamma.Data.Migrations
 
                     b.Property<long>("SequenceNumber")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.SerialColumn);
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseSerialColumn(b.Property<long>("SequenceNumber"));
 
                     b.Property<string>("Tags")
                         .IsRequired()
@@ -1095,6 +1160,53 @@ namespace Tamma.Data.Migrations
                     b.ToTable("github_webhook_deliveries", (string)null);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.KekRotation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<byte[]>("StagedSecondaryProtected")
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<int>("VersionNew")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("VersionOld")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAt")
+                        .IsDescending()
+                        .HasDatabaseName("IX_kek_rotations_StartedAt");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_kek_rotations_Status")
+                        .HasFilter("\"Status\" IN ('pending','running')");
+
+                    b.ToTable("kek_rotations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_kek_rotations_status", "\"Status\" IN ('pending','running','completed','failed','cancelled')");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.PasswordResetToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1302,6 +1414,29 @@ namespace Tamma.Data.Migrations
                     b.ToTable("platform_api_key_index", (string)null);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.PlatformBootstrap", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ClaimedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("platform_bootstrap", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_platform_bootstrap_singleton", "\"Id\" = 1");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.PlatformEmailOutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1414,8 +1549,9 @@ namespace Tamma.Data.Migrations
 
                     b.Property<long>("SequenceNumber")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.SerialColumn);
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseSerialColumn(b.Property<long>("SequenceNumber"));
 
                     b.Property<string>("Tags")
                         .IsRequired()
@@ -1463,6 +1599,10 @@ namespace Tamma.Data.Migrations
                     b.Property<DateTime?>("ClaimedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ClaimedBy")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
@@ -1499,6 +1639,9 @@ namespace Tamma.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime?>("UnprocessableAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -2093,6 +2236,14 @@ namespace Tamma.Data.Migrations
                     b.Property<string>("PasswordHash")
                         .HasColumnType("text");
 
+                    b.Property<string>("PlatformRole")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("user")
+                        .HasColumnName("platform_role");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -2319,6 +2470,26 @@ namespace Tamma.Data.Migrations
                     b.Navigation("Story");
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.AdminImpersonation", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ImpersonatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Tamma.Data.Entities.Tenant", null)
+                        .WithMany()
+                        .HasForeignKey("TargetTenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Tamma.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("TargetUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.AgentConfig", b =>
                 {
                     b.HasOne("Tamma.Data.Entities.Tenant", "Tenant")
@@ -2371,6 +2542,15 @@ namespace Tamma.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlatformBootstrap", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.RefreshToken", b =>

@@ -1,5 +1,9 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Data.Abstractions;
+using Tamma.Data.Entities;
 using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Endpoints.Admin;
@@ -84,16 +88,75 @@ public static class PoolsAdminEndpoints
     /// outstanding, the underlying data source is deferred-disposed
     /// when the final lease releases (the cache entry itself is removed
     /// immediately so subsequent requests build a fresh pool).
+    ///
+    /// <para>Story 28-R2 / Finding M2 — emits a <c>POOL.EVICTED.SUCCESS</c>
+    /// platform event capturing the operator identity (sub + email) so
+    /// SIEM can correlate manual pool eviction with downstream connection
+    /// churn / latency spikes.</para>
     /// </summary>
     public static async Task<IResult> Evict(
         Guid tenantId,
         [FromServices] ITenantConnectionResolver resolver,
+        [FromServices] IPlatformEventPublisher eventPublisher,
+        ClaimsPrincipal principal,
         CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             return Results.BadRequest(new { error = "tenantId required" });
 
         await resolver.EvictAsync(tenantId, ct);
+
+        // Audit best-effort. Eviction already happened; if the publisher
+        // throws (DB outage, downstream failure) we still return 200 so
+        // ops doesn't think their evict was rejected.
+        try
+        {
+            await eventPublisher.AppendAndPublishAsync(
+                BuildPoolEvictedEvent(tenantId, principal), ct);
+        }
+        catch
+        {
+            // Swallow — see comment above.
+        }
+
         return Results.Ok(new { tenantId, status = "evicted" });
+    }
+
+    private static PlatformEvent BuildPoolEvictedEvent(
+        Guid tenantId, ClaimsPrincipal? principal)
+    {
+        var actorUserId = principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var actorEmail = principal?.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal?.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal?.FindFirst("email")?.Value;
+        var actorPlatformRole = principal?.FindFirst("platformRole")?.Value;
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["source"] = "admin-pool-evict",
+        };
+        if (!string.IsNullOrEmpty(actorUserId)) tags["actorUserId"] = actorUserId;
+        if (!string.IsNullOrEmpty(actorEmail)) tags["actorEmail"] = actorEmail;
+        if (!string.IsNullOrEmpty(actorPlatformRole)) tags["actorPlatformRole"] = actorPlatformRole;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["actorUserId"] = actorUserId,
+            ["actorEmail"] = actorEmail,
+            ["actorPlatformRole"] = actorPlatformRole,
+            ["evictedAt"] = DateTime.UtcNow,
+        };
+
+        return new PlatformEvent
+        {
+            Type = "POOL.EVICTED.SUCCESS",
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        };
     }
 }

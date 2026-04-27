@@ -106,6 +106,7 @@ public sealed class LruPooledTenantConnectionResolver
     private readonly TenantConnectionPoolMetrics _metrics;
     private readonly TenantConnectionPoolOptions _options;
     private readonly ILogger<LruPooledTenantConnectionResolver> _logger;
+    private readonly ITenantStatusProbe? _statusProbe;
 
     /// <summary>
     /// Hot-path lookup. Value is the <see cref="LinkedListNode{T}"/>
@@ -134,6 +135,28 @@ public sealed class LruPooledTenantConnectionResolver
     /// </summary>
     private readonly ConcurrentDictionary<Guid, (DateTimeOffset ExpiresAt, ResolvedTenantRow Row)> _tenantRowCache = new();
 
+    /// <summary>
+    /// Round-2 H5 — tracks outstanding deferred-dispose tasks fired by
+    /// <see cref="HandleFinalLeaseReleased"/>. <see cref="DisposeAsync"/>
+    /// awaits this set with a bounded timeout so the resolver doesn't
+    /// race process shutdown against an unfinished
+    /// <c>NpgsqlDataSource.DisposeAsync</c>. Items are removed once they
+    /// complete (success or failure) via the cleanup continuation.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, Task> _pendingDisposes = new();
+
+    /// <summary>
+    /// Round-2 M7 — per-tenant outstanding-lease counter so the cap can
+    /// be enforced without locking the LRU. Increments inside
+    /// <see cref="LeaseAsync"/> after the cap check; decrements when a
+    /// sibling handle's <c>DisposeAsync</c> runs (via
+    /// <see cref="OnLeaseAcquired"/> / <see cref="OnLeaseReleased"/>
+    /// hooks plumbed through <see cref="TenantConnectionHandle"/>).
+    /// Values are best-effort — they may briefly drift across the CAS
+    /// in <c>Acquire</c>, but converge on every dispose.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, int> _outstandingLeases = new();
+
     private int _disposed; // 0 = alive, 1 = disposed
 
     public LruPooledTenantConnectionResolver(
@@ -141,7 +164,8 @@ public sealed class LruPooledTenantConnectionResolver
         IConnectionStringDecryptor decryptor,
         TenantConnectionPoolMetrics metrics,
         IOptions<TenantConnectionPoolOptions> options,
-        ILogger<LruPooledTenantConnectionResolver>? logger = null)
+        ILogger<LruPooledTenantConnectionResolver>? logger = null,
+        ITenantStatusProbe? statusProbe = null)
     {
         ArgumentNullException.ThrowIfNull(cpFactory);
         ArgumentNullException.ThrowIfNull(decryptor);
@@ -153,6 +177,7 @@ public sealed class LruPooledTenantConnectionResolver
         _metrics = metrics;
         _options = options.Value;
         _logger = logger ?? NullLogger<LruPooledTenantConnectionResolver>.Instance;
+        _statusProbe = statusProbe;
 
         if (_options.MaxEntries <= 0)
         {
@@ -177,6 +202,26 @@ public sealed class LruPooledTenantConnectionResolver
         // Fast path. ConcurrentDictionary.TryGetValue is lock-free.
         if (_pools.TryGetValue(tenantId, out var node))
         {
+            // Story 28-8 H12 — before serving a cached pool, consult the
+            // status cache. A cache HIT with a non-active value means an
+            // admin endpoint or workflow flipped the tenant since we
+            // last warmed the pool; falling through to the cold path
+            // forces a fresh CP read which raises
+            // TenantNotProvisionedException with the correct status.
+            // We DO NOT poll CP on every hit — only when the status
+            // probe explicitly reports a non-active value. Probe miss
+            // (no cached entry) keeps the fast-path semantics intact.
+            if (_statusProbe is not null
+                && _statusProbe.TryGet(tenantId, out var cachedStatus)
+                && !IsActiveStatus(cachedStatus))
+            {
+                // Evict-then-rebuild — synchronously sequence the
+                // eviction before the cold CP read so the slow path's
+                // double-check doesn't observe the stale entry.
+                return new ValueTask<NpgsqlDataSource>(
+                    EvictThenResolveAsync(tenantId, cancellationToken));
+            }
+
             // Reposition the LRU under a short lock. We re-check the
             // dictionary after taking the lock because EvictAsync /
             // BuildOrEvict may have removed the entry while we were
@@ -196,6 +241,29 @@ public sealed class LruPooledTenantConnectionResolver
         return new ValueTask<NpgsqlDataSource>(
             ResolveSlowAsync(tenantId, cancellationToken));
     }
+
+    /// <summary>
+    /// H12 — sequenced evict-then-rebuild for the status-flip detection
+    /// path. Runs the eviction first so <see cref="ResolveSlowAsync"/>'s
+    /// double-check inside the build-lock can't observe the stale entry.
+    /// </summary>
+    private async Task<NpgsqlDataSource> EvictThenResolveAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        await EvictAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        return await ResolveSlowAsync(tenantId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Mirror of <see cref="ResolveTenantRowAsync"/>'s active-status
+    /// rule (Doc 04 §2.2). NULL is treated as 'active' so legacy rows
+    /// without the shadow column populated keep working without a
+    /// status backfill.
+    /// </summary>
+    private static bool IsActiveStatus(string? status) =>
+        status is null
+        || string.Equals(status, "active", StringComparison.OrdinalIgnoreCase);
 
     public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
         Guid tenantId,
@@ -227,6 +295,18 @@ public sealed class LruPooledTenantConnectionResolver
     {
         ThrowIfDisposed();
 
+        // Per-tenant lease cap (Round-2 M7). Check BEFORE attempting the
+        // cold-build so a pathological consumer can't stampede pool
+        // builds. Refresh after the cold-build below to handle the
+        // narrow window where the count was at the cap but a sibling
+        // released while we were here.
+        var leaseCap = Math.Max(1, _options.MaxOutstandingLeases);
+        var current = _outstandingLeases.TryGetValue(tenantId, out var c) ? c : 0;
+        if (current >= leaseCap)
+        {
+            throw new TenantLeaseLimitExceededException(tenantId, leaseCap, current);
+        }
+
         // Reuse the same fast/slow path as GetDataSourceAsync. The
         // public method handles the LRU reposition + cold-build path;
         // we then ensure the cache entry has a master handle and
@@ -235,13 +315,21 @@ public sealed class LruPooledTenantConnectionResolver
 
         // After the await above, the entry MUST be in the cache (modulo
         // a pathological race with eviction — handled by the loop).
-        for (var attempt = 0; attempt < 3; attempt++)
+        var maxAttempts = Math.Max(1, _options.LeaseRetryAttempts);
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!_pools.TryGetValue(tenantId, out var node))
             {
                 // Evicted between our build and our handle acquisition.
-                // Re-build by recursing into the cold path.
+                // Re-build by recursing into the cold path. Add a small
+                // backoff so we don't hot-loop the cold-build path on a
+                // pathological eviction storm.
+                if (attempt > 0)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(5 * attempt),
+                        cancellationToken).ConfigureAwait(false);
+                }
                 await GetDataSourceAsync(tenantId, cancellationToken)
                     .ConfigureAwait(false);
                 continue;
@@ -270,7 +358,19 @@ public sealed class LruPooledTenantConnectionResolver
 
             try
             {
-                return master.Acquire();
+                // Re-check the cap inside the loop so a leak that
+                // bloomed since entry can still be refused.
+                var live = _outstandingLeases.TryGetValue(tenantId, out var l) ? l : 0;
+                if (live >= leaseCap)
+                {
+                    throw new TenantLeaseLimitExceededException(tenantId, leaseCap, live);
+                }
+
+                var sibling = master.Acquire();
+                // Track the new outstanding lease and arrange for it to
+                // be decremented on dispose.
+                _outstandingLeases.AddOrUpdate(tenantId, 1, (_, v) => v + 1);
+                return new TrackedTenantConnectionLease(this, tenantId, sibling);
             }
             catch (ObjectDisposedException)
             {
@@ -279,10 +379,69 @@ public sealed class LruPooledTenantConnectionResolver
             }
         }
 
-        throw new InvalidOperationException(
-            $"LeaseAsync({tenantId:N}) failed after 3 retries — repeated " +
-            "race against eviction. This indicates an eviction storm; " +
-            "check tamma.tenant_pools.evicted_total.");
+        // Suggest a back-off proportional to the worst-case schedule
+        // we just exhausted — gives the caller a hint without leaking
+        // the internal step.
+        var retryAfter = 5 * maxAttempts;
+        throw new TenantConnectionLeaseRaceException(tenantId, maxAttempts, retryAfter);
+    }
+
+    /// <summary>
+    /// Decrement the per-tenant outstanding-lease counter. Called by
+    /// <see cref="TrackedTenantConnectionLease.DisposeAsync"/>. Removes
+    /// the dictionary entry once the count drops to zero so the
+    /// dictionary doesn't accumulate one entry per ever-leased tenant.
+    /// </summary>
+    private void DecrementLeaseCount(Guid tenantId)
+    {
+        _outstandingLeases.AddOrUpdate(tenantId, 0, (_, v) => Math.Max(0, v - 1));
+        // Best-effort cleanup — if we just dropped to zero, remove the
+        // entry. A concurrent increment would re-add it which is fine.
+        if (_outstandingLeases.TryGetValue(tenantId, out var live) && live <= 0)
+        {
+            _outstandingLeases.TryRemove(new KeyValuePair<Guid, int>(tenantId, live));
+        }
+    }
+
+    /// <summary>
+    /// Wrapper lease that lets the resolver hook into dispose so the
+    /// per-tenant outstanding-lease counter (Round-2 M7) stays in sync.
+    /// Forwards every <see cref="ITenantConnectionLease"/> member to the
+    /// inner sibling produced by
+    /// <see cref="TenantConnectionHandle.Acquire"/>.
+    /// </summary>
+    private sealed class TrackedTenantConnectionLease : ITenantConnectionLease
+    {
+        private readonly LruPooledTenantConnectionResolver _owner;
+        private readonly Guid _tenantId;
+        private readonly TenantConnectionHandle _inner;
+        private int _disposed;
+
+        public TrackedTenantConnectionLease(
+            LruPooledTenantConnectionResolver owner,
+            Guid tenantId,
+            TenantConnectionHandle inner)
+        {
+            _owner = owner;
+            _tenantId = tenantId;
+            _inner = inner;
+        }
+
+        public Guid TenantId => _inner.TenantId;
+        public NpgsqlDataSource DataSource => _inner.DataSource;
+
+        public async ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+            try
+            {
+                await _inner.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _owner.DecrementLeaseCount(_tenantId);
+            }
+        }
     }
 
     public async ValueTask EvictAsync(
@@ -313,6 +472,12 @@ public sealed class LruPooledTenantConnectionResolver
                 "tenant.pool.evicted tenantId={TenantId} reason=explicit",
                 tenantId);
             await DisposeEvictedEntryAsync(evicted).ConfigureAwait(false);
+            // Round-2 M13 — opportunistically trim the per-tenant build
+            // lock now that the pool is gone. The per-tenant lease
+            // counter is also dropped.
+            if (_buildLocks.TryGetValue(tenantId, out var sem))
+                TryTrimBuildLock(tenantId, sem);
+            _outstandingLeases.TryRemove(tenantId, out _);
         }
     }
 
@@ -320,6 +485,16 @@ public sealed class LruPooledTenantConnectionResolver
         new(WarmPoolCount: (int)_metrics.WarmPoolCount,
             TotalPoolsOpenedSinceStartup: _metrics.OpenedTotal,
             TotalPoolsEvictedSinceStartup: _metrics.EvictedTotal);
+
+    /// <summary>
+    /// Round-2 H5 — bounded timeout we wait for outstanding deferred
+    /// disposes during resolver shutdown. Long enough that a healthy
+    /// Postgres can finish a few <c>NpgsqlDataSource.DisposeAsync</c>
+    /// calls; short enough that a wedged backend doesn't block process
+    /// teardown indefinitely. Made internal so unit tests can shorten
+    /// it without touching options plumbing.
+    /// </summary>
+    internal TimeSpan ShutdownDeferredDisposeTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     public async ValueTask DisposeAsync()
     {
@@ -356,11 +531,55 @@ public sealed class LruPooledTenantConnectionResolver
             }
         }
 
+        // Round-2 H5 — drain any deferred disposes that
+        // HandleFinalLeaseReleased fired before the resolver shut
+        // down. Without this drain, NpgsqlDataSource.DisposeAsync may
+        // race process teardown and leak Postgres backend slots.
+        // Bounded timeout so a wedged Postgres can't block forever.
+        var pending = _pendingDisposes.Values.ToArray();
+        if (pending.Length > 0)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(ShutdownDeferredDisposeTimeout);
+                var allDone = Task.WhenAll(pending);
+                var completed = await Task.WhenAny(
+                    allDone,
+                    Task.Delay(Timeout.InfiniteTimeSpan, cts.Token))
+                    .ConfigureAwait(false);
+                if (completed != allDone)
+                {
+                    _logger.LogWarning(
+                        "tenant.pool.shutdown_timeout pendingDeferredDisposes={Count} timeoutSeconds={Seconds}",
+                        pending.Length,
+                        (int)ShutdownDeferredDisposeTimeout.TotalSeconds);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Don't surface — shutdown is best-effort. Log + move on.
+                _logger.LogWarning(
+                    ex,
+                    "tenant.pool.shutdown_drain_failed pendingDeferredDisposes={Count}",
+                    pending.Length);
+            }
+        }
+
         foreach (var sem in _buildLocks.Values)
             sem.Dispose();
         _buildLocks.Clear();
+        _outstandingLeases.Clear();
+        _pendingDisposes.Clear();
 
-        _metrics.Dispose();
+        // Round-2 review M12: do NOT dispose <see cref="_metrics"/>.
+        // <see cref="TenantConnectionPoolMetrics"/> is registered as a
+        // singleton in DI; its lifetime belongs to the
+        // <see cref="IServiceProvider"/>, not this resolver. The host
+        // disposes the singleton when the container itself disposes,
+        // so reaching across that boundary here would double-dispose
+        // (today <c>Meter.Dispose</c> is idempotent, but the contract
+        // is "DI owns the singleton") and break composition roots that
+        // share the metrics instance with other consumers.
     }
 
     // ── IAdminPoolDiagnostics (Story 28-4 AC5) ────────────────────────
@@ -371,6 +590,13 @@ public sealed class LruPooledTenantConnectionResolver
         var misses = _metrics.MissesTotal;
         var total = hits + misses;
         var ratio = total == 0 ? 0d : (double)hits / total;
+
+        // Sum the per-tenant outstanding-lease counter (Round-2 M7).
+        // Cheap — bounded by the warm pool count.
+        var totalLeases = 0;
+        foreach (var kv in _outstandingLeases)
+            totalLeases += kv.Value;
+
         return new DetailedPoolStats(
             WarmPoolCount: (int)_metrics.WarmPoolCount,
             OpenedTotal: _metrics.OpenedTotal,
@@ -379,7 +605,11 @@ public sealed class LruPooledTenantConnectionResolver
             EvictedExplicit: _metrics.EvictedExplicitTotal,
             HitsTotal: hits,
             MissesTotal: misses,
-            HitRatio: ratio);
+            HitRatio: ratio,
+            DeferredDisposeBacklog: _pendingDisposes.Count,
+            MaxOutstandingLeases: Math.Max(1, _options.MaxOutstandingLeases),
+            TotalOutstandingLeases: totalLeases,
+            BuildLocksRetained: _buildLocks.Count);
     }
 
     public IReadOnlyList<WarmTenantEntry> ListWarmTenants(int limit)
@@ -487,6 +717,11 @@ public sealed class LruPooledTenantConnectionResolver
                     evicted.TenantId);
                 _tenantRowCache.TryRemove(evicted.TenantId, out _);
                 await DisposeEvictedEntryAsync(evicted).ConfigureAwait(false);
+                // Round-2 M13 — try to trim the build lock for the
+                // tenant we just evicted. Drop the lease counter too.
+                if (_buildLocks.TryGetValue(evicted.TenantId, out var evictedSem))
+                    TryTrimBuildLock(evicted.TenantId, evictedSem);
+                _outstandingLeases.TryRemove(evicted.TenantId, out _);
             }
 
             return dataSource;
@@ -494,6 +729,57 @@ public sealed class LruPooledTenantConnectionResolver
         finally
         {
             sem.Release();
+            // Round-2 M13 — opportunistically trim the per-tenant build
+            // lock once it's no longer guarding a live pool. Without
+            // this, a long-lived process that touches many tenants
+            // accumulates one SemaphoreSlim per distinct tenant id
+            // forever (the dictionary was previously never trimmed).
+            // Only remove when the semaphore is unowned AND the pool
+            // it was guarding is gone (or hasn't been rebuilt yet).
+            // BuildLocksRetained on DetailedPoolStats lets ops detect
+            // future leaks.
+            TryTrimBuildLock(tenantId, sem);
+        }
+    }
+
+    /// <summary>
+    /// Round-2 M13 — try to remove an idle per-tenant build lock from
+    /// <see cref="_buildLocks"/>. Called after a cold-build releases
+    /// the semaphore. Removal is conditional:
+    /// <list type="bullet">
+    ///   <item><description>The pool we just built must not still be in
+    ///     <see cref="_pools"/> (eviction or LRU-overflow happened).</description></item>
+    ///   <item><description>Another caller might already be waiting on
+    ///     this semaphore — checked via
+    ///     <see cref="SemaphoreSlim.CurrentCount"/>.</description></item>
+    ///   <item><description>Removal must be exact: only remove the
+    ///     specific instance we recorded, not a fresh one a parallel
+    ///     caller may have just minted.</description></item>
+    /// </list>
+    /// Trimming is best-effort — a missed trim just means one extra
+    /// semaphore lives until the next cold miss for that tenant.
+    /// </summary>
+    private void TryTrimBuildLock(Guid tenantId, SemaphoreSlim ours)
+    {
+        // If the pool is still cached, the lock might be needed for a
+        // future eviction-then-rebuild. Don't trim.
+        if (_pools.ContainsKey(tenantId)) return;
+
+        // Another waiter would mean count < 1 — we just released, so a
+        // free semaphore reads CurrentCount == 1.
+        if (ours.CurrentCount != 1) return;
+
+        // ConcurrentDictionary lacks an exact "remove if value matches"
+        // for value-type collisions, but the (Key, Value) overload does
+        // exactly that.
+        if (_buildLocks.TryRemove(new KeyValuePair<Guid, SemaphoreSlim>(tenantId, ours)))
+        {
+            try { ours.Dispose(); }
+            catch
+            {
+                // Disposed by parallel trim — swallow. The semaphore is
+                // already gone from the dictionary either way.
+            }
         }
     }
 
@@ -665,19 +951,30 @@ public sealed class LruPooledTenantConnectionResolver
     /// Callback wired into every master <see cref="TenantConnectionHandle"/>
     /// at creation. Fires when the final sibling lease releases AND the
     /// resolver has marked the entry pending-dispose. Disposes the
-    /// underlying <c>NpgsqlDataSource</c> on a fire-and-forget task so
-    /// the lease-releasing thread doesn't block on Postgres I/O.
+    /// underlying <c>NpgsqlDataSource</c> on a tracked background task
+    /// so the lease-releasing thread doesn't block on Postgres I/O.
+    ///
+    /// <para>Round-2 H5 — every fired task is registered into
+    /// <see cref="_pendingDisposes"/> so <see cref="DisposeAsync"/> can
+    /// await the backlog before the process exits. The
+    /// <see cref="DetailedPoolStats.DeferredDisposeBacklog"/> diagnostic
+    /// surfaces the live count for ops.</para>
     /// </summary>
     private void HandleFinalLeaseReleased(TenantConnectionHandle handle)
     {
         // Capture the data source via the internal accessor — the
         // handle's public DataSource getter throws because the handle
-        // is now disposed. Fire-and-forget: the lease-release path is
-        // synchronous from the consumer's perspective (DisposeAsync
-        // returns ValueTask.CompletedTask) so we move the actual
-        // Postgres-I/O dispose onto a background task.
+        // is now disposed. Move the actual Postgres-I/O dispose onto a
+        // tracked background task so the lease-release path stays
+        // synchronous from the consumer's perspective.
         var ds = handle.UnsafeRawDataSource;
-        _ = Task.Run(async () =>
+        var tenantId = handle.TenantId;
+
+        // Use a unique key (handle reference) so two evictions for the
+        // same tenant in quick succession don't overwrite each other in
+        // the tracking dictionary.
+        var key = Guid.NewGuid();
+        var disposeTask = Task.Run(async () =>
         {
             try
             {
@@ -688,9 +985,14 @@ public sealed class LruPooledTenantConnectionResolver
                 _logger.LogWarning(
                     ex,
                     "tenant.pool.dispose_failed (deferred) for tenant {TenantId}",
-                    handle.TenantId);
+                    tenantId);
+            }
+            finally
+            {
+                _pendingDisposes.TryRemove(key, out _);
             }
         });
+        _pendingDisposes[key] = disposeTask;
     }
 
     private readonly record struct ResolvedTenantRow(byte[] Envelope, int? KekVersion);
