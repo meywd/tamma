@@ -116,6 +116,9 @@ public static class DependencyInjection
         services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
+        // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
+        // Scoped because it leans on ControlPlaneDbContext.
+        services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
 
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();

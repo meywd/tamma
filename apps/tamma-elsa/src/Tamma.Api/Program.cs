@@ -304,6 +304,13 @@ builder.Services.AddSingleton<ILoginLockoutService, LoginLockoutService>();
 // Two-phase delete confirmation (finding 021) + session cookie writer (finding 018).
 builder.Services.AddSingleton<IDeleteConfirmationService, DeleteConfirmationService>();
 builder.Services.AddScoped<ISessionCookieWriter, SessionCookieWriter>();
+// Story 28-R2 / PF-S6 — trusted-proxy resolver. Singleton because the
+// CIDR list is read from configuration once at startup; runtime
+// changes require a restart. Default empty list = trust nothing
+// (matches a directly-exposed Kestrel). Operators behind nginx /
+// traefik populate Tamma:TrustedProxies:Cidrs with the proxy subnet so
+// X-Forwarded-For flows through for audit-event ip resolution.
+builder.Services.AddSingleton<Tamma.Api.Services.Auth.TrustedProxyResolver>();
 // Story 28-R2 follow-up B — admin impersonation. Scoped because it
 // depends on the per-request ControlPlaneDbContext for the audit
 // table inserts/updates and on the singleton IJwtService for token
@@ -1642,6 +1649,7 @@ using (var scope = app.Services.CreateScope())
                     password_reset_tokens, plans,
                     platform_analytics_hourly,
                     platform_api_key_index,
+                    platform_bootstrap,
                     platform_email_outbox, platform_events, platform_queued_tasks,
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,

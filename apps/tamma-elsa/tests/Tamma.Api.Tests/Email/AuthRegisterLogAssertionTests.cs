@@ -75,6 +75,12 @@ public class AuthRegisterLogAssertionTests
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>()))
             .ReturnsAsync(new TenantMembership());
 
+        // PF-S9 — bootstrap claim returns false for this test (any
+        // already-existing user → no platform_admin promotion).
+        var bootstrapRepo = new Mock<IPlatformBootstrapRepository>();
+        bootstrapRepo.Setup(r => r.TryClaimAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
         var txnId = Guid.NewGuid();
         var emailSvc = new Mock<IEmailService>();
         emailSvc.Setup(s => s.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
@@ -96,6 +102,7 @@ public class AuthRegisterLogAssertionTests
         await AuthEndpoints.Register(
             req, userRepo.Object, passwordSvc.Object,
             tenantRepo.Object, membershipRepo.Object,
+            bootstrapRepo.Object,
             emailSvc.Object, config, _loggerFactory);
 
         // ── Assert ──

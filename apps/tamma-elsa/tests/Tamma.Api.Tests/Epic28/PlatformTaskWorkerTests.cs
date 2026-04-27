@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
+using Tamma.Activities.Security;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Data;
 using Tamma.Data.Entities;
@@ -326,5 +327,118 @@ public class PlatformTaskWorkerTests
         row!.Status.Should().Be(
             "pending",
             "RunOnStartup=false must not run the polling loop");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // PF-C12 — IErrorRedactor scrubbing on persisted error column.
+    // ──────────────────────────────────────────────────────────────────────
+
+    private PlatformTaskWorker NewWorkerWithRedactor(
+        IPlatformTaskHandlerRegistry registry,
+        IErrorRedactor redactor,
+        PlatformTaskWorkerOptions? opts = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<ControlPlaneDbContext>(o =>
+            o.UseInMemoryDatabase(_dbName));
+        services.AddScoped<IPlatformQueuedTaskRepository, PlatformQueuedTaskRepository>();
+        services.AddSingleton(registry);
+        services.AddSingleton(redactor);
+        var sp = services.BuildServiceProvider();
+        return new PlatformTaskWorker(
+            sp,
+            Options.Create(opts ?? new PlatformTaskWorkerOptions { RunOnStartup = false }),
+            TimeProvider.System,
+            NullLogger<PlatformTaskWorker>.Instance);
+    }
+
+    [Test]
+    public async Task ProcessOnce_HandlerThrows_BearerToken_RedactedFromError()
+    {
+        // PF-C12 — exception messages with credentials must be scrubbed
+        // by IErrorRedactor before they hit the persisted Error column.
+        // M1 wired the redactor for cleanup; this finding closes the
+        // platform-task gap that was missed.
+        var handler = new CountingHandler("leak.task")
+        {
+            Behavior = (_, _) => throw new InvalidOperationException(
+                "upstream auth failed: Authorization: Bearer eyJhbGc.abc.def-ghi"),
+        };
+        var registry = new PlatformTaskHandlerRegistry(new[] { handler });
+        var id = await EnqueueAsync("leak.task");
+        var worker = NewWorkerWithRedactor(registry, new ErrorRedactor());
+
+        await worker.ProcessOnceAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Error.Should().NotContain("eyJhbGc.abc.def-ghi",
+            "Bearer token must be scrubbed before persistence");
+        row.Error.Should().Contain("[REDACTED]");
+    }
+
+    [Test]
+    public async Task ProcessOnce_HandlerThrows_PostgresDsn_RedactedFromError()
+    {
+        // The fix for PF-S7 + PF-C12 together: a Postgres connection
+        // string in the exception message must be replaced with the
+        // [REDACTED-DSN] marker before it lands in
+        // platform_queued_tasks.Error.
+        var handler = new CountingHandler("dsn.task")
+        {
+            Behavior = (_, _) => throw new InvalidOperationException(
+                "Connection refused: postgresql://tamma:s3cret@db.internal:5432/tamma"),
+        };
+        var registry = new PlatformTaskHandlerRegistry(new[] { handler });
+        var id = await EnqueueAsync("dsn.task");
+        var worker = NewWorkerWithRedactor(registry, new ErrorRedactor());
+
+        await worker.ProcessOnceAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Error.Should().NotContain("s3cret");
+        row.Error.Should().NotContain("tamma:s3cret");
+        row.Error.Should().Contain("[REDACTED-DSN]");
+    }
+
+    [Test]
+    public async Task ProcessOnce_TerminalException_RedactsErrorBeforeDeadLetter()
+    {
+        // Terminal exceptions also flow through the persisted Error
+        // column via DeadLetterAsync — must be redacted too.
+        var handler = new CountingHandler("dead.task")
+        {
+            Behavior = (_, _) => throw new PlatformTaskTerminalException(
+                "auth header was: Bearer leaked.token.here"),
+        };
+        var registry = new PlatformTaskHandlerRegistry(new[] { handler });
+        var id = await EnqueueAsync("dead.task");
+        var worker = NewWorkerWithRedactor(registry, new ErrorRedactor());
+
+        await worker.ProcessOnceAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Status.Should().Be("dead_letter");
+        row.Error.Should().NotContain("leaked.token.here");
+        row.Error.Should().Contain("[REDACTED]");
+    }
+
+    [Test]
+    public async Task ProcessOnce_NoRedactor_StillPersistsError()
+    {
+        // Dev / test rigs that don't wire IErrorRedactor must still
+        // see the original error string — the redactor is optional.
+        var handler = new CountingHandler("no-redactor.task")
+        {
+            Behavior = (_, _) => throw new InvalidOperationException("plain error"),
+        };
+        var registry = new PlatformTaskHandlerRegistry(new[] { handler });
+        var id = await EnqueueAsync("no-redactor.task");
+        var worker = NewWorker(registry); // no redactor in DI
+
+        await worker.ProcessOnceAsync(default);
+
+        var row = await GetAsync(id);
+        row!.Error.Should().Contain("plain error");
     }
 }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Tamma.Activities.Security;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.PlatformTasks;
@@ -161,6 +162,13 @@ public sealed class PlatformTaskWorker : BackgroundService
             .GetRequiredService<IPlatformQueuedTaskRepository>();
         var registry = scope.ServiceProvider
             .GetRequiredService<IPlatformTaskHandlerRegistry>();
+        // PF-C12 — resolve IErrorRedactor per-tick so any Bearer token,
+        // postgres DSN, etc. that lands in `ex.Message` is scrubbed
+        // BEFORE we persist it via FailAsync / DeadLetterAsync /
+        // ParkUnprocessableAsync. The redactor is optional (matches
+        // the rest of the codebase: M1 introduced it as a defensive
+        // dependency, callers tolerate null in dev rigs).
+        var redactor = scope.ServiceProvider.GetService<IErrorRedactor>();
 
         var task = await repo.ReserveNextAsync(_options.WorkerId, ct)
             .ConfigureAwait(false);
@@ -180,9 +188,14 @@ public sealed class PlatformTaskWorker : BackgroundService
                 task.Id,
                 task.Type,
                 task.RetryCount);
+            // No exception material to scrub here, but the literal
+            // string still flows through redactor to keep the surface
+            // uniform.
+            var parkMsg = Redact(redactor,
+                $"No IPlatformTaskHandler registered for task type '{task.Type}'.");
             await repo.ParkUnprocessableAsync(
                 task.Id,
-                $"No IPlatformTaskHandler registered for task type '{task.Type}'.",
+                parkMsg,
                 _options.MaxRetries,
                 ct).ConfigureAwait(false);
             return true;
@@ -203,7 +216,10 @@ public sealed class PlatformTaskWorker : BackgroundService
                 "platform_task.terminal taskId={TaskId} type={TaskType}",
                 task.Id,
                 task.Type);
-            await repo.DeadLetterAsync(task.Id, ex.Message, ct)
+            // PF-C12 — terminal exceptions still flow into the
+            // persisted Error column; redact before persisting.
+            var deadLetterMsg = Redact(redactor, ex.Message);
+            await repo.DeadLetterAsync(task.Id, deadLetterMsg, ct)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -224,14 +240,33 @@ public sealed class PlatformTaskWorker : BackgroundService
                 task.Id,
                 task.Type,
                 task.RetryCount);
+            // PF-C12 — scrub Bearer tokens, postgres DSNs, internal
+            // URLs out of the persisted error column. M1 wired the
+            // redactor into the cleanup path; this finding closes the
+            // platform-task gap that was missed.
+            var failMsg = Redact(redactor, $"{ex.GetType().Name}: {ex.Message}");
             // FailAsync handles retry-vs-dead-letter via maxRetries.
             await repo.FailAsync(
                 task.Id,
-                $"{ex.GetType().Name}: {ex.Message}",
+                failMsg,
                 _options.MaxRetries,
                 ct).ConfigureAwait(false);
         }
         return true;
+    }
+
+    /// <summary>
+    /// Best-effort redaction. Keeps the original string when no
+    /// redactor is wired (dev / test rigs without the DI registration).
+    /// Truncates to 2000 chars after redaction so a downstream
+    /// <c>character varying(2000)</c> column can't reject the row.
+    /// </summary>
+    private static string Redact(IErrorRedactor? redactor, string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return raw;
+        var scrubbed = redactor is null ? raw : redactor.Redact(raw);
+        if (scrubbed.Length > 2000) scrubbed = scrubbed[..2000];
+        return scrubbed;
     }
 
     private async Task MaybeReapAsync(CancellationToken ct)
