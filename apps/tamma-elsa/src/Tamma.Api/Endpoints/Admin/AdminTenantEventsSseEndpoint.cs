@@ -61,6 +61,37 @@ namespace Tamma.Api.Endpoints.Admin;
 ///     propagates normally.</item>
 /// </list>
 /// </para>
+///
+/// <para><b>Resumption (W3C SSE <c>Last-Event-ID</c>)</b>: clients
+/// reconnecting after a transient drop send the
+/// <c>Last-Event-ID</c> request header carrying the <c>id:</c> of the
+/// last frame they observed. The handler resolves that header to a
+/// <c>platform_events.SequenceNumber</c> and resumes the stream
+/// strictly past it, so the client never sees the same row twice.
+///
+/// <list type="bullet">
+///   <item><b>Header absent</b> — start fresh at the current
+///     high-water-mark (existing behaviour).</item>
+///   <item><b>Header present + parses as a Guid + matches a
+///     <c>platform_events</c> row whose <c>TenantId</c> equals the
+///     route's <c>tenantId</c></b> — resume from that row's
+///     <c>SequenceNumber</c>.</item>
+///   <item><b>Header present but malformed / no matching row /
+///     belongs to a different tenant</b> — log debug + fall through
+///     to the high-water-mark. We deliberately do NOT 400 here:
+///     well-behaved <c>EventSource</c> reconnects against a wiped
+///     event store would otherwise be permanently broken, and
+///     defending tenant-isolation by silent fall-through is safer
+///     than handing a probe-friendly oracle to a caller that
+///     somehow snuck a foreign id past auth.</item>
+/// </list>
+///
+/// The wire format remains unchanged — frames keep emitting
+/// <c>id: &lt;platform_events.id&gt;</c> so existing consumers + the
+/// browser's automatic <c>Last-Event-ID</c> machinery interop
+/// transparently. Resumption costs one extra DB round-trip on
+/// reconnect (a single primary-key lookup), which is negligible.
+/// </para>
 /// </summary>
 public static class AdminTenantEventsSseEndpoint
 {
@@ -151,22 +182,28 @@ public static class AdminTenantEventsSseEndpoint
         var serializerOptions = jsonOptions.Value.SerializerOptions
             ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
 
-        // Initial cursor: high-water-mark BEFORE we started streaming.
-        // Anything strictly past this is "new" from the client's POV.
+        // Initial cursor:
+        //   • If the client sent a Last-Event-ID header that resolves
+        //     to one of our rows for this tenant, resume strictly past
+        //     that row's SequenceNumber.
+        //   • Otherwise start at the high-water-mark BEFORE we began
+        //     streaming. Anything strictly past it is "new" from the
+        //     client's POV.
         // M5 — short-lived context; disposed before the loop sleeps.
+        var rawLastEventId = ReadLastEventIdHeader(http);
         long lastSequence;
         await using (var initDb = await dbFactory.CreateDbContextAsync(token).ConfigureAwait(false))
         {
-            lastSequence = await initDb.PlatformEvents
-                .AsNoTracking()
-                .Where(e => e.TenantId == tenantId)
-                .Select(e => (long?)e.SequenceNumber)
-                .MaxAsync(token).ConfigureAwait(false) ?? 0L;
+            lastSequence = await ResolveStartingCursorAsync(
+                initDb, tenantId, rawLastEventId, logger, token).ConfigureAwait(false);
         }
 
         // Send an opening comment so the client immediately knows the
         // stream is live (helpful for spinner UIs that wait on first
-        // byte before rendering "connected").
+        // byte before rendering "connected"). The cursor reflects the
+        // resolved value (post-resumption), not the literal header —
+        // tests + operators reading the wire can see exactly what the
+        // server decided to do with the resumption hint.
         await WriteAsync(http, $": stream-open tenantId={tenantId:D} cursor={lastSequence}\n\n", token);
 
         var lastKeepalive = timeProvider.GetUtcNow();
@@ -402,5 +439,88 @@ public static class AdminTenantEventsSseEndpoint
         var bytes = Encoding.UTF8.GetBytes(frame);
         await http.Response.Body.WriteAsync(bytes, ct).ConfigureAwait(false);
         await http.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the <c>Last-Event-ID</c> header per W3C SSE. Returns the
+    /// raw string (untrimmed wire value, possibly empty) or
+    /// <see langword="null"/> if the header was not sent. The caller
+    /// is responsible for parsing + validating the value.
+    /// </summary>
+    private static string? ReadLastEventIdHeader(HttpContext http)
+    {
+        // ASP.NET's IHeaderDictionary lookup is case-insensitive. The
+        // header may legitimately be empty (clients that lost their
+        // last-id state but kept the auto-reconnect on); treat empty
+        // as "no resumption hint" rather than as an error.
+        if (!http.Request.Headers.TryGetValue("Last-Event-ID", out var values))
+            return null;
+        var raw = values.ToString();
+        return string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+    }
+
+    /// <summary>
+    /// Resolves the starting <c>SequenceNumber</c> for the stream.
+    ///
+    /// <para>If <paramref name="lastEventIdHeader"/> is null/empty,
+    /// blank, malformed, or refers to a row that doesn't exist or
+    /// belongs to a different tenant, returns the current high-water
+    /// mark (start fresh). The "wrong tenant" path is defence-in-depth:
+    /// even though the route policy guards <c>tenantId</c>, we still
+    /// refuse to leak a foreign tenant's <c>SequenceNumber</c> through
+    /// resumption.</para>
+    ///
+    /// <para>If the header resolves cleanly, returns the matched row's
+    /// <c>SequenceNumber</c> — the poll loop emits everything strictly
+    /// past it.</para>
+    /// </summary>
+    internal static async Task<long> ResolveStartingCursorAsync(
+        ControlPlaneDbContext db,
+        Guid tenantId,
+        string? lastEventIdHeader,
+        Microsoft.Extensions.Logging.ILogger logger,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(lastEventIdHeader))
+        {
+            if (Guid.TryParse(lastEventIdHeader, out var lastEventId)
+                && lastEventId != Guid.Empty)
+            {
+                // Single-row PK lookup against platform_events. Bound
+                // by tenantId so a leaked event id from another tenant
+                // can't be used to fast-forward this stream.
+                var resumed = await db.PlatformEvents
+                    .AsNoTracking()
+                    .Where(e => e.Id == lastEventId && e.TenantId == tenantId)
+                    .Select(e => (long?)e.SequenceNumber)
+                    .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+
+                if (resumed.HasValue)
+                {
+                    logger.LogDebug(
+                        "tenant.events_sse.resumed tenantId={TenantId} lastEventId={LastEventId} cursor={Cursor}",
+                        tenantId, lastEventId, resumed.Value);
+                    return resumed.Value;
+                }
+
+                logger.LogDebug(
+                    "tenant.events_sse.resume_unknown_id tenantId={TenantId} lastEventId={LastEventId}",
+                    tenantId, lastEventId);
+            }
+            else
+            {
+                logger.LogDebug(
+                    "tenant.events_sse.resume_invalid_header tenantId={TenantId} headerLength={HeaderLength}",
+                    tenantId, lastEventIdHeader.Length);
+            }
+        }
+
+        // Fall through to the high-water-mark. Anything strictly past
+        // this is "new" from the client's POV.
+        return await db.PlatformEvents
+            .AsNoTracking()
+            .Where(e => e.TenantId == tenantId)
+            .Select(e => (long?)e.SequenceNumber)
+            .MaxAsync(ct).ConfigureAwait(false) ?? 0L;
     }
 }
