@@ -46,7 +46,11 @@ public class SmtpEmailServiceOutboxTests
         _db = _fx.Cp;
         _outbox = new EmailOutboxRepository(_fx.Factory, _db);
         _platformOutbox = new PlatformEmailOutboxRepository(_db);
-        _events = new EventRepository(_fx.Factory, _tenantContext, _db);
+        _events = new EventRepository(
+            _fx.Factory,
+            _tenantContext,
+            _db,
+            new PlatformEventRepository(_db));
 
         // Seed an active tenant so tenant-scope SendAsync calls can route
         // to a real EF in-memory DB.

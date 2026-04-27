@@ -26,7 +26,11 @@ public class PromptEventsServiceTests
     {
         _fx = new InMemoryDbFixture();
         _db = _fx.Cp;
-        _eventRepo = new EventRepository(_fx.Factory, new TenantContext(), _db);
+        _eventRepo = new EventRepository(
+            _fx.Factory,
+            new TenantContext(),
+            _db,
+            new PlatformEventRepository(_db));
         _service = new PromptEventsService(_eventRepo);
     }
 

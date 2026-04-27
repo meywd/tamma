@@ -54,6 +54,7 @@ public class OutboxSmtpSenderTests
         services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
+        services.AddScoped<IPlatformEventRepository, PlatformEventRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
 
         _transport = new Mock<ISmtpTransport>();
@@ -113,9 +114,14 @@ public class OutboxSmtpSenderTests
         => new(new TestTenantDbContextFactory(_tenantOptions),
                new TestControlPlaneDbContext(_cpOptions));
     private EventRepository FreshEvents()
-        => new(new TestTenantDbContextFactory(_tenantOptions),
-               new TenantContext(),
-               new TestControlPlaneDbContext(_cpOptions));
+    {
+        var cp = new TestControlPlaneDbContext(_cpOptions);
+        return new EventRepository(
+            new TestTenantDbContextFactory(_tenantOptions),
+            new TenantContext(),
+            cp,
+            new PlatformEventRepository(cp));
+    }
 
     private static EmailOutboxMessage NewRow(int maxAttempts = 5) => new()
     {
@@ -151,7 +157,11 @@ public class OutboxSmtpSenderTests
         var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull();
 
-        var sent = await FreshEvents().QueryAsync(null, EmailEventTypes.Sent, null, 10);
+        // Story 28-1 PR C: cross-tenant QueryAsync(null, ...) returns only
+        // platform-scope events (TenantId == null) per Decision #2. Tenant-
+        // scoped Sent events (TenantId = row.TenantId) live in the per-tenant
+        // domain_events stream and are reached via QueryAsync(TestTenantId, ...).
+        var sent = await FreshEvents().QueryAsync(TestTenantId, EmailEventTypes.Sent, null, 10);
         sent.Should().ContainSingle();
         JsonSerializer.Deserialize<Dictionary<string, string?>>(sent[0].Tags)!["txn_id"]
             .Should().Be(enq.Id.ToString());
@@ -232,7 +242,10 @@ public class OutboxSmtpSenderTests
         var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull("terminal failure purges the row — event store holds the audit");
 
-        var failed = await FreshEvents().QueryAsync(null, EmailEventTypes.Failed, null, 10);
+        // Story 28-1 PR C: see comment in EmitsSentEvent — Failed event
+        // emitted by EmitFailedAsync carries TenantId = row.TenantId, so
+        // it lives on the per-tenant stream, not the cross-tenant null half.
+        var failed = await FreshEvents().QueryAsync(TestTenantId, EmailEventTypes.Failed, null, 10);
         failed.Should().ContainSingle();
         var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(failed[0].Data)!;
         data["provider"].GetString().Should().Be("smtp");
@@ -277,7 +290,13 @@ public class OutboxSmtpSenderTests
 
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var all = await FreshEvents().QueryAsync(null, null, null, 20);
+        // Story 28-1 PR C: query the tenant-scoped path (TestTenantId)
+        // because the Sent event from EmitSentAsync sets TenantId = row.TenantId.
+        // The previous QueryAsync(null, ...) call vacuously returned [] after
+        // PR C tightened the legacy UNION half, silently passing this test
+        // without exercising the no-PII-leak invariant.
+        var all = await FreshEvents().QueryAsync(TestTenantId, null, null, 20);
+        all.Should().NotBeEmpty("PII-leak check requires at least one event to inspect");
         foreach (var evt in all)
         {
             var combined = evt.Tags + evt.Data;

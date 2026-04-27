@@ -67,6 +67,22 @@ public sealed class AlertRuleEvaluatorOptions
 /// lifecycle events). When Story 28-1's db-per-tenant rollout
 /// completes, the evaluator expands to poll per-tenant DBs through
 /// <c>ITenantDbContextFactory</c>; no rule-engine logic changes.</para>
+///
+/// <para><b>Story 28-1 PR C audit</b>: the <c>cp.DomainEvents</c> scan
+/// at <see cref="FetchBatchAsync"/> is a cross-tenant tenant-scoped
+/// scan today — built-in alert rules (BUDGET.EXHAUSTED,
+/// AGENT.DISPATCH.FAILED, WORKFLOW.RETRY_EXCEEDED, etc.) subscribe to
+/// tenant-scoped events. Per Decision #2
+/// (<c>.dev/decisions/story-28-1-design-calls.md</c>) the evaluator's
+/// final shape is a per-tenant fan-out via <c>ITenantDbContextFactory</c>
+/// driven off the LRU pool's known-warm tenants. That cascade lands
+/// with PR D — when the entity move forces the issue. The current
+/// scan stays in place under PR C: <c>cp.DomainEvents</c> still
+/// exists in PR C-and-before so rules keep firing against today's
+/// shared-DB topology with no behavioural change. PR D will replace
+/// the line with the fan-out implementation as part of the entity
+/// move; the rule pipeline downstream is independent of the scan
+/// shape so the migration is contained in <c>FetchBatchAsync</c>.</para>
 /// </summary>
 public sealed class AlertRuleEvaluator : BackgroundService
 {
@@ -427,7 +443,15 @@ public sealed class AlertRuleEvaluator : BackgroundService
         // tracks its own cursor because their sequences are
         // independent — there is no global ordering between
         // domain_events and platform_events.
-
+        //
+        // Story 28-1 PR C — the DomainEvents scan below is a
+        // cross-tenant tenant-scoped scan that PR D rewires into a
+        // per-tenant fan-out via ITenantDbContextFactory (see class
+        // doc comment). PR C deliberately leaves the line in place:
+        // cp.DomainEvents still exists today, the scan still produces
+        // the right rows, and replacing the scan + the cursor model
+        // is non-trivial enough that bundling it with the entity move
+        // (PR D) keeps the diff reviewable.
         var domain = await db.DomainEvents.AsNoTracking()
             .IgnoreQueryFilters()
             .Where(e => e.SequenceNumber > cursor.LastDomainSequenceNumber)

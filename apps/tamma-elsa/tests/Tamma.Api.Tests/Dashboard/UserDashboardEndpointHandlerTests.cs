@@ -7,6 +7,7 @@ using NUnit.Framework;
 using Tamma.Api.Authorization;
 using Tamma.Api.Endpoints;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -35,6 +36,7 @@ public class UserDashboardEndpointHandlerTests
     private IUserRepository _userRepo = null!;
     private IEventRepository _events = null!;
     private IWorkflowRepository _workflowRepo = null!;
+    private ITenantDbContextFactory _tenantDbFactory = null!;
 
     [SetUp]
     public async Task Setup()
@@ -47,6 +49,7 @@ public class UserDashboardEndpointHandlerTests
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();
         _events = _scope.ServiceProvider.GetRequiredService<IEventRepository>();
         _workflowRepo = _scope.ServiceProvider.GetRequiredService<IWorkflowRepository>();
+        _tenantDbFactory = _scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
     }
 
     [TearDown]
@@ -76,7 +79,7 @@ public class UserDashboardEndpointHandlerTests
         await SeedInstances(defB.Id, tenantB, 4);
 
         var result = await UserDashboardEndpoints.GetOrgSummary(
-            tenantA, _db, _events, _workflowRepo);
+            tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));
         status.Should().Be(StatusCodes.Status200OK);
 
@@ -95,7 +98,7 @@ public class UserDashboardEndpointHandlerTests
         await SeedEvents(tenantA, 25);
 
         var result = await UserDashboardEndpoints.GetOrgSummary(
-            tenantA, _db, _events, _workflowRepo);
+            tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));
         status.Should().Be(StatusCodes.Status200OK);
 
@@ -122,7 +125,7 @@ public class UserDashboardEndpointHandlerTests
         var (tenantA, _, _) = await SeedTenantWithOwnerAndMember("empty");
 
         var result = await UserDashboardEndpoints.GetOrgSummary(
-            tenantA, _db, _events, _workflowRepo);
+            tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));
         status.Should().Be(StatusCodes.Status200OK);
 
@@ -219,7 +222,7 @@ public class UserDashboardEndpointHandlerTests
         await SeedInstance(def.Id, tenantA, "failed", TimeSpan.FromMinutes(1));
         await SeedInstance(def.Id, tenantA, "running", null);
 
-        var result = await UserDashboardEndpoints.GetStats(tenantA, _db);
+        var result = await UserDashboardEndpoints.GetStats(tenantA, _tenantDbFactory);
         var (status, payload) = (await ExecuteAndCapture(result));
         status.Should().Be(StatusCodes.Status200OK);
 
@@ -254,7 +257,7 @@ public class UserDashboardEndpointHandlerTests
         await SeedInstance(defB.Id, tenantB, "completed", TimeSpan.FromMinutes(2));
         await SeedInstance(defB.Id, tenantB, "failed", TimeSpan.FromMinutes(2));
 
-        var result = await UserDashboardEndpoints.GetStats(tenantA, _db);
+        var result = await UserDashboardEndpoints.GetStats(tenantA, _tenantDbFactory);
         var (_, payload) = await ExecuteAndCapture(result);
         JsonDocument.Parse(payload).RootElement.GetProperty("totalRuns").GetInt32().Should().Be(1);
     }
@@ -264,7 +267,7 @@ public class UserDashboardEndpointHandlerTests
     {
         var (tenantA, _, _) = await SeedTenantWithOwnerAndMember("no-runs");
 
-        var result = await UserDashboardEndpoints.GetStats(tenantA, _db);
+        var result = await UserDashboardEndpoints.GetStats(tenantA, _tenantDbFactory);
         var (_, payload) = await ExecuteAndCapture(result);
 
         var root = JsonDocument.Parse(payload).RootElement;
