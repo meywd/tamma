@@ -18,6 +18,20 @@ public static class SettingsEndpoints
 
     public static async Task<IResult> UpdateAgentsConfig(UpdateAgentsConfigRequest req, IAgentConfigRepository configRepo, ITenantContext tc)
     {
+        // Story 28-1 PR A (Decision #1): platform-default writes are
+        // immutable from this surface — defaults live in code now. Reject
+        // explicitly instead of returning a misleading "updated" response
+        // that silently dropped the write.
+        if (tc.TenantId is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "no_tenant_context",
+                detail = "PUT /api/config/agents requires tenant context; " +
+                         "platform defaults are immutable. Edit " +
+                         "DefaultAgentConfig.ForRole in code instead.",
+            });
+        }
         await configRepo.UpsertAsync(tc.TenantId, JsonSerializer.Serialize(req.Config), null);
         return Results.Ok(new { message = "Agent config updated" });
     }
@@ -30,6 +44,19 @@ public static class SettingsEndpoints
 
     public static async Task<IResult> UpdateSecurityConfig(UpdateSecurityConfigRequest req, IAgentConfigRepository configRepo, ITenantContext tc)
     {
+        // Story 28-1 PR A: same no-tenant-context rejection contract as
+        // UpdateAgentsConfig — both surfaces share the agent_configs row
+        // shape so they share the same platform-defaults-are-code rule.
+        if (tc.TenantId is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "no_tenant_context",
+                detail = "PUT /api/config/security requires tenant context; " +
+                         "platform defaults are immutable. Edit " +
+                         "DefaultAgentConfig.ForRole in code instead.",
+            });
+        }
         await configRepo.UpsertAsync(tc.TenantId, JsonSerializer.Serialize(req.Config), null);
         return Results.Ok(new { message = "Security config updated" });
     }
@@ -98,6 +125,21 @@ public static class SettingsEndpoints
             {
                 return Results.BadRequest(new { error = $"Rule '{rule.Name}' pattern invalid: {ex.Message}" });
             }
+        }
+
+        // Story 28-1 PR A: platform-default rule writes are no longer
+        // accepted — the canonical default rule list lives in
+        // SystemSanitizationRules. Returning 200 here would lie about the
+        // rules taking effect; the repo would silently drop them.
+        if (tc.TenantId is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "no_tenant_context",
+                detail = "PUT /api/config/sanitize/rules requires tenant " +
+                         "context; platform defaults are immutable. Edit " +
+                         "SystemSanitizationRules.DefaultRules in code instead.",
+            });
         }
 
         await repo.ReplaceRulesAsync(tc.TenantId, rules);

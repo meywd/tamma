@@ -313,6 +313,68 @@ public class PlatformDefaultRowRepositoryTests
         raw.Rules.Should().Contain("redact-secret");
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    // Defaults.Snapshot() — fresh-clone-per-call invariant
+    //
+    // PR #338 wave-4 review (LOW upgraded to required): the Defaults classes
+    // promise a fresh, mutable instance on every call. A future contributor
+    // optimising to a cached singleton would silently break thread safety
+    // and let one caller's mutation leak into the next caller's view of the
+    // platform default. These tests pin that contract.
+    // ════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public void AgentConfigDefaults_Snapshot_ReturnsFreshInstancePerCall()
+    {
+        var a = AgentConfigDefaults.Snapshot();
+        var b = AgentConfigDefaults.Snapshot();
+
+        a.Should().NotBeSameAs(b);
+
+        // Mutating one snapshot must NOT leak into the next snapshot.
+        a.Config = "{\"poison\":true}";
+        a.Version = 999;
+
+        var c = AgentConfigDefaults.Snapshot();
+        c.Config.Should().Be(AgentConfigDefaults.ConfigJson);
+        c.Version.Should().Be(0);
+    }
+
+    [Test]
+    public void BudgetConfigDefaults_Snapshot_ReturnsFreshInstancePerCall()
+    {
+        var a = BudgetConfigDefaults.Snapshot("acct-1");
+        var b = BudgetConfigDefaults.Snapshot("acct-1");
+
+        a.Should().NotBeSameAs(b);
+
+        // Mutating one snapshot must NOT leak across calls.
+        a.LimitUsd = 9_999m;
+        a.AlertThreshold = 0.01;
+        a.PeriodDays = 1;
+
+        var c = BudgetConfigDefaults.Snapshot("acct-1");
+        c.LimitUsd.Should().Be(BudgetConfigDefaults.DefaultLimitUsd);
+        c.AlertThreshold.Should().Be(BudgetConfigDefaults.DefaultAlertThreshold);
+        c.PeriodDays.Should().Be(BudgetConfigDefaults.DefaultPeriodDays);
+    }
+
+    [Test]
+    public void SanitizationRuleDefaults_Snapshot_ReturnsFreshInstancePerCall()
+    {
+        const string json = "[{\"name\":\"x\",\"pattern\":\"y\"}]";
+        var a = SanitizationRuleDefaults.Snapshot(json);
+        var b = SanitizationRuleDefaults.Snapshot(json);
+
+        a.Should().NotBeSameAs(b);
+
+        // Mutating one snapshot must NOT leak across calls.
+        a.Rules = "[{\"name\":\"poison\",\"pattern\":\"z\"}]";
+
+        var c = SanitizationRuleDefaults.Snapshot(json);
+        c.Rules.Should().Be(json);
+    }
+
     // ────────────────────────────────────────────────────────────────────
     // helpers
     // ────────────────────────────────────────────────────────────────────

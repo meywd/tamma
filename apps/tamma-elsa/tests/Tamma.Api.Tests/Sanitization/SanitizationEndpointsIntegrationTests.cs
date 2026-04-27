@@ -125,13 +125,13 @@ public class SanitizationEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task UpdateSanitizationRules_PlatformScope_ViaEndpoint_DoesNotShadowDefaults()
+    public async Task UpdateSanitizationRules_PlatformScope_ViaEndpoint_Returns400_AndDefaultsStayIntact()
     {
-        // Story 28-1 PR A: PUT /api/config/sanitize/rules without a tenant
-        // context (TenantId == null) is a no-op write — defaults stay intact
-        // and the subsequent /sanitize call still uses the canonical default
-        // rule set. Tenant-scoped overrides are still supported via the same
-        // endpoint when an authenticated tenant request is in flight.
+        // Story 28-1 PR A + PR #338 wave-4 review fix: PUT
+        // /api/config/sanitize/rules without a tenant context now returns
+        // 400 (instead of a misleading 200) so callers know the rules did
+        // NOT take effect. Defaults remain code-resident and the
+        // subsequent /sanitize call still uses the canonical default set.
         var rule = new
         {
             name = "internal-id",
@@ -145,10 +145,12 @@ public class SanitizationEndpointsIntegrationTests
         var putResp = await _client.PutAsJsonAsync(
             "/api/config/sanitize/rules",
             new { rules = new[] { rule } });
-        // The endpoint still answers 200 — it accepted the request shape — but
-        // the underlying repo dropped the write because tenantContext.TenantId
-        // is null. Default rules keep applying afterwards.
-        putResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        // Honest response: the endpoint rejects the no-tenant-context write
+        // explicitly so admins don't think their rules are live.
+        putResp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var putBody = await putResp.Content.ReadFromJsonAsync<JsonElement>();
+        putBody.GetProperty("error").GetString().Should().Be("no_tenant_context");
 
         var saniResp = await _client.PostAsJsonAsync(
             "/api/config/sanitize",
@@ -158,7 +160,8 @@ public class SanitizationEndpointsIntegrationTests
         var body = await saniResp.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(body);
         // INT-9999 is NOT redacted because the platform-default override was
-        // discarded. The body comes back unchanged through the default rules.
+        // never persisted. The body comes back unchanged through the
+        // default rules.
         doc.RootElement.GetProperty("sanitizedText").GetString()
             .Should().Be("ticket INT-9999 is urgent");
     }
