@@ -4,12 +4,14 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Middleware;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -52,6 +54,11 @@ public class TenantContextMiddlewareTests
     private Mock<IUserRepository> _userRepo = null!;
     private TestTenantContext _tenantContext = null!;
     private bool _nextCalled;
+    // Story 28-8 H7 — middleware now also takes the status cache and a
+    // CP DbContext so it can gate non-active tenants with the proper
+    // 503 / 424 / 410 / 404 status code instead of a blanket 401.
+    private RecordingStatusCache _statusCache = null!;
+    private ControlPlaneDbContext _controlPlane = null!;
 
     [SetUp]
     public void Setup()
@@ -61,7 +68,17 @@ public class TenantContextMiddlewareTests
         _userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
         _tenantContext = new TestTenantContext();
         _nextCalled = false;
+        _statusCache = new RecordingStatusCache();
+        var cpOpts = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _controlPlane = new ControlPlaneDbContext(cpOpts);
     }
+
+    [TearDown]
+    public void TearDown() => _controlPlane.Dispose();
 
     /// <summary>
     /// Builds a default-bypass <see cref="HttpContext"/> with a memory
@@ -116,7 +133,34 @@ public class TenantContextMiddlewareTests
             _tenantRepo.Object,
             _userRepo.Object,
             _resolver.Object,
+            _statusCache,
+            _controlPlane,
             NullLogger<TenantContextMiddleware>.Instance);
+    }
+
+    /// <summary>
+    /// Seed a tenant row into the in-memory CP context so the middleware's
+    /// cold-path Status read returns the configured value. The middleware
+    /// reads <c>EF.Property&lt;string?&gt;(t, "Status")</c>; setting that
+    /// shadow property requires the InMemory provider's
+    /// <c>EntityEntry.Property("Status")</c> hook.
+    /// </summary>
+    private async Task SeedTenantStatusAsync(Guid tenantId, string? status, bool deleted = false)
+    {
+        var tenant = new Tamma.Data.Entities.Tenant
+        {
+            Id = tenantId,
+            Name = $"tenant-{tenantId:N}",
+            Slug = $"slug-{tenantId:N}",
+            Type = "personal",
+            Plan = "free",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            DeletedAt = deleted ? DateTime.UtcNow : null,
+        };
+        var entry = _controlPlane.Tenants.Add(tenant);
+        entry.Property("Status").CurrentValue = status;
+        await _controlPlane.SaveChangesAsync();
     }
 
     private static async Task<JsonDocument> ReadJsonBodyAsync(HttpContext ctx)
@@ -195,6 +239,10 @@ public class TenantContextMiddlewareTests
     public async Task JwtActiveTenantClaim_BindsContextAndWarmsPool()
     {
         var tenantId = Guid.NewGuid();
+        // H7 — middleware now consults the status cache before the
+        // resolver. Pre-seed "active" so the test stays focused on the
+        // resolver contract rather than the CP-read path.
+        _statusCache.Entries[tenantId] = "active";
         var ds = StubDataSource();
         _resolver
             .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
@@ -219,6 +267,7 @@ public class TenantContextMiddlewareTests
     public async Task LegacyTenantIdClaim_StillResolves_WhenActiveTenantIdAbsent()
     {
         var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "active";
         var ds = StubDataSource();
         _resolver
             .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
@@ -243,6 +292,7 @@ public class TenantContextMiddlewareTests
         // bearer claims).
         var apiKeyTenant = Guid.NewGuid();
         var jwtTenant = Guid.NewGuid();
+        _statusCache.Entries[apiKeyTenant] = "active";
         var ds = StubDataSource();
         _resolver
             .Setup(r => r.GetDataSourceAsync(apiKeyTenant, It.IsAny<CancellationToken>()))
@@ -273,6 +323,7 @@ public class TenantContextMiddlewareTests
     {
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "active";
         _userRepo
             .Setup(r => r.GetByIdAsync(userId))
             .ReturnsAsync(new User
@@ -305,12 +356,12 @@ public class TenantContextMiddlewareTests
     // ─────────────────────────────────────────────────────────────────────
 
     [Test]
-    public async Task TenantNotFound_Returns401_AndAbortsPipeline()
+    public async Task TenantNotFound_Returns404_AndAbortsPipeline()
     {
+        // H7 — when the cold-CP read finds no row at all (stale JWT
+        // pointing at a vanished tenant), the middleware now returns
+        // 404 + tenant_not_found instead of a generic 401.
         var tenantId = Guid.NewGuid();
-        _resolver
-            .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
-            .Throws(new TenantNotFoundException(tenantId));
 
         var ctx = BuildContext("/api/v1/issues", claims: new[]
         {
@@ -320,24 +371,27 @@ public class TenantContextMiddlewareTests
         await InvokeAsync(ctx);
 
         _nextCalled.Should().BeFalse("a missing tenant must short-circuit the pipeline");
-        ctx.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
         ctx.Response.ContentType.Should().StartWith("application/json");
 
         var body = await ReadJsonBodyAsync(ctx);
-        body.RootElement.GetProperty("error").GetProperty("code").GetString()
+        body.RootElement.GetProperty("error").GetString()
             .Should().Be("tenant_not_found");
 
         _tenantContext.TenantId.Should().BeNull(
             "context must not be bound when tenant resolution failed");
+
+        // Cold-path also caches the not-found marker so a flood of
+        // probes from the same stale token doesn't hammer CP.
+        _statusCache.Entries.Should().ContainKey(tenantId);
     }
 
     [Test]
-    public async Task TenantNotProvisioned_Returns401_AndAbortsPipeline()
+    public async Task TenantStatusProvisioning_Returns503_FromColdPathRead()
     {
+        // H7 — provisioning state surfaces as 503 + Retry-After: 5.
         var tenantId = Guid.NewGuid();
-        _resolver
-            .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
-            .Throws(new TenantNotProvisionedException(tenantId, "provisioning"));
+        await SeedTenantStatusAsync(tenantId, "provisioning");
 
         var ctx = BuildContext("/api/v1/issues", claims: new[]
         {
@@ -347,10 +401,111 @@ public class TenantContextMiddlewareTests
         await InvokeAsync(ctx);
 
         _nextCalled.Should().BeFalse();
-        ctx.Response.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ctx.Response.Headers["Retry-After"].ToString().Should().Be("5");
+
         var body = await ReadJsonBodyAsync(ctx);
-        body.RootElement.GetProperty("error").GetProperty("code").GetString()
-            .Should().Be("tenant_not_provisioned");
+        body.RootElement.GetProperty("error").GetString()
+            .Should().Be("tenant_not_ready");
+        body.RootElement.GetProperty("status").GetString()
+            .Should().Be("provisioning");
+
+        // Status cache populated so the next request short-circuits
+        // BEFORE re-reading CP.
+        _statusCache.Entries[tenantId].Should().Be("provisioning");
+        _resolver.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task TenantStatusFailed_Returns424_FromColdPathRead()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedTenantStatusAsync(tenantId, "failed");
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+
+        await InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status424FailedDependency);
+        var body = await ReadJsonBodyAsync(ctx);
+        body.RootElement.GetProperty("error").GetString()
+            .Should().Be("tenant_provisioning_failed");
+    }
+
+    [Test]
+    public async Task TenantStatusDeleted_Returns410_FromColdPathRead()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedTenantStatusAsync(tenantId, "deleted", deleted: true);
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+
+        await InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status410Gone);
+        var body = await ReadJsonBodyAsync(ctx);
+        body.RootElement.GetProperty("error").GetString()
+            .Should().Be("tenant_deleted");
+    }
+
+    [Test]
+    public async Task CachedNonActiveStatus_Returns503_WithoutCpReadOrResolverCall()
+    {
+        // H7 — the whole point of the cache: a hit for a non-active
+        // value means we skip both the CP read AND the resolver call.
+        var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "deleting";
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+
+        await InvokeAsync(ctx);
+
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        var body = await ReadJsonBodyAsync(ctx);
+        body.RootElement.GetProperty("error").GetString()
+            .Should().Be("tenant_deleting");
+
+        _resolver.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task CachedActiveStatus_DoesNotQueryCp_ButCallsResolver()
+    {
+        // H7 — cache hit + active value: skip the CP read but proceed
+        // to the resolver warm-up (which is the per-tenant pool).
+        var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "active";
+        var ds = StubDataSource();
+        _resolver
+            .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<NpgsqlDataSource>(ds));
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+
+        await InvokeAsync(ctx);
+
+        _nextCalled.Should().BeTrue();
+        _tenantContext.TenantId.Should().Be(tenantId);
+        // Cold-CP-read marker — _statusCache.Reads only records TryGet
+        // calls, so the entry stays unchanged after a hit.
+        _statusCache.Reads.Should().Contain(tenantId);
+        _statusCache.Entries[tenantId].Should().Be("active",
+            "cache value must not be re-written on a hot-path hit");
+        _resolver.Verify(
+            r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -361,6 +516,7 @@ public class TenantContextMiddlewareTests
     public async Task ResolvedTenant_AddsBaggageToCurrentActivity()
     {
         var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "active";
         var ds = StubDataSource();
         _resolver
             .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
@@ -408,6 +564,7 @@ public class TenantContextMiddlewareTests
         Activity.Current.Should().BeNull();
 
         var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "active";
         var ds = StubDataSource();
         _resolver
             .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))

@@ -24,4 +24,22 @@ public class PlatformQueuedTask
     public DateTime? ClaimedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Round-2 M8 — id of the worker that currently holds the row's
+    /// reservation. Set by <c>ReserveNextAsync(workerId, ...)</c>;
+    /// cleared when the row returns to <c>pending</c> (failure retry,
+    /// reaper recovery). NULL on rows that have never been claimed.
+    /// </summary>
+    public string? ClaimedBy { get; set; }
+
+    /// <summary>
+    /// Round-2 H8 — set when a poll observes the row but no
+    /// <c>IPlatformTaskHandler</c> is registered for its
+    /// <see cref="Type"/>. Increments the retry budget without flipping
+    /// to <c>dead_letter</c>; the next deploy that registers the
+    /// handler can pick the row up. Falls through to <c>dead_letter</c>
+    /// only after <c>RetryCount</c> reaches the configured ceiling.
+    /// </summary>
+    public DateTime? UnprocessableAt { get; set; }
 }

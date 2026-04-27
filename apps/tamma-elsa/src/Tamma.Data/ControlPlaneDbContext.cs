@@ -69,6 +69,38 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<PlatformApiKeyIndex> PlatformApiKeyIndex => Set<PlatformApiKeyIndex>();
 
+    /// <summary>
+    /// R2-H14: durable record of in-flight + completed KEK rotations.
+    /// The <c>StagedSecondaryProtected</c> column lets a coordinator
+    /// recover from a process crash mid-rotation without losing the
+    /// new KEK material.
+    /// </summary>
+    public DbSet<KekRotation> KekRotations => Set<KekRotation>();
+
+    /// <summary>
+    /// Story 28-R2 follow-up B — SOC2 / ISO 27001 audit table for
+    /// platform-admin impersonation sessions. One row per session
+    /// (start = INSERT; end = UPDATE setting <c>EndedAt</c> /
+    /// <c>EndedReason</c>). The active subset is indexed via a
+    /// partial index on <c>EndedAt IS NULL</c> for cheap
+    /// incident-response queries. See
+    /// <see cref="Entities.AdminImpersonation"/> for column semantics.
+    /// </summary>
+    public DbSet<AdminImpersonation> AdminImpersonations =>
+        Set<AdminImpersonation>();
+
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — single-row sentinel that pins which user
+    /// owns the bootstrap superadmin promotion. <c>CHECK (Id = 1)</c>
+    /// + unique primary key force the schema to admit at most one row,
+    /// closing the previous TOCTOU race where concurrent
+    /// first-user-ever registrations both observed
+    /// <c>existingUserCount == 0</c> and both received
+    /// <c>platform_admin</c>. See <see cref="Entities.PlatformBootstrap"/>.
+    /// </summary>
+    public DbSet<PlatformBootstrap> PlatformBootstraps =>
+        Set<PlatformBootstrap>();
+
     // ── Story 5.6 + 1.5-37 (Wave C.1) — alert system ──
     //
     // The three alert tables are CP-resident: alert rules + channels
@@ -167,6 +199,86 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlertDeliveryAttempts(modelBuilder);
         ConfigureAlertRules(modelBuilder);
         ConfigureAlertEvaluatorCursor(modelBuilder);
+        ConfigureKekRotations(modelBuilder);
+        ConfigurePlatformBootstrap(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — single-row <c>platform_bootstrap</c>
+    /// sentinel. Schema-level guard against bootstrap-superadmin
+    /// race; <see cref="Entities.PlatformBootstrap"/> for semantics.
+    /// </summary>
+    private static void ConfigurePlatformBootstrap(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformBootstrap>(entity =>
+        {
+            entity.ToTable("platform_bootstrap", t =>
+            {
+                // Mathematical impossibility of more than one row: PK
+                // forces uniqueness, CHECK forces the value to be 1.
+                // Two concurrent inserts → exactly one wins, the loser
+                // gets a UNIQUE violation that the application catches
+                // and falls back to a normal "user" platform role.
+                t.HasCheckConstraint(
+                    "ck_platform_bootstrap_singleton",
+                    "\"Id\" = 1");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.ClaimedAt)
+                .HasDefaultValueSql("now()");
+
+            // FK to users — RESTRICT so the bootstrap admin can't be
+            // soft-removed without explicitly clearing the sentinel.
+            // (Soft-delete is a hard-delete-equivalent for users;
+            // hard-delete on users is forbidden by app code, so this
+            // FK is effectively a tripwire.)
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    /// <summary>
+    /// R2-H14 — <c>kek_rotations</c> table. One row per rotation; the
+    /// active row is identified by a partial unique index on
+    /// <c>Status IN ('pending', 'running')</c>. The
+    /// <c>StagedSecondaryProtected</c> column is encrypted by the OLD
+    /// primary KEK at write time so the row is always readable after a
+    /// restart.
+    /// </summary>
+    private static void ConfigureKekRotations(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<KekRotation>(entity =>
+        {
+            entity.ToTable("kek_rotations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_kek_rotations_status",
+                    "\"Status\" IN ('pending','running','completed','failed','cancelled')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.VersionOld).IsRequired();
+            entity.Property(e => e.VersionNew).IsRequired();
+            entity.Property(e => e.StagedSecondaryProtected).HasColumnType("bytea");
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.Property(e => e.StartedAt);
+
+            // Hot read: status transitions on the in-flight row. Partial
+            // index keeps the index tight (most rows are completed/failed).
+            entity.HasIndex(e => e.Status)
+                .HasDatabaseName("IX_kek_rotations_Status")
+                .HasFilter("\"Status\" IN ('pending','running')");
+
+            // Reverse-chronological list for the operator dashboard.
+            entity.HasIndex(e => e.StartedAt)
+                .HasDatabaseName("IX_kek_rotations_StartedAt")
+                .IsDescending(true);
+        });
     }
 
     /// <summary>

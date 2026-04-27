@@ -3,6 +3,7 @@ using Elsa.EntityFrameworkCore.Extensions;
 using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.EntityFrameworkCore.Modules.Runtime;
 using Elsa.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
@@ -129,6 +130,33 @@ builder.Services.AddOptions<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupSche
 Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
     .TryAddSingleton<TimeProvider>(builder.Services, _ => TimeProvider.System);
 builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler>();
+
+// Round-2 review M3 — bridge that polls platform_events for new
+// TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
+// event so CleanUpFailedTenantWorkflow's starter trigger fires. The
+// bridge needs a ControlPlaneDbContext to read the durable event log;
+// if ConnectionStrings:ControlPlane is unset (dev / single-process
+// composition) the registration short-circuits and the bridge logs a
+// disabled message at startup. ConnectionStrings:DefaultConnection is
+// the fallback so a single-DB dev composition still wires the bridge.
+var cpConnection = builder.Configuration.GetConnectionString("ControlPlane")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+if (!string.IsNullOrWhiteSpace(cpConnection))
+{
+    builder.Services.AddDbContextFactory<Tamma.Data.ControlPlaneDbContext>(opts =>
+        opts.UseNpgsql(cpConnection, npgsql =>
+            npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
+    builder.Services.AddScoped(sp =>
+        sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<
+            Tamma.Data.ControlPlaneDbContext>>().CreateDbContext());
+
+    builder.Services.AddOptions<Tamma.ElsaServer.Workflows.TenantCleanupRequestedTriggerOptions>()
+        .Configure(opts =>
+            builder.Configuration
+                .GetSection(Tamma.ElsaServer.Workflows.TenantCleanupRequestedTriggerOptions.SectionName)
+                .Bind(opts));
+    builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantCleanupRequestedTrigger>();
+}
 
 // CORS for Tamma API and Dashboard
 builder.Services.AddCors(options =>

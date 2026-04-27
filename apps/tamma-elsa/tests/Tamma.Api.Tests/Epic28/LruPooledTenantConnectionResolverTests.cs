@@ -415,7 +415,114 @@ public class LruPooledTenantConnectionResolverTests
         cs.Should().Contain("Keepalive=41");
     }
 
+    // ── H12: status-probe-driven cold-path forcing ────────────────────
+
+    private LruPooledTenantConnectionResolver CreateResolverWithProbe(
+        ITenantStatusProbe probe,
+        TenantConnectionPoolOptions? options = null)
+    {
+        return new LruPooledTenantConnectionResolver(
+            _factory,
+            _decryptor,
+            _metrics,
+            Options.Create(options ?? new TenantConnectionPoolOptions()),
+            NullLogger<LruPooledTenantConnectionResolver>.Instance,
+            probe);
+    }
+
+    [Test]
+    public async Task HotPath_Status_Probe_Active_Returns_Cached_Pool()
+    {
+        // Probe says "active" → fast path serves the warm pool, no
+        // extra decryptor call.
+        var tenantId = await SeedActiveTenantAsync();
+        var probe = new RecordingProbe();
+        await using var resolver = CreateResolverWithProbe(probe);
+
+        await resolver.GetDataSourceAsync(tenantId);
+        var callsAfterFirst = _decryptor.Calls;
+
+        // Set the probe to "active" — hot path should bypass cold path.
+        probe.Set(tenantId, "active");
+        await resolver.GetDataSourceAsync(tenantId);
+
+        _decryptor.Calls.Should().Be(callsAfterFirst,
+            "active probe value must let the resolver serve the cache");
+        _metrics.HitsTotal.Should().BeGreaterThan(0);
+    }
+
+    [Test]
+    public async Task HotPath_Status_Probe_NonActive_Forces_Cold_Refresh_With_Exception()
+    {
+        // Tenant currently 'active'. Build the warm pool. Then flip CP
+        // to 'provisioning' AND set the probe to 'provisioning' so the
+        // hot path detects the flip + forces a cold CP read which
+        // throws TenantNotProvisionedException.
+        var tenantId = await SeedActiveTenantAsync();
+        var probe = new RecordingProbe();
+        await using var resolver = CreateResolverWithProbe(probe);
+
+        // Warm the pool while the row is active.
+        await resolver.GetDataSourceAsync(tenantId);
+
+        // Mutate CP — Status flipped to provisioning.
+        await using (var ctx = await _factory.CreateDbContextAsync())
+        {
+            var tenant = await ctx.Tenants.FirstAsync(t => t.Id == tenantId);
+            ctx.Entry(tenant).Property("Status").CurrentValue = "provisioning";
+            await ctx.SaveChangesAsync();
+        }
+        // Probe (admin endpoint just invalidated/set the cache).
+        probe.Set(tenantId, "provisioning");
+
+        // Next call must force the cold path → CP read raises the
+        // structured non-provisioned exception.
+        var act = async () => await resolver.GetDataSourceAsync(tenantId);
+        await act.Should().ThrowAsync<TenantNotProvisionedException>()
+            .Where(ex => ex.Status == "provisioning");
+    }
+
+    [Test]
+    public async Task HotPath_Status_Probe_NoEntry_KeepsFastPathSemantics()
+    {
+        // Probe TryGet returns false → resolver must NOT change the
+        // cache-hit fast path. This test pins the contract: probe miss
+        // is a "no opinion" signal, not a "force refresh" signal.
+        var tenantId = await SeedActiveTenantAsync();
+        var probe = new RecordingProbe();  // empty
+        await using var resolver = CreateResolverWithProbe(probe);
+
+        await resolver.GetDataSourceAsync(tenantId);
+        var callsAfterFirst = _decryptor.Calls;
+        await resolver.GetDataSourceAsync(tenantId);
+
+        _decryptor.Calls.Should().Be(callsAfterFirst,
+            "probe miss must not force a cold rebuild");
+    }
+
     // ── test doubles ──────────────────────────────────────────────────
+
+    /// <summary>Read-only probe stub for the H12 hot-path checks.
+    /// PF-C6: probe surface is strictly <c>TryGet</c>; the hidden
+    /// <c>Remove</c> below is test-side state management for arranging
+    /// arrange/act sequences and is intentionally NOT on the probe
+    /// contract.</summary>
+    private sealed class RecordingProbe : ITenantStatusProbe
+    {
+        private readonly Dictionary<Guid, string?> _entries = new();
+        public int Reads;
+
+        public void Set(Guid tenantId, string? status) => _entries[tenantId] = status;
+
+        public bool TryGet(Guid tenantId, out string? status)
+        {
+            Reads++;
+            return _entries.TryGetValue(tenantId, out status);
+        }
+
+        // Test-only helper — NOT part of ITenantStatusProbe (PF-C6).
+        public void Remove(Guid tenantId) => _entries.Remove(tenantId);
+    }
 
     private sealed class RecordingDecryptor : IConnectionStringDecryptor
     {

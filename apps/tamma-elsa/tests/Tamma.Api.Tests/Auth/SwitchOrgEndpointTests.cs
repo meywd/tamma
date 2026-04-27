@@ -8,7 +8,9 @@ using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -44,6 +46,9 @@ public class SwitchOrgEndpointTests
     private IJwtService _jwtService = null!;
     private ISessionCookieWriter _cookieWriter = null!;
     private IConfiguration _config = null!;
+    // Story 28-R2 / Finding H2 — recording publisher for SwitchOrg/Logout
+    // audit events. Tests assert non-null + event content via Events list.
+    private RecordingPlatformEventPublisher _publisher = null!;
 
     [SetUp]
     public async Task Setup()
@@ -75,6 +80,8 @@ public class SwitchOrgEndpointTests
         _cookieWriter = new SessionCookieWriter(
             _config,
             ApiTestFixture.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>());
+
+        _publisher = new RecordingPlatformEventPublisher();
     }
 
     [TearDown]
@@ -143,7 +150,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
 
         await result.ExecuteAsync(ctx);
         ctx.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -177,7 +184,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
 
         var response = await UnwrapJson<SwitchOrgResponse>(result);
         response.TenantId.Should().Be(tenantB.Id);
@@ -209,7 +216,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantOther.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
 
         (await StatusOf(result)).Should().Be(StatusCodes.Status403Forbidden);
 
@@ -229,7 +236,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(Guid.Empty, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
         (await StatusOf(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -241,7 +248,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(Guid.NewGuid(), RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, anon, ctx);
+            _cookieWriter, _publisher, anon, ctx);
         (await StatusOf(result)).Should().Be(StatusCodes.Status401Unauthorized);
     }
 
@@ -266,7 +273,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: oldRefresh),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
 
         var response = await UnwrapJson<SwitchOrgResponse>(result);
         response.RefreshToken.Should().NotBe(oldRefresh,
@@ -298,7 +305,7 @@ public class SwitchOrgEndpointTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
 
         var r1 = await _refreshTokenRepo.GetByTokenHashAsync(HashHex(t1));
         var r2 = await _refreshTokenRepo.GetByTokenHashAsync(HashHex(t2));
@@ -323,7 +330,7 @@ public class SwitchOrgEndpointTests
         var switchResult = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, Principal(user.Id), ctx);
         var switchResp = await UnwrapJson<SwitchOrgResponse>(switchResult);
 
         // Refresh.

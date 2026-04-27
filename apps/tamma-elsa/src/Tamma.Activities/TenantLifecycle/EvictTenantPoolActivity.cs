@@ -15,6 +15,11 @@ namespace Tamma.Activities.TenantLifecycle;
 /// so subsequent requests don't try to reuse the dropped pool.
 ///
 /// <para>Idempotent — eviction of a non-cached tenant is a no-op.</para>
+///
+/// <para><b>Throws</b> on resolver failure so the surrounding
+/// <c>DeleteTenantWorkflow</c> aborts cleanly. For continue-on-error
+/// cleanup semantics see
+/// <see cref="EvictTenantPoolForCleanupActivity"/>.</para>
 /// </summary>
 [Activity(
     "Tamma.TenantLifecycle",
@@ -34,6 +39,37 @@ public sealed class EvictTenantPoolActivity : TenantLifecycleActivity
         await resolver.EvictAsync(tenantId, context.CancellationToken);
         Logger?.LogInformation(
             "tenant.lifecycle.evict_pool completed tenantId={TenantId}",
+            tenantId);
+    }
+}
+
+/// <summary>
+/// H6 / Story 28-5 AC7 — continue-on-error variant of
+/// <see cref="EvictTenantPoolActivity"/> used by
+/// <c>CleanUpFailedTenantWorkflow</c>. Functionally identical (calls
+/// <c>ITenantConnectionResolver.EvictAsync</c>), but on failure the
+/// activity swallows the exception, records the failure into the
+/// workflow's per-step state (see <see cref="CleanupWorkflowState"/>),
+/// emits <c>TENANT.DELETE.STEP_FAILED</c>, and returns normally so the
+/// next sibling step in the cleanup <c>Sequence</c> still runs.
+/// </summary>
+[Activity(
+    "Tamma.TenantLifecycle",
+    "Evict Tenant Pool (Cleanup)",
+    "Continue-on-error variant — never throws; records failure to workflow state.",
+    Kind = ActivityKind.Task)]
+public sealed class EvictTenantPoolForCleanupActivity : CleanupStepActivity
+{
+    public override string StepName => CleanupSteps.EvictPool;
+
+    protected override async Task DoStepAsync(
+        ActivityExecutionContext context,
+        Guid tenantId)
+    {
+        var resolver = context.GetRequiredService<ITenantConnectionResolver>();
+        await resolver.EvictAsync(tenantId, context.CancellationToken);
+        Logger?.LogInformation(
+            "tenant.cleanup.evict_pool completed tenantId={TenantId}",
             tenantId);
     }
 }

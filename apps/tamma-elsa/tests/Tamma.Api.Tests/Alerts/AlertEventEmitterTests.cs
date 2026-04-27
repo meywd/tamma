@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Api.Services.Alerts;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -325,15 +326,3 @@ internal sealed class RecordingEventRepository : IEventRepository
         => Task.FromResult<(IReadOnlyList<DomainEvent>, int)>((Array.Empty<DomainEvent>(), 0));
 }
 
-internal sealed class RecordingPlatformEventPublisher : IPlatformEventPublisher
-{
-    public List<PlatformEvent> Appended { get; } = new();
-
-    public Task<PlatformEvent?> AppendAndPublishAsync(PlatformEvent evt, CancellationToken ct = default)
-    {
-        if (evt.Id == Guid.Empty) evt.Id = Guid.NewGuid();
-        if (evt.CreatedAt == default) evt.CreatedAt = DateTime.UtcNow;
-        Appended.Add(evt);
-        return Task.FromResult<PlatformEvent?>(evt);
-    }
-}

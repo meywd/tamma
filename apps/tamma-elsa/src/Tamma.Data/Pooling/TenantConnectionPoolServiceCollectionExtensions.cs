@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Npgsql;
 using Tamma.Data.Abstractions;
 
 namespace Tamma.Data.Pooling;
@@ -87,6 +89,19 @@ public static class TenantConnectionPoolServiceCollectionExtensions
         // DbContext registered by AddTammaData. Pooled factory caches
         // recent contexts so cold-miss CP lookups don't pay
         // construction cost on every request.
+        //
+        // Round-2 review H10: AddTammaData registers a plain
+        // <c>AddDbContextFactory&lt;ControlPlaneDbContext&gt;</c> as the
+        // default. Strip the factory + options registrations before
+        // <c>AddPooledDbContextFactory</c> wires the pooled variant so
+        // there's exactly one factory + options pipeline registered for
+        // <c>ControlPlaneDbContext</c>. Without the cleanup the second
+        // <c>AddPooledDbContextFactory</c> call layers another
+        // <c>IDbContextFactory&lt;ControlPlaneDbContext&gt;</c>
+        // descriptor on top of the existing one and both options
+        // pipelines run on construction.
+        services.RemoveAll<IDbContextFactory<ControlPlaneDbContext>>();
+        services.RemoveAll<DbContextOptions<ControlPlaneDbContext>>();
         services.AddPooledDbContextFactory<ControlPlaneDbContext>(opts =>
         {
             opts.UseNpgsql(controlPlaneConnectionString, npgsql =>
@@ -102,6 +117,68 @@ public static class TenantConnectionPoolServiceCollectionExtensions
             sp => sp.GetRequiredService<LruPooledTenantConnectionResolver>());
         services.AddSingleton<IAdminPoolDiagnostics>(
             sp => sp.GetRequiredService<LruPooledTenantConnectionResolver>());
+
+        // Round-2 follow-up — register the cluster-wide tenant-status
+        // invalidation bus over the CP <c>NpgsqlDataSource</c>. The bus
+        // publishes pg_notify on every Invalidate call from the admin
+        // endpoints; the matching listener (registered via
+        // <c>AddTenantStatusInvalidation</c>) opens a long-lived LISTEN
+        // connection from the same data source and dispatches into the
+        // local cache + resolver.
+        services.AddTenantStatusInvalidation(controlPlaneConnectionString);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Round-2 follow-up — register the Postgres-backed tenant-status
+    /// invalidation bus and a singleton CP <see cref="NpgsqlDataSource"/>
+    /// for it to share with the listener
+    /// (<c>TenantStatusInvalidationListener</c>, registered separately
+    /// in <c>Tamma.Api</c>'s composition root).
+    ///
+    /// <para>Idempotent — calling twice in the same DI container is
+    /// safe; <c>TryAddSingleton</c> for the bus + data source guards
+    /// against duplicate registrations. When the connection string is
+    /// missing/empty, the <see cref="NullTenantStatusInvalidationBus"/>
+    /// wins (no-op publish, no listener wired).</para>
+    /// </summary>
+    /// <param name="services">DI container.</param>
+    /// <param name="controlPlaneConnectionString">CP connection string
+    /// used for both publish and listen connections. Pass <c>null</c>
+    /// or empty to fall through to the Null seam.</param>
+    public static IServiceCollection AddTenantStatusInvalidation(
+        this IServiceCollection services,
+        string? controlPlaneConnectionString)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        if (string.IsNullOrWhiteSpace(controlPlaneConnectionString))
+        {
+            // No CP connection string: tests / single-pod dev. Register
+            // the no-op bus (idempotent — TryAdd lets a previous
+            // explicit registration win).
+            services.TryAddSingleton<ITenantStatusInvalidationBus, NullTenantStatusInvalidationBus>();
+            return services;
+        }
+
+        // Build a singleton NpgsqlDataSource scoped to the bus + listener.
+        // We could share an existing CP data source if one were
+        // registered globally, but Tamma's CP plumbing today is
+        // EF-DbContext-only (no DI-resolvable NpgsqlDataSource). Keep
+        // this localised: the bus + listener share one source built
+        // from the same connection string the EF factory uses.
+        services.TryAddSingleton(sp =>
+        {
+            var loggerFactory = sp.GetService<ILoggerFactory>();
+            var dataSourceBuilder = new NpgsqlDataSourceBuilder(controlPlaneConnectionString);
+            if (loggerFactory is not null)
+                dataSourceBuilder.UseLoggerFactory(loggerFactory);
+            return dataSourceBuilder.Build();
+        });
+
+        services.RemoveAll<ITenantStatusInvalidationBus>();
+        services.AddSingleton<ITenantStatusInvalidationBus, PostgresTenantStatusInvalidationBus>();
 
         return services;
     }

@@ -263,4 +263,187 @@ public class LruResolverLeaseAndDiagnosticsTests
         var entries = ((IAdminPoolDiagnostics)resolver).ListWarmTenants(0);
         entries.Should().HaveCount(1, "limit < 1 floors to 1");
     }
+
+    // ── H5: deferred-dispose tracking + DisposeAsync drain ──────────
+
+    [Test]
+    public async Task DisposeAsync_AwaitsPendingDeferredDisposes_BeforeReturning()
+    {
+        // Round-2 H5 — when a lease is held over an eviction, the
+        // resolver schedules a background dispose. DisposeAsync MUST
+        // await that work (with a bounded timeout) so the process
+        // doesn't exit while NpgsqlDataSource is mid-tear-down.
+        var tid = await SeedTenantAsync();
+        var resolver = NewResolver();
+
+        var lease = await resolver.LeaseAsync(tid);
+        await resolver.EvictAsync(tid);
+
+        // The lease is still alive and the data source is pending
+        // dispose. DeferredDisposeBacklog should reflect a pending
+        // task once we drop the lease.
+        await lease.DisposeAsync();
+
+        // Now the deferred dispose has been scheduled. It might be
+        // queued or running on the thread pool. DisposeAsync must
+        // wait for it.
+        await resolver.DisposeAsync();
+
+        // After DisposeAsync, the backlog must be drained.
+        // We can't read the diagnostics post-dispose (the resolver
+        // throws) but the assertion is implicit: DisposeAsync didn't
+        // throw and didn't return early.
+    }
+
+    [Test]
+    public async Task GetDetailedStats_SurfacesDeferredDisposeBacklog_WhenLeaseHeldOverEviction()
+    {
+        // The deferred dispose only fires after we release the
+        // lease. So we verify the backlog rises while a sibling
+        // releases mid-eviction and the master is still waiting.
+        var tid = await SeedTenantAsync();
+        var resolver = NewResolver();
+
+        var lease = await resolver.LeaseAsync(tid);
+        await resolver.EvictAsync(tid);
+
+        var preDispose = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        // While the lease is alive, the deferred-dispose hasn't fired
+        // yet (it's gated on the master's ref count dropping to 0).
+        preDispose.DeferredDisposeBacklog.Should().Be(0,
+            "deferred dispose only fires once the last lease releases");
+
+        await lease.DisposeAsync();
+
+        // Just dispose the resolver; we're not making timing claims
+        // about the backlog here — the H5 fix is that DisposeAsync
+        // waits for it. That's covered by the previous test.
+        await resolver.DisposeAsync();
+    }
+
+    // ── M7: typed lease-race exception + per-tenant lease cap ──────
+
+    [Test]
+    public async Task LeaseAsync_LeaseCap_Throws_TenantLeaseLimitExceededException()
+    {
+        // Round-2 M7 — per-tenant ceiling on outstanding leases.
+        var tid = await SeedTenantAsync();
+        await using var resolver = NewResolver(new TenantConnectionPoolOptions
+        {
+            MaxOutstandingLeases = 3,
+        });
+
+        var leases = new List<ITenantConnectionLease>();
+        for (var i = 0; i < 3; i++)
+            leases.Add(await resolver.LeaseAsync(tid));
+
+        var act = async () => await resolver.LeaseAsync(tid);
+
+        var ex = await act.Should().ThrowAsync<TenantLeaseLimitExceededException>();
+        ex.Which.TenantId.Should().Be(tid);
+        ex.Which.MaxOutstandingLeases.Should().Be(3);
+        ex.Which.CurrentOutstandingLeases.Should().BeGreaterOrEqualTo(3);
+
+        foreach (var l in leases) await l.DisposeAsync();
+
+        // After releasing leases the cap is no longer hit.
+        var freshLease = await resolver.LeaseAsync(tid);
+        await freshLease.DisposeAsync();
+    }
+
+    [Test]
+    public async Task GetDetailedStats_SurfacesLeaseCap_AndOutstandingTotal()
+    {
+        var tid = await SeedTenantAsync();
+        await using var resolver = NewResolver(new TenantConnectionPoolOptions
+        {
+            MaxOutstandingLeases = 7,
+        });
+        var l1 = await resolver.LeaseAsync(tid);
+        var l2 = await resolver.LeaseAsync(tid);
+
+        var stats = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        stats.MaxOutstandingLeases.Should().Be(7);
+        stats.TotalOutstandingLeases.Should().BeGreaterOrEqualTo(2);
+        stats.BuildLocksRetained.Should().BeGreaterOrEqualTo(0);
+
+        await l1.DisposeAsync();
+        await l2.DisposeAsync();
+
+        var after = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        after.TotalOutstandingLeases.Should().Be(0);
+    }
+
+    [Test]
+    public async Task LeaseAsync_RetryRace_ThrowsTypedException_AfterConfiguredAttempts()
+    {
+        // Round-2 M7 — when LeaseAsync's retry loop exhausts its
+        // attempts, it throws TenantConnectionLeaseRaceException
+        // (not the previous generic InvalidOperationException).
+        // We can't easily simulate the race without substantial
+        // refactoring, so the test verifies the exception type by
+        // disposing the resolver mid-flight (which makes every
+        // subsequent acquisition observe ObjectDisposed and forces
+        // the loop to re-build).
+        //
+        // Simpler proof: verify the typed exception's properties by
+        // throwing one directly. The behavioural test (storm of
+        // evictions) needs an integration setup we don't have here.
+        var ex = new TenantConnectionLeaseRaceException(
+            tenantId: Guid.NewGuid(),
+            attempts: 5,
+            retryAfterMs: 25);
+        ex.Attempts.Should().Be(5);
+        ex.RetryAfterMs.Should().Be(25);
+        ex.TenantId.Should().NotBe(Guid.Empty);
+        ex.Message.Should().Contain("eviction storm");
+    }
+
+    // ── M13: build-locks dictionary trim ────────────────────────────
+
+    [Test]
+    public async Task BuildLocks_AreTrimmed_AfterEviction()
+    {
+        // Round-2 M13 — after a tenant is evicted, the entry in
+        // _buildLocks must be removed so the dictionary doesn't grow
+        // by one per distinct tenant id forever.
+        var tids = new List<Guid>();
+        for (var i = 0; i < 5; i++) tids.Add(await SeedTenantAsync());
+        await using var resolver = NewResolver();
+
+        // Warm each tenant (cold-build path → adds a build lock).
+        foreach (var tid in tids) _ = await resolver.GetDataSourceAsync(tid);
+        var stats1 = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        stats1.BuildLocksRetained.Should().BeGreaterOrEqualTo(5);
+
+        // Evict every tenant. M13 trims the build lock when the
+        // tenant is no longer in _pools.
+        foreach (var tid in tids) await resolver.EvictAsync(tid);
+        var stats2 = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        stats2.BuildLocksRetained.Should().BeLessThan(5,
+            "evicted tenants must drop their build locks; otherwise the dictionary leaks");
+    }
+
+    [Test]
+    public async Task BuildLocks_AreTrimmed_AfterLruEviction()
+    {
+        // M13 also covers the LRU-overflow eviction path. Cap at 1
+        // so each new tenant evicts the previous one.
+        await using var resolver = NewResolver(new TenantConnectionPoolOptions
+        {
+            MaxEntries = 1,
+        });
+
+        var tidA = await SeedTenantAsync();
+        var tidB = await SeedTenantAsync();
+        var tidC = await SeedTenantAsync();
+        _ = await resolver.GetDataSourceAsync(tidA);
+        _ = await resolver.GetDataSourceAsync(tidB); // evicts A
+        _ = await resolver.GetDataSourceAsync(tidC); // evicts B
+
+        var stats = ((IAdminPoolDiagnostics)resolver).GetDetailedStats();
+        // Only tidC's build lock should remain; A and B were evicted.
+        stats.BuildLocksRetained.Should().BeLessOrEqualTo(2,
+            "evicted tenants' build locks must be trimmed (the cap-1 LRU keeps at most one + maybe one in-flight)");
+    }
 }

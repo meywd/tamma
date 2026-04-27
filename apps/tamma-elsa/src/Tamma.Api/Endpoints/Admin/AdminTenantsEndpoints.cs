@@ -1,4 +1,7 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Dtos.Admin;
@@ -265,6 +268,10 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -277,22 +284,37 @@ public static class AdminTenantsEndpoints
         if (!IsRetryable(current))
             return IllegalTransition(current, "retry");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusPendingVerification;
         db.Entry(tenant).Property("FailureReason").CurrentValue = null;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         // Story 28-8 — drop the cached status so the next request sees
         // the new state immediately (per-pod; sibling pods converge
         // via TTL).
         statusCache.Invalidate(tenantId);
+        // H12 #2 — also evict the resolver's data-source pool. The
+        // status cache alone doesn't unwind a warm NpgsqlDataSource —
+        // without this, in-flight handlers continue holding a pool
+        // built against the now-stale connection envelope until the
+        // pool's natural eviction kicks in.
+        await connectionResolver.EvictAsync(tenantId, ct);
+        // Round-2 follow-up — cluster-wide fan-out via Postgres
+        // LISTEN/NOTIFY so sibling pods drop their copy + evict their
+        // resolver pool within milliseconds, not the 10s TTL window.
+        // Best-effort: a Postgres failure is logged + swallowed inside
+        // the bus; this admin action does not fail on a transient
+        // notify hiccup.
+        await invalidationBus.PublishAsync(tenantId, ct);
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
                 "TENANT.PROVISIONING_REQUESTED",
                 tenantId,
+                principal,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-retry",
                 }),
             ct);
@@ -316,6 +338,10 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
         var tenant = await db.Tenants
@@ -328,19 +354,23 @@ public static class AdminTenantsEndpoints
         if (!IsDeletable(current))
             return IllegalTransition(current, "delete");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusDeleting;
-        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = now;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
+        await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
+        await invalidationBus.PublishAsync(tenantId, ct);  // R2 follow-up — cluster fan-out
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
                 "TENANT.DELETE.REQUESTED",
                 tenantId,
+                principal,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-delete",
                 }),
             ct);
@@ -366,6 +396,10 @@ public static class AdminTenantsEndpoints
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
         ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
         // 2FA-lite: the caller must echo the tenant id in a header so a
@@ -391,19 +425,23 @@ public static class AdminTenantsEndpoints
         if (!IsForceDeletable(current))
             return IllegalTransition(current, "force-delete");
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         db.Entry(tenant).Property("Status").CurrentValue = StatusDeleting;
-        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = now;
+        tenant.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         statusCache.Invalidate(tenantId);  // Story 28-8
+        await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
+        await invalidationBus.PublishAsync(tenantId, ct);  // R2 follow-up — cluster fan-out
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
                 "TENANT.DELETE.REQUESTED",
                 tenantId,
+                principal,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = now,
                     ["source"] = "admin-force-delete",
                     ["previousStatus"] = current,
                 }),
@@ -439,6 +477,8 @@ public static class AdminTenantsEndpoints
         HttpContext http,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
         // 2FA-lite per the force-delete pattern — cleanup runs
@@ -460,17 +500,34 @@ public static class AdminTenantsEndpoints
         if (tenant is null)
             return Results.NotFound(new { error = "tenant_not_found" });
 
-        // Optional operator note for the audit trail.
+        // Optional operator note for the audit trail. Story 28-R2 / Finding
+        // M17 — the raw header value flows into platform_events.data["note"]
+        // and tenants.ProvisioningDetail; sanitise charset + clamp length
+        // before persisting so a malicious operator can't inject control
+        // characters / SSE-poisoning payloads / log-forging newlines.
         var note = http.Request.Headers["X-Admin-Note"].ToString();
-        if (note.Length > 500) note = note[..500];
+        if (!string.IsNullOrEmpty(note))
+        {
+            var (sanitized, ok) = SanitizeAdminNote(note);
+            if (!ok)
+                return Results.Json(
+                    new
+                    {
+                        error = "invalid_admin_note",
+                        message = "X-Admin-Note must match [A-Za-z0-9 .,;:_!@#$%&()-]{0,500}.",
+                    },
+                    statusCode: StatusCodes.Status400BadRequest);
+            note = sanitized;
+        }
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
                 "TENANT.CLEANUP.REQUESTED",
                 tenantId,
+                principal,
                 new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["requestedAt"] = timeProvider.GetUtcNow().UtcDateTime,
                     ["source"] = "admin-cleanup",
                     ["note"] = string.IsNullOrWhiteSpace(note) ? null : note,
                     ["currentStatus"] = (string?)db.Entry(tenant).Property("Status").CurrentValue,
@@ -483,6 +540,34 @@ public static class AdminTenantsEndpoints
             "Cleanup queued — global-Elsa workflow will run best-effort teardown."));
     }
 
+    // ── Story 28-R2 / Finding M17 — X-Admin-Note charset gate ──
+
+    /// <summary>
+    /// Whitelist regex for the <c>X-Admin-Note</c> operator-note header.
+    /// Allowed: ASCII letters/digits, space, and a small punctuation set
+    /// safe to round-trip through JSON/event store/UI without injection.
+    /// Rejected: control characters (incl. CR/LF — log forgery), HTML
+    /// metacharacters (&lt; &gt; &quot;), and anything outside ASCII.
+    /// 500-char cap matches the original soft clamp.
+    /// </summary>
+    private static readonly Regex AdminNoteRegex = new(
+        @"^[A-Za-z0-9 .,;:_!@#$%&()\-]{0,500}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Returns <c>(sanitized, true)</c> when <paramref name="raw"/> matches
+    /// the whitelist; <c>(_, false)</c> otherwise. Trims surrounding
+    /// whitespace before validation so a leading/trailing space alone does
+    /// not 400 (callers who send ` reason ` naturally still pass).
+    /// </summary>
+    internal static (string Sanitized, bool Ok) SanitizeAdminNote(string raw)
+    {
+        var trimmed = raw.Trim();
+        if (trimmed.Length > 500)
+            return (trimmed[..500], false);
+        return (trimmed, AdminNoteRegex.IsMatch(trimmed));
+    }
+
     // ── PATCH /api/admin/tenants/{id}/plan ──
 
     public static async Task<IResult> UpdateTenantPlan(
@@ -490,6 +575,8 @@ public static class AdminTenantsEndpoints
         UpdateTenantPlanRequest req,
         ControlPlaneDbContext db,
         IPlatformEventPublisher publisher,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
         if (req.PlanId == Guid.Empty)
@@ -517,13 +604,14 @@ public static class AdminTenantsEndpoints
         // Keep the legacy string column in lockstep so dashboards that still
         // read it render the same plan.
         tenant.Plan = plan.Slug;
-        tenant.UpdatedAt = DateTime.UtcNow;
+        tenant.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct);
 
         await publisher.AppendAndPublishAsync(
             BuildAdminEvent(
                 "PLAN.UPDATED",
                 tenantId,
+                principal,
                 new Dictionary<string, object?>
                 {
                     ["oldPlanId"] = oldPlanId?.ToString("D"),
@@ -644,22 +732,87 @@ public static class AdminTenantsEndpoints
             },
             statusCode: StatusCodes.Status409Conflict);
 
+    /// <summary>
+    /// Story 28-R2 / Finding M2 — actor-bearing platform event constructor.
+    /// Captures the JWT <c>sub</c> + <c>email</c> claims of the operator
+    /// driving the action, both into <c>tags</c> (for SQL queries) and into
+    /// <c>data</c> (defence-in-depth: tags can be projected/dropped, data
+    /// is the immutable record). Without this, the existing audit trail
+    /// only records the affected <c>tenantId</c> — there's no way to
+    /// answer "which platform admin retried tenant X?" after the fact.
+    ///
+    /// <para>The principal is the request <see cref="ClaimsPrincipal"/>
+    /// the minimal-API binding hands to the handler; tests inject a stub
+    /// principal directly.</para>
+    /// </summary>
     private static PlatformEvent BuildAdminEvent(
         string type,
         Guid tenantId,
+        ClaimsPrincipal principal,
         IReadOnlyDictionary<string, object?>? data = null)
     {
+        var actor = ExtractActor(principal);
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["source"] = "admin",
+        };
+        if (!string.IsNullOrEmpty(actor.UserId))
+            tags["actorUserId"] = actor.UserId;
+        if (!string.IsNullOrEmpty(actor.Email))
+            tags["actorEmail"] = actor.Email;
+        if (!string.IsNullOrEmpty(actor.PlatformRole))
+            tags["actorPlatformRole"] = actor.PlatformRole;
+
+        // Defence-in-depth: also write into data. Tags get projected onto
+        // the dashboard timeline + are easy to mass-update; data is the
+        // immutable canonical record, so the actor identity must live
+        // there too in case a future refactor drops or rewrites tags.
+        var enriched = data is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(data);
+        enriched["actorUserId"] = actor.UserId;
+        enriched["actorEmail"] = actor.Email;
+        enriched["actorPlatformRole"] = actor.PlatformRole;
+
         return new PlatformEvent
         {
             Type = type,
             TenantId = tenantId,
-            Tags = JsonSerializer.Serialize(new Dictionary<string, string?>
-            {
-                ["tenantId"] = tenantId.ToString("D"),
-                ["source"] = "admin",
-            }),
+            Tags = JsonSerializer.Serialize(tags),
             Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
-            Data = data is null ? "{}" : JsonSerializer.Serialize(data),
+            Data = JsonSerializer.Serialize(enriched),
         };
+    }
+
+    /// <summary>
+    /// Lightweight projection of the operator identity captured from the
+    /// JWT. <see cref="ExtractActor"/> tolerates a missing principal (e.g.
+    /// permissive-dev test runs) by returning all-null fields — the event
+    /// still gets persisted, it just lacks the actor breadcrumb. In
+    /// production with the real <c>PlatformOwnerAccess</c> gate, the
+    /// principal always carries <c>sub</c> + <c>email</c>.
+    /// </summary>
+    internal readonly record struct ActorIdentity(
+        string? UserId,
+        string? Email,
+        string? PlatformRole);
+
+    internal static ActorIdentity ExtractActor(ClaimsPrincipal? principal)
+    {
+        if (principal is null) return new ActorIdentity(null, null, null);
+
+        // sub (mapped to NameClaimType when MapInboundClaims=false in
+        // JwtService) carries the user GUID. Fallback to NameIdentifier
+        // covers cookie + tests that mint identities under either name.
+        var userId = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = principal.FindFirst(JwtRegisteredClaimNames.Email)?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal.FindFirst("email")?.Value;
+        var platformRole = principal.FindFirst("platformRole")?.Value;
+
+        return new ActorIdentity(userId, email, platformRole);
     }
 }
