@@ -75,4 +75,15 @@ public interface IUserRepository
 
     /// <summary>Persists the user's per-user provider settings JSON.</summary>
     Task UpdateUserSettingsAsync(Guid id, string settingsJson);
+
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — atomically updates a user's
+    /// <c>platform_role</c>. Used by the bootstrap-superadmin
+    /// promotion path: the first user that wins the
+    /// <see cref="IPlatformBootstrapRepository.TryClaimAsync"/> race
+    /// is promoted from the default <c>"user"</c> to
+    /// <c>"platform_admin"</c>. Subsequent registrations stay at
+    /// <c>"user"</c>.
+    /// </summary>
+    Task SetPlatformRoleAsync(Guid id, string platformRole);
 }

@@ -11,6 +11,7 @@ using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Services.Auth;
 using Tamma.Api.Services.RateLimit;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
@@ -112,15 +113,49 @@ public class AuthAuditEventTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
     }
 
-    private static HttpContext MakeContext(string? userAgent = "Mozilla/5.0", string? ip = "203.0.113.7")
+    private static HttpContext MakeContext(
+        string? userAgent = "Mozilla/5.0",
+        string? ip = "203.0.113.7",
+        IEnumerable<string>? trustedProxyCidrs = null)
     {
-        var ctx = new DefaultHttpContext { RequestServices = ApiTestFixture.Factory.Services };
+        // PF-S6: every test context wraps the factory's DI in a tiny
+        // sub-scope so we can swap the TrustedProxyResolver without
+        // mutating shared state. When trustedProxyCidrs is null we
+        // register an empty-list resolver — every XFF header is
+        // ignored, matching production "default trust nothing".
+        var inner = ApiTestFixture.Factory.Services;
+        var sub = new ServiceCollection();
+        sub.AddSingleton(new TrustedProxyResolver(
+            trustedProxyCidrs ?? Array.Empty<string>()));
+        var subProvider = sub.BuildServiceProvider();
+
+        var composite = new CompositeServiceProvider(subProvider, inner);
+
+        var ctx = new DefaultHttpContext { RequestServices = composite };
         ctx.Response.Body = new MemoryStream();
         if (userAgent is not null)
             ctx.Request.Headers.UserAgent = userAgent;
         if (ip is not null)
             ctx.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip);
         return ctx;
+    }
+
+    /// <summary>
+    /// Lets MakeContext layer a per-test resolver on top of the shared
+    /// factory DI without forcing each test to rebuild the entire
+    /// container.
+    /// </summary>
+    private sealed class CompositeServiceProvider : IServiceProvider
+    {
+        private readonly IServiceProvider _primary;
+        private readonly IServiceProvider _fallback;
+        public CompositeServiceProvider(IServiceProvider primary, IServiceProvider fallback)
+        {
+            _primary = primary;
+            _fallback = fallback;
+        }
+        public object? GetService(Type serviceType)
+            => _primary.GetService(serviceType) ?? _fallback.GetService(serviceType);
     }
 
     private sealed class RecordingPlatformEventPublisher : IPlatformEventPublisher
@@ -175,10 +210,14 @@ public class AuthAuditEventTests
     }
 
     [Test]
-    public async Task LogoutAll_RespectsXForwardedFor()
+    public async Task LogoutAll_HonoursXForwardedFor_WhenOriginIsTrustedProxy()
     {
+        // PF-S6 — XFF wins ONLY when the immediate peer sits in the
+        // operator-configured trusted-proxy CIDR. Here the loopback
+        // socket is in 127.0.0.0/8 so the leftmost client IP is honoured.
         var user = await CreateUserAsync("logout-cara@example.com");
-        var ctx = MakeContext(ip: "127.0.0.1");
+        var ctx = MakeContext(ip: "127.0.0.1",
+            trustedProxyCidrs: new[] { "127.0.0.0/8", "10.0.0.0/8" });
         ctx.Request.Headers["X-Forwarded-For"] = "198.51.100.42, 10.0.0.1";
         ctx.Request.QueryString = new QueryString("?all=true");
 
@@ -188,8 +227,83 @@ public class AuthAuditEventTests
 
         var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
             _publisher.Events[0].Data!);
+        // Walking right-to-left: 10.0.0.1 is trusted, 198.51.100.42 is not
+        // → 198.51.100.42 is the resolved client.
         data!["actorIp"].GetString().Should().Be("198.51.100.42",
-            "X-Forwarded-For wins when present, with the leftmost (client) entry picked");
+            "trusted-proxy peer + multi-hop XFF resolves to the leftmost untrusted entry");
+    }
+
+    [Test]
+    public async Task LogoutAll_IgnoresXForwardedFor_WhenOriginUntrusted()
+    {
+        // PF-S6 — internet-facing peer with NO trusted proxy
+        // configured. The forged XFF header MUST be ignored; actorIp
+        // falls back to the socket peer. This is the audit-log
+        // poisoning fix: a malicious client cannot stamp 198.51.100.42
+        // into the immutable platform_events row.
+        var user = await CreateUserAsync("logout-mal@example.com");
+        var ctx = MakeContext(ip: "203.0.113.99",
+            trustedProxyCidrs: Array.Empty<string>());
+        ctx.Request.Headers["X-Forwarded-For"] = "198.51.100.42";
+        ctx.Request.QueryString = new QueryString("?all=true");
+
+        await AuthEndpoints.Logout(
+            _refreshTokenRepo, _config, _publisher, _rateLimit,
+            MakePrincipal(user.Id, user.Email), ctx);
+
+        var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            _publisher.Events[0].Data!);
+        data!["actorIp"].GetString().Should().Be("203.0.113.99",
+            "untrusted origins fall straight through to the socket peer; "
+            + "X-Forwarded-For is treated as user-controlled garbage");
+    }
+
+    [Test]
+    public async Task LogoutAll_MultiHopXForwardedFor_ResolvesRightmostUntrusted()
+    {
+        // PF-S6 — header carries [client, l7-proxy, edge-proxy]. With
+        // 10.0.0.0/8 + 172.16.0.0/12 trusted, the resolver walks
+        // right-to-left through the trusted hops and stops at the
+        // first untrusted entry — that's the real client. The
+        // edge-proxy IP (10.x) and the l7 proxy (172.16.x) are skipped.
+        var user = await CreateUserAsync("logout-multi@example.com");
+        var ctx = MakeContext(ip: "10.0.0.5",
+            trustedProxyCidrs: new[] { "10.0.0.0/8", "172.16.0.0/12" });
+        ctx.Request.Headers["X-Forwarded-For"] =
+            "198.51.100.42, 172.16.4.7, 10.0.0.99";
+        ctx.Request.QueryString = new QueryString("?all=true");
+
+        await AuthEndpoints.Logout(
+            _refreshTokenRepo, _config, _publisher, _rateLimit,
+            MakePrincipal(user.Id, user.Email), ctx);
+
+        var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            _publisher.Events[0].Data!);
+        data!["actorIp"].GetString().Should().Be("198.51.100.42",
+            "right-to-left walk through trusted proxies stops at the first untrusted entry");
+    }
+
+    [Test]
+    public async Task LogoutAll_DefaultEmptyTrustedList_TreatsAllOriginsAsUntrusted()
+    {
+        // PF-S6 — verify the default is "trust nothing". Even loopback
+        // (which would naively be considered "internal") gets the
+        // socket-peer treatment when no CIDR is configured. This is
+        // the safe-by-default posture for a directly-exposed Kestrel.
+        var user = await CreateUserAsync("logout-def@example.com");
+        var ctx = MakeContext(ip: "127.0.0.1",
+            trustedProxyCidrs: Array.Empty<string>());
+        ctx.Request.Headers["X-Forwarded-For"] = "198.51.100.42";
+        ctx.Request.QueryString = new QueryString("?all=true");
+
+        await AuthEndpoints.Logout(
+            _refreshTokenRepo, _config, _publisher, _rateLimit,
+            MakePrincipal(user.Id, user.Email), ctx);
+
+        var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            _publisher.Events[0].Data!);
+        data!["actorIp"].GetString().Should().Be("127.0.0.1",
+            "empty trusted-proxy list = trust nothing, including loopback");
     }
 
     [Test]

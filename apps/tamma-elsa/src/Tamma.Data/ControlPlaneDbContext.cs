@@ -89,6 +89,18 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AdminImpersonation> AdminImpersonations =>
         Set<AdminImpersonation>();
 
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — single-row sentinel that pins which user
+    /// owns the bootstrap superadmin promotion. <c>CHECK (Id = 1)</c>
+    /// + unique primary key force the schema to admit at most one row,
+    /// closing the previous TOCTOU race where concurrent
+    /// first-user-ever registrations both observed
+    /// <c>existingUserCount == 0</c> and both received
+    /// <c>platform_admin</c>. See <see cref="Entities.PlatformBootstrap"/>.
+    /// </summary>
+    public DbSet<PlatformBootstrap> PlatformBootstraps =>
+        Set<PlatformBootstrap>();
+
     // ── Story 5.6 + 1.5-37 (Wave C.1) — alert system ──
     //
     // The three alert tables are CP-resident: alert rules + channels
@@ -188,6 +200,45 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlertRules(modelBuilder);
         ConfigureAlertEvaluatorCursor(modelBuilder);
         ConfigureKekRotations(modelBuilder);
+        ConfigurePlatformBootstrap(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — single-row <c>platform_bootstrap</c>
+    /// sentinel. Schema-level guard against bootstrap-superadmin
+    /// race; <see cref="Entities.PlatformBootstrap"/> for semantics.
+    /// </summary>
+    private static void ConfigurePlatformBootstrap(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformBootstrap>(entity =>
+        {
+            entity.ToTable("platform_bootstrap", t =>
+            {
+                // Mathematical impossibility of more than one row: PK
+                // forces uniqueness, CHECK forces the value to be 1.
+                // Two concurrent inserts → exactly one wins, the loser
+                // gets a UNIQUE violation that the application catches
+                // and falls back to a normal "user" platform role.
+                t.HasCheckConstraint(
+                    "ck_platform_bootstrap_singleton",
+                    "\"Id\" = 1");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UserId).IsRequired();
+            entity.Property(e => e.ClaimedAt)
+                .HasDefaultValueSql("now()");
+
+            // FK to users — RESTRICT so the bootstrap admin can't be
+            // soft-removed without explicitly clearing the sentinel.
+            // (Soft-delete is a hard-delete-equivalent for users;
+            // hard-delete on users is forbidden by app code, so this
+            // FK is effectively a tripwire.)
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     /// <summary>

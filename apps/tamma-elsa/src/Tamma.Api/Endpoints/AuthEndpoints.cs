@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
+using Tamma.Api.Services.Auth;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.OAuth;
 using Tamma.Api.Services.RateLimit;
@@ -147,6 +148,58 @@ public static class AuthEndpoints
         return options;
     }
 
+    /// <summary>
+    /// Story 28-R2 / PF-S9 — atomic bootstrap superadmin promotion.
+    /// Tries to claim the single-row <c>platform_bootstrap</c>
+    /// sentinel; on success, updates the user's
+    /// <c>platform_role</c> to <c>"platform_admin"</c>. The schema's
+    /// unique-PK + <c>CHECK (Id = 1)</c> constraint guarantees that
+    /// concurrent first-user registrations race for exactly one
+    /// claim — every loser silently stays at the default
+    /// <c>"user"</c> role.
+    ///
+    /// <para>This replaces the previous TOCTOU race
+    /// (<c>userRepo.CountAsync()</c> + create) where two concurrent
+    /// transactions could both observe an empty users table and both
+    /// mint <c>platform_admin</c>. The race is now mathematically
+    /// impossible: the DB rejects a second sentinel row.</para>
+    ///
+    /// <para>Failures (DB unreachable, transient errors) are logged
+    /// but do NOT propagate — the user has already been created and
+    /// the registration response must succeed. If the bootstrap
+    /// claim never lands, the deploy stays without a platform admin
+    /// until an operator manually promotes one; that's the
+    /// fail-secure posture.</para>
+    /// </summary>
+    private static async Task TryPromoteBootstrapAdminAsync(
+        IUserRepository userRepo,
+        IPlatformBootstrapRepository bootstrapRepo,
+        User user,
+        ILoggerFactory loggerFactory)
+    {
+        try
+        {
+            var won = await bootstrapRepo.TryClaimAsync(user.Id);
+            if (won)
+            {
+                await userRepo.SetPlatformRoleAsync(user.Id, "platform_admin");
+                loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
+                    .LogInformation(
+                        "USER.BOOTSTRAP_ADMIN.SUCCESS userId={UserId} email={Email}",
+                        user.Id, user.Email);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Never fail the registration over a bootstrap-claim
+            // hiccup; the user can still log in as a regular user.
+            loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
+                .LogWarning(ex,
+                    "Bootstrap-superadmin promotion failed for userId={UserId}",
+                    user.Id);
+        }
+    }
+
     // ─── Endpoints ────────────────────────────────────────────────────────
 
     public static async Task<IResult> Register(
@@ -155,6 +208,7 @@ public static class AuthEndpoints
         IPasswordService passwordService,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
+        IPlatformBootstrapRepository bootstrapRepo,
         [FromServices] IEmailService emailService,
         [FromServices] IConfiguration config,
         [FromServices] ILoggerFactory loggerFactory)
@@ -175,18 +229,6 @@ public static class AuthEndpoints
         var verificationToken = Guid.NewGuid().ToString("N");
         var tokenHash = HashToken(verificationToken);
 
-        // Story 28-R2 / Finding C1 — bootstrap superadmin promotion. The very
-        // first user in the system gets `platform_role = 'platform_admin'` so
-        // a fresh deploy has at least one operator who can hit the
-        // /api/admin/* surface. Every subsequent user defaults to
-        // `'user'` (the column default; we set it explicitly anyway).
-        // The CountAsync race window between two concurrent first-user
-        // registrations is tolerable — the worst case is two platform
-        // admins, which is fine; it's NOT a privilege escalation because
-        // both rows are honest first-time registrants.
-        var existingUserCount = await userRepo.CountAsync();
-        var bootstrapPlatformRole = existingUserCount == 0 ? "platform_admin" : "user";
-
         User user;
         try
         {
@@ -196,7 +238,10 @@ public static class AuthEndpoints
                 PasswordHash = passwordService.HashPassword(req.Password),
                 DisplayName = req.DisplayName,
                 Role = "member",
-                PlatformRole = bootstrapPlatformRole,
+                // Default to "user". Bootstrap superadmin promotion
+                // happens AFTER the user row commits (PF-S9) — we
+                // can't use the user id until insert.
+                PlatformRole = "user",
                 AuthMethod = "email",
                 EmailVerificationTokenHash = tokenHash,
                 EmailVerificationExpiresAt = DateTime.UtcNow.AddHours(24),
@@ -208,6 +253,16 @@ public static class AuthEndpoints
             // (Phase-1 hardening migration ix_users_email_lower) caught it.
             return Results.Conflict(new { error = "Email already registered" });
         }
+
+        // PF-S9 — atomic bootstrap superadmin claim. The single-row
+        // platform_bootstrap table has a unique PK + CHECK (Id = 1)
+        // constraint, so concurrent first-user registrations race for
+        // exactly one row. The winner becomes platform_admin; everyone
+        // else stays "user". This replaces the previous TOCTOU race
+        // where two concurrent count-then-insert paths could both
+        // mint platform_admin.
+        await TryPromoteBootstrapAdminAsync(
+            userRepo, bootstrapRepo, user, loggerFactory);
 
         // Auto-create personal tenant
         var slug = user.Email.Split('@')[0].ToLowerInvariant().Replace(".", "-").Replace("+", "-");
@@ -653,13 +708,29 @@ public static class AuthEndpoints
             ?? principal.FindFirst("email")?.Value;
         var jti = principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
         var userAgent = httpContext.Request.Headers.UserAgent.ToString();
-        // X-Forwarded-For wins when present (reverse-proxy edge); fall back
-        // to the socket peer. Truncate to 64 chars so a forged header
-        // stuffed with kilobytes of garbage can't bloat the event.
-        var forwardedFor = httpContext.Request.Headers["X-Forwarded-For"].ToString();
-        var actorIp = string.IsNullOrWhiteSpace(forwardedFor)
-            ? httpContext.Connection.RemoteIpAddress?.ToString()
-            : forwardedFor.Split(',')[0].Trim();
+        // PF-S6 — resolve the actor IP through TrustedProxyResolver. The
+        // resolver honours X-Forwarded-For ONLY when the immediate peer
+        // sits in an operator-configured trusted-proxy CIDR list
+        // (Tamma:TrustedProxies:Cidrs). Untrusted origins fall straight
+        // through to the socket peer; this stops audit-log poisoning
+        // from internet-facing requests that forge an XFF header.
+        // Default-empty list = trust nothing — appropriate for a
+        // directly-exposed Kestrel.
+        var resolver = httpContext.RequestServices.GetService<TrustedProxyResolver>();
+        string? actorIp;
+        if (resolver is not null)
+        {
+            actorIp = resolver.ResolveActorIp(httpContext);
+        }
+        else
+        {
+            // Test contexts that don't register the resolver still need
+            // an actorIp populated; fall back to the socket peer (the
+            // safe default — never trust XFF in this path).
+            actorIp = httpContext.Connection.RemoteIpAddress?.ToString();
+        }
+        // Truncate to 64 chars so a forged header stuffed with
+        // kilobytes of garbage can't bloat the event.
         if (!string.IsNullOrEmpty(actorIp) && actorIp.Length > 64)
             actorIp = actorIp[..64];
         if (userAgent.Length > 256) userAgent = userAgent[..256];
@@ -1101,6 +1172,7 @@ public static class AuthEndpoints
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IInviteRepository inviteRepo,
+        IPlatformBootstrapRepository bootstrapRepo,
         IJwtService jwtService,
         IRefreshTokenRepository refreshTokenRepo,
         ILoggerFactory loggerFactory)
@@ -1176,12 +1248,6 @@ public static class AuthEndpoints
                 ? $"{profile.Id}+{profile.Login}@users.noreply.github.com"
                 : profile.Email.ToLowerInvariant();
 
-            // Story 28-R2 / Finding C1 — first-user-via-GitHub also gets
-            // platform_admin (matches the email-registration bootstrap path).
-            // Race tolerance: see the email-Register comment.
-            var existingUserCount = await userRepo.CountAsync();
-            var bootstrapPlatformRole = existingUserCount == 0 ? "platform_admin" : "user";
-
             user = await userRepo.CreateAsync(new User
             {
                 Email = placeholderEmail,
@@ -1192,8 +1258,19 @@ public static class AuthEndpoints
                 AuthMethod = "github",
                 EmailVerified = true,
                 Role = "member",
-                PlatformRole = bootstrapPlatformRole,
+                // Default to "user". PF-S9 — bootstrap superadmin
+                // promotion happens AFTER the user row commits via
+                // the platform_bootstrap sentinel claim below.
+                PlatformRole = "user",
             });
+
+            // PF-S9 — first-user-via-GitHub races for the same single
+            // platform_bootstrap row as the email Register path, so a
+            // mixed registration burst (one email signup + one
+            // GitHub OAuth at the same moment) still produces exactly
+            // one platform_admin.
+            await TryPromoteBootstrapAdminAsync(
+                userRepo, bootstrapRepo, user, loggerFactory);
 
             // Auto-create personal tenant.
             var slug = profile.Login.ToLowerInvariant().Replace(".", "-").Replace("+", "-");

@@ -173,4 +173,13 @@ public class UserRepository(ControlPlaneDbContext db) : IUserRepository
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
+
+    public async Task SetPlatformRoleAsync(Guid id, string platformRole)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null) return;
+        user.PlatformRole = platformRole;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
 }
