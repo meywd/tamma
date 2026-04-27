@@ -9,18 +9,24 @@ const mockCallTool = vi.fn();
 const mockListTools = vi.fn();
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
-  Client: vi.fn().mockImplementation(() => ({
-    connect: mockConnect,
-    close: mockClose,
-    callTool: mockCallTool,
-    listTools: mockListTools,
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  Client: vi.fn().mockImplementation(function () {
+    return {
+      connect: mockConnect,
+      close: mockClose,
+      callTool: mockCallTool,
+      listTools: mockListTools,
+    };
+  }),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
-  StdioClientTransport: vi.fn().mockImplementation(() => ({
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  StdioClientTransport: vi.fn().mockImplementation(function () {
+    return {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+  }),
 }));
 
 describe('ZenMCPProvider', () => {
