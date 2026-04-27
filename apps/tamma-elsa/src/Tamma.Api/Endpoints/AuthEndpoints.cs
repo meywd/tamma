@@ -277,10 +277,17 @@ public static class AuthEndpoints
         await userRepo.UpdateActiveTenantAsync(user.Id, tenant.Id);
 
         var verifyUrl = BuildVerificationUrl(config, verificationToken);
+        // Story 28-1 PR B — registration verification email is
+        // platform-scope: no tenant DB exists yet to land the row in
+        // (the personal tenant we just minted is shared-infra-only
+        // until provisioning runs separately). Leaving TenantId unset
+        // routes through IPlatformEmailOutboxRepository →
+        // platform_email_outbox. UserId is preserved for correlation.
+        // Decision matrix: .dev/decisions/story-28-1-design-calls.md §5.
         var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl) with
         {
             Template = "verification",
-            TenantId = tenant.Id,
+            TenantId = null,
             UserId = user.Id,
         };
         var txnId = await emailService.SendAsync(message);
@@ -351,10 +358,13 @@ public static class AuthEndpoints
                 user.Id, HashToken(verificationToken), DateTime.UtcNow.AddHours(24));
 
             var verifyUrl = BuildVerificationUrl(config, verificationToken);
+            // Story 28-1 PR B — verification email is platform-scope (the
+            // user may not have a tenant yet, or the tenant DB may not be
+            // provisioned). Routes through IPlatformEmailOutboxRepository.
             var message = EmailTemplates.VerificationEmail(user.Email, verifyUrl) with
             {
                 Template = "verification",
-                TenantId = user.TenantId,
+                TenantId = null,
                 UserId = user.Id,
             };
             var txnId = await emailService.SendAsync(message);
@@ -805,10 +815,14 @@ public static class AuthEndpoints
         await resetRepo.CreateAsync(user.Id, tokenHash, expiresAt);
 
         var resetUrl = BuildResetUrl(config, rawToken);
+        // Story 28-1 PR B — password reset is platform-scope. Reset is
+        // an account-recovery flow; pinning it to a single TenantId
+        // would mean the email vanishes if that tenant is later
+        // deleted. Routes through IPlatformEmailOutboxRepository.
         var message = EmailTemplates.PasswordResetEmail(user.Email, resetUrl) with
         {
             Template = "password-reset",
-            TenantId = user.TenantId,
+            TenantId = null,
             UserId = user.Id,
         };
         var txnId = await emailService.SendAsync(message);

@@ -5,15 +5,17 @@ using Tamma.Data.Repositories;
 namespace Tamma.Api.Services.TaskQueue;
 
 /// <summary>
-/// Database-backed <see cref="ITaskQueue"/>. Derives tenant scoping from the
-/// ambient <see cref="ITenantContext"/>; accepts explicit overrides for
-/// sources where tenancy is resolved from something other than the caller
-/// (notably the GitHub App webhook, which binds tenancy via installation ID).
+/// Database-backed <see cref="ITaskQueue"/>. Strictly tenant-scoped:
+/// derives the tenant from the ambient <see cref="ITenantContext"/>
+/// unless an explicit override is supplied (used by the GitHub webhook
+/// handler that derives tenancy from the installation id, not the
+/// authenticated user).
 ///
-/// <para>Ported from the deleted TypeScript in-memory queue, with the
-/// behaviour of <c>requireInstallationId</c> folded into the webhook caller
-/// rather than this service — tenant isolation here is enforced via the
-/// ambient context, not the installationId field.</para>
+/// <para>Story 28-1 PR B — platform-scope tasks no longer flow through
+/// here. <c>CranlTenantProvisioner</c> and <c>RetireScheduler</c> hit
+/// <see cref="IPlatformQueuedTaskRepository"/> directly; the GitHub
+/// webhook handler routes orphan webhooks to the platform repo too.
+/// This surface ONLY enqueues into a real tenant's per-tenant queue.</para>
 /// </summary>
 public sealed class DbTaskQueue : ITaskQueue
 {
@@ -34,11 +36,18 @@ public sealed class DbTaskQueue : ITaskQueue
         CancellationToken ct = default)
     {
         var tenantId = tenantIdOverride ?? _tenantContext.TenantId;
+        if (tenantId is not Guid tid || tid == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "DbTaskQueue.EnqueueAsync requires a tenant id. Set " +
+                "ITenantContext or pass tenantIdOverride. Platform-scope " +
+                "callers must use IPlatformQueuedTaskRepository directly.");
+        }
 
         var task = new QueuedTask
         {
             Type = type,
-            TenantId = tenantId,
+            TenantId = tid,
             InstallationId = installationId,
             Payload = string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson
         };
@@ -46,18 +55,18 @@ public sealed class DbTaskQueue : ITaskQueue
         return _repo.EnqueueAsync(task, ct);
     }
 
-    public Task<QueuedTask?> GetAsync(Guid id, CancellationToken ct = default)
-        => _repo.GetAsync(id, ct);
+    public Task<QueuedTask?> GetAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+        => _repo.GetAsync(tenantId, id, ct);
 
-    public Task<List<QueuedTask>> ListPendingAsync(int limit = 20, CancellationToken ct = default)
-        => _repo.ListPendingAsync(_tenantContext.TenantId, limit, ct);
+    public Task<List<QueuedTask>> ListPendingAsync(Guid tenantId, int limit = 20, CancellationToken ct = default)
+        => _repo.ListPendingAsync(tenantId, limit, ct);
 
-    public Task<QueuedTask?> MarkProcessingAsync(Guid id, CancellationToken ct = default)
-        => _repo.MarkProcessingAsync(id, ct);
+    public Task<QueuedTask?> MarkProcessingAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+        => _repo.MarkProcessingAsync(tenantId, id, ct);
 
-    public Task MarkCompletedAsync(Guid id, CancellationToken ct = default)
-        => _repo.MarkCompletedAsync(id, ct);
+    public Task MarkCompletedAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+        => _repo.MarkCompletedAsync(tenantId, id, ct);
 
-    public Task MarkFailedAsync(Guid id, string error, CancellationToken ct = default)
-        => _repo.MarkFailedAsync(id, error, ct);
+    public Task MarkFailedAsync(Guid tenantId, Guid id, string error, CancellationToken ct = default)
+        => _repo.MarkFailedAsync(tenantId, id, error, ct);
 }

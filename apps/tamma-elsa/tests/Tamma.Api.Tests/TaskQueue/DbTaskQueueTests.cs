@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.TaskQueue;
 using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.TaskQueue;
@@ -13,6 +14,11 @@ namespace Tamma.Api.Tests.TaskQueue;
 /// Tenant-isolation + FIFO contract for <see cref="DbTaskQueue"/>. Uses the
 /// EF Core InMemory provider behind a real repository so the service's tenant
 /// scoping is exercised against actual persistence, not a repo mock.
+///
+/// <para>Story 28-1 PR B — DbTaskQueue is now strictly tenant-scoped.
+/// Tests assert that calling EnqueueAsync without an ambient tenant
+/// throws (callers MUST use IPlatformQueuedTaskRepository for
+/// platform-scope work).</para>
 /// </summary>
 [TestFixture]
 public class DbTaskQueueTests
@@ -39,12 +45,30 @@ public class DbTaskQueueTests
         return new DbTaskQueue(repo, context.Object);
     }
 
+    private void SeedTenant(Guid tenantId)
+    {
+        if (_db.Tenants.Find(tenantId) is null)
+        {
+            _db.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = tenantId.ToString()[..8],
+                Slug = "t-" + tenantId.ToString()[..8],
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _db.SaveChanges();
+        }
+    }
+
     // ─── Enqueue + ambient tenant ─────────────────────────────────────────────
 
     [Test]
     public async Task EnqueueAsync_StampsAmbientTenant_WhenNoOverride()
     {
         var tenantA = Guid.NewGuid();
+        SeedTenant(tenantA);
         var queue = NewQueue(_repo, tenantA);
 
         var task = await queue.EnqueueAsync("x", "{}");
@@ -57,6 +81,8 @@ public class DbTaskQueueTests
     {
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
+        SeedTenant(tenantA);
+        SeedTenant(tenantB);
         var queue = NewQueue(_repo, tenantA);
 
         var task = await queue.EnqueueAsync(
@@ -67,13 +93,16 @@ public class DbTaskQueueTests
     }
 
     [Test]
-    public async Task EnqueueAsync_AllowsNullAmbientTenant()
+    public async Task EnqueueAsync_ThrowsWhenAmbientTenantNull()
     {
+        // Story 28-1 PR B — DbTaskQueue is strictly tenant-scoped now.
+        // Platform-scope callers must use IPlatformQueuedTaskRepository.
         var queue = NewQueue(_repo, null);
 
-        var task = await queue.EnqueueAsync("x", "{}");
+        var act = async () => await queue.EnqueueAsync("x", "{}");
 
-        task.TenantId.Should().BeNull();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*tenant*");
     }
 
     // ─── Tenant isolation ────────────────────────────────────────────────────
@@ -83,30 +112,18 @@ public class DbTaskQueueTests
     {
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
+        SeedTenant(tenantA);
+        SeedTenant(tenantB);
 
         await NewQueue(_repo, tenantA).EnqueueAsync("a1", "{}");
         await NewQueue(_repo, tenantA).EnqueueAsync("a2", "{}");
         await NewQueue(_repo, tenantB).EnqueueAsync("b1", "{}");
 
-        var aPending = await NewQueue(_repo, tenantA).ListPendingAsync();
-        var bPending = await NewQueue(_repo, tenantB).ListPendingAsync();
+        var aPending = await NewQueue(_repo, tenantA).ListPendingAsync(tenantA);
+        var bPending = await NewQueue(_repo, tenantB).ListPendingAsync(tenantB);
 
         aPending.Select(t => t.Type).Should().BeEquivalentTo(new[] { "a1", "a2" });
         bPending.Select(t => t.Type).Should().BeEquivalentTo(new[] { "b1" });
-    }
-
-    [Test]
-    public async Task ListPendingAsync_NullTenant_ReturnsAllTenants()
-    {
-        var tenantA = Guid.NewGuid();
-        var tenantB = Guid.NewGuid();
-
-        await NewQueue(_repo, tenantA).EnqueueAsync("a1", "{}");
-        await NewQueue(_repo, tenantB).EnqueueAsync("b1", "{}");
-
-        var all = await NewQueue(_repo, null).ListPendingAsync();
-
-        all.Select(t => t.Type).Should().BeEquivalentTo(new[] { "a1", "b1" });
     }
 
     // ─── FIFO within a tenant ─────────────────────────────────────────────────
@@ -115,6 +132,7 @@ public class DbTaskQueueTests
     public async Task ListPendingAsync_ReturnsTasksInCreationOrder()
     {
         var tenant = Guid.NewGuid();
+        SeedTenant(tenant);
         var queue = NewQueue(_repo, tenant);
 
         var first = await queue.EnqueueAsync("first", "{}");
@@ -123,7 +141,7 @@ public class DbTaskQueueTests
         await Task.Delay(5);
         var third = await queue.EnqueueAsync("third", "{}");
 
-        var pending = await queue.ListPendingAsync();
+        var pending = await queue.ListPendingAsync(tenant);
 
         pending.Select(t => t.Id).Should().ContainInOrder(first.Id, second.Id, third.Id);
     }
@@ -131,13 +149,13 @@ public class DbTaskQueueTests
     // ─── Get/Mark transitions ─────────────────────────────────────────────────
 
     [Test]
-    public async Task GetAsync_ReturnsTaskAcrossTenants()
+    public async Task GetAsync_ReturnsTaskByTenantAndId()
     {
-        // Processor (null tenant) must be able to read any tenant's task.
         var tenantA = Guid.NewGuid();
+        SeedTenant(tenantA);
         var enqueued = await NewQueue(_repo, tenantA).EnqueueAsync("a1", "{}");
 
-        var fetched = await NewQueue(_repo, null).GetAsync(enqueued.Id);
+        var fetched = await NewQueue(_repo, tenantA).GetAsync(tenantA, enqueued.Id);
 
         fetched.Should().NotBeNull();
         fetched!.TenantId.Should().Be(tenantA);
@@ -147,26 +165,29 @@ public class DbTaskQueueTests
     public async Task MarkProcessing_ThenCompleted_ClearsFromPendingList()
     {
         var tenant = Guid.NewGuid();
+        SeedTenant(tenant);
         var queue = NewQueue(_repo, tenant);
         var t = await queue.EnqueueAsync("x", "{}");
 
-        await queue.MarkProcessingAsync(t.Id);
-        await queue.MarkCompletedAsync(t.Id);
+        await queue.MarkProcessingAsync(tenant, t.Id);
+        await queue.MarkCompletedAsync(tenant, t.Id);
 
-        var pending = await queue.ListPendingAsync();
+        var pending = await queue.ListPendingAsync(tenant);
         pending.Should().BeEmpty();
     }
 
     [Test]
     public async Task MarkFailed_StoresErrorString()
     {
-        var queue = NewQueue(_repo, Guid.NewGuid());
+        var tenant = Guid.NewGuid();
+        SeedTenant(tenant);
+        var queue = NewQueue(_repo, tenant);
         var t = await queue.EnqueueAsync("x", "{}");
-        await queue.MarkProcessingAsync(t.Id);
+        await queue.MarkProcessingAsync(tenant, t.Id);
 
-        await queue.MarkFailedAsync(t.Id, "nope");
+        await queue.MarkFailedAsync(tenant, t.Id, "nope");
 
-        var stored = await queue.GetAsync(t.Id);
+        var stored = await queue.GetAsync(tenant, t.Id);
         stored!.Status.Should().Be("failed");
         stored.Error.Should().Be("nope");
     }

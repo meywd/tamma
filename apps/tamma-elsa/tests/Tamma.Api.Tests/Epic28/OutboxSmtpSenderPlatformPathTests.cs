@@ -120,8 +120,11 @@ public class OutboxSmtpSenderPlatformPathTests
         MaxAttempts = maxAttempts,
     };
 
+    private static readonly Guid TenantPathTestId = Guid.Parse("ffffffff-1111-2222-3333-444444444444");
+
     private static EmailOutboxMessage NewTenantRow() => new()
     {
+        TenantId = TenantPathTestId,
         Template = "verification",
         ToAddress = "tenant@example.com",
         Subject = "Verify",
@@ -130,6 +133,30 @@ public class OutboxSmtpSenderPlatformPathTests
         FromAddress = "noreply@tamma.dev",
         MaxAttempts = 5,
     };
+
+    /// <summary>
+    /// Seed an active tenant row in CP. Story 28-1 PR B: the tenant
+    /// outbox drain path enumerates active tenants from CP — without
+    /// one, the tenant path returns null and only the platform path
+    /// drains.
+    /// </summary>
+    private void SeedActiveTenant(Guid tenantId)
+    {
+        using var cp = new TestControlPlaneDbContext(_cpOptions);
+        if (cp.Tenants.Find(tenantId) is null)
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "test-tenant",
+                Slug = "test-tenant-" + tenantId.ToString()[..8],
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            cp.SaveChanges();
+        }
+    }
 
     // ── Platform path drains when tenant queue empty ─────────────────────────
 
@@ -214,11 +241,11 @@ public class OutboxSmtpSenderPlatformPathTests
             // options (see SetUp), so the tenant row is visible to the CP
             // scan too — the test's invariant is "tenant row delivers first",
             // which the sender enforces by polling CP first.
+            SeedActiveTenant(TenantPathTestId);
             var tenantRepo = new EmailOutboxRepository(
                 new TestTenantDbContextFactory(_tenantOptions),
                 new TestControlPlaneDbContext(_cpOptions));
             var tenantRow = NewTenantRow();
-            tenantRow.TenantId = Guid.NewGuid();
             var tenantEnq = await tenantRepo.EnqueueAsync(tenantRow);
 
             using var cp = new ControlPlaneDbContext(_cpOptions);
