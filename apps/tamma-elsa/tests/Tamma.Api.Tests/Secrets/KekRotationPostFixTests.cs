@@ -11,6 +11,7 @@ using NUnit.Framework;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -85,7 +86,7 @@ public class KekRotationPostFixTests
         services.AddDbContextFactory<ControlPlaneDbContext>(
             o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
-        var eventRepo = new RecordingEventRepository();
+        var eventRepo = new RecordingPlatformEventRepository();
         services.AddSingleton<IPlatformEventRepository>(eventRepo);
         await using var sp = services.BuildServiceProvider();
         var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
@@ -121,7 +122,7 @@ public class KekRotationPostFixTests
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
         // Original run — actor claims point at "alice".
@@ -184,7 +185,7 @@ public class KekRotationPostFixTests
         services.AddDbContextFactory<ControlPlaneDbContext>(
             o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
-        var eventRepo = new RecordingEventRepository();
+        var eventRepo = new RecordingPlatformEventRepository();
         services.AddSingleton<IPlatformEventRepository>(eventRepo);
         await using var sp = services.BuildServiceProvider();
         var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
@@ -218,7 +219,7 @@ public class KekRotationPostFixTests
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
         coordinator.StartAsync(stagedSecondary);
@@ -281,7 +282,7 @@ public class KekRotationPostFixTests
         services.AddDbContextFactory<ControlPlaneDbContext>(
             o => o.UseNpgsql(connectionString));
         services.AddLogging();
-        services.AddSingleton<IPlatformEventRepository, NoopEventRepository>();
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
         services.AddSingleton(NpgsqlDataSource.Create(connectionString));
         await using var sp = services.BuildServiceProvider();
 
@@ -332,7 +333,7 @@ public class KekRotationPostFixTests
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
         // Step 1 — drive into Failed. The first rotation stages key A
@@ -428,7 +429,7 @@ public class KekRotationPostFixTests
         // EF factory is never reached.
         services.AddDbContextFactory<ControlPlaneDbContext>(
             o => o.UseInMemoryDatabase($"kek-pfs8-{Guid.NewGuid():N}"));
-        services.AddSingleton<IPlatformEventRepository, NoopEventRepository>();
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
 
         // Closed port — guaranteed to fail with NpgsqlException on
         // OpenConnectionAsync. Port 1 is reserved by the OS and
@@ -443,7 +444,7 @@ public class KekRotationPostFixTests
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
         coordinator.StartAsync(BuildKek(seed: 50));
@@ -559,7 +560,7 @@ public class KekRotationPostFixTests
         services.AddDbContextFactory<ControlPlaneDbContext>(
             o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
-        services.AddSingleton<IPlatformEventRepository, NoopEventRepository>();
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
         await using var sp = services.BuildServiceProvider();
 
         var initialPrimary = BuildKek(seed: 1);
@@ -567,7 +568,7 @@ public class KekRotationPostFixTests
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
         var principal = BuildPrincipal("retry-sub", "retry@tamma.dev", "platform_admin");
@@ -578,64 +579,4 @@ public class KekRotationPostFixTests
         result.GetType().Name.Should().Contain("Conflict");
     }
 
-    // ── helpers ──────────────────────────────────────────────────────
-
-    private sealed class NoopResolver : ITenantConnectionResolver
-    {
-        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-            => ValueTask.CompletedTask;
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
-    }
-
-    private sealed class NoopEventRepository : IPlatformEventRepository
-    {
-        public Task<PlatformEvent?> AppendAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-
-        public Task<PlatformEvent?> GetByIdAsync(Guid id, CancellationToken ct = default)
-            => Task.FromResult<PlatformEvent?>(null);
-
-        public Task<IReadOnlyList<PlatformEvent>> QueryAsync(
-            Guid? tenantId = null, Guid? userId = null, string? typePrefix = null,
-            DateTime? since = null, bool includePlatformWide = false, int limit = 100,
-            CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<PlatformEvent>>(Array.Empty<PlatformEvent>());
-    }
-
-    private sealed class RecordingEventRepository : IPlatformEventRepository
-    {
-        public List<PlatformEvent> AppendedEvents { get; } = new();
-
-        public Task<PlatformEvent?> AppendAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            AppendedEvents.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-
-        public Task<PlatformEvent?> GetByIdAsync(Guid id, CancellationToken ct = default)
-            => Task.FromResult(AppendedEvents.FirstOrDefault(e => e.Id == id));
-
-        public Task<IReadOnlyList<PlatformEvent>> QueryAsync(
-            Guid? tenantId = null, Guid? userId = null, string? typePrefix = null,
-            DateTime? since = null, bool includePlatformWide = false, int limit = 100,
-            CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<PlatformEvent>>(AppendedEvents);
-    }
 }

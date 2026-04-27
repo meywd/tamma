@@ -11,6 +11,7 @@ using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Middleware;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -78,32 +79,6 @@ public class TenantContextMiddlewareTests
 
     [TearDown]
     public void TearDown() => _controlPlane.Dispose();
-
-    /// <summary>
-    /// Recording fake for <see cref="ITenantStatusCache"/>. Captures
-    /// every <c>Set</c>/<c>Invalidate</c> call so tests can assert the
-    /// middleware populates the cache on cold-CP-read paths.
-    /// </summary>
-    private sealed class RecordingStatusCache : Tamma.Api.Services.TenantStatus.ITenantStatusCache
-    {
-        public Dictionary<Guid, string?> Entries { get; } = new();
-        public List<Guid> Invalidations { get; } = new();
-        public List<Guid> Reads { get; } = new();
-
-        public bool TryGet(Guid tenantId, out string? status)
-        {
-            Reads.Add(tenantId);
-            return Entries.TryGetValue(tenantId, out status);
-        }
-
-        public void Set(Guid tenantId, string? status) => Entries[tenantId] = status;
-
-        public void Invalidate(Guid tenantId)
-        {
-            Invalidations.Add(tenantId);
-            Entries.Remove(tenantId);
-        }
-    }
 
     /// <summary>
     /// Builds a default-bypass <see cref="HttpContext"/> with a memory

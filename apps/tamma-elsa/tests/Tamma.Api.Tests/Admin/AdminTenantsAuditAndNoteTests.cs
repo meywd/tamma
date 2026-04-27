@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Endpoints.Admin;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -31,9 +32,9 @@ namespace Tamma.Api.Tests.Admin;
 public class AdminTenantsAuditAndNoteTests
 {
     private ControlPlaneDbContext _db = null!;
-    private RecordingEventPublisher _publisher = null!;
+    private RecordingPlatformEventPublisher _publisher = null!;
     private RecordingStatusCache _statusCache = null!;
-    private RecordingConnectionResolver _connectionResolver = null!;
+    private RecordingTenantConnectionResolver _connectionResolver = null!;
     private RecordingInvalidationBus _invalidationBus = null!;
     private TimeProvider _timeProvider = null!;
 
@@ -47,9 +48,9 @@ public class AdminTenantsAuditAndNoteTests
             .Options;
 
         _db = new ControlPlaneDbContext(options);
-        _publisher = new RecordingEventPublisher();
+        _publisher = new RecordingPlatformEventPublisher();
         _statusCache = new RecordingStatusCache();
-        _connectionResolver = new RecordingConnectionResolver();
+        _connectionResolver = new RecordingTenantConnectionResolver();
         _invalidationBus = new RecordingInvalidationBus();
         _timeProvider = TimeProvider.System;
         await PlansSeeder.SeedAsync(_db);
@@ -284,64 +285,6 @@ public class AdminTenantsAuditAndNoteTests
             return s.StatusCode.Value;
         throw new InvalidOperationException(
             $"Result {result.GetType().Name} has no status code");
-    }
-
-    private sealed class RecordingEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
-
-    private sealed class RecordingStatusCache : Tamma.Api.Services.TenantStatus.ITenantStatusCache
-    {
-        public bool TryGet(Guid tenantId, out string? status)
-        { status = null; return false; }
-        public void Set(Guid tenantId, string? status) { }
-        public void Invalidate(Guid tenantId) { }
-    }
-
-    private sealed class RecordingConnectionResolver : ITenantConnectionResolver
-    {
-        public List<Guid> Evictions { get; } = new();
-
-        public ValueTask<Npgsql.NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in audit-event tests.");
-
-        public ValueTask<Npgsql.NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in audit-event tests.");
-
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in audit-event tests.");
-
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            Evictions.Add(tenantId);
-            return ValueTask.CompletedTask;
-        }
-
-        public TenantConnectionPoolStats GetStats() =>
-            new TenantConnectionPoolStats(0, 0, 0);
-    }
-
-    private sealed class RecordingInvalidationBus : ITenantStatusInvalidationBus
-    {
-        public List<Guid> Publishes { get; } = new();
-        public ValueTask PublishAsync(Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            Publishes.Add(tenantId);
-            return ValueTask.CompletedTask;
-        }
     }
 
 }

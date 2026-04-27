@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Endpoints.Admin;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -32,7 +33,7 @@ namespace Tamma.Api.Tests.Admin;
 public class AdminTenantsTests
 {
     private ControlPlaneDbContext _db = null!;
-    private RecordingEventPublisher _publisher = null!;
+    private RecordingPlatformEventPublisher _publisher = null!;
     // Story 28-8 — admin endpoints take an ITenantStatusCache to
     // invalidate the cached status on flip. Tests use a no-op stub.
     private RecordingStatusCache _statusCache = null!;
@@ -44,7 +45,7 @@ public class AdminTenantsTests
     // H12 #2 — admin endpoints also evict the connection-resolver pool
     // on Status flip. Tests use a recording resolver to assert the
     // EvictAsync call.
-    private RecordingConnectionResolver _connectionResolver = null!;
+    private RecordingTenantConnectionResolver _connectionResolver = null!;
     // R2 follow-up — admin endpoints publish a NOTIFY for cluster-wide
     // invalidation. Tests use a recording bus to assert the publish
     // call wires through alongside the local invalidation.
@@ -60,73 +61,13 @@ public class AdminTenantsTests
             .Options;
 
         _db = new ControlPlaneDbContext(options);
-        _publisher = new RecordingEventPublisher();
+        _publisher = new RecordingPlatformEventPublisher();
         _statusCache = new RecordingStatusCache();
         _timeProvider = TimeProvider.System;
-        _connectionResolver = new RecordingConnectionResolver();
+        _connectionResolver = new RecordingTenantConnectionResolver();
         _invalidationBus = new RecordingInvalidationBus();
 
         await PlansSeeder.SeedAsync(_db);
-    }
-
-    /// <summary>
-    /// Test double for the Story 28-8 status cache. Records every
-    /// invalidate call so tests can assert the admin endpoints flush
-    /// the cache after mutating <c>tenants.Status</c>.
-    /// </summary>
-    private sealed class RecordingStatusCache : Tamma.Api.Services.TenantStatus.ITenantStatusCache
-    {
-        public List<Guid> Invalidations { get; } = new();
-        public bool TryGet(Guid tenantId, out string? status)
-        { status = null; return false; }
-        public void Set(Guid tenantId, string? status) { }
-        public void Invalidate(Guid tenantId) => Invalidations.Add(tenantId);
-    }
-
-    /// <summary>
-    /// H12 #2 — Test double for the resolver. Records every
-    /// <c>EvictAsync</c> call so tests can assert the admin endpoints
-    /// invalidate the pool after a Status flip.
-    /// </summary>
-    private sealed class RecordingConnectionResolver : ITenantConnectionResolver
-    {
-        public List<Guid> Evictions { get; } = new();
-
-        public ValueTask<Npgsql.NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
-
-        public ValueTask<Npgsql.NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
-
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in admin-endpoint tests.");
-
-        public ValueTask EvictAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            Evictions.Add(tenantId);
-            return ValueTask.CompletedTask;
-        }
-
-        public TenantConnectionPoolStats GetStats() => default;
-    }
-
-    /// <summary>
-    /// R2 follow-up — Test double for the cluster invalidation bus.
-    /// Records every <c>PublishAsync</c> call so tests can assert the
-    /// admin endpoints fire the NOTIFY alongside the local cache flush.
-    /// </summary>
-    private sealed class RecordingInvalidationBus : ITenantStatusInvalidationBus
-    {
-        public List<Guid> Publishes { get; } = new();
-        public ValueTask PublishAsync(Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            Publishes.Add(tenantId);
-            return ValueTask.CompletedTask;
-        }
     }
 
     [TearDown]
@@ -676,20 +617,4 @@ public class AdminTenantsTests
             $"Result type {result.GetType().FullName} does not expose a status code.");
     }
 
-    // ── Test doubles ──
-
-    private sealed class RecordingEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt,
-            CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
 }

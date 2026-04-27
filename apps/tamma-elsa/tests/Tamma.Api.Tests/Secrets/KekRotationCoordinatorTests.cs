@@ -8,6 +8,7 @@ using NUnit.Framework;
 using Npgsql;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -33,8 +34,8 @@ public class KekRotationCoordinatorTests
     private string _dbName = null!;
     private ServiceProvider _sp = null!;
     private IDbContextFactory<ControlPlaneDbContext> _factory = null!;
-    private RecordingResolver _resolver = null!;
-    private RecordingEventRepository _eventRepo = null!;
+    private RecordingTenantConnectionResolver _resolver = null!;
+    private RecordingPlatformEventRepository _eventRepo = null!;
     private byte[] _initialPrimary = null!;
 
     private static byte[] BuildKek(byte seed)
@@ -49,8 +50,8 @@ public class KekRotationCoordinatorTests
     {
         _dbName = $"kek-rotation-test-{Guid.NewGuid():N}";
         _initialPrimary = BuildKek(seed: 1);
-        _resolver = new RecordingResolver();
-        _eventRepo = new RecordingEventRepository();
+        _resolver = new RecordingTenantConnectionResolver();
+        _eventRepo = new RecordingPlatformEventRepository();
 
         var services = new ServiceCollection();
         services.AddDbContextFactory<ControlPlaneDbContext>(
@@ -325,69 +326,4 @@ public class KekRotationCoordinatorTests
         act.Should().Throw<ArgumentException>();
     }
 
-    // ── helpers ───────────────────────────────────────────────────────
-
-    private sealed class RecordingResolver : ITenantConnectionResolver
-    {
-        public List<Guid> Evictions { get; } = new();
-
-        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException("not exercised by these tests");
-
-        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException("not exercised by these tests");
-
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-        {
-            Evictions.Add(tenantId);
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException("not exercised by these tests");
-
-        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
-    }
-
-    private sealed class RecordingEventRepository : IPlatformEventRepository
-    {
-        public List<PlatformEvent> AppendedEvents { get; } = new();
-
-        public Task<PlatformEvent?> AppendAsync(PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            AppendedEvents.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-
-        public Task<PlatformEvent?> GetByIdAsync(Guid id, CancellationToken ct = default)
-            => Task.FromResult(AppendedEvents.FirstOrDefault(e => e.Id == id));
-
-        public Task<IReadOnlyList<PlatformEvent>> QueryAsync(
-            Guid? tenantId = null,
-            Guid? userId = null,
-            string? typePrefix = null,
-            DateTime? since = null,
-            bool includePlatformWide = false,
-            int limit = 100,
-            CancellationToken ct = default)
-        {
-            IEnumerable<PlatformEvent> query = AppendedEvents;
-            if (tenantId is not null)
-            {
-                query = includePlatformWide
-                    ? query.Where(e => e.TenantId == tenantId || e.TenantId == null)
-                    : query.Where(e => e.TenantId == tenantId);
-            }
-            if (userId is not null) query = query.Where(e => e.UserId == userId);
-            if (typePrefix is not null) query = query.Where(e => e.Type.StartsWith(typePrefix));
-            if (since is not null) query = query.Where(e => e.CreatedAt >= since);
-            return Task.FromResult<IReadOnlyList<PlatformEvent>>(
-                query.OrderByDescending(e => e.CreatedAt).Take(limit).ToList());
-        }
-    }
 }
