@@ -3,9 +3,17 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Services.TaskQueue;
 
 /// <summary>
-/// Multi-tenant task queue surface used by the API layer. Wraps
-/// <see cref="Tamma.Data.Repositories.IQueuedTaskRepository"/> with tenant
-/// scoping derived from <see cref="Tamma.Data.ITenantContext"/>.
+/// Tenant-scoped task queue surface used by the API layer. Wraps
+/// <see cref="Tamma.Data.Repositories.IQueuedTaskRepository"/> with
+/// tenant scoping derived from <see cref="Tamma.Data.ITenantContext"/>.
+///
+/// <para>Story 28-1 PR B — this surface is now <b>tenant-scoped only</b>.
+/// Platform-scope tasks (tenant provisioning, secret retire, GitHub
+/// orphan webhooks) go straight to
+/// <see cref="Tamma.Data.Repositories.IPlatformQueuedTaskRepository"/>
+/// instead. The decision matrix is in
+/// <c>.dev/decisions/story-28-1-design-calls.md</c> §5 plus the commit
+/// body of PR B itself.</para>
 ///
 /// <para>
 /// Ported from the deleted TypeScript <c>ITaskQueue</c>
@@ -18,11 +26,12 @@ namespace Tamma.Api.Services.TaskQueue;
 public interface ITaskQueue
 {
     /// <summary>
-    /// Enqueue a new pending task. The tenant is resolved from the ambient
-    /// <c>ITenantContext</c>; callers do not set <see cref="QueuedTask.TenantId"/>
-    /// directly. Pass an explicit <paramref name="tenantIdOverride"/> to bypass
-    /// the ambient context (used by the webhook handler, which derives tenancy
-    /// from the GitHub installation ID, not the authenticated user).
+    /// Enqueue a new pending task for a tenant. The tenant is resolved
+    /// from the ambient <see cref="Tamma.Data.ITenantContext"/> unless
+    /// <paramref name="tenantIdOverride"/> is supplied. If neither is
+    /// available the call throws — platform-scope callers must use
+    /// <see cref="Tamma.Data.Repositories.IPlatformQueuedTaskRepository"/>
+    /// instead.
     /// </summary>
     Task<QueuedTask> EnqueueAsync(
         string type,
@@ -32,25 +41,24 @@ public interface ITaskQueue
         CancellationToken ct = default);
 
     /// <summary>
-    /// Fetch a single task by id. Returns the row regardless of tenant
-    /// (processor + observability tools may need cross-tenant reads); callers
-    /// that want tenant isolation must filter on the returned tenant.
+    /// Fetch a single task by id from the supplied tenant's queue.
+    /// Tenant id is required since the per-tenant queue lives in the
+    /// per-tenant DB.
     /// </summary>
-    Task<QueuedTask?> GetAsync(Guid id, CancellationToken ct = default);
+    Task<QueuedTask?> GetAsync(Guid tenantId, Guid id, CancellationToken ct = default);
 
     /// <summary>
-    /// List pending tasks for the ambient tenant. When the ambient tenant is
-    /// <c>null</c> (system scope / self-hosted), returns tasks for every
-    /// tenant — this is the lane the processor takes when it runs unscoped.
+    /// List pending tasks for the supplied tenant. Tenant id is
+    /// required since the per-tenant queue lives in the per-tenant DB.
     /// </summary>
-    Task<List<QueuedTask>> ListPendingAsync(int limit = 20, CancellationToken ct = default);
+    Task<List<QueuedTask>> ListPendingAsync(Guid tenantId, int limit = 20, CancellationToken ct = default);
 
     /// <summary>Claim a pending task. See repository for semantics.</summary>
-    Task<QueuedTask?> MarkProcessingAsync(Guid id, CancellationToken ct = default);
+    Task<QueuedTask?> MarkProcessingAsync(Guid tenantId, Guid id, CancellationToken ct = default);
 
     /// <summary>Mark a claimed task complete.</summary>
-    Task MarkCompletedAsync(Guid id, CancellationToken ct = default);
+    Task MarkCompletedAsync(Guid tenantId, Guid id, CancellationToken ct = default);
 
     /// <summary>Mark a claimed task failed with an error message.</summary>
-    Task MarkFailedAsync(Guid id, string error, CancellationToken ct = default);
+    Task MarkFailedAsync(Guid tenantId, Guid id, string error, CancellationToken ct = default);
 }

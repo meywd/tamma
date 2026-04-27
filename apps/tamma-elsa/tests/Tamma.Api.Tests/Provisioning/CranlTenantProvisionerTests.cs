@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Provisioning;
-using Tamma.Api.Services.TaskQueue;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -17,6 +16,14 @@ namespace Tamma.Api.Tests.Provisioning;
 /// is idempotent (already-provisioned tenants don't re-enqueue), correctly
 /// transitions to Pending on a fresh tenant, and enqueues the right task
 /// type for both provision + deprovision flows.
+///
+/// <para>Story 28-1 PR B — provisioning + deprovisioning tasks live on
+/// the platform queue (<see cref="IPlatformQueuedTaskRepository"/>),
+/// not the per-tenant queue. Reason: at provisioning time the tenant
+/// DB doesn't exist yet (the task's whole job is to create it!); at
+/// deprovisioning time the tenant DB is about to be torn down. Tests
+/// here mock <see cref="IPlatformQueuedTaskRepository"/> instead of
+/// <see cref="ITaskQueue"/>.</para>
 /// </summary>
 [TestFixture]
 public class CranlTenantProvisionerTests
@@ -25,7 +32,7 @@ public class CranlTenantProvisionerTests
 #pragma warning disable NUnit1032
     private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
-    private Mock<ITaskQueue> _queue = null!;
+    private Mock<IPlatformQueuedTaskRepository> _platformTasks = null!;
     private CranlTenantProvisioner _provisioner = null!;
 
     [SetUp]
@@ -35,17 +42,18 @@ public class CranlTenantProvisionerTests
         _scope = ApiTestFixture.Factory.Services.CreateScope();
         _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        _queue = new Mock<ITaskQueue>(MockBehavior.Strict);
-        _queue.Setup(q => q.EnqueueAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<long?>(),
-                It.IsAny<Guid?>(),
+        _platformTasks = new Mock<IPlatformQueuedTaskRepository>(MockBehavior.Strict);
+        _platformTasks.Setup(q => q.EnqueueAsync(
+                It.IsAny<PlatformQueuedTask>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new QueuedTask { Id = Guid.NewGuid() });
+            .ReturnsAsync((PlatformQueuedTask t, CancellationToken _) =>
+            {
+                t.Id = Guid.NewGuid();
+                return t;
+            });
 
         _provisioner = new CranlTenantProvisioner(
-            _db, _queue.Object, NullLogger<CranlTenantProvisioner>.Instance);
+            _db, _platformTasks.Object, NullLogger<CranlTenantProvisioner>.Instance);
     }
 
     [TearDown]
@@ -78,11 +86,13 @@ public class CranlTenantProvisionerTests
 
         status.State.Should().Be(ProvisioningState.Pending);
 
-        _queue.Verify(q => q.EnqueueAsync(
-            CranlTenantProvisioner.ProvisioningTaskType,
-            It.Is<string>(json => json.Contains(tenant.Id.ToString()) && json.Contains("germany-1")),
-            null,
-            tenant.Id,
+        _platformTasks.Verify(q => q.EnqueueAsync(
+            It.Is<PlatformQueuedTask>(t =>
+                t.Type == CranlTenantProvisioner.ProvisioningTaskType
+                && t.TenantId == tenant.Id
+                && t.Payload != null
+                && t.Payload.Contains(tenant.Id.ToString())
+                && t.Payload.Contains("germany-1")),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -99,9 +109,9 @@ public class CranlTenantProvisionerTests
             tenant.Id, new ProvisioningOptions("germany-1"), CancellationToken.None);
 
         status.State.Should().Be(ProvisioningState.DatabaseProvisioning);
-        _queue.Verify(q => q.EnqueueAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<long?>(),
-            It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+        _platformTasks.Verify(q => q.EnqueueAsync(
+            It.IsAny<PlatformQueuedTask>(),
+            It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -114,7 +124,7 @@ public class CranlTenantProvisionerTests
             tenant.Id, new ProvisioningOptions("germany-1"), CancellationToken.None);
 
         status.State.Should().Be(ProvisioningState.Ready);
-        _queue.VerifyNoOtherCalls();
+        _platformTasks.VerifyNoOtherCalls();
     }
 
     [Test]
@@ -124,11 +134,10 @@ public class CranlTenantProvisionerTests
 
         await _provisioner.DeprovisionAsync(tenant.Id, CancellationToken.None);
 
-        _queue.Verify(q => q.EnqueueAsync(
-            CranlTenantProvisioner.DeprovisioningTaskType,
-            It.IsAny<string>(),
-            null,
-            tenant.Id,
+        _platformTasks.Verify(q => q.EnqueueAsync(
+            It.Is<PlatformQueuedTask>(t =>
+                t.Type == CranlTenantProvisioner.DeprovisioningTaskType
+                && t.TenantId == tenant.Id),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -140,6 +149,6 @@ public class CranlTenantProvisionerTests
 
         await _provisioner.DeprovisionAsync(tenant.Id, CancellationToken.None);
 
-        _queue.VerifyNoOtherCalls();
+        _platformTasks.VerifyNoOtherCalls();
     }
 }

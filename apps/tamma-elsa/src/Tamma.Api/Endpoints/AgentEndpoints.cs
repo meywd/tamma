@@ -43,6 +43,16 @@ public static class AgentEndpoints
     /// <summary>
     /// Upsert the tenant's agent config. Validates schema, increments
     /// version, and appends a domain event for audit.
+    ///
+    /// <para>
+    /// Story 28-1 PR A (Decision #1): writes without a tenant context are
+    /// rejected with 400. Platform defaults moved to code
+    /// (<c>DefaultAgentConfig.ForRole</c>); the legacy "edit the platform
+    /// default by PUTing with a null tenant" behaviour was a no-op that
+    /// silently dropped the request AND emitted a false success audit
+    /// event. Both lies are gone now: callers see an explicit 400 and no
+    /// <c>AGENT_CONFIG.UPDATED.SUCCESS</c> hits the event store.
+    /// </para>
     /// </summary>
     public static async Task<IResult> UpdateConfig(
         UpdateAgentConfigRequest req,
@@ -59,12 +69,27 @@ public static class AgentEndpoints
             return Results.BadRequest(new { valid = false, errors });
         }
 
+        // Story 28-1 PR A: short-circuit before persistence + audit so we
+        // don't poison the DCB stream with a SUCCESS event for a write that
+        // never happened. Platform defaults are immutable from this surface.
+        if (tenantContext.TenantId is null)
+        {
+            return Results.BadRequest(new
+            {
+                error = "no_tenant_context",
+                detail = "PUT /api/v1/agents/config requires tenant context; " +
+                         "platform defaults are immutable from this endpoint. " +
+                         "Edit DefaultAgentConfig.ForRole in code instead.",
+            });
+        }
+
         var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var userGuid = userId is not null && Guid.TryParse(userId, out var g) ? g : (Guid?)null;
 
         var saved = await configRepo.UpsertAsync(tenantContext.TenantId, configJson, userGuid);
 
-        // Emit audit event (DCB pattern)
+        // Emit audit event (DCB pattern). Reachable only after a real write
+        // — every emitted event corresponds to a state transition.
         await events.AppendAsync(new DomainEvent
         {
             Id = Guid.NewGuid(),

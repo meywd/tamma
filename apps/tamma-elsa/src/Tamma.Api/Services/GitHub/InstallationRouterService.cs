@@ -36,6 +36,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly ITenantRepository _tenants;
     private readonly IUserRepository _users;
     private readonly ITaskQueue? _taskQueue;
+    private readonly IPlatformQueuedTaskRepository? _platformTasks;
     private readonly IMemoryCache _cache;
     private readonly IGitHubAppClient _gitHubApp;
     private readonly IGitHubSecretsProvisioner _provisioner;
@@ -43,6 +44,15 @@ public sealed class InstallationRouterService : IInstallationRouterService
     private readonly IWebhookSignalRegistry? _webhookSignals;
     private readonly ILogger<InstallationRouterService> _logger;
 
+    /// <summary>
+    /// Story 28-1 PR B — webhook deferral now routes by tenancy:
+    /// tenant-bound webhooks (installation has a TenantId) go to the
+    /// per-tenant queue via <see cref="ITaskQueue"/>; orphan webhooks
+    /// (no TenantId on the installation row) go to the platform queue
+    /// via <see cref="IPlatformQueuedTaskRepository"/>. Both repos are
+    /// optional so the existing test fixtures that wire only one of
+    /// them keep working.
+    /// </summary>
     public InstallationRouterService(
         IInstallationRepository installations,
         IEventRepository events,
@@ -54,6 +64,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         IApiKeyRepository apiKeys,
         ILogger<InstallationRouterService> logger,
         ITaskQueue? taskQueue = null,
+        IPlatformQueuedTaskRepository? platformTasks = null,
         IWebhookSignalRegistry? webhookSignals = null)
     {
         _installations = installations;
@@ -65,6 +76,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         _provisioner = provisioner;
         _apiKeys = apiKeys;
         _taskQueue = taskQueue;
+        _platformTasks = platformTasks;
         _webhookSignals = webhookSignals;
         _logger = logger;
     }
@@ -496,14 +508,26 @@ public sealed class InstallationRouterService : IInstallationRouterService
     /// webhook handler returns fast. When the task queue is not wired (tests
     /// that only register the installation router) the event falls through to
     /// <c>skipped = true</c> so old behaviour remains observable.
+    ///
+    /// <para>Story 28-1 PR B — routing splits by tenancy:
+    /// <list type="bullet">
+    ///   <item><description>installation has a TenantId → tenant queue
+    ///     (<see cref="ITaskQueue"/>). Per-tenant DB drains via the
+    ///     <c>TaskQueueProcessor</c>.</description></item>
+    ///   <item><description>orphan installation (TenantId is null) →
+    ///     platform queue (<see cref="IPlatformQueuedTaskRepository"/>).
+    ///     Drained by the <c>PlatformTaskWorker</c>. Without a tenant DB
+    ///     the per-tenant queue can't accept the row, so the platform
+    ///     queue is the only viable home.</description></item>
+    /// </list></para>
     /// </summary>
     private async Task<WebhookResult> EnqueueDeferredEventAsync(
         string eventType, string? action, JsonElement payload)
     {
-        if (_taskQueue is null)
+        if (_taskQueue is null && _platformTasks is null)
         {
             _logger.LogDebug(
-                "Webhook event {Event} (action={Action}) skipped: task queue not registered",
+                "Webhook event {Event} (action={Action}) skipped: no task queue registered",
                 Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
             return new WebhookResult(eventType, action, Skipped: true);
         }
@@ -529,18 +553,50 @@ public sealed class InstallationRouterService : IInstallationRouterService
             ? $"github.{eventType}"
             : $"github.{eventType}.{action}";
 
-        var task = await _taskQueue.EnqueueAsync(
-            type: taskType,
-            payloadJson: payload.GetRawText(),
-            installationId: installationId,
-            tenantIdOverride: tenantId);
+        Guid taskId;
+        string scope;
+        if (tenantId is Guid tid && tid != Guid.Empty && _taskQueue is not null)
+        {
+            var task = await _taskQueue.EnqueueAsync(
+                type: taskType,
+                payloadJson: payload.GetRawText(),
+                installationId: installationId,
+                tenantIdOverride: tid);
+            taskId = task.Id;
+            scope = "tenant";
+        }
+        else if (_platformTasks is not null)
+        {
+            // Orphan webhook (no installation→tenant mapping yet) OR the
+            // per-tenant queue isn't wired. Fall back to the platform
+            // queue — handlers can decide at dispatch time whether to
+            // process or drop.
+            var pt = await _platformTasks.EnqueueAsync(new Tamma.Data.Entities.PlatformQueuedTask
+            {
+                Type = taskType,
+                TenantId = tenantId,
+                InstallationId = installationId,
+                Payload = payload.GetRawText(),
+            });
+            taskId = pt.Id;
+            scope = "platform";
+        }
+        else
+        {
+            // _taskQueue is null and we'd want a tenant-scope enqueue —
+            // there's no orphan-tolerant fallback. Skip.
+            _logger.LogDebug(
+                "Webhook event {Event} (action={Action}) skipped: tenant queue unavailable",
+                Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
+            return new WebhookResult(eventType, action, Skipped: true);
+        }
 
         _logger.LogInformation(
-            "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId})",
+            "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId}, scope={Scope})",
             Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action),
-            task.Id, installationId, tenantId);
+            taskId, installationId, tenantId, scope);
 
-        return new WebhookResult(eventType, action, Skipped: false, TaskId: task.Id);
+        return new WebhookResult(eventType, action, Skipped: false, TaskId: taskId);
     }
 
     private async Task<WebhookResult> HandleInstallationEventAsync(

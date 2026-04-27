@@ -12,19 +12,25 @@ const mockEngineInstance = {
 };
 
 vi.mock('@tamma/orchestrator', () => ({
-  TammaEngine: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn(),
-    processOneIssue: vi.fn(),
-    dispose: vi.fn(),
-    getStats: vi.fn().mockReturnValue({ issuesProcessed: 1, totalCostUsd: 0.5, startedAt: Date.now() }),
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  TammaEngine: vi.fn().mockImplementation(function () {
+    return {
+      initialize: vi.fn(),
+      processOneIssue: vi.fn(),
+      dispose: vi.fn(),
+      getStats: vi.fn().mockReturnValue({ issuesProcessed: 1, totalCostUsd: 0.5, startedAt: Date.now() }),
+    };
+  }),
 }));
 
 vi.mock('@tamma/platforms', () => ({
-  GitHubPlatform: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn(),
-    dispose: vi.fn(),
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  GitHubPlatform: vi.fn().mockImplementation(function () {
+    return {
+      initialize: vi.fn(),
+      dispose: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('@tamma/observability', () => ({
@@ -37,15 +43,21 @@ vi.mock('@tamma/observability', () => ({
 }));
 
 vi.mock('@tamma/shared', () => ({
-  DiagnosticsQueue: vi.fn().mockImplementation(() => ({
-    setProcessor: vi.fn(),
-    dispose: vi.fn(),
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  DiagnosticsQueue: vi.fn().mockImplementation(function () {
+    return {
+      setProcessor: vi.fn(),
+      dispose: vi.fn(),
+    };
+  }),
   ContentSanitizer: vi.fn(),
 }));
 
 vi.mock('@tamma/providers', () => ({
-  RoleBasedAgentResolver: vi.fn().mockImplementation(() => ({})),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  RoleBasedAgentResolver: vi.fn().mockImplementation(function () {
+    return {};
+  }),
   AgentProviderFactory: vi.fn(),
   ProviderHealthTracker: vi.fn(),
   AgentPromptRegistry: vi.fn(),
@@ -97,11 +109,14 @@ vi.mock('../error-handler.js', () => ({
 }));
 
 vi.mock('../worker/result-callback.js', () => ({
-  WorkerResultCallback: vi.fn().mockImplementation(() => ({
-    reportSuccess: vi.fn(),
-    reportFailure: vi.fn(),
-    reportStatus: vi.fn(),
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  WorkerResultCallback: vi.fn().mockImplementation(function () {
+    return {
+      reportSuccess: vi.fn(),
+      reportFailure: vi.fn(),
+      reportStatus: vi.fn(),
+    };
+  }),
 }));
 
 // Import after mocks — use dynamic import so mocks are applied
@@ -150,7 +165,8 @@ describe('processIssueCommand', () => {
 
     it('should return EXIT_FAILURE (1) on processing error', async () => {
       // Override the mock for this test: make processOneIssue reject
-      vi.mocked(TammaEngine).mockImplementationOnce(() => {
+      // Vitest 4: constructor mocks must use `function` keyword, not arrow
+      vi.mocked(TammaEngine).mockImplementationOnce(function () {
         const inst = {
           initialize: vi.fn().mockResolvedValue(undefined),
           processOneIssue: vi.fn().mockRejectedValue(new Error('Agent provider is not available')),
@@ -169,7 +185,8 @@ describe('processIssueCommand', () => {
     });
 
     it('should return EXIT_SKIPPED (78) when no issues found', async () => {
-      vi.mocked(TammaEngine).mockImplementationOnce(() => {
+      // Vitest 4: constructor mocks must use `function` keyword, not arrow
+      vi.mocked(TammaEngine).mockImplementationOnce(function () {
         return {
           initialize: vi.fn().mockResolvedValue(undefined),
           processOneIssue: vi.fn().mockRejectedValue(new Error('No issues found matching labels')),
@@ -187,7 +204,8 @@ describe('processIssueCommand', () => {
     });
 
     it('should return EXIT_SKIPPED (78) when issue is skipped', async () => {
-      vi.mocked(TammaEngine).mockImplementationOnce(() => {
+      // Vitest 4: constructor mocks must use `function` keyword, not arrow
+      vi.mocked(TammaEngine).mockImplementationOnce(function () {
         return {
           initialize: vi.fn().mockResolvedValue(undefined),
           processOneIssue: vi.fn().mockRejectedValue(new Error('Plan skipped by user')),
@@ -228,7 +246,8 @@ describe('processIssueCommand', () => {
     });
 
     it('should clean up resources even on failure', async () => {
-      vi.mocked(TammaEngine).mockImplementationOnce(() => {
+      // Vitest 4: constructor mocks must use `function` keyword, not arrow
+      vi.mocked(TammaEngine).mockImplementationOnce(function () {
         return {
           initialize: vi.fn().mockResolvedValue(undefined),
           processOneIssue: vi.fn().mockRejectedValue(new Error('boom')),
@@ -295,7 +314,8 @@ describe('processIssueCommand', () => {
     it('should write ::error:: annotation on processing failure in GitHub Actions', async () => {
       process.env['GITHUB_ACTIONS'] = 'true';
 
-      vi.mocked(TammaEngine).mockImplementationOnce(() => {
+      // Vitest 4: constructor mocks must use `function` keyword, not arrow
+      vi.mocked(TammaEngine).mockImplementationOnce(function () {
         return {
           initialize: vi.fn().mockResolvedValue(undefined),
           processOneIssue: vi.fn().mockRejectedValue(new Error('Agent crashed')),

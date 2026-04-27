@@ -95,7 +95,11 @@ public class GitHubWebhookTaskQueueIntegrationTests
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync();
+        // Story 28-1 PR B — orphan webhooks (no installation→tenant
+        // mapping) route to platform_queued_tasks, not the per-tenant
+        // queue. There's no tenant DB to land them in until the
+        // installation is claimed.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync();
         task.Should().NotBeNull();
         task!.Type.Should().StartWith("github.push");
         task.InstallationId.Should().Be(9001L);
@@ -123,7 +127,8 @@ public class GitHubWebhookTaskQueueIntegrationTests
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
+        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
         task.Should().NotBeNull();
         task!.Type.Should().Be("github.issues.opened");
     }
@@ -148,7 +153,8 @@ public class GitHubWebhookTaskQueueIntegrationTests
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
+        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
         task.Should().NotBeNull();
         task!.Type.Should().Be("github.pull_request.opened");
     }

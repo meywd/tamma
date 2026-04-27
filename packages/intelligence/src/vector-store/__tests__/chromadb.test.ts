@@ -53,7 +53,10 @@ vi.mock('chromadb', () => {
   };
 
   return {
-    ChromaClient: vi.fn().mockImplementation(() => mockClient),
+    // Vitest 4: constructor mocks must use `function` keyword, not arrow
+    ChromaClient: vi.fn().mockImplementation(function () {
+      return mockClient;
+    }),
   };
 });
 

@@ -82,10 +82,34 @@ public class TaskQueueProcessorLifecycleBusTests
         => new(new TestTenantDbContextFactory(_tenantOptions),
                new TestControlPlaneDbContext(_cpOptions));
 
+    /// <summary>
+    /// Seed a tenant so <see cref="QueuedTaskRepository.ListPendingFromAnyTenantAsync"/>
+    /// has a tenant to walk. Story 28-1 PR B — the processor's drain
+    /// path enumerates active tenants from CP.
+    /// </summary>
+    private void SeedTenant(Guid tenantId)
+    {
+        using var cp = new TestControlPlaneDbContext(_cpOptions);
+        if (cp.Tenants.Find(tenantId) is null)
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "test",
+                Slug = "test-" + tenantId.ToString()[..8],
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            cp.SaveChanges();
+        }
+    }
+
     [Test]
     public async Task ProcessOnceAsync_SuccessfulTask_PublishesClaimedThenCompleted()
     {
         var tenantId = Guid.NewGuid();
+        SeedTenant(tenantId);
         await FreshRepo().EnqueueAsync(new QueuedTask
         {
             Type = "github.push.main",
@@ -122,6 +146,7 @@ public class TaskQueueProcessorLifecycleBusTests
     public async Task ProcessOnceAsync_HandlerThrows_PublishesClaimedThenFailed()
     {
         var tenantId = Guid.NewGuid();
+        SeedTenant(tenantId);
         await FreshRepo().EnqueueAsync(new QueuedTask
         {
             Type = "github.x",

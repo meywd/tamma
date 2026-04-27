@@ -23,6 +23,8 @@ namespace Tamma.Api.Tests.TaskQueue;
 [TestFixture]
 public class TaskQueueProcessorTests
 {
+    private static readonly Guid TestTenantId = Guid.Parse("12345678-aaaa-bbbb-cccc-9999cafe0000");
+
     private ServiceProvider _services = null!;
     private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
     private DbContextOptions<TenantDbContext> _tenantOptions = null!;
@@ -64,6 +66,21 @@ public class TaskQueueProcessorTests
 
         _services = services.BuildServiceProvider();
 
+        // Seed an active tenant so cross-tenant drain has a tenant to walk.
+        using (var seed = new TestControlPlaneDbContext(_cpOptions))
+        {
+            seed.Tenants.Add(new Tenant
+            {
+                Id = TestTenantId,
+                Name = "test",
+                Slug = "test",
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            seed.SaveChanges();
+        }
+
         _processor = new TaskQueueProcessor(
             _services,
             new TaskQueueProcessorOptions
@@ -97,6 +114,7 @@ public class TaskQueueProcessorTests
         var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask
         {
             Type = "github.push.main",
+            TenantId = TestTenantId,
             Payload = "{\"ref\":\"refs/heads/main\"}"
         });
 
@@ -110,7 +128,7 @@ public class TaskQueueProcessorTests
             It.Is<QueuedTask>(t => t.Id == enqueued.Id),
             It.IsAny<CancellationToken>()), Times.Once);
 
-        var stored = await FreshRepo().GetAsync(enqueued.Id);
+        var stored = await FreshRepo().GetAsync(TestTenantId, enqueued.Id);
         stored!.Status.Should().Be("completed");
         stored.Error.Should().BeNull();
     }
@@ -130,14 +148,14 @@ public class TaskQueueProcessorTests
     [Test]
     public async Task ProcessOnceAsync_HandlerThrows_RequeuesWithIncrementedRetry()
     {
-        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "github.x" });
+        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "github.x", TenantId = TestTenantId });
 
         _handler.Setup(h => h.HandleAsync(It.IsAny<QueuedTask>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("transient boom"));
 
         await _processor.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshRepo().GetAsync(enqueued.Id);
+        var stored = await FreshRepo().GetAsync(TestTenantId, enqueued.Id);
         stored!.Status.Should().Be("pending");  // requeued
         stored.RetryCount.Should().Be(1);
         stored.Error.Should().Contain("transient boom");
@@ -146,23 +164,23 @@ public class TaskQueueProcessorTests
     [Test]
     public async Task ProcessOnceAsync_HandlerThrowsThreeTimes_MarksFailed()
     {
-        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "github.x" });
+        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "github.x", TenantId = TestTenantId });
 
         _handler.Setup(h => h.HandleAsync(It.IsAny<QueuedTask>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("broken"));
 
         // Attempt 1 → RetryCount 1, pending
         await _processor.ProcessOnceAsync(CancellationToken.None);
-        (await FreshRepo().GetAsync(enqueued.Id))!.Status.Should().Be("pending");
+        (await FreshRepo().GetAsync(TestTenantId, enqueued.Id))!.Status.Should().Be("pending");
 
         // Attempt 2 → RetryCount 2, pending
         await _processor.ProcessOnceAsync(CancellationToken.None);
-        (await FreshRepo().GetAsync(enqueued.Id))!.Status.Should().Be("pending");
+        (await FreshRepo().GetAsync(TestTenantId, enqueued.Id))!.Status.Should().Be("pending");
 
         // Attempt 3 → RetryCount 3, now failed (exhausted)
         await _processor.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshRepo().GetAsync(enqueued.Id);
+        var stored = await FreshRepo().GetAsync(TestTenantId, enqueued.Id);
         stored!.Status.Should().Be("failed");
         stored.RetryCount.Should().Be(3);
         stored.Error.Should().Contain("broken");
@@ -174,11 +192,11 @@ public class TaskQueueProcessorTests
     public async Task ProcessOnceAsync_NoHandlerRegistered_MarksFailedWithClearError()
     {
         // Type does NOT start with "github." — registry returns null.
-        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "unknown.type" });
+        var enqueued = await FreshRepo().EnqueueAsync(new QueuedTask { Type = "unknown.type", TenantId = TestTenantId });
 
         await _processor.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshRepo().GetAsync(enqueued.Id);
+        var stored = await FreshRepo().GetAsync(TestTenantId, enqueued.Id);
         stored!.Status.Should().Be("failed");
         stored.Error.Should().Contain("no handler");
     }
