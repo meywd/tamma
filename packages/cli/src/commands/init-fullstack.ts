@@ -58,7 +58,7 @@ services:
   # Infrastructure: PostgreSQL
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: \${POSTGRES_USER:-tamma}
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}

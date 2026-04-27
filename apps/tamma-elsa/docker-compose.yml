@@ -38,7 +38,7 @@ services:
       start_period: 40s
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${DB_NAME:-tamma}
       POSTGRES_USER: ${DB_USER:-tamma}
