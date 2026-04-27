@@ -100,6 +100,25 @@ public class LruResolverLeaseAndDiagnosticsTests
         lease.DataSource.ConnectionString.Should().Contain($"tenant={tid:D}");
     }
 
+    /// <summary>
+    /// Round-1 H6 flake-watch (epic-28-multi-agent-review-2026-04-26).
+    ///
+    /// <para><b>Why this test is NOT timing-dependent</b>: the concern was
+    /// that <see cref="LruPooledTenantConnectionResolver.HandleFinalLeaseReleased"/>
+    /// fires a <c>Task.Run</c> that disposes the data source, and on a
+    /// busy CI box that <c>Task.Run</c> might execute before the
+    /// <see cref="NpgsqlDataSource.ConnectionString"/> assertion below.
+    /// Analysis (2026-04-26) shows this is impossible: the callback is
+    /// gated behind the ref count dropping to zero, which only happens
+    /// when <c>await lease.DisposeAsync()</c> runs at line 136 — AFTER
+    /// the assertion at line 122. The deferred dispose cannot race the
+    /// assertion because the lease is still alive while we assert.
+    /// Verified 0/100 failures on a local busy box (see commit message).</para>
+    ///
+    /// <para><b>Verdict</b>: H6 closed-by-Wave-3 (no code change needed).
+    /// The test comment below was already correct; this XML doc adds the
+    /// formal closure note per the H6 fix plan.</para>
+    /// </summary>
     [Test]
     public async Task LeaseAsync_Then_Evict_Defers_DataSource_Dispose_Until_Lease_Releases()
     {
@@ -116,7 +135,11 @@ public class LruResolverLeaseAndDiagnosticsTests
 
         // The lease's data source must still work — i.e. ConnectionString
         // accessor doesn't throw, meaning the data source is not yet
-        // disposed.
+        // disposed. This assertion is NOT timing-dependent: the deferred
+        // dispose callback is gated behind the ref count dropping to 0,
+        // which only occurs when lease.DisposeAsync() executes below.
+        // While the lease is alive, the ref count is 1 (the sibling) and
+        // the callback cannot fire. See XML doc above for full analysis.
         Action stillUsable = () => _ = ds.ConnectionString;
         stillUsable.Should().NotThrow(
             "deferred-dispose must keep the data source alive while the lease is open");
