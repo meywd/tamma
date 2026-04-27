@@ -8,6 +8,7 @@ using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -81,25 +82,6 @@ public class SwitchOrgEndpointTests
             ApiTestFixture.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>());
 
         _publisher = new RecordingPlatformEventPublisher();
-    }
-
-    /// <summary>
-    /// Story 28-R2 / Finding H2 — local stub for IPlatformEventPublisher.
-    /// Records every appended event so tests can assert that SwitchOrg /
-    /// Logout emit the new audit events with the right shape.
-    /// </summary>
-    internal sealed class RecordingPlatformEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
     }
 
     [TearDown]

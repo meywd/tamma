@@ -13,9 +13,9 @@ using NUnit.Framework;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Endpoints.Admin;
-using Tamma.Data.Abstractions;
 using Tamma.Api.Services;
 using Tamma.Api.Services.TenantStatus;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -244,11 +244,11 @@ public class QuickWinsRound2Tests
         db.Entry(tenant).Property("PlanId").CurrentValue = PlansSeeder.FreePlanId;
         await db.SaveChangesAsync();
 
-        var publisher = new RecordingEventPublisher();
-        var statusCache = new NoopStatusCache();
+        var publisher = new RecordingPlatformEventPublisher();
+        var statusCache = new RecordingStatusCache();
 
         var result = await AdminTenantsEndpoints.RetryTenant(
-            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
+            tenantId, db, publisher, statusCache, new NoopTenantConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await db.Tenants.IgnoreQueryFilters()
@@ -289,11 +289,11 @@ public class QuickWinsRound2Tests
         db.Entry(tenant).Property("PlanId").CurrentValue = PlansSeeder.FreePlanId;
         await db.SaveChangesAsync();
 
-        var publisher = new RecordingEventPublisher();
-        var statusCache = new NoopStatusCache();
+        var publisher = new RecordingPlatformEventPublisher();
+        var statusCache = new RecordingStatusCache();
 
         var result = await AdminTenantsEndpoints.DeleteTenant(
-            tenantId, db, publisher, statusCache, new NoopConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
+            tenantId, db, publisher, statusCache, new NoopTenantConnectionResolver(), new NullTenantStatusInvalidationBus(), time, EmptyPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await db.Tenants.IgnoreQueryFilters()
@@ -327,48 +327,7 @@ public class QuickWinsRound2Tests
         public override DateTimeOffset GetUtcNow() => _now;
     }
 
-    private sealed class NoopStatusCache : ITenantStatusCache
-    {
-        public bool TryGet(Guid tenantId, out string? status)
-        { status = null; return false; }
-        public void Set(Guid tenantId, string? status) { }
-        public void Invalidate(Guid tenantId) { }
-    }
-
-    // R2 merge — minimal resolver stub for tests that exercise admin
-    // endpoint TimeProvider behaviour without caring about resolver
-    // eviction. EvictAsync is a no-op.
-    private sealed class NoopConnectionResolver : ITenantConnectionResolver
-    {
-        public ValueTask<Npgsql.NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in TimeProvider tests.");
-        public ValueTask<Npgsql.NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in TimeProvider tests.");
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new InvalidOperationException("Not used in TimeProvider tests.");
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-            => ValueTask.CompletedTask;
-
-        public TenantConnectionPoolStats GetStats() =>
-            new TenantConnectionPoolStats(0, 0, 0);
-    }
-
     // R2 merge — empty principal for tests that don't care about actor.
     private static System.Security.Claims.ClaimsPrincipal EmptyPrincipal() =>
         new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity());
-
-    private sealed class RecordingEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt,
-            CancellationToken ct = default)
-        {
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
 }

@@ -10,6 +10,7 @@ using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Endpoints.Admin;
 using Tamma.Api.Services.Auth;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -39,7 +40,7 @@ namespace Tamma.Api.Tests.Admin;
 public class AdminImpersonationTests
 {
     private ControlPlaneDbContext _db = null!;
-    private RecordingEventPublisher _publisher = null!;
+    private RecordingPlatformEventPublisher _publisher = null!;
     private TimeProvider _timeProvider = null!;
     private IAdminImpersonationService _service = null!;
     private IJwtService _jwt = null!;
@@ -57,7 +58,7 @@ public class AdminImpersonationTests
             .Options;
 
         _db = new ControlPlaneDbContext(options);
-        _publisher = new RecordingEventPublisher();
+        _publisher = new RecordingPlatformEventPublisher();
         _timeProvider = TimeProvider.System;
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -485,17 +486,4 @@ public class AdminImpersonationTests
         data["impersonationId"]!.ToString().Should().Be(expectedImpId.ToString("D"));
     }
 
-    private sealed class RecordingEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
 }

@@ -7,6 +7,7 @@ using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
@@ -109,7 +110,7 @@ public class KekRotationAdvisoryLockTests
         services.AddDbContextFactory<ControlPlaneDbContext>(opts =>
             opts.UseNpgsql(_connectionString));
         services.AddLogging();
-        services.AddSingleton<IPlatformEventRepository, NoopEventRepository>();
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
         services.AddSingleton(NpgsqlDataSource.Create(_connectionString));
         var sp = services.BuildServiceProvider();
 
@@ -123,7 +124,7 @@ public class KekRotationAdvisoryLockTests
         var cfg = new ConfigurationBuilder().AddInMemoryCollection(dict).Build();
         var provider = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
 
-        var resolver = new NoopResolver();
+        var resolver = new NoopTenantConnectionResolver();
         var coordinator = new KekRotationCoordinator(
             sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
@@ -148,45 +149,4 @@ public class KekRotationAdvisoryLockTests
         await sp.DisposeAsync();
     }
 
-    private sealed class NoopResolver : ITenantConnectionResolver
-    {
-        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-            => ValueTask.CompletedTask;
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
-    }
-
-    private sealed class NoopEventRepository : IPlatformEventRepository
-    {
-        public Task<Tamma.Data.Entities.PlatformEvent?> AppendAsync(
-            Tamma.Data.Entities.PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            return Task.FromResult<Tamma.Data.Entities.PlatformEvent?>(evt);
-        }
-
-        public Task<Tamma.Data.Entities.PlatformEvent?> GetByIdAsync(
-            Guid id, CancellationToken ct = default)
-            => Task.FromResult<Tamma.Data.Entities.PlatformEvent?>(null);
-
-        public Task<IReadOnlyList<Tamma.Data.Entities.PlatformEvent>> QueryAsync(
-            Guid? tenantId = null,
-            Guid? userId = null,
-            string? typePrefix = null,
-            DateTime? since = null,
-            bool includePlatformWide = false,
-            int limit = 100,
-            CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Tamma.Data.Entities.PlatformEvent>>(
-                Array.Empty<Tamma.Data.Entities.PlatformEvent>());
-    }
 }

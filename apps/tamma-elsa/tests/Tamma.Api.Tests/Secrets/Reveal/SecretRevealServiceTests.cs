@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Postgres;
 using Tamma.Api.Services.Secrets.Reveal;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Tests.Secrets.Reveal;
@@ -36,7 +37,7 @@ public class SecretRevealServiceTests
     private static readonly Guid OwnerUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     private TestKekProvider _kekProvider = null!;
-    private RecordingAuditor _auditor = null!;
+    private RecordingSecretAccessAuditor _auditor = null!;
     private InMemorySecretStoreBackend _backend = null!;
     private RevealDbFactoryDouble _revealFactory = null!;
     private SecretsDbFactoryDouble _secretsFactory = null!;
@@ -48,7 +49,7 @@ public class SecretRevealServiceTests
     {
         var kek = RandomNumberGenerator.GetBytes(32);
         _kekProvider = new TestKekProvider(PrimaryKekId, kek);
-        _auditor = new RecordingAuditor();
+        _auditor = new RecordingSecretAccessAuditor();
         _backend = new InMemorySecretStoreBackend();
         _revealFactory = new RevealDbFactoryDouble(Guid.NewGuid().ToString());
         _secretsFactory = new SecretsDbFactoryDouble(Guid.NewGuid().ToString());
@@ -355,17 +356,6 @@ public class SecretRevealServiceTests
         public FakeClockProvider(DateTimeOffset start) => _now = start;
         public override DateTimeOffset GetUtcNow() => _now;
         public void Advance(TimeSpan delta) => _now = _now.Add(delta);
-    }
-
-    private sealed class RecordingAuditor : ISecretAccessAuditor
-    {
-        public List<SecretAuditEvent> Events { get; } = new();
-
-        public Task EmitAsync(SecretAuditEvent auditEvent, CancellationToken ct = default)
-        {
-            Events.Add(auditEvent);
-            return Task.CompletedTask;
-        }
     }
 
     private sealed class TestKekProvider : IKekProvider

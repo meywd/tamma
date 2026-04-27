@@ -13,6 +13,7 @@ using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Services.Auth;
 using Tamma.Api.Services.RateLimit;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -158,18 +159,6 @@ public class AuthAuditEventTests
             => _primary.GetService(serviceType) ?? _fallback.GetService(serviceType);
     }
 
-    private sealed class RecordingPlatformEventPublisher : IPlatformEventPublisher
-    {
-        public List<PlatformEvent> Events { get; } = new();
-        public Task<PlatformEvent?> AppendAndPublishAsync(
-            PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            Events.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-    }
 
     // ── Logout-all audit + rate-limit ──────────────────────────────────────
 

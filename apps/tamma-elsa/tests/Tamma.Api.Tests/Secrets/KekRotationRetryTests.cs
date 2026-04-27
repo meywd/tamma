@@ -11,6 +11,7 @@ using Tamma.Activities.Security;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -47,7 +48,7 @@ public class KekRotationRetryTests
         var services = new ServiceCollection();
         services.AddDbContextFactory<ControlPlaneDbContext>(
             options => options.UseInMemoryDatabase(_dbName));
-        services.AddSingleton<IPlatformEventRepository, RecordingEventRepository>();
+        services.AddSingleton<IPlatformEventRepository, RecordingPlatformEventRepository>();
         services.AddLogging();
         _sp = services.BuildServiceProvider();
         _factory = _sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
@@ -64,7 +65,7 @@ public class KekRotationRetryTests
         return new KekRotationCoordinator(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
     }
 
@@ -155,7 +156,7 @@ public class KekRotationRetryTests
         var coordinator = new KekRotationCoordinator(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             provider,
-            new NoopResolver(),
+            new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance,
             errorRedactor: fakeRedactor);
 
@@ -232,22 +233,6 @@ public class KekRotationRetryTests
         await ctx.SaveChangesAsync();
     }
 
-    private sealed class NoopResolver : ITenantConnectionResolver
-    {
-        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
-            => ValueTask.CompletedTask;
-        public ValueTask<ITenantConnectionLease> LeaseAsync(
-            Guid tenantId, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
-    }
-
     private sealed class RecordingRedactor : IErrorRedactor
     {
         private readonly List<string> _seen;
@@ -259,25 +244,4 @@ public class KekRotationRetryTests
         }
     }
 
-    private sealed class RecordingEventRepository : IPlatformEventRepository
-    {
-        public List<PlatformEvent> AppendedEvents { get; } = new();
-
-        public Task<PlatformEvent?> AppendAsync(PlatformEvent evt, CancellationToken ct = default)
-        {
-            evt.Id = Guid.NewGuid();
-            evt.CreatedAt = DateTime.UtcNow;
-            AppendedEvents.Add(evt);
-            return Task.FromResult<PlatformEvent?>(evt);
-        }
-
-        public Task<PlatformEvent?> GetByIdAsync(Guid id, CancellationToken ct = default)
-            => Task.FromResult(AppendedEvents.FirstOrDefault(e => e.Id == id));
-
-        public Task<IReadOnlyList<PlatformEvent>> QueryAsync(
-            Guid? tenantId = null, Guid? userId = null, string? typePrefix = null,
-            DateTime? since = null, bool includePlatformWide = false, int limit = 100,
-            CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<PlatformEvent>>(AppendedEvents);
-    }
 }

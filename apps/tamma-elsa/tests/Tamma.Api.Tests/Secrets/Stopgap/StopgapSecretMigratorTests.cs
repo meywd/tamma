@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Stopgap;
 using Tamma.Api.Services.Secrets.Postgres;
+using Tamma.Api.Tests.TestDoubles;
 
 namespace Tamma.Api.Tests.Secrets.Migration;
 
@@ -19,7 +20,7 @@ public class StopgapSecretMigratorTests
 {
     private SecretsDbContextFactoryDouble _factory = null!;
     private InMemorySecretStoreBackend _backend = null!;
-    private RecordingAuditor _auditor = null!;
+    private RecordingSecretAccessAuditor _auditor = null!;
     private TimeProvider _time = null!;
     private static readonly Guid OperatorId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-111111111111");
 
@@ -28,7 +29,7 @@ public class StopgapSecretMigratorTests
     {
         _factory = new SecretsDbContextFactoryDouble(Guid.NewGuid().ToString());
         _backend = new InMemorySecretStoreBackend();
-        _auditor = new RecordingAuditor();
+        _auditor = new RecordingSecretAccessAuditor();
         _time = new FixedTimeProvider(
             new DateTimeOffset(2026, 4, 22, 9, 0, 0, TimeSpan.Zero));
     }
@@ -181,15 +182,6 @@ public class StopgapSecretMigratorTests
             .Build();
     }
 
-    private sealed class RecordingAuditor : ISecretAccessAuditor
-    {
-        public List<SecretAuditEvent> Events { get; } = new();
-        public Task EmitAsync(SecretAuditEvent auditEvent, CancellationToken ct = default)
-        {
-            Events.Add(auditEvent);
-            return Task.CompletedTask;
-        }
-    }
 
     private sealed class FixedTimeProvider : TimeProvider
     {
