@@ -62,7 +62,7 @@ export function calculateDelay(
 /**
  * Sleep for a specified duration
  */
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error('Operation aborted'));
@@ -150,7 +150,7 @@ export function retryable<TArgs extends unknown[], TResult>(
   fn: (...args: TArgs) => Promise<TResult>,
   options: Partial<RetryOptions> = {}
 ): (...args: TArgs) => Promise<TResult> {
-  return (...args: TArgs) => withRetry(() => fn(...args), options);
+  return async (...args: TArgs) => withRetry(async () => fn(...args), options);
 }
 
 /**

@@ -47,7 +47,7 @@ describe('TenantAlertChannels', () => {
       }),
     );
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], count: 0 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderPage();
 
@@ -79,7 +79,7 @@ describe('TenantAlertChannels', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'new' }, 201));
     // refresh
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], count: 0 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderPage();
 
@@ -101,7 +101,7 @@ describe('TenantAlertChannels', () => {
       const createCall = fetchMock.mock.calls.find(
         (c) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).endsWith('/api/v1/orgs/tnt-A/alert-channels') &&
+          (c[0]).endsWith('/api/v1/orgs/tnt-A/alert-channels') &&
           (c[1] as RequestInit).method === 'POST',
       );
       expect(createCall).toBeTruthy();
@@ -128,7 +128,7 @@ describe('TenantAlertChannels', () => {
       }),
     );
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], count: 0 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderPage();
 
@@ -156,7 +156,7 @@ describe('TenantAlertChannels', () => {
     const createCall = fetchMock.mock.calls.find(
       (c) =>
         typeof c[0] === 'string' &&
-        (c[0] as string).endsWith('/api/v1/orgs/tnt-A/alert-channels') &&
+        (c[0]).endsWith('/api/v1/orgs/tnt-A/alert-channels') &&
         (c[1] as RequestInit).method === 'POST',
     );
     expect(createCall).toBeFalsy();

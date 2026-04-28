@@ -98,7 +98,7 @@ describe('useAuth', () => {
     });
 
     const loginCall = fetchMock.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('/auth/login'),
+      (c) => typeof c[0] === 'string' && (c[0]).includes('/auth/login'),
     );
     expect(loginCall).toBeDefined();
     expect((loginCall![1] as RequestInit).method).toBe('POST');
@@ -126,7 +126,7 @@ describe('useAuth', () => {
 
     expect(result.current.user).toBeNull();
     const logoutCall = fetchMock.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('/auth/logout'),
+      (c) => typeof c[0] === 'string' && (c[0]).includes('/auth/logout'),
     );
     expect(logoutCall).toBeDefined();
   });

@@ -29,7 +29,7 @@ describe('RegisterPage', () => {
   it('renders the registration form', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response('', { status: 401 }),
-    ) as unknown as typeof fetch;
+    );
 
     renderWithRouter();
 
@@ -57,7 +57,7 @@ describe('RegisterPage', () => {
       // follow-up /auth/me (still anon until verified)
       .mockResolvedValueOnce(new Response('', { status: 401 }))
       .mockResolvedValueOnce(new Response('', { status: 401 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderWithRouter();
     await screen.findByLabelText(/name/i);
@@ -72,7 +72,7 @@ describe('RegisterPage', () => {
     });
 
     const registerCall = fetchMock.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('/auth/register'),
+      (c) => typeof c[0] === 'string' && (c[0]).includes('/auth/register'),
     );
     expect(registerCall).toBeDefined();
     const body = JSON.parse((registerCall![1] as RequestInit).body as string);

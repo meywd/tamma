@@ -22,7 +22,7 @@ function renderWith(role: string | null) {
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     ),
-  ) as unknown as typeof fetch;
+  );
 
   return render(
     <MemoryRouter>

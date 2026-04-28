@@ -30,7 +30,7 @@ export default function Sidebar({ mobileOpen = false, onCloseMobile }: SidebarPr
 
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => {
         setManifest(data);
         // Auto-expand current section

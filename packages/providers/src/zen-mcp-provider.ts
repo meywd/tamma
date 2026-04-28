@@ -65,7 +65,7 @@ export class ZenMCPProvider implements IAIProvider {
       '@modelcontextprotocol/sdk/client/stdio.js'
     );
 
-    const command = (typeof meta['command'] === 'string' ? meta['command'] : 'npx') as string;
+    const command = (typeof meta['command'] === 'string' ? meta['command'] : 'npx');
     const args = (Array.isArray(meta['args']) ? meta['args'] : ['zen-mcp-server-199bio']) as string[];
 
     // Build env vars — pass through API keys from metadata
@@ -174,7 +174,7 @@ export class ZenMCPProvider implements IAIProvider {
       const response: MessageResponse = {
         id: `zen-${Date.now()}`,
         content: text,
-        model: (request.model ?? this.config?.model ?? 'zen-mcp') as string,
+        model: (request.model ?? this.config?.model ?? 'zen-mcp'),
         usage: {
           inputTokens: 0,
           outputTokens: 0,

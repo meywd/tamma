@@ -37,7 +37,7 @@ const HEALTH_SENTINEL = '/tmp/tamma-engine-healthy';
  * A sleep that can be cancelled via AbortSignal.
  * Resolves immediately if the signal is already aborted.
  */
-function cancellableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+async function cancellableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -68,7 +68,7 @@ function createStateEmitter(): StateEmitter {
 /**
  * Show IssueSelector in a temporary Ink render, resolve with the user's choice.
  */
-function selectIssueInteractively(issues: Issue[]): Promise<Issue | null> {
+async function selectIssueInteractively(issues: Issue[]): Promise<Issue | null> {
   return new Promise((resolve) => {
     const { unmount } = render(
       <IssueSelector
@@ -259,7 +259,7 @@ export async function startCommand(options: CLIOptions): Promise<void> {
   }
 
   // Ink-based approval handler
-  const approvalHandler: ApprovalHandler = (plan) => {
+  const approvalHandler: ApprovalHandler = async (plan) => {
     return new Promise<'approve' | 'reject' | 'skip'>((resolve) => {
       approvalRef.current = { plan, resolve };
       stateEmitter.reEmit();

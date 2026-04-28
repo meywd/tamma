@@ -73,7 +73,7 @@ describe('TenantAlertFeed', () => {
         limit: 200,
       }),
     );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderFeed();
 
@@ -127,7 +127,7 @@ describe('TenantAlertFeed', () => {
         limit: 200,
       }),
     );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderFeed();
 
@@ -186,7 +186,7 @@ describe('TenantAlertFeed', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ items: [], count: 0, limit: 200 }),
     );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderFeed();
 
@@ -204,7 +204,7 @@ describe('TenantAlertFeed', () => {
       const ackCall = fetchMock.mock.calls.find(
         (c) =>
           typeof c[0] === 'string' &&
-          (c[0] as string).includes('/alerts/a1/acknowledge'),
+          (c[0]).includes('/alerts/a1/acknowledge'),
       );
       expect(ackCall).toBeTruthy();
       expect((ackCall?.[1] as RequestInit).method).toBe('POST');

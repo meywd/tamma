@@ -71,7 +71,7 @@ export default function StoriesPage() {
   useEffect(() => {
     document.title = 'Stories \u2014 Tamma Docs';
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => {
         const epicMap = new Map<string, ManifestEntry[]>();
 

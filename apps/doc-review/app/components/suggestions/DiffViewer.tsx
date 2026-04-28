@@ -135,7 +135,7 @@ export function DiffViewer({
           {/* Copy buttons */}
           <button
             type="button"
-            onClick={() => handleCopy(suggestedText)}
+            onClick={async () => handleCopy(suggestedText)}
             className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
             title="Copy suggested text"
           >

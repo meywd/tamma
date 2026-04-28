@@ -939,7 +939,7 @@ Follow existing project conventions and patterns.`;
     const startTime = Date.now();
     let ciPollCount = 0;
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+     
     while (true) {
       if (Date.now() - startTime > timeout) {
         throw new WorkflowError(

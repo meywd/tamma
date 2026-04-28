@@ -21,8 +21,8 @@ export default function Banner({ version }: BannerProps): React.JSX.Element {
 }
 
 export function printBanner(version: string): void {
-  const c = Boolean(process.env['NO_COLOR']) ? (s: string) => s : (s: string) => `\x1b[36m${s}\x1b[0m`;
-  const gray = Boolean(process.env['NO_COLOR']) ? (s: string) => s : (s: string) => `\x1b[90m${s}\x1b[0m`;
+  const c = process.env['NO_COLOR'] ? (s: string) => s : (s: string) => `\x1b[36m${s}\x1b[0m`;
+  const gray = process.env['NO_COLOR'] ? (s: string) => s : (s: string) => `\x1b[90m${s}\x1b[0m`;
   console.log(c(LOGO));
   console.log(gray('  AI-powered autonomous development'));
   console.log(gray(`  v${version}`));

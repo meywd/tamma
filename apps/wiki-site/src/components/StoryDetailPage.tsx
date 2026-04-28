@@ -178,7 +178,7 @@ export default function StoryDetailPage() {
 
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => setManifest(data))
       .catch(() => {});
   }, []);
@@ -187,7 +187,7 @@ export default function StoryDetailPage() {
     setLoading(true);
     setError(false);
     fetch(`/content/stories/${epic}/${story}.md`)
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })

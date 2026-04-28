@@ -540,7 +540,7 @@ export default function ArchitecturePage() {
   useEffect(() => {
     setLoading(true);
     fetch('/content/architecture.md')
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })

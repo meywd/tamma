@@ -188,7 +188,7 @@ function parseAgentConfig(agentConfigJson: string | undefined): AgentConfig {
   try {
     const parsed = JSON.parse(agentConfigJson) as unknown;
     if (parsed === null || typeof parsed !== 'object') return {};
-    return parsed as AgentConfig;
+    return parsed;
   } catch {
     return {};
   }
@@ -284,13 +284,13 @@ async function readRequest(requestPath: string): Promise<AgentExecutionRequestJs
   const result: AgentExecutionRequestJson = {
     repository: record['repository'] as string,
     branch_name: record['branch_name'] as string,
-    issue_number: record['issue_number'] as number,
+    issue_number: record['issue_number'],
     issue_title: (record['issue_title'] as string | undefined) ?? '',
     task: record['task'] as string,
     plan_json: (record['plan_json'] as string | undefined) ?? '',
     tamma_session_id: record['tamma_session_id'] as string,
     agent_provider: record['agent_provider'] as string,
-    timeout_minutes: record['timeout_minutes'] as number,
+    timeout_minutes: record['timeout_minutes'],
   };
   if (typeof record['agent_config_json'] === 'string') {
     result.agent_config_json = record['agent_config_json'];

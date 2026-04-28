@@ -209,7 +209,7 @@ export async function startServer(opts: {
 // Entry point: only run when invoked directly (not when imported by tests).
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer().catch((err) => {
-    // eslint-disable-next-line no-console
+     
     console.error('Failed to start intelligence-server:', err);
     process.exit(1);
   });

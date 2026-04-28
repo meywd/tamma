@@ -95,7 +95,7 @@ export class ProviderRegistry implements IProviderRegistry {
    * Dispose all providers and clear the registry
    */
   async dispose(): Promise<void> {
-    const disposePromises = Array.from(this.providers.values()).map((provider) =>
+    const disposePromises = Array.from(this.providers.values()).map(async (provider) =>
       provider.dispose().catch((error) => {
         // Log error but continue disposing other providers
         console.error('Error disposing provider:', error);

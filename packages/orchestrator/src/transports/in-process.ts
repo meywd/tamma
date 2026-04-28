@@ -170,7 +170,7 @@ export class InProcessTransport implements IEngineTransport {
    * `skip`) from the UI.
    */
   createApprovalHandler(): (plan: DevelopmentPlan) => Promise<'approve' | 'reject' | 'skip'> {
-    return (plan: DevelopmentPlan) => {
+    return async (plan: DevelopmentPlan) => {
       // If a decision was queued before the approval request arrived, resolve immediately
       if (this.queuedDecision !== null) {
         const decision = this.queuedDecision;

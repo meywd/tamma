@@ -238,7 +238,7 @@ export function hasPlaintextCredential(configJson?: string | null): boolean {
       'auth_token',
     ].map((s) => s.toLowerCase()),
   );
-  for (const key of Object.keys(parsed as Record<string, unknown>)) {
+  for (const key of Object.keys(parsed)) {
     if (banned.has(key.toLowerCase())) return true;
   }
   return false;

@@ -129,7 +129,7 @@ export default function MarkdownPage({ path, prefix }: Props) {
   // Load manifest
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => setManifest(data))
       .catch(() => {});
   }, []);

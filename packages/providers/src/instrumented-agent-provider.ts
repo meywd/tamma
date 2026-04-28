@@ -147,7 +147,7 @@ export class InstrumentedAgentProvider implements IAgentProvider {
 
       return result;
     } catch (err) {
-      const errRecord = err as unknown as Record<string, unknown>;
+      const errRecord = err as Record<string, unknown>;
       const errorCode: DiagnosticsErrorCode =
         (errRecord?.['code'] as DiagnosticsErrorCode | undefined) ?? 'UNKNOWN';
 
