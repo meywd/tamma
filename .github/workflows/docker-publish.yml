@@ -17,14 +17,6 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      force_reset_volumes:
-        description: "Wipe postgres + chromadb volumes before deploy (escape hatch for unrecoverable data-dir corruption / major version bumps that auto-detection missed). DESTRUCTIVE — see CLAUDE.md 'No migration anxiety'."
-        required: false
-        default: 'false'
-        type: choice
-        options: ['false', 'true']
 
 permissions:
   contents: read
@@ -540,34 +532,19 @@ jobs:
               fi
             "
 
-      # Optional manual escape hatch: wipe stateful volumes before health check.
-      # Triggered ONLY by workflow_dispatch with force_reset_volumes=true.
-      # Per CLAUDE.md "No migration anxiety: App is not in production with
-      # users. All data stores can be replaced without migration."
-      - name: "Force-reset stateful volumes (manual escape hatch)"
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.force_reset_volumes == 'true'
+      # Layer-1 health check is detect-only — never auto-destroys data.
+      # If postgres/chromadb fail to become healthy (e.g. major-version
+      # data-dir incompatibility after an image bump), this step fails
+      # the deploy with a precise diagnosis and tells you to run the
+      # `volume-reset.yml` workflow (which backs up first + requires
+      # reviewer approval before wiping).
+      - name: "Verify layer 1: postgres + rabbitmq + chromadb healthy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-              echo '::warning::FORCE_RESET_VOLUMES=true — wiping postgres + chromadb data dirs before deploy' && \
-              \$COMPOSE stop postgres chromadb 2>/dev/null || true && \
-              \$COMPOSE rm -f postgres chromadb 2>/dev/null || true && \
-              docker volume rm -f \$(docker volume ls -q | grep -E 'pg-data|chroma-data') 2>/dev/null || true && \
-              \$COMPOSE up -d postgres chromadb
-            "
-
-      - name: "Verify layer 1: postgres + rabbitmq + chromadb healthy (auto-recovery)"
-        run: |
-          ssh -i ~/.ssh/deploy_key \
-            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
-              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-
-              # First-pass health check
               for i in \$(seq 1 30); do
                 PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
                 RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
@@ -579,41 +556,26 @@ jobs:
                 sleep 2
               done
 
-              echo '::warning::Layer 1 unhealthy after 60s — checking for known recoverable conditions'
-
-              # Auto-recovery: postgres major-version data-dir incompatibility.
-              # Pattern: 'database files are incompatible with server' in logs after a major bump.
+              echo '::error::Layer 1 (postgres / rabbitmq / chromadb) failed to become healthy' && \
+              echo '' && \
+              echo 'Diagnosis (last 30 log lines per service):' && \
+              \$COMPOSE logs --tail=30 postgres rabbitmq chromadb && \
+              echo '' && \
               if \$COMPOSE logs --tail=50 postgres 2>&1 | grep -q 'database files are incompatible with server'; then
-                echo '::warning::Postgres data-dir incompatible with server image — auto-resetting volume (no prod users per CLAUDE.md)'
-                \$COMPOSE stop postgres && \$COMPOSE rm -f postgres
-                docker volume rm -f \$(docker volume ls -q | grep pg-data) 2>/dev/null || true
-                \$COMPOSE up -d postgres
-              fi
-
-              # Auto-recovery: chromadb data-dir incompatibility (silent failure mode — server keeps
-              # restarting or stays unhealthy with no clear error). Heuristic: chromadb stuck
-              # unhealthy or absent → wipe.
-              CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null)
-              if [ \"\$CHROMA\" != 'healthy' ]; then
-                echo '::warning::ChromaDB persistently unhealthy — auto-resetting volume (no prod users per CLAUDE.md)'
-                \$COMPOSE stop chromadb && \$COMPOSE rm -f chromadb
-                docker volume rm -f \$(docker volume ls -q | grep chroma-data) 2>/dev/null || true
-                \$COMPOSE up -d chromadb
-              fi
-
-              # Second-pass health check after auto-recovery
-              for i in \$(seq 1 30); do
-                PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null) && \
-                RMQ=\$(\$COMPOSE ps rabbitmq --format '{{.Health}}' 2>/dev/null) && \
-                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
-                echo \"Recovery check \$i/30: postgres=\$PG rabbitmq=\$RMQ chromadb=\$CHROMA\" && \
-                if [ \"\$PG\" = 'healthy' ] && [ \"\$RMQ\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ]; then
-                  echo 'Layer 1 healthy after auto-recovery' && exit 0
-                fi && \
-                sleep 2
-              done && \
-              echo '::error::Layer 1 still unhealthy after auto-recovery — manual intervention needed' && \
-              \$COMPOSE logs --tail=50 postgres rabbitmq chromadb && \
+                echo '::error::Postgres data-dir is incompatible with the new server image (major-version bump).' && \
+                echo 'To recover: run the volume-reset workflow with target=postgres.' && \
+                echo 'GitHub UI: Actions → \"Volume Reset (DESTRUCTIVE)\" → Run workflow → target=postgres' && \
+                echo 'That workflow backs up the data dir to an artifact first, then waits for reviewer approval before wiping.'
+              fi && \
+              CHROMA_FINAL=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+              if [ \"\$CHROMA_FINAL\" != 'healthy' ]; then
+                echo '::error::ChromaDB is not healthy. Possible causes (most → least common):' && \
+                echo '  1. Major-version data-dir incompatibility (e.g. 0.6.x → 1.x server)' && \
+                echo '  2. Healthcheck script is broken (e.g. curl missing in image)' && \
+                echo '  3. Resource pressure / disk full / network issue' && \
+                echo 'Inspect the chromadb logs above to disambiguate.' && \
+                echo 'To recover from data-dir issue: run volume-reset workflow with target=chromadb.'
+              fi && \
               exit 1
             "
 

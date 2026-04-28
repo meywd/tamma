@@ -1,0 +1,239 @@
+# =============================================================================
+# Volume Reset (DESTRUCTIVE) — backup + reviewer-approval-gated wipe
+#
+# Use this workflow to recover from a stateful-volume incompatibility that
+# the regular deploy can't auto-handle (e.g. postgres major-version bump
+# leaving a postgres-15 data dir that postgres-17 refuses to read).
+#
+# This workflow ALWAYS:
+#   1. Takes a backup BEFORE doing anything destructive (uploaded as a
+#      90-day-retained workflow artifact + retained per Tamma's S3 if
+#      configured).
+#   2. Pauses for manual reviewer approval via the `production-destructive`
+#      GitHub Actions environment. (Configure this in repo Settings →
+#      Environments → New environment → "production-destructive" →
+#      add yourself / the on-call as a required reviewer.)
+#   3. Wipes the targeted volume(s).
+#   4. Verifies layer 1 comes back healthy.
+#
+# The deploy workflow (docker-publish.yml) is detect-only — it never
+# auto-destroys data, only fails loudly with a recovery hint pointing here.
+# =============================================================================
+
+name: Volume Reset (DESTRUCTIVE)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which stateful service(s) to reset"
+        required: true
+        type: choice
+        options: ['postgres', 'chromadb', 'both']
+      confirmation_phrase:
+        description: "Type WIPE-VOLUME (exactly) to confirm you understand this destroys the chosen volume(s)."
+        required: true
+        type: string
+      reason:
+        description: "Why are you doing this? (audit trail — e.g. 'postgres 17 image bump made data dir unreadable')"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize destructive ops — never run two volume resets in parallel.
+  group: volume-reset
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate confirmation phrase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check phrase
+        run: |
+          if [ "${{ github.event.inputs.confirmation_phrase }}" != "WIPE-VOLUME" ]; then
+            echo "::error::confirmation_phrase must be exactly 'WIPE-VOLUME' (got: '${{ github.event.inputs.confirmation_phrase }}')."
+            echo "This is a deliberate friction step. Re-run the workflow with the correct phrase if you intend to proceed."
+            exit 1
+          fi
+          echo "Confirmation valid. Target=${{ github.event.inputs.target }} reason=${{ github.event.inputs.reason }}"
+
+  backup:
+    name: Backup target volume(s)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT || 22 }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Backup postgres (pg_dumpall + tar of data dir)
+        if: github.event.inputs.target == 'postgres' || github.event.inputs.target == 'both'
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              set -e
+              source /opt/tamma/.env
+              cd /opt/tamma/docker
+              echo 'Running pg_dumpall...'
+              # pg_dumpall is the safer logical backup — restorable on any pg version.
+              docker exec docker-postgres-1 pg_dumpall -U \"\$POSTGRES_USER\" --clean --if-exists \
+                | gzip > /tmp/pg-dumpall-${{ github.run_id }}.sql.gz
+              ls -lh /tmp/pg-dumpall-${{ github.run_id }}.sql.gz
+
+              echo 'Tarring raw data dir (belt-and-suspenders, restorable only to same pg version)...'
+              docker run --rm \
+                -v docker_tamma-pg-data:/source:ro \
+                -v /tmp:/dest \
+                busybox tar -czf /dest/pg-data-${{ github.run_id }}.tar.gz -C /source .
+              ls -lh /tmp/pg-data-${{ github.run_id }}.tar.gz
+            "
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/pg-dumpall-${{ github.run_id }}.sql.gz \
+            ./pg-dumpall.sql.gz
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/pg-data-${{ github.run_id }}.tar.gz \
+            ./pg-data.tar.gz
+
+      - name: Backup chromadb (tar of data volume)
+        if: github.event.inputs.target == 'chromadb' || github.event.inputs.target == 'both'
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              echo 'Tarring chromadb data volume...'
+              docker run --rm \
+                -v docker_tamma-chroma-data:/source:ro \
+                -v /tmp:/dest \
+                busybox tar -czf /dest/chroma-data-${{ github.run_id }}.tar.gz -C /source .
+              ls -lh /tmp/chroma-data-${{ github.run_id }}.tar.gz
+            "
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/chroma-data-${{ github.run_id }}.tar.gz \
+            ./chroma-data.tar.gz
+
+      - name: Upload backups as artifacts (90-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: volume-backup-${{ github.event.inputs.target }}-${{ github.run_id }}
+          path: |
+            pg-dumpall.sql.gz
+            pg-data.tar.gz
+            chroma-data.tar.gz
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Cleanup VPS-side temp files
+        if: always()
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "rm -f /tmp/pg-dumpall-${{ github.run_id }}.sql.gz /tmp/pg-data-${{ github.run_id }}.tar.gz /tmp/chroma-data-${{ github.run_id }}.tar.gz" \
+            2>/dev/null || true
+          rm -f ~/.ssh/deploy_key
+
+  wipe:
+    name: Wipe targeted volume(s) — REQUIRES REVIEWER APPROVAL
+    needs: backup
+    runs-on: ubuntu-latest
+    # The `production-destructive` environment must be configured in repo
+    # Settings → Environments with at least one required reviewer. That
+    # gates this job behind a manual GitHub-UI approval click that goes
+    # through after the backup artifact is already uploaded.
+    environment:
+      name: production-destructive
+      url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    timeout-minutes: 15
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT || 22 }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Wipe postgres volume
+        if: github.event.inputs.target == 'postgres' || github.event.inputs.target == 'both'
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd /opt/tamma/docker
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file /opt/tamma/.env'
+              echo '::warning::Wiping postgres volume — backup artifact retained 90 days'
+              \$COMPOSE stop postgres
+              \$COMPOSE rm -f postgres
+              docker volume rm -f \$(docker volume ls -q | grep pg-data) 2>/dev/null || true
+              \$COMPOSE up -d postgres
+            "
+
+      - name: Wipe chromadb volume
+        if: github.event.inputs.target == 'chromadb' || github.event.inputs.target == 'both'
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd /opt/tamma/docker
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file /opt/tamma/.env'
+              echo '::warning::Wiping chromadb volume — backup artifact retained 90 days'
+              \$COMPOSE stop chromadb
+              \$COMPOSE rm -f chromadb
+              docker volume rm -f \$(docker volume ls -q | grep chroma-data) 2>/dev/null || true
+              \$COMPOSE up -d chromadb
+            "
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+  verify:
+    name: Verify layer 1 healthy after reset
+    needs: wipe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.VPS_SSH_PORT || 22 }} ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Health-check loop
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              cd /opt/tamma/docker
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file /opt/tamma/.env'
+              for i in \$(seq 1 60); do
+                PG=\$(\$COMPOSE ps postgres --format '{{.Health}}' 2>/dev/null)
+                CHROMA=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null)
+                echo \"Post-reset check \$i/60: postgres=\$PG chromadb=\$CHROMA\"
+                if [ \"\$PG\" = 'healthy' ] && [ \"\$CHROMA\" = 'healthy' ]; then
+                  echo 'Reset verified healthy.'
+                  exit 0
+                fi
+                sleep 3
+              done
+              echo '::error::Layer 1 still unhealthy 3 minutes after reset. Inspect logs.'
+              \$COMPOSE logs --tail=50 postgres chromadb
+              exit 1
+            "
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
