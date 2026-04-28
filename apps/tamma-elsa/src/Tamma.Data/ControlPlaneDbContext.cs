@@ -143,54 +143,65 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AlertEvaluatorCursor> AlertEvaluatorCursors =>
         Set<AlertEvaluatorCursor>();
 
-    // ── Legacy-shared tables (DEPRECATED — transitional-topology scratchpad) ──
-    //
-    // These DbSets cover per-tenant business data that still lives on the
-    // shared central Postgres until Story 28-1's db-per-tenant rollout
-    // completes. They are exposed here ONLY so the eleven legacy-shared
-    // repositories (AgentConfigRepository, PromptRepository, etc.) that
-    // take <see cref="ControlPlaneDbContext"/> can still compile during
-    // the transition — they are scoped to the <c>TenantId IS NULL</c>
-    // platform-default row family (Doc 01 §1.4 — "system defaults"
-    // carry no tenant scope; tenant-scoped data goes through
-    // <see cref="ITenantDbContextFactory"/>).
-    //
-    // <para><b>Mapping:</b> The entity types are NOT included in the CP
-    // model (<see cref="OnModelCreating"/> does not call
-    // <c>ConfigureTenantEntities</c>). Query attempts against these
-    // DbSets will throw — by design. Model-shape tests
-    // (<c>ControlPlaneDbContextModelTests.Model_Has14_ControlPlaneEntities</c>)
-    // enforce the 14-entity invariant. The DbSet surface is retained as a
-    // compile-time shim only; repositories must migrate fully onto
-    // <see cref="ITenantDbContextFactory"/> or onto the platform-plane
-    // tables before Story 28-1 ships.</para>
+    // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
+    // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
+    // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
+    // QueuedTask, EmailOutboxMessage, BudgetConfig + MentorshipSession,
+    // MentorshipEvent, JuniorDeveloper, Story) have left the control plane
+    // entirely and now live exclusively on TenantDbContext. They are NOT
+    // in the CP model graph — the matching DbSet shim properties below are
+    // retained ONLY so legacy test fixtures and any not-yet-migrated
+    // consumers still compile. Any actual query / SaveChanges through these
+    // shim DbSets throws at runtime ("The entity type X cannot be used
+    // since it has been excluded from the model.") which is exactly the
+    // failure shape we want — it forces the call site to migrate to
+    // ITenantDbContextFactory.
+
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<ProviderDiagnostic> ProviderDiagnostics => Set<ProviderDiagnostic>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<SanitizationRule> SanitizationRules => Set<SanitizationRule>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<WorkflowDefinition> WorkflowDefinitions => Set<WorkflowDefinition>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<WorkflowInstance> WorkflowInstances => Set<WorkflowInstance>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<MentorshipSession> MentorshipSessions => Set<MentorshipSession>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<MentorshipEvent> MentorshipEvents => Set<MentorshipEvent>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<JuniorDeveloper> JuniorDevelopers => Set<JuniorDeveloper>();
+    /// <summary>Compile-time shim — entity ignored on CP per Story 28-1 PR D.</summary>
     public DbSet<Story> Stories => Set<Story>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        TammaModelConfiguration.ConfigureMentorshipEntities(modelBuilder);
         TammaModelConfiguration.ConfigureControlPlaneEntities(
             modelBuilder, includeTenantShadowColumns: true);
-        // Legacy tables still live on the shared central DB during the
-        // Epic 28 transition; repos access them through this context
-        // with explicit tenant predicates. Once Story 28-1's db-per-tenant
-        // rollout ships, these configurations move to TenantDbContext.
-        TammaModelConfiguration.ConfigureTenantEntities(modelBuilder);
+        // Story 28-1 PR D: explicitly ignore the moved POCOs so EF's
+        // convention-based discovery doesn't re-pick them up via navigation
+        // properties on Tenant. The CP model contract is now exactly the
+        // CP-resident table list (Doc 01 §1.2 + alerts + KEK + impersonation
+        // + bootstrap + analytics + apikey index). The DbSet shim properties
+        // above remain only as a compile-time bridge for not-yet-migrated
+        // call sites; runtime queries throw with a clear "entity excluded
+        // from model" diagnostic.
+        TammaModelConfiguration.IgnoreLegacyAndMentorshipEntities(modelBuilder);
 
         ConfigurePlatformAnalyticsHourly(modelBuilder);
         ConfigurePlatformApiKeyIndex(modelBuilder);

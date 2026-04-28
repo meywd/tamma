@@ -8,49 +8,45 @@ namespace Tamma.Data.Repositories;
 /// <summary>
 /// Repository for mentorship session data access.
 ///
-/// <para>Epic 28: mentorship data is tenant-scoped in the target architecture
-/// (every mentorship belongs to an org). During the transition the table does
-/// not yet carry a TenantId column, so the repo picks its context lazily —
-/// tenant-scoped when <see cref="ITenantContext.TenantId"/> is bound, else
-/// <see cref="ControlPlaneDbContext"/> for system-scope / admin operations.
-/// The context is held across method calls within a request so
-/// CreateAsync + SaveChanges patterns work against the same EF change tracker.</para>
+/// <para>Story 28-1 PR D: mentorship_sessions, mentorship_events,
+/// junior_developers, stories all moved off
+/// <see cref="ControlPlaneDbContext"/>. Every operation now requires an
+/// ambient tenant id; system-scope / admin paths must bind a tenant
+/// before invoking the repository.</para>
 /// </summary>
 public class MentorshipSessionRepository : IMentorshipSessionRepository, IAsyncDisposable
 {
     private readonly ITenantDbContextFactory _factory;
     private readonly ITenantContext _tenantContext;
-    private readonly ControlPlaneDbContext _cp;
     private TenantDbContext? _cachedTenantCtx;
 
     public MentorshipSessionRepository(
         ITenantDbContextFactory factory,
-        ITenantContext tenantContext,
-        ControlPlaneDbContext cp)
+        ITenantContext tenantContext)
     {
         _factory = factory;
         _tenantContext = tenantContext;
-        _cp = cp;
     }
 
-    private async Task<DbContext> GetCtxAsync()
+    private Guid RequireTenantId() => _tenantContext.TenantId
+        ?? throw new InvalidOperationException(
+            "MentorshipSessionRepository requires an ambient tenant id. " +
+            "Story 28-1 PR D moved mentorship_* and stories / junior_developers " +
+            "off the control plane; admin / system paths must bind a tenant " +
+            "before calling.");
+
+    private async Task<TenantDbContext> GetCtxAsync()
     {
-        if (_tenantContext.TenantId is Guid tid)
-        {
-            _cachedTenantCtx ??= await _factory.CreateAsync(tid);
-            return _cachedTenantCtx;
-        }
-        return _cp;
+        var tid = RequireTenantId();
+        _cachedTenantCtx ??= await _factory.CreateAsync(tid);
+        return _cachedTenantCtx;
     }
 
     private async Task<DbSet<MentorshipSession>> Sessions()
-        => (await GetCtxAsync()) is TenantDbContext t ? t.MentorshipSessions : _cp.MentorshipSessions;
+        => (await GetCtxAsync()).MentorshipSessions;
 
     private async Task<DbSet<MentorshipEvent>> Events()
-        => (await GetCtxAsync()) is TenantDbContext t ? t.MentorshipEvents : _cp.MentorshipEvents;
-
-    // Mentorship juniors/stories live on CP (no tenant DB has them in
-    // transition) — always use CP.
+        => (await GetCtxAsync()).MentorshipEvents;
 
     private async Task SaveAsync()
     {
@@ -228,46 +224,62 @@ public class MentorshipSessionRepository : IMentorshipSessionRepository, IAsyncD
             .ToListAsync();
     }
 
-    // Juniors and stories stay on CP — they're cross-tenant today.
+    // Story 28-1 PR D: juniors and stories moved to the per-tenant DB.
     public async Task<JuniorDeveloper?> GetJuniorByIdAsync(string id)
-        => await _cp.JuniorDevelopers.FindAsync(id);
+    {
+        var ctx = await GetCtxAsync();
+        return await ctx.JuniorDevelopers.FindAsync(id);
+    }
 
     public async Task<JuniorDeveloper> CreateJuniorAsync(JuniorDeveloper junior)
     {
-        _cp.JuniorDevelopers.Add(junior);
-        await _cp.SaveChangesAsync();
+        var ctx = await GetCtxAsync();
+        ctx.JuniorDevelopers.Add(junior);
+        await ctx.SaveChangesAsync();
         return junior;
     }
 
     public async Task UpdateJuniorAsync(JuniorDeveloper junior)
     {
+        var ctx = await GetCtxAsync();
         junior.UpdatedAt = DateTime.UtcNow;
-        _cp.JuniorDevelopers.Update(junior);
-        await _cp.SaveChangesAsync();
+        ctx.JuniorDevelopers.Update(junior);
+        await ctx.SaveChangesAsync();
     }
 
     public async Task<List<JuniorDeveloper>> GetAllJuniorsAsync()
-        => await _cp.JuniorDevelopers.OrderBy(j => j.Name).ToListAsync();
+    {
+        var ctx = await GetCtxAsync();
+        return await ctx.JuniorDevelopers.OrderBy(j => j.Name).ToListAsync();
+    }
 
     public async Task<Story?> GetStoryByIdAsync(string id)
-        => await _cp.Stories.FindAsync(id);
+    {
+        var ctx = await GetCtxAsync();
+        return await ctx.Stories.FindAsync(id);
+    }
 
     public async Task<Story> CreateStoryAsync(Story story)
     {
-        _cp.Stories.Add(story);
-        await _cp.SaveChangesAsync();
+        var ctx = await GetCtxAsync();
+        ctx.Stories.Add(story);
+        await ctx.SaveChangesAsync();
         return story;
     }
 
     public async Task UpdateStoryAsync(Story story)
     {
+        var ctx = await GetCtxAsync();
         story.UpdatedAt = DateTime.UtcNow;
-        _cp.Stories.Update(story);
-        await _cp.SaveChangesAsync();
+        ctx.Stories.Update(story);
+        await ctx.SaveChangesAsync();
     }
 
     public async Task<List<Story>> GetAllStoriesAsync()
-        => await _cp.Stories.OrderByDescending(s => s.CreatedAt).ToListAsync();
+    {
+        var ctx = await GetCtxAsync();
+        return await ctx.Stories.OrderByDescending(s => s.CreatedAt).ToListAsync();
+    }
 
     public async Task<int> GetActiveSessionCountAsync()
         => await (await Sessions()).CountAsync(s => s.Status == SessionStatus.Active);

@@ -44,26 +44,21 @@ namespace Tamma.Data.Repositories;
 public class EventRepository(
     ITenantDbContextFactory tenantDbFactory,
     ITenantContext tenantContext,
-    ControlPlaneDbContext cp,
     IPlatformEventRepository? platformEvents = null) : IEventRepository
 {
     public async Task<DomainEvent> AppendAsync(DomainEvent evt)
     {
         evt.CreatedAt = DateTime.UtcNow;
 
-        // Platform-scope events (no tenant) — e.g. Resend email without a
-        // tenant-bound sender — write to CP. Tenant-scoped events route
-        // through the factory.
-        var tid = evt.TenantId ?? tenantContext.TenantId;
-        if (tid is null)
-        {
-            cp.DomainEvents.Add(evt);
-            await cp.SaveChangesAsync();
-            return evt;
-        }
+        var tid = evt.TenantId ?? tenantContext.TenantId
+            ?? throw new InvalidOperationException(
+                "EventRepository.AppendAsync requires a tenant id. " +
+                "Story 28-1 PR D moved domain_events off the control plane; " +
+                "platform-scope events (TenantId == null) must be appended " +
+                "via IPlatformEventRepository.AppendAsync instead.");
 
         evt.TenantId = tid;
-        await using var db = await tenantDbFactory.CreateAsync(tid.Value);
+        await using var db = await tenantDbFactory.CreateAsync(tid);
         db.DomainEvents.Add(evt);
         await db.SaveChangesAsync();
         return evt;
@@ -71,13 +66,13 @@ public class EventRepository(
 
     public async Task<DomainEvent?> GetByIdAsync(Guid id)
     {
-        if (tenantContext.TenantId is Guid tid)
-        {
-            await using var db = await tenantDbFactory.CreateAsync(tid);
-            return await db.DomainEvents.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(e => e.Id == id);
-        }
-        return await cp.DomainEvents.IgnoreQueryFilters()
+        var tid = tenantContext.TenantId
+            ?? throw new InvalidOperationException(
+                "EventRepository.GetByIdAsync requires an ambient tenant id. " +
+                "Story 28-1 PR D moved domain_events off the control plane; " +
+                "cross-tenant lookup by id is not implemented (Decision #2).");
+        await using var db = await tenantDbFactory.CreateAsync(tid);
+        return await db.DomainEvents.IgnoreQueryFilters()
             .FirstOrDefaultAsync(e => e.Id == id);
     }
 
@@ -87,10 +82,6 @@ public class EventRepository(
         if (tenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            // Explicit tenant predicate — the factory-issued context no
-            // longer carries an EF query filter (the Npgsql per-tenant
-            // connection is the real isolation plane; during transition
-            // the physical DB is shared so we filter at query time).
             var query = db.DomainEvents.Where(e => e.TenantId == tid);
             if (!string.IsNullOrEmpty(type))
                 query = query.Where(e => e.Type == type);
@@ -103,12 +94,6 @@ public class EventRepository(
         // queries get a per-call answer). The supported answer here is
         // platform-lifecycle events: read from platform_events and project
         // back into DomainEvent shape so existing callers stay unchanged.
-        //
-        // A non-null `issueNumber` is meaningless for platform-scope events
-        // (those rows have no IssueNumber column) — that combination is
-        // almost certainly a per-tenant query someone forgot to scope, so
-        // we reject it loudly per Decision #2's "build when a story
-        // demands it" rule rather than silently returning no rows.
         if (issueNumber.HasValue)
         {
             throw new NotSupportedException(
@@ -120,69 +105,16 @@ public class EventRepository(
                 "the per-call routing matrix.");
         }
 
-        // Read the platform_events log (CP-resident; survives PR D).
-        // typePrefix matches DomainEvent's exact-type semantics for full
-        // event type strings (e.g. "EMAIL.QUEUED.SUCCESS") because no
-        // other event type starts with that string. A null/empty type
-        // returns every platform-scope event, capped at `limit`.
-        // PR-C/PR-B-fix: platformEvents is optional. When the platform
-        // repo isn't registered (some test scopes deliberately exclude
-        // it to verify graceful degradation), skip the platform-events
-        // half of the union and return only the legacy CP rows. Once
-        // PR D drops cp.DomainEvents, callers without IPlatformEventRepository
-        // simply get an empty result rather than a DI activation failure.
+        // Story 28-1 PR D: cp.DomainEvents is gone. Tenant-less reads
+        // resolve to platform_events only. Callers that need cross-tenant
+        // tenant-scoped events should fan out via ITenantDbContextFactory
+        // when a user story demands it.
         var platformRows = platformEvents is not null
             ? await platformEvents.QueryAsync(typePrefix: type, limit: limit)
             : (IReadOnlyList<PlatformEvent>)Array.Empty<PlatformEvent>();
 
-        // Transitional UNION: the pre-Story-28-1 code path appended
-        // tenant-less events to cp.DomainEvents. Until PR D drops the
-        // DbSet those rows must still be visible.
-        //
-        // SECURITY: scope the legacy half to TenantId == null. During the
-        // transitional shared-DB phase, the physical cp.domain_events
-        // table mixes rows from every tenant — a tenant-less query with
-        // a tenant-scoped event type (e.g. CODE.GENERATED.SUCCESS) would
-        // otherwise leak rows from every tenant into the cross-tenant
-        // admin view. Per Decision #2 the supported answer here is
-        // platform-lifecycle events only; the issueNumber guard above
-        // catches one signal of tenant-scoped intent but a caller can
-        // still pass a tenant-scoped `type` with no `issueNumber`. The
-        // TenantId-null predicate makes the leak structurally
-        // impossible regardless of what `type` carries. Once PR D drops
-        // cp.DomainEvents this branch becomes a no-op.
-        //
-        // Type-predicate semantics: the platform half uses prefix-LIKE
-        // (`type%`) via IPlatformEventRepository.QueryAsync. The legacy
-        // half mirrors that here so the two routing branches return the
-        // same row shape for the same `type` argument. Reviewer note
-        // (#340 LOW): full event type strings like "EMAIL.QUEUED.SUCCESS"
-        // are only a prefix of themselves, so prefix-LIKE doesn't change
-        // behaviour for full strings; it lets short prefixes ("EMAIL")
-        // work consistently across both halves.
-        var legacy = cp.DomainEvents
-            .IgnoreQueryFilters()
-            .Where(e => e.TenantId == null)
-            .AsQueryable();
-        if (!string.IsNullOrEmpty(type))
-        {
-            var like = type + "%";
-            legacy = legacy.Where(e => EF.Functions.Like(e.Type, like));
-        }
-        if (issueNumber.HasValue)
-            legacy = legacy.Where(e => e.IssueNumber == issueNumber.Value);
-        var legacyRows = await legacy
-            .OrderByDescending(e => e.CreatedAt)
-            .Take(limit)
-            .ToListAsync();
-
-        // Merge both streams, newest-first, capped at `limit`. The
-        // PlatformEvent → DomainEvent projection drops the UserId column
-        // (DomainEvent has no equivalent slot) and synthesises a missing
-        // IssueNumber — callers already tolerate null IssueNumber on
-        // platform-scope events.
-        var merged = legacyRows
-            .Concat(platformRows.Select(p => new DomainEvent
+        return platformRows
+            .Select(p => new DomainEvent
             {
                 Id = p.Id,
                 Type = p.Type,
@@ -193,12 +125,10 @@ public class EventRepository(
                 CreatedAt = p.CreatedAt,
                 SequenceNumber = p.SequenceNumber,
                 IssueNumber = null,
-            }))
+            })
             .OrderByDescending(e => e.CreatedAt)
             .Take(limit)
             .ToList();
-
-        return merged;
     }
 
     public async Task<DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)

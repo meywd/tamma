@@ -50,7 +50,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         // Seed two events, one per tenant. The factory-issued context is
@@ -92,7 +91,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         // Seed a platform-lifecycle event into platform_events directly
@@ -131,7 +129,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         fx.Cp.DomainEvents.Add(new DomainEvent
@@ -171,7 +168,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         var act = async () =>
@@ -193,7 +189,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         fx.Cp.PlatformEvents.Add(new PlatformEvent
@@ -255,9 +250,8 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var eventRepo = new EventRepository(
             spyFactory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
-        var workflowRepo = new WorkflowRepository(spyFactory, new TenantContext(), fx.Cp);
+        var workflowRepo = new WorkflowRepository(spyFactory, new TenantContext());
 
         var result = await UserDashboardEndpoints.GetOrgSummary(
             tenantId, spyFactory, eventRepo, workflowRepo);
@@ -355,7 +349,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             platformEvents: null);
 
         var platformEventId = Guid.NewGuid();
@@ -405,7 +398,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
-            fx.Cp,
             new PlatformEventRepository(fx.Cp));
 
         var platformEventId = Guid.NewGuid();

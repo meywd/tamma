@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -444,21 +445,49 @@ public sealed class AlertRuleEvaluator : BackgroundService
         // independent — there is no global ordering between
         // domain_events and platform_events.
         //
-        // Story 28-1 PR C — the DomainEvents scan below is a
-        // cross-tenant tenant-scoped scan that PR D rewires into a
-        // per-tenant fan-out via ITenantDbContextFactory (see class
-        // doc comment). PR C deliberately leaves the line in place:
-        // cp.DomainEvents still exists today, the scan still produces
-        // the right rows, and replacing the scan + the cursor model
-        // is non-trivial enough that bundling it with the entity move
-        // (PR D) keeps the diff reviewable.
-        var domain = await db.DomainEvents.AsNoTracking()
-            .IgnoreQueryFilters()
-            .Where(e => e.SequenceNumber > cursor.LastDomainSequenceNumber)
-            .OrderBy(e => e.SequenceNumber)
-            .Take(_options.BatchSize)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // Story 28-1 PR D — domain_events moved off CP. The evaluator
+        // now fans out across the active tenant set and merges per-tenant
+        // domain_events streams. The Domain cursor is shared across
+        // tenants: its SequenceNumber semantics are per-stream-but-monotonic
+        // because the BIGSERIAL identity is allocated independently in
+        // each tenant DB. We collect all tenants' Domain rows whose
+        // SequenceNumber exceeds the cursor and let the per-tenant ORDER BY
+        // handle ordering within a tenant; cross-tenant interleave is
+        // resolved by the items.Sort() below by CreatedAt then sequence.
+        var resolver = _services.GetService(typeof(ITenantDbContextFactory)) as ITenantDbContextFactory;
+        var domain = new List<Tamma.Data.Entities.DomainEvent>();
+        if (resolver is not null)
+        {
+            var tenantIds = await db.Tenants.AsNoTracking()
+                .Where(t => t.DeletedAt == null)
+                .OrderBy(t => t.Id)
+                .Select(t => t.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var tid in tenantIds)
+            {
+                if (ct.IsCancellationRequested) break;
+                try
+                {
+                    await using var tdb = await resolver.CreateAsync(tid, ct);
+                    var rows = await tdb.DomainEvents.AsNoTracking()
+                        .Where(e => e.SequenceNumber > cursor.LastDomainSequenceNumber)
+                        .OrderBy(e => e.SequenceNumber)
+                        .Take(_options.BatchSize)
+                        .ToListAsync(ct)
+                        .ConfigureAwait(false);
+                    domain.AddRange(rows);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex,
+                        "AlertRuleEvaluator: tenant {TenantId} domain_events " +
+                        "scan failed; continuing with the remaining tenants.",
+                        tid);
+                }
+            }
+        }
 
         // PlatformEvents share the same shape — project into
         // DomainEvent for uniform rule evaluation.

@@ -49,7 +49,6 @@ public class SmtpEmailServiceOutboxTests
         _events = new EventRepository(
             _fx.Factory,
             _tenantContext,
-            _db,
             new PlatformEventRepository(_db));
 
         // Seed an active tenant so tenant-scope SendAsync calls can route

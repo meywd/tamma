@@ -119,7 +119,6 @@ public class OutboxSmtpSenderTests
         return new EventRepository(
             new TestTenantDbContextFactory(_tenantOptions),
             new TenantContext(),
-            cp,
             new PlatformEventRepository(cp));
     }
 

@@ -37,7 +37,7 @@ public class PlatformAnalyticsServiceTests
         _cp = new ControlPlaneDbContext(cpOptions);
 
         _clock = new FakeTimeProvider(FixedNow);
-        _sut = new PlatformAnalyticsService(_cp, _clock);
+        _sut = new PlatformAnalyticsService(_cp, tenantFactory: null, clock: _clock);
     }
 
     [TearDown]
