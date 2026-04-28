@@ -6,7 +6,7 @@
  * vector DB, RAG pipeline, MCP servers, context testing, and analytics.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import { DashboardLayout } from '../../components/knowledge-base/dashboard/DashboardLayout.js';
 import { QuickStatusPanel } from '../../components/knowledge-base/dashboard/QuickStatusPanel.js';
 import { IndexStatusCard } from '../../components/knowledge-base/index-management/IndexStatusCard.js';

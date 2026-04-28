@@ -10,7 +10,7 @@
 
 services:
   postgres-test:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: tamma_test
       POSTGRES_PASSWORD: tamma_test

@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class RefreshTokenRepository(TammaDbContext db) : IRefreshTokenRepository
+public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRepository
 {
     public async Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
     {
@@ -32,7 +32,7 @@ public class RefreshTokenRepository(TammaDbContext db) : IRefreshTokenRepository
         }
     }
 
-    public async Task RevokeAllForUserAsync(Guid userId)
+    public async Task<int> RevokeAllForUserAsync(Guid userId)
     {
         var tokens = await db.RefreshTokens
             .Where(t => t.UserId == userId && t.RevokedAt == null)
@@ -40,6 +40,7 @@ public class RefreshTokenRepository(TammaDbContext db) : IRefreshTokenRepository
         foreach (var token in tokens)
             token.RevokedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+        return tokens.Count;
     }
 
     public async Task<int> CleanExpiredAsync()

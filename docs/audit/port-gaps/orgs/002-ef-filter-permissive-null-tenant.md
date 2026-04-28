@@ -1,19 +1,29 @@
 # Finding 002: EF Query Filter Permissive When `TenantContext.TenantId` is Null
 
+> **SUPERSEDED (Wave A.5, 2026-04-18)**: Epic 28 db-per-tenant isolation
+> replaces the EF permissive-filter + RLS-on-shared-DB plane entirely.
+> Each tenant now has its own physical database; there is no tenant column
+> for filters to be permissive about. The `TammaDbContext` /
+> `TammaAppDbContext` dual-context scaffold and the
+> `TenantContextInterceptor` were deleted in commits `7289d4b`,
+> `3548f12`, `fc3be04` as part of Wave A.5. Every tenant-scoped
+> repository is now routed through `ITenantDbContextFactory`, which
+> binds a fixed tenant id into the EF model cache per instance —
+> fail-closed by construction. This finding's remediation is
+> architecturally resolved.
+
 **Scope**: orgs
-**Severity**: P0 (cutover-blocking)
-**Status**: Behavioral drift (fail-open instead of fail-closed)
-**Estimated port effort**: 3h
+**Severity**: P0 (cutover-blocking) — **Superseded by Epic 28 db-per-tenant**
+**Status**: Superseded
+**Estimated port effort**: 3h (resolved by Epic 28 architectural shift, not per-finding fix)
 
 ## Remediation status
 
-- **Confirmed**: 2026-04-18 by agent; downgraded 2026-04-20 after code review.
-- **Outcome**: Partial — scaffold only, not live
-- **Commit**: 549f10d (partial — resolution widen), e53c5a1 (Phase-3 dual context), 9e20e05 (interceptor wiring), 159f12a (fail-closed filter + closure-capture fix + integration tests)
-- **Notes**: Scaffold landed in commits `e53c5a1`, `9e20e05`, `159f12a` (TammaAppDbContext, TenantContextInterceptor, fail-closed filter). BUT: zero production code paths inject TammaAppDbContext — all 21 repositories and all endpoints still use the permissive admin TammaDbContext. RLS is dormant. Full remediation requires wiring tenant-scoped repositories onto the app-role connection — tracked as follow-up story in `docs/stories/epic-19/story-19-6-wire-app-role-context.md`.
-- **Scaffold shape (unchanged)**: Phase-3 landed a dual-DbContext architecture. `TammaAppDbContext` (subclass, intended for per-request endpoints, connects as `tamma_app`) emits `e.TenantId == CurrentTenantId` — fail-closed when the tenant context is null. The base `TammaDbContext` (admin / migrations / background services) keeps the permissive `CurrentTenantId == null || e.TenantId == CurrentTenantId` form to avoid breaking `TaskQueueProcessor`, `OutboxSmtpSender`, `WorkflowSyncService`, and `EnsurePersonalTenantMiddleware` (which all read cross-tenant by design). Admin and app contexts share the model graph (same migrations history table) but have distinct cached models. Fallback behavior: if `ConnectionStrings:TammaAppDb` is unset, `AddTammaData` logs a warning and points the app context at the admin connection — local dev keeps working with a single Postgres role; production must set the app-role password explicitly.
-- **Why "scaffold only"**: a `grep -rn "TammaAppDbContext" apps/tamma-elsa/src/` returns hits only in `Tamma.Data` itself (definition + doc cross-refs). All 21 repositories in `Tamma.Data/Repositories/` inject `TammaDbContext`, and every endpoint that takes a DbContext directly (`DashboardEndpoints`, `OrgEndpoints`, `CranlTenantProvisioner`, `CranlProvisioningWorkflow`, `NullTenantProvisioner`) also uses `TammaDbContext`. The query-filter code path where `EnforceTenantFilter == true` executes only in `QueryFilterAndInterceptorTests`; production never reaches it. The policies + role + interceptor are correct; they are simply not on the runtime hot path.
-- **Follow-up (Phase-3.1)**: Repositories currently inject `TammaDbContext`. Migrating them to `TammaAppDbContext` per-finding is the work that flips per-request endpoints onto the fail-closed + RLS-enforced plane. Integration tests (`Tamma.Api.Tests/Tenancy/QueryFilterAndInterceptorTests`) prove both context shapes behave correctly end-to-end against a real Postgres 17 testcontainer — flipping a repository is a one-line change with existing coverage. See `docs/stories/epic-19/story-19-6-wire-app-role-context.md`.
+- **Confirmed**: 2026-04-18 by agent; downgraded 2026-04-20 after code review; re-promoted 2026-04-18 after Story 19-6 endpoint + repo swap.
+- **Outcome**: Fixed
+- **Commit**: 549f10d (partial — resolution widen), e53c5a1 (Phase-3 dual context), 9e20e05 (interceptor wiring), 159f12a (fail-closed filter + closure-capture fix + integration tests), Story 19-6 (route DashboardEndpoints + OrgEndpoints + Prompt/ProviderHealth/Sanitization repositories through `TammaAppDbContext`; add `AppRoleRegressionTests` covering the NULL-tenant + cross-tenant + empty-binding paths against a Phase-3 Postgres testcontainer).
+- **Live runtime contract**: per-request endpoint handlers and the migrated repositories now resolve the `TammaAppDbContext` subclass — its `EnforceTenantFilter` override emits `e.TenantId == CurrentTenantId` and the dual-context split keeps the `TenantContextInterceptor` binding `app.current_tenant_id` on connection open. With `ConnectionStrings:TammaAppDb` set, the connection binds as `tamma_app` and Phase-2 RLS policies enforce isolation at the DB layer. With it unset (dev fallback), the EF query filter alone provides the fail-closed guarantee.
+- **Scope kept on `TammaDbContext`**: platform-admin + auth-time + background-service repositories — `UserRepository`, `ApiKeyRepository`, `RefreshTokenRepository`, `PasswordResetRepository`, `TenantRepository`, `TenantMembershipRepository`, `InviteRepository`, `InstallationRepository`, `GitHubWebhookDeliveryRepository`, `EmailOutboxRepository`, `QueuedTaskRepository`, `EventRepository`, `WorkflowRepository`, `AgentConfigRepository`, `DiagnosticsRepository`, `BudgetConfigRepository`, `MentorshipSessionRepository`. Each of these is invoked from a code path where the tenant context is not yet bound (auth, middleware, webhook dispatch) or from a singleton-scope-factory background service. Migrating them safely requires plumbing explicit tenant binding into each background path; tracked as follow-up.
 
 ## 1. What's in TS
 
@@ -166,6 +176,39 @@ Error paths:
   - Rewrite query filters: 0.5h
   - Audit consumers / add `.IgnoreQueryFilters()` where needed: 1h
   - Tests: 1.5h
+
+## Repositories with split-usage follow-up
+
+Story 19-6 migrated 3 of 21 tenant-scoped repositories to `TammaAppDbContext` and classified the remaining 18 as *legitimately admin* (auth-time / middleware / background-service paths where `ITenantContext` is not bound or safe to bind). That blanket classification is correct at the file level but hides a real architectural split: **6 of those 18 repositories have BOTH an admin call path and one or more per-request, tenant-scoped call paths**. Keeping them on `TammaDbContext` means the per-request paths bypass the fail-closed EF filter and (when `ConnectionStrings:TammaAppDb` is set) the `tamma_app` DB role + RLS defence. Each of these should be split into an admin-only repository + an app-role repository in a follow-up pass.
+
+This section is **documentation only** — it does not mandate the work. Implementation is tracked as a separate follow-up story candidate so this audit doc stays the canonical list for the next pass.
+
+### Repositories needing an admin + app-role split
+
+| # | Repository | Admin path (stays on `TammaDbContext`) | App-role path (move to `TammaAppDbContext`) |
+| - | ---------- | -------------------------------------- | ------------------------------------------- |
+| 1 | `EmailOutboxRepository` | Drainer / dispatcher loop (outbox worker — tenant context not set when the BackgroundService fires) | `EnqueueAsync` called from request handlers (Register, PasswordReset, CreateInvite, ResendInvite, ResendVerification, TenantInviteEmail, etc.) — tenant context IS bound here |
+| 2 | `QueuedTaskRepository` | `TaskQueueProcessor` drain loop (BackgroundService, singleton scope — tenant context deliberately unbound so the processor can see every tenant's queue) | Per-request enqueue sites: webhook dispatch, provisioning trigger, agent-dispatch handlers — all already carry a bound tenant context |
+| 3 | `EventRepository` | Cross-tenant platform-wide reads (DCB time-travel / audit aggregation where the platform operator must see every tenant), migration backfills | Per-request domain-event append from handlers (`AppendAsync` in `OrgEndpoints`, `AuthEndpoints`, `AgentEndpoints`, etc.) and scoped reads like `ListByTenantAsync` hit from `OrgEndpoints.ListTenantAudit` |
+| 4 | `WorkflowRepository` | Elsa engine wiring (Elsa persistence provider runs outside the request pipeline; the engine needs to see every workflow instance across tenants for dispatch / resume) | Per-tenant workflow CRUD surfaced via `WorkflowEndpoints` (create / list / delete for the path tenant) — caller's tenant is already bound by `TenantContextMiddleware` |
+| 5 | `AgentConfigRepository` | System-default config seeding + platform-wide `UpsertSystemDefaultAsync` admin surface | Tenant-override CRUD exposed via `AgentEndpoints` (`PutTenantOverrideAsync`, `GetResolvedAsync`, `DeleteTenantOverrideAsync`) — these are per-request and tenant-scoped by definition |
+| 6 | `DiagnosticsRepository` | Platform-wide aggregate views (cross-tenant rollups consumed by the platform-admin dashboard — legitimately needs every tenant's rows) | Per-tenant diagnostics reads surfaced via `DiagnosticsEndpoints` (`GetTenantSummaryAsync`, `GetRecentFailuresForTenantAsync`, etc.) — these should be guarded by the fail-closed filter, not the permissive admin one |
+
+### Why this is deferred, not done
+
+1. **Cost of the split is non-trivial per repo**: each one needs an `I{Name}AdminRepository` + `I{Name}Repository` interface pair, two implementations (one bound to `TammaDbContext`, one to `TammaAppDbContext`), DI rewiring at every call site, and a test suite covering both paths under the Phase-3 Postgres testcontainer (mirrors the `AppRoleRegressionTests` suite Story 19-6 added for the migrated trio).
+2. **None of these are P0 right now**: the immediate fail-open exposure (tenant context not bound → filter returns every row) was closed for the three hot repositories in 19-6 (`DashboardRepository`, `OrgRepository`, and the prompt/provider-health/sanitization trio). The 6 repos listed here still rely on the admin filter, but they are only reachable through admin-gated endpoints today — the gap is architectural rather than an immediate leak vector.
+3. **Blocker**: requires one audit pass per repo to enumerate every call site and classify it admin vs per-request. Budget: ≈ 0.5 day per repo (discover + split + DI + tests) = 3 dev-days total. Worth scheduling as a standalone audit-pass story once the Phase-3 RLS policies from finding 003 land, because the follow-up story's acceptance criteria can then be written as "app-role path must fail closed under the RLS policies" (a testable DB-layer contract) rather than "app-role path must use `TammaAppDbContext`" (a structural claim that requires code review to verify).
+
+### Follow-up story sketch
+
+> **Title**: Split 6 dual-use repositories into admin + app-role halves.
+>
+> **Scope**: the 6 repositories listed above. Each gets two interfaces, two implementations, and a migration of call sites from the old one-name-for-both pattern to the new split. No behavioral change at runtime — the admin half keeps the current connection binding, the app-role half picks up the fail-closed filter and the `tamma_app` role binding.
+>
+> **Out of scope**: the other 12 admin-classified repositories (`UserRepository`, `ApiKeyRepository`, `RefreshTokenRepository`, `PasswordResetRepository`, `TenantRepository`, `TenantMembershipRepository`, `InviteRepository`, `InstallationRepository`, `GitHubWebhookDeliveryRepository`, `BudgetConfigRepository`, `MentorshipSessionRepository`, plus whichever of `EmailOutboxRepository` / `QueuedTaskRepository` ultimately stays admin-only). These are genuinely admin-only in every call site.
+>
+> **Tests**: per split, an `AppRoleRegressionTests`-shaped suite that exercises (a) the app-role path under a bound tenant context returns only that tenant's rows, (b) the app-role path with no tenant context returns zero rows, (c) the admin path under no tenant context returns every tenant's rows (deliberate).
 
 ## References
 

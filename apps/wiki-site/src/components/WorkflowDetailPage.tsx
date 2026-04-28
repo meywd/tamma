@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import WorkflowDiagram from './WorkflowDiagram';
+import InlineMarkdown from './InlineMarkdown';
 
 interface ManifestEntry {
   path: string;
@@ -195,7 +196,7 @@ export default function WorkflowDetailPage() {
 
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => setManifest(data))
       .catch(() => {});
   }, []);
@@ -204,7 +205,7 @@ export default function WorkflowDetailPage() {
     setLoading(true);
     setError(false);
     fetch(`/content/workflows/${slug}.md`)
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })
@@ -466,15 +467,7 @@ export default function WorkflowDetailPage() {
                       <tr key={ri} className="hover:bg-zinc-800/30 transition-colors">
                         {row.map((cell, ci) => (
                           <td key={ci} className="px-4 py-2.5 text-zinc-300 border-b border-zinc-800/50">
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: cell
-                                  .replace(/`([^`]+)`/g, '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>')
-                                  .replace(/\*\*([^*]+)\*\*/g, '<strong class="text-zinc-100 font-medium">$1</strong>')
-                                  .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-400 hover:underline">$1</a>')
-                                  .replace(/--/g, '\u2014'),
-                              }}
-                            />
+                            <InlineMarkdown>{cell}</InlineMarkdown>
                           </td>
                         ))}
                       </tr>

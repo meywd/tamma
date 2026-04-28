@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import type { WorkflowPhase, AgentType, IAgentsConfig } from '@tamma/shared';
 import { DEFAULT_PHASE_ROLE_MAP } from '@tamma/shared';
 import { useAgentsConfig } from '../../../hooks/settings/useAgentsConfig.js';

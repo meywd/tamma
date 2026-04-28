@@ -74,6 +74,24 @@ builder.Services.AddUIHintHandler<ProviderSelectorUIHintHandler>();
 builder.Services.AddScoped<LocalStorageService>();
 builder.Services.AddScoped<UserPreferencesService>();
 
+// Wave C.3 — Tamma admin-alerts HTTP client. Targets the Tamma.Api
+// mount (not the Elsa backend) since the alert endpoints live under
+// /api/v1/admin/alerts/*, not the Elsa workflow surface. The
+// auto-login cookie (nginx + tamma_session JWT) authenticates these
+// calls the same way it authenticates the rest of Studio.
+var tammaApiUrl = configuration["Tamma:ApiBaseUrl"]
+    ?? builder.HostEnvironment.BaseAddress.TrimEnd('/');
+builder.Services.AddHttpClient("TammaAdminApi", client =>
+{
+    client.BaseAddress = new Uri(tammaApiUrl);
+});
+builder.Services.AddScoped(sp =>
+{
+    var factory = sp.GetRequiredService<IHttpClientFactory>();
+    var http = factory.CreateClient("TammaAdminApi");
+    return new AlertAdminApiService(http);
+});
+
 // Tamma theme service — persists dark mode to localStorage.
 // Replaces the default IThemeService registered by AddCore().
 builder.Services.AddScoped<TammaThemeService>();

@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class UserRepository(TammaDbContext db) : IUserRepository
+public class UserRepository(ControlPlaneDbContext db) : IUserRepository
 {
     public async Task<User> CreateAsync(User user)
     {
@@ -36,6 +36,12 @@ public class UserRepository(TammaDbContext db) : IUserRepository
         var users = await query.OrderByDescending(u => u.CreatedAt).Skip(offset).Take(limit).ToListAsync();
         return (users, total);
     }
+
+    /// <inheritdoc />
+    public Task<int> CountAsync()
+        // The default soft-delete query filter on User excludes DeletedAt
+        // rows; CountAsync over the filtered set is what we want.
+        => db.Users.CountAsync();
 
     public async Task<User> UpdateAsync(User user)
     {
@@ -164,6 +170,15 @@ public class UserRepository(TammaDbContext db) : IUserRepository
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user is null) return;
         user.Settings = settingsJson;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task SetPlatformRoleAsync(Guid id, string platformRole)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null) return;
+        user.PlatformRole = platformRole;
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }

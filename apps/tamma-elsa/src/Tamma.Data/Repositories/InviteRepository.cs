@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class InviteRepository(TammaDbContext db) : IInviteRepository
+public class InviteRepository(ControlPlaneDbContext db) : IInviteRepository
 {
     public async Task<UserInvite> CreateAsync(UserInvite invite)
     {
@@ -51,6 +51,18 @@ public class InviteRepository(TammaDbContext db) : IInviteRepository
         db.UserInvites.RemoveRange(rows);
         await db.SaveChangesAsync();
         return rows.Count;
+    }
+
+    public async Task<UserInvite?> GetByIdScopedAsync(Guid tenantId, Guid id)
+        => await db.UserInvites
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId);
+
+    public async Task ExtendExpiryAsync(Guid id, DateTime newExpiresAt)
+    {
+        var invite = await db.UserInvites.FindAsync(id);
+        if (invite is null) return;
+        invite.ExpiresAt = newExpiresAt;
+        await db.SaveChangesAsync();
     }
 
     [Obsolete("Use DeleteScopedAsync for per-tenant invariant. Kept for transitional callers.")]

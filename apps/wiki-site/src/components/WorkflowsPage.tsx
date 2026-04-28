@@ -65,7 +65,7 @@ export default function WorkflowsPage() {
   useEffect(() => {
     document.title = 'Workflows \u2014 Tamma Docs';
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => {
         const workflowEntries = data.filter((e) => e.section === 'Workflows');
         const cards: WorkflowCard[] = workflowEntries.map((entry) => {

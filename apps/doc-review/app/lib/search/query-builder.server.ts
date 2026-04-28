@@ -594,7 +594,7 @@ export class SearchQueryBuilder {
     }
 
     // Escape special characters but preserve wildcards
-    let escaped = query.replace(/[()]/g, '');
+    const escaped = query.replace(/[()]/g, '');
 
     // Handle prefix search (e.g., "search*")
     if (escaped.endsWith('*')) {

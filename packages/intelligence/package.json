@@ -40,16 +40,16 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tamma/shared": "workspace:*",
-    "@tamma/providers": "workspace:*",
     "@tamma/observability": "workspace:*",
-    "chromadb": "^1.8.1",
-    "pg": "^8.13.1"
+    "@tamma/providers": "workspace:*",
+    "@tamma/shared": "workspace:*",
+    "chromadb": "^3.4.3",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.10",
-    "typescript": "~5.7.2",
-    "vitest": "^3.0.6"
+    "@types/pg": "^8.20.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   },
   "peerDependencies": {
     "@pinecone-database/pinecone": "^2.0.0",

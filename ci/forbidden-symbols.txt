@@ -1,0 +1,52 @@
+# Story 29-10 — forbidden-symbols guard.
+#
+# Ripgrep patterns that fail the build if they appear in production
+# code (apps/, packages/) outside of:
+#   - EF migration files (Migrations/)
+#   - test fixtures (tests/ and *.test.* / *.spec.*)
+#   - markdown / documentation
+#   - SystemSanitizationRules.cs — legitimate SAST regexes
+#   - CredentialRedactor.cs + its test — Wave C.4 scrubbing utility;
+#     same category as the SAST regexes (references prefixes to MATCH
+#     and strip them, not because they're leaked).
+#   - common-passwords.txt — password blocklist (contains 'changeme'
+#     as a blocked value, not a real credential)
+#   - init-fullstack.ts / config.ts — env-file templates that ship
+#     placeholder values annotated with "xxx" / "_your_key_here"
+#   - docker-compose.yml bootstrap defaults
+#
+# The ci/check-forbidden-symbols.sh wrapper applies the exclusion
+# globs; keep this file focused on the patterns themselves.
+
+# ── Story 29-10: legacy protector + encrypted-column names ──────────────
+# Kept commented until tenant-scoped cabinet routing lands — see
+# Story 29-10 impl plan §9 "Open questions" for the sequencing.
+#TenantSecretProtector
+#cranl_database_url_encrypted
+
+# ── Real secret literals ────────────────────────────────────────────────
+# A match on any of these in production code outside the excluded
+# files is a committed credential and must be rotated immediately.
+#
+# `sk_live_` — Stripe live API key prefix (no placeholder equivalent).
+sk_live_
+
+# Anthropic real key body (12+ chars after the prefix; placeholder
+# docs use "xxxxxxx" / "_your_key_here" and won't match).
+sk-ant-api\d{2}-[A-Za-z0-9_-]{20,}
+
+# GitHub tokens — fixed 36-char body, no shorter placeholder matches.
+ghp_[A-Za-z0-9]{36}
+gho_[A-Za-z0-9]{36}
+ghs_[A-Za-z0-9]{36}
+
+# Slack tokens
+xoxb-[0-9]{9,}-[A-Za-z0-9-]{8,}
+xoxp-[0-9]{9,}-[A-Za-z0-9-]{8,}
+
+# AWS access key ids — 20-char uppercase after AKIA.
+AKIA[0-9A-Z]{16}
+
+# Private-key PEM headers.
+-----BEGIN RSA PRIVATE KEY-----
+-----BEGIN OPENSSH PRIVATE KEY-----

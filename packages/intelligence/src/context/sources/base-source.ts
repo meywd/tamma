@@ -42,7 +42,7 @@ export abstract class BaseContextSource implements IContextSource {
 
   protected abstract doRetrieve(query: SourceQuery): Promise<ContextChunk[]>;
 
-  protected withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  protected async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Source ${this.name} timed out after ${timeoutMs}ms`)), timeoutMs);
       promise.then(result => { clearTimeout(timer); resolve(result); }).catch(err => { clearTimeout(timer); reject(err); });

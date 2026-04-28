@@ -93,9 +93,13 @@ public class GitHubWebhookTaskQueueIntegrationTests
         doc.RootElement.GetProperty("taskId").GetString().Should().NotBeNullOrEmpty();
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync();
+        // Story 28-1 PR B — orphan webhooks (no installation→tenant
+        // mapping) route to platform_queued_tasks, not the per-tenant
+        // queue. There's no tenant DB to land them in until the
+        // installation is claimed.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync();
         task.Should().NotBeNull();
         task!.Type.Should().StartWith("github.push");
         task.InstallationId.Should().Be(9001L);
@@ -121,9 +125,10 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
+        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9002L);
         task.Should().NotBeNull();
         task!.Type.Should().Be("github.issues.opened");
     }
@@ -146,9 +151,10 @@ public class GitHubWebhookTaskQueueIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var task = await db.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
+        // Story 28-1 PR B — orphan webhook → platform_queued_tasks.
+        var task = await db.PlatformQueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 9003L);
         task.Should().NotBeNull();
         task!.Type.Should().Be("github.pull_request.opened");
     }
@@ -173,12 +179,21 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var response = await client.SendAsync(BuildWebhookRequest("installation", body));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // Story 28-1 PR D — queued_tasks live on the tenant DB, but
+        // installation events are handled inline so no tenant context is
+        // bound. Verify the per-tenant store has nothing — fan out is
+        // the only way to "any tenant has any queued task" cross-tenant.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-
-        // installation events should NOT land in queued_tasks — they are handled
-        // inline by the existing installation router code path.
-        var anyQueued = await db.QueuedTasks.AnyAsync();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        var anyQueued = false;
+        foreach (var tid in await cp.Tenants.AsNoTracking()
+            .Where(t => t.DeletedAt == null).Select(t => t.Id).ToListAsync())
+        {
+            await using var tdb = await factory.CreateAsync(tid);
+            if (await tdb.QueuedTasks.AnyAsync()) { anyQueued = true; break; }
+        }
         anyQueued.Should().BeFalse();
     }
 
@@ -196,9 +211,19 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var json = await response.Content.ReadAsStringAsync();
         json.Should().Contain("\"skipped\":true");
 
+        // Story 28-1 PR D — fan out across tenants to verify nothing queued.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        (await db.QueuedTasks.AnyAsync()).Should().BeFalse();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        var anyQueued = false;
+        foreach (var tid in await cp.Tenants.AsNoTracking()
+            .Where(t => t.DeletedAt == null).Select(t => t.Id).ToListAsync())
+        {
+            await using var tdb = await factory.CreateAsync(tid);
+            if (await tdb.QueuedTasks.AnyAsync()) { anyQueued = true; break; }
+        }
+        anyQueued.Should().BeFalse();
     }
 
     // ─── tenant binding via installation ──────────────────────────────────────
@@ -216,7 +241,7 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var tenantId = Guid.NewGuid();
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
             db.Tenants.Add(new Data.Entities.Tenant
             {
                 Id = tenantId,
@@ -245,9 +270,13 @@ public class GitHubWebhookTaskQueueIntegrationTests
         var response = await client.SendAsync(BuildWebhookRequest("push", body));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // Story 28-1 PR D — queued_tasks live on the tenant DB. The
+        // webhook resolves installation → tenant id, then enqueues to
+        // that tenant's DB.
         using var assertScope = ApiTestFixture.Factory.Services.CreateScope();
-        var adb = assertScope.ServiceProvider.GetRequiredService<TammaDbContext>();
-
+        var factory = assertScope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        await using var adb = await factory.CreateAsync(tenantId);
         var queued = await adb.QueuedTasks.FirstOrDefaultAsync(t => t.InstallationId == 7777L);
         queued.Should().NotBeNull();
         queued!.TenantId.Should().Be(tenantId);

@@ -83,7 +83,7 @@ public class AgentEndpointsIntegrationTests
 
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
-            var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.TammaDbContext>();
+            var db = scope.ServiceProvider.GetRequiredService<Tamma.Data.ControlPlaneDbContext>();
             db.Tenants.Add(new Tamma.Data.Entities.Tenant
             {
                 Id = tenantId,
@@ -116,8 +116,14 @@ public class AgentEndpointsIntegrationTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public async Task GetConfig_AfterUpdate_Returns_UpdatedConfig()
+    public async Task PutConfig_WithoutTenantContext_Returns400_AndGetStillReturnsPlatformDefault()
     {
+        // Story 28-1 PR A (Decision #1) + PR #338 wave-4 review fix:
+        // platform defaults moved to code (DefaultAgentConfig.ForRole) AND
+        // the endpoint now rejects null-tenant writes with 400 instead of
+        // returning a misleading 200 + emitting a false
+        // AGENT_CONFIG.UPDATED.SUCCESS audit event. Honest response shape +
+        // honest event-store contents.
         var payload = new
         {
             config = new
@@ -134,14 +140,58 @@ public class AgentEndpointsIntegrationTests
         };
 
         var put = await _client.PutAsJsonAsync("/api/v1/agents/config", payload);
-        put.StatusCode.Should().Be(HttpStatusCode.OK);
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var putBody = await put.Content.ReadFromJsonAsync<JsonElement>();
+        putBody.GetProperty("error").GetString().Should().Be("no_tenant_context");
 
         var get = await _client.GetAsync("/api/v1/agents/config");
         get.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await get.Content.ReadFromJsonAsync<JsonElement>();
-        // The developer override must be present in returned config JSON.
-        body.GetProperty("config").GetProperty("roles").GetProperty("developer")
-            .GetProperty("provider").GetString().Should().Be("openai");
+
+        // GET surfaces the "platform-default" source marker; the PUT was
+        // rejected so no developer override leaks through.
+        body.GetProperty("source").GetString().Should().Be("platform-default");
+    }
+
+    [Test]
+    public async Task PutConfig_WithoutTenantContext_DoesNotEmitAgentConfigUpdatedSuccessEvent()
+    {
+        // PR #338 wave-4 review HIGH regression test. The original bug:
+        // when tenantContext.TenantId was null the endpoint would skip the
+        // persistence write but still call events.AppendAsync with a
+        // SUCCESS event, poisoning the DCB audit trail. Pin the
+        // no-op-no-audit invariant — every emitted event must correspond
+        // to a real state transition.
+        var payload = new
+        {
+            config = new
+            {
+                roles = new
+                {
+                    developer = new { provider = "openai", model = "gpt-4o" }
+                }
+            }
+        };
+
+        var put = await _client.PutAsJsonAsync("/api/v1/agents/config", payload);
+        put.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // Inspect the event store directly. AppendAsync writes platform-
+        // scope events to the CP DomainEvents table when tenantId is null,
+        // and tenant-scope events route through the tenant factory — so
+        // the cross-tenant QueryAsync(null, type, ...) path catches both.
+        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        var eventRepo = scope.ServiceProvider.GetRequiredService<IEventRepository>();
+        var events = await eventRepo.QueryAsync(
+            tenantId: null,
+            type: "AGENT_CONFIG.UPDATED.SUCCESS",
+            issueNumber: null,
+            limit: 50);
+
+        events.Should().BeEmpty(
+            because: "no-op admin PUTs must not emit *.UPDATED.SUCCESS — " +
+                     "the audit trail can only contain real state transitions.");
     }
 
     [Test]

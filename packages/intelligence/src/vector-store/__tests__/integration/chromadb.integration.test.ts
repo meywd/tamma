@@ -7,7 +7,7 @@
  * To run: pnpm test:integration
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, type TaskContext } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { ChromaDBVectorStore } from '../../providers/chromadb.js';
 import { createChromaDBStore } from '../../factory.js';
 import type { VectorDocument, SearchQuery, HybridSearchQuery } from '../../interfaces.js';
@@ -19,24 +19,34 @@ import { join } from 'path';
 const SKIP_INTEGRATION = process.env['SKIP_INTEGRATION_TESTS'] === 'true';
 const CHROMADB_URL = process.env['CHROMADB_TEST_URL'] ?? '';
 
-describe.skipIf(SKIP_INTEGRATION || !CHROMADB_URL)('ChromaDB Integration Tests', () => {
+// Vitest 4 removed the ability to call `ctx.skip()` from top-level
+// `beforeAll`, so we probe ChromaDB at module load time (top-level await
+// is supported in ESM) and gate the suite via `describe.skipIf`.
+let chromaReachable = false;
+if (!SKIP_INTEGRATION && CHROMADB_URL) {
+  try {
+    const probe = createChromaDBStore(CHROMADB_URL, 64) as ChromaDBVectorStore;
+    await probe.initialize();
+    await probe.dispose();
+    chromaReachable = true;
+  } catch {
+    console.warn('ChromaDB not available at', CHROMADB_URL, '— skipping integration tests');
+  }
+}
+
+describe.skipIf(SKIP_INTEGRATION || !CHROMADB_URL || !chromaReachable)('ChromaDB Integration Tests', () => {
   let store: ChromaDBVectorStore;
   let tempDir: string;
   const testCollectionName = 'test-collection';
   const dimensions = 128; // Smaller dimensions for faster tests
 
-  beforeAll(async (ctx: TaskContext) => {
-    // Create temp directory for ChromaDB data
+  beforeAll(async () => {
+    // Create temp directory for ChromaDB data. Reachability already
+    // verified at module load — initialize() here is for the real
+    // long-lived store the tests use.
     tempDir = mkdtempSync(join(tmpdir(), 'chroma-test-'));
-
     store = createChromaDBStore(CHROMADB_URL, dimensions) as ChromaDBVectorStore;
-
-    try {
-      await store.initialize();
-    } catch (error) {
-      console.warn('ChromaDB not available, skipping integration tests');
-      ctx.skip();
-    }
+    await store.initialize();
   });
 
   afterAll(async () => {

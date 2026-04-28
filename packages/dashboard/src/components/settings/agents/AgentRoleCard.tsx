@@ -4,6 +4,8 @@ import { Card } from '../../common/Card.js';
 import { Badge } from '../../common/Badge.js';
 import { ProviderChainEditor } from './ProviderChainEditor.js';
 
+import type { JSX } from "react";
+
 interface AgentRoleCardProps {
   role: string;
   roleConfig: Partial<IAgentRoleConfig>;

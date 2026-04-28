@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class InstallationRepository(TammaDbContext db) : IInstallationRepository
+public class InstallationRepository(ControlPlaneDbContext db) : IInstallationRepository
 {
     public async Task<GitHubInstallation> UpsertAsync(GitHubInstallation installation)
     {
@@ -218,4 +218,18 @@ public class InstallationRepository(TammaDbContext db) : IInstallationRepository
         return await db.GitHubInstallations
             .FirstOrDefaultAsync(i => i.Id == repo.InstallationEntityId);
     }
+
+    /// <summary>
+    /// Story 18-4 — eager-load the per-installation repo collection so the
+    /// onboarding wizard can render counts + listings without a N+1 round
+    /// trip. Suspended rows are included; the dashboard surfaces them with a
+    /// "re-enable on GitHub" banner. Newest-first because freshly-installed
+    /// orgs are the most common thing the user wants to confirm.
+    /// </summary>
+    public async Task<List<GitHubInstallation>> ListByTenantAsync(Guid tenantId)
+        => await db.GitHubInstallations
+            .Where(i => i.TenantId == tenantId)
+            .Include(i => i.Repos)
+            .OrderByDescending(i => i.CreatedAt)
+            .ToListAsync();
 }

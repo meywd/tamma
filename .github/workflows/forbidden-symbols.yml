@@ -1,0 +1,27 @@
+# Story 29-10 — CI guard that fails the build when a forbidden secret
+# literal or stopgap symbol appears in production code. See
+# ci/forbidden-symbols.txt for the pattern list and
+# ci/check-forbidden-symbols.sh for the runner.
+name: forbidden-symbols
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Minimal permissions — this workflow only needs to read the checked-out
+# tree to grep for forbidden literals. No write scopes.
+permissions:
+  contents: read
+
+jobs:
+  forbidden-symbols:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Scan for forbidden symbols
+        run: bash ci/check-forbidden-symbols.sh

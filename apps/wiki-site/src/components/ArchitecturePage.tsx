@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import WorkflowDiagram from './WorkflowDiagram';
 import type { WorkflowDef } from './WorkflowDiagram';
+import InlineMarkdown from './InlineMarkdown';
 
 // --- Types ---
 
@@ -362,20 +363,7 @@ function StyledTable({
                     key={ci}
                     className="px-4 py-2.5 text-zinc-300 border-b border-zinc-800/50"
                   >
-                    <span
-                      dangerouslySetInnerHTML={{
-                        __html: cell
-                          .replace(
-                            /`([^`]+)`/g,
-                            '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1.5 py-0.5 rounded">$1</code>'
-                          )
-                          .replace(
-                            /\*\*([^*]+)\*\*/g,
-                            '<strong class="text-zinc-100 font-medium">$1</strong>'
-                          )
-                          .replace(/--/g, '\u2014'),
-                      }}
-                    />
+                    <InlineMarkdown>{cell}</InlineMarkdown>
                   </td>
                 ))}
               </tr>
@@ -552,7 +540,7 @@ export default function ArchitecturePage() {
   useEffect(() => {
     setLoading(true);
     fetch('/content/architecture.md')
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })
@@ -694,12 +682,13 @@ export default function ArchitecturePage() {
         <h1 className="text-3xl font-bold text-white tracking-tight">
           System Architecture
         </h1>
-        <p className="mt-2 text-zinc-400 text-[15px] leading-relaxed max-w-3xl">
-          {introParagraph
-            .replace(/\*\*/g, '')
-            .replace(/\[.*?\]\(.*?\)/g, '')
-            .substring(0, 200) || 'Dual-stack architecture combining TypeScript and C# for autonomous development orchestration.'}
-        </p>
+        <div className="mt-2 text-zinc-400 text-[15px] leading-relaxed max-w-3xl line-clamp-4">
+          {introParagraph ? (
+            <InlineMarkdown>{introParagraph}</InlineMarkdown>
+          ) : (
+            'Dual-stack architecture combining TypeScript and C# for autonomous development orchestration.'
+          )}
+        </div>
 
         {/* Tech stack badges */}
         <div className="flex flex-wrap gap-2 mt-4">

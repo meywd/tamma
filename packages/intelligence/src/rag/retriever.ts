@@ -99,7 +99,7 @@ export class Retriever {
     });
 
     // Create retrieval promises
-    const retrievalPromises = activeSources.map((name) =>
+    const retrievalPromises = activeSources.map(async (name) =>
       this.retrieveFromSource(name, query, config)
     );
 
@@ -185,7 +185,7 @@ export class Retriever {
   /**
    * Create a timeout promise that returns empty results
    */
-  private createTimeoutPromise(
+  private async createTimeoutPromise(
     timeoutMs: number,
     numSources: number
   ): Promise<SourceRetrievalResult[]> {
@@ -226,7 +226,7 @@ export class Retriever {
    * Dispose all sources
    */
   async dispose(): Promise<void> {
-    const disposePromises = Array.from(this.sources.values()).map((source) =>
+    const disposePromises = Array.from(this.sources.values()).map(async (source) =>
       source.dispose()
     );
     await Promise.all(disposePromises);

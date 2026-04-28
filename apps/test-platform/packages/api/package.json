@@ -27,7 +27,7 @@
     "nanoid": "^5.1.6",
     "resend": "^6.4.2",
     "slugify": "^1.6.6",
-    "zod": "^3.25.76"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -1,0 +1,410 @@
+@page "/admin/alert-channels"
+@using Tamma.Studio.Services
+@inject AlertAdminApiService Api
+
+<PageTitle>Alert channels · Tamma admin</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudText Typo="Typo.h4">Alert channels</MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenNewDialog">
+            New channel
+        </MudButton>
+    </MudStack>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+        Platform-wide channels fan out alerts to email, Slack, PagerDuty, or a
+        custom webhook. Credentials are NEVER entered directly — they live in
+        the secret store, and this page only links by <code>secretId</code>.
+    </MudText>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">@_error</MudAlert>
+    }
+
+    <MudTable Items="_channels" Dense="true" Hover="true" Loading="_isLoading" T="ChannelDto">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Type</MudTh>
+            <MudTh>Scope</MudTh>
+            <MudTh>Enabled</MudTh>
+            <MudTh>Credentials</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.Name</MudTd>
+            <MudTd>@context.ChannelType</MudTd>
+            <MudTd>@(context.TenantId is null ? "platform" : context.TenantId.Value.ToString()[..8])</MudTd>
+            <MudTd>
+                <MudSwitch T="bool" Value="context.IsEnabled"
+                           ValueChanged="@(e => ToggleEnabledAsync(context, e))"
+                           Color="Color.Success" />
+            </MudTd>
+            <MudTd>
+                @if (context.CredentialsSecretId is null)
+                {
+                    <MudChip T="string" Size="Size.Small">none</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success">linked</MudChip>
+                }
+            </MudTd>
+            <MudTd Style="text-align:right">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           OnClick="@(() => OpenEditDialog(context))">Edit</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           Class="ml-1"
+                           OnClick="@(() => TestSendAsync(context))">Test send</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           Color="Color.Error" Class="ml-1"
+                           OnClick="@(() => DeleteAsync(context))">Delete</MudButton>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+
+    @if (_lastTestSend is not null)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-3">@_lastTestSend</MudAlert>
+    }
+</MudContainer>
+
+@* ── Two-step wizard (new) / simple editor (edit) ── *@
+<MudDialog @bind-Visible="_dialogOpen"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        @(_editing is null
+            ? ($"New channel — step {_wizardStep} of 2")
+            : "Edit channel")
+    </TitleContent>
+    <DialogContent>
+        @if (_editing is null && _wizardStep == 1)
+        {
+            @* Step 1: type + name + scope *@
+            <MudSelect T="string" @bind-Value="_form.ChannelType"
+                       Label="Type" Variant="Variant.Outlined" Class="mb-2">
+                <MudSelectItem Value="@("email")">Email</MudSelectItem>
+                <MudSelectItem Value="@("slack")">Slack</MudSelectItem>
+                <MudSelectItem Value="@("pagerduty")">PagerDuty</MudSelectItem>
+                <MudSelectItem Value="@("webhook")">Webhook</MudSelectItem>
+            </MudSelect>
+
+            <MudTextField T="string" @bind-Value="_form.Name" Label="Name"
+                          Variant="Variant.Outlined" Class="mb-2" />
+
+            <MudSwitch T="bool" @bind-Value="_form.IsPlatformScope"
+                       Label="Platform-scope (null tenant)"
+                       Color="Color.Primary" Class="mb-2" />
+
+            @if (!_form.IsPlatformScope)
+            {
+                <MudTextField T="Guid?" Value="_form.TenantId"
+                              ValueChanged="@((Guid? v) => _form.TenantId = v)"
+                              Label="Tenant ID (GUID)"
+                              Variant="Variant.Outlined" Class="mb-2" />
+            }
+        }
+        else if (_editing is null && _wizardStep == 2)
+        {
+            @* Step 2: config JSON + secret id *@
+            @if (_form.ChannelType != "email")
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3">
+                    Credentials must live in the secret store first. Create the
+                    secret via the Secrets page and paste its ID below. This UI
+                    will never accept plaintext credentials.
+                </MudAlert>
+                <MudTextField T="Guid?" Value="_form.CredentialsSecretId"
+                              ValueChanged="@((Guid? v) => _form.CredentialsSecretId = v)"
+                              Label="Credentials secret ID"
+                              Variant="Variant.Outlined" Class="mb-2" />
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3">
+                    Email channels use the shared SMTP cabinet — no per-channel secret needed.
+                </MudAlert>
+            }
+
+            <MudText Typo="Typo.subtitle2" Class="mt-2">Config (JSON)</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">
+                Non-credential config: email <code>toAddress</code> / <code>subjectPrefix</code>,
+                webhook <code>signingAlg</code>, etc. Credentials here are rejected with 400.
+            </MudText>
+            <MudTextField T="string" @bind-Value="_form.ConfigJson"
+                          Lines="5" Variant="Variant.Outlined"
+                          Style="font-family:monospace;font-size:12px" />
+        }
+        else if (_editing is not null)
+        {
+            @* Edit mode — simple form *@
+            <MudTextField T="string" @bind-Value="_form.Name" Label="Name"
+                          Variant="Variant.Outlined" Class="mb-2" />
+            <MudSwitch T="bool" @bind-Value="_form.IsEnabled" Label="Enabled"
+                       Color="Color.Success" Class="mb-2" />
+            <MudText Typo="Typo.subtitle2">Config (JSON)</MudText>
+            <MudTextField T="string" @bind-Value="_form.ConfigJson"
+                          Lines="5" Variant="Variant.Outlined"
+                          Style="font-family:monospace;font-size:12px" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogOpen = false)">Cancel</MudButton>
+        @if (_editing is null && _wizardStep == 1)
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="@(() => _wizardStep = 2)"
+                       Disabled="@(!CanAdvanceToStep2())">
+                Next
+            </MudButton>
+        }
+        else if (_editing is null && _wizardStep == 2)
+        {
+            <MudButton OnClick="@(() => _wizardStep = 1)">Back</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="CreateAsync">Create</MudButton>
+        }
+        else
+        {
+            <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                       OnClick="UpdateAsync">Save</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<ChannelDto> _channels = new();
+    private bool _isLoading;
+    private string? _error;
+    private string? _lastTestSend;
+
+    private bool _dialogOpen;
+    private int _wizardStep = 1;
+    private ChannelDto? _editing;
+    private ChannelFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _isLoading = true;
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var resp = await Api.ListChannelsAsync();
+            _channels = resp.Items;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load channels: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenNewDialog()
+    {
+        _editing = null;
+        _form = new ChannelFormModel
+        {
+            ChannelType = "email",
+            IsPlatformScope = true,
+            ConfigJson = "{}",
+            IsEnabled = true,
+        };
+        _wizardStep = 1;
+        _dialogOpen = true;
+    }
+
+    private void OpenEditDialog(ChannelDto c)
+    {
+        _editing = c;
+        _form = new ChannelFormModel
+        {
+            Name = c.Name,
+            ChannelType = c.ChannelType,
+            TenantId = c.TenantId,
+            IsPlatformScope = c.TenantId is null,
+            ConfigJson = c.Config,
+            CredentialsSecretId = c.CredentialsSecretId,
+            IsEnabled = c.IsEnabled,
+        };
+        _dialogOpen = true;
+    }
+
+    private bool CanAdvanceToStep2()
+    {
+        if (string.IsNullOrWhiteSpace(_form.ChannelType)) return false;
+        if (string.IsNullOrWhiteSpace(_form.Name)) return false;
+        if (!_form.IsPlatformScope && _form.TenantId is null) return false;
+        return true;
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            // Pre-flight: reject any known credential-ish field in config.
+            if (ContainsCredential(_form.ConfigJson))
+            {
+                _error = "Config contains a credential-like field. Use the secret store instead.";
+                return;
+            }
+
+            var body = new CreateChannelBody(
+                Name: _form.Name ?? string.Empty,
+                ChannelType: _form.ChannelType ?? "email",
+                TenantId: _form.IsPlatformScope ? null : _form.TenantId,
+                Config: _form.ConfigJson,
+                CredentialsSecretId: _form.CredentialsSecretId);
+
+            var resp = await Api.CreateChannelAsync(body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Create failed: {resp.StatusCode} {await resp.Content.ReadAsStringAsync()}";
+                return;
+            }
+            _dialogOpen = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Create failed: {ex.Message}";
+        }
+    }
+
+    private async Task UpdateAsync()
+    {
+        if (_editing is null) return;
+        try
+        {
+            if (ContainsCredential(_form.ConfigJson))
+            {
+                _error = "Config contains a credential-like field. Use the secret store instead.";
+                return;
+            }
+
+            var body = new UpdateChannelBody(
+                Name: _form.Name,
+                IsEnabled: _form.IsEnabled,
+                Config: _form.ConfigJson);
+            var resp = await Api.UpdateChannelAsync(_editing.Id, body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Update failed: {resp.StatusCode}";
+                return;
+            }
+            _dialogOpen = false;
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Update failed: {ex.Message}";
+        }
+    }
+
+    private async Task ToggleEnabledAsync(ChannelDto c, bool enabled)
+    {
+        try
+        {
+            await Api.UpdateChannelAsync(c.Id,
+                new UpdateChannelBody(null, enabled, null));
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Toggle failed: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteAsync(ChannelDto c)
+    {
+        try
+        {
+            await Api.DeleteChannelAsync(c.Id);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete failed: {ex.Message}";
+        }
+    }
+
+    private async Task TestSendAsync(ChannelDto c)
+    {
+        _lastTestSend = "Sending test alert…";
+        StateHasChanged();
+        try
+        {
+            var resp = await Api.TestRaiseAsync(
+                severity: "info",
+                title: $"Test from Studio → {c.Name}",
+                description: "Synthetic payload from Alert Channels admin page.",
+                correlationId: $"studio-test-{Guid.NewGuid():N}",
+                tenantId: c.TenantId);
+            var body = await resp.Content.ReadAsStringAsync();
+            _lastTestSend = $"HTTP {(int)resp.StatusCode}: {body}";
+        }
+        catch (Exception ex)
+        {
+            _lastTestSend = $"Test send failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Client-side pre-flight mirror of the server-side check in
+    /// <see cref="AlertEndpoints.ContainsPlaintextCredential"/>. Keeps
+    /// the UX snappy (don't round-trip to learn the field is illegal)
+    /// without weakening the server gate. Server is still authoritative.
+    /// </summary>
+    private static bool ContainsCredential(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "{}") return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+            string[] banned =
+            {
+                "webhookUrl", "webhook_url",
+                "routingKey", "routing_key",
+                "password", "apiKey", "api_key",
+                "secret", "sharedSecret", "shared_secret",
+                "token", "authToken", "auth_token",
+            };
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (banned.Contains(prop.Name, StringComparer.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch
+        {
+            // Malformed JSON → let server return 400 with a useful error.
+            return false;
+        }
+        return false;
+    }
+
+    private sealed class ChannelFormModel
+    {
+        public string? Name { get; set; }
+        public string? ChannelType { get; set; } = "email";
+        public Guid? TenantId { get; set; }
+        public bool IsPlatformScope { get; set; } = true;
+        public string? ConfigJson { get; set; } = "{}";
+        public Guid? CredentialsSecretId { get; set; }
+        public bool IsEnabled { get; set; } = true;
+    }
+}

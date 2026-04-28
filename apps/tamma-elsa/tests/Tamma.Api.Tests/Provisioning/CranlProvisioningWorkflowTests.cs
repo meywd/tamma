@@ -27,7 +27,7 @@ public class CranlProvisioningWorkflowTests
     private IServiceScope _scope = null!;
     // Owned by _scope; disposing the scope cascades.
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private Mock<ICranlApiClient> _cranl = null!;
     private CranlOptions _options = null!;
@@ -40,7 +40,7 @@ public class CranlProvisioningWorkflowTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         _cranl = new Mock<ICranlApiClient>(MockBehavior.Strict);
         _options = new CranlOptions

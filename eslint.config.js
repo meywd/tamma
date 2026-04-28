@@ -1,7 +1,7 @@
 import eslint from '@eslint/js';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
-import prettierConfig from 'eslint-config-prettier';
+import prettierConfig from 'eslint-config-prettier/flat';
 
 export default [
   eslint.configs.recommended,
@@ -64,11 +64,17 @@ export default [
   prettierConfig,
   {
     ignores: [
-      'node_modules',
-      'dist',
-      'coverage',
-      '*.config.js',
-      '.tsbuildinfo',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/coverage/**',
+      '**/*.config.js',
+      '**/.tsbuildinfo',
+      // apps/test-platform manages its own ESLint config (legacy eslintrc).
+      // ESLint 10 removed support for legacy eslintrc, but this app is linted
+      // separately via its own `next lint` / `eslint src/**/*.ts` scripts and
+      // is not part of the root lint scope. Migrate to flat config in a
+      // follow-up.
+      'apps/test-platform/**',
     ],
   },
 ];

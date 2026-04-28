@@ -54,6 +54,43 @@ public class CheckCircuitBreakerActivity : Activity
         try
         {
             var providerName = ProviderName.Get(context);
+
+            // Story 9-11: Tamma API first. When the API reports a definitive
+            // status we honor it; otherwise fall back to the legacy
+            // workflow-variable state (preserves backward compat).
+            var apiClient = context.GetService<TammaApiClient>();
+            if (apiClient is not null && !string.IsNullOrWhiteSpace(providerName))
+            {
+                try
+                {
+                    var tenantId = context.GetVariable<string>("TenantId");
+                    var health = await apiClient
+                        .GetProviderHealthAsync(providerName, tenantId, context.CancellationToken)
+                        .ConfigureAwait(false);
+                    if (health is not null)
+                    {
+                        if (health.HalfOpen)
+                        {
+                            await context.CompleteActivityWithOutcomesAsync("HalfOpen");
+                            return;
+                        }
+                        if (health.CircuitOpen || !health.Healthy)
+                        {
+                            await context.CompleteActivityWithOutcomesAsync("Open");
+                            return;
+                        }
+                        await context.CompleteActivityWithOutcomesAsync("Closed");
+                        return;
+                    }
+                }
+                catch (Exception apiEx)
+                {
+                    _logger?.LogWarning(apiEx,
+                        "Tamma API health lookup failed for {Provider}, falling back to local state",
+                        providerName);
+                }
+            }
+
             var statesJson = CircuitBreakerStatesJson.Get(context);
 
             var states = DeserializeStates(statesJson);

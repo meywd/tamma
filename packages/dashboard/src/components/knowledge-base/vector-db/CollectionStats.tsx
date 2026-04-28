@@ -4,7 +4,7 @@
  * Detailed statistics view for a vector collection.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { CollectionStatsInfo } from '@tamma/shared';
 
 export interface CollectionStatsProps {

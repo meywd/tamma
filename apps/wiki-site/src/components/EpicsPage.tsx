@@ -106,7 +106,7 @@ export default function EpicsPage() {
   useEffect(() => {
     document.title = 'Epics \u2014 Tamma Docs';
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => {
         // Count stories per epic section
         const storyCounts = new Map<string, number>();

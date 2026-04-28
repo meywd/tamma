@@ -16,16 +16,19 @@ vi.mock('openai', () => {
     }
   }
 
-  const OpenAIMock: any = vi.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: mockCreate,
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  const OpenAIMock: any = vi.fn().mockImplementation(function () {
+    return {
+      chat: {
+        completions: {
+          create: mockCreate,
+        },
       },
-    },
-    models: {
-      list: mockModelsList,
-    },
-  }));
+      models: {
+        list: mockModelsList,
+      },
+    };
+  });
 
   // Real OpenAI exposes APIError as static property on the class
   OpenAIMock.APIError = APIError;

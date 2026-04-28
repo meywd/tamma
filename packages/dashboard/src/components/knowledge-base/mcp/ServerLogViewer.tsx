@@ -4,7 +4,7 @@
  * Displays log entries from an MCP server with level filtering.
  */
 
-import React, { useState } from 'react';
+import React, { useState, type JSX } from 'react';
 import type { MCPServerLog } from '@tamma/shared';
 
 export interface ServerLogViewerProps {

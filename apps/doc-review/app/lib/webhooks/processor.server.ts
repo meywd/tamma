@@ -352,19 +352,19 @@ export class WebhookProcessor {
     try {
       switch (event.data.kind) {
         case 'pull_request':
-          await this.processPullRequestEvent(event.data as UnifiedPullRequestData, actions);
+          await this.processPullRequestEvent(event.data, actions);
           break;
 
         case 'review':
-          await this.processReviewEvent(event.data as UnifiedReviewData, actions);
+          await this.processReviewEvent(event.data, actions);
           break;
 
         case 'comment':
-          await this.processCommentEvent(event.data as UnifiedCommentData, actions);
+          await this.processCommentEvent(event.data, actions);
           break;
 
         case 'push':
-          await this.processPushEvent(event.data as UnifiedPushData, actions);
+          await this.processPushEvent(event.data, actions);
           break;
 
         default:

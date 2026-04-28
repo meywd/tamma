@@ -33,7 +33,7 @@ export async function loader({ request, context }: any) {
   const offset = parseInt(url.searchParams.get('offset') || '0');
 
   // Build dynamic query with filters
-  let conditions = [isNull(discussions.deletedAt)];
+  const conditions = [isNull(discussions.deletedAt)];
 
   if (docPath) {
     conditions.push(eq(discussions.docPath, docPath));

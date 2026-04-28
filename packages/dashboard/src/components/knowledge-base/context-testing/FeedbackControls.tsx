@@ -5,7 +5,7 @@
  * Provides rating buttons and an optional comment field.
  */
 
-import React, { useState } from 'react';
+import React, { useState, type JSX } from 'react';
 
 export type FeedbackRating = 'relevant' | 'irrelevant' | 'partially_relevant';
 

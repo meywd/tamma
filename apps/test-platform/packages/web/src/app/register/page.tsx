@@ -13,9 +13,8 @@ import { PasswordRequirementsChecklist } from '@/components/auth/PasswordRequire
 const registerSchema = z.object({
   fullName: z.string().min(1, 'Full name is required').min(2, 'Full name must be at least 2 characters'),
   email: z
-    .string()
-    .min(1, 'Email is required')
-    .email('Please enter a valid email address'),
+    .email('Please enter a valid email address')
+    .min(1, 'Email is required'),
   password: z
     .string()
     .min(12, 'Password must be at least 12 characters')

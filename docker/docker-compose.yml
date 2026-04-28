@@ -17,7 +17,7 @@ services:
   # Infrastructure: PostgreSQL
   # ---------------------------------------------------------------------------
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tamma}
@@ -57,7 +57,7 @@ services:
   # Infrastructure: ChromaDB (vector database)
   # ---------------------------------------------------------------------------
   chromadb:
-    image: chromadb/chroma:0.6.3
+    image: chromadb/chroma:1.5.8
     restart: unless-stopped
     volumes:
       - tamma-chroma-data:/chroma/chroma
@@ -65,7 +65,14 @@ services:
       ANONYMIZED_TELEMETRY: "false"
       IS_PERSISTENT: "true"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      # chromadb 1.5.8 image strips curl/wget/nc. Using bash's /dev/tcp for a
+      # raw HTTP/1.0 probe — but we MUST invoke bash explicitly: docker's
+      # CMD-SHELL runs as `/bin/sh`, which on Debian-based images is `dash`,
+      # and dash does NOT support /dev/tcp/<host>/<port>. The bash-c wrap
+      # routes the probe through a shell that has the feature.
+      test:
+        - "CMD-SHELL"
+        - "bash -c 'exec 3<>/dev/tcp/localhost/8000 && printf \"GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && head -1 <&3 | grep -q \"200 OK\"'"
       interval: 10s
       timeout: 5s
       retries: 5

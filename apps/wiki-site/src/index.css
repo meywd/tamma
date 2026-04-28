@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin "@tailwindcss/typography";
 
 /* Typography is loaded via <link> in index.html (Space Grotesk + JetBrains Mono — matches marketing site). */
 
@@ -26,6 +27,13 @@ code, pre, kbd, samp {
 }
 
 /* Prose overrides for markdown content — aligned with Midnight Ocean tokens */
+/* Remove default backtick quotes around inline code (plugin adds `::before`/`::after`
+   with content '`'). They collide with our custom code pill styling. */
+.prose :where(code):not(:where([class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}
+
 .prose {
   --tw-prose-body: #d4d4d8;
   --tw-prose-headings: #f4f4f5;

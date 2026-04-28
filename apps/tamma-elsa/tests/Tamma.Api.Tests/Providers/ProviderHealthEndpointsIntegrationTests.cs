@@ -16,6 +16,7 @@ using NUnit.Framework;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Extensions;
 using Tamma.Api.Services.Providers;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Tamma.Data.Entities;
 
@@ -63,6 +64,7 @@ public class ProviderHealthEndpointsIntegrationTests
             .WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
+                builder.DisableAlertHostedServices();
                 builder.ConfigureTestServices(services =>
                 {
                     // Remove any previously registered clock/breaker/resolver so
@@ -212,9 +214,12 @@ public class ProviderHealthEndpointsIntegrationTests
         for (var i = 0; i < 3; i++)
             await PostFailureAsync("anthropic");
 
+        // Story 28-1 PR D — provider_health lives on the tenant DB.
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var row = await db.ProviderHealths
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(Guid.Parse(Tenant));
+        var row = await tdb.ProviderHealths
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(h => h.ProviderKey == "anthropic");
 
@@ -331,6 +336,120 @@ public class ProviderHealthEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    // ── Story 9-5 — recommendedProvider / allExhausted / entries[] ──────────
+
+    [Test]
+    public async Task ResolveChain_HealthyChain_ReturnsRecommendedProviderAndEntries()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [
+              {"provider": "anthropic", "model": "claude-sonnet-4"},
+              {"provider": "openai",    "model": "gpt-4o"}
+            ]
+          }
+        }
+        """);
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").GetString().Should().Be("anthropic");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeFalse();
+
+        // entries[] mirrors ordered[] and surfaces per-entry status.
+        var entries = body.RootElement.GetProperty("entries");
+        entries.GetArrayLength().Should().Be(2);
+        entries[0].GetProperty("recommended").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("budgetAllowed").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("healthy").GetBoolean().Should().BeTrue();
+        entries[0].GetProperty("circuitOpen").GetBoolean().Should().BeFalse();
+        entries[1].GetProperty("recommended").GetBoolean().Should().BeFalse();
+    }
+
+    [Test]
+    public async Task ResolveChain_AllOpen_ReturnsAllExhaustedTrue()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [
+              {"provider": "anthropic"},
+              {"provider": "openai"}
+            ]
+          }
+        }
+        """);
+        for (var i = 0; i < 3; i++) await PostFailureAsync("anthropic");
+        for (var i = 0; i < 3; i++) await PostFailureAsync("openai");
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").ValueKind
+            .Should().Be(JsonValueKind.Null);
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("error").GetString().Should().Be("NO_AVAILABLE_PROVIDER");
+
+        // skipped[] entries carry full status — circuitOpen=true and the
+        // open-until timestamp is preserved on the wire.
+        var skipped = body.RootElement.GetProperty("skipped");
+        skipped.GetArrayLength().Should().Be(2);
+        skipped[0].GetProperty("circuitOpen").GetBoolean().Should().BeTrue();
+        skipped[0].GetProperty("circuitOpenUntil").ValueKind
+            .Should().NotBe(JsonValueKind.Null);
+    }
+
+    [Test]
+    public async Task ResolveChain_EmptyConfig_ReturnsAllExhaustedTrue()
+    {
+        // No agent_config row at all — empty chain still surfaces the new
+        // shape so dashboards can render the "no providers" state without
+        // branching.
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("error").GetString().Should().Be("EMPTY_PROVIDER_CHAIN");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("recommendedProvider").ValueKind
+            .Should().Be(JsonValueKind.Null);
+    }
+
+    [Test]
+    public async Task ResolveChain_HalfOpenProbe_SurfacesAsRecommendedAtTail()
+    {
+        await SeedAgentConfigAsync("""
+        {
+          "chains": {
+            "default": [{"provider": "anthropic"}]
+          }
+        }
+        """);
+        // Trip the breaker, then advance past the cooldown so it flips to
+        // HalfOpen — only one provider configured so the probe is the
+        // recommended choice.
+        for (var i = 0; i < 3; i++) await PostFailureAsync("anthropic");
+        _clock.Advance(TimeSpan.FromSeconds(301));
+
+        var resp = await _client.PostAsJsonAsync("/api/providers/chain/resolve",
+            new { role = "developer", action = "code_generation" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("recommendedProvider").GetString().Should().Be("anthropic");
+        body.RootElement.GetProperty("allExhausted").GetBoolean().Should().BeFalse();
+        var entries = body.RootElement.GetProperty("entries");
+        entries[0].GetProperty("reason").GetString().Should().Be("HalfOpenProbeCandidate");
+        entries[0].GetProperty("recommended").GetBoolean().Should().BeTrue();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private static void RemoveAll<T>(IServiceCollection services) =>
@@ -353,6 +472,16 @@ public class ProviderHealthEndpointsIntegrationTests
     /// <see cref="IStartupFilter"/> that wraps the production pipeline to
     /// inject a tiny middleware branch handling
     /// <c>POST /api/providers/chain/resolve</c>.
+    ///
+    /// <para>
+    /// Story 28-1 PR A: every request that touches the provider-health API
+    /// has its <see cref="ITenantContext"/> pre-populated with the test's
+    /// <see cref="Tenant"/> constant. The chain endpoint reads agent config
+    /// through <see cref="IAgentConfigRepository"/>, whose <c>tenantId == null</c>
+    /// path now returns null (defaults moved to code per Decision #1). Pinning
+    /// a tenant here lets the integration tests continue to seed a chain
+    /// config in the tenant DB and observe ordered resolution.
+    /// </para>
     /// </summary>
     private sealed class ProviderHealthStartupFilter : IStartupFilter
     {
@@ -360,6 +489,19 @@ public class ProviderHealthEndpointsIntegrationTests
         {
             return app =>
             {
+                // Pin a deterministic tenant for the entire test request lifetime.
+                // Without this, ITenantContext.TenantId is null and the agent-config
+                // lookup would resolve to in-code defaults that carry no chain.
+                app.Use(async (ctx, contNext) =>
+                {
+                    var tenantCtx = ctx.RequestServices.GetRequiredService<ITenantContext>();
+                    if (tenantCtx.TenantId is null)
+                    {
+                        tenantCtx.SetTenantId(Guid.Parse(Tenant));
+                    }
+                    await contNext();
+                });
+
                 // Branch middleware for the new chain-resolve route — terminal.
                 app.Use(async (ctx, contNext) =>
                 {
@@ -389,21 +531,30 @@ public class ProviderHealthEndpointsIntegrationTests
 
                         var resolver = ctx.RequestServices.GetRequiredService<IProviderChainResolver>();
                         var tenantCtx = ctx.RequestServices.GetRequiredService<ITenantContext>();
+
+                        // Story 9-5 — opt-in accountId override on the body.
+                        Guid? accountId = null;
+                        if (!string.IsNullOrWhiteSpace(req.AccountId) &&
+                            Guid.TryParse(req.AccountId, out var parsed))
+                        {
+                            accountId = parsed;
+                        }
+                        var options = new ChainResolveOptions(AccountId: accountId);
                         var result = await resolver.ResolveAsync(
-                            tenantCtx.TenantId, req.Role, req.Action);
+                            tenantCtx.TenantId, req.Role, req.Action, options);
+
+                        var orderedDtos = result.Ordered.Select(MapEntry).ToList();
+                        var skippedDtos = result.Skipped.Select(MapEntry).ToList();
 
                         if (!result.HasCandidates)
                         {
                             await ctx.Response.WriteAsJsonAsync(new
                             {
                                 ordered = Array.Empty<object>(),
-                                skipped = result.Skipped.Select(e => new
-                                {
-                                    provider = e.Provider.Provider,
-                                    model = e.Provider.Model,
-                                    key = e.Provider.Key,
-                                    reason = e.Reason.ToString(),
-                                }),
+                                entries = orderedDtos,
+                                skipped = skippedDtos,
+                                recommendedProvider = (string?)null,
+                                allExhausted = true,
                                 error = result.ErrorCode,
                                 message = result.ErrorMessage,
                             });
@@ -412,20 +563,11 @@ public class ProviderHealthEndpointsIntegrationTests
 
                         await ctx.Response.WriteAsJsonAsync(new
                         {
-                            ordered = result.Ordered.Select(e => new
-                            {
-                                provider = e.Provider.Provider,
-                                model = e.Provider.Model,
-                                key = e.Provider.Key,
-                                reason = e.Reason.ToString(),
-                            }),
-                            skipped = result.Skipped.Select(e => new
-                            {
-                                provider = e.Provider.Provider,
-                                model = e.Provider.Model,
-                                key = e.Provider.Key,
-                                reason = e.Reason.ToString(),
-                            }),
+                            ordered = orderedDtos,
+                            entries = orderedDtos,
+                            skipped = skippedDtos,
+                            recommendedProvider = result.RecommendedProvider,
+                            allExhausted = result.AllExhausted,
                         });
                         return;
                     }
@@ -436,20 +578,70 @@ public class ProviderHealthEndpointsIntegrationTests
                 next(app);
             };
         }
+
+        /// <summary>
+        /// Project a <see cref="ChainEntry"/> into the wire DTO that mirrors
+        /// the production <c>ProviderEndpoints.MapEntryToDto</c> shape (Story
+        /// 9-5: <c>healthy</c> / <c>circuitOpen</c> / <c>circuitOpenUntil</c> /
+        /// <c>budgetAllowed</c> / <c>budgetSpent</c> / <c>recommended</c>).
+        /// </summary>
+        private static object MapEntry(ChainEntry e) => new
+        {
+            provider = e.Provider.Provider,
+            model = e.Provider.Model,
+            key = e.Provider.Key,
+            reason = e.Reason.ToString(),
+            healthy = e.Healthy,
+            circuitOpen = e.CircuitOpen,
+            circuitOpenUntil = e.CircuitOpenUntil,
+            budgetAllowed = e.BudgetAllowed,
+            budgetSpent = e.BudgetSpent,
+            recommended = e.Recommended,
+        };
     }
 
     private async Task SeedAgentConfigAsync(string configJson)
     {
+        // Story 28-1 PR A: agent-config "platform default" rows no longer
+        // exist on CP — defaults moved to code (DefaultAgentConfig.ForRole).
+        // Tests need a real tenant id; we use the class-level <see cref="Tenant"/>
+        // constant which the startup filter pins onto every request.
+        //
+        // Phase-1 hardening (finding 031) added an FK on agent_configs.TenantId
+        // → tenants.Id, so the tenant row must exist before the override insert.
+        var tid = Guid.Parse(Tenant);
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+
+        // Seed the tenant row (idempotent — keep it on CP).
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var existingTenant = await cp.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tid);
+        if (existingTenant is null)
+        {
+            cp.Tenants.Add(new Tamma.Data.Entities.Tenant
+            {
+                Id = tid,
+                Name = $"Test {tid:N}",
+                Slug = $"t-{tid:N}",
+                Plan = "free"
+            });
+            await cp.SaveChangesAsync();
+        }
+
+        // Upsert the agent-config row in the tenant DB (shared physical
+        // database during the transition window — the factory still hands
+        // back a tenant-scoped DbContext bound to the same connection).
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        await using var db = await factory.CreateAsync(tid);
         var existing = await db.AgentConfigs.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(c => c.TenantId == null);
+            .FirstOrDefaultAsync(c => c.TenantId == tid);
         if (existing is null)
         {
             db.AgentConfigs.Add(new AgentConfig
             {
                 Id = Guid.NewGuid(),
-                TenantId = null,
+                TenantId = tid,
                 Config = configJson,
                 Version = 1,
                 CreatedAt = DateTime.UtcNow,

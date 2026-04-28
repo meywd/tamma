@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Provisioning.Cranl;
+using Tamma.Api.Services.Secrets.Stopgap;
 using Tamma.Data;
 using Tamma.Data.Entities;
 
@@ -28,26 +29,29 @@ public sealed class CranlProvisioningWorkflow
     public static readonly TimeSpan ApplicationPollTimeout = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
-    private readonly TammaDbContext _db;
+    private readonly ControlPlaneDbContext _db;
     private readonly ICranlApiClient _cranl;
     private readonly CranlOptions _options;
     private readonly TenantSecretProtector _protector;
     private readonly IConfiguration _configuration;
+    private readonly IRuntimeSecretResolver? _secretResolver;
     private readonly ILogger<CranlProvisioningWorkflow> _logger;
 
     public CranlProvisioningWorkflow(
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ICranlApiClient cranl,
         CranlOptions options,
         TenantSecretProtector protector,
         IConfiguration configuration,
-        ILogger<CranlProvisioningWorkflow> logger)
+        ILogger<CranlProvisioningWorkflow> logger,
+        IRuntimeSecretResolver? secretResolver = null)
     {
         _db = db;
         _cranl = cranl;
         _options = options;
         _protector = protector;
         _configuration = configuration;
+        _secretResolver = secretResolver;
         _logger = logger;
     }
 
@@ -144,7 +148,10 @@ public sealed class CranlProvisioningWorkflow
             }
 
             // Step 5: push environment
-            var envText = BuildEnvironmentText(tenantId, _protector.Decrypt(tenant.CranlDatabaseUrlEncrypted!));
+            var envText = await BuildEnvironmentTextAsync(
+                tenantId,
+                _protector.Decrypt(tenant.CranlDatabaseUrlEncrypted!),
+                ct);
             await _cranl.PutEnvironmentAsync(tenant.CranlAppId!, envText, ct);
             await TransitionAsync(tenant,
                 ProvisioningState.AppProvisioning,
@@ -323,12 +330,42 @@ public sealed class CranlProvisioningWorkflow
         return false;
     }
 
-    private string BuildEnvironmentText(Guid tenantId, string databaseUrl)
+    private async Task<string> BuildEnvironmentTextAsync(
+        Guid tenantId, string databaseUrl, CancellationToken ct)
     {
         var controlPlaneUrl = _configuration["Tamma:ControlPlaneUrl"] ?? "https://api.tamma.dev";
-        var sharedSecret = _configuration["Tamma:TenantSharedSecret"]
-            ?? _configuration["Cranl:TenantSharedSecret"]
-            ?? string.Empty;
+
+        // Story 29-10: prefer the cabinet-backed resolver when the
+        // secret has been migrated; fall through to the legacy config
+        // path during the coexistence window. The resolver itself
+        // owns the deprecation warning.
+        string? sharedSecret = null;
+        if (_secretResolver is not null)
+        {
+            try
+            {
+                sharedSecret = await _secretResolver.GetAsync(
+                    StopgapSecretMap.PlatformTenantSharedSecret, ct);
+            }
+            catch (MissingSecretException)
+            {
+                // Fail-fast mode + cabinet not populated yet — surface
+                // a deployment error by leaving sharedSecret null so
+                // the operator sees the missing env line in the Cranl
+                // app log rather than a cryptic HMAC-mismatch later.
+                _logger.LogError(
+                    "TAMMA_SHARED_SECRET missing from cabinet; run " +
+                    "`migrate-secrets` (Story 29-9) or disable " +
+                    "TAMMA_STOPGAP_FAIL_FAST for the grace window.");
+            }
+        }
+        if (string.IsNullOrEmpty(sharedSecret))
+        {
+            sharedSecret = _configuration["Tamma:TenantSharedSecret"]
+                ?? _configuration["Cranl:TenantSharedSecret"]
+                ?? string.Empty;
+        }
+
         var lines = new List<string>
         {
             $"DATABASE_URL={databaseUrl}",

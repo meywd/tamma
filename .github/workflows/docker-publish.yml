@@ -532,7 +532,13 @@ jobs:
               fi
             "
 
-      - name: "Verify layer 1: postgres + rabbitmq healthy"
+      # Layer-1 health check is detect-only — never auto-destroys data.
+      # If postgres/chromadb fail to become healthy (e.g. major-version
+      # data-dir incompatibility after an image bump), this step fails
+      # the deploy with a precise diagnosis and tells you to run the
+      # `volume-reset.yml` workflow (which backs up first + requires
+      # reviewer approval before wiping).
+      - name: "Verify layer 1: postgres + rabbitmq + chromadb healthy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -548,9 +554,28 @@ jobs:
                   echo 'Layer 1 healthy' && exit 0
                 fi && \
                 sleep 2
-              done && \
-              echo '::error::Layer 1 (postgres/rabbitmq/chromadb) failed to become healthy' && \
-              \$COMPOSE logs --tail=30 postgres rabbitmq && \
+              done
+
+              echo '::error::Layer 1 (postgres / rabbitmq / chromadb) failed to become healthy' && \
+              echo '' && \
+              echo 'Diagnosis (last 30 log lines per service):' && \
+              \$COMPOSE logs --tail=30 postgres rabbitmq chromadb && \
+              echo '' && \
+              if \$COMPOSE logs --tail=50 postgres 2>&1 | grep -q 'database files are incompatible with server'; then
+                echo '::error::Postgres data-dir is incompatible with the new server image (major-version bump).' && \
+                echo 'To recover: run the volume-reset workflow with target=postgres.' && \
+                echo 'GitHub UI: Actions → \"Volume Reset (DESTRUCTIVE)\" → Run workflow → target=postgres' && \
+                echo 'That workflow backs up the data dir to an artifact first, then waits for reviewer approval before wiping.'
+              fi && \
+              CHROMA_FINAL=\$(\$COMPOSE ps chromadb --format '{{.Health}}' 2>/dev/null) && \
+              if [ \"\$CHROMA_FINAL\" != 'healthy' ]; then
+                echo '::error::ChromaDB is not healthy. Possible causes (most → least common):' && \
+                echo '  1. Major-version data-dir incompatibility (e.g. 0.6.x → 1.x server)' && \
+                echo '  2. Healthcheck script is broken (e.g. curl missing in image)' && \
+                echo '  3. Resource pressure / disk full / network issue' && \
+                echo 'Inspect the chromadb logs above to disambiguate.' && \
+                echo 'To recover from data-dir issue: run volume-reset workflow with target=chromadb.'
+              fi && \
               exit 1
             "
 

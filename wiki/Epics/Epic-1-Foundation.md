@@ -1,232 +1,211 @@
 # Epic 1: Foundation & Core Infrastructure
 
-**Status:** Near Complete (10/15 done; 1-10 in progress with OpenCode/OpenRouter/Zen MCP done; remaining providers planned)
+**Status:** Near Complete (12/15 done; 1-10, 1-13, 1-14 in-flight)
 **Stories:** 15 (1-0 through 1-14)
 **Milestone:** [Epic 1 Milestone](https://github.com/meywd/tamma/milestone/1)
+**Tech Spec:** [tech-spec-epic-1.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-1/tech-spec-epic-1.md)
 
 ## Overview
 
-Epic 1 establishes the foundational abstractions that enable Tamma's multi-provider, multi-platform architecture. By decoupling AI providers and Git platforms through interface-based design, Tamma can support multiple providers without vendor lock-in.
-
-## Goals
-
-1. Define abstract interfaces for AI providers and Git platforms
-2. Implement reference implementations (Claude Code for AI, GitHub for Git)
-3. Add support for multiple AI providers (OpenCode, OpenRouter, Zen MCP)
-4. Create hybrid orchestrator/worker architecture
-5. Build basic CLI with mode selection
-6. Deploy initial marketing website
-
-## Implementation Summary
-
-### Packages Created
-
-| Package | Purpose | Source Files | Test Files |
-|---------|---------|-------------|-----------|
-| `@tamma/providers` | AI provider abstraction layer | 21 | 20 |
-| `@tamma/platforms` | Git platform abstraction layer | 14 | 7 |
-| `@tamma/cli` | Command-line interface | 17 | 13 |
-| `@tamma/orchestrator` | Orchestrator mode service | 7 | 4 |
-| `@tamma/shared` | Shared utilities and types | 43 | 21 |
-| `@tamma/observability` | Logging (Pino) | 3 | 1 |
-
-### Key Interfaces
-
-- `IAIProvider` -- Standard LLM operations (synchronous and streaming messages)
-- `IAgentProvider` -- Task-based agent operations (tool-calling CLI agents)
-- `ICLIAgentProvider` -- Providers managing their own subprocess execution
-- `IGitPlatform` -- Git platform operations (PRs, issues, branches, CI)
-
-### AI Providers Implemented
-
-| Provider | Class | Type | Package |
-|----------|-------|------|---------|
-| Claude Code | `ClaudeAgentProvider` | CLI agent | `@tamma/providers` |
-| OpenCode | `OpenCodeProvider` | CLI agent | `@tamma/providers` |
-| OpenRouter | `OpenRouterProvider` | LLM API | `@tamma/providers` |
-| Zen MCP | `ZenMCPProvider` | LLM API | `@tamma/providers` |
-
-### Git Platforms Implemented
-
-| Platform | Class | Status | Package |
-|----------|-------|--------|---------|
-| GitHub | `GitHubPlatform` | Implemented (reference) | `@tamma/platforms` |
-| GitLab | -- | Story ready, not yet implemented | -- |
-| Gitea/Forgejo/Bitbucket/Azure DevOps | -- | Stories ready | -- |
-
-## Stories
-
-### Story 1-0: AI Provider Strategy Research
-**Status:** Done | **Tasks:** 6
-
-Research AI provider options across cost models, capabilities, and workflow fit.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-0)
-
----
-
-### Story 1-1: AI Provider Interface Definition
-**Status:** Done | **Tasks:** 5
-
-Define abstract interface contracts for AI provider operations.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-1)
-
----
-
-### Story 1-2: Claude Code Provider Implementation
-**Status:** Done | **Tasks:** 6
-
-Implement Anthropic Claude as the first AI provider (reference implementation).
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-2)
-
----
-
-### Story 1-3: Provider Configuration Management
-**Status:** Done | **Tasks:** 7
-
-Centralized configuration for AI provider settings.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-3)
-
----
-
-### Story 1-4: Git Platform Interface Definition
-**Status:** Done | **Tasks:** 6
-
-Define abstract interface contracts for Git platform operations.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-4)
-
----
-
-### Story 1-5: GitHub Platform Implementation
-**Status:** Done | **Tasks:** 8
-
-Implement GitHub as the first Git platform (reference implementation).
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-5)
-
----
-
-### Story 1-6: GitLab Platform Implementation
-**Status:** Story ready | **Tasks:** 6
-
-Implement GitLab as second Git platform. Story documentation complete, code not yet implemented.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-6)
-
----
-
-### Story 1-7: Git Platform Configuration Management
-**Status:** Done | **Tasks:** 5
-
-Centralized configuration for Git platform settings.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-7)
-
----
-
-### Story 1-8: Hybrid Orchestrator/Worker Architecture Design
-**Status:** Done | **Tasks:** 7
-
-Document architecture for orchestrator mode and worker mode.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-8)
-
----
-
-### Story 1-9: Basic CLI Scaffolding with Mode Selection
-**Status:** Done | **Tasks:** 5
-
-Build basic CLI entry point supporting multiple modes.
-
-CLI modes implemented:
-- `tamma start` -- Self-hosted engine (CLI mode)
-- `tamma server` -- Self-hosted HTTP server
-- `tamma api` -- SaaS/GitHub App mode
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-9)
-
----
-
-### Story 1-10: Additional AI Provider Implementations
-**Status:** In Progress | **Tasks:** 10
-
-OpenCode, OpenRouter, and Zen MCP providers implemented and tested (108 tests passing across all three). OpenAI, Copilot, Gemini, z.ai, and local LLMs still planned. See `packages/providers/src/` for source.
-
-Key lessons (from project memory):
-- `vi.mock()` factory must be self-contained (hoisted) — put mock classes inside factory, use async helper to retrieve them
-- Two provider hierarchies: `IAIProvider` (LLM APIs) and `IAgentProvider` / `ICLIAgentProvider` (CLI agents). Tests cover both surfaces independently.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-10)
-
----
-
-### Story 1-11: Additional Git Platform Implementations
-**Status:** Story ready | **Tasks:** 7
-
-Stories for Gitea, Forgejo, Bitbucket, Azure DevOps, and Plain Git are documented. Only GitHub is implemented in code.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-11)
-
----
-
-### Story 1-12: Initial Marketing Website
-**Status:** Done | **Tasks:** 8
-
-Marketing website deployed at tamma.dev on Cloudflare Workers.
-
-Location: `apps/marketing-site/`
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-12)
-
----
-
-### Story 1-13: Agent Customization System
-**Status:** In Progress | **Tasks:** 8
-
-AgentPromptRegistry, RoleBasedAgentResolver, and agent configs exist. A/B testing, benchmarks, and learning not yet done.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-13)
-
----
-
-### Story 1-14: Performance Impact Analysis
-**Status:** Ready for Dev | **Tasks:** 8
-
-Performance impact analysis for agent customizations. Context XML exists, no implementation yet.
-
-- [Story Document](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1/story-1-14)
-
----
-
-## Technical Notes
-
-### TypeScript Strict Mode Gotchas
-
-Lessons learned from implementation:
-- `exactOptionalPropertyTypes: true` -- cannot assign `undefined` to optional props; use conditional assignment: `if (val !== undefined) obj.prop = val;`
-- `noUncheckedIndexedAccess: true` -- indexed access returns `T | undefined`
-- Cast through `unknown` first when type narrowing fails: `(m as unknown as Record<string, unknown>)['context_length']`
-
-### Testing Pattern
-
-- `vi.mock()` factory must be self-contained (hoisted) -- put mock classes inside factory, use async helper to retrieve them
-- All tests use Vitest 3.x with colocated `*.test.ts` files
-
----
+Epic 1 lays the two foundational abstractions that keep Tamma vendor-neutral: an **AI provider interface** that every model or coding-agent integration implements, and a **Git platform interface** that every forge integration implements. Anything higher up the stack — the autonomous loop, quality gates, event sourcing, observability — is written against the interfaces, never a concrete provider.
+
+The epic also delivers the reference implementations the rest of the system boots on: Claude Code as the primary CLI-agent provider, GitHub as the primary Git platform, and the first version of the CLI binary (`tamma start / server / api`) that bundles engine, worker, and service modes. Together these give Tamma a working "one happy path" end-to-end before additional providers and platforms are added.
+
+A third track in Epic 1 adds extensibility: additional AI provider adapters (OpenCode, OpenRouter, Zen MCP delivered; OpenAI / Copilot / Gemini / z.ai / local LLMs still planned), additional Git platforms as ready-but-unimplemented stories (Gitea, Forgejo, Bitbucket, Azure DevOps, plain Git), and an agent-customization layer (`AgentPromptRegistry`, `RoleBasedAgentResolver`) that lets users override per-role prompts without forking the provider.
+
+## Architecture
+
+Two parallel adapter hierarchies sit under a small set of interfaces. `IProvider` is the common base; it branches into `ILLMProvider` (chat/complete/analyze/review against a cloud or local LLM API) and `ICLIAgentProvider` (execute a headless coding agent subprocess with session resume). A legacy `IAgentProvider` alias still maps onto `ICLIAgentProvider` for back-compat. On the Git side, `IGitPlatform` is the only seam — one interface covers repos, branches, PRs, issues, comments, commits, and CI status, with platform-specific rate-limiting and error mapping wrapped behind factory classes.
+
+The CLI (`@tamma/cli`) wires the provider and platform factories into three runtime modes: engine (`tamma start` — polls GitHub for labelled issues), server (`tamma server` — HTTP API for a self-hosted deployment), and API (`tamma api` — SaaS/GitHub-App mode that dispatches `workflow_dispatch` events). The orchestrator package (`@tamma/orchestrator`) contains `TammaEngine`, which threads the interfaces together: it takes an `IGitPlatform` plus an `IAgentProvider` and runs one issue end-to-end.
+
+## Components
+
+| Component | Purpose | Key files | Status |
+|-----------|---------|-----------|--------|
+| `@tamma/providers` — Interfaces | `IProvider`, `ILLMProvider`, `ICLIAgentProvider`, `IAgentProvider`, `ProviderCapabilities`, `MessageRequest/Response/Chunk` | `packages/providers/src/types.ts`, `agent-types.ts` | Done |
+| `@tamma/providers` — Registry | Register/lookup provider by name; capability discovery | `packages/providers/src/registry.ts`, `factory.ts` | Done |
+| `ClaudeAgentProvider` | Reference CLI-agent implementation over `@anthropic-ai/claude-agent-sdk` | `packages/providers/src/claude-agent-provider.ts` | Done |
+| `OpenCodeProvider` | Local/cloud CLI-agent via OpenCode | `packages/providers/src/opencode-provider.ts` | Done |
+| `OpenRouterProvider` | Multi-model LLM API gateway | `packages/providers/src/openrouter-provider.ts` | Done |
+| `ZenMCPProvider` | LLM API via Zen MCP | `packages/providers/src/zen-mcp-provider.ts` | Done |
+| `SecureAgentProvider` | Generic decorator that adds input/output sanitization + redaction to any `IAgentProvider` | `packages/providers/src/secure-agent-provider.ts` | Done |
+| `AgentPromptRegistry` + `RoleBasedAgentResolver` | Role→agent mapping with per-role prompt overrides | `packages/providers/src/agent-prompt-registry.ts`, `role-based-agent-resolver.ts` | In progress (1-13) |
+| `@tamma/platforms` — `IGitPlatform` | Single interface for repo / branch / PR / issue / comment / commit / CI | `packages/platforms/src/types/git-platform.interface.ts` | Done |
+| `GitHubPlatform` | Octokit-based reference implementation with rate limiter and error mapper | `packages/platforms/src/github/*` | Done |
+| GitLab / Gitea / Forgejo / Bitbucket / Azure DevOps | Story briefs + context XML; code not yet landed | `docs/stories/epic-1/story-1-6`, `story-1-11` | Drafted |
+| `@tamma/cli` | Three-mode CLI (`start`/`server`/`api`) with init, status, execute-agent commands | `packages/cli/src/commands/*`, `index.tsx` | Done |
+| `@tamma/orchestrator` — `TammaEngine` | Single-issue pipeline: select → analyze → plan → approve → implement → PR → monitor → merge | `packages/orchestrator/src/engine.ts` | Done |
+| `@tamma/observability` | Pino logger with OpenSearch transport option | `packages/observability/src/logger.ts` | Done |
+| Marketing site | Landing pages on Cloudflare Workers (tamma.dev) | `apps/marketing-site/` | Done |
+
+## Class diagram
+
+```
+                    IProvider  <<interface>>
+                    + name : string
+                    + isAvailable() : Promise<boolean>
+                    + dispose() : Promise<void>
+                         ^                ^
+                         |                |
+           +-------------+                +----------------+
+           |                                               |
+  ILLMProvider <<interface>>              ICLIAgentProvider <<interface>>
+  + type = 'llm-api'                      + type = 'cli-agent'
+  + capabilities : LLMCapabilities        + capabilities : CLIAgentCapabilities
+  + chat(req) : AsyncIterable             + execute(cfg,cb) : Promise<AgentTaskResult>
+  + complete(req) : Promise               + resumeSession(id,p,cb)
+  + analyze(req) : Promise
+  + review(req)  : Promise
+  + listModels() : Promise<ModelInfo[]>
+           ^                                               ^
+           |                                               |
+           |                                +--------------+--------------+
+           |                                |                             |
+  OpenRouterProvider                ClaudeAgentProvider          OpenCodeProvider
+  + sendMessage(req) : Iterable     + execute(cfg)               + execute(cfg)
+  + sendMessageSync(req) : Promise  - session : AgentSession     - runtime : Subprocess
+
+  ZenMCPProvider  (ILLMProvider)
+
+  SecureAgentProvider  (implements IAgentProvider, wraps IAgentProvider)
+  - inner : IAgentProvider
+  - sanitizer : IContentSanitizer
+  + executeTask(cfg,cb) : Promise<AgentTaskResult>
+
+                    IGitPlatform  <<interface>>
+                    + platformName : string
+                    + getRepository(owner,repo)
+                    + createBranch / getBranch / deleteBranch
+                    + createPR / getPR / updatePR / mergePR / addPRComment
+                    + listIssues / getIssue / updateIssue / addIssueComment / assignIssue
+                    + listCommits / getCIStatus
+                         ^
+                         |
+                  GitHubPlatform
+                  - octokit : Octokit
+                  - rateLimiter : GitHubRateLimiter
+                  - mappers : GitHubMappers
+                  + initialize(cfg) ; dispose()
+
+                  TammaEngine  (orchestrator)
+                  - platform : IGitPlatform
+                  - agent    : IAgentProvider
+                  - eventStore? : IEventStore
+                  + initialize() / run() / processOneIssue() / dispose()
+```
+
+See source — `packages/providers/src/types.ts` for the full interface bodies, `packages/platforms/src/types/git-platform.interface.ts` for the Git contract, and `packages/orchestrator/src/engine.ts` for how they compose.
+
+## Data flow — "process one issue" happy path
+
+```
+User CLI        TammaEngine        IGitPlatform (GitHub)     IAgentProvider (Claude)
+   |                |                      |                         |
+   | tamma start    |                      |                         |
+   |--------------->|                      |                         |
+   |                | initialize()         |                         |
+   |                |--------------------->| verify auth             |
+   |                |                      |                         |
+   |                | run() loop           |                         |
+   |                |--> selectIssue()     |                         |
+   |                |    listIssues(label) |                         |
+   |                |--------------------->| returns IssueData       |
+   |                |<---------------------|                         |
+   |                |                      |                         |
+   |                |--> analyzeIssue() ───┼────── execute(prompt) ──>|
+   |                |                      |                         | Claude reads repo,
+   |                |                      |                         | emits plan JSON
+   |                |<─────────────────────┼─────── AgentTaskResult ─|
+   |                |                      |                         |
+   | prompt approve |                      |                         |
+   |<───────────────|  awaitApproval()     |                         |
+   |   (y/n)        |                      |                         |
+   |───────────────>|                      |                         |
+   |                |                      |                         |
+   |                | createBranch(fromRef)|                         |
+   |                |--------------------->| -> Branch               |
+   |                |<---------------------|                         |
+   |                |                      |                         |
+   |                |--> implementCode() ──┼──── execute(plan) ─────>|
+   |                |                      |                         | Claude writes
+   |                |                      |                         | files + commits
+   |                |<─────────────────────┼──── AgentTaskResult ────|
+   |                |                      |                         |
+   |                | createPR(options)    |                         |
+   |                |--------------------->| -> PullRequest          |
+   |                |                      |                         |
+   |                | monitorAndMerge()    |                         |
+   |                |--> poll getCIStatus()|                         |
+   |                |     until success    |                         |
+   |                |--> mergePR()         |                         |
+   |                |--------------------->| -> MergeResult          |
+   |                |                      |                         |
+   | "merged #123"  |                      |                         |
+   |<───────────────|                      |                         |
+```
+
+Every step between `TammaEngine` and the external world goes through an interface — a different `IGitPlatform` or `IAgentProvider` plugs in without touching engine code.
+
+## Use cases
+
+- **Solo developer** wants **Tamma to close labelled issues on their GitHub repo**: `tamma init` configures `github.token` + `provider.anthropic.apiKey` → `tamma start` polls for `tamma-auto`-labelled issues → engine plans / approves / implements / PRs / merges → loop continues.
+- **SaaS tenant** wants **Tamma to run as a GitHub App across their org**: admin installs GitHub App → `SaaSCoordinator` (Epic 1.5) discovers the installation → `tamma api` mode dispatches `workflow_dispatch` to tenant repos → worker calls back through `IAgentProvider` + `IGitPlatform`.
+- **Framework builder** wants **a new AI provider (e.g. local Ollama) to plug in**: implement `ILLMProvider` or `ICLIAgentProvider` → register via `ProviderRegistry.register('ollama', provider)` → set `provider.selected = 'ollama'` in config → no engine changes.
+- **Security-conscious operator** wants **every agent call redacted and sanitized**: wrap the concrete agent in `SecureAgentProvider(inner, sanitizer)` at DI time → every `executeTask` input/output flows through the sanitizer → no per-provider code changes.
+- **Platform migration** wants **to try GitLab instead of GitHub**: when `GitLabPlatform` (Story 1-6) lands, set `platform.selected = 'gitlab'` in config → engine uses the same pipeline with a different `IGitPlatform` implementation.
 
 ## Dependencies
 
-**Prerequisite Epics:** None (foundational epic)
+**Upstream:** None — this is the root foundation epic.
 
-**Dependent Epics:**
-- Epic 1.5 (Deployment) depends on Epic 1
-- Epic 2 (Autonomous Loop) depends on Epic 1
-- Epic 9 (Multi-Agent) depends on Epic 1
+**Downstream:**
+- [Epic 1.5](Epic-1.5-Infrastructure.md) builds CLI/service modes, Docker, K8s on top of `@tamma/cli` and `@tamma/orchestrator`.
+- [Epic 2](Epic-2-Autonomous-Loop.md) turns the engine skeleton into the full 14-step loop.
+- [Epic 3](Epic-3-Quality-Gates.md) adds build/test/security gates around the loop.
+- [Epic 4](Epic-4-Event-Sourcing.md) wires `IEventStore` into the engine.
+- [Epic 5](Epic-5-Observability.md) adds structured logging + metrics + dashboard on top of `@tamma/observability`.
+- [Epic 6](Epic-6-Context-Knowledge.md) adds context/RAG/MCP layer consumed by providers.
+- [Epic 9](Epic-9-Agent-Management.md) extends `AgentPromptRegistry` / `RoleBasedAgentResolver` into full multi-agent orchestration.
+- [Epic 31](Epic-31-Multi-Git-Platform.md) completes the Git-platform implementations for GitLab / Gitea / Forgejo / Bitbucket / Azure DevOps.
 
----
+## Current state
 
-_For detailed technical specifications, see [Tech Spec Epic 1](https://github.com/meywd/tamma/blob/main/docs/stories/epic-1/tech-spec-epic-1.md)._
+**Landed** (in `main`):
+
+- Interfaces `IProvider`, `ILLMProvider`, `ICLIAgentProvider`, `IAgentProvider`, `IGitPlatform` — all with unit-test coverage.
+- `ClaudeAgentProvider`, `OpenCodeProvider`, `OpenRouterProvider`, `ZenMCPProvider` — 108+ tests passing (per `MEMORY.md`).
+- `SecureAgentProvider` decorator — per the content-sanitization plan, wraps any `IAgentProvider` generically.
+- `GitHubPlatform` with rate limiter and error mapper — used in production by the deployed engine.
+- CLI with `start`, `server`, `api`, `init`, `status`, `execute-agent`, `process-issue`, `upgrade` commands.
+- `TammaEngine` orchestrator with state machine (`EngineState` enum) and injectable `IEventStore`.
+- `AgentPromptRegistry` + `RoleBasedAgentResolver` (Story 1-13 in progress — benchmarks and A/B testing still TODO).
+- Marketing site at tamma.dev on Cloudflare Workers (Story 1-12).
+
+**Stubbed / drafted only:**
+
+- `GitLabPlatform`, `GiteaPlatform`, `ForgejoPlatform`, `BitbucketPlatform`, `AzureDevOpsPlatform`, `PlainGitPlatform` — story briefs + context XML exist under `docs/stories/epic-1/story-1-6/` and `story-1-11/`; no TS code.
+- OpenAI, GitHub Copilot, Gemini, z.ai, local-LLM providers — Story 1-10 is in progress; briefs exist under `docs/stories/epic-1/story-1-10/`.
+- Performance impact analysis (Story 1-14) — context XML only, ready for dev.
+
+**Drift from briefs:**
+
+- The original Story 1-2 brief named the class `AnthropicClaudeProvider`; the actual implementation is named `ClaudeAgentProvider` and is a CLI-agent (`ICLIAgentProvider`) rather than a plain LLM API (`ILLMProvider`). This is intentional — Claude Code is always run as a subprocess agent, not a chat completion — but the wiki page now reflects the real class name.
+- The wiki previously listed "Claude Code" as `AnthropicClaudeProvider`; corrected to `ClaudeAgentProvider`.
+- Epic 4 mentions an Emmett/PostgreSQL event store "implemented in Epic 10"; in the current TypeScript tree `@tamma/events` is still a stub (`packages/events/src/index.ts` exports only a placeholder) and `IEventStore` lives in `@tamma/shared/event-store.ts` as `InMemoryEventStore`. The production event store is in the .NET Elsa tree (`apps/tamma-elsa/src/Tamma.Data/`).
+
+## See also
+
+- **Docs:** [docs/stories/epic-1/](https://github.com/meywd/tamma/tree/main/docs/stories/epic-1) — all 15 story briefs and context XML.
+- **Tech spec:** [tech-spec-epic-1.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-1/tech-spec-epic-1.md).
+- **Related wiki pages:**
+  - [Architecture](Architecture) — overall system architecture.
+  - [GitHub Integration](GitHub-Integration) — GitHub-specific operations.
+  - [Multi-Git-Platform](Multi-Git-Platform) — progress on non-GitHub platforms (Epic 31).
+  - [Epic 1.5: Infrastructure](Epic-1.5-Infrastructure.md) — how the CLI gets packaged and deployed.
+  - [Epic 2: Autonomous Loop](Epic-2-Autonomous-Loop.md) — how the engine skeleton becomes the 14-step loop.
+- **Code paths:**
+  - `packages/providers/src/` — AI provider adapters.
+  - `packages/platforms/src/` — Git platform adapters.
+  - `packages/orchestrator/src/engine.ts` — `TammaEngine` reference composition.
+  - `packages/cli/src/` — CLI entry points.

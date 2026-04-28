@@ -11,6 +11,8 @@ import { Navigate } from 'react-router-dom';
 import { useCurrentUser } from '../hooks/admin/useCurrentUser.js';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.js';
 
+import type { JSX } from "react";
+
 interface AdminGuardProps {
   children: React.ReactNode;
 }

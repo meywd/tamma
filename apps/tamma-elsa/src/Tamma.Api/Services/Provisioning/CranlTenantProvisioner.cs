@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Provisioning.Cranl;
-using Tamma.Api.Services.TaskQueue;
 using Tamma.Data;
 using Tamma.Data.Entities;
+using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Provisioning;
 
@@ -44,17 +44,28 @@ public sealed class CranlTenantProvisioner : ITenantProvisioner
     public const string ProvisioningTaskType = "provisioning.tenant";
     public const string DeprovisioningTaskType = "provisioning.tenant.deprovision";
 
-    private readonly TammaDbContext _db;
-    private readonly ITaskQueue _taskQueue;
+    private readonly ControlPlaneDbContext _db;
+    private readonly IPlatformQueuedTaskRepository _platformTasks;
     private readonly ILogger<CranlTenantProvisioner> _logger;
 
+    /// <summary>
+    /// Story 28-1 PR B — provisioning + deprovisioning tasks live on
+    /// the <em>platform</em> queue, not the per-tenant queue. Reason:
+    /// at provisioning time the tenant DB doesn't exist yet (the task's
+    /// whole job is to create it!); at deprovisioning time the tenant
+    /// DB is about to be torn down. Either way the per-tenant queue is
+    /// not a viable home for the work item, so the task lives in
+    /// <c>platform_queued_tasks</c> and the
+    /// <see cref="Tamma.Api.Services.PlatformTasks.PlatformTaskWorker"/>
+    /// drains it.
+    /// </summary>
     public CranlTenantProvisioner(
-        TammaDbContext db,
-        ITaskQueue taskQueue,
+        ControlPlaneDbContext db,
+        IPlatformQueuedTaskRepository platformTasks,
         ILogger<CranlTenantProvisioner> logger)
     {
         _db = db;
-        _taskQueue = taskQueue;
+        _platformTasks = platformTasks;
         _logger = logger;
     }
 
@@ -92,11 +103,12 @@ public sealed class CranlTenantProvisioner : ITenantProvisioner
             Region = options.Region,
             CustomName = options.CustomName
         });
-        await _taskQueue.EnqueueAsync(
-            type: ProvisioningTaskType,
-            payloadJson: payload,
-            tenantIdOverride: tenantId,
-            ct: ct);
+        await _platformTasks.EnqueueAsync(new PlatformQueuedTask
+        {
+            Type = ProvisioningTaskType,
+            TenantId = tenantId,
+            Payload = payload,
+        }, ct);
 
         _logger.LogInformation(
             "Enqueued Cranl provisioning task for tenant {TenantId} (region={Region})",
@@ -133,11 +145,12 @@ public sealed class CranlTenantProvisioner : ITenantProvisioner
             Region = tenant.CranlRegion ?? string.Empty,
             CustomName = null
         });
-        await _taskQueue.EnqueueAsync(
-            type: DeprovisioningTaskType,
-            payloadJson: payload,
-            tenantIdOverride: tenantId,
-            ct: ct);
+        await _platformTasks.EnqueueAsync(new PlatformQueuedTask
+        {
+            Type = DeprovisioningTaskType,
+            TenantId = tenantId,
+            Payload = payload,
+        }, ct);
 
         _logger.LogInformation("Enqueued Cranl deprovisioning task for tenant {TenantId}", tenantId);
     }

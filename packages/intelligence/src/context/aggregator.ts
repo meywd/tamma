@@ -99,7 +99,7 @@ export class ContextAggregator implements IContextAggregator {
     const budgetAllocation = this.budgetManager.allocateBudget(availableSources, priorities, effectiveBudget);
 
     // 4. Parallel retrieval from all sources
-    const retrievalPromises = availableSources.map(source => {
+    const retrievalPromises = availableSources.map(async source => {
       const sourceConfig = this.config.sources[source];
       const timeoutValue = request.options?.timeout ?? sourceConfig?.timeoutMs;
       const sourceQuery: SourceQuery = {
@@ -223,7 +223,7 @@ export class ContextAggregator implements IContextAggregator {
 
     return {
       healthy: allHealthy,
-      sources: sourceStatus as Record<ContextSourceType, { healthy: boolean; latencyMs?: number; error?: string }>,
+      sources: sourceStatus,
       cache: { healthy: cacheHealthy, provider: this.config.caching.provider },
     };
   }

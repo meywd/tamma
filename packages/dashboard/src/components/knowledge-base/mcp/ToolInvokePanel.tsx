@@ -4,7 +4,7 @@
  * Panel for invoking an MCP tool with arguments and viewing results.
  */
 
-import React, { useState } from 'react';
+import React, { useState, type JSX } from 'react';
 import type { MCPTool, MCPToolInvokeResult } from '@tamma/shared';
 
 export interface ToolInvokePanelProps {

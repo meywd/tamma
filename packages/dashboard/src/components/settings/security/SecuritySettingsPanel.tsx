@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import type { SecurityConfig } from '@tamma/shared';
 import { useSecurityConfig } from '../../../hooks/settings/useSecurityConfig.js';
 import { Card } from '../../common/Card.js';

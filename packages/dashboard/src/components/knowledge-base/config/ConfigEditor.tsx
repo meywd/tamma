@@ -5,7 +5,7 @@
  * Allows editing all context layer configurations.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, type JSX } from 'react';
 
 export interface ConfigEditorProps {
   config: Record<string, unknown>;

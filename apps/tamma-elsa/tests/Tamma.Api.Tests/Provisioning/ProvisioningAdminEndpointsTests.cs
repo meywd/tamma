@@ -32,7 +32,7 @@ public class ProvisioningAdminEndpointsTests
     private static async Task<Guid> SeedTenantAsync()
     {
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),

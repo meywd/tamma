@@ -24,6 +24,24 @@ public class User
     /// </summary>
     public string Role { get; set; } = "member";
 
+    /// <summary>
+    /// Platform-wide role (separate from the per-tenant <see cref="Role"/>).
+    /// Distinguishes the small set of platform operators (<c>"platform_admin"</c>)
+    /// from the regular tenant population (<c>"user"</c>). Story 28-R2/C1
+    /// removed the prior "tenant-owner == platform admin" coupling that let
+    /// every signed-up user (auto-owner of their personal tenant) pass the
+    /// <c>OwnerAccess</c> policy; the new <c>PlatformOwnerAccess</c> policy
+    /// keys off this column instead.
+    ///
+    /// <para>Constrained at the DB level to <c>"user" | "platform_admin"</c>
+    /// via a CHECK constraint added by the
+    /// <c>AddUsersPlatformRole</c> migration. The bootstrap superadmin (the
+    /// first user ever created) defaults to <c>platform_admin</c>; every
+    /// other registration / invite / OAuth bootstrap defaults to
+    /// <c>"user"</c>.</para>
+    /// </summary>
+    public string PlatformRole { get; set; } = "user";
+
     public Guid? TenantId { get; set; }
     public bool EmailVerified { get; set; }
     public bool IsActive { get; set; } = true;

@@ -5,10 +5,13 @@ import type { AppCredentials } from '../github/github-platform-factory.js';
 // Mock the GitHubPlatform class
 const mockInitialize = vi.fn();
 vi.mock('../github/github-platform.js', () => ({
-  GitHubPlatform: vi.fn(() => ({
-    initialize: mockInitialize,
-    platformName: 'github',
-  })),
+  // Vitest 4: constructor mocks must use `function` keyword, not arrow
+  GitHubPlatform: vi.fn(function () {
+    return {
+      initialize: mockInitialize,
+      platformName: 'github',
+    };
+  }),
 }));
 
 describe('createGitHubPlatformForInstallation', () => {

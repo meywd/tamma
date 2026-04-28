@@ -3,7 +3,7 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class TenantRepository(TammaDbContext db) : ITenantRepository
+public class TenantRepository(ControlPlaneDbContext db) : ITenantRepository
 {
     public async Task<Tenant> CreateAsync(Tenant tenant)
     {

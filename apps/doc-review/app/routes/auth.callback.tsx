@@ -48,7 +48,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     role: oauthUser.role || 'reviewer', // Provide default role
   };
 
-  const dbUser = await syncUserRecord({ DB: (dbEnv as any)?.DB }, userWithRole);
+  const dbUser = await syncUserRecord({ DB: (dbEnv)?.DB }, userWithRole);
   if (dbUser && 'role' in dbUser) {
     oauthUser.role = dbUser.role;
   }

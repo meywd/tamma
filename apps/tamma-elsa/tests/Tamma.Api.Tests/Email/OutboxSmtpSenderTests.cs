@@ -1,3 +1,4 @@
+using Tamma.Data.Abstractions;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -23,8 +24,10 @@ namespace Tamma.Api.Tests.Email;
 [TestFixture]
 public class OutboxSmtpSenderTests
 {
+    private static readonly Guid TestTenantId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
     private ServiceProvider _services = null!;
-    private DbContextOptions<TammaDbContext> _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private Mock<ISmtpTransport> _transport = null!;
     private OutboxSmtpSender _sender = null!;
     private IConfiguration _config = null!;
@@ -33,22 +36,48 @@ public class OutboxSmtpSenderTests
     public void SetUp()
     {
         var dbName = Guid.NewGuid().ToString();
-        _options = new DbContextOptionsBuilder<TammaDbContext>()
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        var captured = _options;
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         var services = new ServiceCollection();
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(captured));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
+        services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
+        services.AddScoped<IPlatformEventRepository, PlatformEventRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
 
         _transport = new Mock<ISmtpTransport>();
         services.AddSingleton(_transport.Object);
 
         _services = services.BuildServiceProvider();
+
+        // Seed an active tenant — Story 28-1 PR B: the cross-tenant
+        // drain path enumerates active tenants from CP. Without one,
+        // the sender finds nothing to drain.
+        using (var seed = new TestControlPlaneDbContext(_cpOptions))
+        {
+            seed.Tenants.Add(new Tenant
+            {
+                Id = TestTenantId,
+                Name = "test",
+                Slug = "test",
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            seed.SaveChanges();
+        }
 
         _config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -81,11 +110,21 @@ public class OutboxSmtpSenderTests
         _services.Dispose();
     }
 
-    private EmailOutboxRepository FreshOutbox() => new(new TestDbContext(_options));
-    private EventRepository FreshEvents() => new(new TestDbContext(_options));
+    private EmailOutboxRepository FreshOutbox()
+        => new(new TestTenantDbContextFactory(_tenantOptions),
+               new TestControlPlaneDbContext(_cpOptions));
+    private EventRepository FreshEvents()
+    {
+        var cp = new TestControlPlaneDbContext(_cpOptions);
+        return new EventRepository(
+            new TestTenantDbContextFactory(_tenantOptions),
+            new TenantContext(),
+            new PlatformEventRepository(cp));
+    }
 
     private static EmailOutboxMessage NewRow(int maxAttempts = 5) => new()
     {
+        TenantId = TestTenantId,
         Template = "verification",
         ToAddress = "u@example.com",
         Subject = "Verify",
@@ -114,10 +153,14 @@ public class OutboxSmtpSenderTests
         // Row is deleted after successful delivery — audit trail lives in the
         // event store (EMAIL.SENT.SUCCESS below), so recipient/subject/body
         // don't persist in the outbox past the successful-send moment.
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull();
 
-        var sent = await FreshEvents().QueryAsync(null, EmailEventTypes.Sent, null, 10);
+        // Story 28-1 PR C: cross-tenant QueryAsync(null, ...) returns only
+        // platform-scope events (TenantId == null) per Decision #2. Tenant-
+        // scoped Sent events (TenantId = row.TenantId) live in the per-tenant
+        // domain_events stream and are reached via QueryAsync(TestTenantId, ...).
+        var sent = await FreshEvents().QueryAsync(TestTenantId, EmailEventTypes.Sent, null, 10);
         sent.Should().ContainSingle();
         JsonSerializer.Deserialize<Dictionary<string, string?>>(sent[0].Tags)!["txn_id"]
             .Should().Be(enq.Id.ToString());
@@ -132,7 +175,7 @@ public class OutboxSmtpSenderTests
 
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull("the sent row must be purged so the recipient " +
                               "address and body don't linger beyond delivery");
     }
@@ -155,7 +198,7 @@ public class OutboxSmtpSenderTests
         var before = DateTime.UtcNow;
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored!.Status.Should().Be("pending", "requeued — not yet at max attempts");
         stored.Attempts.Should().Be(1);
         stored.LastError.Should().Contain("connect refused");
@@ -178,11 +221,12 @@ public class OutboxSmtpSenderTests
 
         // Attempt 1 — transient, requeued with backoff into the future.
         await _sender.ProcessOnceAsync(CancellationToken.None);
-        var afterFirst = await FreshOutbox().GetByIdAsync(enq.Id);
+        var afterFirst = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         afterFirst!.Status.Should().Be("pending");
 
         // Fast-forward NextAttemptAt so the next ProcessOnceAsync picks it up.
-        using (var db = new TestDbContext(_options))
+        // Story 28-1 PR D — email_outbox lives on the tenant DB.
+        await using (var db = new TestTenantDbContext(_tenantOptions, TestTenantId))
         {
             var row = await db.EmailOutbox.FindAsync(enq.Id);
             row!.NextAttemptAt = DateTime.UtcNow.AddMinutes(-1);
@@ -195,10 +239,13 @@ public class OutboxSmtpSenderTests
         // would mean recipient/subject/body lingering in the DB indefinitely.
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var stored = await FreshOutbox().GetByIdAsync(enq.Id);
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
         stored.Should().BeNull("terminal failure purges the row — event store holds the audit");
 
-        var failed = await FreshEvents().QueryAsync(null, EmailEventTypes.Failed, null, 10);
+        // Story 28-1 PR C: see comment in EmitsSentEvent — Failed event
+        // emitted by EmitFailedAsync carries TenantId = row.TenantId, so
+        // it lives on the per-tenant stream, not the cross-tenant null half.
+        var failed = await FreshEvents().QueryAsync(TestTenantId, EmailEventTypes.Failed, null, 10);
         failed.Should().ContainSingle();
         var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(failed[0].Data)!;
         data["provider"].GetString().Should().Be("smtp");
@@ -243,7 +290,13 @@ public class OutboxSmtpSenderTests
 
         await _sender.ProcessOnceAsync(CancellationToken.None);
 
-        var all = await FreshEvents().QueryAsync(null, null, null, 20);
+        // Story 28-1 PR C: query the tenant-scoped path (TestTenantId)
+        // because the Sent event from EmitSentAsync sets TenantId = row.TenantId.
+        // The previous QueryAsync(null, ...) call vacuously returned [] after
+        // PR C tightened the legacy UNION half, silently passing this test
+        // without exercising the no-PII-leak invariant.
+        var all = await FreshEvents().QueryAsync(TestTenantId, null, null, 20);
+        all.Should().NotBeEmpty("PII-leak check requires at least one event to inspect");
         foreach (var evt in all)
         {
             var combined = evt.Tags + evt.Data;

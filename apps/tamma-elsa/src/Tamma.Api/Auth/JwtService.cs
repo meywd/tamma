@@ -2,10 +2,21 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Auth;
+
+/// <summary>
+/// One row of the JWT <c>tenants</c> claim — the list of tenants the user is
+/// a member of, with the per-tenant role. Story 28-9 introduced this claim so
+/// the dashboard can render a tenant switcher without a separate
+/// <c>GET /api/v1/orgs</c> round-trip on every page load, and so the
+/// switch-org flow can validate membership against the request token rather
+/// than re-querying the DB on every gate.
+/// </summary>
+public readonly record struct TenantClaim(Guid TenantId, string Role);
 
 public interface IJwtService
 {
@@ -13,8 +24,45 @@ public interface IJwtService
     /// Generates a 15-minute access JWT with the seven non-time claims defined
     /// by Story 18-2 AC 8 / TS <c>UnifiedJwtPayload</c>:
     /// <c>{ sub, tenantId, role, platformRole, email, name, authMethod }</c>.
+    /// Story 28-9 also emits an explicit <c>active_tenant_id</c> claim
+    /// (mirror of <c>tenantId</c>; the explicit name removes the ambiguity
+    /// that <c>tenantId</c> could be a request-scoped tenant) and a
+    /// <c>tenants</c> JSON array of <c>{tenantId, role}</c> tuples for every
+    /// membership the user holds. The <paramref name="tenants"/> argument is
+    /// optional — handlers that haven't been updated yet still mint valid
+    /// (single-tenant) tokens with an empty <c>tenants</c> claim.
+    ///
+    /// <para>Story 28-R2 follow-up B — when <paramref name="impId"/> is set
+    /// the token carries an <c>imp_id</c> claim pointing at the
+    /// <c>admin_impersonations.id</c> row that authorises the session.
+    /// Token lifetime is hard-capped at 15 minutes — the configured
+    /// <c>Tamma:Impersonation:MaxSessionMinutes</c> value bounds the
+    /// outer-session window enforced by
+    /// <see cref="Middleware.ImpersonationContextMiddleware"/>, not the
+    /// per-token lifetime.</para>
+    ///
+    /// <para><b>SCOPE-REDUCTION GUARANTEE (Story 28-R2 / PF-S3)</b>: when
+    /// <paramref name="impId"/> is set, the minted JWT carries
+    /// <c>platformRole="user"</c> regardless of the
+    /// <see cref="User.PlatformRole"/> value on the impersonator's row.
+    /// The original operator's identity is preserved on the new
+    /// <c>actor_user_id</c> + <c>actor_email</c> claims so audit-log
+    /// enrichers can attribute downstream calls to the operator without
+    /// granting them platform-admin reach inside the impersonation
+    /// session. Concretely: a stolen impersonation token CANNOT call
+    /// <c>PlatformOwnerAccess</c>-gated routes (KEK rotation, alerts,
+    /// other-tenant admin endpoints) even when the originating operator
+    /// is a platform admin. The role inside the impersonated tenant
+    /// (passed via <paramref name="role"/>) determines per-tenant
+    /// reach — typically <c>"owner"</c> for a tenant-scoped session,
+    /// the target user's actual role for a user-scoped session.</para>
     /// </summary>
-    string GenerateAccessToken(User user, Guid? tenantId, string role);
+    string GenerateAccessToken(
+        User user,
+        Guid? tenantId,
+        string role,
+        IEnumerable<TenantClaim>? tenants = null,
+        Guid? impId = null);
 
     string GenerateRefreshToken();
     ClaimsPrincipal? ValidateToken(string token);
@@ -32,13 +80,41 @@ public class JwtService : IJwtService
         _signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
     }
 
-    public string GenerateAccessToken(User user, Guid? tenantId, string role)
+    public string GenerateAccessToken(
+        User user,
+        Guid? tenantId,
+        string role,
+        IEnumerable<TenantClaim>? tenants = null,
+        Guid? impId = null)
     {
-        // Derive the platform role: tenant-owners are also platform admins
-        // by convention (matches TS github-oauth.ts mapping). Anything else
-        // is a regular user. Update this when a dedicated platform-role
-        // column lands.
-        var platformRole = role == "owner" ? "platform_admin" : "user";
+        // Story 28-R2 / Finding C1 — the platform role is now sourced from the
+        // dedicated users.platform_role column (added by AddUsersPlatformRole
+        // migration), NOT from the per-tenant role. Before C1, this was
+        // `role == "owner" ? "platform_admin" : "user"` — but every signed-up
+        // user is auto-owner of their personal tenant, so that mapping let
+        // every user pass OwnerAccess on every /api/admin/* route.
+        //
+        // Defensive default: if the column ever ends up NULL/empty (legacy row
+        // pre-migration, hand-edited DB), treat it as the safest non-elevated
+        // value ("user"). Promoting a user to platform_admin requires an
+        // explicit DB write — never auto-derived from runtime state.
+        //
+        // Story 28-R2 / PF-S3 — IMPERSONATION SCOPE REDUCTION. When the
+        // caller passes a non-empty `impId`, this token is being minted
+        // INSIDE an impersonation session: the operator (an actual
+        // platform admin) is "becoming" a target user/tenant. Per the
+        // PF-S3 design, the impersonation token must NOT carry the
+        // operator's platform_admin role — otherwise it doubles as a
+        // cross-tenant platform-admin ticket (KEK rotation, alerts,
+        // every PlatformOwnerAccess route). We therefore force
+        // platformRole="user" for impersonation tokens. The original
+        // operator's identity is preserved on the dedicated
+        // `actor_user_id` + `actor_email` claims (added below) so audit
+        // enrichers can still attribute the action to the operator.
+        var isImpersonation = impId.HasValue && impId.Value != Guid.Empty;
+        var platformRole = isImpersonation
+            ? "user"
+            : (string.IsNullOrWhiteSpace(user.PlatformRole) ? "user" : user.PlatformRole);
         var displayName = user.DisplayName
             ?? user.GitHubLogin
             ?? user.Email.Split('@')[0];
@@ -53,6 +129,11 @@ public class JwtService : IJwtService
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new("tenantId", tenantClaimValue),
+            // Story 28-9 — explicit "active tenant" claim. `tenantId` is kept
+            // as an alias so existing readers (TenantContextMiddleware
+            // fallback, nginx auth_request, dashboard) keep working through
+            // the transition.
+            new("active_tenant_id", tenantClaimValue),
             new("role", role),
             new("platformRole", platformRole),
             new(JwtRegisteredClaimNames.Email, user.Email),
@@ -64,17 +145,73 @@ public class JwtService : IJwtService
                 ClaimValueTypes.Integer64),
         };
 
+        // Story 28-9 — `tenants` claim: JSON array of {tenantId, role} so
+        // multi-tenant users can list/switch without a DB hit. Always emitted
+        // (possibly empty) so the dashboard can distinguish "no memberships"
+        // from "claim missing → stale token". Empty Guids are filtered out
+        // defensively.
+        var tenantList = (tenants ?? Array.Empty<TenantClaim>())
+            .Where(t => t.TenantId != Guid.Empty)
+            .Select(t => new { tenantId = t.TenantId.ToString(), role = t.Role })
+            .ToArray();
+        var tenantsJson = JsonSerializer.Serialize(tenantList);
+        // Stored as a string-typed claim that holds the JSON array literal.
+        // The dashboard / TenantContextMiddleware / tests JSON.parse the
+        // value to recover the array. We tried the JWT JsonArray / Json
+        // value-type expansion paths but JwtSecurityTokenHandler's roundtrip
+        // re-shapes the claim into nested objects rather than a single
+        // string claim, which broke every consumer. Plain string is the
+        // shape that survives both serialization and read-back unchanged.
+        claims.Add(new Claim("tenants", tenantsJson));
+
+        // Story 28-R2 follow-up B — impersonation linkage. The `imp_id`
+        // claim is the FK back to `admin_impersonations.id`, which the
+        // ImpersonationContextMiddleware reads to (a) verify the session
+        // is still active and (b) tag downstream audit events with both
+        // the impersonator + the impersonated identity. Absent for normal
+        // (non-impersonation) sessions.
+        //
+        // Story 28-R2 / PF-S3 — alongside `imp_id` we also emit
+        // `actor_user_id` + `actor_email` claims that capture the
+        // impersonator's identity. The token's `sub`/`email` claims
+        // already carry the operator's identity (the JWT is minted FROM
+        // the operator's User row), so today these "actor" claims are a
+        // duplicate breadcrumb. The breadcrumb exists so audit-event
+        // enrichers and the ImpersonationContextMiddleware can attribute
+        // the action to the operator without parsing `imp_id` and
+        // re-querying the impersonation table on every request — and so
+        // a future change that flips the JWT's `sub` to the TARGET user
+        // (e.g. for tenant-scoped impersonation that needs target-user
+        // identity in `sub`) does not orphan the audit trail.
+        if (isImpersonation)
+        {
+            claims.Add(new Claim("imp_id", impId!.Value.ToString("D")));
+            claims.Add(new Claim("actor_user_id", user.Id.ToString()));
+            claims.Add(new Claim("actor_email", user.Email));
+        }
+
         var credentials = new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256);
         var handler = new JwtSecurityTokenHandler();
         // Disable inbound claim mapping so consumers see raw `role` not the URI.
         handler.InboundClaimTypeMap.Clear();
         handler.OutboundClaimTypeMap.Clear();
 
+        // Token lifetime — both regular and impersonation sessions are
+        // hard-capped at 15 minutes. The configured
+        // `Tamma:Impersonation:MaxSessionMinutes` (default 60) bounds
+        // the OUTER-session window enforced by
+        // `ImpersonationContextMiddleware` (StartedAt + MaxSessionMinutes
+        // wall); the per-token cap is always 15 to limit blast radius
+        // of a stolen impersonation token. Story 28-R2 / PF-C2 collapsed
+        // a dead ternary that branched on `impId` but returned 15 min
+        // on both sides; the comment now matches the literal.
+        var lifetime = TimeSpan.FromMinutes(15);
+
         var token = new JwtSecurityToken(
             issuer: _config["Jwt:Issuer"] ?? "tamma",
             audience: _config["Jwt:Audience"] ?? "tamma-api",
             claims: claims,
-            expires: DateTime.UtcNow.AddMinutes(15),
+            expires: DateTime.UtcNow.Add(lifetime),
             signingCredentials: credentials
         );
 

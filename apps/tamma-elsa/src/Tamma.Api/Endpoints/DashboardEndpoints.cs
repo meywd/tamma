@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Engine;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
@@ -9,29 +10,41 @@ public static class DashboardEndpoints
 {
     /// <summary>
     /// Audit finding 022 — restored TS shape:
-    /// <c>{engineCount, workflowDefinitions, recentEvents[20]}</c>. The
-    /// previous <c>{totalEvents, totalWorkflows, timestamp}</c> simplification
-    /// dropped the activity feed the dashboard's <c>SummaryTile</c> uses to
-    /// render "last event: …".
+    /// <c>{engineCount, workflowDefinitions, recentEvents[20]}</c>.
     /// </summary>
     public static async Task<IResult> GetSummary(
         IEventRepository eventRepo,
         IWorkflowRepository workflowRepo,
         IEngineRegistry engineRegistry,
-        TammaDbContext db,
+        ITenantDbContextFactory tenantDbFactory,
+        IDbContextFactory<ControlPlaneDbContext> cpDbFactory,
         ITenantContext tc)
     {
-        // True total-events count (the previous QueryAsync(..., 1000) was
-        // capped at 1000 and presented as if it were a true total).
-        var totalEvents = await db.DomainEvents
-            .Where(e => tc.TenantId == null || e.TenantId == tc.TenantId)
-            .CountAsync();
-
+        long totalEvents = 0;
         var defs = await workflowRepo.ListDefinitionsAsync();
         var (instances, totalWorkflows) = await workflowRepo.ListInstancesAsync(null, tc.TenantId, 1, 1);
 
         // Activity feed — 20 most recent events scoped to the ambient tenant.
         var recent = await eventRepo.QueryAsync(tc.TenantId, null, null, 20);
+
+        // Total events count — scoped to the current tenant via the factory.
+        if (tc.TenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            totalEvents = await db.DomainEvents.LongCountAsync(e => e.TenantId == tid);
+        }
+        else
+        {
+            // PR #329 review: restore the prior null-tenant behaviour.
+            // Story 28-1 PR C / Decision #2: cross-tenant admin queries route
+            // to platform_events on the control plane (tenant DBs aren't
+            // reachable without a tenant id). The DashboardView policy admits
+            // the platform-admin user when no per-tenant role is bound, so
+            // returning the platform-wide event count for the global summary
+            // matches the prior `tc.TenantId == null || ...` aggregate count.
+            await using var cp = await cpDbFactory.CreateDbContextAsync();
+            totalEvents = await cp.PlatformEvents.LongCountAsync();
+        }
 
         var engines = await engineRegistry.ListAsync(tc.TenantId);
 
@@ -40,8 +53,6 @@ public static class DashboardEndpoints
             engineCount = engines.Count,
             workflowDefinitions = defs.Count,
             totalWorkflows,
-            // Keep `totalEvents` as a useful Tamma-specific counter alongside
-            // the TS-required `recentEvents` array.
             totalEvents,
             recentEvents = recent.Select(e => new
             {
@@ -56,10 +67,8 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Audit finding 023 — was hard-coded <c>[]</c>; now enumerates the
-    /// engine registry filtered to the ambient tenant. Until the real
-    /// <c>TammaEngine</c> ports the registry serves a synthetic per-tenant
-    /// entry so the dashboard tile is not blank.
+    /// Audit finding 023 — enumerates the engine registry filtered to the
+    /// ambient tenant.
     /// </summary>
     public static async Task<IResult> GetEngines(
         IEngineRegistry engineRegistry,
@@ -70,27 +79,29 @@ public static class DashboardEndpoints
     }
 
     /// <summary>
-    /// Audit finding 024 — restored TS semantics: one row per workflow
-    /// DEFINITION (not instance), each annotated with an
-    /// <c>instanceCount</c>. The previous version returned the first 20
-    /// instances under the same URL, which was a different semantic and
-    /// broke any frontend code written against the TS shape.
+    /// Audit finding 024 — one row per workflow DEFINITION annotated with
+    /// <c>instanceCount</c>, keyed off the tenant-scoped instance store.
     /// </summary>
     public static async Task<IResult> GetWorkflows(
         IWorkflowRepository workflowRepo,
-        TammaDbContext db,
+        ITenantDbContextFactory tenantDbFactory,
         ITenantContext tc)
     {
         var defs = await workflowRepo.ListDefinitionsAsync();
 
-        // Single-query rollup keyed by definition id (avoid N+1).
-        var counts = await db.WorkflowInstances
-            .Where(i => tc.TenantId == null || i.TenantId == tc.TenantId)
-            .GroupBy(i => i.DefinitionId)
-            .Select(g => new { DefinitionId = g.Key, Count = g.Count() })
-            .ToListAsync();
-
-        var byId = counts.ToDictionary(c => c.DefinitionId, c => c.Count);
+        // Single-query rollup keyed by definition id (avoid N+1). Scoped to
+        // the ambient tenant via the factory — no cross-tenant leak possible.
+        var byId = new Dictionary<Guid, int>();
+        if (tc.TenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            var counts = await db.WorkflowInstances
+                .Where(i => i.TenantId == tid)
+                .GroupBy(i => i.DefinitionId)
+                .Select(g => new { DefinitionId = g.Key, Count = g.Count() })
+                .ToListAsync();
+            byId = counts.ToDictionary(c => c.DefinitionId, c => c.Count);
+        }
 
         var rollup = defs.Select(d => new
         {

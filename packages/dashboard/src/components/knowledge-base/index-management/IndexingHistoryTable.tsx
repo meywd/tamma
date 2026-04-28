@@ -4,7 +4,7 @@
  * Shows previous indexing runs with key metrics.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { IndexHistoryEntry } from '@tamma/shared';
 
 export interface IndexingHistoryTableProps {

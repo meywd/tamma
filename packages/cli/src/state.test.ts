@@ -15,10 +15,18 @@ vi.mock('node:fs');
 
 describe('state management', () => {
   beforeEach(() => {
+    // Vitest 4: vi.restoreAllMocks() only restores manual spies, not automocks
+    // (vi.mock'd modules). Use clearAllMocks() to also reset call history of
+    // automocked functions so each test starts with mock.calls === [].
+    vi.clearAllMocks();
     vi.restoreAllMocks();
   });
 
   afterEach(() => {
+    // Vitest 4: vi.restoreAllMocks() only restores manual spies, not automocks
+    // (vi.mock'd modules). Use clearAllMocks() to also reset call history of
+    // automocked functions so each test starts with mock.calls === [].
+    vi.clearAllMocks();
     vi.restoreAllMocks();
   });
 

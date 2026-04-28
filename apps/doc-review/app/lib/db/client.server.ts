@@ -12,7 +12,7 @@ export function getDb(env: { DB?: D1Database }): Database {
     throw new Error('Database binding "DB" is not configured.');
   }
 
-  return drizzle(env.DB, { schema }) as Database;
+  return drizzle(env.DB, { schema });
 }
 
 export function hasDatabase(env: { DB?: D1Database }): env is { DB: D1Database } {

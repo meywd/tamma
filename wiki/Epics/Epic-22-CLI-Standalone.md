@@ -1,100 +1,232 @@
 # Epic 22: CLI Mode Preservation
 
-**Status:** Partially Superseded — `IAgentExecutor` (Story 22-1) delivered by Epic 19; CLI standalone working; cloud-sync (22-3) and parity matrix (22-4) still drafted
-**Stories:** 4 (22-1 through 22-4)
-**Estimated Effort:** ~44 hours (much of which Epic 19 absorbed)
+**Status:** Largely superseded by Epic 19 (Agent Dispatch). Stories 22-1 and 22-2 delivered via `IAgentExecutor` + `LocalExecutor`; 22-3 (cloud sync) and 22-4 (parity matrix) remain drafted.
+**Stories:** 4 active + 1 optional (22-5 CLI Docker install) drafted under stories folder
+**Estimated Effort:** ~44h original scope; ~16h absorbed by Epic 19, ~16h remaining across 22-3/22-4
 
 ## Overview
 
-Epic 22 ensures the standalone CLI mode (`tamma start`) continues to work without cloud dependencies, account creation, or SaaS enrollment, while sharing the Elsa workflow engine with the SaaS mode and allowing optional cloud connectivity for monitoring.
+Epic 22 is Tamma's "no cloud required" commitment. The CLI mode (`tamma start`) must keep working — with local agents running on the operator's machine, a local Elsa workflow engine, and local configuration files — whether or not the user has ever heard of tamma.dev. The epic exists to formally own the guarantee that the same platform runs in three shapes: standalone CLI (zero cloud), SaaS (GitHub App + Actions runners), and hybrid (local execution with optional cloud-sync observability).
 
-The epic was originally written before Epic 19 (Agent Dispatch) and overlapped substantially with it. Epic 19 delivered the `IAgentExecutor` abstraction (Story 22-1's main deliverable) as part of its agent-dispatch work; the CLI standalone path (Story 22-2's mode) already works. Stories 22-3 (optional cloud sync) and 22-4 (feature parity matrix) remain as the residual work for this epic.
+Most of Epic 22's work is already done — but not in this epic. When Epic 19 shipped the GitHub-Actions dispatch path, it had to abstract execution behind the `IAgentExecutor` interface (originally scoped as Story 22-1) and it had to keep the local execution path working (originally scoped as Story 22-2). Both shipped in Story 19-5 in the auth-foundation sprint (2026-04-18..2026-04-21). Epic 22's residual scope is the optional cloud-sync transport (22-3) and the feature-parity documentation matrix (22-4).
 
-## Current state
+## Architecture
 
-- **`IAgentExecutor` lives in Epic 19** — `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/IAgentExecutor.cs`
-- **`LocalExecutor`** (CLI mode) — shipped as part of Epic 19 Story 19-5; subprocess execution via `IProcessRunner`; deterministic test fakes
-- **`GitHubActionsExecutor`** (SaaS mode) — shipped as part of Epic 19 Story 19-5; webhook-mode resume; tenant-scoped via `install:{id}:` prefix
-- **TS `execute-agent` CLI** — `packages/cli/src/commands/execute-agent.ts` — the subprocess entry point used by `LocalExecutor`
-- **Mode resolution via `AgentExecutorFactory`** — env var → config → auto-detect
-- **`tamma start` works fully standalone** — no cloud dependencies; agents run locally
-- **Cloud sync (22-3)**: optional `CloudSyncTransport` for observability — not yet shipped
-- **Feature parity matrix (22-4)**: documentation — not yet shipped
+```
+User's machine
+├── ~/.tamma/providers.json           (per-user provider + model config)
+├── <repo>/.tamma/config.json         (per-repo agents, security, prompts)
+├── tamma CLI (@tamma/cli)            (Ink 5 React-for-CLIs TUI)
+│     └── spawns local child process for agent execution
+├── @tamma/orchestrator               (14-step loop, in-process Elsa)
+├── @tamma/events (InMemoryEventStore + optional CloudSyncTransport)
+└── agent subprocess (claude, opencode, etc.)
+
+Tamma Cloud (SaaS mode only)
+├── Elsa Workflow Engine (global + per-tenant, C#)
+├── AgentExecutorFactory →  GitHubActionsExecutor
+│     └── POST workflow_dispatch  →  user's GitHub repo
+│                                     └── .github/workflows/tamma-agent.yml
+│                                         (agent runs on user's Actions runner)
+└── Observability dashboard (optional sink for hybrid-mode clients)
+```
+
+**Mode resolution** — deterministic, four-step, **fail-fast** (Epic 19 Story 19-5):
+
+1. Explicit override passed by the caller (`ExecuteAgentActivity` workflow input).
+2. Environment variable `TAMMA_AGENT_MODE=Local | GitHubActions`.
+3. Configuration `Agent:ExecutorMode = Local | GitHubActions | Auto`.
+4. Auto-detection: `GitHubActions` if a GitHub App is configured; otherwise `Local`.
+
+A misconfiguration — for example `TAMMA_AGENT_MODE=GitHubActions` with no GitHub App credentials — is caught at dispatch time by `NullGitHubActionsClient` reporting `NotConfigured`, not at startup and not silently falling back.
+
+**Event flow (hybrid mode, 22-3 scope)**:
+
+```
+@tamma/orchestrator → IEventStore.append(event)
+                            ├── InMemoryEventStore   (always, for CLI TUI)
+                            └── CloudSyncTransport   (optional; when tamma.cloud.apiKey set)
+                                      └── POST /api/v1/events/ingest  →  Tamma Cloud Dashboard
+```
+
+Cloud-sync is strictly observability: the agent still runs locally, the event store of record is still local, and offline operation is still fully supported. Packets are batched and signed; failures degrade silently (log-and-drop) without blocking the engine.
+
+## Components
+
+| Surface | Component | Location | Status |
+|--------|-----------|----------|--------|
+| Executor abstraction | `IAgentExecutor` | `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/IAgentExecutor.cs` | Done (via Epic 19) |
+| Executor selection | `AgentExecutorFactory` | same folder / `AgentExecutorFactory.cs` | Done (Epic 19) |
+| Local mode | `LocalExecutor` | `LocalExecutor.cs` | Done (Epic 19) |
+| SaaS mode | `GitHubActionsExecutor` | `GitHubActionsExecutor.cs` | Done (Epic 19) |
+| Subprocess protocol | `IProcessRunner` + `DefaultProcessRunner` | `IProcessRunner.cs`, `DefaultProcessRunner.cs` | Done |
+| TS CLI bridge | `tamma execute-agent` | `packages/cli/src/commands/execute-agent.ts` | Done |
+| Request/response shape | `AgentExecutionRequest`, `AgentExecutionResult`, `AgentResultArtifact` | `Models/` | Done (bounded strings, 4 MB artifact cap) |
+| Standalone entry | `tamma start` | `packages/cli/src/commands/start.ts` | Done |
+| Cloud-sync transport (22-3) | `CloudSyncTransport` | planned in `packages/events/src/cloud-sync.ts` | Planned |
+| Parity matrix (22-4) | `docs/cli-saas-parity.md` | not yet written | Planned |
+| Docker install (22-5) | `docker/tamma-cli.Dockerfile` | drafted in `docs/stories/epic-22/22-5-cli-docker-installation.md` | Drafted |
+
+Execution flows through a **JSON shell-out protocol** between the C# Elsa activity and the TypeScript CLI: `LocalExecutor` writes `.tamma/exec-request-{sessionId}.json`, invokes `tamma execute-agent --request <path> --output <path>`, waits for the subprocess, and reads `.tamma/exec-result-{sessionId}.json` back. Both files are `AgentExecutionRequest`/`AgentResultArtifact`-shaped; a non-zero exit code is mapped to a diagnostic `AgentExecutionResult` with failure context.
+
+## Class diagram
+
+```
+                   ┌─────────────────────────┐
+                   │    IAgentExecutor       │
+                   │  ExecuteAsync(req)      │
+                   │  Mode {get;}            │
+                   └───────────┬─────────────┘
+                               │ implements
+                 ┌─────────────┴─────────────┐
+                 │                           │
+      ┌──────────▼──────────┐     ┌──────────▼──────────┐
+      │   LocalExecutor     │     │ GitHubActionsExecutor│
+      │   Mode = "local"    │     │ Mode = "github_actions"│
+      └──────────┬──────────┘     └──────────┬──────────┘
+                 │ uses                      │ uses
+      ┌──────────▼──────────┐     ┌──────────▼──────────┐
+      │   IProcessRunner    │     │ IGitHubActionsClient│
+      │  (DefaultProcessRunner)│  │ (OctokitClient /    │
+      └──────────┬──────────┘     │  NullGitHubActionsClient)│
+                 │                └─────────────────────┘
+      ┌──────────▼──────────┐                     │
+      │ tamma execute-agent │                     │ dispatches
+      │ (Node subprocess)   │              ┌──────▼───────┐
+      └──────────┬──────────┘              │ GitHub       │
+                 │ reads/writes            │ workflow_dispatch│
+      ┌──────────▼──────────┐              └──────────────┘
+      │ .tamma/exec-*.json  │
+      │ (request + result)  │
+      └─────────────────────┘
+
+ AgentExecutorFactory
+  ├── Create(mode, deps)   → IAgentExecutor
+  └── ResolveMode(env, config, auto) → ExecutionMode
+```
+
+## Sequence diagram (CLI standalone, happy path)
+
+```
+Operator        tamma CLI        C# Elsa          LocalExecutor   tamma execute-agent     ClaudeAgentProvider
+    │                │               │                   │                │                       │
+    │ tamma start    │               │                   │                │                       │
+    │───────────────▶│               │                   │                │                       │
+    │                │ boot engine   │                   │                │                       │
+    │                │──────────────▶│                   │                │                       │
+    │                │               │ ExecuteAgentActivity                                        │
+    │                │               │──────────────────▶│                │                       │
+    │                │               │                   │ write request  │                       │
+    │                │               │                   │───────────────▶│                       │
+    │                │               │                   │ spawn subprocess                       │
+    │                │               │                   │───────────────▶│                       │
+    │                │               │                   │                │ dispatch agent        │
+    │                │               │                   │                │──────────────────────▶│
+    │                │               │                   │                │                       │ run task
+    │                │               │                   │                │◀──────────────────────│ artifact
+    │                │               │                   │ exit 0         │                       │
+    │                │               │                   │◀───────────────│                       │
+    │                │               │                   │ read result.json                       │
+    │                │               │ AgentExecutionResult                                        │
+    │                │               │◀──────────────────│                │                       │
+    │                │ TUI update    │                   │                │                       │
+    │                │◀──────────────│                   │                │                       │
+    │ live logs      │               │                   │                │                       │
+    │◀───────────────│               │                   │                │                       │
+```
+
+## Use cases
+
+1. **Offline developer hacks locally** — `tamma start` in a repo with `.tamma/config.json`. No network calls beyond the target Git remote. All events in `InMemoryEventStore`, TUI shows real-time progress.
+2. **Self-hosted server** — `tamma server` runs Fastify API + engine on user's VPS; no Tamma Cloud dependency. Agents still dispatched via `LocalExecutor`.
+3. **SaaS mode (Tamma Cloud)** — user installs GitHub App; `AgentExecutorFactory` resolves to `GitHubActionsExecutor`; Tamma Cloud never clones user code (Epic 19 security model).
+4. **Hybrid mode (planned 22-3)** — CLI user opts in with `tamma.cloud.apiKey` set; local execution continues; events additionally POST to `/api/v1/events/ingest` so the user can watch runs in the Tamma Cloud dashboard. If cloud is unreachable the CLI keeps running.
+5. **Docker distribution (drafted 22-5)** — `docker run ghcr.io/tamma/cli` image for teams that want `tamma` in a sealed container. Mounts `$HOME/.tamma` + the project repo as volumes.
+6. **Parity matrix (22-4)** — maintainers block SaaS-only scope creep: every new feature must declare whether it's CLI, SaaS, or both. Doc lives at `docs/cli-saas-parity.md` and is referenced from PR templates.
+
+## Principles
+
+1. **No cloud required** — `tamma start` works with zero internet beyond the target Git platform.
+2. **No account required** — CLI users are never forced to create a Tamma Cloud account.
+3. **Agents run where the user chooses** — local is local; cloud-sync is observability only, never delegation.
+4. **Shared engine, different execution** — the same Elsa workflows run in both modes; only the executor backend changes.
+5. **Additive cloud features** — cloud connectivity can add monitoring but never gate core features.
 
 ## Stories
 
 | Story | Title | Priority | Effort | Status |
 |-------|-------|----------|--------|--------|
-| 22-1 | `IAgentExecutor` Abstraction | P0 | 12h | **Superseded by Epic 19 Story 19-5** |
-| 22-2 | CLI Standalone Workflow Engine | P0 | 16h | **Done via Epic 19 + existing `tamma start`** |
-| 22-3 | Optional Cloud Sync | P2 | 10h | Planned |
-| 22-4 | CLI + SaaS Feature Parity Matrix | P1 | 6h | Planned |
+| 22-1 | `IAgentExecutor` Abstraction | P0 | 12h | **Superseded — delivered by Epic 19 Story 19-5** |
+| 22-2 | CLI Standalone Workflow Engine | P0 | 16h | **Done — Epic 19 Story 19-5 + existing `tamma start`** |
+| 22-3 | Optional Cloud Sync (`CloudSyncTransport`) | P2 | 10h | Drafted |
+| 22-4 | CLI + SaaS Feature Parity Matrix | P1 | 6h | Drafted |
+| 22-5 | CLI Docker Installation | P2 | — | Drafted |
 
-## Architecture
+## Feature parity matrix (22-4 target schema)
 
-### `IAgentExecutor` abstraction (delivered by Epic 19)
+| Capability | CLI standalone | SaaS (GitHub Actions) | Hybrid |
+|-----------|---------------|-----------------------|--------|
+| Agent execution | Local subprocess | User's GitHub Actions runner | Local subprocess |
+| Event store | In-memory | Per-tenant Postgres | In-memory + cloud sync |
+| Workflow engine | Elsa (self-hosted) | Elsa (Tamma Cloud) | Elsa (self-hosted) |
+| Dashboard | TUI (Ink 5) | Web dashboard | TUI + optional cloud dashboard |
+| Config source | `~/.tamma/*` + repo `.tamma/` | GitHub App + env vars | `~/.tamma/*` + optional cloud pull |
+| Secrets | OS keychain | Per-tenant cabinet (Epic 29) | OS keychain |
+| Billing | None (self-hosted) | Stripe subscription | None (self-hosted) |
+| Multi-tenancy | Single tenant (self) | Full multi-tenant | Single tenant (self) |
+| Telemetry | Local Pino logs | OpenSearch + Pino | Local Pino + optional forward |
+| Updates | `pnpm install -g` / Docker pull | Managed | `pnpm install -g` / Docker pull |
 
-```csharp
-public interface IAgentExecutor
-{
-    Task<DispatchResult> DispatchAsync(DispatchRequest req, CancellationToken ct);
-    Task<MonitorResult> MonitorAsync(MonitorRequest req, CancellationToken ct);
-    Task<CollectResult> CollectAsync(CollectRequest req, CancellationToken ct);
-}
-```
-
-| Mode | Class | Surface |
-|------|-------|---------|
-| `Local` | `LocalExecutor` | subprocess on operator machine (CLI mode) |
-| `GitHubActions` | `GitHubActionsExecutor` | GitHub Actions `workflow_dispatch` (SaaS mode) |
-
-### Mode selection
-
-```
-config.mode === 'standalone'  → LocalExecutor
-config.mode === 'saas'        → GitHubActionsExecutor (via SaaSCoordinator)
-config.mode === 'hybrid'      → LocalExecutor + optional CloudSyncTransport (22-3)
-```
-
-### Event flow (hybrid mode, 22-3)
-
-```
-Engine → IEventStore.record()
-              ├── InMemoryEventStore (always, for TUI)
-              └── CloudSyncTransport (optional, when tamma.cloud.apiKey is set)
-                      → POST /api/v1/events/ingest → Tamma Cloud Dashboard
-```
-
-## Key principles
-
-1. **No cloud required** for core functionality — `tamma start` works with zero internet dependency beyond the target Git platform
-2. **No account required** — CLI users not forced to create Tamma Cloud account
-3. **Agents run where user chooses** — local means local; cloud sync is observability only
-4. **Shared engine, different execution** — same Elsa workflows run in both modes
-5. **Additive cloud features** — cloud connectivity adds monitoring, never gates core features
+A feature that lands on only one column must declare a migration path or an explicit "SaaS-only" / "CLI-only" intent in its story file. New features default to dual-mode; opt-outs require a maintainer sign-off.
 
 ## Dependencies
 
 | Dependency | Epic | Reason |
 |-----------|------|--------|
-| AI Providers | Epic 1 | `IAgentProvider` for local execution |
-| Engine Core | Epic 10 | `TammaEngine` and event store |
-| Elsa Workflows | Epic 7 | Shared workflow engine |
-| **Agent Dispatch (delivered)** | **Epic 19** | **`IAgentExecutor` + `LocalExecutor` + `GitHubActionsExecutor`** |
-| Agent Management | Epic 9 | Config-driven provider selection |
+| AI Providers | Epic 1 | `IAgentProvider` + `ICLIAgentProvider` for local execution |
+| Engine Core | Epic 10 | `TammaEngine` + in-memory event store |
+| Elsa Workflows | Epic 7 | Shared workflow engine (both modes) |
+| **Agent Dispatch (delivered)** | **Epic 19** | **`IAgentExecutor`, `LocalExecutor`, `GitHubActionsExecutor`** |
+| Agent Management | Epic 9 | Role-based provider selection |
+| Events | Epic 4 | Event store that cloud-sync will drain |
 
-## Why Epic 22 still exists
+## Current state
 
-Even though Epic 19 absorbed the `IAgentExecutor` work, Epic 22 remains as the home for:
+- **Delivered**: `IAgentExecutor` interface and both implementations ship in `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`. `AgentExecutorFactory` resolves mode via the env/config/auto precedence. The TS `packages/cli/src/commands/execute-agent.ts` implements the JSON shell-out protocol. `tamma start`, `tamma server`, and `tamma api` CLI modes all work.
+- **Security hardening** (from the Epic 19 2026-04-20 code review) applies here: tenant-scoped `WebhookSignalRegistry` aliases, 4 MB artifact cap in `LimitedStream`, and 2 KB/32 KB string clamps in `AgentResultArtifact`. None of these affect the CLI standalone path — they only protect the SaaS path.
+- **Planned**: `CloudSyncTransport` (22-3) for hybrid-mode observability; the feature parity matrix (22-4); optional Docker distribution (22-5).
+- **Open risks**: none for the standalone path (already shipped). For cloud-sync, the transport must be purely additive with circuit-breaker behaviour so a Tamma Cloud outage never stops a local run.
 
-1. **Optional cloud-sync (22-3)** — bridge for CLI users to see dashboard data in Tamma Cloud while keeping execution local
-2. **Feature parity matrix (22-4)** — documentation matrix that prevents SaaS-only lock-in for core functionality
-3. **CLI-mode preservation as a project value** — formal owner of the "no cloud required" guarantee
+## Why Epic 22 still exists (and is not deleted)
+
+Even though Epic 19 absorbed 22-1 and 22-2, this epic stays as the permanent home of:
+
+1. **Optional cloud-sync (22-3)** — the observability bridge that's explicitly not SaaS lock-in.
+2. **Feature parity matrix (22-4)** — documentation that blocks "we'll do this SaaS-only" from quietly happening.
+3. **CLI-mode preservation as a project value** — someone has to formally own the "no cloud required" guarantee, with this page as the durable reference.
+
+## Cloud-sync transport (22-3 design)
+
+The `CloudSyncTransport` is an `IEventStore` decorator, not a replacement. The engine keeps writing to `InMemoryEventStore` as the source of truth. The transport batches events (50-event or 5-second windows), signs each batch with the tenant's cloud API key, POSTs to `https://api.tamma.cloud/api/v1/events/ingest`, and honours a circuit breaker on 5xx responses. On circuit-open, events queue in a bounded ring buffer (10k events max); on circuit-close, the buffer drains oldest-first. A local log line at WARN reports drops with event count and age. The transport never blocks the engine: all work is async and failures are swallowed.
+
+## Operator-facing commands
+
+| Command | Mode | What it does |
+|---------|------|---------------|
+| `tamma start` | Standalone | Boots engine in TUI mode, runs workflows locally |
+| `tamma server` | Self-hosted server | Boots Fastify API + engine (no Tamma Cloud) |
+| `tamma api` | SaaS / GitHub App | Boots the Tamma Cloud API surface |
+| `tamma execute-agent` | Internal | The subprocess side of `LocalExecutor`'s JSON shell-out protocol |
+| `tamma config show` | All | Dumps resolved config with source labels |
+| `tamma doctor` | All | Validates provider keys, GitHub App creds, local Elsa reachability |
 
 ## See also
 
-- [Agent Dispatch](Agent-Dispatch) — the root topic page where `IAgentExecutor` is documented in full
-- [Epic 19 — GitHub App Agent Dispatch](Epic-19-Agent-Dispatch.md) — where 22-1 and 22-2 actually shipped
+- [Epic 19 — GitHub App Agent Dispatch](Epic-19-Agent-Dispatch.md) — where 22-1 and 22-2 actually shipped.
+- [Agent Dispatch](Agent-Dispatch) — root-level topic page with full executor abstraction.
+- [Epic 10 — Engine Core](Epic-10-Engine-Core.md) — shared engine consumed by both modes.
+- [Epic 1 — Foundation](Epic-1-Foundation.md) — `IAgentProvider` / `ICLIAgentProvider` used by `LocalExecutor`.
+- [Roadmap](Roadmap.md) — how this epic sits in the overall plan.
 
 ## Story files
 
@@ -102,4 +234,4 @@ Even though Epic 19 absorbed the `IAgentExecutor` work, Epic 22 remains as the h
 
 ---
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-22_

@@ -6,7 +6,7 @@
  * Invite user dialog with role selection.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type JSX } from 'react';
 import { useUsers } from '../../hooks/admin/useUsers.js';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner.js';

@@ -19,7 +19,7 @@ public class BudgetConfigRepositoryTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private IBudgetConfigRepository _repo = null!;
 
@@ -28,7 +28,7 @@ public class BudgetConfigRepositoryTests
     {
         await DiagnosticsSetUpFixture.ResetDatabaseAsync();
         _scope = DiagnosticsTestHarness.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _repo = _scope.ServiceProvider.GetRequiredService<IBudgetConfigRepository>();
     }
 
@@ -112,11 +112,11 @@ public class BudgetConfigRepositoryTests
     }
 
     [Test]
-    public async Task DefaultRow_CanCoexistWithTenantRow()
+    public async Task PlatformDefaultWrite_IsNoOp_AndTenantRowStillPersists()
     {
-        // TenantId = null is the platform default; it should coexist with a
-        // tenant-specific override on the same accountId. Exercises the
-        // partial-unique-index split.
+        // Story 28-1 PR A (Decision #1): platform-default writes
+        // (TenantId == null) are no-ops because defaults moved to code
+        // (BudgetConfigDefaults). Tenant-scoped rows still persist normally.
         var tenant = Guid.NewGuid();
         var account = tenant.ToString();
 
@@ -129,11 +129,13 @@ public class BudgetConfigRepositoryTests
             TenantId = tenant, AccountId = account, LimitUsd = 999m,
         });
 
+        // Platform-default lookup returns null — there is no longer a CP row
+        // to read from; callers fall through to BudgetConfigDefaults / config.
         var defaultRow = await _repo.GetAsync(null, account);
-        var tenantRow = await _repo.GetAsync(tenant, account);
+        defaultRow.Should().BeNull();
 
-        defaultRow.Should().NotBeNull();
-        defaultRow!.LimitUsd.Should().Be(50m);
+        // Tenant-scoped row is unaffected by the no-op platform write.
+        var tenantRow = await _repo.GetAsync(tenant, account);
         tenantRow.Should().NotBeNull();
         tenantRow!.LimitUsd.Should().Be(999m);
     }

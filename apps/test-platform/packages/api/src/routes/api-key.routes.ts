@@ -18,7 +18,7 @@ const generateKeySchema = z.object({
   description: z.string().optional(),
   scopes: z.array(z.string()).min(1),
   rateLimit: z.number().int().min(0).max(1000000).optional().default(1000),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: z.iso.datetime().optional(),
   ipWhitelist: z.array(z.string()).optional(),
 })
 
@@ -39,8 +39,8 @@ const listKeysSchema = z.object({
 })
 
 const usageQuerySchema = z.object({
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: z.iso.datetime().optional(),
+  endDate: z.iso.datetime().optional(),
   limit: z.string().transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
   offset: z.string().transform(Number).pipe(z.number().int().min(0)).optional(),
 })

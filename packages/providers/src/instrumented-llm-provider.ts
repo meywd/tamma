@@ -164,7 +164,7 @@ export class InstrumentedLLMProvider implements IAIProvider {
               return result;
             } catch (streamErr) {
               // Stream error -- emit provider:error
-              const errRecord = streamErr as unknown as Record<string, unknown>;
+              const errRecord = streamErr as Record<string, unknown>;
               const errorCode: DiagnosticsErrorCode =
                 (errRecord?.['code'] as DiagnosticsErrorCode | undefined) ?? 'UNKNOWN';
 
@@ -279,7 +279,7 @@ export class InstrumentedLLMProvider implements IAIProvider {
    * Extracts error code and sanitizes the error message.
    */
   private _emitError(err: unknown, start: number): void {
-    const errRecord = err as unknown as Record<string, unknown>;
+    const errRecord = err as Record<string, unknown>;
     const errorCode: DiagnosticsErrorCode =
       (errRecord?.['code'] as DiagnosticsErrorCode | undefined) ?? 'UNKNOWN';
 

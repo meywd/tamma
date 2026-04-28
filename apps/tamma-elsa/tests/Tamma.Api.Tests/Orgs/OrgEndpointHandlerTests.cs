@@ -28,7 +28,7 @@ public class OrgEndpointHandlerTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032 // Disposed via _scope
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private ITenantRepository _tenantRepo = null!;
     private ITenantMembershipRepository _membershipRepo = null!;
@@ -43,7 +43,7 @@ public class OrgEndpointHandlerTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _tenantRepo = _scope.ServiceProvider.GetRequiredService<ITenantRepository>();
         _membershipRepo = _scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
         _inviteRepo = _scope.ServiceProvider.GetRequiredService<IInviteRepository>();
@@ -165,7 +165,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.UpdateMemberRole(
             tenantId, ownerId, new UpdateMemberRoleRequest("root"),
-            _membershipRepo, Principal(ownerId), ctx);
+            _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -177,7 +177,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.UpdateMemberRole(
             tenantId, Guid.NewGuid(), new UpdateMemberRoleRequest("admin"),
-            _membershipRepo, Principal(ownerId), ctx);
+            _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status404NotFound);
     }
 
@@ -191,7 +191,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.UpdateMemberRole(
             tenantId, memberId, new UpdateMemberRoleRequest("owner"),
-            _membershipRepo, Principal(memberId), ctx);
+            _membershipRepo, _events, Principal(memberId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status403Forbidden);
     }
 
@@ -203,7 +203,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.UpdateMemberRole(
             tenantId, ownerId, new UpdateMemberRoleRequest("admin"),
-            _membershipRepo, Principal(ownerId), ctx);
+            _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -215,10 +215,60 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.UpdateMemberRole(
             tenantId, memberId, new UpdateMemberRoleRequest("admin"),
-            _membershipRepo, Principal(ownerId), ctx);
+            _membershipRepo, _events, Principal(ownerId), ctx);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status200OK);
 
         (await _membershipRepo.GetRoleAsync(tenantId, memberId)).Should().Be("admin");
+    }
+
+    /// <summary>
+    /// Story 18-7 task 1: every successful role change appends a
+    /// <c>TENANT.MEMBER_ROLE_CHANGED.SUCCESS</c> event so the audit log
+    /// is complete. Tags must include caller + target ids; data must
+    /// include old + new role.
+    /// </summary>
+    [Test]
+    public async Task UpdateMemberRole_EmitsRoleChangedEvent_OnSuccess()
+    {
+        var (tenantId, ownerId, memberId) = await SeedTenantWithOwnerAndMember();
+        var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
+
+        await OrgEndpoints.UpdateMemberRole(
+            tenantId, memberId, new UpdateMemberRoleRequest("admin"),
+            _membershipRepo, _events, Principal(ownerId), ctx);
+
+        var rows = await _events.QueryAsync(tenantId, "TENANT.MEMBER_ROLE_CHANGED.SUCCESS", null, 10);
+        rows.Should().HaveCount(1);
+
+        var evt = rows[0];
+        evt.TenantId.Should().Be(tenantId);
+
+        // Tags carries tenantId + caller userId.
+        var tags = System.Text.Json.JsonDocument.Parse(evt.Tags).RootElement;
+        tags.GetProperty("tenantId").GetString().Should().Be(tenantId.ToString());
+        tags.GetProperty("userId").GetString().Should().Be(ownerId.ToString());
+
+        // Data carries the role-change payload (target + old + new).
+        var data = System.Text.Json.JsonDocument.Parse(evt.Data).RootElement;
+        data.GetProperty("targetUserId").GetString().Should().Be(memberId.ToString());
+        data.GetProperty("oldRole").GetString().Should().Be("member");
+        data.GetProperty("newRole").GetString().Should().Be("admin");
+    }
+
+    [Test]
+    public async Task UpdateMemberRole_DoesNotEmitEvent_OnRejection()
+    {
+        var (tenantId, ownerId, memberId) = await SeedTenantWithOwnerAndMember();
+        await _membershipRepo.UpdateRoleAsync(tenantId, memberId, TenantRoleHierarchy.Admin);
+        var ctx = HttpCtxWithRole(TenantRoleHierarchy.Admin);
+
+        // Admin tries to promote peer to owner — 403.
+        await OrgEndpoints.UpdateMemberRole(
+            tenantId, memberId, new UpdateMemberRoleRequest("owner"),
+            _membershipRepo, _events, Principal(memberId), ctx);
+
+        var rows = await _events.QueryAsync(tenantId, "TENANT.MEMBER_ROLE_CHANGED.SUCCESS", null, 10);
+        rows.Should().BeEmpty();
     }
 
     // ── RemoveMember (finding 013) ──────────────────────────────────────────

@@ -265,14 +265,18 @@ export class OpenRouterProvider implements IAIProvider {
 
       const toolCalls = choice?.message?.tool_calls;
       if (toolCalls) {
-        response.tool_calls = toolCalls.map((tc) => ({
-          id: tc.id,
-          type: tc.type,
-          function: {
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-          },
-        }));
+        // openai v6: tool_calls is a discriminated union of function and custom tool calls.
+        // We only support function tool calls — filter and narrow.
+        response.tool_calls = toolCalls
+          .filter((tc): tc is Extract<typeof tc, { type: 'function' }> => tc.type === 'function')
+          .map((tc) => ({
+            id: tc.id,
+            type: tc.type,
+            function: {
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            },
+          }));
       }
 
       if (request.metadata) {

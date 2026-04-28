@@ -1,22 +1,39 @@
+using Tamma.Data.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
 /// <summary>
-/// EF-backed persistence for the <see cref="QueuedTask"/> queue. Pure CRUD;
-/// all business policy (polling cadence, retry ceiling, handler dispatch)
-/// lives in <c>Tamma.Api.Services.TaskQueue</c>.
+/// EF-backed persistence for the per-tenant <see cref="QueuedTask"/>
+/// queue. Strictly tenant-scoped — every operation routes through
+/// <see cref="ITenantDbContextFactory"/> so the read/write hits the
+/// per-tenant DB. Platform-scope tasks (tenant provisioning, secret
+/// retire, GitHub orphan webhook) use
+/// <see cref="IPlatformQueuedTaskRepository"/> instead — see
+/// <c>.dev/decisions/story-28-1-design-calls.md</c> §5.
 ///
-/// <para>
-/// Ported from the deleted TypeScript <c>InMemoryTaskQueue</c> in
-/// <c>packages/api/src/services/in-memory-task-queue.ts</c>.
-/// </para>
+/// <para>During the Story 28-1 transition the per-tenant
+/// <c>queued_tasks</c> table physically still co-resides on the CP DB —
+/// PR D moves it to per-tenant DBs. Until then a tenant-bound DB
+/// context built by the factory still sees the same shared table; the
+/// split here is logical so the eventual physical move is mechanical.</para>
 /// </summary>
-public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
+public class QueuedTaskRepository(
+    ITenantDbContextFactory tenantDbFactory,
+    ControlPlaneDbContext cp) : IQueuedTaskRepository
 {
     public async Task<QueuedTask> EnqueueAsync(QueuedTask task, CancellationToken ct = default)
     {
+        if (task.TenantId is not Guid tid || tid == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "QueuedTaskRepository requires a non-empty TenantId. " +
+                "Platform-scope tasks (provisioning, retire, orphan " +
+                "webhook) must go through IPlatformQueuedTaskRepository.",
+                nameof(task));
+        }
+
         var now = DateTime.UtcNow;
         task.Status = "pending";
         task.RetryCount = 0;
@@ -24,56 +41,106 @@ public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
         task.CreatedAt = now;
         task.UpdatedAt = now;
 
+        await using var db = await tenantDbFactory.CreateAsync(tid, ct);
         db.QueuedTasks.Add(task);
         await db.SaveChangesAsync(ct);
         return task;
     }
 
-    public async Task<QueuedTask?> GetAsync(Guid id, CancellationToken ct = default)
-        => await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+    public async Task<QueuedTask?> GetAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — FindAsync keys on PK
+        // only. While the per-tenant queue physically still co-resides
+        // on the CP DB, tenant A's call could read tenant B's row.
+        // Predicate-based lookup makes the tenant id a hard guard.
+        return await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
+    }
 
     public async Task<List<QueuedTask>> ListPendingAsync(
-        Guid? tenantId, int limit, CancellationToken ct = default)
+        Guid tenantId, int limit, CancellationToken ct = default)
     {
-        var query = db.QueuedTasks.AsQueryable()
-            .Where(t => t.Status == "pending");
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
 
-        if (tenantId.HasValue)
-        {
-            var tid = tenantId.Value;
-            query = query.Where(t => t.TenantId == tid);
-        }
-
-        return await query
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        return await db.QueuedTasks
+            .Where(t => t.Status == "pending" && t.TenantId == tenantId)
             .OrderBy(t => t.CreatedAt)
             .Take(limit)
             .ToListAsync(ct);
     }
 
-    public async Task<QueuedTask?> MarkProcessingAsync(Guid id, CancellationToken ct = default)
+    public async Task<List<QueuedTask>> ListPendingFromAnyTenantAsync(
+        int batchSizePerTenant, CancellationToken ct = default)
     {
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        // Snapshot the active tenant set first. Cheap (single SELECT
+        // bounded by the tenants table) relative to the per-task handler
+        // dispatch this drain pass precedes.
+        var activeTenantIds = await cp.Tenants
+            .AsNoTracking()
+            .Where(t => t.DeletedAt == null)
+            .OrderBy(t => t.Id)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+
+        var aggregate = new List<QueuedTask>(capacity: activeTenantIds.Count * batchSizePerTenant);
+        foreach (var tid in activeTenantIds)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            try
+            {
+                var rows = await ListPendingAsync(tid, batchSizePerTenant, ct);
+                aggregate.AddRange(rows);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Tenant might be mid-deletion or have a transient
+                // connection failure; don't let one tenant's outage
+                // starve the rest. The caller logs and the next poll
+                // re-tries. Wave-4 review M2 — cooperative cancellation
+                // must propagate, not be swallowed as a "tenant outage".
+                continue;
+            }
+        }
+
+        return aggregate;
+    }
+
+    public async Task<QueuedTask?> MarkProcessingAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return null;
         if (task.Status != "pending") return null;
 
         var now = DateTime.UtcNow;
         task.Status = "processing";
-        task.ClaimedAt = now; // Audit finding 026 — drives the reaper.
+        task.ClaimedAt = now;
         task.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         return task;
     }
 
-    /// <summary>
-    /// Audit finding 026 — visibility-timeout reaper. Resets rows stuck in
-    /// <c>processing</c> for longer than <paramref name="visibilityTimeout"/>
-    /// back to <c>pending</c> (or <c>failed</c> when retry ceiling reached)
-    /// so a worker that died mid-task does not leave zombies forever.
-    /// Returns the number of rows reaped.
-    /// </summary>
     public async Task<int> ReapStaleProcessingAsync(
-        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default)
+        Guid tenantId, TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default)
     {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
         var threshold = DateTime.UtcNow - visibilityTimeout;
         var stale = await db.QueuedTasks
             .Where(t => t.Status == "processing"
@@ -103,9 +170,47 @@ public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
         return stale.Count;
     }
 
-    public async Task MarkCompletedAsync(Guid id, CancellationToken ct = default)
+    public async Task<int> ReapStaleProcessingAcrossAllTenantsAsync(
+        TimeSpan visibilityTimeout, int maxRetries, CancellationToken ct = default)
     {
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        var activeTenantIds = await cp.Tenants
+            .AsNoTracking()
+            .Where(t => t.DeletedAt == null)
+            .OrderBy(t => t.Id)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+
+        var total = 0;
+        foreach (var tid in activeTenantIds)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            try
+            {
+                total += await ReapStaleProcessingAsync(tid, visibilityTimeout, maxRetries, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Don't let one tenant's outage starve the reaper for
+                // the rest; the caller logs and the next poll re-tries.
+                // Wave-4 review M2 — cooperative cancellation must
+                // propagate, not be swallowed as a "tenant outage".
+                continue;
+            }
+        }
+        return total;
+    }
+
+    public async Task MarkCompletedAsync(Guid tenantId, Guid id, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return;
 
         task.Status = "completed";
@@ -114,9 +219,16 @@ public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task MarkFailedAsync(Guid id, string error, CancellationToken ct = default)
+    public async Task MarkFailedAsync(Guid tenantId, Guid id, string error, CancellationToken ct = default)
     {
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return;
 
         task.Status = "failed";
@@ -126,9 +238,16 @@ public class QueuedTaskRepository(TammaDbContext db) : IQueuedTaskRepository
     }
 
     public async Task<QueuedTask?> IncrementRetryAndRequeueAsync(
-        Guid id, string error, CancellationToken ct = default)
+        Guid tenantId, Guid id, string error, CancellationToken ct = default)
     {
-        var task = await db.QueuedTasks.FindAsync(new object[] { id }, ct);
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+        // Story 28-1 PR B fix (wave-4 review H2) — see GetAsync.
+        var task = await db.QueuedTasks
+            .Where(t => t.Id == id && t.TenantId == tenantId)
+            .FirstOrDefaultAsync(ct);
         if (task is null) return null;
 
         task.RetryCount += 1;

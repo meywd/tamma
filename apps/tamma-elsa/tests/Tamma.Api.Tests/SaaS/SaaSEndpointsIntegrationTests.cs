@@ -5,10 +5,12 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NUnit.Framework;
 using Tamma.Api.Extensions;
 using Tamma.Api.Services.SaaS;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Tests.SaaS;
@@ -34,6 +36,17 @@ public class SaaSEndpointsIntegrationTests
 #pragma warning disable NUnit1032 // shared by all tests; disposed by OneTimeTearDown
     private static CannedHandler _activeHandler = new(HttpStatusCode.OK, "{}");
 #pragma warning restore NUnit1032
+    /// <summary>
+    /// Story 28-1 PR D — workflow_instances + domain_events moved to the
+    /// per-tenant DB; <see cref="WorkflowRepository.UpdateInstanceAsync"/>
+    /// now requires an ambient tenant id. Dev-mode permissive auth doesn't
+    /// stamp a principal, so the middleware never resolves a tenant from
+    /// claims/membership. We replace the scoped <see cref="ITenantContext"/>
+    /// with a fixed-tenant stub used by every workflow seed + endpoint
+    /// invocation in this fixture.
+    /// </summary>
+    private static readonly Guid TestTenantId =
+        Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
 
     [SetUp]
     public async Task SetUp()
@@ -75,9 +88,12 @@ public class SaaSEndpointsIntegrationTests
         json.GetProperty("usage").GetProperty("totalTokens").GetInt32().Should().Be(15);
 
         // A diagnostic row must have been persisted.
+        // Story 28-1 PR D — provider_diagnostics live on the tenant DB.
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var diagnosticCount = await db.ProviderDiagnostics
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
+        var diagnosticCount = await tdb.ProviderDiagnostics
             .IgnoreQueryFilters()
             .CountAsync(d => d.ProviderKey == "anthropic-claude");
         diagnosticCount.Should().Be(1);
@@ -110,9 +126,12 @@ public class SaaSEndpointsIntegrationTests
         });
         resp.StatusCode.Should().Be(HttpStatusCode.BadGateway);
 
+        // Story 28-1 PR D — provider_diagnostics live on the tenant DB.
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var failures = await db.ProviderDiagnostics
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
+        var failures = await tdb.ProviderDiagnostics
             .IgnoreQueryFilters()
             .Where(d => !d.Success)
             .CountAsync();
@@ -142,8 +161,11 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var instance = await db.WorkflowInstances.IgnoreQueryFilters()
+        // Story 28-1 PR D — workflow_instances live on the tenant DB.
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
+        var instance = await tdb.WorkflowInstances.IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == instanceId);
         instance.Should().NotBeNull();
         instance!.Status.Should().Be("running");
@@ -190,8 +212,12 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var instance = await db.WorkflowInstances.IgnoreQueryFilters()
+        // Story 28-1 PR D — workflow_instances + domain_events live on
+        // the tenant DB.
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
+        var instance = await tdb.WorkflowInstances.IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == instanceId);
         instance.Should().NotBeNull();
         instance!.Status.Should().Be("completed");
@@ -200,7 +226,7 @@ public class SaaSEndpointsIntegrationTests
         payload.GetProperty("prNumber").GetInt32().Should().Be(42);
         payload.GetProperty("duration").GetInt64().Should().Be(1234);
 
-        var events = await db.DomainEvents.IgnoreQueryFilters()
+        var events = await tdb.DomainEvents.IgnoreQueryFilters()
             .Where(e => e.Type == "WORKFLOW.COMPLETED")
             .ToListAsync();
         events.Should().ContainSingle();
@@ -224,8 +250,11 @@ public class SaaSEndpointsIntegrationTests
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
-        var events = await db.DomainEvents.IgnoreQueryFilters()
+        // Story 28-1 PR D — domain_events live on the tenant DB.
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
+        var events = await tdb.DomainEvents.IgnoreQueryFilters()
             .Where(e => e.Type == "WORKFLOW.FAILED")
             .ToListAsync();
         events.Should().ContainSingle();
@@ -258,7 +287,7 @@ public class SaaSEndpointsIntegrationTests
     [Test]
     public async Task RotateInstallationKey_ThroughService_HappyPath_PersistsAndEmits()
     {
-        var (userId, _, installationEntityId) = await SeedInstallationWithOwnerAsync();
+        var (userId, ownerTenantId, installationEntityId) = await SeedInstallationWithOwnerAsync();
 
         // Use the shared factory that registers AddSaaSServices so the scoped
         // service resolves exactly as it would behind the HTTP endpoint.
@@ -270,12 +299,18 @@ public class SaaSEndpointsIntegrationTests
         result.Success.Should().BeTrue();
         result.PlaintextKey.Should().StartWith("tamma_sk_");
 
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         (await db.ApiKeys.IgnoreQueryFilters()
             .CountAsync(k => k.OwnerId == installationEntityId.ToString()))
             .Should().Be(1);
 
-        (await db.DomainEvents.IgnoreQueryFilters()
+        // Story 28-1 PR D — domain_events live on the tenant DB. The
+        // RotateAsync path emits API_KEY.ROTATED tagged with the
+        // installation's owner tenant id.
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(ownerTenantId);
+        (await tdb.DomainEvents.IgnoreQueryFilters()
             .CountAsync(e => e.Type == "API_KEY.ROTATED"))
             .Should().Be(1);
     }
@@ -338,6 +373,17 @@ public class SaaSEndpointsIntegrationTests
                     // swap its canned response without rebuilding the host.
                     services.AddHttpClient("anthropic")
                         .ConfigurePrimaryHttpMessageHandler(() => new DelegatingToCurrent());
+
+                    // Story 28-1 PR D — pin TenantContext to the test tenant
+                    // so WorkflowRepository (which now requires an ambient
+                    // tenant id) resolves to the seeded workflow instance.
+                    services.RemoveAll<ITenantContext>();
+                    services.AddScoped<ITenantContext>(_ =>
+                    {
+                        var ctx = new TenantContext();
+                        ctx.SetTenantId(TestTenantId);
+                        return ctx;
+                    });
                 });
             });
         }
@@ -347,27 +393,53 @@ public class SaaSEndpointsIntegrationTests
     private static async Task<(Guid DefinitionId, Guid InstanceId)> SeedWorkflowInstanceAsync()
     {
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
+        // Make sure the pinned tenant exists on CP — TenantContextMiddleware
+        // doesn't run for dev-mode permissive auth, but other code paths
+        // (analytics fan-outs, audit) read CP tenants for the active set.
+        var tenantExists = await cp.Tenants.IgnoreQueryFilters()
+            .AnyAsync(t => t.Id == TestTenantId);
+        if (!tenantExists)
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = TestTenantId,
+                Name = "saas-test",
+                Slug = $"saas-{TestTenantId:N}",
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await cp.SaveChangesAsync();
+        }
+
+        // Story 28-1 PR D — workflow_definitions + workflow_instances live
+        // on the tenant DB now. Seed via ITenantDbContextFactory.
+        var factory = scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(TestTenantId);
         var def = new WorkflowDefinition
         {
             Id = Guid.NewGuid(),
             Name = "test-def",
             Description = null,
             Steps = "[]",
-            Version = 1
+            Version = 1,
+            TenantId = TestTenantId,
         };
-        db.WorkflowDefinitions.Add(def);
+        tdb.WorkflowDefinitions.Add(def);
 
         var inst = new WorkflowInstance
         {
             Id = Guid.NewGuid(),
             DefinitionId = def.Id,
             Status = "pending",
-            Variables = "{\"seeded\":true}"
+            Variables = "{\"seeded\":true}",
+            TenantId = TestTenantId,
         };
-        db.WorkflowInstances.Add(inst);
-        await db.SaveChangesAsync();
+        tdb.WorkflowInstances.Add(inst);
+        await tdb.SaveChangesAsync();
 
         return (def.Id, inst.Id);
     }
@@ -375,7 +447,7 @@ public class SaaSEndpointsIntegrationTests
     private static async Task<(Guid UserId, Guid TenantId, Guid InstallationEntityId)> SeedInstallationWithOwnerAsync()
     {
         using var scope = SharedFactory().Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();

@@ -129,7 +129,7 @@ export default function MarkdownPage({ path, prefix }: Props) {
   // Load manifest
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => setManifest(data))
       .catch(() => {});
   }, []);
@@ -137,11 +137,33 @@ export default function MarkdownPage({ path, prefix }: Props) {
   useEffect(() => {
     setLoading(true);
     setError(false);
-    fetch(`/content/${resolvedPath}`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Not found');
-        return res.text();
-      })
+    // Try `${path}.md` first; if the server returns the SPA HTML fallback
+    // (status 200 but body is index.html), or a 404, fall back to
+    // `${path}/index.md`. This handles directory-style URLs like
+    // /stories/epic-28 where the overview lives at stories/epic-28/index.md
+    // (sync-content.ts emits /stories/epic-N as a manifest path per epic dir).
+    const looksLikeMarkdown = (text: string): boolean => {
+      const trimmed = text.trimStart().toLowerCase();
+      return !trimmed.startsWith('<!doctype') && !trimmed.startsWith('<html');
+    };
+    const tryFetch = async (): Promise<string> => {
+      const res = await fetch(`/content/${resolvedPath}`);
+      if (res.ok) {
+        const text = await res.text();
+        if (looksLikeMarkdown(text)) return text;
+      }
+      // Fall back to index.md under a directory of the same name
+      const dirPath = resolvedPath.replace(/\.md$/, '/index.md');
+      if (dirPath !== resolvedPath) {
+        const fallback = await fetch(`/content/${dirPath}`);
+        if (fallback.ok) {
+          const text = await fallback.text();
+          if (looksLikeMarkdown(text)) return text;
+        }
+      }
+      throw new Error('Not found');
+    };
+    tryFetch()
       .then((text) => {
         // Extract title from frontmatter
         const fmMatch = text.match(/^---\s*\n[\s\S]*?title:\s*"?([^"\n]+)"?[\s\S]*?---\s*\n/);

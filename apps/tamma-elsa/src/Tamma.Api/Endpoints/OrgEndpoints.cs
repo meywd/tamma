@@ -6,6 +6,7 @@ using Tamma.Api.Auth;
 using Tamma.Api.Authorization;
 using Tamma.Api.Dtos.Orgs;
 using Tamma.Api.Services.Email;
+using Tamma.Api.Services.RateLimit;
 using Tamma.Api.Validation;
 using Tamma.Data;
 using Tamma.Data.Entities;
@@ -153,6 +154,7 @@ public static class OrgEndpoints
         Guid userId,
         UpdateMemberRoleRequest req,
         ITenantMembershipRepository membershipRepo,
+        IEventRepository events,
         ClaimsPrincipal principal,
         HttpContext httpContext)
     {
@@ -204,6 +206,18 @@ public static class OrgEndpoints
         }
 
         await membershipRepo.UpdateRoleAsync(tenantId, userId, req.Role);
+
+        // Story 18-7 task 1: emit role-changed event so the tenant audit
+        // log shows every role mutation. Same fire-and-forget shape used
+        // by every other tenant emitter — failure does not unwind the role
+        // change (which is the user-visible side effect).
+        await EmitTenantEvent(events, "TENANT.MEMBER_ROLE_CHANGED.SUCCESS", tenantId, callerId.Value, new
+        {
+            targetUserId = userId.ToString(),
+            oldRole = targetRole,
+            newRole = req.Role,
+        });
+
         return Results.Ok(new { message = "Role updated", tenantId, userId, role = req.Role });
     }
 
@@ -384,6 +398,161 @@ public static class OrgEndpoints
         return Results.Ok(new { ok = true });
     }
 
+    /// <summary>
+    /// Story 18-7 task 3 — extend a pending invite's expiry by 72 h and
+    /// re-dispatch the invite email. Token + token_hash are NOT rotated:
+    /// the invite-id stays stable and the original accept link keeps
+    /// working (UI invariant per brief AC §2). Rate-limited to 3 calls
+    /// per invite per hour via <see cref="IRateLimitService"/>.
+    /// </summary>
+    public static async Task<IResult> ResendInvite(
+        Guid tenantId,
+        Guid inviteId,
+        ITenantRepository tenantRepo,
+        IInviteRepository inviteRepo,
+        IEmailService emailService,
+        IRateLimitService rateLimits,
+        IEventRepository events,
+        ILoggerFactory loggerFactory,
+        IConfiguration config,
+        ClaimsPrincipal principal,
+        HttpContext httpContext)
+    {
+        var callerId = ResolveUserId(principal);
+        if (callerId is null) return Results.Unauthorized();
+
+        var requesterRole = httpContext.Items[RequireTenantMembershipFilter.TenantRoleItemKey] as string;
+        if (requesterRole is null)
+            return Results.Json(new { error = "Not a member of this organization" }, statusCode: 403);
+        if (!TenantRoleHierarchy.IsAtLeast(requesterRole, TenantRoleHierarchy.Admin))
+            return Results.Json(new { error = "Requires admin role or higher" }, statusCode: 403);
+
+        // Tenant-scoped lookup — guards against id-spoofing across tenants.
+        var invite = await inviteRepo.GetByIdScopedAsync(tenantId, inviteId);
+        if (invite is null)
+            return Results.NotFound(new { error = "Invite not found" });
+
+        if (invite.AcceptedAt is not null)
+            return Results.BadRequest(new { error = "Invite has already been accepted" });
+        if (invite.ExpiresAt < DateTime.UtcNow)
+            return Results.BadRequest(new { error = "Invite has expired" });
+
+        // Rate limit: 3 resends per invite per hour. Same scope/key style
+        // used by AuthEndpoints.ResendVerification.
+        var rateKey = $"{tenantId}:{inviteId}";
+        if (rateLimits.IsLimited("resend-tenant-invite", rateKey))
+        {
+            return Results.Json(new
+            {
+                error = "rate_limited",
+                message = "Too many resends. Try again later.",
+            }, statusCode: StatusCodes.Status429TooManyRequests);
+        }
+        rateLimits.Record("resend-tenant-invite", rateKey);
+
+        var newExpiresAt = DateTime.UtcNow.AddHours(72);
+        await inviteRepo.ExtendExpiryAsync(invite.Id, newExpiresAt);
+
+        var tenant = await tenantRepo.GetByIdAsync(tenantId);
+        var tenantName = tenant?.Name ?? "your organization";
+
+        // Per story brief AC §2: do NOT mint a new token. The original raw
+        // token is gone (only the hash is stored), so the resend email is
+        // a reminder pointing back to the dashboard accept route. The
+        // dashboard's invite-accept page resolves the user's pending
+        // invites by email + tenant id and lets them complete signup
+        // without re-entering the raw token. Until that page exists, the
+        // simplest no-leak fallback is to embed only the invite id —
+        // attempting to derive the original raw token from the hash is
+        // not cryptographically possible.
+        var dashboardBase = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        var pendingUrl = $"{dashboardBase}/invites/pending?inviteId={Uri.EscapeDataString(invite.Id.ToString())}";
+
+        var inviterName = principal.FindFirst("name")?.Value
+            ?? principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? "A teammate";
+
+        var logger = loggerFactory.CreateLogger("OrgEndpoints.ResendInvite");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await emailService.SendAsync(
+                    EmailTemplates.TenantInviteEmail(
+                        invite.Email ?? string.Empty, tenantName, inviterName, pendingUrl, invite.Role) with
+                    {
+                        TenantId = tenantId,
+                        UserId = callerId,
+                    });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to resend tenant invite email for invite {InviteId}", invite.Id);
+            }
+        });
+
+        await EmitTenantEvent(events, "TENANT.MEMBER_INVITE_RESENT.SUCCESS", tenantId, callerId.Value, new
+        {
+            inviteId = invite.Id.ToString(),
+            email = invite.Email,
+            role = invite.Role,
+            newExpiresAt,
+        });
+
+        return Results.Ok(new { id = invite.Id, expiresAt = newExpiresAt });
+    }
+
+    /// <summary>
+    /// Story 18-7 task 2 — tenant-scoped audit-log read. Returns events
+    /// whose <c>TenantId</c> matches the path tenant, most-recent first,
+    /// paginated. <see cref="RequireTenantMembershipFilter"/> already
+    /// enforces caller membership; this handler additionally requires
+    /// admin+. The event store's global query filter provides defence
+    /// in depth (cross-tenant rows are rejected even if the explicit
+    /// filter regresses).
+    /// </summary>
+    public static async Task<IResult> ListTenantAudit(
+        Guid tenantId,
+        IEventRepository events,
+        ITenantContext tenantContext,
+        HttpContext httpContext,
+        int? limit,
+        int? offset,
+        string? type)
+    {
+        var requesterRole = httpContext.Items[RequireTenantMembershipFilter.TenantRoleItemKey] as string;
+        if (requesterRole is null)
+            return Results.Json(new { error = "Not a member of this organization" }, statusCode: 403);
+        if (!TenantRoleHierarchy.IsAtLeast(requesterRole, TenantRoleHierarchy.Admin))
+            return Results.Json(new { error = "Requires admin role or higher" }, statusCode: 403);
+
+        var clampedLimit = Math.Clamp(limit ?? 50, 1, 200);
+        var clampedOffset = Math.Max(offset ?? 0, 0);
+
+        // Set ambient tenant context so the global query filter on
+        // domain_events triggers the defence-in-depth path. Idempotent —
+        // RequireTenantMembershipFilter usually sets this too, but be
+        // explicit so this handler is safe when called in isolation.
+        tenantContext.SetTenantId(tenantId);
+
+        var (rows, total) = await events.ListByTenantAsync(tenantId, type, clampedLimit, clampedOffset);
+
+        var projected = rows.Select(e => new AuditEventResponse(
+            e.Id,
+            e.Type,
+            e.CreatedAt,
+            e.Tags,
+            e.Data)).ToList();
+
+        return Results.Ok(new
+        {
+            events = projected,
+            total,
+            limit = clampedLimit,
+            offset = clampedOffset,
+        });
+    }
+
     public static async Task<IResult> AcceptInvite(
         AcceptInviteRequest req,
         IInviteRepository inviteRepo,
@@ -447,41 +616,17 @@ public static class OrgEndpoints
         });
     }
 
-    public static async Task<IResult> SwitchOrg(
-        SwitchOrgRequest req,
-        ITenantMembershipRepository membershipRepo,
-        IUserRepository userRepo,
-        IJwtService jwtService,
-        ISessionCookieWriter cookieWriter,
-        ClaimsPrincipal principal,
-        HttpContext httpContext)
-    {
-        var userId = ResolveUserId(principal);
-        if (userId is null) return Results.Unauthorized();
-
-        var role = await membershipRepo.GetRoleAsync(req.TenantId, userId.Value);
-        if (role is null)
-            return Results.Json(new { error = "Not a member of the target organization" }, statusCode: 403);
-
-        var user = await userRepo.GetByIdAsync(userId.Value);
-        if (user is null)
-            return Results.Json(new { error = "User not found" }, statusCode: 401);
-
-        await userRepo.UpdateActiveTenantAsync(userId.Value, req.TenantId);
-        var accessToken = jwtService.GenerateAccessToken(user, req.TenantId, role);
-
-        // Finding 018: write the tamma_session cookie so the dashboard's
-        // next request automatically uses the new tenant.
-        cookieWriter.WriteSession(httpContext, accessToken);
-
-        return Results.Ok(new
-        {
-            accessToken,
-            tenantId = req.TenantId,
-            role,
-            expiresIn = 900,
-        });
-    }
+    // Story 28-9: the original `OrgEndpoints.SwitchOrg` (Story 18-3) called
+    // `IUserRepository.UpdateActiveTenantAsync` directly, which at runtime
+    // triggers the Phase-2 `prevent_tenant_id_change` Postgres trigger and
+    // fails for every user whose personal tenant is already set (uuid→uuid
+    // update path is blocked). The canonical handler now lives at
+    // `AuthEndpoints.SwitchOrg` (POST /api/v1/auth/switch-org), which stashes
+    // the runtime active tenant in `users.Settings.activeTenantId` JSON —
+    // avoiding the trigger — and additionally rotates the refresh token.
+    // The method and its route registration have both been deleted; the old
+    // path `POST /api/v1/orgs/switch-org` now 404s (covered by
+    // `Tamma.Api.Tests.Orgs.OrgSwitchOrgRoute404Tests`).
 
     public static async Task<IResult> ListTenants(
         ITenantRepository tenantRepo,
@@ -509,7 +654,7 @@ public static class OrgEndpoints
     public static async Task<IResult> TransferOwnership(
         Guid tenantId,
         TransferOwnershipRequest req,
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IEventRepository events,
@@ -567,7 +712,7 @@ public static class OrgEndpoints
 
     public static async Task<IResult> DeleteOrg(
         Guid tenantId,
-        TammaDbContext db,
+        ControlPlaneDbContext db,
         ITenantRepository tenantRepo,
         ITenantMembershipRepository membershipRepo,
         IInviteRepository inviteRepo,

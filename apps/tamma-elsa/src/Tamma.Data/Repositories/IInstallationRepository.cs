@@ -46,4 +46,13 @@ public interface IInstallationRepository
     /// matches; the caller treats that as 503 <c>github_client_not_configured</c>.
     /// </summary>
     Task<GitHubInstallation?> GetByRepoFullNameAsync(string repoFullName);
+
+    /// <summary>
+    /// Story 18-4: list every installation linked to the given tenant
+    /// (read-only). Returns rows with their <c>Repos</c> collection so the
+    /// onboarding wizard can show the connected GitHub orgs + their repo
+    /// counts in a single round trip. Suspended rows are included so the UI
+    /// can render a banner asking the user to re-enable the install on GitHub.
+    /// </summary>
+    Task<List<GitHubInstallation>> ListByTenantAsync(Guid tenantId);
 }

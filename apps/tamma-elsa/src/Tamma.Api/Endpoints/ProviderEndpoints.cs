@@ -172,6 +172,12 @@ public static class ProviderEndpoints
         });
     }
 
+    /// <summary>
+    /// Resolve a provider chain for the caller's tenant (or an explicit
+    /// <c>accountId</c> override) given a role / action pair. Story 9-5 —
+    /// returns ordered entries with health and budget status per entry plus
+    /// the recommended first-available provider.
+    /// </summary>
     public static async Task<IResult> ResolveChain(
         ResolveChainRequest req,
         [FromServices] IProviderChainResolver resolver,
@@ -182,19 +188,38 @@ public static class ProviderEndpoints
             return Results.BadRequest(new { error = "role and action are required" });
         }
 
-        var result = await resolver.ResolveAsync(tc.TenantId, req.Role, req.Action);
+        // Body-supplied accountId is opt-in and must be a GUID; otherwise we
+        // fall back to the ambient tenant. Bad GUIDs return 400 instead of
+        // silently using the tenant — surfaces the typo to the caller.
+        Guid? accountId = null;
+        if (!string.IsNullOrWhiteSpace(req.AccountId))
+        {
+            if (!Guid.TryParse(req.AccountId, out var parsed))
+            {
+                return Results.BadRequest(new { error = "accountId must be a GUID." });
+            }
+            accountId = parsed;
+        }
+
+        var options = new ChainResolveOptions(AccountId: accountId);
+        var result = await resolver.ResolveAsync(tc.TenantId, req.Role, req.Action, options);
+
+        var orderedDtos = result.Ordered
+            .Select(MapEntryToDto)
+            .ToList();
+        var skippedDtos = result.Skipped
+            .Select(MapEntryToDto)
+            .ToList();
+
         if (!result.HasCandidates)
         {
             return Results.Ok(new
             {
                 ordered = Array.Empty<object>(),
-                skipped = result.Skipped.Select(e => new
-                {
-                    provider = e.Provider.Provider,
-                    model = e.Provider.Model,
-                    key = e.Provider.Key,
-                    reason = e.Reason.ToString(),
-                }),
+                entries = orderedDtos,
+                skipped = skippedDtos,
+                recommendedProvider = (string?)null,
+                allExhausted = true,
                 error = result.ErrorCode,
                 message = result.ErrorMessage,
             });
@@ -202,22 +227,37 @@ public static class ProviderEndpoints
 
         return Results.Ok(new
         {
-            ordered = result.Ordered.Select(e => new
-            {
-                provider = e.Provider.Provider,
-                model = e.Provider.Model,
-                key = e.Provider.Key,
-                reason = e.Reason.ToString(),
-            }),
-            skipped = result.Skipped.Select(e => new
-            {
-                provider = e.Provider.Provider,
-                model = e.Provider.Model,
-                key = e.Provider.Key,
-                reason = e.Reason.ToString(),
-            }),
+            // `ordered` and `entries` are aliases — `entries` matches the
+            // Story 9-5 spec, `ordered` is preserved for the existing TS /
+            // C# integration tests.
+            ordered = orderedDtos,
+            entries = orderedDtos,
+            skipped = skippedDtos,
+            recommendedProvider = result.RecommendedProvider,
+            allExhausted = result.AllExhausted,
         });
     }
+
+    /// <summary>
+    /// Project a <see cref="ChainEntry"/> into the wire DTO. Returned shape
+    /// mirrors the Story 9-5 spec: <c>provider</c>, <c>model</c>, <c>key</c>,
+    /// <c>reason</c>, <c>healthy</c>, <c>circuitOpen</c>,
+    /// <c>circuitOpenUntil</c>, <c>budgetAllowed</c>, <c>budgetSpent</c>,
+    /// <c>recommended</c>.
+    /// </summary>
+    private static object MapEntryToDto(ChainEntry e) => new
+    {
+        provider = e.Provider.Provider,
+        model = e.Provider.Model,
+        key = e.Provider.Key,
+        reason = e.Reason.ToString(),
+        healthy = e.Healthy,
+        circuitOpen = e.CircuitOpen,
+        circuitOpenUntil = e.CircuitOpenUntil,
+        budgetAllowed = e.BudgetAllowed,
+        budgetSpent = e.BudgetSpent,
+        recommended = e.Recommended,
+    };
 
     private static string MapLegacyStatus(CircuitBreakerState state) => state switch
     {
@@ -610,8 +650,22 @@ public static class ProviderEndpoints
     }
 }
 
-/// <summary>Request body for <c>POST /api/providers/chain/resolve</c>.</summary>
-public sealed record ResolveChainRequest(string Role, string Action);
+/// <summary>
+/// Request body for <c>POST /api/providers/chain/resolve</c>. Story 9-5 added
+/// the optional <see cref="AccountId"/> override; when omitted the resolver
+/// uses the ambient <see cref="ITenantContext.TenantId"/> for budget lookup.
+/// </summary>
+/// <param name="Role">Agent role (e.g. <c>developer</c>, <c>tester</c>).</param>
+/// <param name="Action">Action context (e.g. <c>code_generation</c>, <c>test</c>).</param>
+/// <param name="AccountId">
+/// Optional GUID overriding which account's budget is consulted. Useful for
+/// admin tools that resolve chains on behalf of another tenant. Bad input
+/// yields <c>400 Bad Request</c>.
+/// </param>
+public sealed record ResolveChainRequest(
+    string Role,
+    string Action,
+    string? AccountId = null);
 
 /// <summary>
 /// Request body for <c>PUT /api/providers/diagnostics/budget/{accountId}</c>.

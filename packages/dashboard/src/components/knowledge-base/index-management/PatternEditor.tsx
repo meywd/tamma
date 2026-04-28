@@ -4,7 +4,7 @@
  * Inline editor for glob include/exclude patterns with add/remove controls.
  */
 
-import React, { useState } from 'react';
+import React, { useState, type JSX } from 'react';
 
 export interface PatternEditorProps {
   label: string;

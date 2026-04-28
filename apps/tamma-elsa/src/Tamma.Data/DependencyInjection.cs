@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Tamma.Data.Interceptors;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Npgsql;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Data;
@@ -9,95 +11,99 @@ namespace Tamma.Data;
 public static class DependencyInjection
 {
     /// <summary>
-    /// Registers the dual-DbContext architecture introduced in Phase-3:
+    /// Registers the Epic 28 isolation model:
     /// <list type="bullet">
-    ///   <item><description><see cref="TammaDbContext"/> — admin connection.
-    ///     Uses the superuser-equivalent runtime role, skips RLS, carries the
-    ///     permissive (null-tenant = all rows) query filter shape so
-    ///     background services (<c>TaskQueueProcessor</c>,
-    ///     <c>OutboxSmtpSender</c>, <c>WorkflowSyncService</c>,
-    ///     <c>EngineRegistryHeartbeatService</c>,
-    ///     <c>ProviderSessionCleanupService</c>) and migrations keep working
-    ///     without manual escape hatches at every call site.</description></item>
-    ///   <item><description><see cref="TammaAppDbContext"/> — app connection.
-    ///     Connects as the <c>tamma_app</c> role (Phase-2 migration) so RLS
-    ///     policies are enforced, the <c>TenantContextInterceptor</c> binds
-    ///     <c>app.current_tenant_id</c> on connection open, and the EF query
-    ///     filter is fail-closed. This is the context per-request endpoint
-    ///     handlers should inject.</description></item>
+    ///   <item><description><see cref="ControlPlaneDbContext"/> — owns the
+    ///     CP tables (users, tenants, memberships, invites, API keys,
+    ///     GitHub installations, auth tokens, mentorship schema).
+    ///     Registered scoped; migrations run against this context.
+    ///     </description></item>
+    ///   <item><description><see cref="ITenantDbContextFactory"/> — creates
+    ///     a <see cref="TenantDbContext"/> per tenant per call. Every
+    ///     tenant-scoped repository depends on this factory and passes the
+    ///     tenant id explicitly (or resolves it from
+    ///     <see cref="ITenantContext"/> for per-request scopes).
+    ///     </description></item>
     /// </list>
     ///
     /// <para>Connection strings:</para>
     /// <list type="bullet">
-    ///   <item><description><c>ConnectionStrings:TammaDb</c> —
-    ///     admin connection. Falls back to
-    ///     <c>ConnectionStrings:DefaultConnection</c> for dev/backward
-    ///     compat, then to the single <paramref name="adminConnectionString"/>
-    ///     arg if neither is configured.</description></item>
-    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — app
-    ///     connection. Falls back to the admin connection string with a
-    ///     warning (dev-mode only). Production must set this explicitly.
+    ///   <item><description><c>ConnectionStrings:TammaDb</c> — admin / CP
+    ///     connection. Falls back to <c>DefaultConnection</c> for dev.
     ///     </description></item>
+    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — per-tenant
+    ///     connection. Falls back to the admin connection with a warning.
+    ///     Replaced by per-tenant resolver in Story 28-4.</description></item>
     /// </list>
-    ///
-    /// <para>Closes port-gap findings orgs/002 (EF filter permissive on null
-    /// tenant) and orgs/004 (<c>withTenantContext</c> SET LOCAL gone).</para>
     /// </summary>
     public static IServiceCollection AddTammaData(
         this IServiceCollection services,
         string adminConnectionString,
-        string? appConnectionString = null)
+        string? appConnectionString = null,
+        string? controlPlaneConnectionString = null)
     {
         services.AddScoped<ITenantContext, TenantContext>();
 
-        // Interceptor that runs SELECT set_config('app.current_tenant_id', ...)
-        // on connection open so the Phase-2 RLS policies evaluate against the
-        // current request's tenant. Registered as scoped because it reads
-        // ITenantContext (scoped). EF Core's internal service provider
-        // resolves DbContextOptions extensions via the application service
-        // provider, so the scoped binding is correctly honored per-request.
-        services.AddScoped<TenantContextInterceptor>();
-
-        // Admin / platform-root context. Registered first so migrations run
-        // against it at startup (see Program.cs). Uses the admin connection
-        // (superuser-equivalent) and therefore bypasses RLS. The EF query
-        // filter stays permissive (null tenant → all rows) on this context
-        // so background services (TaskQueueProcessor, OutboxSmtpSender) and
-        // migrations continue to work unchanged.
+        // Control-plane context (migrations-owning). The factory is the
+        // canonical seam — every scoped <see cref="ControlPlaneDbContext"/>
+        // is created from <see cref="IDbContextFactory{TContext}"/>.
         //
-        // The interceptor is STILL attached so:
-        //   (a) raw-SQL queries that touch current_setting() see the right
-        //       tenant when a request scope is active;
-        //   (b) when individual repositories migrate to the app-role
-        //       context, the binding is already plumbed end-to-end and we
-        //       only need to flip the injected context type.
-        services.AddDbContext<TammaDbContext>((sp, options) =>
+        // Two callers can wire this:
+        //
+        // <list type="bullet">
+        //   <item><description>The default (here) registers a plain
+        //     non-pooled <c>AddDbContextFactory&lt;ControlPlaneDbContext&gt;</c>.
+        //     Used in tests, dev, and any composition that hasn't opted
+        //     into the per-tenant connection pool.</description></item>
+        //   <item><description>Production wires
+        //     <c>AddTenantConnectionPool</c> after this method, which
+        //     calls <c>RemoveAll</c> on the factory + options
+        //     registrations and replaces them with the pooled factory
+        //     from <c>AddPooledDbContextFactory</c>.</description></item>
+        // </list>
+        //
+        // The scoped <see cref="ControlPlaneDbContext"/> registration
+        // resolves a context from the factory on demand. Consumers
+        // (auth handlers, admin endpoints, CP repos) keep the same DI
+        // shape — they still take a scoped CP context — but the
+        // underlying instance comes from the pool when one is wired.
+        // (Round-2 review H10: removed the parallel
+        // <c>AddDbContext&lt;ControlPlaneDbContext&gt;</c> registration
+        // that conflicted with the pooled factory.)
+        services.AddDbContextFactory<ControlPlaneDbContext>(options =>
         {
             options.UseNpgsql(adminConnectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
-            options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
         });
+        services.AddScoped(sp =>
+            sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
+                .CreateDbContext());
 
-        // App-role context. If no dedicated connection string is supplied
-        // (e.g. dev laptop hitting a single-role local Postgres) we silently
-        // fall back to the admin connection. Production must override this
-        // via ConnectionStrings:TammaAppDb. The TenantContextInterceptor is
-        // installed so the SET app.current_tenant_id plumbing exercises
-        // RLS as soon as the connection is tamma_app.
-        services.AddDbContext<TammaAppDbContext>((sp, options) =>
+        // Factory for per-tenant contexts. Uses the app connection when
+        // provided, else falls back to the admin connection.
+        var tenantConnectionString = string.IsNullOrWhiteSpace(appConnectionString)
+            ? adminConnectionString
+            : appConnectionString;
+        services.AddSingleton<ITenantDbContextFactory>(
+            _ => new TenantDbContextFactory(tenantConnectionString));
+
+        // Story 28-3 contract: every consumer of per-tenant connection
+        // pooling depends on ITenantConnectionResolver, not directly on
+        // a connection string. Wave A.5 post-merge restores the stub
+        // resolver so KekRotationCoordinator (Story 28-12) and the
+        // LRU pool cache (Story 28-4) have an implementation to wire
+        // against until the real per-tenant pool resolver replaces it.
+        //
+        // TryAddSingleton lets a higher-priority composition (e.g. the
+        // pool-cache extension once Story 28-4 lands) register its own
+        // resolver first without conflicting with this fallback.
+        services.TryAddSingleton<ITenantConnectionResolver>(sp =>
         {
-            var cs = string.IsNullOrWhiteSpace(appConnectionString)
-                ? adminConnectionString
-                : appConnectionString;
-            options.UseNpgsql(cs, npgsql =>
-            {
-                // App-role context does NOT run migrations — the admin
-                // context owns the __TammaMigrationsHistory table.
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory");
-            });
-            options.AddInterceptors(sp.GetRequiredService<TenantContextInterceptor>());
+            var dataSource = NpgsqlDataSource.Create(tenantConnectionString);
+            return new StubTenantConnectionResolver(dataSource);
         });
 
+        // Control-plane repositories.
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IPasswordResetRepository, PasswordResetRepository>();
@@ -105,8 +111,16 @@ public static class DependencyInjection
         services.AddScoped<ITenantMembershipRepository, TenantMembershipRepository>();
         services.AddScoped<IInviteRepository, InviteRepository>();
         services.AddScoped<IApiKeyRepository, ApiKeyRepository>();
+        // Story 28-7 deferred-item: CP-scoped routing index for prefix-based
+        // API-key auth lookups. Scoped because ControlPlaneDbContext is.
+        services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
+        // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
+        // Scoped because it leans on ControlPlaneDbContext.
+        services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
+
+        // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();
@@ -115,6 +129,19 @@ public static class DependencyInjection
         services.AddScoped<IWorkflowRepository, WorkflowRepository>();
         services.AddScoped<IEventRepository, EventRepository>();
         services.AddScoped<IBudgetConfigRepository, BudgetConfigRepository>();
+        services.AddScoped<IQueuedTaskRepository, QueuedTaskRepository>();
+        services.AddScoped<IEmailOutboxRepository, EmailOutboxRepository>();
+
+        // ── Epic 28 Story 28-6: control-plane repositories ──
+        //
+        // Each platform-* repo is a thin wrapper over ControlPlaneDbContext
+        // (registered above by Story 28-2). TryAdd* lets adjacent stories
+        // (28-4 owns the tenant connection resolver registration) re-enter
+        // this method or replace these in tests without conflict — the
+        // first registration wins and tests can pre-stage doubles.
+        services.TryAddScoped<IPlatformEventRepository, PlatformEventRepository>();
+        services.TryAddScoped<IPlatformQueuedTaskRepository, PlatformQueuedTaskRepository>();
+        services.TryAddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
 
         return services;
     }

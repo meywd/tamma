@@ -23,15 +23,17 @@
   "author": "Tamma Project",
   "license": "SEE LICENSE IN ../../LICENSE",
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.1",
+    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/node": "^22.10.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.2.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vite": "^6.0.7",
-    "wrangler": "^4.79.0"
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.4",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "wrangler": "^4.85.0"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -40,11 +42,11 @@
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
     "elkjs": "^0.11.1",
-    "mermaid": "^11.13.0",
+    "mermaid": "^11.14.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
-    "react-router": "^7.9.5",
+    "react-router": "^7.14.2",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.0"
   }

@@ -145,7 +145,7 @@ export async function publishCommentEvent(
 ): Promise<void> {
   await publishEvent(context, {
     docPath,
-    type: `comment.${type}` as EventType,
+    type: `comment.${type}`,
     data: type === 'deleted' ? { id: comment.id || comment } : comment,
     userId
   });
@@ -163,7 +163,7 @@ export async function publishSuggestionEvent(
 ): Promise<void> {
   await publishEvent(context, {
     docPath,
-    type: `suggestion.${type}` as EventType,
+    type: `suggestion.${type}`,
     data: suggestion,
     userId
   });
@@ -181,7 +181,7 @@ export async function publishDiscussionEvent(
 ): Promise<void> {
   await publishEvent(context, {
     docPath,
-    type: `discussion.${type}` as EventType,
+    type: `discussion.${type}`,
     data,
     userId
   });

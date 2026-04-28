@@ -33,7 +33,6 @@ export const stripHtml = (value: string): string => {
 export const validationSchemas = {
   // Email validation
   email: z
-    .string()
     .email('Invalid email address')
     .toLowerCase()
     .trim()
@@ -81,7 +80,7 @@ export const validationSchemas = {
     ),
 
   // UUID validation
-  uuid: z.string().uuid('Invalid UUID format'),
+  uuid: z.uuid('Invalid UUID format'),
 
   // Token validation
   token: z
@@ -118,12 +117,11 @@ export const validationSchemas = {
 
   // URL validation
   url: z
-    .string()
     .url('Invalid URL format')
     .max(2048, 'URL must be less than 2048 characters'),
 
   // Date validation
-  date: z.string().datetime('Invalid date format'),
+  date: z.iso.datetime('Invalid date format'),
 
   // Boolean validation (handles string booleans)
   boolean: z.preprocess(
@@ -244,7 +242,7 @@ export function validateBody<T extends ZodSchema>(schema: T) {
       await next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const errors = error.errors.map((err) => ({
+        const errors = error.issues.map((err) => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code,
@@ -284,7 +282,7 @@ export function validateQuery<T extends ZodSchema>(schema: T) {
       await next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const errors = error.errors.map((err) => ({
+        const errors = error.issues.map((err) => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code,
@@ -324,7 +322,7 @@ export function validateParams<T extends ZodSchema>(schema: T) {
       await next();
     } catch (error) {
       if (error instanceof ZodError) {
-        const errors = error.errors.map((err) => ({
+        const errors = error.issues.map((err) => ({
           field: err.path.join('.'),
           message: err.message,
           code: err.code,

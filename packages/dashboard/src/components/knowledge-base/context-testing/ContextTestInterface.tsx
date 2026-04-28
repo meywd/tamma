@@ -5,7 +5,7 @@
  * Combines query input, source selection, and results display.
  */
 
-import React, { useState } from 'react';
+import React, { useState, type JSX } from 'react';
 import type { ContextTestResult, UIContextSource, UITaskType } from '@tamma/shared';
 import { ContextViewer } from './ContextViewer.js';
 

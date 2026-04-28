@@ -17,27 +17,28 @@ namespace Tamma.Api.Tests.PromptStore;
 [TestFixture]
 public class PromptStoreServiceTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private PromptRepository _repo = null!;
     private PromptStoreService _service = null!;
 
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
-        _db = new TestDbContext(options);
-        _repo = new PromptRepository(_db);
+        _fx = new InMemoryDbFixture();
+        _db = _fx.Cp;
+        // Story 28-1 PR D: prompt_overrides is tenant-scoped. Bind a
+        // synthetic tenant so the repo routes through the factory.
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.Parse("11111111-2222-3333-4444-555555555555"));
+        _repo = new PromptRepository(_fx.Factory, tc);
         _service = new PromptStoreService(_repo);
     }
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
-        _db.Dispose();
+        await _fx.DisposeAsync();
     }
 
     // ------------------------------------------------------------------

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NUnit.Framework;
 using Respawn;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Testcontainers.PostgreSql;
 
@@ -28,8 +29,22 @@ namespace Tamma.Api.Tests;
 public class ApiTestFixture
 {
     public static PostgreSqlContainer Postgres { get; private set; } = null!;
+    /// <summary>
+    /// Story 28-1 PR D — second Postgres container that holds the per-tenant
+    /// schema (agent_configs, prompt_overrides, provider_health, ...).
+    /// In production each tenant gets its own physical DB; in tests we use
+    /// one shared tenant DB and let <c>TenantDbContextFactory</c>'s shared
+    /// connection-string mode (<c>StubTenantConnectionResolver</c>) hand
+    /// every tenant the same connection. The CP migration drops the moved
+    /// tables from this fixture's CP DB; the tenant migration creates them
+    /// here. Without this split, every test that exercises a moved entity
+    /// hits "relation does not exist" because the moved tables only live
+    /// on the tenant DB now.
+    /// </summary>
+    public static PostgreSqlContainer TenantPostgres { get; private set; } = null!;
     public static WebApplicationFactory<Program> Factory { get; private set; } = null!;
     private static Respawner _respawner = null!;
+    private static Respawner _tenantRespawner = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -40,8 +55,14 @@ public class ApiTestFixture
             .WithUsername("tamma")
             .WithPassword("tamma")
             .Build();
+        TenantPostgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("tamma_tenant_test")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
 
-        await Postgres.StartAsync();
+        await Task.WhenAll(Postgres.StartAsync(), TenantPostgres.StartAsync());
 
         // Program.cs reads `builder.Configuration.GetConnectionString(...)` at
         // WebApplicationBuilder-composition time, BEFORE any callback passed to
@@ -54,16 +75,14 @@ public class ApiTestFixture
         // Program.cs. appsettings.json ships with a stale localhost default
         // for TammaDb (empty password), so clearing the env var lets the
         // appsettings layer take over and we fail to auth. Instead, point
-        // ALL three keys explicitly at our container so Program.cs resolves
-        // the same connection whichever key it reads. TammaAppDb falls
-        // through to the admin connection in AddTammaData when empty, which
-        // is what we want — tests don't exercise the tamma_app role on this
-        // fixture.
+        // CP keys at the CP container and TammaAppDb at the tenant container
+        // so the per-tenant DbContext factory hits the tenant schema.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaAppDb", TenantPostgres.GetConnectionString());
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
 
         // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of
@@ -77,24 +96,35 @@ public class ApiTestFixture
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
 
         Factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("Development");
+                // PR #329 wired three always-on hosted services into
+                // Program.cs (seeder + rule evaluator + dispatcher).
+                // Gate them off for the shared fixture so 75 tests
+                // don't each pay the per-host startup cost. Opt-in
+                // tests (E2EAlertFlowTests, AlertRuleEndpointsIntegrationTests)
+                // drive them via the public *Once / SeedAsync APIs.
+                builder.DisableAlertHostedServices();
+            });
 
         // The InitialSchema migration references uuid_generate_v4() (pre-existing
         // mentorship schema) which lives in the uuid-ossp extension. Enable it
         // before running migrations so the container image (stock postgres:17-alpine)
-        // can execute the migration bundle.
-        await using (var bootstrap = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString()))
-        {
-            await bootstrap.OpenAsync();
-            await using var cmd = bootstrap.CreateCommand();
-            cmd.CommandText = "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";";
-            await cmd.ExecuteNonQueryAsync();
-        }
+        // can execute the migration bundle. Same need on the tenant DB —
+        // the tenant migration creates uuid + jsonb columns.
+        await EnableExtensionsAsync(Postgres.GetConnectionString());
+        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
 
         // Force service resolution so Program.cs migrations run against the container.
         using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         await db.Database.MigrateAsync();
+
+        // Story 28-1 PR D — apply tenant migrations to the tenant container
+        // so moved tables (agent_configs, provider_health, domain_events,
+        // ...) physically exist before any test seeds them.
+        await ApplyTenantMigrationsAsync(TenantPostgres.GetConnectionString());
 
         await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
         await conn.OpenAsync();
@@ -102,6 +132,15 @@ public class ApiTestFixture
         {
             DbAdapter = DbAdapter.Postgres,
             TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            SchemasToInclude = new[] { "public" }
+        });
+
+        await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
+        await tenantConn.OpenAsync();
+        _tenantRespawner = await Respawner.CreateAsync(tenantConn, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.Postgres,
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__TenantMigrationsHistory") },
             SchemasToInclude = new[] { "public" }
         });
     }
@@ -112,6 +151,8 @@ public class ApiTestFixture
         Factory?.Dispose();
         if (Postgres is not null)
             await Postgres.DisposeAsync();
+        if (TenantPostgres is not null)
+            await TenantPostgres.DisposeAsync();
     }
 
     /// <summary>Call from <c>[SetUp]</c> in each test class to clear tenant-scoped data.</summary>
@@ -120,7 +161,32 @@ public class ApiTestFixture
         await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
         await conn.OpenAsync();
         await _respawner.ResetAsync(conn);
+
+        await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
+        await tenantConn.OpenAsync();
+        await _tenantRespawner.ResetAsync(tenantConn);
     }
 
     public static HttpClient CreateClient() => Factory.CreateClient();
+
+    private static async Task EnableExtensionsAsync(string connectionString)
+    {
+        await using var bootstrap = new Npgsql.NpgsqlConnection(connectionString);
+        await bootstrap.OpenAsync();
+        await using var cmd = bootstrap.CreateCommand();
+        cmd.CommandText =
+            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
+            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task ApplyTenantMigrationsAsync(string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(connectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .Options;
+        await using var ctx = new TenantDbContext(options);
+        await ctx.Database.MigrateAsync();
+    }
 }

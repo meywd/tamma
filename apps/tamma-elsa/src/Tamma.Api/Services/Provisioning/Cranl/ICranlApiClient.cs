@@ -59,5 +59,13 @@ public interface ICranlApiClient
     /// </summary>
     Task PutEnvironmentAsync(string id, string envText, CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 29-8 — fetch the current env-var text
+    /// (<c>GET /api/applications/:id/environment</c> returns
+    /// <c>{ "env": "KEY=VALUE\n..." }</c>). The rotation handler uses this
+    /// to merge a single key rather than replacing the whole set.
+    /// </summary>
+    Task<string> GetEnvironmentAsync(string id, CancellationToken ct = default);
+
     Task<CranlAppDomains> GetApplicationDomainsAsync(string id, CancellationToken ct = default);
 }

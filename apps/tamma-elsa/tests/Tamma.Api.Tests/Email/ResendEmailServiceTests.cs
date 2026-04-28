@@ -33,7 +33,8 @@ namespace Tamma.Api.Tests.Email;
 [TestFixture]
 public class ResendEmailServiceTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private EventRepository _events = null!;
     private TenantContext _tenantContext = null!;
     private IConfiguration _config = null!;
@@ -44,15 +45,13 @@ public class ResendEmailServiceTests
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(
-                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
+        _fx = new InMemoryDbFixture();
         _tenantContext = new TenantContext();
-        _db = new TestDbContext(options, _tenantContext);
-        _events = new EventRepository(_db);
+        _db = _fx.Cp;
+        _events = new EventRepository(
+            _fx.Factory,
+            _tenantContext,
+            new PlatformEventRepository(_db));
 
         _config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -68,9 +67,9 @@ public class ResendEmailServiceTests
     }
 
     [TearDown]
-    public void TearDown()
+    public async Task TearDown()
     {
-        _db.Dispose();
+        await _fx.DisposeAsync();
         _loggerFactory.Dispose();
         _loggerProvider.Dispose();
     }

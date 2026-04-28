@@ -289,7 +289,7 @@ export async function getRecentEmails(
   const { limit = 50, offset = 0, userId, type, status } = options;
   const dbClient = drizzle(db);
 
-  let query = dbClient
+  const query = dbClient
     .select()
     .from(emailQueue)
     .orderBy(desc(emailQueue.createdAt))

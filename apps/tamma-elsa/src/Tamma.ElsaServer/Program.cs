@@ -3,6 +3,7 @@ using Elsa.EntityFrameworkCore.Extensions;
 using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.EntityFrameworkCore.Modules.Runtime;
 using Elsa.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
@@ -105,12 +106,57 @@ builder.Services.AddElsa(elsa =>
             httpOptions.BaseUrl = new Uri(
                 builder.Configuration["Elsa:Server:BaseUrl"] ?? "http://localhost:5000"));
 
-    // Register all custom Tamma activities from the Activities assembly
+    // Register all custom Tamma activities from the Activities assembly.
+    // AddActivitiesFrom<T>() registers every [Activity]-marked type in T's
+    // assembly, so ClaudeAnalysisActivity brings along the Analytics
+    // (Story 28-10) activities too without an extra call.
     elsa.AddActivitiesFrom<ClaudeAnalysisActivity>();
 
-    // Register all code-first WorkflowBase subclasses from the ElsaServer assembly
+    // Register all code-first WorkflowBase subclasses from the ElsaServer
+    // assembly. HourlyAnalyticsRollupWorkflow (Story 28-10) is picked up
+    // by the same assembly sweep as LlmCallWorkflow.
     elsa.AddWorkflowsFrom<LlmCallWorkflow>();
 });
+
+// Story 28-10 — scheduler that fires HourlyAnalyticsRollupWorkflow on
+// the configured cron offset (default: minute 5 of every hour, UTC).
+// Lightweight in-process scheduler — preferred over an external cron
+// dependency since the Elsa host is the only consumer.
+builder.Services.AddOptions<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupSchedulerOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupSchedulerOptions.SectionName)
+            .Bind(opts));
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<TimeProvider>(builder.Services, _ => TimeProvider.System);
+builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler>();
+
+// Round-2 review M3 — bridge that polls platform_events for new
+// TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
+// event so CleanUpFailedTenantWorkflow's starter trigger fires. The
+// bridge needs a ControlPlaneDbContext to read the durable event log;
+// if ConnectionStrings:ControlPlane is unset (dev / single-process
+// composition) the registration short-circuits and the bridge logs a
+// disabled message at startup. ConnectionStrings:DefaultConnection is
+// the fallback so a single-DB dev composition still wires the bridge.
+var cpConnection = builder.Configuration.GetConnectionString("ControlPlane")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+if (!string.IsNullOrWhiteSpace(cpConnection))
+{
+    builder.Services.AddDbContextFactory<Tamma.Data.ControlPlaneDbContext>(opts =>
+        opts.UseNpgsql(cpConnection, npgsql =>
+            npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
+    builder.Services.AddScoped(sp =>
+        sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<
+            Tamma.Data.ControlPlaneDbContext>>().CreateDbContext());
+
+    builder.Services.AddOptions<Tamma.ElsaServer.Workflows.TenantCleanupRequestedTriggerOptions>()
+        .Configure(opts =>
+            builder.Configuration
+                .GetSection(Tamma.ElsaServer.Workflows.TenantCleanupRequestedTriggerOptions.SectionName)
+                .Bind(opts));
+    builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantCleanupRequestedTrigger>();
+}
 
 // CORS for Tamma API and Dashboard
 builder.Services.AddCors(options =>
@@ -127,6 +173,21 @@ builder.Services.AddCors(options =>
 
 // HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
 builder.Services.AddHttpClient();
+
+// Story 9-11: Tamma API client — used by simplified activities to delegate
+// agent config, health, diagnostics, and provider execution to the central
+// Fastify/ASP.NET API plane.
+builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
+
+// Wave C.4 §4 — per-process health monitor for TammaApiClient. Singleton
+// so the rolling 5-min window is shared across every call site. Fires
+// PLATFORM.API.UNHEALTHY via IAlertEventEmitter when sustained failures
+// cross threshold. Only wired if alerts are registered (Scoped
+// IAlertEventEmitter resolved per-call via IServiceProvider).
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp =>
+    new Tamma.Activities.LlmCall.TammaApiHealthMonitor(
+        new Tamma.Activities.LlmCall.ScopedAlertEventEmitter(sp),
+        sp.GetService<TimeProvider>()));
 
 // Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
 // All tools are stateless singletons. The registry (also Singleton) captures them via

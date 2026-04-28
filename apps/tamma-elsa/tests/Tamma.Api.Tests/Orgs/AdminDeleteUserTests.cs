@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Services;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -28,7 +29,7 @@ public class AdminDeleteUserTests
 {
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private IUserRepository _userRepo = null!;
     private IApiKeyRepository _apiKeyRepo = null!;
@@ -43,7 +44,7 @@ public class AdminDeleteUserTests
     {
         await ApiTestFixture.ResetDatabaseAsync();
         _scope = ApiTestFixture.Factory.Services.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();
         _apiKeyRepo = _scope.ServiceProvider.GetRequiredService<IApiKeyRepository>();
         _membershipRepo = _scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
@@ -183,6 +184,138 @@ public class AdminDeleteUserTests
         (await _membershipRepo.GetRoleAsync(tenant.Id, target.Id)).Should().BeNull();
     }
 
+    // ── Story 28-R2 / PF-S1 — Cross-platform-admin guards ──────────
+
+    [Test]
+    public async Task DeleteUser_Returns403_WhenTargetIsPlatformAdmin_PF_S1()
+    {
+        // PF-S1 defense-in-depth: even though the route gate now
+        // requires PlatformOwnerAccess (the caller IS a platform
+        // admin), the handler must refuse to delete ANOTHER platform
+        // admin via this surface. Removing a platform admin is a
+        // privileged operation that requires an explicit DB-side
+        // demotion first.
+        var caller = await _userRepo.CreateAsync(new User
+        {
+            Email = "ops@example.com",
+            PlatformRole = "platform_admin",
+        });
+        var target = await _userRepo.CreateAsync(new User
+        {
+            Email = "other-ops@example.com",
+            PlatformRole = "platform_admin",
+        });
+
+        var principal = PrincipalFor(caller.Id);
+        var result = await AdminEndpoints.DeleteUser(
+            target.Id, _userRepo, _apiKeyRepo, _membershipRepo, principal, _lf);
+
+        (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status403Forbidden);
+
+        // Target still active — delete was blocked by the in-handler guard.
+        var still = await _userRepo.GetByIdAsync(target.Id);
+        still.Should().NotBeNull();
+        still!.DeletedAt.Should().BeNull();
+        still.IsActive.Should().BeTrue();
+        still.PlatformRole.Should().Be("platform_admin");
+    }
+
+    [Test]
+    public async Task UpdateUserRole_Returns403_WhenTargetIsPlatformAdmin_AndCallerIsDifferent_PF_S1()
+    {
+        // PF-S1 defense-in-depth: cross-platform-admin role-change is
+        // refused. Self-demotion (caller == target) is allowed; this
+        // test pins the cross-actor case.
+        await ApiTestFixture.ResetDatabaseAsync();
+        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+        var membershipRepo = scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var lf = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        var caller = await userRepo.CreateAsync(new User
+        {
+            Email = "ops@example.com",
+            PlatformRole = "platform_admin",
+        });
+        var target = await userRepo.CreateAsync(new User
+        {
+            Email = "other-ops@example.com",
+            PlatformRole = "platform_admin",
+            Role = "owner",
+        });
+
+        var principal = PrincipalForOwner(caller.Id);
+        var result = await AdminEndpoints.UpdateUserRole(
+            target.Id,
+            new Tamma.Api.Dtos.Admin.UpdateUserRoleRequest("member"),
+            userRepo, membershipRepo, tenantContext, principal, lf);
+
+        (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status403Forbidden);
+
+        // Target's per-tenant role still "owner".
+        var still = await userRepo.GetByIdAsync(target.Id);
+        still!.Role.Should().Be("owner");
+    }
+
+    [Test]
+    public async Task UpdateUserRole_Succeeds_WhenTargetIsPlatformAdmin_AndCallerIsSelf_PF_S1()
+    {
+        // PF-S1 defense-in-depth carve-out: self-demotion is allowed
+        // (the cross-actor guard fires only when actor != id). However,
+        // the SEPARATE self-protection guard at the top of the handler
+        // refuses this with a 400. Confirm the precedence: the
+        // self-protection guard runs FIRST, so we expect 400 (not
+        // 403) on a self-targeting call.
+        await ApiTestFixture.ResetDatabaseAsync();
+        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+        var membershipRepo = scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var lf = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        var self = await userRepo.CreateAsync(new User
+        {
+            Email = "ops@example.com",
+            PlatformRole = "platform_admin",
+            Role = "owner",
+        });
+
+        var principal = PrincipalForOwner(self.Id);
+        var result = await AdminEndpoints.UpdateUserRole(
+            self.Id,
+            new Tamma.Api.Dtos.Admin.UpdateUserRoleRequest("member"),
+            userRepo, membershipRepo, tenantContext, principal, lf);
+
+        // Self-protection guard (returns 400 "Cannot change your own role")
+        // fires before the cross-platform-admin guard.
+        (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [Test]
+    public async Task DeleteUser_Succeeds_WhenTargetIsRegularUser_AndCallerIsPlatformAdmin_PF_S1()
+    {
+        // Sanity — the new platform-admin guard does NOT block deletes
+        // of non-platform-admin targets. A platform admin can still
+        // delete regular users (the typical admin flow).
+        var caller = await _userRepo.CreateAsync(new User
+        {
+            Email = "ops@example.com",
+            PlatformRole = "platform_admin",
+        });
+        var target = await _userRepo.CreateAsync(new User
+        {
+            Email = "regular@example.com",
+            PlatformRole = "user",
+        });
+
+        var principal = PrincipalFor(caller.Id);
+        var result = await AdminEndpoints.DeleteUser(
+            target.Id, _userRepo, _apiKeyRepo, _membershipRepo, principal, _lf);
+
+        (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status200OK);
+    }
+
     [Test]
     public async Task DeleteUser_Succeeds_WhenTargetHasNoTenants()
     {
@@ -209,6 +342,24 @@ public class AdminDeleteUserTests
         {
             new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+        }, authenticationType: "Test");
+        return new ClaimsPrincipal(identity);
+    }
+
+    /// <summary>
+    /// Story 28-R2 / PF-S1 — for UpdateUserRole tests, the handler reads
+    /// the per-tenant `role` claim to gate owner-only promotions; the
+    /// "owner" role is also what an actual platform admin's JWT would
+    /// carry on their personal tenant.
+    /// </summary>
+    private static ClaimsPrincipal PrincipalForOwner(Guid userId)
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim("role", "owner"),
+            new Claim(JwtRegisteredClaimNames.Email, "ops@example.com"),
         }, authenticationType: "Test");
         return new ClaimsPrincipal(identity);
     }

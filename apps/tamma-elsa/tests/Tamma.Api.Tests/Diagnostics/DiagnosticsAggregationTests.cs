@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Diagnostics;
 using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -23,7 +24,7 @@ public class DiagnosticsAggregationTests
     // DbContext is owned by _scope; disposing the scope cascades correctly.
     // Suppress NUnit1032 (false positive for scoped deps).
 #pragma warning disable NUnit1032
-    private TammaDbContext _db = null!;
+    private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
 
     [SetUp]
@@ -31,7 +32,7 @@ public class DiagnosticsAggregationTests
     {
         await DiagnosticsSetUpFixture.ResetDatabaseAsync();
         _scope = DiagnosticsTestHarness.CreateScope();
-        _db = _scope.ServiceProvider.GetRequiredService<TammaDbContext>();
+        _db = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         _repo = _scope.ServiceProvider.GetRequiredService<IDiagnosticsRepository>();
         _service = _scope.ServiceProvider.GetRequiredService<IDiagnosticsService>();
     }
@@ -236,6 +237,12 @@ public class DiagnosticsAggregationTests
         // Materialise the tenant before the diagnostic insert.
         await EnsureTenantAsync(tenantId);
 
+        // Story 28-1 PR D — provider_diagnostics moved off CP. Route the
+        // seed through ITenantDbContextFactory.
+        var factory = _scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(tenantId);
+
         // Bypass global query filter — insert raw entity.
         var row = new ProviderDiagnostic
         {
@@ -248,8 +255,8 @@ public class DiagnosticsAggregationTests
             Success = success,
             CreatedAt = DateTime.SpecifyKind(createdAt, DateTimeKind.Utc)
         };
-        _db.ProviderDiagnostics.Add(row);
-        await _db.SaveChangesAsync();
+        tdb.ProviderDiagnostics.Add(row);
+        await tdb.SaveChangesAsync();
     }
 
     private async Task EnsureTenantAsync(Guid tenantId)

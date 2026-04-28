@@ -1,5 +1,8 @@
+using Tamma.Data.Abstractions;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Tamma.Data.Defaults;
 using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
@@ -10,53 +13,43 @@ namespace Tamma.Data.Repositories;
 /// <para>
 /// The physical storage is a single row per tenant in the
 /// <c>sanitization_rules</c> table; the per-rule array is serialized as JSONB
-/// under the <see cref="SanitizationRule.Rules"/> column. This lets us evolve
-/// the per-rule shape without migrations while still giving the Api and
-/// service layers a structured CRUD surface.
+/// under the <see cref="SanitizationRule.Rules"/> column.
 /// </para>
 ///
 /// <para>
-/// <see cref="GetRulesAsync"/> applies the merge policy: every system default
-/// from <see cref="ISanitizationDefaultsProvider.DefaultRules"/> is included,
-/// and any tenant-stored rule with the same <see cref="SanitizationRuleDefinition.Name"/>
-/// replaces the default in-place.
+/// Story 28-1 PR A (Decision #1, <c>.dev/decisions/story-28-1-design-calls.md</c>):
+/// the legacy <c>sanitization_rules.tenant_id IS NULL</c> CP row is no longer
+/// the source of platform defaults. Reads with <c>tenantId == null</c>
+/// resolve to <see cref="ISanitizationDefaultsProvider.DefaultRules"/>
+/// (whose canonical impl wraps <c>SystemSanitizationRules.DefaultRules</c>);
+/// writes with <c>tenantId == null</c> are dropped with a structured warning.
 /// </para>
+///
+/// <para>Tenant-scoped reads/writes (non-null <c>TenantId</c>) continue to
+/// flow through <see cref="ITenantDbContextFactory"/>.</para>
 /// </summary>
 public class SanitizationRepository : ISanitizationRepository
 {
-    /// <summary>
-    /// JSON options applied to the rules blob. camelCase matches the
-    /// <c>[JsonPropertyName]</c> attributes on <see cref="SanitizationRuleDefinition"/>
-    /// and produces stable on-disk form regardless of caller-supplied options.
-    /// </summary>
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false,
     };
 
-    private readonly TammaDbContext _db;
+    private readonly ITenantDbContextFactory _factory;
     private readonly ISanitizationDefaultsProvider _defaults;
+    private readonly ILogger<SanitizationRepository>? _logger;
 
-    /// <summary>
-    /// DI-friendly constructor. <paramref name="defaults"/> is injected as an
-    /// <see cref="IEnumerable{T}"/> so the container does not fail activation
-    /// when the downstream <c>AddSanitizationServices</c> has not yet been
-    /// called. If nothing is registered, we fall back to
-    /// <see cref="EmptyDefaultsProvider"/>.
-    /// </summary>
-    public SanitizationRepository(TammaDbContext db, IEnumerable<ISanitizationDefaultsProvider> defaults)
+    public SanitizationRepository(
+        ITenantDbContextFactory factory,
+        IEnumerable<ISanitizationDefaultsProvider> defaults,
+        ILogger<SanitizationRepository>? logger = null)
     {
-        _db = db;
+        _factory = factory;
         _defaults = defaults?.FirstOrDefault() ?? EmptyDefaultsProvider.Instance;
+        _logger = logger;
     }
 
-    /// <summary>
-    /// Fallback for when no <see cref="ISanitizationDefaultsProvider"/> is
-    /// registered. Returning an empty default list means the tenant sees only
-    /// their own overrides — safe and predictable rather than throwing at
-    /// service-provider validation time.
-    /// </summary>
     private sealed class EmptyDefaultsProvider : ISanitizationDefaultsProvider
     {
         public static readonly EmptyDefaultsProvider Instance = new();
@@ -69,8 +62,6 @@ public class SanitizationRepository : ISanitizationRepository
     {
         var overrides = await LoadOverridesAsync(tenantId).ConfigureAwait(false);
 
-        // Merge: start from defaults, replace any same-named override.
-        // Use ordinal comparison — rule names are machine identifiers, not locale text.
         var byName = _defaults.DefaultRules
             .ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
 
@@ -89,16 +80,28 @@ public class SanitizationRepository : ISanitizationRepository
         if (string.IsNullOrWhiteSpace(rule.Name))
             throw new ArgumentException("Rule name must be non-empty", nameof(rule));
 
-        var existing = await LoadOrCreateRowAsync(tenantId).ConfigureAwait(false);
-        var current = DeserializeRules(existing.Rules).ToList();
+        if (tenantId is Guid tid)
+        {
+            await using var db = await _factory.CreateAsync(tid);
+            var row = await LoadOrCreateRowAsync(db.SanitizationRules, db, tenantId);
+            var current = DeserializeRules(row.Rules).ToList();
+            var idx = current.FindIndex(r => string.Equals(r.Name, rule.Name, StringComparison.Ordinal));
+            if (idx >= 0) current[idx] = rule;
+            else current.Add(rule);
+            row.Rules = JsonSerializer.Serialize(current, JsonOpts);
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            return;
+        }
 
-        var idx = current.FindIndex(r => string.Equals(r.Name, rule.Name, StringComparison.Ordinal));
-        if (idx >= 0) current[idx] = rule;
-        else current.Add(rule);
-
-        existing.Rules = JsonSerializer.Serialize(current, JsonOpts);
-        existing.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync().ConfigureAwait(false);
+        // Story 28-1 PR A: platform-default writes are no-ops. Defaults live
+        // in SystemSanitizationRules; pretending to persist the override
+        // would silently shadow code defaults next time the row reappeared.
+        _logger?.LogWarning(
+            "SanitizationRepository.UpsertRuleAsync called with tenantId=null " +
+            "for rule={RuleName} — platform defaults moved to code per Story " +
+            "28-1 Decision #1. Discarding the requested rule.",
+            rule.Name);
     }
 
     /// <inheritdoc />
@@ -106,77 +109,105 @@ public class SanitizationRepository : ISanitizationRepository
     {
         if (string.IsNullOrWhiteSpace(ruleName)) return;
 
-        var existing = await _db.SanitizationRules
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId)
-            .ConfigureAwait(false);
-        if (existing is null) return;
+        if (tenantId is Guid tid)
+        {
+            await using var db = await _factory.CreateAsync(tid);
+            var row = await db.SanitizationRules.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId);
+            if (row is null) return;
+            var current = DeserializeRules(row.Rules).ToList();
+            var removed = current.RemoveAll(r => string.Equals(r.Name, ruleName, StringComparison.Ordinal));
+            if (removed == 0) return;
+            row.Rules = JsonSerializer.Serialize(current, JsonOpts);
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            return;
+        }
 
-        var current = DeserializeRules(existing.Rules).ToList();
-        var removed = current.RemoveAll(r =>
-            string.Equals(r.Name, ruleName, StringComparison.Ordinal));
-        if (removed == 0) return;
-
-        existing.Rules = JsonSerializer.Serialize(current, JsonOpts);
-        existing.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync().ConfigureAwait(false);
+        // Story 28-1 PR A: platform-default deletes are no-ops.
+        _logger?.LogWarning(
+            "SanitizationRepository.DeleteRuleAsync called with tenantId=null " +
+            "for rule={RuleName} — defaults are code-resident; nothing to " +
+            "remove (Story 28-1 Decision #1).",
+            ruleName);
     }
 
     /// <inheritdoc />
     public async Task ReplaceRulesAsync(Guid? tenantId, IEnumerable<SanitizationRuleDefinition> rules)
     {
         var list = rules?.ToList() ?? new List<SanitizationRuleDefinition>();
-        var existing = await LoadOrCreateRowAsync(tenantId).ConfigureAwait(false);
-        existing.Rules = JsonSerializer.Serialize(list, JsonOpts);
-        existing.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync().ConfigureAwait(false);
+
+        if (tenantId is Guid tid)
+        {
+            await using var db = await _factory.CreateAsync(tid);
+            var row = await LoadOrCreateRowAsync(db.SanitizationRules, db, tenantId);
+            row.Rules = JsonSerializer.Serialize(list, JsonOpts);
+            row.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            return;
+        }
+
+        // Story 28-1 PR A: bulk platform-default writes are no-ops.
+        _logger?.LogWarning(
+            "SanitizationRepository.ReplaceRulesAsync called with tenantId=null " +
+            "(count={Count}) — platform defaults moved to code per Story 28-1 " +
+            "Decision #1. Discarding the requested rule set.",
+            list.Count);
     }
 
     /// <inheritdoc />
     public async Task<SanitizationRule?> GetRawAsync(Guid? tenantId)
-        => await _db.SanitizationRules
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId)
-            .ConfigureAwait(false);
+    {
+        if (tenantId is Guid tid)
+        {
+            await using var db = await _factory.CreateAsync(tid);
+            return await db.SanitizationRules.IgnoreQueryFilters()
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId);
+        }
+        // Story 28-1 PR A: synthesise a snapshot row from the in-code defaults
+        // so callers that want the raw shape (e.g. admin dashboards) still
+        // observe non-null content. The Id is Guid.Empty to signal "synthetic
+        // / not persisted" — callers can treat that as a sentinel.
+        var defaultsJson = JsonSerializer.Serialize(_defaults.DefaultRules, JsonOpts);
+        return SanitizationRuleDefaults.Snapshot(defaultsJson);
+    }
 
     // ─── helpers ────────────────────────────────────────────────────────────
 
     private async Task<IReadOnlyList<SanitizationRuleDefinition>> LoadOverridesAsync(Guid? tenantId)
     {
-        var row = await _db.SanitizationRules
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId)
-            .ConfigureAwait(false);
+        if (tenantId is not Guid tid)
+        {
+            // Story 28-1 PR A: there are no platform-default overrides — the
+            // defaults themselves are returned by GetRulesAsync's merge step.
+            return Array.Empty<SanitizationRuleDefinition>();
+        }
+        await using var db = await _factory.CreateAsync(tid);
+        var row = await db.SanitizationRules.IgnoreQueryFilters().AsNoTracking()
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId);
         return row is null
             ? Array.Empty<SanitizationRuleDefinition>()
             : DeserializeRules(row.Rules);
     }
 
-    private async Task<SanitizationRule> LoadOrCreateRowAsync(Guid? tenantId)
+    private static async Task<SanitizationRule> LoadOrCreateRowAsync(
+        DbSet<SanitizationRule> set, DbContext ctx, Guid? tenantId)
     {
-        var row = await _db.SanitizationRules
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId)
-            .ConfigureAwait(false);
+        var row = await set.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId);
         if (row is not null) return row;
 
         row = new SanitizationRule
         {
             TenantId = tenantId,
-            Rules = "[]",
+            Rules = SanitizationRuleDefaults.EmptyRulesJson,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
-        _db.SanitizationRules.Add(row);
+        set.Add(row);
         return row;
     }
 
-    /// <summary>
-    /// Parse the <see cref="SanitizationRule.Rules"/> JSONB. The column was
-    /// previously used for a free-form object, so we tolerate non-array JSON
-    /// by returning an empty list instead of throwing.
-    /// </summary>
     private static IReadOnlyList<SanitizationRuleDefinition> DeserializeRules(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return Array.Empty<SanitizationRuleDefinition>();
@@ -193,7 +224,6 @@ public class SanitizationRepository : ISanitizationRepository
         }
         catch (JsonException)
         {
-            // Corrupt blob — treat as empty so the tenant falls back to system defaults.
             return Array.Empty<SanitizationRuleDefinition>();
         }
     }

@@ -12,7 +12,7 @@ using Tamma.Data;
 
 namespace Tamma.Data.Migrations
 {
-    [DbContext(typeof(TammaDbContext))]
+    [DbContext(typeof(ControlPlaneDbContext))]
     [Migration("20260416192411_ProviderHealthCircuitBreakerState")]
     partial class ProviderHealthCircuitBreakerState
     {

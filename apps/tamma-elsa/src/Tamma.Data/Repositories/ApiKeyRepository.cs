@@ -3,7 +3,14 @@ using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
-public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
+/// <summary>
+/// Stores and verifies API keys on the control-plane <c>api_keys</c> table.
+/// Epic-28 split: this row is CP-resident (see
+/// <see cref="ControlPlaneDbContext.ApiKeys"/>), because platform-admin, user,
+/// and service keys route through the CP before fanning out to per-tenant
+/// DbContexts.
+/// </summary>
+public class ApiKeyRepository(ControlPlaneDbContext db) : IApiKeyRepository
 {
     public async Task<ApiKey> CreateAsync(ApiKey apiKey)
     {
@@ -83,5 +90,19 @@ public class ApiKeyRepository(TammaDbContext db) : IApiKeyRepository
             key.LastUsedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
         }
+    }
+
+    /// <summary>
+    /// Story 28-7 deferred-item — rewrites <c>api_keys.KeyHash</c> in place
+    /// (no new row, no <see cref="ApiKey.RotatedFromId"/> chain). Used by
+    /// <c>ApiKeyAuthHandler</c> when a successful legacy-format verify hints
+    /// that the row should be upgraded to Argon2id on next use.
+    /// </summary>
+    public async Task UpdateHashAsync(Guid id, string newKeyHash)
+    {
+        var key = await db.ApiKeys.FindAsync(id);
+        if (key is null) return;
+        key.KeyHash = newKeyHash;
+        await db.SaveChangesAsync();
     }
 }

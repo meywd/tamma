@@ -2,16 +2,19 @@
  * Admin Panel — Tabbed Layout
  *
  * Top-level admin page with tabs: Users, API Keys, System Health, Quick Links.
+ * Story 28-11 adds a Tenants tab that links to the dedicated
+ * /admin/tenants roster + detail pages.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
+import { Link } from 'react-router-dom';
 import { UsersTab } from './UsersTab.js';
 import { ApiKeysTab } from './ApiKeysTab.js';
 import { HealthTab } from './HealthTab.js';
 import { QuickLinksTab } from './QuickLinksTab.js';
 import { AuditLogTab } from './AuditLogTab.js';
 
-type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log';
+type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log' | 'tenants';
 
 interface TabDef {
   id: AdminTab;
@@ -20,11 +23,31 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'users', label: 'Users' },
+  { id: 'tenants', label: 'Tenants' },
   { id: 'api-keys', label: 'API Keys' },
   { id: 'health', label: 'System Health' },
   { id: 'links', label: 'Quick Links' },
   { id: 'audit-log', label: 'Audit Log' },
 ];
+
+function TenantsLinkPanel(): JSX.Element {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-2">Tenants</h2>
+      <p className="text-sm text-gray-600 mb-4">
+        View every tenant&apos;s lifecycle status, recent platform events,
+        and run state-gated admin actions (retry provisioning, initiate
+        delete, force-delete stuck tenants, change plan).
+      </p>
+      <Link
+        to="/admin/tenants"
+        className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+      >
+        Open tenants roster
+      </Link>
+    </div>
+  );
+}
 
 export function AdminLayout(): JSX.Element {
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
@@ -56,6 +79,7 @@ export function AdminLayout(): JSX.Element {
       {/* Tab Content */}
       <div>
         {activeTab === 'users' && <UsersTab />}
+        {activeTab === 'tenants' && <TenantsLinkPanel />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'health' && <HealthTab />}
         {activeTab === 'links' && <QuickLinksTab />}

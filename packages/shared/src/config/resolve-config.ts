@@ -220,7 +220,7 @@ export function resolveConfig(
     if (envOverrides.mode !== undefined) config.mode = envOverrides.mode;
     if (envOverrides.logLevel !== undefined) config.logLevel = envOverrides.logLevel;
     if (envOverrides.github !== undefined) {
-      config.github = { ...config.github, ...envOverrides.github } as TammaConfig['github'];
+      config.github = { ...config.github, ...envOverrides.github };
     }
     if (envOverrides.agent !== undefined) {
       config.agent = { ...config.agent, ...envOverrides.agent };
@@ -229,10 +229,10 @@ export function resolveConfig(
       config.engine = { ...config.engine, ...envOverrides.engine };
     }
     if (envOverrides.agents !== undefined) {
-      config.agents = { ...config.agents, ...envOverrides.agents } as IAgentsConfig;
+      config.agents = { ...config.agents, ...envOverrides.agents };
     }
     if (envOverrides.security !== undefined) {
-      config.security = { ...config.security, ...envOverrides.security } as SecurityConfig;
+      config.security = { ...config.security, ...envOverrides.security };
     }
     if (envOverrides.elsa !== undefined) {
       config.elsa = envOverrides.elsa;

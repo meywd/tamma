@@ -16,25 +16,25 @@ namespace Tamma.Api.Tests.PromptStore;
 [TestFixture]
 public class PromptEventsServiceTests
 {
-    private TammaDbContext _db = null!;
+    private InMemoryDbFixture _fx = null!;
+    private ControlPlaneDbContext _db = null!;
     private EventRepository _eventRepo = null!;
     private PromptEventsService _service = null!;
 
     [SetUp]
     public void SetUp()
     {
-        var options = new DbContextOptionsBuilder<TammaDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
-            .Options;
-
-        _db = new TestDbContext(options);
-        _eventRepo = new EventRepository(_db);
+        _fx = new InMemoryDbFixture();
+        _db = _fx.Cp;
+        _eventRepo = new EventRepository(
+            _fx.Factory,
+            new TenantContext(),
+            new PlatformEventRepository(_db));
         _service = new PromptEventsService(_eventRepo);
     }
 
     [TearDown]
-    public void TearDown() => _db.Dispose();
+    public async Task TearDown() => await _fx.DisposeAsync();
 
     [Test]
     public async Task EmitUpdatedAsync_AppendsPromptUpdatedSuccessEvent()
@@ -122,5 +122,9 @@ public class PromptEventsServiceTests
             => throw new NotImplementedException();
 
         public Task ClearAsync(Guid tenantId) => throw new NotImplementedException();
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
+            Guid tenantId, string? typePrefix, int limit, int offset)
+            => throw new NotImplementedException();
     }
 }

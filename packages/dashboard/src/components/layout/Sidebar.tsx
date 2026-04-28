@@ -2,6 +2,8 @@
 import { NavLink } from 'react-router-dom';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 
+import type { JSX } from "react";
+
 interface NavGroup {
   label: string;
   items: { to: string; label: string }[];
@@ -13,7 +15,15 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/account', label: 'Account' },
       { to: '/keys', label: 'API Keys' },
+      { to: '/settings/prompts', label: 'AI Prompts' },
     ],
+  },
+  {
+    // Story 18-8: tenant-admin user-mgmt UI. Visible to all members; the
+    // TenantAdminGuard renders a friendly 403 if the user lacks admin/
+    // owner role inside their active tenant.
+    label: 'Organization',
+    items: [{ to: '/settings/organization', label: 'Members & Audit' }],
   },
 ];
 
@@ -31,12 +41,15 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { to: '/settings/security', label: 'Security' },
       { to: '/settings/health', label: 'Provider Health' },
       { to: '/settings/budget', label: 'Budget & Cost' },
-      { to: '/settings/prompts', label: 'Prompt Templates' },
     ],
   },
   {
     label: 'Administration',
-    items: [{ to: '/admin', label: 'Admin Panel' }],
+    items: [
+      { to: '/admin', label: 'Admin Panel' },
+      // Story 27-4: prompt-store admin UI.
+      { to: '/admin/prompts', label: 'System Prompts' },
+    ],
   },
 ];
 

@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import InlineMarkdown from './InlineMarkdown';
 
 // --- Types ---
 
@@ -114,7 +115,7 @@ function parseEpicDetails(markdown: string): ParsedEpicDetail[] {
     const statusMatch = body.match(/\*\*Status:\*\*\s*(.+?)(?:\n|$)/);
 
     // If no explicit status, infer from the ## section this epic is under
-    const sectionContext = findSectionContext(markdown, match.index!);
+    const sectionContext = findSectionContext(markdown, match.index);
     const inferredStatus = statusMatch
       ? statusMatch[1].trim()
       : inferStatusFromSection(sectionContext);
@@ -453,7 +454,7 @@ function EpicDetailCard({
                 Goal
               </div>
               <p className="text-[14px] text-zinc-300 leading-relaxed">
-                {detail.goal}
+                <InlineMarkdown>{detail.goal}</InlineMarkdown>
               </p>
             </div>
           )}
@@ -468,20 +469,9 @@ function EpicDetailCard({
                 {detail.deliverables.map((d, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500/60 mt-1.5 shrink-0" />
-                    <span
-                      className="text-[13px] text-zinc-400 leading-relaxed"
-                      dangerouslySetInnerHTML={{
-                        __html: d
-                          .replace(
-                            /`([^`]+)`/g,
-                            '<code class="text-amber-300 text-[12px] bg-zinc-800/80 px-1 py-0.5 rounded">$1</code>'
-                          )
-                          .replace(
-                            /\*\*([^*]+)\*\*/g,
-                            '<strong class="text-zinc-200">$1</strong>'
-                          ),
-                      }}
-                    />
+                    <span className="text-[13px] text-zinc-400 leading-relaxed">
+                      <InlineMarkdown>{d}</InlineMarkdown>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -512,7 +502,7 @@ function EpicDetailCard({
           {detail.remaining && (
             <div className="text-[13px] text-zinc-500">
               <span className="text-zinc-600 font-medium">Remaining:</span>{' '}
-              {detail.remaining}
+              <InlineMarkdown>{detail.remaining}</InlineMarkdown>
             </div>
           )}
 
@@ -528,7 +518,7 @@ function EpicDetailCard({
                     key={i}
                     className="text-[12px] text-zinc-500 leading-relaxed"
                   >
-                    - {note}
+                    - <InlineMarkdown>{note}</InlineMarkdown>
                   </li>
                 ))}
               </ul>
@@ -610,7 +600,7 @@ export default function RoadmapPage() {
   useEffect(() => {
     setLoading(true);
     fetch('/content/roadmap.md')
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })

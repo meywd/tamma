@@ -4,7 +4,7 @@
  * Displays assembled context with chunk cards and source contributions.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { ContextTestResult } from '@tamma/shared';
 import { ChunkCard } from './ChunkCard.js';
 import { SourceContributionChart } from './SourceContributionChart.js';

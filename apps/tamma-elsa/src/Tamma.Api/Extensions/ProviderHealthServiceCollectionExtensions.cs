@@ -20,7 +20,13 @@ public static class ProviderHealthServiceCollectionExtensions
         services.TryAddSingleton<ISystemClock, SystemClock>();
         services.TryAddSingleton(new CircuitBreakerOptions());
         services.AddScoped<ICircuitBreakerService, CircuitBreakerService>();
-        services.AddScoped<IProviderChainResolver, ProviderChainResolver>();
+        // Story 9-5 — resolver pulls IDiagnosticsService for budget filtering.
+        // The two-arg ctor stays available for tests that don't care about
+        // budget (existing ProviderChainResolverTests fixture).
+        services.AddScoped<IProviderChainResolver>(sp => new ProviderChainResolver(
+            sp.GetRequiredService<Tamma.Data.Repositories.IAgentConfigRepository>(),
+            sp.GetRequiredService<ICircuitBreakerService>(),
+            sp.GetService<Tamma.Api.Services.Diagnostics.IDiagnosticsService>()));
         return services;
     }
 

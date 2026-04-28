@@ -4,7 +4,7 @@
  * Configuration editor for the RAG pipeline.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, type JSX } from 'react';
 import type { RAGConfigInfo } from '@tamma/shared';
 
 export interface RAGConfigPanelProps {

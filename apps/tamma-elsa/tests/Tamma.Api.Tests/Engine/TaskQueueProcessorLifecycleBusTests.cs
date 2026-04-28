@@ -1,3 +1,4 @@
+using Tamma.Data.Abstractions;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,7 +24,8 @@ namespace Tamma.Api.Tests.Engine;
 public class TaskQueueProcessorLifecycleBusTests
 {
     private ServiceProvider _services = null!;
-    private DbContextOptions<TammaDbContext> _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
     private Mock<ITaskHandler> _handler = null!;
     private TaskQueueProcessor _processor = null!;
     private InMemoryEngineLifecycleBus _bus = null!;
@@ -32,17 +34,24 @@ public class TaskQueueProcessorLifecycleBusTests
     public void SetUp()
     {
         var dbName = Guid.NewGuid().ToString();
-        _options = new DbContextOptionsBuilder<TammaDbContext>()
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
-        var capturedOptions = _options;
+        var capturedCp = _cpOptions;
+        var capturedTenant = _tenantOptions;
         _bus = new InMemoryEngineLifecycleBus();
 
         var services = new ServiceCollection();
-        services.AddScoped<TammaDbContext>(_ => new TestDbContext(capturedOptions));
+        services.AddScoped<ControlPlaneDbContext>(_ => new TestControlPlaneDbContext(capturedCp));
+        services.AddSingleton<ITenantDbContextFactory>(_ => new TestTenantDbContextFactory(capturedTenant));
         services.AddScoped<IQueuedTaskRepository, QueuedTaskRepository>();
         services.AddSingleton<IEngineLifecycleBus>(_bus);
 
@@ -70,12 +79,37 @@ public class TaskQueueProcessorLifecycleBusTests
     }
 
     private QueuedTaskRepository FreshRepo()
-        => new(new TestDbContext(_options));
+        => new(new TestTenantDbContextFactory(_tenantOptions),
+               new TestControlPlaneDbContext(_cpOptions));
+
+    /// <summary>
+    /// Seed a tenant so <see cref="QueuedTaskRepository.ListPendingFromAnyTenantAsync"/>
+    /// has a tenant to walk. Story 28-1 PR B — the processor's drain
+    /// path enumerates active tenants from CP.
+    /// </summary>
+    private void SeedTenant(Guid tenantId)
+    {
+        using var cp = new TestControlPlaneDbContext(_cpOptions);
+        if (cp.Tenants.Find(tenantId) is null)
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "test",
+                Slug = "test-" + tenantId.ToString()[..8],
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            cp.SaveChanges();
+        }
+    }
 
     [Test]
     public async Task ProcessOnceAsync_SuccessfulTask_PublishesClaimedThenCompleted()
     {
         var tenantId = Guid.NewGuid();
+        SeedTenant(tenantId);
         await FreshRepo().EnqueueAsync(new QueuedTask
         {
             Type = "github.push.main",
@@ -112,6 +146,7 @@ public class TaskQueueProcessorLifecycleBusTests
     public async Task ProcessOnceAsync_HandlerThrows_PublishesClaimedThenFailed()
     {
         var tenantId = Guid.NewGuid();
+        SeedTenant(tenantId);
         await FreshRepo().EnqueueAsync(new QueuedTask
         {
             Type = "github.x",
