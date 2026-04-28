@@ -1,5 +1,7 @@
 
 
+import type { JSX } from "react";
+
 interface ToggleProps {
   label: string;
   description?: string;

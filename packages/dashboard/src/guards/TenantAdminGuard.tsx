@@ -11,7 +11,7 @@
  * without being a platform admin and vice-versa.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 import { useCurrentTenant } from '../hooks/orgs/useCurrentTenant.js';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.js';
 

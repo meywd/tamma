@@ -4,7 +4,7 @@
  * Displays a single retrieved context chunk with metadata and feedback controls.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { UIContextChunk } from '@tamma/shared';
 
 export interface ChunkCardProps {

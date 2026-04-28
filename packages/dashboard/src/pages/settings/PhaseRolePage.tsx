@@ -1,6 +1,8 @@
 
 import { PhaseRoleMatrix } from '../../components/settings/phases/PhaseRoleMatrix.js';
 
+import type { JSX } from "react";
+
 export function PhaseRolePage(): JSX.Element {
   return (
     <div>

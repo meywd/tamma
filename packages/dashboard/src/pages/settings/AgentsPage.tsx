@@ -1,6 +1,8 @@
 
 import { AgentsOverview } from '../../components/settings/agents/AgentsOverview.js';
 
+import type { JSX } from "react";
+
 export function AgentsPage(): JSX.Element {
   return (
     <div>

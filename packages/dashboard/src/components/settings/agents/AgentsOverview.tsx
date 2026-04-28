@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import type { IAgentsConfig, IAgentRoleConfig, AgentType } from '@tamma/shared';
 import { useAgentsConfig } from '../../../hooks/settings/useAgentsConfig.js';
 import { LoadingSpinner } from '../../common/LoadingSpinner.js';

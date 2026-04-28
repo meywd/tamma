@@ -6,6 +6,8 @@
 
 import type { OnboardingStep } from '../../services/onboarding/onboarding-api-client.js';
 
+import type { JSX } from "react";
+
 interface StepDef {
   id: OnboardingStep;
   label: string;

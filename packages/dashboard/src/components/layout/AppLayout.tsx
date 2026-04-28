@@ -3,6 +3,8 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar.js';
 import { NavHeader } from './NavHeader.js';
 
+import type { JSX } from "react";
+
 export function AppLayout(): JSX.Element {
   return (
     <>

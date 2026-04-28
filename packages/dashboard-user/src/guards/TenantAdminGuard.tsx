@@ -11,7 +11,7 @@
  * impossible here and fail closed.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 import { useAuth } from '../hooks/useAuth';
 
 const ADMIN_OR_HIGHER = new Set(['admin', 'owner']);

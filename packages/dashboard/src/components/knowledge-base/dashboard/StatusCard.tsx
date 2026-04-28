@@ -4,7 +4,7 @@
  * A compact card showing the health status of a subsystem.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 
 export interface StatusCardProps {
   title: string;

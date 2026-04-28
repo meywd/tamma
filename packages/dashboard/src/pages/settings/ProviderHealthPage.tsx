@@ -1,6 +1,8 @@
 
 import { ProviderHealthDashboard } from '../../components/settings/health/ProviderHealthDashboard.js';
 
+import type { JSX } from "react";
+
 export function ProviderHealthPage(): JSX.Element {
   return (
     <div>

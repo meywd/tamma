@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, type JSX } from 'react';
 
 interface ConfirmDialogProps {
   open: boolean;

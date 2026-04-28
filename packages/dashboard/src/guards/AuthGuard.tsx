@@ -10,6 +10,8 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.js';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.js';
 
+import type { JSX } from "react";
+
 interface AuthGuardProps {
   children: React.ReactNode;
 }

@@ -8,6 +8,8 @@
 import { useAuth } from '../hooks/useAuth.js';
 import { useCurrentUser } from '../hooks/admin/useCurrentUser.js';
 
+import type { JSX } from "react";
+
 export function AccountPage(): JSX.Element {
   const { user } = useAuth();
   const { user: fullUser } = useCurrentUser();

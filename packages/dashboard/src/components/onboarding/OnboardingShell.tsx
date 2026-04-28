@@ -13,7 +13,7 @@
  * but on a dark background to signal "you are in a guided flow".
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 
 interface OnboardingShellProps {
   /** Tagline shown above the card title. */

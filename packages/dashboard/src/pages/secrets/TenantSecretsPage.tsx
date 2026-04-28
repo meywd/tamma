@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type JSX } from 'react';
 import { SecretsListView } from '../../components/secrets/SecretsListView.js';
 import { tenantSecretsApi } from '../../services/secrets/secrets-api-client.js';
 import { useCurrentTenant } from '../../hooks/orgs/useCurrentTenant.js';

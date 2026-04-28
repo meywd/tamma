@@ -1,5 +1,7 @@
 
 
+import type { JSX } from "react";
+
 interface SliderProps {
   label: string;
   value: number;

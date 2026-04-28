@@ -14,7 +14,7 @@
  * "owner" cannot delete it — they can only customise on top of it.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
 import { LoadingSpinner } from '../common/LoadingSpinner.js';
 import type {

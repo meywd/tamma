@@ -4,7 +4,7 @@
  * Displays RAG pipeline metrics with visual breakdown of sources.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { RAGMetricsInfo } from '@tamma/shared';
 
 export interface RAGMetricsChartProps {

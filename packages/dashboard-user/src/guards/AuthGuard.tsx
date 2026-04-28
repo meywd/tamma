@@ -6,7 +6,7 @@
  * login page.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 /**
  * Story 29-3 reveal-once copy-to-clipboard modal. Renders the

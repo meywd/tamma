@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import type { PromptTemplateEntry } from '../../../services/settings/settings-api-client.js';
 import { Card } from '../../common/Card.js';
 

@@ -6,7 +6,7 @@
  * to a success state with a CTA to continue. Errors surface inline.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { apiClient } from '../../api/client';
 

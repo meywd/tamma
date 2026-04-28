@@ -11,7 +11,7 @@
  * the raw user-id; the audit-summary mapper handles both cases.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { useOrgAudit } from '../../hooks/orgs/useOrgAudit.js';
 import { useOrgMembers } from '../../hooks/orgs/useOrgMembers.js';
 import { LoadingSpinner } from '../common/LoadingSpinner.js';

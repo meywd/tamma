@@ -7,6 +7,8 @@
 
 import { useSearchParams } from 'react-router-dom';
 
+import type { JSX } from "react";
+
 const ERROR_MESSAGES: Record<string, string> = {
   missing_code: 'GitHub authorization was cancelled.',
   token_exchange_failed: 'Failed to complete GitHub sign-in. Please try again.',

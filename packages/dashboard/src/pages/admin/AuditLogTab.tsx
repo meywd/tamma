@@ -8,6 +8,8 @@
 
 import { Card } from '../../components/common/Card.js';
 
+import type { JSX } from "react";
+
 const FEATURE_ENABLED = import.meta.env.VITE_FEATURE_ADMIN_AUDIT_LOG === 'true';
 
 function ComingSoonPlaceholder(): JSX.Element {

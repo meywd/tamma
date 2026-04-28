@@ -10,7 +10,7 @@
  * server has no list-with-filter endpoint, so all reduction is client-side.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type { PromptResponse } from '../../services/admin/prompts-api-client.js';
 import {
   ACTIONS,
@@ -84,7 +84,6 @@ export function PromptTable({
           {filtered.length} of {prompts.length} templates
         </span>
       </div>
-
       {/* Table */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200">

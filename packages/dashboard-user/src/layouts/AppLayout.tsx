@@ -8,6 +8,8 @@
 import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
+import type { JSX } from "react";
+
 export function AppLayout(): JSX.Element {
   const { user, logout } = useAuth();
 

@@ -7,7 +7,7 @@
  * `mapOrgError`.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useOrgMembers } from '../../hooks/orgs/useOrgMembers.js';
 import { useCurrentTenant } from '../../hooks/orgs/useCurrentTenant.js';
 import { LoadingSpinner } from '../common/LoadingSpinner.js';

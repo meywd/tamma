@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { usePromptTemplates } from '../../../hooks/settings/usePromptTemplates.js';
 import { Card } from '../../common/Card.js';
 import { LoadingSpinner } from '../../common/LoadingSpinner.js';

@@ -3,6 +3,8 @@ import { useProviderHealth } from '../../../hooks/settings/useProviderHealth.js'
 import { LoadingSpinner } from '../../common/LoadingSpinner.js';
 import { ProviderHealthCard } from './ProviderHealthCard.js';
 
+import type { JSX } from "react";
+
 export function ProviderHealthDashboard(): JSX.Element {
   const { status, loading, error, reload } = useProviderHealth();
 

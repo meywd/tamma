@@ -18,6 +18,8 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { OnboardingShell } from '../../components/onboarding/OnboardingShell.js';
 
+import type { JSX } from "react";
+
 const REASON_COPY: Record<string, { title: string; body: string }> = {
   unknown_user: {
     title: 'Your session looks stale',

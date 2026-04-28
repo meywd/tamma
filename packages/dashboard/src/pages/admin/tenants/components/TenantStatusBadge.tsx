@@ -1,5 +1,7 @@
 import { Badge } from '../../../../components/common/Badge.js';
 
+import type { JSX } from "react";
+
 /**
  * Story 28-11 — renders a color-coded status chip for a tenant's lifecycle
  * status. Maps the six canonical states from Doc 01 §7.2 to the shared

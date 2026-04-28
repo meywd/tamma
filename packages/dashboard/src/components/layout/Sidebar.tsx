@@ -2,6 +2,8 @@
 import { NavLink } from 'react-router-dom';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 
+import type { JSX } from "react";
+
 interface NavGroup {
   label: string;
   items: { to: string; label: string }[];

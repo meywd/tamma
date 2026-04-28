@@ -1,6 +1,8 @@
 
 import type { DiagnosticsEvent } from '@tamma/shared';
 
+import type { JSX } from "react";
+
 interface CostBreakdownTableProps {
   events: DiagnosticsEvent[];
 }

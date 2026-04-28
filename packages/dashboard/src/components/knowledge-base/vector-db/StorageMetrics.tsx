@@ -4,7 +4,7 @@
  * Visualizes vector database storage usage across collections.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { StorageUsage } from '@tamma/shared';
 
 export interface StorageMetricsProps {

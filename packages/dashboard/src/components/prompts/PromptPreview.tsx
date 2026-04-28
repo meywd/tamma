@@ -6,7 +6,7 @@
  * avoid hitting the render endpoint on every keypress.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import type { RenderedResult } from '../../hooks/useTenantPrompts.js';
 
 interface PromptPreviewProps {

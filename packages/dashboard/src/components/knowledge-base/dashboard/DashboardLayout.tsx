@@ -5,7 +5,7 @@
  * with sidebar navigation and content area.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 
 export interface NavItem {
   id: string;

@@ -6,7 +6,7 @@
  * /admin/tenants roster + detail pages.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { UsersTab } from './UsersTab.js';
 import { ApiKeysTab } from './ApiKeysTab.js';
