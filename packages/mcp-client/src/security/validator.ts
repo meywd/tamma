@@ -17,12 +17,12 @@ const serverConfigSchema = z.object({
   // Stdio options
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   cwd: z.string().optional(),
 
   // SSE/WebSocket options
-  url: z.string().url().optional(),
-  headers: z.record(z.string()).optional(),
+  url: z.url().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 
   // Common options
   timeout: z.number().positive().optional(),
@@ -77,7 +77,7 @@ export function validateClientConfig(config: unknown): MCPClientConfig {
   const result = clientConfigSchema.safeParse(config);
 
   if (!result.success) {
-    const errors = result.error.errors.map((e) => ({
+    const errors = result.error.issues.map((e) => ({
       path: e.path.join('.'),
       message: e.message,
     }));
@@ -99,7 +99,7 @@ export function validateServerConfig(config: unknown): MCPServerConfig {
   const result = serverConfigSchema.safeParse(config);
 
   if (!result.success) {
-    const errors = result.error.errors.map((e) => ({
+    const errors = result.error.issues.map((e) => ({
       path: e.path.join('.'),
       message: e.message,
     }));

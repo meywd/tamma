@@ -14,13 +14,13 @@ const authRoutes = new Hono<HonoContext>()
 
 // Validation schemas
 const registerSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email('Invalid email format'),
   password: z.string().min(12, 'Password must be at least 12 characters'),
   fullName: z.string().optional(),
 })
 
 const loginSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email('Invalid email format'),
   password: z.string().min(1, 'Password is required'),
 })
 
@@ -29,7 +29,7 @@ const verifyEmailSchema = z.object({
 })
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email('Invalid email format'),
 })
 
 const resetPasswordSchema = z.object({
@@ -47,7 +47,7 @@ const refreshTokenSchema = z.object({
 })
 
 const resendVerificationSchema = z.object({
-  email: z.string().email('Invalid email format'),
+  email: z.email('Invalid email format'),
 })
 
 /**

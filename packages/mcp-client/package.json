@@ -30,7 +30,7 @@
   "dependencies": {
     "@tamma/shared": "workspace:*",
     "@tamma/observability": "workspace:*",
-    "zod": "^3.23.0",
+    "zod": "^4.0.0",
     "eventemitter3": "^5.0.0"
   },
   "devDependencies": {

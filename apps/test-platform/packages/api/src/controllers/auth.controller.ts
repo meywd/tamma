@@ -10,7 +10,7 @@ import { rateLimitService } from '../services/rate-limit.service'
 import { getDatabase } from '../../../../src/database/connection'
 
 const registerSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
@@ -18,7 +18,7 @@ const registerSchema = z.object({
 })
 
 const requestPasswordResetSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
 })
 
 const resetPasswordSchema = z.object({
@@ -36,7 +36,7 @@ const validateTokenSchema = z.object({
 })
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
 })
 
@@ -53,7 +53,7 @@ const verifyEmailSchema = z.object({
 })
 
 const resendVerificationSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
 })
 
 export const register = [
