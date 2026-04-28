@@ -45,7 +45,7 @@ public static class KekRotationEndpoints
             ?? principal.FindFirst("email")?.Value;
         var actorPlatformRole = principal.FindFirst("platformRole")?.Value;
 
-        var status = coordinator.StartAsync(
+        var status = coordinator.Start(
             newKek: null,
             cancellationToken: http.RequestAborted,
             actorUserId: actorUserId,

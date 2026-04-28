@@ -126,7 +126,7 @@ public class KekRotationPostFixTests
             NullLogger<KekRotationCoordinator>.Instance);
 
         // Original run — actor claims point at "alice".
-        coordinator.StartAsync(
+        coordinator.Start(
             stagedSecondary,
             actorUserId: "alice-user-id",
             actorEmail: "alice@tamma.dev",
@@ -222,7 +222,7 @@ public class KekRotationPostFixTests
             new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
-        coordinator.StartAsync(stagedSecondary);
+        coordinator.Start(stagedSecondary);
         await coordinator.WaitForCompletionAsync();
         coordinator.GetStatus().Phase.Should().Be(KekRotationPhase.Failed);
 
@@ -339,7 +339,7 @@ public class KekRotationPostFixTests
         // Step 1 — drive into Failed. The first rotation stages key A
         // into provider._secondary AND persists key A into the
         // kek_rotations row.
-        coordinator.StartAsync(keyA);
+        coordinator.Start(keyA);
         await coordinator.WaitForCompletionAsync();
         coordinator.GetStatus().Phase.Should().Be(KekRotationPhase.Failed);
         provider.GetSecondary().Should().BeEquivalentTo(keyA,
@@ -447,7 +447,7 @@ public class KekRotationPostFixTests
             new NoopTenantConnectionResolver(),
             NullLogger<KekRotationCoordinator>.Instance);
 
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();

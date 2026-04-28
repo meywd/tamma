@@ -21,7 +21,7 @@ namespace Tamma.Api.Services.Secrets;
 /// <para>The coordinator is a singleton (one rotation can be in flight
 /// at a time per process). The actual re-encrypt loop runs on a
 /// background <see cref="Task"/> kicked off by
-/// <see cref="StartAsync"/> so the API call returns 202 immediately.</para>
+/// <see cref="Start"/> so the API call returns 202 immediately.</para>
 ///
 /// <para>R2-H14 hardening:</para>
 /// <list type="bullet">
@@ -123,7 +123,7 @@ public sealed class KekRotationCoordinator
         FailureReason: null);
     private Task? _runningTask;
     // R2-H14: when a rotation runs, this is the kek_rotations row id
-    // tracking the in-flight state. Set on StartAsync, cleared on
+    // tracking the in-flight state. Set on Start, cleared on
     // terminal phase. Retry uses this to find the row to re-execute.
     private Guid? _activeRotationId;
 
@@ -162,6 +162,15 @@ public sealed class KekRotationCoordinator
     /// Begin a rotation. If a rotation is already in flight, returns
     /// the running snapshot without staging a second key. The operator
     /// can <see cref="GetStatus"/> to poll progress.
+    ///
+    /// <para>This method is intentionally synchronous: it stages the
+    /// new KEK as secondary, captures the in-memory status, and
+    /// schedules the long-running re-encrypt loop on a background task
+    /// (<c>Task.Run</c>) before returning the status snapshot. Callers
+    /// should NOT <c>await</c> this method — the rotation runs to
+    /// completion on the background task and is observable via
+    /// <see cref="GetStatus"/>. Renamed from <c>StartAsync</c> in PR #329
+    /// review to remove the misleading <c>Async</c> suffix.</para>
     /// </summary>
     /// <param name="newKek">Optional caller-supplied 32-byte KEK. When
     /// null, the coordinator generates one via
@@ -177,7 +186,7 @@ public sealed class KekRotationCoordinator
     /// <paramref name="actorUserId"/>.</param>
     /// <param name="actorPlatformRole">JWT <c>platformRole</c> claim,
     /// see <paramref name="actorUserId"/>.</param>
-    public KekRotationStatus StartAsync(
+    public KekRotationStatus Start(
         byte[]? newKek = null,
         CancellationToken cancellationToken = default,
         string? actorUserId = null,
@@ -189,7 +198,7 @@ public sealed class KekRotationCoordinator
             if (_status.Phase == KekRotationPhase.Running)
             {
                 _logger.LogInformation(
-                    "KekRotationCoordinator.StartAsync called while a rotation is "
+                    "KekRotationCoordinator.Start called while a rotation is "
                     + "already in flight — returning current status.");
                 return _status;
             }
@@ -238,7 +247,7 @@ public sealed class KekRotationCoordinator
 
     /// <summary>
     /// Story 28-R2 / Finding M2 — projection of the JWT-bound operator
-    /// identity captured at <see cref="StartAsync"/> time and replayed
+    /// identity captured at <see cref="Start"/> time and replayed
     /// into every platform event emitted during the rotation. Threaded
     /// through <see cref="RunRotationAsync"/> so the background task
     /// can attach the actor to STARTED / STEP / COMPLETED / FAILED
@@ -1059,7 +1068,7 @@ public sealed class KekRotationCoordinator
     /// Story 28-R2 / Finding M2 — emits a KEK-rotation platform event with
     /// the operator identity (sub + email + platformRole) baked into both
     /// <c>tags</c> (for SQL filtering) and <c>data</c> (immutable record).
-    /// The actor is captured at <see cref="StartAsync"/> time and threaded
+    /// The actor is captured at <see cref="Start"/> time and threaded
     /// through every subsequent emit on the rotation's background task.
     /// </summary>
     private static async Task EmitPlatformEventAsync(

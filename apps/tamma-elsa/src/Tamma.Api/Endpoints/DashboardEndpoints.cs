@@ -17,6 +17,7 @@ public static class DashboardEndpoints
         IWorkflowRepository workflowRepo,
         IEngineRegistry engineRegistry,
         ITenantDbContextFactory tenantDbFactory,
+        IDbContextFactory<ControlPlaneDbContext> cpDbFactory,
         ITenantContext tc)
     {
         long totalEvents = 0;
@@ -31,6 +32,18 @@ public static class DashboardEndpoints
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
             totalEvents = await db.DomainEvents.LongCountAsync(e => e.TenantId == tid);
+        }
+        else
+        {
+            // PR #329 review: restore the prior null-tenant behaviour.
+            // Story 28-1 PR C / Decision #2: cross-tenant admin queries route
+            // to platform_events on the control plane (tenant DBs aren't
+            // reachable without a tenant id). The DashboardView policy admits
+            // the platform-admin user when no per-tenant role is bound, so
+            // returning the platform-wide event count for the global summary
+            // matches the prior `tc.TenantId == null || ...` aggregate count.
+            await using var cp = await cpDbFactory.CreateDbContextAsync();
+            totalEvents = await cp.PlatformEvents.LongCountAsync();
         }
 
         var engines = await engineRegistry.ListAsync(tc.TenantId);

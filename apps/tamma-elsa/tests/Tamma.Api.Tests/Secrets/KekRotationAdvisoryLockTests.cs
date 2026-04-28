@@ -134,7 +134,7 @@ public class KekRotationAdvisoryLockTests
         var newKek = new byte[32];
         for (var i = 0; i < 32; i++) newKek[i] = (byte)(i + 50);
 
-        coordinator.StartAsync(newKek);
+        coordinator.Start(newKek);
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();

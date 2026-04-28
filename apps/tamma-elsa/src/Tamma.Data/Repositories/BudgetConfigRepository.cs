@@ -53,7 +53,7 @@ public class BudgetConfigRepository(
         if (config.TenantId is Guid tid)
         {
             await using var db = await factory.CreateAsync(tid, ct);
-            return await UpsertInternal(db.BudgetConfigs, () => db.SaveChangesAsync(ct), config);
+            return await UpsertInternal(db.BudgetConfigs, () => db.SaveChangesAsync(ct), config, ct);
         }
 
         // Story 28-1 PR A: platform-default writes are no-ops. Defaults live
@@ -69,11 +69,12 @@ public class BudgetConfigRepository(
     }
 
     private static async Task<BudgetConfig> UpsertInternal(
-        DbSet<BudgetConfig> set, Func<Task<int>> save, BudgetConfig config)
+        DbSet<BudgetConfig> set, Func<Task<int>> save, BudgetConfig config, CancellationToken ct)
     {
         var existing = await set
             .FirstOrDefaultAsync(
-                b => b.TenantId == config.TenantId && b.AccountId == config.AccountId);
+                b => b.TenantId == config.TenantId && b.AccountId == config.AccountId,
+                ct);
 
         if (existing is null)
         {

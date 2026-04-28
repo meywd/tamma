@@ -127,7 +127,7 @@ public class KekRotationCoordinatorTests
         var coordinator = BuildCoordinator(provider);
         var newKek = BuildKek(seed: 99);
 
-        var initialStatus = coordinator.StartAsync(newKek);
+        var initialStatus = coordinator.Start(newKek);
         initialStatus.Phase.Should().Be(KekRotationPhase.Running);
 
         await coordinator.WaitForCompletionAsync();
@@ -177,7 +177,7 @@ public class KekRotationCoordinatorTests
         var provider = BuildProvider();
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var types = _eventRepo.AppendedEvents.Select(e => e.Type).ToList();
@@ -197,7 +197,7 @@ public class KekRotationCoordinatorTests
         var provider = BuildProvider();
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 77));
+        coordinator.Start(BuildKek(seed: 77));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();
@@ -219,7 +219,7 @@ public class KekRotationCoordinatorTests
         var provider = BuildProvider();
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 99));
+        coordinator.Start(BuildKek(seed: 99));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();
@@ -241,8 +241,8 @@ public class KekRotationCoordinatorTests
 
         // Kick off and immediately try to start a second one. The second
         // call must see Phase=Running and not stage a new key.
-        coordinator.StartAsync(firstKek);
-        var secondStatus = coordinator.StartAsync(secondKek);
+        coordinator.Start(firstKek);
+        var secondStatus = coordinator.Start(secondKek);
 
         secondStatus.Phase.Should().Be(KekRotationPhase.Running);
 
@@ -264,7 +264,7 @@ public class KekRotationCoordinatorTests
         var provider = BuildProvider();
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();
@@ -295,7 +295,7 @@ public class KekRotationCoordinatorTests
     [Test]
     public async Task Start_Without_Primary_Marks_Rotation_Failed()
     {
-        // Build a provider with NO primary — StartAsync stages the
+        // Build a provider with NO primary — Start() stages the
         // secondary successfully but the background task fails because
         // it cannot read the old primary to decrypt with.
         var dict = new Dictionary<string, string?>
@@ -306,7 +306,7 @@ public class KekRotationCoordinatorTests
         var provider = new KekProvider(cfg, NullLogger<KekProvider>.Instance);
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();
@@ -321,7 +321,7 @@ public class KekRotationCoordinatorTests
         var provider = BuildProvider();
         var coordinator = BuildCoordinator(provider);
 
-        Action act = () => coordinator.StartAsync(new byte[16]);
+        Action act = () => coordinator.Start(new byte[16]);
 
         act.Should().Throw<ArgumentException>();
     }

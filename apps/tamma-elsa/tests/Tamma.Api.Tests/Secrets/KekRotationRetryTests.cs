@@ -101,7 +101,7 @@ public class KekRotationRetryTests
         var provider = BuildProvider(initialPrimary);
         var coordinator = BuildCoordinator(provider);
 
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var snapshot = coordinator.GetStatus();
@@ -162,7 +162,7 @@ public class KekRotationRetryTests
 
         // Force a failure by encrypting a tenant under an unknown key.
         await SeedFailingTenantAsync();
-        coordinator.StartAsync(BuildKek(seed: 50));
+        coordinator.Start(BuildKek(seed: 50));
         await coordinator.WaitForCompletionAsync();
 
         var status = coordinator.GetStatus();
@@ -195,7 +195,7 @@ public class KekRotationRetryTests
         // Drive the coordinator into Failed phase by running a
         // deliberate failing rotation (envelope under unknown key).
         await SeedFailingTenantAsync();
-        coordinator.StartAsync(stagedSecondary);
+        coordinator.Start(stagedSecondary);
         await coordinator.WaitForCompletionAsync();
 
         coordinator.GetStatus().Phase.Should().Be(KekRotationPhase.Failed);

@@ -45,11 +45,28 @@ public sealed class MarkTenantActiveActivity : TenantLifecycleActivity
                 $"MarkActive: tenant {tenantId} not found in CP.");
 
         var current = (string?)db.Entry(tenant).Property("Status").CurrentValue;
-        if (!string.Equals(current, "active", StringComparison.OrdinalIgnoreCase))
+        // PR #329 review: enforce the documented `WHERE Status='provisioning'`
+        // guard. Two legitimate cases reach here:
+        //   1. Status == 'provisioning' — happy path, flip to 'active'.
+        //   2. Status == 'active' — replay (workflow re-runs after the same
+        //      activity already succeeded). No-op; events still emit so the
+        //      step-dedup index swallows the duplicate row.
+        // Anything else (e.g. 'failed', 'deleted', 'suspended') is an
+        // accidental re-activation we MUST refuse — flipping a deleted or
+        // suspended tenant to 'active' on workflow replay would silently
+        // resurrect the row.
+        if (string.Equals(current, "provisioning", StringComparison.OrdinalIgnoreCase))
         {
             db.Entry(tenant).Property("Status").CurrentValue = "active";
             tenant.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(context.CancellationToken);
+        }
+        else if (!string.Equals(current, "active", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"MarkActive: refusing to flip tenant {tenantId} to 'active' "
+                + $"from unexpected status '{current ?? "(null)"}'. Expected "
+                + "'provisioning' (happy path) or 'active' (replay).");
         }
 
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();

@@ -44,7 +44,6 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
                 "EncryptAndPersist: TenantConnectionString input is empty.");
 
         var protector = context.GetRequiredService<ITenantConnectionStringProtector>();
-        var envelope = protector.Encrypt(cs);
         var kek = protector.CurrentKekVersion;
 
         var factory = context.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
@@ -56,6 +55,26 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
             ?? throw new InvalidOperationException(
                 $"EncryptAndPersist: tenant {tenantId} not found in CP.");
 
+        // PR #329 review: enforce the documented no-op skip when the envelope
+        // is already populated under the active KEK version. Re-running the
+        // activity (workflow replay, or a downstream-step retry that loops
+        // back through this step) shouldn't re-encrypt — fresh AES-GCM
+        // ciphertext under the same key would invalidate downstream consumers
+        // that snapshot the envelope (e.g. cached connection resolvers).
+        // We DO re-encrypt when the KEK version differs (rotation in flight)
+        // because the rotation re-encrypt loop owns that path explicitly;
+        // this just guards the retry-loop case.
+        var existingEnvelope = (string?)db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue;
+        var existingKek = (int?)db.Entry(tenant).Property("KekVersion").CurrentValue;
+        if (!string.IsNullOrEmpty(existingEnvelope) && existingKek == kek)
+        {
+            Logger?.LogInformation(
+                "tenant.lifecycle.encrypt_creds skipped (idempotent) tenantId={TenantId} kek={Kek}",
+                tenantId, kek);
+            return;
+        }
+
+        var envelope = protector.Encrypt(cs);
         db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = envelope;
         db.Entry(tenant).Property("KekVersion").CurrentValue = kek;
         tenant.UpdatedAt = DateTime.UtcNow;
