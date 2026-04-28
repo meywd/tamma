@@ -26,12 +26,12 @@
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.5",
     "jsdom": "^29.1.0",
     "tailwindcss": "^4.2.4",
     "typescript": "~5.7.2",
-    "vite": "^6.0.7",
+    "vite": "^8.0.10",
     "vitest": "^4.1.5"
   }
 }
