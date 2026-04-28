@@ -23,7 +23,7 @@
     "@tamma/cost-monitor": "workspace:*",
     "@tamma/observability": "workspace:*",
     "@tamma/shared": "workspace:*",
-    "openai": "^4.77.3"
+    "openai": "^6.34.0"
   },
   "devDependencies": {
     "typescript": "~5.7.2"
