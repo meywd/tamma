@@ -214,9 +214,12 @@ public class ProviderHealthEndpointsIntegrationTests
         for (var i = 0; i < 3; i++)
             await PostFailureAsync("anthropic");
 
+        // Story 28-1 PR D — provider_health lives on the tenant DB.
         using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-        var row = await db.ProviderHealths
+        var factory = scope.ServiceProvider
+            .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(Guid.Parse(Tenant));
+        var row = await tdb.ProviderHealths
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(h => h.ProviderKey == "anthropic");
 

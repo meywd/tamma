@@ -296,8 +296,11 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
             {
                 if (ct.IsCancellationRequested) break;
                 await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase requires the
+                // explicit TenantId predicate. Once each tenant has its
+                // own DB the predicate is redundant but harmless.
                 var statuses = await tdb.WorkflowInstances
-                    .Where(w => w.CreatedAt >= since)
+                    .Where(w => w.TenantId == tid && w.CreatedAt >= since)
                     .Select(w => w.Status)
                     .ToListAsync(ct)
                     .ConfigureAwait(false);
@@ -477,8 +480,10 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
             {
                 if (ct.IsCancellationRequested) break;
                 await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase requires the
+                // explicit TenantId predicate.
                 rows.AddRange(await tdb.WorkflowInstances
-                    .Where(w => w.CreatedAt >= t30d)
+                    .Where(w => w.TenantId == tid && w.CreatedAt >= t30d)
                     .Select(w => new WfRow(w.Status, w.CreatedAt))
                     .ToListAsync(ct)
                     .ConfigureAwait(false));
@@ -589,8 +594,10 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
             {
                 if (ct.IsCancellationRequested) break;
                 await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
                 rows.AddRange(await tdb.DomainEvents.AsNoTracking()
-                    .Where(e => e.Type == LlmCallSuccess && e.CreatedAt >= t30d)
+                    .Where(e => e.TenantId == tid &&
+                                e.Type == LlmCallSuccess && e.CreatedAt >= t30d)
                     .Select(e => new CostRow(e.CreatedAt, tid, e.Data))
                     .ToListAsync(ct)
                     .ConfigureAwait(false));
@@ -633,8 +640,10 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         {
             if (ct.IsCancellationRequested) break;
             await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+            // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
             var data = await tdb.DomainEvents.AsNoTracking()
-                .Where(e => e.Type == LlmCallSuccess && e.CreatedAt >= since)
+                .Where(e => e.TenantId == tid &&
+                            e.Type == LlmCallSuccess && e.CreatedAt >= since)
                 .Select(e => e.Data)
                 .ToListAsync(ct)
                 .ConfigureAwait(false);

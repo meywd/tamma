@@ -64,7 +64,9 @@ public class DiagnosticsRepository(
         if (tenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            return await PageAsync(db.ProviderDiagnostics.AsQueryable(),
+            // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+            return await PageAsync(
+                db.ProviderDiagnostics.Where(d => d.TenantId == tid),
                 providerKey, from, to, limit, offset, success, model);
         }
 
@@ -93,7 +95,14 @@ public class DiagnosticsRepository(
         if (tenantId is Guid tid)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            return await SumCostAsync(db.ProviderDiagnostics.AsQueryable(), fromUtc, toUtc);
+            // Wave A.5 transitional shared-DB phase requires explicit TenantId
+            // predicate (see TammaModelConfiguration.ApplyTenantFilter). The
+            // per-tenant Npgsql connection becomes the isolation plane once
+            // each tenant has its own DB, at which point this predicate is
+            // redundant but harmless.
+            return await SumCostAsync(
+                db.ProviderDiagnostics.Where(d => d.TenantId == tid),
+                fromUtc, toUtc);
         }
 
         decimal total = 0m;
@@ -101,7 +110,9 @@ public class DiagnosticsRepository(
         foreach (var t in tenantIds)
         {
             await using var db = await tenantDbFactory.CreateAsync(t);
-            total += await SumCostAsync(db.ProviderDiagnostics.AsQueryable(), fromUtc, toUtc);
+            total += await SumCostAsync(
+                db.ProviderDiagnostics.Where(d => d.TenantId == t),
+                fromUtc, toUtc);
         }
         return total;
     }
@@ -127,7 +138,8 @@ public class DiagnosticsRepository(
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
             rows.AddRange(await db.ProviderDiagnostics
-                .Where(d => d.CreatedAt >= fromUtc && d.CreatedAt < toUtc)
+                .Where(d => d.TenantId == tid &&
+                            d.CreatedAt >= fromUtc && d.CreatedAt < toUtc)
                 .ToListAsync());
         }
         else
@@ -137,7 +149,8 @@ public class DiagnosticsRepository(
             {
                 await using var db = await tenantDbFactory.CreateAsync(t);
                 rows.AddRange(await db.ProviderDiagnostics
-                    .Where(d => d.CreatedAt >= fromUtc && d.CreatedAt < toUtc)
+                    .Where(d => d.TenantId == t &&
+                                d.CreatedAt >= fromUtc && d.CreatedAt < toUtc)
                     .ToListAsync());
             }
         }
@@ -220,7 +233,8 @@ public class DiagnosticsRepository(
         foreach (var tid in tenantIds)
         {
             await using var db = await tenantDbFactory.CreateAsync(tid);
-            var query = db.ProviderDiagnostics.AsQueryable();
+            // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+            var query = db.ProviderDiagnostics.Where(d => d.TenantId == tid);
             if (!string.IsNullOrEmpty(providerKey))
                 query = query.Where(d => d.ProviderKey == providerKey);
             if (from.HasValue)

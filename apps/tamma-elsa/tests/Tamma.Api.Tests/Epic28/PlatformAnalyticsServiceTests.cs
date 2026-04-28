@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Analytics;
 using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Tests.Epic28;
@@ -19,10 +20,13 @@ public class PlatformAnalyticsServiceTests
         new(2026, 04, 18, 12, 00, 00, DateTimeKind.Utc);
 
     private ControlPlaneDbContext _cp = null!;
-    // Wave A.5 post-merge: DomainEvents + WorkflowInstances DbSets live on
-    // ControlPlaneDbContext now as legacy-shared tables. _app is an alias
-    // for _cp so the seed helpers stay grouped by semantic scope.
-    private ControlPlaneDbContext _app => _cp;
+    // Story 28-1 PR D: WorkflowInstances + DomainEvents moved off CP to
+    // the per-tenant DB. _app is the per-tenant context, materialised on
+    // demand by helpers via the test tenant factory. Tests still seed
+    // tenants via _cp.
+    private TenantDbContext _app = null!;
+    private DbContextOptions<TenantDbContext> _appOptions = null!;
+    private ITenantDbContextFactory _tenantFactory = null!;
     private PlatformAnalyticsService _sut = null!;
     private FakeTimeProvider _clock = null!;
 
@@ -36,13 +40,26 @@ public class PlatformAnalyticsServiceTests
             .Options;
         _cp = new ControlPlaneDbContext(cpOptions);
 
+        _appOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase($"tenant-{Guid.NewGuid()}")
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantFactory = new TestTenantDbContextFactory(_appOptions);
+        // _app is a tenant context bound to a sentinel id used only for
+        // seed helpers that don't carry an explicit tenant. The factory
+        // hands back contexts bound to the actual tenant id when callers
+        // pass one.
+        _app = new TestTenantDbContext(_appOptions, Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
+
         _clock = new FakeTimeProvider(FixedNow);
-        _sut = new PlatformAnalyticsService(_cp, tenantFactory: null, clock: _clock);
+        _sut = new PlatformAnalyticsService(_cp, _tenantFactory, _clock);
     }
 
     [TearDown]
     public void TearDown()
     {
+        _app.Dispose();
         _cp.Dispose();
     }
 
@@ -326,7 +343,12 @@ public class PlatformAnalyticsServiceTests
 
     private async Task SeedWorkflowAsync(Guid tenantId, string status, DateTime createdAt)
     {
-        _app.WorkflowInstances.Add(new WorkflowInstance
+        // Story 28-1 PR D — workflow_instances live on the tenant DB.
+        // Also ensure the tenant exists on CP since PlatformAnalyticsService
+        // enumerates active tenants from CP before fanning out.
+        await EnsureTenantOnCpAsync(tenantId);
+        await using var tdb = await _tenantFactory.CreateAsync(tenantId);
+        tdb.WorkflowInstances.Add(new WorkflowInstance
         {
             Id = Guid.NewGuid(),
             DefinitionId = Guid.NewGuid(),
@@ -336,7 +358,24 @@ public class PlatformAnalyticsServiceTests
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
         });
-        await _app.SaveChangesAsync();
+        await tdb.SaveChangesAsync();
+    }
+
+    private async Task EnsureTenantOnCpAsync(Guid tenantId)
+    {
+        var exists = await _cp.Tenants.IgnoreQueryFilters()
+            .AnyAsync(t => t.Id == tenantId);
+        if (exists) return;
+        _cp.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"t-{tenantId:N}",
+            Slug = $"t-{tenantId:N}",
+            Type = "personal",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _cp.SaveChangesAsync();
     }
 
     private async Task SeedPlatformEventAsync(string type, DateTime createdAt)
@@ -355,17 +394,29 @@ public class PlatformAnalyticsServiceTests
 
     private async Task SeedDomainEventAsync(string type, DateTime createdAt, string data, Guid? tenantId = null)
     {
-        _app.DomainEvents.Add(new DomainEvent
+        // Story 28-1 PR D — domain_events live on the tenant DB. For
+        // platform-scope events (TenantId == null) the test still uses
+        // the same per-tenant store, since these in-memory tests don't
+        // partition platform events from tenant events at the storage
+        // layer (PlatformAnalyticsService reads cp.PlatformEvents for
+        // those — see SeedPlatformEventAsync).
+        var tid = tenantId
+            ?? throw new InvalidOperationException(
+                "SeedDomainEventAsync requires a tenant id after Story 28-1 PR D. " +
+                "For platform-scope events, use SeedPlatformEventAsync.");
+        await EnsureTenantOnCpAsync(tid);
+        await using var tdb = await _tenantFactory.CreateAsync(tid);
+        tdb.DomainEvents.Add(new DomainEvent
         {
             Id = Guid.NewGuid(),
             Type = type,
-            TenantId = tenantId,
+            TenantId = tid,
             Tags = "{}",
             Metadata = "{\"eventSource\":\"system\"}",
             Data = data,
             CreatedAt = createdAt,
         });
-        await _app.SaveChangesAsync();
+        await tdb.SaveChangesAsync();
     }
 
     private sealed class FakeTimeProvider : TimeProvider

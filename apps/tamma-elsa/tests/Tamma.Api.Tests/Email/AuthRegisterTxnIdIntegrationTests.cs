@@ -83,7 +83,11 @@ public class AuthRegisterTxnIdIntegrationTests
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
-        var queued = await db.DomainEvents
+        // Story 28-1 PR D — verification email is platform-scope. The
+        // QUEUED event lands in platform_events (EventRepository delegates
+        // null-tenant appends to IPlatformEventRepository), not in the
+        // tenant-resident domain_events.
+        var queued = await db.PlatformEvents
             .IgnoreQueryFilters()
             .Where(e => e.Type == EmailEventTypes.Queued)
             .ToListAsync();
@@ -101,10 +105,6 @@ public class AuthRegisterTxnIdIntegrationTests
         var outboxRows = await db.PlatformEmailOutbox.ToListAsync();
         outboxRows.Should().ContainSingle();
         outboxRows[0].Id.ToString().Should().Be(txnIdStr);
-
-        // No tenant-scope email row should exist — verification email is
-        // strictly platform-scope.
-        (await db.EmailOutbox.ToListAsync()).Should().BeEmpty();
 
         // Event payload must NOT leak recipient / subject / body — CodeQL
         // would flag those. Tags and data are checked separately.
@@ -138,7 +138,9 @@ public class AuthRegisterTxnIdIntegrationTests
         rows[0].ToAddress.Should().Be("outbox-row@example.com",
             "the OUTBOX is the one place we DO persist the recipient");
 
-        var queued = await db.DomainEvents
+        // Story 28-1 PR D — verification email QUEUED event lands in
+        // platform_events (platform-scope, null tenant id).
+        var queued = await db.PlatformEvents
             .IgnoreQueryFilters()
             .Where(e => e.Type == EmailEventTypes.Queued)
             .ToListAsync();

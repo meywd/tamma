@@ -471,8 +471,14 @@ public sealed class AlertRuleEvaluator : BackgroundService
                 try
                 {
                     await using var tdb = await resolver.CreateAsync(tid, ct);
+                    // Wave A.5 transitional shared-DB phase requires the
+                    // explicit TenantId predicate (see
+                    // TammaModelConfiguration.ApplyTenantFilter). Once each
+                    // tenant has its own DB the predicate is redundant but
+                    // harmless.
                     var rows = await tdb.DomainEvents.AsNoTracking()
-                        .Where(e => e.SequenceNumber > cursor.LastDomainSequenceNumber)
+                        .Where(e => e.TenantId == tid &&
+                                    e.SequenceNumber > cursor.LastDomainSequenceNumber)
                         .OrderBy(e => e.SequenceNumber)
                         .Take(_options.BatchSize)
                         .ToListAsync(ct)

@@ -52,6 +52,16 @@ public class UserDashboardEndpointHandlerTests
         _tenantDbFactory = _scope.ServiceProvider.GetRequiredService<ITenantDbContextFactory>();
     }
 
+    // Story 28-1 PR D — WorkflowRepository now requires an ambient tenant
+    // id. Direct service-level tests bypass TenantContextMiddleware, so
+    // bind the scope's ITenantContext explicitly before each endpoint
+    // invocation.
+    private void BindTenant(Guid tenantId)
+    {
+        var ctx = _scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        ctx.SetTenantId(tenantId);
+    }
+
     [TearDown]
     public void TearDown() => _scope?.Dispose();
 
@@ -78,6 +88,7 @@ public class UserDashboardEndpointHandlerTests
         await SeedInstances(defA.Id, tenantA, 2);
         await SeedInstances(defB.Id, tenantB, 4);
 
+        BindTenant(tenantA);
         var result = await UserDashboardEndpoints.GetOrgSummary(
             tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));
@@ -97,6 +108,7 @@ public class UserDashboardEndpointHandlerTests
         var (tenantA, _, _) = await SeedTenantWithOwnerAndMember("acme-cap");
         await SeedEvents(tenantA, 25);
 
+        BindTenant(tenantA);
         var result = await UserDashboardEndpoints.GetOrgSummary(
             tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));
@@ -124,6 +136,7 @@ public class UserDashboardEndpointHandlerTests
     {
         var (tenantA, _, _) = await SeedTenantWithOwnerAndMember("empty");
 
+        BindTenant(tenantA);
         var result = await UserDashboardEndpoints.GetOrgSummary(
             tenantA, _tenantDbFactory, _events, _workflowRepo);
         var (status, payload) = (await ExecuteAndCapture(result));

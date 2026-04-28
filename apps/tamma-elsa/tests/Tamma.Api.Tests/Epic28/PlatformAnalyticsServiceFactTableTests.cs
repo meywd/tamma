@@ -4,6 +4,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Analytics;
 using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Tests.Epic28;
@@ -23,14 +24,18 @@ public class PlatformAnalyticsServiceFactTableTests
         new(2026, 04, 18, 12, 00, 00, DateTimeKind.Utc);
 
     private ControlPlaneDbContext _cp = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
+    private ITenantDbContextFactory _tenantFactory = null!;
     private PlatformAnalyticsService _sut = null!;
     private FakeTimeProvider _clock = null!;
 
     [SetUp]
     public void SetUp()
     {
-        // Wave A.5 collapsed TammaAppDbContext into ControlPlaneDbContext;
-        // legacy WorkflowInstances / DomainEvents DbSets now live on CP.
+        // Story 28-1 PR D: WorkflowInstances + DomainEvents moved off CP
+        // to the per-tenant DB. Tests need both contexts now — CP for the
+        // tenants/fact table and the tenant factory for the workflow /
+        // event seeds.
         var cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
             .UseInMemoryDatabase($"cp-fact-{Guid.NewGuid()}")
             .ConfigureWarnings(w => w.Ignore(
@@ -38,8 +43,15 @@ public class PlatformAnalyticsServiceFactTableTests
             .Options;
         _cp = new ControlPlaneDbContext(cpOptions);
 
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase($"tenant-fact-{Guid.NewGuid()}")
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        _tenantFactory = new TestTenantDbContextFactory(_tenantOptions);
+
         _clock = new FakeTimeProvider(FixedNow);
-        _sut = new PlatformAnalyticsService(_cp, tenantFactory: null, clock: _clock);
+        _sut = new PlatformAnalyticsService(_cp, _tenantFactory, _clock);
     }
 
     [TearDown]
@@ -123,8 +135,23 @@ public class PlatformAnalyticsServiceFactTableTests
     public async Task GetSummary_FallsBackToLive_WhenFactTableEmpty()
     {
         // No fact-table rows — populate the live sources.
+        // Story 28-1 PR D: workflow_instances + domain_events live on the
+        // tenant DB. Seed the tenant on CP first, then route per-tenant
+        // seeds through the factory.
         var tenantId = Guid.NewGuid();
-        _cp.WorkflowInstances.Add(new WorkflowInstance
+        _cp.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"t-{tenantId:N}",
+            Slug = $"t-{tenantId:N}",
+            Type = "personal",
+            CreatedAt = FixedNow,
+            UpdatedAt = FixedNow,
+        });
+        await _cp.SaveChangesAsync();
+
+        await using var tdb = await _tenantFactory.CreateAsync(tenantId);
+        tdb.WorkflowInstances.Add(new WorkflowInstance
         {
             Id = Guid.NewGuid(),
             DefinitionId = Guid.NewGuid(),
@@ -134,9 +161,7 @@ public class PlatformAnalyticsServiceFactTableTests
             CreatedAt = FixedNow.AddHours(-1),
             UpdatedAt = FixedNow.AddHours(-1),
         });
-        await _cp.SaveChangesAsync();
-
-        _cp.DomainEvents.Add(new DomainEvent
+        tdb.DomainEvents.Add(new DomainEvent
         {
             Id = Guid.NewGuid(),
             Type = "LLM.CALL.SUCCESS",
@@ -146,7 +171,7 @@ public class PlatformAnalyticsServiceFactTableTests
             Data = "{\"costUsd\":0.75}",
             CreatedAt = FixedNow.AddHours(-1),
         });
-        await _cp.SaveChangesAsync();
+        await tdb.SaveChangesAsync();
 
         var summary = await _sut.GetSummaryAsync();
 

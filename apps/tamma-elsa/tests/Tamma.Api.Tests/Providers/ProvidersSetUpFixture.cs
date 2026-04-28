@@ -22,8 +22,14 @@ namespace Tamma.Api.Tests.Providers;
 public class ProvidersSetUpFixture
 {
     public static PostgreSqlContainer Postgres { get; private set; } = null!;
+    /// <summary>
+    /// Story 28-1 PR D — second Postgres container for tenant-resident
+    /// schema (provider_health, provider_diagnostics, ...).
+    /// </summary>
+    public static PostgreSqlContainer TenantPostgres { get; private set; } = null!;
     public static WebApplicationFactory<Program> Factory { get; private set; } = null!;
     private static Respawner _respawner = null!;
+    private static Respawner _tenantRespawner = null!;
 
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
@@ -34,20 +40,20 @@ public class ProvidersSetUpFixture
             .WithUsername("tamma")
             .WithPassword("tamma")
             .Build();
+        TenantPostgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("tamma_providers_tenant_test")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
 
-        await Postgres.StartAsync();
+        await Task.WhenAll(Postgres.StartAsync(), TenantPostgres.StartAsync());
 
         // InitialSchema uses uuid_generate_v4() which requires the uuid-ossp
         // extension; create it up-front so EF migrations succeed on a vanilla
         // Postgres image.
-        await using (var probe = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString()))
-        {
-            await probe.OpenAsync();
-            await using var cmd = new Npgsql.NpgsqlCommand(
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";",
-                probe);
-            await cmd.ExecuteNonQueryAsync();
-        }
+        await EnableExtensionsAsync(Postgres.GetConnectionString());
+        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
 
         // Environment variables have highest precedence in the default
         // configuration chain, so set the connection string there rather
@@ -55,13 +61,14 @@ public class ProvidersSetUpFixture
         // to read before our overrides can layer on top.
         // Phase-3: point both DefaultConnection and TammaDb at our container.
         // Clearing TammaDb would let appsettings.json's stale localhost
-        // default win. Empty TammaAppDb → AddTammaData falls through to the
-        // admin connection.
+        // default win. Story 28-1 PR D: TammaAppDb points at the tenant
+        // container so the tenant DbContext factory hits the moved tables.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__DefaultConnection", Postgres.GetConnectionString());
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb", Postgres.GetConnectionString());
-        Environment.SetEnvironmentVariable("ConnectionStrings__TammaAppDb", "");
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__TammaAppDb", TenantPostgres.GetConnectionString());
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         // Intentionally leave Jwt:Secret unset so Program.cs takes the
         // Development-mode branch that registers permissive policies.
@@ -81,12 +88,24 @@ public class ProvidersSetUpFixture
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         await db.Database.MigrateAsync();
 
+        // Story 28-1 PR D — apply tenant migrations to the tenant container.
+        await ApplyTenantMigrationsAsync(TenantPostgres.GetConnectionString());
+
         await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
         await conn.OpenAsync();
         _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
         {
             DbAdapter = DbAdapter.Postgres,
             TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            SchemasToInclude = new[] { "public" },
+        });
+
+        await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
+        await tenantConn.OpenAsync();
+        _tenantRespawner = await Respawner.CreateAsync(tenantConn, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.Postgres,
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__TenantMigrationsHistory") },
             SchemasToInclude = new[] { "public" },
         });
     }
@@ -97,6 +116,8 @@ public class ProvidersSetUpFixture
         Factory?.Dispose();
         if (Postgres is not null)
             await Postgres.DisposeAsync();
+        if (TenantPostgres is not null)
+            await TenantPostgres.DisposeAsync();
 
         // Restore the env vars to the root ApiTestFixture's container so
         // sibling-namespace tests running after us can still resolve their
@@ -112,7 +133,8 @@ public class ProvidersSetUpFixture
                 "ConnectionStrings__TammaDb",
                 ApiTestFixture.Postgres.GetConnectionString());
             Environment.SetEnvironmentVariable(
-                "ConnectionStrings__TammaAppDb", "");
+                "ConnectionStrings__TammaAppDb",
+                ApiTestFixture.TenantPostgres?.GetConnectionString() ?? "");
         }
     }
 
@@ -121,5 +143,29 @@ public class ProvidersSetUpFixture
         await using var conn = new Npgsql.NpgsqlConnection(Postgres.GetConnectionString());
         await conn.OpenAsync();
         await _respawner.ResetAsync(conn);
+
+        await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
+        await tenantConn.OpenAsync();
+        await _tenantRespawner.ResetAsync(tenantConn);
+    }
+
+    private static async Task EnableExtensionsAsync(string connectionString)
+    {
+        await using var conn = new Npgsql.NpgsqlConnection(connectionString);
+        await conn.OpenAsync();
+        await using var cmd = new Npgsql.NpgsqlCommand(
+            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";",
+            conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task ApplyTenantMigrationsAsync(string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(connectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .Options;
+        await using var ctx = new TenantDbContext(options);
+        await ctx.Database.MigrateAsync();
     }
 }

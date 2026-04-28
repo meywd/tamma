@@ -52,25 +52,30 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
             new TenantContext(),
             new PlatformEventRepository(fx.Cp));
 
-        // Seed two events, one per tenant. The factory-issued context is
-        // bound to the EF in-memory store so seeding via CP context still
-        // surfaces the same rows.
-        fx.Cp.DomainEvents.AddRange(
-            new DomainEvent
+        // Seed two events, one per tenant. Story 28-1 PR D — domain_events
+        // live on the tenant DB, so seeding goes through the factory.
+        await using (var tdb1 = await fx.Factory.CreateAsync(tenantId))
+        {
+            tdb1.DomainEvents.Add(new DomainEvent
             {
                 Id = Guid.NewGuid(),
                 Type = "WORKFLOW.STARTED.SUCCESS",
                 TenantId = tenantId,
                 CreatedAt = DateTime.UtcNow,
-            },
-            new DomainEvent
+            });
+            await tdb1.SaveChangesAsync();
+        }
+        await using (var tdb2 = await fx.Factory.CreateAsync(otherTenantId))
+        {
+            tdb2.DomainEvents.Add(new DomainEvent
             {
                 Id = Guid.NewGuid(),
                 Type = "WORKFLOW.STARTED.SUCCESS",
                 TenantId = otherTenantId,
                 CreatedAt = DateTime.UtcNow,
             });
-        await fx.Cp.SaveChangesAsync();
+            await tdb2.SaveChangesAsync();
+        }
 
         var rows = await repo.QueryAsync(tenantId, null, null, 50);
 
@@ -118,26 +123,21 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
     }
 
     [Test]
+    [Ignore("Story 28-1 PR D — cp.domain_events is gone; the transitional "
+        + "UNION (legacy cp.DomainEvents + platform_events) was the PR-C "
+        + "compat shim and was removed when PR D landed. Tenant-less "
+        + "EventRepository.QueryAsync now reads ONLY platform_events. The "
+        + "union test is no longer the contract; "
+        + "EventRepository_QueryAsync_WithNullTenantAndType_ReadsPlatformEvents "
+        + "covers the post-D behaviour.")]
     public async Task EventRepository_QueryAsync_WithNullTenantAndType_UnionsLegacyDomainEvents()
     {
-        // Transitional behaviour: until PR D drops cp.domain_events, any
-        // platform-scope events appended via the pre-PR-C code path still
-        // live in cp.domain_events and must remain visible. The merge is
-        // bounded by `limit` so the total never exceeds what callers
-        // requested.
         await using var fx = new InMemoryDbFixture();
         var repo = new EventRepository(
             fx.Factory,
             new TenantContext(),
             new PlatformEventRepository(fx.Cp));
 
-        fx.Cp.DomainEvents.Add(new DomainEvent
-        {
-            Id = Guid.NewGuid(),
-            Type = "EMAIL.QUEUED.SUCCESS",
-            TenantId = null,
-            CreatedAt = DateTime.UtcNow,
-        });
         fx.Cp.PlatformEvents.Add(new PlatformEvent
         {
             Id = Guid.NewGuid(),
@@ -153,9 +153,6 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         var rows = await repo.QueryAsync(null, "EMAIL.QUEUED.SUCCESS", null, 10);
 
         rows.Should().HaveCount(2);
-        // Platform_events row is newer (AddSeconds(1)), so it sorts first.
-        rows[0].Type.Should().Be("EMAIL.QUEUED.SUCCESS");
-        rows[1].Type.Should().Be("EMAIL.QUEUED.SUCCESS");
     }
 
     [Test]
@@ -220,38 +217,51 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         // re-introduces a direct cp.* scan.
         await using var fx = new InMemoryDbFixture();
         var tenantId = Guid.NewGuid();
+        var foreignTenantId = Guid.NewGuid();
 
-        // Seed a tenant-scoped row + a foreign tenant's row to prove the
-        // tenant predicate scopes correctly.
-        fx.Cp.DomainEvents.Add(new DomainEvent
+        // Story 28-1 PR D — domain_events + workflow_instances live on the
+        // tenant DB. Seed via the factory.
+        await using (var tdb = await fx.Factory.CreateAsync(tenantId))
         {
-            Id = Guid.NewGuid(),
-            Type = "WORKFLOW.STARTED.SUCCESS",
-            TenantId = tenantId,
-            CreatedAt = DateTime.UtcNow,
-        });
-        fx.Cp.DomainEvents.Add(new DomainEvent
+            tdb.DomainEvents.Add(new DomainEvent
+            {
+                Id = Guid.NewGuid(),
+                Type = "WORKFLOW.STARTED.SUCCESS",
+                TenantId = tenantId,
+                CreatedAt = DateTime.UtcNow,
+            });
+            tdb.WorkflowInstances.Add(new WorkflowInstance
+            {
+                Id = Guid.NewGuid(),
+                DefinitionId = Guid.NewGuid(),
+                TenantId = tenantId,
+                Status = "completed",
+            });
+            await tdb.SaveChangesAsync();
+        }
+        await using (var tdbForeign = await fx.Factory.CreateAsync(foreignTenantId))
         {
-            Id = Guid.NewGuid(),
-            Type = "WORKFLOW.STARTED.SUCCESS",
-            TenantId = Guid.NewGuid(),
-            CreatedAt = DateTime.UtcNow,
-        });
-        fx.Cp.WorkflowInstances.Add(new WorkflowInstance
-        {
-            Id = Guid.NewGuid(),
-            DefinitionId = Guid.NewGuid(),
-            TenantId = tenantId,
-            Status = "completed",
-        });
-        await fx.Cp.SaveChangesAsync();
+            tdbForeign.DomainEvents.Add(new DomainEvent
+            {
+                Id = Guid.NewGuid(),
+                Type = "WORKFLOW.STARTED.SUCCESS",
+                TenantId = foreignTenantId,
+                CreatedAt = DateTime.UtcNow,
+            });
+            await tdbForeign.SaveChangesAsync();
+        }
 
         var spyFactory = new SpyTenantDbContextFactory(fx.TenantOptions);
+        // Story 28-1 PR D — WorkflowRepository.ListDefinitionsAsync now
+        // requires an ambient tenant id. Pin TenantContext.TenantId to
+        // the test tenant so the endpoint resolves correctly.
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(tenantId);
         var eventRepo = new EventRepository(
             spyFactory,
-            new TenantContext(),
+            tenantContext,
             new PlatformEventRepository(fx.Cp));
-        var workflowRepo = new WorkflowRepository(spyFactory, new TenantContext());
+        var workflowRepo = new WorkflowRepository(spyFactory, tenantContext);
 
         var result = await UserDashboardEndpoints.GetOrgSummary(
             tenantId, spyFactory, eventRepo, workflowRepo);
@@ -297,20 +307,24 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
         await using var fx = new InMemoryDbFixture();
         var tenantId = Guid.NewGuid();
 
-        fx.Cp.ProviderDiagnostics.Add(new ProviderDiagnostic
+        // Story 28-1 PR D — provider_diagnostics live on the tenant DB.
+        await using (var tdb = await fx.Factory.CreateAsync(tenantId))
         {
-            Id = Guid.NewGuid(),
-            ProviderKey = "anthropic",
-            Model = "claude-3-7-sonnet",
-            AgentType = "developer",
-            Success = true,
-            TenantId = tenantId,
-            CreatedAt = DateTime.UtcNow.AddMinutes(-5),
-            RequestDurationMs = 100,
-            Cost = 0.01m,
-            TokensUsed = 100,
-        });
-        await fx.Cp.SaveChangesAsync();
+            tdb.ProviderDiagnostics.Add(new ProviderDiagnostic
+            {
+                Id = Guid.NewGuid(),
+                ProviderKey = "anthropic",
+                Model = "claude-3-7-sonnet",
+                AgentType = "developer",
+                Success = true,
+                TenantId = tenantId,
+                CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+                RequestDurationMs = 100,
+                Cost = 0.01m,
+                TokensUsed = 100,
+            });
+            await tdb.SaveChangesAsync();
+        }
 
         var spyFactory = new SpyTenantDbContextFactory(fx.TenantOptions);
 
@@ -338,6 +352,14 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
     // ── EventRepository optional-platform-repo fallback ─────────────
 
     [Test]
+    [Ignore("Story 28-1 PR D — the legacy cp.DomainEvents fallback path "
+        + "this test asserted is gone. Tenant-less queries with no "
+        + "IPlatformEventRepository wired now return an empty list, not a "
+        + "filtered cp.DomainEvents read (the entity is excluded from the "
+        + "CP model graph entirely). The defensive guard against NRE on "
+        + "null platformEvents still holds and is exercised by the live "
+        + "platform path; this fixture's seed shape (cp.DomainEvents.Add) "
+        + "no longer compiles to a runtime model after PR D.")]
     public async Task EventRepository_QueryAsync_NullPlatformRepo_ReturnsLegacyOnly_NoThrow()
     {
         // #340 MEDIUM finding — exercise the optional ctor parameter
@@ -385,6 +407,13 @@ public class Story28_1_PrC_CrossTenantQueryRoutingTests
     }
 
     [Test]
+    [Ignore("Story 28-1 PR D — cp.DomainEvents is gone; the legacy half "
+        + "this test guarded (filter tenant-scoped rows out of the legacy "
+        + "UNION) is no longer reachable. Tenant-scoped rows now live on "
+        + "the per-tenant DB and are unreachable from a tenant-less query "
+        + "by physical isolation, not by a EF predicate. Coverage of the "
+        + "tenant-less query result shape lives in "
+        + "EventRepository_QueryAsync_WithNullTenantAndType_ReadsPlatformEvents.")]
     public async Task EventRepository_QueryAsync_LegacyHalf_FiltersTenantScopedEventsOut()
     {
         // #340 HIGH finding — the legacy UNION half MUST filter to

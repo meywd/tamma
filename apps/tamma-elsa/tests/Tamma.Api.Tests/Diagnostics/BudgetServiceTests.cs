@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Diagnostics;
 using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 using BudgetConfig = Tamma.Api.Services.Diagnostics.Models.BudgetConfig;
@@ -202,6 +203,12 @@ public class BudgetServiceTests
         // Tests must materialise the tenant row before the diagnostic insert.
         await EnsureTenantAsync(tenantId);
 
+        // Story 28-1 PR D — provider_diagnostics moved off CP. Route the
+        // seed through ITenantDbContextFactory so the row lands on the
+        // tenant DB where DiagnosticsRepository now reads from.
+        var factory = _scope.ServiceProvider
+            .GetRequiredService<ITenantDbContextFactory>();
+        await using var tdb = await factory.CreateAsync(tenantId);
         var row = new ProviderDiagnostic
         {
             Id = Guid.NewGuid(),
@@ -211,8 +218,8 @@ public class BudgetServiceTests
             Success = success,
             CreatedAt = DateTime.SpecifyKind(createdAt, DateTimeKind.Utc)
         };
-        _db.ProviderDiagnostics.Add(row);
-        await _db.SaveChangesAsync();
+        tdb.ProviderDiagnostics.Add(row);
+        await tdb.SaveChangesAsync();
     }
 
     private async Task EnsureTenantAsync(Guid tenantId)

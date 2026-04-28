@@ -50,15 +50,37 @@ public class EventRepository(
     {
         evt.CreatedAt = DateTime.UtcNow;
 
-        var tid = evt.TenantId ?? tenantContext.TenantId
-            ?? throw new InvalidOperationException(
-                "EventRepository.AppendAsync requires a tenant id. " +
-                "Story 28-1 PR D moved domain_events off the control plane; " +
-                "platform-scope events (TenantId == null) must be appended " +
-                "via IPlatformEventRepository.AppendAsync instead.");
+        var tid = evt.TenantId ?? tenantContext.TenantId;
+        if (tid is null)
+        {
+            // Story 28-1 PR D — platform-scope (null tenant) events live on
+            // platform_events. When IPlatformEventRepository is wired we
+            // transparently delegate; older callers that don't yet know
+            // about the split keep working. Without a platform repo the
+            // append is a hard error so the missing wiring surfaces loudly.
+            if (platformEvents is null)
+            {
+                throw new InvalidOperationException(
+                    "EventRepository.AppendAsync requires a tenant id. " +
+                    "Story 28-1 PR D moved domain_events off the control plane; " +
+                    "platform-scope events (TenantId == null) must be appended " +
+                    "via IPlatformEventRepository.AppendAsync instead.");
+            }
+            await platformEvents.AppendAsync(new PlatformEvent
+            {
+                Id = evt.Id == Guid.Empty ? Guid.NewGuid() : evt.Id,
+                Type = evt.Type,
+                TenantId = null,
+                Tags = evt.Tags,
+                Metadata = evt.Metadata,
+                Data = evt.Data,
+                CreatedAt = evt.CreatedAt,
+            });
+            return evt;
+        }
 
         evt.TenantId = tid;
-        await using var db = await tenantDbFactory.CreateAsync(tid);
+        await using var db = await tenantDbFactory.CreateAsync(tid.Value);
         db.DomainEvents.Add(evt);
         await db.SaveChangesAsync();
         return evt;
