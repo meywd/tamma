@@ -68,12 +68,21 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       if (this.chromaConfig.host) {
         // Client mode - connect to remote ChromaDB server
         this.client = new chromadb.ChromaClient({
-          path: `http://${this.chromaConfig.host}:${this.chromaConfig.port ?? 8000}`,
+          host: this.chromaConfig.host,
+          port: this.chromaConfig.port ?? 8000,
+          ssl: false,
         });
       } else {
-        // Embedded mode with persistence
+        // chromadb v3 dropped embedded persistence — only the HTTP/server
+        // mode remains. We still accept persistPath as a URL or
+        // host:port string so existing callers (e.g. integration tests
+        // that pass CHROMADB_TEST_URL through createChromaDBStore) keep
+        // working.
+        const parsed = this._parseEndpoint(this.chromaConfig.persistPath);
         this.client = new chromadb.ChromaClient({
-          path: this.chromaConfig.persistPath,
+          host: parsed.host,
+          port: parsed.port,
+          ssl: parsed.ssl,
         });
       }
 
@@ -135,13 +144,25 @@ export class ChromaDBVectorStore extends BaseVectorStore {
         options?.distanceMetric ?? this.distanceMetric,
       );
 
+      // chromadb v3 moved index-level config (hnsw:space) out of metadata
+      // and into a dedicated `configuration.hnsw` object. Free-form fields
+      // such as `dimensions` and caller-supplied metadata still live on
+      // the collection metadata for downstream stats consumption.
       const collection = await this.client.createCollection({
         name,
+        configuration: {
+          hnsw: {
+            space: distanceFunction,
+          },
+        },
         metadata: {
-          'hnsw:space': distanceFunction,
           dimensions: options?.dimensions ?? this.dimensions,
           ...options?.metadata,
         },
+        // We always upsert pre-computed embeddings, so there is no need
+        // for chromadb to instantiate its (now optional, separately
+        // installed) DefaultEmbeddingFunction.
+        embeddingFunction: null,
       });
 
       this.collections.set(name, collection);
@@ -184,12 +205,10 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       throw new Error('Client not initialized');
     }
 
+    // chromadb v3's listCollections() returns Collection instances; we
+    // only need their names for the BaseVectorStore contract.
     const collections = await this.client.listCollections();
-    return collections.map((c) => {
-      if (typeof c === 'string') return c;
-      if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name;
-      return String(c);
-    });
+    return collections.map((c) => c.name);
   }
 
   protected override async doGetCollectionStats(name: string): Promise<CollectionStats> {
@@ -221,11 +240,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     }
 
     const collections = await this.client.listCollections();
-    return collections.some((c) => {
-      if (typeof c === 'string') return c === name;
-      if (c && typeof c === 'object' && 'name' in c) return (c as { name: string }).name === name;
-      return false;
-    });
+    return collections.some((c) => c.name === name);
   }
 
   // === Document Operations ===
@@ -710,7 +725,13 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     }
 
     try {
-      const collection = await this.client.getOrCreateCollection({ name });
+      // We always supply pre-computed embeddings on upsert, so opt out
+      // of chromadb v3's DefaultEmbeddingFunction (otherwise the client
+      // requires the optional `@chroma-core/default-embed` peer).
+      const collection = await this.client.getOrCreateCollection({
+        name,
+        embeddingFunction: null,
+      });
       this.collections.set(name, collection);
       return collection;
     } catch (error) {
@@ -753,6 +774,44 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     }
 
     return result;
+  }
+
+  /**
+   * Parse a chromadb endpoint string (URL or host:port) into the
+   * host/port/ssl triple expected by chromadb v3's ChromaClient.
+   *
+   * Falls back to localhost:8000 when the input is empty, a filesystem
+   * path, or otherwise unparseable — the subsequent heartbeat call
+   * surfaces the "no chroma server reachable" error to the caller in
+   * that case, which is the correct behaviour now that v3 has dropped
+   * the v1 embedded mode.
+   */
+  private _parseEndpoint(input: string | undefined): {
+    host: string;
+    port: number;
+    ssl: boolean;
+  } {
+    const fallback = { host: 'localhost', port: 8000, ssl: false };
+    if (!input) return fallback;
+
+    // Try to parse as a full URL first (http://host:port or https://host[:port]).
+    try {
+      const url = new URL(input);
+      const ssl = url.protocol === 'https:';
+      const host = url.hostname || 'localhost';
+      const port = url.port ? Number.parseInt(url.port, 10) : ssl ? 443 : 8000;
+      return { host, port, ssl };
+    } catch {
+      // Not a URL — fall through to host:port parsing.
+    }
+
+    // Accept bare "host:port" strings.
+    const match = /^([^/:]+):(\d+)$/.exec(input);
+    if (match && match[1] && match[2]) {
+      return { host: match[1], port: Number.parseInt(match[2], 10), ssl: false };
+    }
+
+    return fallback;
   }
 
   /**

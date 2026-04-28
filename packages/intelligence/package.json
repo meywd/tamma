@@ -43,7 +43,7 @@
     "@tamma/observability": "workspace:*",
     "@tamma/providers": "workspace:*",
     "@tamma/shared": "workspace:*",
-    "chromadb": "^1.8.1",
+    "chromadb": "^3.4.3",
     "pg": "^8.20.0"
   },
   "devDependencies": {
