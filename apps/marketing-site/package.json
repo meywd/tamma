@@ -39,7 +39,7 @@
     "@cloudflare/workers-types": "^4.20260426.1",
     "sharp": "^0.34.4",
     "tsx": "^4.21.0",
-    "typescript": "^5.7.2",
+    "typescript": "^6.0.3",
     "wrangler": "^4.85.0"
   },
   "engines": {
