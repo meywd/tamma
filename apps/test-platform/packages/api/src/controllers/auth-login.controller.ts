@@ -7,7 +7,7 @@ import { refreshTokenService } from '../services/refresh-token.service'
 import { getDatabase } from '../../../../src/database/connection'
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(1),
 })
 

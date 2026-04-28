@@ -18,7 +18,7 @@ const createApiKeySchema = z.object({
   scopes: z.array(z.string()).optional(),
   allowedIps: z.array(z.string()).optional(),
   allowedDomains: z.array(z.string()).optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: z.iso.datetime().optional(),
   usageLimit: z.number().int().positive().optional(),
   requireMfa: z.boolean().optional(),
 });
@@ -30,7 +30,7 @@ const updateApiKeySchema = z.object({
   scopes: z.array(z.string()).optional(),
   allowedIps: z.array(z.string()).optional(),
   allowedDomains: z.array(z.string()).optional(),
-  expiresAt: z.string().datetime().optional(),
+  expiresAt: z.iso.datetime().optional(),
   usageLimit: z.number().int().positive().optional(),
   requireMfa: z.boolean().optional(),
   status: z.enum(['active', 'inactive']).optional(),
