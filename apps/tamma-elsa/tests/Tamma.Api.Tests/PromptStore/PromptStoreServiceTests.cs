@@ -27,7 +27,11 @@ public class PromptStoreServiceTests
     {
         _fx = new InMemoryDbFixture();
         _db = _fx.Cp;
-        _repo = new PromptRepository(_fx.Factory, new TenantContext(), _db);
+        // Story 28-1 PR D: prompt_overrides is tenant-scoped. Bind a
+        // synthetic tenant so the repo routes through the factory.
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.Parse("11111111-2222-3333-4444-555555555555"));
+        _repo = new PromptRepository(_fx.Factory, tc);
         _service = new PromptStoreService(_repo);
     }
 

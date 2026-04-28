@@ -9,65 +9,59 @@ namespace Tamma.Data.Repositories;
 /// lives in <c>CircuitBreakerService</c>; this class only reads/writes
 /// persistent rows.
 ///
-/// <para>Epic 28 note: provider health has tenant-scoped rows
-/// (<c>TenantId = &lt;guid&gt;</c>) and a platform-default row
-/// (<c>TenantId = NULL</c>). During the transition (shared physical DB)
-/// the repo uses a single long-lived context per request so the
-/// <c>GetOrCreate → mutate → SaveChanges</c> pattern preserved in
-/// <c>CircuitBreakerService</c> keeps its EF-tracked entity across
-/// method calls. The context is chosen lazily:
-/// <see cref="ITenantDbContextFactory"/> when the ambient tenant is set,
-/// else <see cref="ControlPlaneDbContext"/>.</para>
+/// <para>Story 28-1 PR D: provider_health moved off
+/// <see cref="ControlPlaneDbContext"/>. Every operation now requires an
+/// ambient tenant id; platform-default rows are gone (PR A, Decision #1
+/// — defaults live in code). The repo uses a single long-lived context
+/// per request so the <c>GetOrCreate → mutate → SaveChanges</c> pattern
+/// in <c>CircuitBreakerService</c> keeps its EF-tracked entity across
+/// method calls.</para>
 /// </summary>
 public class ProviderHealthRepository : IProviderHealthRepository, IAsyncDisposable
 {
     private readonly ITenantDbContextFactory _factory;
     private readonly ITenantContext _tenantContext;
-    private readonly ControlPlaneDbContext _cp;
     private TenantDbContext? _tenantContextDb;
 
     public ProviderHealthRepository(
         ITenantDbContextFactory factory,
-        ITenantContext tenantContext,
-        ControlPlaneDbContext cp)
+        ITenantContext tenantContext)
     {
         _factory = factory;
         _tenantContext = tenantContext;
-        _cp = cp;
     }
 
-    private async Task<DbContext> GetContextAsync()
+    private Guid RequireTenantId() => _tenantContext.TenantId
+        ?? throw new InvalidOperationException(
+            "ProviderHealthRepository requires an ambient tenant id. Story " +
+            "28-1 PR D moved provider_health off the control plane; platform-" +
+            "default health rows live in code (DefaultProviderHealth) per PR A.");
+
+    private async Task<TenantDbContext> GetContextAsync()
     {
-        if (_tenantContext.TenantId is Guid tid)
-        {
-            _tenantContextDb ??= await _factory.CreateAsync(tid);
-            return _tenantContextDb;
-        }
-        return _cp;
+        var tid = RequireTenantId();
+        _tenantContextDb ??= await _factory.CreateAsync(tid);
+        return _tenantContextDb;
     }
-
-    private Microsoft.EntityFrameworkCore.DbSet<ProviderHealth> GetSet(DbContext ctx) =>
-        ctx is TenantDbContext t ? t.ProviderHealths : ((ControlPlaneDbContext)ctx).ProviderHealths;
 
     public async Task<ProviderHealth?> GetStatusAsync(string providerKey, Guid? tenantId)
     {
         var ctx = await GetContextAsync();
-        return await GetSet(ctx).IgnoreQueryFilters()
+        return await ctx.ProviderHealths.IgnoreQueryFilters()
             .FirstOrDefaultAsync(h => h.ProviderKey == providerKey && h.TenantId == tenantId);
     }
 
     public async Task<List<ProviderHealth>> GetAllAsync(Guid? tenantId)
     {
         var ctx = await GetContextAsync();
-        return await GetSet(ctx).IgnoreQueryFilters()
+        return await ctx.ProviderHealths.IgnoreQueryFilters()
             .Where(h => h.TenantId == tenantId).ToListAsync();
     }
 
     public async Task<ProviderHealth> GetOrCreateAsync(string providerKey, Guid? tenantId)
     {
         var ctx = await GetContextAsync();
-        var set = GetSet(ctx);
-        var health = await set.IgnoreQueryFilters()
+        var health = await ctx.ProviderHealths.IgnoreQueryFilters()
             .FirstOrDefaultAsync(h => h.ProviderKey == providerKey && h.TenantId == tenantId);
         if (health is not null) return health;
 
@@ -78,7 +72,7 @@ public class ProviderHealthRepository : IProviderHealthRepository, IAsyncDisposa
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
-        set.Add(health);
+        ctx.ProviderHealths.Add(health);
         return health;
     }
 

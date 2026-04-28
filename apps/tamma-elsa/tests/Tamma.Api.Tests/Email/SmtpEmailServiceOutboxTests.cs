@@ -49,7 +49,6 @@ public class SmtpEmailServiceOutboxTests
         _events = new EventRepository(
             _fx.Factory,
             _tenantContext,
-            _db,
             new PlatformEventRepository(_db));
 
         // Seed an active tenant so tenant-scope SendAsync calls can route
@@ -197,8 +196,10 @@ public class SmtpEmailServiceOutboxTests
         var svc = NewService();
         var txnId = await svc.SendAsync(NewMessage(tenantId: null, userId: Guid.NewGuid()));
 
-        // Tenant repo doesn't have it.
-        var tenantSearch = await _db.EmailOutbox.FindAsync(txnId);
+        // Tenant repo doesn't have it. Story 28-1 PR D — email_outbox
+        // lives on the tenant DB, accessed via the factory.
+        await using var tdb = await _fx.Factory.CreateAsync(TestTenantId);
+        var tenantSearch = await tdb.EmailOutbox.FindAsync(txnId);
         tenantSearch.Should().BeNull("platform-scope email must NOT land in the tenant outbox");
 
         // Platform repo does.

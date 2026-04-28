@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Services.Analytics;
@@ -42,11 +43,10 @@ namespace Tamma.Api.Services.Analytics;
 public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
 {
     private readonly ControlPlaneDbContext _cp;
-    // Wave A.5: legacy-shared domain_events / workflow_instances DbSets
-    // still live on ControlPlaneDbContext (see ControlPlaneDbContext.cs
-    // "Legacy-shared tables" region). _app is an alias for _cp kept so
-    // the read-side code reads like the pre-merge app/cp split.
-    private ControlPlaneDbContext _app => _cp;
+    // Story 28-1 PR D: domain_events / workflow_instances moved to per-tenant
+    // DBs. Live-aggregation fallback paths (used when the platform_analytics_hourly
+    // fact table is missing or stale) now fan out via the tenant factory.
+    private readonly ITenantDbContextFactory? _tenantFactory;
     private readonly TimeProvider _clock;
 
     // Event-type prefixes used by the rollup. Kept as constants so they
@@ -71,9 +71,11 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
 
     public PlatformAnalyticsService(
         ControlPlaneDbContext cp,
+        ITenantDbContextFactory? tenantFactory = null,
         TimeProvider? clock = null)
     {
         _cp = cp ?? throw new ArgumentNullException(nameof(cp));
+        _tenantFactory = tenantFactory;
         _clock = clock ?? TimeProvider.System;
     }
 
@@ -281,19 +283,32 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         var now = _clock.GetUtcNow().UtcDateTime;
         var since = now.AddDays(-30);
 
-        // Aggregate workflow counts per tenant over the 30-day window.
-        var wfStats = await _app.WorkflowInstances
-            .IgnoreQueryFilters()
-            .Where(w => w.CreatedAt >= since && w.TenantId != null)
-            .GroupBy(w => w.TenantId!.Value)
-            .Select(g => new
+        // Story 28-1 PR D: aggregate workflow counts per tenant via fan-out.
+        var wfStats = new List<(Guid TenantId, int Total, int Failed)>();
+        if (_tenantFactory is not null)
+        {
+            var activeTenantIds = await _cp.Tenants.AsNoTracking()
+                .Where(t => t.DeletedAt == null)
+                .Select(t => t.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var tid in activeTenantIds)
             {
-                TenantId = g.Key,
-                Total = g.Count(),
-                Failed = g.Count(w => w.Status == WfStatusFailed),
-            })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+                if (ct.IsCancellationRequested) break;
+                await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase requires the
+                // explicit TenantId predicate. Once each tenant has its
+                // own DB the predicate is redundant but harmless.
+                var statuses = await tdb.WorkflowInstances
+                    .Where(w => w.TenantId == tid && w.CreatedAt >= since)
+                    .Select(w => w.Status)
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                var total = statuses.Count;
+                var failed = statuses.Count(s => s == WfStatusFailed);
+                if (total > 0) wfStats.Add((tid, total, failed));
+            }
+        }
 
         if (wfStats.Count == 0)
             return Array.Empty<TenantAnalyticsRow>();
@@ -450,16 +465,30 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         DateTime t30d,
         CancellationToken ct)
     {
-        // One query over the 30-day window returns every candidate row;
-        // bucket in memory so we avoid three round trips. 30 days of
-        // workflow activity fits comfortably in a platform-admin response
-        // for the fleet size we target (< 10k tenants per README §3).
-        var rows = await _app.WorkflowInstances
-            .IgnoreQueryFilters()
-            .Where(w => w.CreatedAt >= t30d)
-            .Select(w => new { w.Status, w.CreatedAt })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // Story 28-1 PR D: workflow_instances moved to per-tenant DBs.
+        // Fan out across active tenants and merge in memory. 30 days of
+        // workflow activity fits comfortably for the < 10k-tenant target.
+        var rows = new List<WfRow>();
+        if (_tenantFactory is not null)
+        {
+            var activeTenantIds = await _cp.Tenants.AsNoTracking()
+                .Where(t => t.DeletedAt == null)
+                .Select(t => t.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var tid in activeTenantIds)
+            {
+                if (ct.IsCancellationRequested) break;
+                await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase requires the
+                // explicit TenantId predicate.
+                rows.AddRange(await tdb.WorkflowInstances
+                    .Where(w => w.TenantId == tid && w.CreatedAt >= t30d)
+                    .Select(w => new WfRow(w.Status, w.CreatedAt))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false));
+            }
+        }
 
         var b24 = BucketWorkflow(rows, t24h);
         var b7 = BucketWorkflow(rows, t7d);
@@ -468,8 +497,10 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         return new WorkflowCounts(b24, b7, b30);
     }
 
+    private readonly record struct WfRow(string Status, DateTime CreatedAt);
+
     private static WorkflowWindowCounts BucketWorkflow(
-        IEnumerable<dynamic> rows,
+        IEnumerable<WfRow> rows,
         DateTime lowerBound)
     {
         var completed = 0;
@@ -480,7 +511,7 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         {
             if (r.CreatedAt < lowerBound) continue;
 
-            string status = (string)r.Status;
+            var status = r.Status;
 
             if (string.Equals(status, WfStatusCompleted, StringComparison.OrdinalIgnoreCase))
                 completed++;
@@ -549,18 +580,29 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
         DateTime t30d,
         CancellationToken ct)
     {
-        // Sum LLM.CALL.SUCCESS.data.costUsd from the legacy domain_events
-        // stream. The column is a JSONB string on Postgres and a CLR
-        // string under the InMemory provider — we parse in memory so
-        // both paths share code. Precision capped at 4 decimals to
-        // match the future platform_analytics_hourly.Value column.
-        var rows = await _app.DomainEvents
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(e => e.Type == LlmCallSuccess && e.CreatedAt >= t30d)
-            .Select(e => new { e.CreatedAt, e.Data })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        // Story 28-1 PR D: domain_events moved to per-tenant DBs. Sum
+        // LLM.CALL.SUCCESS costs by fanning out across tenants and merging.
+        var rows = new List<CostRow>();
+        if (_tenantFactory is not null)
+        {
+            var activeTenantIds = await _cp.Tenants.AsNoTracking()
+                .Where(t => t.DeletedAt == null)
+                .Select(t => t.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            foreach (var tid in activeTenantIds)
+            {
+                if (ct.IsCancellationRequested) break;
+                await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+                // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+                rows.AddRange(await tdb.DomainEvents.AsNoTracking()
+                    .Where(e => e.TenantId == tid &&
+                                e.Type == LlmCallSuccess && e.CreatedAt >= t30d)
+                    .Select(e => new CostRow(e.CreatedAt, tid, e.Data))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false));
+            }
+        }
 
         decimal sum24 = 0m, sum7 = 0m, sum30 = 0m;
 
@@ -579,32 +621,40 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
             Round4(sum30));
     }
 
+    private readonly record struct CostRow(DateTime CreatedAt, Guid TenantId, string Data);
+
     private async Task<Dictionary<Guid, decimal>> SumLlmCostsPerTenantAsync(
         DateTime since,
         CancellationToken ct)
     {
-        var rows = await _app.DomainEvents
-            .IgnoreQueryFilters()
-            .AsNoTracking()
-            .Where(e => e.Type == LlmCallSuccess
-                        && e.CreatedAt >= since
-                        && e.TenantId != null)
-            .Select(e => new { TenantId = e.TenantId!.Value, e.Data })
+        var byTenant = new Dictionary<Guid, decimal>();
+        if (_tenantFactory is null) return byTenant;
+
+        var activeTenantIds = await _cp.Tenants.AsNoTracking()
+            .Where(t => t.DeletedAt == null)
+            .Select(t => t.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var byTenant = new Dictionary<Guid, decimal>();
-
-        foreach (var r in rows)
+        foreach (var tid in activeTenantIds)
         {
-            if (!TryExtractCostUsd(r.Data, out var cost)) continue;
+            if (ct.IsCancellationRequested) break;
+            await using var tdb = await _tenantFactory.CreateAsync(tid, ct);
+            // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+            var data = await tdb.DomainEvents.AsNoTracking()
+                .Where(e => e.TenantId == tid &&
+                            e.Type == LlmCallSuccess && e.CreatedAt >= since)
+                .Select(e => e.Data)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
 
-            byTenant[r.TenantId] = byTenant.GetValueOrDefault(r.TenantId) + cost;
+            decimal sum = 0m;
+            foreach (var d in data)
+            {
+                if (TryExtractCostUsd(d, out var cost)) sum += cost;
+            }
+            if (sum > 0) byTenant[tid] = Round4(sum);
         }
-
-        // Normalise to 4 decimals so the round-trip to the future rollup table is lossless.
-        foreach (var k in byTenant.Keys.ToList())
-            byTenant[k] = Round4(byTenant[k]);
 
         return byTenant;
     }

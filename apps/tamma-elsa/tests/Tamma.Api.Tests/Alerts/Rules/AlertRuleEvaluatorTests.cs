@@ -5,7 +5,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Rules;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -36,6 +38,9 @@ public class AlertRuleEvaluatorTests
     private TestTimeProvider _time = null!;
     private AlertRuleEvaluator _evaluator = null!;
     private AlertRuleEvaluatorOptions _options = null!;
+    private DbContextOptions<ControlPlaneDbContext> _cpOptions = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
+    private ITenantDbContextFactory _tenantFactory = null!;
 
     [SetUp]
     public void SetUp()
@@ -45,18 +50,34 @@ public class AlertRuleEvaluatorTests
         _windowStore = new InMemoryRuleWindowStore();
         _time = new TestTimeProvider(DateTimeOffset.Parse("2026-04-23T12:00:00Z"));
 
+        // Story 28-1 PR D — domain_events moved off CP. The evaluator
+        // fans out across active tenants via ITenantDbContextFactory. Here
+        // we wire one CP context (rules + cursor + tenants list) and one
+        // tenant factory (DomainEvents seeding) sharing the same in-memory
+        // dbName so the evaluator's tenant scan finds rows seeded via the
+        // factory. Tenants seeded via the CP context appear on the same
+        // physical store, and the factory hands back a TenantDbContext
+        // bound to the requested tenant id.
         var dbName = Guid.NewGuid().ToString();
-        var options = new DbContextOptionsBuilder<ControlPlaneDbContext>()
-            .UseInMemoryDatabase(dbName)
+        _cpOptions = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+            .UseInMemoryDatabase(dbName + ":cp")
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId
                     .TransactionIgnoredWarning))
             .Options;
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseInMemoryDatabase(dbName + ":tenant")
+            .ConfigureWarnings(w => w.Ignore(
+                Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId
+                    .TransactionIgnoredWarning))
+            .Options;
+        _tenantFactory = new TestTenantDbContextFactory(_tenantOptions);
 
         var services = new ServiceCollection();
-        services.AddSingleton(options);
+        services.AddSingleton(_cpOptions);
         services.AddScoped<ControlPlaneDbContext>(_ =>
-            new ControlPlaneDbContext(options));
+            new TestControlPlaneDbContext(_cpOptions));
+        services.AddSingleton<ITenantDbContextFactory>(_tenantFactory);
         services.AddSingleton<IAlertSink>(_sink);
         services.AddSingleton<IEventRepository>(_events);
         services.AddSingleton<IRuleWindowStore>(_windowStore);
@@ -99,9 +120,36 @@ public class AlertRuleEvaluatorTests
 
     private async Task AddEventAsync(DomainEvent evt)
     {
+        // Story 28-1 PR D — domain_events live on the tenant DB. Route the
+        // seed through ITenantDbContextFactory and ensure a Tenants row
+        // exists on CP so AlertRuleEvaluator's tenant fan-out picks it up.
+        var tid = evt.TenantId
+            ?? throw new InvalidOperationException(
+                "AddEventAsync requires a tenant id — domain_events are " +
+                "tenant-resident after Story 28-1 PR D. For platform-scope " +
+                "events use AddPlatformEventAsync.");
+        await EnsureTenantExistsAsync(tid);
+        await using var tdb = await _tenantFactory.CreateAsync(tid);
+        tdb.DomainEvents.Add(evt);
+        await tdb.SaveChangesAsync();
+    }
+
+    private async Task EnsureTenantExistsAsync(Guid tenantId)
+    {
         using var scope = _sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-        db.DomainEvents.Add(evt);
+        var exists = await db.Tenants.IgnoreQueryFilters()
+            .AnyAsync(t => t.Id == tenantId);
+        if (exists) return;
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = $"t-{tenantId:N}",
+            Slug = $"t-{tenantId:N}",
+            Type = "personal",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
     }
 
@@ -477,14 +525,14 @@ public class AlertRuleEvaluatorTests
     {
         // Re-use the same DbContextOptions (registered as singleton)
         // so the cloned service-provider talks to the same InMemory
-        // database root as the original.
-        var srcOptions = _sp.GetRequiredService<
-            DbContextOptions<ControlPlaneDbContext>>();
-
+        // database root as the original. Story 28-1 PR D: also re-use
+        // the same TenantDbContext options so the cloned evaluator
+        // sees the same per-tenant domain_events the original seeded.
         var services = new ServiceCollection();
-        services.AddSingleton(srcOptions);
+        services.AddSingleton(_cpOptions);
         services.AddScoped<ControlPlaneDbContext>(_ =>
-            new ControlPlaneDbContext(srcOptions));
+            new TestControlPlaneDbContext(_cpOptions));
+        services.AddSingleton<ITenantDbContextFactory>(_tenantFactory);
         services.AddSingleton<IAlertSink>(sink);
         services.AddSingleton<IEventRepository>(_events);
         services.AddSingleton<IRuleWindowStore>(_windowStore);
@@ -523,7 +571,7 @@ public class AlertRuleEvaluatorTests
         // Registry skips the bad row.
         _registry.Count.Should().Be(1);
 
-        await AddEventAsync(MakeEvent("A.X"));
+        await AddEventAsync(MakeEvent("A.X", tenantId: Guid.NewGuid()));
         await _evaluator.ProcessOnceAsync(default);
         _sink.Raised.Should().ContainSingle();
     }
@@ -557,8 +605,9 @@ public class AlertRuleEvaluatorTests
         await AddRuleAsync(MakeRule("A.X", name: "r1"));
         await _registry.RefreshAsync(default);
 
-        await AddEventAsync(MakeEvent("A.X"));
-        await AddEventAsync(MakeEvent("A.X"));
+        var tenant = Guid.NewGuid();
+        await AddEventAsync(MakeEvent("A.X", tenantId: tenant));
+        await AddEventAsync(MakeEvent("A.X", tenantId: tenant));
 
         // The first event triggers a sink throw; the second must
         // still process after the interlock caught the first failure.
@@ -805,13 +854,29 @@ public class AlertRuleEvaluatorPostgresTests
                 UpdatedAt = DateTime.UtcNow,
             });
 
-            // Seed three failed-dispatch events for the same tenant
-            // directly into domain_events so the evaluator's batch
-            // query has to find them via the (CreatedAt, Id) cursor.
+            // Seed the tenant row so the evaluator's tenant fan-out
+            // (AlertRuleEvaluator scans cp.tenants for active tenants
+            // before reading per-tenant domain_events).
+            db.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = $"t-{tenantId:N}",
+                Slug = $"t-{tenantId:N}",
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+
+            // Story 28-1 PR D — domain_events live on the tenant DB.
+            // Route the seed through ITenantDbContextFactory.
+            var factory = scope.ServiceProvider
+                .GetRequiredService<ITenantDbContextFactory>();
+            await using var tdb = await factory.CreateAsync(tenantId);
             var baseTime = DateTime.UtcNow;
             for (var i = 0; i < 3; i++)
             {
-                db.DomainEvents.Add(new DomainEvent
+                tdb.DomainEvents.Add(new DomainEvent
                 {
                     Id = Guid.NewGuid(),
                     Type = "AGENT.DISPATCH.FAILED",
@@ -822,7 +887,7 @@ public class AlertRuleEvaluatorPostgresTests
                     CreatedAt = baseTime.AddMilliseconds(i * 10),
                 });
             }
-            await db.SaveChangesAsync();
+            await tdb.SaveChangesAsync();
         }
 
         // Build a self-contained evaluator stack pointed at the same

@@ -113,9 +113,13 @@ public class PlatformDefaultRowRepositoryTests
         returned.TenantId.Should().BeNull();
         returned.Config.Should().Be(AgentConfigDefaults.ConfigJson);
 
-        // No CP row was created (defaults are code-resident).
-        var cpCount = await fx.Cp.AgentConfigs.IgnoreQueryFilters().CountAsync();
-        cpCount.Should().Be(0);
+        // Story 28-1 PR D — agent_configs moved to the tenant DB.
+        // The null-tenant null-op should NOT have created a row anywhere.
+        // Use Guid.Empty as a sentinel to peek at any per-tenant store
+        // (the test factory shares one store across tenants).
+        await using var tdb = await fx.Factory.CreateAsync(Guid.NewGuid());
+        var tenantCount = await tdb.AgentConfigs.IgnoreQueryFilters().CountAsync();
+        tenantCount.Should().Be(0);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -178,9 +182,11 @@ public class PlatformDefaultRowRepositoryTests
         returned.AlertThreshold.Should().Be(BudgetConfigDefaults.DefaultAlertThreshold);
         returned.PeriodDays.Should().Be(BudgetConfigDefaults.DefaultPeriodDays);
 
-        // CP DB has nothing.
-        var cpCount = await fx.Cp.BudgetConfigs.IgnoreQueryFilters().CountAsync();
-        cpCount.Should().Be(0);
+        // Story 28-1 PR D — budget_configs moved to the tenant DB.
+        // The null-tenant no-op didn't write anywhere.
+        await using var tdb = await fx.Factory.CreateAsync(Guid.NewGuid());
+        var tenantCount = await tdb.BudgetConfigs.IgnoreQueryFilters().CountAsync();
+        tenantCount.Should().Be(0);
     }
 
     [Test]
@@ -280,9 +286,10 @@ public class PlatformDefaultRowRepositoryTests
             Enabled: true,
             CaseSensitive: false));
 
-        // CP DB has nothing — defaults are code-resident.
-        var cpCount = await fx.Cp.SanitizationRules.IgnoreQueryFilters().CountAsync();
-        cpCount.Should().Be(0);
+        // Story 28-1 PR D — sanitization_rules moved to the tenant DB.
+        await using var tdb = await fx.Factory.CreateAsync(Guid.NewGuid());
+        var tenantCount = await tdb.SanitizationRules.IgnoreQueryFilters().CountAsync();
+        tenantCount.Should().Be(0);
 
         // GetRulesAsync(null) still returns the empty defaults set.
         var rules = await repo.GetRulesAsync(null);

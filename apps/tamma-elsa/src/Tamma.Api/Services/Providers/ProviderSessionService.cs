@@ -113,20 +113,32 @@ public sealed class ProviderSessionService : IProviderSessionService
 
             var durationMs = invocation.DurationMs > 0 ? invocation.DurationMs : stopwatch.ElapsedMilliseconds;
 
-            await _diagnostics.RecordEventAsync(new ProviderDiagnostic
+            // Story 28-1 PR D — diagnostics are tenant-resident; a session
+            // created without an ambient tenant id (dev / unauth path) has
+            // no per-tenant store to land in. Swallow the diagnostic-side
+            // failure so the caller still sees the invocation result.
+            try
             {
-                ProviderKey = session.Provider,
-                Model = session.Model,
-                RequestDurationMs = durationMs,
-                TokensUsed = invocation.TokensUsed,
-                InputTokens = invocation.InputTokens,
-                OutputTokens = invocation.OutputTokens,
-                Cost = invocation.CostUsd,
-                TenantId = session.TenantId,
-                Success = true,
-                CreatedAt = _clock.UtcNow.UtcDateTime,
-                RequestType = "provider-session-execute",
-            }, ct);
+                await _diagnostics.RecordEventAsync(new ProviderDiagnostic
+                {
+                    ProviderKey = session.Provider,
+                    Model = session.Model,
+                    RequestDurationMs = durationMs,
+                    TokensUsed = invocation.TokensUsed,
+                    InputTokens = invocation.InputTokens,
+                    OutputTokens = invocation.OutputTokens,
+                    Cost = invocation.CostUsd,
+                    TenantId = session.TenantId,
+                    Success = true,
+                    CreatedAt = _clock.UtcNow.UtcDateTime,
+                    RequestType = "provider-session-execute",
+                }, ct);
+            }
+            catch (Exception diagEx)
+            {
+                _logger.LogWarning(diagEx,
+                    "Failed to record diagnostic for successful provider execution {Handle}", handle);
+            }
 
             return new ExecuteResult(
                 Content: invocation.Content,

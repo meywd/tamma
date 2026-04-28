@@ -30,13 +30,6 @@ public class ControlPlaneDbContextModelTests
     }
 
     [Test]
-    [Ignore("Story 28-1 end-state assertion: passes once legacy-shared DbSets "
-        + "(AgentConfigs, PromptOverrides, WorkflowInstances, DomainEvents, etc.) "
-        + "migrate off ControlPlaneDbContext and onto TenantDbContext via "
-        + "ITenantDbContextFactory. Wave A.5 deliberately exposes them on CP as "
-        + "compile-time shims so the eleven legacy-shared repositories still "
-        + "build during the transition; re-enable this test when Story 28-1 "
-        + "lands the db-per-tenant cutover.")]
     public void Model_Has_ExpectedControlPlaneEntities()
     {
         using var ctx = CreateContext();
@@ -46,13 +39,15 @@ public class ControlPlaneDbContextModelTests
             .Where(n => n is not null)
             .ToHashSet()!;
 
-        // Doc 01 §1.2 lists 14 foundational CP tables; Story 28-10 adds
-        // platform_analytics_hourly (fact table for the hourly rollup).
-        // Each CP-resident table must be listed here so a missing mapping
-        // — or an accidental TenantId-scoped entity leaking onto the CP
-        // context — fails the test loudly.
+        // Story 28-1 PR D: enumerate every CP-resident table per Decision
+        // #4. The base 14 (Doc 01 §1.2) + alerts (5) + analytics +
+        // platform_api_key_index + kek_rotations + admin_impersonations +
+        // platform_bootstrap. The 11 + 4 mentorship tenant-resident
+        // entities have left CP entirely and now live exclusively on
+        // TenantDbContext.
         entityTypes.Should().BeEquivalentTo(new[]
         {
+            // Doc 01 §1.2 — foundational CP tables.
             "users",
             "refresh_tokens",
             "password_reset_tokens",
@@ -60,8 +55,6 @@ public class ControlPlaneDbContextModelTests
             "tenant_memberships",
             "user_invites",
             "api_keys",
-            // Story 28-7 deferred-item: CP routing index, 15th CP-resident table.
-            "platform_api_key_index",
             "github_installations",
             "github_installation_repos",
             "github_webhook_deliveries",
@@ -69,8 +62,25 @@ public class ControlPlaneDbContextModelTests
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
+            // Story 28-7 — bearer-token routing index.
+            "platform_api_key_index",
+            // Story 28-10 — hourly analytics fact table.
             "platform_analytics_hourly",
-        }, because: "Doc 01 §1.2 (14 tables) + Story 28-7 (platform_api_key_index) + Story 28-10 (platform_analytics_hourly).");
+            // Story 5.6 + 1.5-37 (Wave C.1+C.2) — alert system.
+            "alerts",
+            "alert_channels",
+            "alert_delivery_attempts",
+            "alert_rules",
+            "alert_evaluator_cursor",
+            // R2-H14 — KEK rotation audit table.
+            "kek_rotations",
+            // Story 28-R2/B — platform-admin impersonation audit.
+            "admin_impersonations",
+            // PF-S9 — bootstrap superadmin sentinel (single-row).
+            "platform_bootstrap",
+        }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
+            + "CP-resident table; the 11 + 4 mentorship tenant-resident "
+            + "entities have moved to TenantDbContext.");
     }
 
     [Test]
@@ -177,11 +187,13 @@ public class ControlPlaneDbContextModelTests
     }
 
     [Test]
-    [Ignore("Story 28-1 end-state assertion: passes once the Cranl-provisioning "
-        + "columns on Tenant are removed (Cranl is superseded by the db-per-tenant "
-        + "architecture from Epic 28). Wave A.5 keeps them mapped on CP because "
-        + "legacy Tamma.Core.Entities.Tenant callers still reference them; "
-        + "re-enable after Story 28-1 drops the Cranl POCO fields.")]
+    [Ignore("Story 28-1 PR D — Decision #3: keep this test ignored until "
+        + "Epic 30 ships pluggable infra backends and an alternative "
+        + "routing column. Today the Cranl columns are load-bearing "
+        + "(Story 29-10 stopgap) — LruPooledTenantConnectionResolver "
+        + "reads tenants.CranlDatabaseUrlEncrypted to route per-request "
+        + "DB connections in production. Re-enable when Epic 30 lands "
+        + "the alternative routing column.")]
     public void Tenants_Cranl_Columns_Are_Ignored_On_NewContext()
     {
         using var ctx = CreateContext();

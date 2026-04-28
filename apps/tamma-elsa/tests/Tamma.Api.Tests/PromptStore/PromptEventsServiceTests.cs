@@ -29,7 +29,6 @@ public class PromptEventsServiceTests
         _eventRepo = new EventRepository(
             _fx.Factory,
             new TenantContext(),
-            _db,
             new PlatformEventRepository(_db));
         _service = new PromptEventsService(_eventRepo);
     }

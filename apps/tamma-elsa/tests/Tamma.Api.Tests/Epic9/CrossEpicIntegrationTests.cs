@@ -116,6 +116,9 @@ public class CrossEpicIntegrationTests
 
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
+            // Story 28-1 PR D — PromptRepository requires an ambient tenant id.
+            var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+            ctx.SetTenantId(_tenantA);
             var repo = scope.ServiceProvider.GetRequiredService<IPromptRepository>();
             await repo.UpsertAsync(new PromptOverride
             {
@@ -135,8 +138,16 @@ public class CrossEpicIntegrationTests
         ResolvedPrompt? resolvedB;
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
+            var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+            ctx.SetTenantId(_tenantA);
             var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
             resolvedA = await svc.ResolveRoleActionAsync(_tenantA, role, action);
+        }
+        using (var scope = ApiTestFixture.Factory.Services.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+            ctx.SetTenantId(_tenantB);
+            var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
             resolvedB = await svc.ResolveRoleActionAsync(_tenantB, role, action);
         }
 
@@ -291,18 +302,31 @@ public class CrossEpicIntegrationTests
     [Test]
     public async Task PromptStore_SystemDefault_IsReadableByAnyTenant_WithoutOverrides()
     {
-        using var scope = ApiTestFixture.Factory.Services.CreateScope();
-        var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
-
-        // developer/implement is shipped in SystemPrompts — both tenants
-        // should resolve to it when neither has an override.
-        var resolvedA = await svc.ResolveRoleActionAsync(_tenantA, "developer", "implement");
-        var resolvedB = await svc.ResolveRoleActionAsync(_tenantB, "developer", "implement");
+        // Story 28-1 PR D — PromptRepository requires an ambient tenant id
+        // even for system-default lookups (the user-override probe goes
+        // through the per-tenant DB). Resolve each tenant in its own
+        // scope with the ambient context bound.
+        ResolvedPrompt resolvedA;
+        ResolvedPrompt resolvedB;
+        using (var scope = ApiTestFixture.Factory.Services.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+            ctx.SetTenantId(_tenantA);
+            var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
+            resolvedA = (await svc.ResolveRoleActionAsync(_tenantA, "developer", "implement"))!;
+        }
+        using (var scope = ApiTestFixture.Factory.Services.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+            ctx.SetTenantId(_tenantB);
+            var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
+            resolvedB = (await svc.ResolveRoleActionAsync(_tenantB, "developer", "implement"))!;
+        }
 
         resolvedA.Should().NotBeNull();
-        resolvedA!.Source.Should().Be(PromptSource.SystemRoleAction);
+        resolvedA.Source.Should().Be(PromptSource.SystemRoleAction);
         resolvedB.Should().NotBeNull();
-        resolvedB!.Source.Should().Be(PromptSource.SystemRoleAction);
+        resolvedB.Source.Should().Be(PromptSource.SystemRoleAction);
 
         // Same template bytes — no tenant leakage, just the system default.
         resolvedA.Template.Should().Be(resolvedB.Template);

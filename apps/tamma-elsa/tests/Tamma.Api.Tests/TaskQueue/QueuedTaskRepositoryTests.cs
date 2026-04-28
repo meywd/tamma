@@ -67,7 +67,9 @@ public class QueuedTaskRepositoryTests
         task.RetryCount.Should().Be(0);
         task.Error.Should().BeNull();
 
-        var stored = await _db.QueuedTasks.FindAsync(task.Id);
+        // Story 28-1 PR D — queued_tasks live on the tenant DB.
+        await using var tdb = await _fx.Factory.CreateAsync(task.TenantId!.Value);
+        var stored = await tdb.QueuedTasks.FindAsync(task.Id);
         stored.Should().NotBeNull();
         stored!.Type.Should().Be("github.push.main");
         stored.Payload.Should().Be("{\"a\":1}");

@@ -147,6 +147,8 @@ public class E2EAlertFlowTests
         // Pre-seed a webhook channel. No tenant scope (platform-wide).
         // The built-in budget-exhausted rule exists from
         // BuiltInAlertRuleSeeder (runs in Program.cs on startup).
+        var tenantId = Guid.NewGuid();
+        var correlation = Guid.NewGuid().ToString("N");
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
@@ -162,11 +164,22 @@ public class E2EAlertFlowTests
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             });
+            // Story 28-1 PR D — domain_events live on the tenant DB and
+            // AlertRuleEvaluator fans out across active tenants from CP.
+            // The seeded tenant id MUST exist in cp.tenants for the fan-out
+            // to discover the per-tenant DB containing the budget-exhausted
+            // event.
+            db.Tenants.Add(new Data.Entities.Tenant
+            {
+                Id = tenantId,
+                Name = $"e2e-{tenantId:N}",
+                Slug = $"e2e-{tenantId:N}".Substring(0, 16),
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
             await db.SaveChangesAsync();
         }
-
-        var tenantId = Guid.NewGuid();
-        var correlation = Guid.NewGuid().ToString("N");
 
         // Emit directly via IAlertEventEmitter — this is the shortest
         // path that mirrors what CheckBudgetActivity will do in a
@@ -285,10 +298,27 @@ public class E2EAlertFlowTests
         // this test asserts the rule-evaluator consumes an event already
         // shaped as SECRET.ROTATION.FAILED.
         var tenantId = Guid.NewGuid();
+        // Story 28-1 PR D — domain_events live on the tenant DB. Seed the
+        // tenant in CP so AlertRuleEvaluator's per-tenant fan-out finds
+        // it, then route the event seed through ITenantDbContextFactory.
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-            db.DomainEvents.Add(new DomainEvent
+            db.Tenants.Add(new Data.Entities.Tenant
+            {
+                Id = tenantId,
+                Name = $"e2e-rot-{tenantId:N}",
+                Slug = $"e2e-rot-{tenantId:N}".Substring(0, 16),
+                Type = "personal",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+
+            var factory = scope.ServiceProvider
+                .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();
+            await using var tdb = await factory.CreateAsync(tenantId);
+            tdb.DomainEvents.Add(new DomainEvent
             {
                 Id = Guid.NewGuid(),
                 Type = "SECRET.ROTATION.FAILED",
@@ -311,7 +341,7 @@ public class E2EAlertFlowTests
                 }),
                 CreatedAt = DateTime.UtcNow,
             });
-            await db.SaveChangesAsync();
+            await tdb.SaveChangesAsync();
         }
 
         var delivered = await WaitForAsync(

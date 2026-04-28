@@ -508,7 +508,8 @@ internal static class TammaModelConfiguration
         // transitional shared-DB phase — tenant repos still filter by
         // TenantId explicitly until Story 28-1's db-per-tenant split
         // ships and that filter becomes redundant.
-        if (fixedTenantId is not null)
+        var isTenantContext = fixedTenantId is not null;
+        if (isTenantContext)
         {
             modelBuilder.Ignore<Tenant>();
             modelBuilder.Ignore<User>();
@@ -540,6 +541,17 @@ internal static class TammaModelConfiguration
             {
                 entity.Ignore(e => e.TenantId);
                 entity.Ignore(e => e.Tenant);
+            }
+            else if (isTenantContext)
+            {
+                // Story 28-1 PR D: Tenant entity is CP-resident. The
+                // navigation property stays on the POCO for code-shape
+                // compatibility, but on the tenant DB context we must
+                // not pull Tenant into the model. Keep the TenantId
+                // column (predicate-as-isolation during the shared-DB
+                // transition) but break the navigation.
+                entity.Ignore(e => e.Tenant);
+                entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
             }
             else
             {
@@ -641,6 +653,12 @@ internal static class TammaModelConfiguration
             {
                 entity.Ignore(e => e.TenantId);
                 entity.Ignore(e => e.Tenant);
+            }
+            else if (isTenantContext)
+            {
+                // Story 28-1 PR D — see AgentConfig comment above.
+                entity.Ignore(e => e.Tenant);
+                entity.HasIndex(e => e.TenantId).IsUnique().HasFilter("\"TenantId\" IS NOT NULL");
             }
             else
             {

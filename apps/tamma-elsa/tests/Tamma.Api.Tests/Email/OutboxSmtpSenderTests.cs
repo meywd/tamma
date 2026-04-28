@@ -119,7 +119,6 @@ public class OutboxSmtpSenderTests
         return new EventRepository(
             new TestTenantDbContextFactory(_tenantOptions),
             new TenantContext(),
-            cp,
             new PlatformEventRepository(cp));
     }
 
@@ -226,7 +225,8 @@ public class OutboxSmtpSenderTests
         afterFirst!.Status.Should().Be("pending");
 
         // Fast-forward NextAttemptAt so the next ProcessOnceAsync picks it up.
-        using (var db = new TestControlPlaneDbContext(_cpOptions))
+        // Story 28-1 PR D — email_outbox lives on the tenant DB.
+        await using (var db = new TestTenantDbContext(_tenantOptions, TestTenantId))
         {
             var row = await db.EmailOutbox.FindAsync(enq.Id);
             row!.NextAttemptAt = DateTime.UtcNow.AddMinutes(-1);

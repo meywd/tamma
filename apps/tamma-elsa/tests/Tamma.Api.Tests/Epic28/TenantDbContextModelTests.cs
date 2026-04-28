@@ -56,13 +56,18 @@ public class TenantDbContextModelTests
     }
 
     [Test]
-    [Ignore("Story 28-1 end-state assertion: passes once tenant-resident entity "
-        + "POCOs (AgentConfig, DomainEvent, QueuedTask, ...) drop their TenantId "
-        + "columns — the db-per-tenant architecture makes the tenant implicit "
-        + "(one DB = one tenant, Doc 01 §1.4). Wave A.5 keeps TenantId on the "
-        + "POCOs because the same entities are still queried from CP via legacy "
-        + "tenant-filtered predicates; re-enable after Story 28-1 splits the "
-        + "entities into CP-resident vs tenant-resident POCOs.")]
+    [Ignore("Story 28-1 PR D — kept ignored: the entity move from CP to "
+        + "Tenant has landed (the 11 + 4 mentorship POCOs are no longer "
+        + "in the CP model graph) but the TenantId COLUMN on tenant-"
+        + "resident tables stays during the shared-DB transitional phase. "
+        + "Production today routes most tenants through "
+        + "StubTenantConnectionResolver onto a shared central Postgres "
+        + "(see CLAUDE.md 'Routing (current state)'). The TenantId "
+        + "predicate in tenant repositories is the only isolation plane "
+        + "while the shared-DB topology is in play. Re-enable when "
+        + "every tenant has a dedicated physical DB (Epic 28 cutover, "
+        + "or when Epic 30's pluggable infra backends remove the "
+        + "shared-DB seam entirely).")]
     public void Tenant_Resident_Entities_Have_No_TenantId_Column()
     {
         using var ctx = CreateContext();

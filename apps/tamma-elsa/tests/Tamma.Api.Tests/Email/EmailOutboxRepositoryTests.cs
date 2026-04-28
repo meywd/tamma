@@ -26,6 +26,8 @@ public class EmailOutboxRepositoryTests
 {
     private static readonly Guid TestTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private ControlPlaneDbContext _db = null!;
+    private DbContextOptions<TenantDbContext> _tenantOptions = null!;
+    private TestTenantDbContextFactory _tenantFactory = null!;
     private EmailOutboxRepository _repo = null!;
 
     [SetUp]
@@ -37,15 +39,15 @@ public class EmailOutboxRepositoryTests
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
-        var tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
+        _tenantOptions = new DbContextOptionsBuilder<TenantDbContext>()
             .UseInMemoryDatabase(dbName)
             .ConfigureWarnings(w => w.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         _db = new TestControlPlaneDbContext(cpOptions);
-        var factory = new TestTenantDbContextFactory(tenantOptions);
-        _repo = new EmailOutboxRepository(factory, _db);
+        _tenantFactory = new TestTenantDbContextFactory(_tenantOptions);
+        _repo = new EmailOutboxRepository(_tenantFactory, _db);
 
         // Seed an active-tenant row so ClaimNextPendingFromAnyTenantAsync
         // has a tenant to walk.
@@ -93,7 +95,9 @@ public class EmailOutboxRepositoryTests
         msg.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
         msg.NextAttemptAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
 
-        var stored = await _db.EmailOutbox.FindAsync(msg.Id);
+        // Story 28-1 PR D — email_outbox lives on the tenant DB.
+        await using var tdb = await _tenantFactory.CreateAsync(TestTenantId);
+        var stored = await tdb.EmailOutbox.FindAsync(msg.Id);
         stored.Should().NotBeNull();
         stored!.Template.Should().Be("verification");
     }
@@ -150,12 +154,13 @@ public class EmailOutboxRepositoryTests
         var msg = await _repo.EnqueueAsync(NewMessage());
 
         // Schedule far in the future so current-time claims can't grab
-        // it. Story 28-1 PR B — the row lives in the per-tenant DB; use
-        // a fresh CP-shared in-memory context to mutate it without
-        // wedging change-tracking on the test's CP context.
-        var stored = await _db.EmailOutbox.FindAsync(msg.Id);
-        stored!.NextAttemptAt = DateTime.UtcNow.AddHours(1);
-        await _db.SaveChangesAsync();
+        // it. Story 28-1 PR D — email_outbox lives on the tenant DB.
+        await using (var tdb = await _tenantFactory.CreateAsync(TestTenantId))
+        {
+            var stored = await tdb.EmailOutbox.FindAsync(msg.Id);
+            stored!.NextAttemptAt = DateTime.UtcNow.AddHours(1);
+            await tdb.SaveChangesAsync();
+        }
 
         var claim = await _repo.ClaimNextPendingAsync(TestTenantId, DateTime.UtcNow);
 
