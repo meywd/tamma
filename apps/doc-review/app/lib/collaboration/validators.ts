@@ -269,7 +269,7 @@ function optionalDiscussionStatus(value: unknown): 'open' | 'resolved' | 'closed
   if (typeof value === 'string') {
     const status = value.trim().toLowerCase();
     if (status === 'open' || status === 'resolved' || status === 'closed') {
-      return status as 'open' | 'resolved' | 'closed';
+      return status;
     }
   }
 

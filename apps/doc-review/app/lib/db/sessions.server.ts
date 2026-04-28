@@ -134,7 +134,7 @@ export function parseDocPaths(docPaths: string | null): string[] {
 
   try {
     const parsed = JSON.parse(docPaths);
-    return Array.isArray(parsed) ? (parsed.filter((item) => typeof item === 'string') as string[]) : [];
+    return Array.isArray(parsed) ? (parsed.filter((item) => typeof item === 'string')) : [];
   } catch (error) {
     console.warn('Failed to parse docPaths JSON', error);
     return [];

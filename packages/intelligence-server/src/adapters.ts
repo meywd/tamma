@@ -51,11 +51,11 @@ export function adaptVectorStore(
   embedText: (text: string) => Promise<number[]>,
 ): IVectorStoreAdapter {
   const base: IVectorStoreAdapter = {
-    listCollections: () => real.listCollections(),
-    createCollection: (name, opts) => real.createCollection(name, opts),
-    deleteCollection: (name) => real.deleteCollection(name),
-    upsert: (collection, docs) => real.upsert(collection, docs),
-    delete: (collection, ids) => real.delete(collection, ids),
+    listCollections: async () => real.listCollections(),
+    createCollection: async (name, opts) => real.createCollection(name, opts),
+    deleteCollection: async (name) => real.deleteCollection(name),
+    upsert: async (collection, docs) => real.upsert(collection, docs),
+    delete: async (collection, ids) => real.delete(collection, ids),
     async search(collection, query) {
       const limit = query.limit ?? 10;
       const embedding = query.vector ?? (query.text ? await embedText(query.text) : []);
@@ -93,7 +93,7 @@ export function adaptVectorStore(
     };
   }
   if (real.getCollectionStats) {
-    base.getCollectionStats = (name) => real.getCollectionStats!(name);
+    base.getCollectionStats = async (name) => real.getCollectionStats!(name);
   }
   return base;
 }
@@ -125,7 +125,7 @@ export function adaptRagPipeline(
   },
 ): IRagPipeline {
   const out: IRagPipeline = {
-    retrieve: (q, o) => real.retrieve(q, o),
+    retrieve: async (q, o) => real.retrieve(q, o),
   };
   if (real.getCacheStats) out.getCacheStats = real.getCacheStats.bind(real);
   if (real.getFeedbackOverview) out.getFeedbackOverview = real.getFeedbackOverview.bind(real);

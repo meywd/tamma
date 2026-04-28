@@ -17,7 +17,7 @@ describe('AuthGuard', () => {
 
   it('shows loading placeholder while /auth/me is in flight', () => {
     // Never resolves — the hook stays in loading state.
-    globalThis.fetch = vi.fn(() => new Promise(() => {})) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn(async () => new Promise(() => {})) as unknown as typeof fetch;
 
     render(
       <MemoryRouter initialEntries={['/']}>
@@ -37,7 +37,7 @@ describe('AuthGuard', () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(new Response('', { status: 401 }))
-      .mockResolvedValueOnce(new Response('', { status: 401 })) as unknown as typeof fetch;
+      .mockResolvedValueOnce(new Response('', { status: 401 }));
 
     render(
       <MemoryRouter initialEntries={['/']}>
@@ -64,7 +64,7 @@ describe('AuthGuard', () => {
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
-    ) as unknown as typeof fetch;
+    );
 
     render(
       <MemoryRouter initialEntries={['/']}>

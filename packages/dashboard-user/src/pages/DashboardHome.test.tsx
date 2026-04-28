@@ -32,7 +32,7 @@ describe('DashboardHome', () => {
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       ),
-    ) as unknown as typeof fetch;
+    );
 
     renderHome();
 
@@ -95,7 +95,7 @@ describe('DashboardHome', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderHome();
 

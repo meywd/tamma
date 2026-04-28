@@ -34,7 +34,7 @@ describe('LoginPage', () => {
     // Initial /auth/me returns 401 — page renders in anonymous state.
     globalThis.fetch = vi
       .fn()
-      .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
+      .mockResolvedValue(new Response('', { status: 401 }));
 
     renderWithRouter();
 
@@ -68,7 +68,7 @@ describe('LoginPage', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderWithRouter();
 
@@ -82,7 +82,7 @@ describe('LoginPage', () => {
     });
 
     const loginCall = fetchMock.mock.calls.find(
-      (c) => typeof c[0] === 'string' && (c[0] as string).includes('/auth/login'),
+      (c) => typeof c[0] === 'string' && (c[0]).includes('/auth/login'),
     );
     expect(loginCall).toBeDefined();
     expect(JSON.parse((loginCall![1] as RequestInit).body as string)).toEqual({
@@ -103,7 +103,7 @@ describe('LoginPage', () => {
         }),
       )
       .mockResolvedValueOnce(new Response('', { status: 401 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderWithRouter();
 
@@ -136,7 +136,7 @@ describe('LoginPage', () => {
           { status: 200, headers: { 'content-type': 'application/json' } },
         ),
       );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     renderWithRouter('/login?redirect=%2Frepos');
 

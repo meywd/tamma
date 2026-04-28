@@ -344,7 +344,7 @@ export default function AdminWebhooks() {
                   className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-md text-sm font-mono"
                 />
                 <button
-                  onClick={() => navigator.clipboard.writeText(data.webhookUrls.github)}
+                  onClick={async () => navigator.clipboard.writeText(data.webhookUrls.github)}
                   className="ml-2 px-3 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm"
                 >
                   Copy
@@ -405,7 +405,7 @@ export default function AdminWebhooks() {
                   className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-md text-sm font-mono"
                 />
                 <button
-                  onClick={() => navigator.clipboard.writeText(data.webhookUrls.gitlab)}
+                  onClick={async () => navigator.clipboard.writeText(data.webhookUrls.gitlab)}
                   className="ml-2 px-3 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm"
                 >
                   Copy

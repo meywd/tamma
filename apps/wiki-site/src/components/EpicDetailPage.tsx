@@ -211,7 +211,7 @@ export default function EpicDetailPage() {
 
   useEffect(() => {
     fetch('/content/manifest.json')
-      .then((r) => r.json())
+      .then(async (r) => r.json())
       .then((data: ManifestEntry[]) => setManifest(data))
       .catch(() => {});
   }, []);
@@ -220,7 +220,7 @@ export default function EpicDetailPage() {
     setLoading(true);
     setError(false);
     fetch(`/content/epics/${slug}.md`)
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })

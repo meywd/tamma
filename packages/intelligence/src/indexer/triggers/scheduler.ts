@@ -128,7 +128,7 @@ export class Scheduler {
       // Handle both sync and async callbacks
       const result = this.callback();
       if (result && typeof result === 'object' && 'catch' in result) {
-        (result as Promise<void>).catch((error: unknown) => {
+        (result).catch((error: unknown) => {
           console.warn('[Scheduler] Async callback error:', error instanceof Error ? error.message : String(error));
         });
       }

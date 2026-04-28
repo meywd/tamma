@@ -28,7 +28,7 @@ describe('VerifyEmailPage', () => {
   it('shows waiting state when no token is in the query', async () => {
     globalThis.fetch = vi
       .fn()
-      .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
+      .mockResolvedValue(new Response('', { status: 401 }));
 
     renderAt('/verify-email');
 
@@ -40,7 +40,7 @@ describe('VerifyEmailPage', () => {
   it('POSTs token on mount and shows success state', async () => {
     // URL-aware mock — order of effects is non-deterministic across
     // parent/child renders, so match on URL instead of call order.
-    const fetchMock = vi.fn((url: string) => {
+    const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/auth/verify-email')) {
         return Promise.resolve(
           new Response(JSON.stringify({ ok: true }), {
@@ -70,7 +70,7 @@ describe('VerifyEmailPage', () => {
   });
 
   it('shows error when token is rejected', async () => {
-    const fetchMock = vi.fn((url: string) => {
+    const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/auth/verify-email')) {
         return Promise.resolve(
           new Response(JSON.stringify({ error: 'expired_token' }), {

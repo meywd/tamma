@@ -140,7 +140,7 @@ export class ConnectionPool {
    */
   async disconnectAll(): Promise<void> {
     await Promise.all(
-      Array.from(this.connections.values()).map((connection) =>
+      Array.from(this.connections.values()).map(async (connection) =>
         connection.disconnect()
       )
     );

@@ -492,7 +492,7 @@ export class ServerConnection {
     if (isJSONRPCResponse(message)) {
       this.handleResponse(message);
     } else if ('method' in message) {
-      this.handleNotification(message as JSONRPCNotification);
+      this.handleNotification(message);
     }
   }
 

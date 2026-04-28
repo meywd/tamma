@@ -70,7 +70,7 @@ export abstract class BaseEmbeddingProvider implements IEmbeddingProvider {
   /**
    * Sleep for a specified duration (for rate limiting)
    */
-  protected sleep(ms: number): Promise<void> {
+  protected async sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

@@ -38,11 +38,11 @@ const REFRESH_PATH = '/api/v1/auth/refresh';
 export class ApiClient {
   constructor(private readonly options: ApiClientOptions) {}
 
-  get<T>(path: string, init?: RequestInit): Promise<T> {
+  async get<T>(path: string, init?: RequestInit): Promise<T> {
     return this.request<T>(path, { ...init, method: 'GET' });
   }
 
-  post<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  async post<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
     const requestInit: RequestInit = {
       ...init,
       method: 'POST',
@@ -55,7 +55,7 @@ export class ApiClient {
     return this.request<T>(path, requestInit);
   }
 
-  put<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  async put<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
     const requestInit: RequestInit = {
       ...init,
       method: 'PUT',
@@ -68,7 +68,7 @@ export class ApiClient {
     return this.request<T>(path, requestInit);
   }
 
-  delete<T>(path: string, init?: RequestInit): Promise<T> {
+  async delete<T>(path: string, init?: RequestInit): Promise<T> {
     return this.request<T>(path, { ...init, method: 'DELETE' });
   }
 

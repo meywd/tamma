@@ -115,7 +115,7 @@ function parseEpicDetails(markdown: string): ParsedEpicDetail[] {
     const statusMatch = body.match(/\*\*Status:\*\*\s*(.+?)(?:\n|$)/);
 
     // If no explicit status, infer from the ## section this epic is under
-    const sectionContext = findSectionContext(markdown, match.index!);
+    const sectionContext = findSectionContext(markdown, match.index);
     const inferredStatus = statusMatch
       ? statusMatch[1].trim()
       : inferStatusFromSection(sectionContext);
@@ -600,7 +600,7 @@ export default function RoadmapPage() {
   useEffect(() => {
     setLoading(true);
     fetch('/content/roadmap.md')
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error('Not found');
         return res.text();
       })
