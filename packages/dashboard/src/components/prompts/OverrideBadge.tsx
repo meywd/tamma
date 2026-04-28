@@ -7,6 +7,8 @@
  */
 import type { PromptSource } from '../../hooks/useTenantPrompts.js';
 
+import type { JSX } from "react";
+
 interface OverrideBadgeProps {
   source: PromptSource;
 }

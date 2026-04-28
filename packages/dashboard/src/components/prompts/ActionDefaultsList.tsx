@@ -17,6 +17,8 @@
 import type { PromptResponse } from '../../services/admin/prompts-api-client.js';
 import { ACTIONS, actionLabel } from './prompt-constants.js';
 
+import type { JSX } from "react";
+
 interface ActionDefaultsListProps {
   /** `{ [action]: ActionDefault }` — supplied by the parent page. */
   actionDefaults: Record<string, PromptResponse>;

@@ -3,7 +3,7 @@
  * useAuth.register() and redirects to /verify-email on success.
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type JSX } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 

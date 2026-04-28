@@ -5,7 +5,7 @@
  * and trigger/cancel controls.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { IndexStatus } from '@tamma/shared';
 
 export interface IndexStatusCardProps {

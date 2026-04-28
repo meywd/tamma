@@ -1,5 +1,7 @@
 import type { ConsumerRef } from '../../services/secrets/secrets-api-client.js';
 
+import type { JSX } from "react";
+
 /**
  * Story 29-4 / 29-5 — typed consumer renderer. The `ConsumerRef.type`
  * drives what link / iconography the UI shows:

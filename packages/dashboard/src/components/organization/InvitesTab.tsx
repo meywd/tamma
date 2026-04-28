@@ -7,7 +7,7 @@
  * `DeleteInvite` handler for revoke.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useOrgInvites } from '../../hooks/orgs/useOrgInvites.js';
 import { useCurrentTenant } from '../../hooks/orgs/useCurrentTenant.js';
 import { LoadingSpinner } from '../common/LoadingSpinner.js';

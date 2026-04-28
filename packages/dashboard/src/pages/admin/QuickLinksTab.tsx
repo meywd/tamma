@@ -7,6 +7,8 @@
 
 import { Card } from '../../components/common/Card.js';
 
+import type { JSX } from "react";
+
 interface QuickLink {
   name: string;
   description: string;

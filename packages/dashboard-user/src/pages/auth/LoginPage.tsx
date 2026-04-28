@@ -5,7 +5,7 @@
  * responses surface as an inline alert.
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type JSX } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 

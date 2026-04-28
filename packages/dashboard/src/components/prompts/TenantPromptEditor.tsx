@@ -16,7 +16,7 @@
  *     they can explore the prompt catalogue.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
 import { ConventionSelector } from './ConventionSelector.js';
 import { PromptPreview } from './PromptPreview.js';

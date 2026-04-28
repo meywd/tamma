@@ -10,7 +10,7 @@
  * textarea that posts the override on save.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { ConfirmDialog } from '../common/ConfirmDialog.js';
 import { roleLabel, ROLES } from './prompt-constants.js';
 import type { UpsertPromptRequest } from '../../services/admin/prompts-api-client.js';

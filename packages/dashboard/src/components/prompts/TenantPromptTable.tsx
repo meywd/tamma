@@ -4,7 +4,7 @@
  * AC #2, AC #3, AC #11, AC #12).
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import type { ResolvedPrompt } from '../../hooks/useTenantPrompts.js';
 import { OverrideBadge } from './OverrideBadge.js';
 

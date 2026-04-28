@@ -10,7 +10,7 @@
  * 403 page instead of empty tabs.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { MembersTab } from '../../components/organization/MembersTab.js';
 import { InvitesTab } from '../../components/organization/InvitesTab.js';
 import { AuditTab } from '../../components/organization/AuditTab.js';

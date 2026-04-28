@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type JSX } from 'react';
 import type { FormEvent } from 'react';
 import type { IProviderChainEntry } from '@tamma/shared';
 

@@ -1,6 +1,8 @@
 import { SecretsListView } from '../../../components/secrets/SecretsListView.js';
 import { platformSecretsApi } from '../../../services/secrets/secrets-api-client.js';
 
+import type { JSX } from "react";
+
 /**
  * Story 29-4 — platform-admin secrets management page at
  * `/admin/secrets`. Thin wrapper over <SecretsListView /> with

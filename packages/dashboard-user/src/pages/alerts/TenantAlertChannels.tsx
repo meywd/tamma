@@ -13,7 +13,7 @@
  * admin+.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import {
   createTenantChannel,

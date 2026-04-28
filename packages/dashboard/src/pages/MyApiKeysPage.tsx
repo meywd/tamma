@@ -5,7 +5,7 @@
  * Users can create and revoke their own API keys.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type JSX } from 'react';
 import { useAuth } from '../hooks/useAuth.js';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.js';
 

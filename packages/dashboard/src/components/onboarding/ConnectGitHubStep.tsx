@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 /**
  * Step 3 — Install Tamma GitHub App.
  *

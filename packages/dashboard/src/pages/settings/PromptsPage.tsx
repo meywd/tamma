@@ -8,7 +8,7 @@
  * reset — enforced in the editor and the API via the `SettingsManage` policy.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { useTenantPrompts } from '../../hooks/useTenantPrompts.js';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner.js';

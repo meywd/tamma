@@ -3,6 +3,8 @@ import { Card } from '../../common/Card.js';
 import { Badge } from '../../common/Badge.js';
 import type { HealthStatusEntry } from '../../../services/settings/settings-api-client.js';
 
+import type { JSX } from "react";
+
 interface ProviderHealthCardProps {
   providerKey: string;
   entry: HealthStatusEntry;

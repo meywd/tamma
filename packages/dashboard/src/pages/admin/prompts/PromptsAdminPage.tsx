@@ -14,7 +14,7 @@
  * component.
  */
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { LoadingSpinner } from '../../../components/common/LoadingSpinner.js';
 import { ActionDefaultsList } from '../../../components/prompts/ActionDefaultsList.js';
 import { ConventionPreview } from '../../../components/prompts/ConventionPreview.js';

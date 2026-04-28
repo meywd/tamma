@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AdminErrorBoundary } from '../AdminErrorBoundary.js';
 
+import type { JSX } from "react";
+
 function ThrowingChild({ shouldThrow }: { shouldThrow: boolean }): JSX.Element {
   if (shouldThrow) {
     throw new Error('Test render error');

@@ -10,7 +10,7 @@
  * (admin/owner).
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type JSX } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
 import type { AuthUser } from '../../hooks/useAuth.js';
 import './NavHeader.css';

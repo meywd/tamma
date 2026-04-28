@@ -18,6 +18,8 @@ import type {
   OnboardingStatus,
 } from '../../services/onboarding/onboarding-api-client.js';
 
+import type { JSX } from "react";
+
 interface ReviewReposStepProps {
   status: OnboardingStatus;
   installUrl: string;

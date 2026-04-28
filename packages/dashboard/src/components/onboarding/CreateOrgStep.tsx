@@ -10,6 +10,8 @@
 
 import { useNavigate } from 'react-router-dom';
 
+import type { JSX } from "react";
+
 export function CreateOrgStep(): JSX.Element {
   const navigate = useNavigate();
   return (

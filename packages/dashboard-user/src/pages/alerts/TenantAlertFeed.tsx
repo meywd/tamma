@@ -10,7 +10,7 @@
  * the buttons only for admin/owner; members see the read-only feed.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import {
   acknowledgeTenantAlert,

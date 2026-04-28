@@ -22,6 +22,8 @@ import { DashboardHome } from './pages/DashboardHome';
 import { TenantAlertFeed } from './pages/alerts/TenantAlertFeed';
 import { TenantAlertChannels } from './pages/alerts/TenantAlertChannels';
 
+import type { JSX } from "react";
+
 export function App(): JSX.Element {
   return (
     <BrowserRouter>

@@ -10,7 +10,7 @@
  * stays cheap (the list is metadata-only by backend design).
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import {
   conventionTemplatesApi,
   type ConventionTemplate,

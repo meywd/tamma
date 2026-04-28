@@ -5,7 +5,7 @@
  * can splice it in at the `{{conventions}}` placeholder.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 
 interface ConventionSummary {
   key: string;

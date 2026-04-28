@@ -1,6 +1,8 @@
 
 import { BudgetOverview } from '../../components/settings/budget/BudgetOverview.js';
 
+import type { JSX } from "react";
+
 export function BudgetPage(): JSX.Element {
   return (
     <div>

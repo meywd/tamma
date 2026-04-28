@@ -4,7 +4,7 @@
  * Displays cost analytics with category breakdown.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 import type { CostAnalytics } from '@tamma/shared';
 
 export interface CostBreakdownProps {

@@ -19,7 +19,7 @@
  *      surface it as a hint.
  */
 
-import { useEffect } from 'react';
+import { useEffect, type JSX } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { OnboardingShell } from '../../components/onboarding/OnboardingShell.js';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner.js';

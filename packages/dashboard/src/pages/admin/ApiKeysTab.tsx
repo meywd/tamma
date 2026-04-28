@@ -6,7 +6,7 @@
  * Create new key (per-user, shown once in dialog) and revoke existing keys.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type JSX } from 'react';
 import { useApiKeys } from '../../hooks/admin/useApiKeys.js';
 import { useUsers } from '../../hooks/admin/useUsers.js';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';

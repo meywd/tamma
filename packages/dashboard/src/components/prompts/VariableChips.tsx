@@ -6,7 +6,7 @@
  * the parent passes a ref so we can find the active selection range.
  */
 
-import type { RefObject } from 'react';
+import type { RefObject, JSX } from 'react';
 
 interface VariableChipsProps {
   variables: string[];

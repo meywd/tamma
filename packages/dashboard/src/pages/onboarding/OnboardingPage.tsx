@@ -28,6 +28,8 @@ import { VerifyEmailStep } from '../../components/onboarding/VerifyEmailStep.js'
 import { CreateOrgStep } from '../../components/onboarding/CreateOrgStep.js';
 import { ReviewReposStep } from '../../components/onboarding/ReviewReposStep.js';
 
+import type { JSX } from "react";
+
 export function OnboardingPage(): JSX.Element {
   const { loading, status, error, refresh } = useOnboardingStatus();
   const navigate = useNavigate();

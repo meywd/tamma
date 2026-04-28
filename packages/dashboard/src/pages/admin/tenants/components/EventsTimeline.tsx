@@ -1,5 +1,7 @@
 import type { AdminTenantEventItem } from '../../../../services/admin/admin-tenants-client.js';
 
+import type { JSX } from "react";
+
 /**
  * Story 28-11 — renders the recent platform_events feed for a single
  * tenant. The server returns the last 100 rows (most recent first);

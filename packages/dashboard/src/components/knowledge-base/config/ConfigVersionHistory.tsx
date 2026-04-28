@@ -4,7 +4,7 @@
  * Displays version history of configuration changes with rollback capability.
  */
 
-import React from 'react';
+import React, { type JSX } from 'react';
 
 export interface ConfigVersion {
   id: string;

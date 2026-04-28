@@ -1,6 +1,8 @@
 
 import { SecuritySettingsPanel } from '../../components/settings/security/SecuritySettingsPanel.js';
 
+import type { JSX } from "react";
+
 export function SecurityPage(): JSX.Element {
   return (
     <div>

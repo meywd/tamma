@@ -10,6 +10,8 @@ import { useSystemHealth } from '../../hooks/admin/useSystemHealth.js';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner.js';
 import { Card } from '../../components/common/Card.js';
 
+import type { JSX } from "react";
+
 function formatTime(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString();
 }

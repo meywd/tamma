@@ -7,6 +7,8 @@ import { Badge } from '../../common/Badge.js';
 import { LoadingSpinner } from '../../common/LoadingSpinner.js';
 import { CostBreakdownTable } from './CostBreakdownTable.js';
 
+import type { JSX } from "react";
+
 const ALL_ROLES: AgentType[] = [
   'scrum_master', 'architect', 'researcher', 'analyst',
   'planner', 'implementer', 'reviewer', 'tester', 'documenter',
