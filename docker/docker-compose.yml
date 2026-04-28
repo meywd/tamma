@@ -57,7 +57,7 @@ services:
   # Infrastructure: ChromaDB (vector database)
   # ---------------------------------------------------------------------------
   chromadb:
-    image: chromadb/chroma:0.6.3
+    image: chromadb/chroma:1.5.8
     restart: unless-stopped
     volumes:
       - tamma-chroma-data:/chroma/chroma

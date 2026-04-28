@@ -91,7 +91,7 @@ jobs:
             -e ANONYMIZED_TELEMETRY=false \
             -e IS_PERSISTENT=false \
             -p 8000:8000 \
-            chromadb/chroma:0.6.3
+            chromadb/chroma:1.5.8
 
       - name: Wait for Postgres healthy
         run: |
