@@ -27,11 +27,11 @@
     "@tailwindcss/vite": "^4.2.4",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "tailwindcss": "^4.2.4",
     "tsx": "^4.21.0",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7",
+    "vite": "^8.0.10",
     "wrangler": "^4.85.0"
   },
   "engines": {
