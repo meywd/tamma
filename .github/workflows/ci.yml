@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/engine-mvp, feat/deployment]
+    branches: [main, feat/wave-a, feat/engine-mvp, feat/deployment]
   pull_request:
-    branches: [main]
+    branches: [main, feat/wave-a]
 
 permissions:
   contents: read

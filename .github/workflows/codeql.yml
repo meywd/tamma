@@ -2,9 +2,9 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [main, feat/deployment]
+    branches: [main, feat/wave-a, feat/deployment]
   pull_request:
-    branches: [main]
+    branches: [main, feat/wave-a]
 
 permissions:
   security-events: write
