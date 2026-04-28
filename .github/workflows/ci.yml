@@ -105,12 +105,15 @@ jobs:
 
       - name: Wait for ChromaDB healthy
         run: |
-          for i in $(seq 1 15); do
-            if curl -sf http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1; then
+          # ChromaDB 1.x retired the /api/v1 prefix; healthcheck path is now /api/v2.
+          # Extended to 60s (was 30s) because the Rust-backed v1.5.x server has a
+          # slower cold-boot than the Python v0.x server.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/api/v2/heartbeat > /dev/null 2>&1; then
               echo "ChromaDB is healthy"
               exit 0
             fi
-            echo "Check $i/15: waiting..."
+            echo "Check $i/30: waiting..."
             sleep 2
           done
           echo "ChromaDB failed to become healthy" && docker logs chromadb-test && exit 1
