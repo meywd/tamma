@@ -1,6 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
+using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Api.Services.TaskQueue;
 
 namespace Tamma.Api.Extensions;
@@ -75,6 +77,27 @@ public static class ProvisioningServiceCollectionExtensions
         {
             services.TryAddScoped<ITenantProvisioner, NullTenantProvisioner>();
         }
+
+        // ── Story 30-1: v2 ITenantInfrastructureProvider registry ───────────
+        //
+        // The v2 surface coexists with the v1 ITenantProvisioner above. Story
+        // 30-3 will retire the v1 path and refactor CranlTenantProvisioner
+        // into a v2 provider; until then the v2 registry has only the null
+        // seam wired so the dispatch workflow + onboarding UI can take a
+        // hard dependency on TenantProviderRegistry without breaking
+        // existing single-user deployments. Mode behaviour:
+        //   single-user: NullTenantProvider only — provisioning is unused.
+        //   SaaS:        NullTenantProvider + (eventually) per-backend
+        //                providers from 30-3..30-6, plugged in by their
+        //                own AddTenantProvider* extension methods.
+        //
+        // Note: providers are registered as IEnumerable<ITenantInfrastructureProvider>
+        // — the TenantProviderRegistry consumes the collection at startup.
+        // We use TryAddEnumerable so a follow-up provider registration in a
+        // 30-3..30-6 extension method idempotently adds rather than replaces.
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<ITenantInfrastructureProvider, NullTenantProvider>());
+        services.TryAddSingleton<TenantProviderRegistry>();
 
         return services;
     }
