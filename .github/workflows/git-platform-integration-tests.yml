@@ -1,0 +1,151 @@
+name: Git Platform Integration Tests
+
+# Story 31-10 — runs the Tamma.Platforms.IntegrationTests harness
+# against real platform servers (Gitea today; GitLab/Forgejo as those
+# stories ship). Per-PR job is fast (Gitea only); GitLab nightly job
+# pulls the heavy gitlab-ce image and runs on schedule + manual
+# dispatch.
+
+on:
+  push:
+    branches: [main, feat/wave-b]
+    paths:
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Abstractions/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Gitea/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.GitLab/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Forgejo/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.GitHub/**'
+      - 'apps/tamma-elsa/tests/Tamma.Platforms.IntegrationTests/**'
+      - '.github/workflows/git-platform-integration-tests.yml'
+  pull_request:
+    branches: [main, feat/wave-b]
+    paths:
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Abstractions/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Gitea/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.GitLab/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.Forgejo/**'
+      - 'apps/tamma-elsa/src/Tamma.Platforms.GitHub/**'
+      - 'apps/tamma-elsa/tests/Tamma.Platforms.IntegrationTests/**'
+      - '.github/workflows/git-platform-integration-tests.yml'
+  workflow_dispatch:
+  schedule:
+    # Nightly @ 03:00 UTC — runs the heavy GitLab job.
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gitea-forgejo:
+    name: Gitea + Forgejo (per-PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: github.event_name != 'schedule'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Pre-pull the image with retry — Docker Hub anon rate limits
+      # bite GitHub-hosted runners on shared IPs.
+      - name: Pull Gitea image (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 3
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: docker pull gitea/gitea:1.21
+
+      - name: Restore
+        working-directory: apps/tamma-elsa
+        run: dotnet restore Tamma.sln
+
+      - name: Build IntegrationTests project
+        working-directory: apps/tamma-elsa
+        run: dotnet build tests/Tamma.Platforms.IntegrationTests/Tamma.Platforms.IntegrationTests.csproj -c Release --no-restore
+
+      # PLATFORMS_REQUIRE_DOCKER=true converts the skip-when-no-docker
+      # path into a hard failure on CI — a CI runner without docker is
+      # a config bug, not a "skip silently" condition. See
+      # DockerAvailability.cs for the gating logic.
+      - name: Run Gitea + Forgejo integration tests
+        working-directory: apps/tamma-elsa
+        env:
+          PLATFORMS_REQUIRE_DOCKER: 'true'
+        run: |
+          dotnet test tests/Tamma.Platforms.IntegrationTests/Tamma.Platforms.IntegrationTests.csproj \
+            -c Release --no-build \
+            --filter "TestCategory!=Nightly&(FullyQualifiedName~GiteaIntegration|FullyQualifiedName~ForgejoIntegration)" \
+            --logger "trx;LogFileName=gitea-forgejo.trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Upload TRX results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitea-forgejo-trx
+          path: apps/tamma-elsa/tests/Tamma.Platforms.IntegrationTests/TestResults/
+
+  gitlab-nightly:
+    name: GitLab (nightly + manual)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Run on the nightly schedule + workflow_dispatch + when a PR is
+    # explicitly labeled `run-gitlab-integration`.
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'run-gitlab-integration')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # gitlab-ce is ~3 GB — give the pull plenty of retries.
+      - name: Pull GitLab CE image (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: docker pull gitlab/gitlab-ce:latest
+
+      - name: Restore
+        working-directory: apps/tamma-elsa
+        run: dotnet restore Tamma.sln
+
+      - name: Build IntegrationTests project
+        working-directory: apps/tamma-elsa
+        run: dotnet build tests/Tamma.Platforms.IntegrationTests/Tamma.Platforms.IntegrationTests.csproj -c Release --no-restore
+
+      - name: Run GitLab integration tests
+        working-directory: apps/tamma-elsa
+        env:
+          PLATFORMS_REQUIRE_DOCKER: 'true'
+        run: |
+          dotnet test tests/Tamma.Platforms.IntegrationTests/Tamma.Platforms.IntegrationTests.csproj \
+            -c Release --no-build \
+            --filter "FullyQualifiedName~GitLabIntegration" \
+            --logger "trx;LogFileName=gitlab.trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Upload TRX results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-trx
+          path: apps/tamma-elsa/tests/Tamma.Platforms.IntegrationTests/TestResults/
