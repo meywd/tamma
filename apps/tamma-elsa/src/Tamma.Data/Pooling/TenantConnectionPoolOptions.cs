@@ -92,4 +92,21 @@ public sealed class TenantConnectionPoolOptions
     /// other tenants.
     /// </summary>
     public int MaxOutstandingLeases { get; set; } = 200;
+
+    /// <summary>
+    /// Story 30-8 — TTL (seconds) for the negative cache that suppresses
+    /// repeated V2-provider calls when a tenant is in a non-Ready state
+    /// (provisioning / suspended / deprovisioning / failed). Without
+    /// this, every cold miss for a half-provisioned tenant would storm
+    /// the V2 provider on every retry. Default 5 — short enough that a
+    /// tenant transition (e.g. provisioning → ready) propagates within a
+    /// few seconds, long enough to dampen pathological retry loops.
+    ///
+    /// <para>Set to 0 to disable. The legacy <c>EncryptedConnectionString</c>
+    /// path still surfaces <see cref="Abstractions.TenantNotProvisionedException"/>
+    /// directly from the CP-row check; the negative cache only guards
+    /// the V2-provider dispatch path which can involve external API
+    /// calls (Cranl GetStatus, Hetzner ServerInfo, ...).</para>
+    /// </summary>
+    public int NotProvisionedNegativeCacheSeconds { get; set; } = 5;
 }

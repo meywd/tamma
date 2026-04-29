@@ -109,6 +109,23 @@ public sealed class LruPooledTenantConnectionResolver
     private readonly ITenantStatusProbe? _statusProbe;
 
     /// <summary>
+    /// Story 30-8 — V2 routing seam. Consulted before the legacy
+    /// <c>EncryptedConnectionString</c> + <see cref="IConnectionStringDecryptor"/>
+    /// path on cold-miss. When the directory returns
+    /// <see cref="TenantEndpointResolution.IsApplicable"/> = <c>true</c>,
+    /// the resolver uses the V2 <c>DatabaseUrl</c> directly and skips the
+    /// decrypt path entirely. When it returns
+    /// <see cref="TenantEndpointResolution.NotApplicable"/> the resolver
+    /// falls through to the pre-30-8 behaviour so existing tenants on the
+    /// shadow-column legacy path keep working without any V2 wiring.
+    ///
+    /// <para>Defaults to <see cref="NullTenantEndpointDirectory.Instance"/>
+    /// when the constructor argument is <c>null</c> (DI hasn't registered
+    /// the V2 directory yet, e.g. tests / single-user / pre-30-3 SaaS).</para>
+    /// </summary>
+    private readonly ITenantEndpointDirectory _endpointDirectory;
+
+    /// <summary>
     /// Hot-path lookup. Value is the <see cref="LinkedListNode{T}"/>
     /// inside <see cref="_lru"/> so cache-hit reposition runs in O(1).
     /// </summary>
@@ -146,6 +163,19 @@ public sealed class LruPooledTenantConnectionResolver
     private readonly ConcurrentDictionary<Guid, Task> _pendingDisposes = new();
 
     /// <summary>
+    /// Story 30-8 — short-lived negative cache for tenants whose V2
+    /// provider call raised <see cref="TenantNotProvisionedException"/>
+    /// (or whose V2 path threw a transient failure). Without this, a
+    /// dead tenant would storm the V2 provider on every cold-miss and
+    /// every retry until the next status flip. TTL is bounded by
+    /// <see cref="TenantConnectionPoolOptions.NotProvisionedNegativeCacheSeconds"/>.
+    /// Eviction is lazy (next probe checks the timestamp) — no
+    /// background sweeper needed. Cleared via <see cref="EvictAsync"/>
+    /// alongside the row cache.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, (DateTimeOffset ExpiresAt, string? Status)> _notProvisionedCache = new();
+
+    /// <summary>
     /// Round-2 M7 — per-tenant outstanding-lease counter so the cap can
     /// be enforced without locking the LRU. Increments inside
     /// <see cref="LeaseAsync"/> after the cap check; decrements when a
@@ -165,7 +195,8 @@ public sealed class LruPooledTenantConnectionResolver
         TenantConnectionPoolMetrics metrics,
         IOptions<TenantConnectionPoolOptions> options,
         ILogger<LruPooledTenantConnectionResolver>? logger = null,
-        ITenantStatusProbe? statusProbe = null)
+        ITenantStatusProbe? statusProbe = null,
+        ITenantEndpointDirectory? endpointDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(cpFactory);
         ArgumentNullException.ThrowIfNull(decryptor);
@@ -178,6 +209,12 @@ public sealed class LruPooledTenantConnectionResolver
         _options = options.Value;
         _logger = logger ?? NullLogger<LruPooledTenantConnectionResolver>.Instance;
         _statusProbe = statusProbe;
+        // Story 30-8 — null directory is the safe default. SaaS deployments
+        // wire a real ITenantEndpointDirectory in DI (Tamma.Api's
+        // V2TenantEndpointDirectory) which dispatches via
+        // TenantProviderRegistry. When null, every cold miss takes the
+        // legacy decrypt-from-EncryptedConnectionString path verbatim.
+        _endpointDirectory = endpointDirectory ?? NullTenantEndpointDirectory.Instance;
 
         if (_options.MaxEntries <= 0)
         {
@@ -465,6 +502,11 @@ public sealed class LruPooledTenantConnectionResolver
         // the rotation case where the encrypted CS changed.
         _tenantRowCache.TryRemove(tenantId, out _);
 
+        // Story 30-8 — drop the negative cache so a status flip
+        // (provisioning → ready, suspended → ready) propagates on the
+        // next request without waiting for the negative-cache TTL.
+        _notProvisionedCache.TryRemove(tenantId, out _);
+
         if (evicted is not null)
         {
             _metrics.RecordEviction("explicit");
@@ -570,6 +612,7 @@ public sealed class LruPooledTenantConnectionResolver
         _buildLocks.Clear();
         _outstandingLeases.Clear();
         _pendingDisposes.Clear();
+        _notProvisionedCache.Clear();
 
         // Round-2 review M12: do NOT dispose <see cref="_metrics"/>.
         // <see cref="TenantConnectionPoolMetrics"/> is registered as a
@@ -650,6 +693,12 @@ public sealed class LruPooledTenantConnectionResolver
     {
         _metrics.RecordMiss();
 
+        // Story 30-8 — short-circuit on negative cache before taking the
+        // build lock. A pathological retry loop on a failed-provisioning
+        // tenant would otherwise queue up on the per-tenant semaphore.
+        if (TryGetCachedNotProvisioned(tenantId, out var negStatus))
+            throw new TenantNotProvisionedException(tenantId, negStatus);
+
         var sem = _buildLocks.GetOrAdd(tenantId, _ => new SemaphoreSlim(1, 1));
         await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -674,8 +723,23 @@ public sealed class LruPooledTenantConnectionResolver
                 }
             }
 
-            var row = await ResolveTenantRowAsync(tenantId, cancellationToken).ConfigureAwait(false);
-            var connectionString = DecryptOrThrow(tenantId, row);
+            // Re-check the negative cache inside the lock — another
+            // thread may have just populated it while we were waiting on
+            // the semaphore.
+            if (TryGetCachedNotProvisioned(tenantId, out var negStatus2))
+                throw new TenantNotProvisionedException(tenantId, negStatus2);
+
+            // Story 30-8 — V2 directory dispatch. When the directory
+            // returns IsApplicable=true, use its connection string
+            // directly and skip the legacy decrypt-from-shadow-column
+            // path. When it returns NotApplicable (no provider_key, or
+            // the registry doesn't recognise the key), fall through to
+            // the legacy path so existing tenants keep working without
+            // any V2 wiring. Failures on the V2 path are cached
+            // (negatively) for a short window via
+            // NotProvisionedNegativeCacheSeconds.
+            var connectionString = await ResolveConnectionStringAsync(tenantId, cancellationToken)
+                .ConfigureAwait(false);
             var dataSource = BuildDataSource(tenantId, connectionString);
 
             var entry = new CacheEntry
@@ -860,6 +924,129 @@ public sealed class LruPooledTenantConnectionResolver
                 ex.GetType().Name);
             throw new TenantConnectionDecryptionException(tenantId, ex);
         }
+    }
+
+    /// <summary>
+    /// Story 30-8 — single chokepoint for "give me the postgres
+    /// connection string for this tenant". Tries the V2 directory
+    /// first; on <see cref="TenantEndpointResolution.NotApplicable"/>
+    /// falls through to the legacy <c>EncryptedConnectionString</c> +
+    /// <see cref="IConnectionStringDecryptor"/> path. Negative-caches
+    /// <see cref="TenantNotProvisionedException"/> so a half-provisioned
+    /// tenant doesn't storm the V2 provider on every retry.
+    ///
+    /// <para>The two paths intentionally share the same downstream
+    /// <see cref="BuildDataSource"/> + LRU insertion code — the only
+    /// difference is the source of the connection string.</para>
+    /// </summary>
+    private async Task<string> ResolveConnectionStringAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        // V2 dispatch. Wrap the call so we can negative-cache transient
+        // failures without polluting the per-tenant SemaphoreSlim with a
+        // burst of retries.
+        TenantEndpointResolution resolution;
+        try
+        {
+            resolution = await _endpointDirectory
+                .TryResolveAsync(tenantId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (TenantNotProvisionedException ex)
+        {
+            CacheNotProvisioned(tenantId, ex.Status);
+            throw;
+        }
+        catch (TenantNotFoundException)
+        {
+            // Bubble up — this is a definitive control-plane miss. The
+            // ResolveTenantRowAsync fallback below would also throw
+            // TenantNotFoundException, so short-circuiting here keeps
+            // the surface uniform.
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Don't negative-cache — the caller may be holding a
+            // transient network failure on the provider's external API.
+            // Log + fall through to the legacy path so the tenant has a
+            // chance to come up if the legacy column is populated.
+            _logger.LogWarning(
+                ex,
+                "tenant.pool.v2_directory_failed tenantId={TenantId} fallback=legacy",
+                tenantId);
+            resolution = TenantEndpointResolution.NotApplicable;
+        }
+
+        if (resolution.IsApplicable)
+        {
+            // V2 path — use the provider's connection string verbatim.
+            // The provider is responsible for any password rotation /
+            // pgbouncer endpoint switching; we just feed it into
+            // NpgsqlDataSource.
+            var dbUrl = resolution.DatabaseUrl!;
+            _logger.LogInformation(
+                "tenant.pool.resolved_via_v2 tenantId={TenantId} provider={ProviderKey}",
+                tenantId,
+                resolution.ProviderKey);
+            return dbUrl;
+        }
+
+        // Legacy path — decrypt the shadow column. Identical to the
+        // pre-30-8 behaviour. Preserved intact for existing tenants
+        // that don't have provider_key set.
+        var row = await ResolveTenantRowAsync(tenantId, cancellationToken).ConfigureAwait(false);
+        return DecryptOrThrow(tenantId, row);
+    }
+
+    /// <summary>
+    /// Story 30-8 — try-pattern read against the negative cache.
+    /// Returns <c>true</c> when the tenant has a non-expired
+    /// "not-provisioned" entry; the caller throws
+    /// <see cref="TenantNotProvisionedException"/> with the captured
+    /// status. Lazy expiry — a stale entry is removed on observation.
+    /// </summary>
+    private bool TryGetCachedNotProvisioned(Guid tenantId, out string? status)
+    {
+        if (_options.NotProvisionedNegativeCacheSeconds <= 0)
+        {
+            status = null;
+            return false;
+        }
+        if (_notProvisionedCache.TryGetValue(tenantId, out var entry))
+        {
+            if (entry.ExpiresAt > DateTimeOffset.UtcNow)
+            {
+                status = entry.Status;
+                return true;
+            }
+            // Stale — drop opportunistically. Concurrent updates are
+            // fine; the negative cache is best-effort, not authoritative.
+            _notProvisionedCache.TryRemove(
+                new KeyValuePair<Guid, (DateTimeOffset, string?)>(tenantId, entry));
+        }
+        status = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Story 30-8 — record a "not-provisioned" outcome for the tenant.
+    /// Re-evaluating provisioning state requires either the TTL to
+    /// expire OR a deliberate <see cref="EvictAsync"/> (which the
+    /// status invalidation listener calls on
+    /// <c>TENANT.STATUS_CHANGED</c>).
+    /// </summary>
+    private void CacheNotProvisioned(Guid tenantId, string? status)
+    {
+        var ttlSeconds = _options.NotProvisionedNegativeCacheSeconds;
+        if (ttlSeconds <= 0) return;
+        var expiresAt = DateTimeOffset.UtcNow.AddSeconds(ttlSeconds);
+        _notProvisionedCache[tenantId] = (expiresAt, status);
     }
 
     private NpgsqlDataSource BuildDataSource(Guid tenantId, string connectionString)
