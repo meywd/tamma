@@ -89,3 +89,50 @@ services.AddGiteaPlatformDriver();
 // PlatformResolver picks the factory up via keyed DI when
 // tenant_platform_installations.platform_kind = 'gitea'.
 ```
+
+## Forgejo compatibility (Story 31-5)
+
+Forgejo branched from Gitea at v1.18 (Dec 2022) and intentionally
+retains REST + DB + webhook payload compatibility with its Gitea
+fork-base. The 31-5 driver is a thin shim that composes the same
+`GiteaPlatformClient` + `GiteaActionsPlatformClient` stack and
+exposes itself as `PlatformKind.Forgejo` so the onboarding picker
+can brand Forgejo separately and the matrix can diverge in future
+without touching the Gitea driver.
+
+### Divergence points the wrapper handles
+
+1. **Version string suffix**: Forgejo's `/api/v1/version` returns
+   shapes like `1.21.5+forgejo-3`. The Gitea factory's
+   strip-after-'+' parser handles this unchanged — the suffix is
+   just metadata.
+2. **Webhook signature header**: Forgejo emits
+   `X-Forgejo-Signature` on modern releases. Older forks (pre-
+   rename) still emit `X-Gitea-Signature`. The verifier accepts
+   both; the Forgejo registration extension wires it with the
+   `ForgejoAndGiteaHeaderNames` priority list (Forgejo first,
+   Gitea second).
+
+### Wire-up
+
+```csharp
+services.AddGiteaPlatformDriver();   // PlatformKind.Gitea
+services.AddForgejoPlatformDriver(); // PlatformKind.Forgejo
+```
+
+Both extensions can run in the same host without conflict — they
+share the OAuth2 token cache singleton and each registers a
+distinct keyed factory + named HttpClient (`tamma-gitea`,
+`tamma-forgejo`).
+
+### Future-drift policy
+
+The wrapper is cheaper than duplication today because Forgejo's
+divergences are at the boundary (one header name, one suffix
+shape). A capability divergence (Forgejo gets native OIDC, say) is
+absorbed by overriding `ForgejoPlatformDriver.ComputeCapabilities`
++ updating `PlatformKindCapabilityMatrix.Defaults[Forgejo]`. If a
+hot-path REST shape diverges in a way that breaks shared parsing,
+the fix is to promote `ForgejoPlatformDriver` to a full driver
+project with its own `GiteaHttpClient` subclass. The trigger is a
+contract-test failure in the 31-10 nightly Forgejo container suite.

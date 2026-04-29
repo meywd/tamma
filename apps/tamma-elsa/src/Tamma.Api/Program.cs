@@ -480,6 +480,13 @@ builder.Services.AddScoped<
 // client + OAuth2 token cache + webhook signature verifier.
 builder.Services.AddGiteaPlatformDriver();
 
+// Story 31-5: Forgejo compat shim. Composes the Gitea driver — wire-
+// compatible REST surface — under PlatformKind.Forgejo so the resolver
+// can pick a Forgejo-branded driver for tenants with platform_kind =
+// 'forgejo'. Webhook verifier registered keyed-DI with X-Forgejo-Sig
+// preferred, X-Gitea-Sig fallback for older forks. Idempotent.
+builder.Services.AddForgejoPlatformDriver();
+
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
 //
