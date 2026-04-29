@@ -14,6 +14,7 @@ using Tamma.Api.Extensions;
 using Tamma.Api.Infrastructure;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
+using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Core.Interfaces;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Data;
@@ -258,6 +259,16 @@ if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
             .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
             .Bind(opts));
     builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
+
+    // Story 30-8 — V2 routing seam: the LRU pool consults
+    // ITenantEndpointDirectory before falling back to the legacy
+    // EncryptedConnectionString path. Wires the registry, the null
+    // provider seam, the provider-key lookup (gracefully handles
+    // Story 30-3's not-yet-landed migration via information_schema
+    // probe) and the V2 directory adapter. Real providers plug in
+    // via additional AddSingleton<ITenantInfrastructureProvider, …>
+    // calls (Stories 30-4..30-6).
+    builder.Services.AddTenantProvisioningV2();
 }
 else
 {
