@@ -67,6 +67,10 @@
          the credential reader so every secret read goes through Epic 29. -->
     <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <ProjectReference Include="..\Tamma.Platforms\Tamma.Platforms.csproj" />
+    <!-- Story 31-6: GitLab driver. Registered via AddGitLabPlatform() in
+         Program.cs and consumed by 31-2's PlatformResolver via keyed DI
+         under PlatformKind.GitLab. -->
+    <ProjectReference Include="..\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
   </ItemGroup>
 
 </Project>
