@@ -41,6 +41,15 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
 
+    /// <summary>
+    /// Story 31-2 — generalised per-(tenant, platform_kind) installation
+    /// registry. The <see cref="GitHubInstallation"/> table stays for
+    /// 31-3 dual-read; new platform bindings (Gitea/Forgejo/GitLab/etc.)
+    /// land here.
+    /// </summary>
+    public DbSet<TenantPlatformInstallation> TenantPlatformInstallations =>
+        Set<TenantPlatformInstallation>();
+
     // ── Control-plane platform tables (Story 28-6 + 28-10) ──
     //
     // These three tables (platform_events, platform_queued_tasks,
@@ -212,6 +221,79 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlertEvaluatorCursor(modelBuilder);
         ConfigureKekRotations(modelBuilder);
         ConfigurePlatformBootstrap(modelBuilder);
+        ConfigureTenantPlatformInstallations(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 31-2 — <c>tenant_platform_installations</c> table.
+    /// CHECK constraints pin <c>PlatformKind</c> + <c>Status</c> to
+    /// closed enums; the partial unique index on
+    /// <c>(TenantId, PlatformKind, InstallationExternalId)</c> is what
+    /// the resolver hashes against, with a separate partial unique on
+    /// <c>(TenantId, PlatformKind)</c> filtered by
+    /// <c>IsPrimary = true</c> guaranteeing a unique primary per tenant
+    /// kind for the no-explicit-kind resolution path.
+    /// </summary>
+    private static void ConfigureTenantPlatformInstallations(
+        ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantPlatformInstallation>(entity =>
+        {
+            entity.ToTable("tenant_platform_installations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_PlatformKind",
+                    "\"PlatformKind\" IN ('github','gitea','forgejo','gitlab','bitbucket','azure_devops')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_Status",
+                    "\"Status\" IN ('connected','suspended','disconnected')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_CredentialSecretScope",
+                    "\"CredentialSecretScope\" IN ('platform','tenant')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_WebhookSecretScope",
+                    "\"WebhookSecretScope\" IS NULL OR \"WebhookSecretScope\" IN ('platform','tenant')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.MetadataJson)
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.IsPrimary).HasDefaultValue(true);
+            entity.Property(e => e.Status).HasDefaultValue("connected");
+            entity.Property(e => e.CredentialSecretScope).HasDefaultValue("tenant");
+
+            // Webhook resolve path — 31-7 only has the external id from the
+            // payload, not the row id. Composite (PlatformKind, ExternalId)
+            // narrows to the right driver instance even when two platforms
+            // mint colliding ids.
+            entity.HasIndex(e => new { e.PlatformKind, e.InstallationExternalId })
+                .HasDatabaseName("IX_tenant_platform_installations_PlatformKind_ExternalId")
+                .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
+
+            // Idempotency / dedupe: the same external installation can't
+            // be registered twice against the same tenant + kind. The
+            // filter excludes soft-deleted rows so a tenant can re-add
+            // a previously-disconnected installation cleanly.
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.PlatformKind,
+                e.InstallationExternalId,
+            })
+                .HasDatabaseName("UX_tenant_platform_installations_TenantId_Kind_ExternalId")
+                .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL")
+                .IsUnique();
+
+            // At most one primary per (TenantId, PlatformKind) — keeps
+            // the no-explicit-kind resolver path deterministic. Partial
+            // index so non-primary rows don't collide.
+            entity.HasIndex(e => new { e.TenantId, e.PlatformKind })
+                .HasDatabaseName("UX_tenant_platform_installations_PrimaryPerKind")
+                .HasFilter("\"IsPrimary\" = TRUE AND \"DeletedAt\" IS NULL")
+                .IsUnique();
+        });
     }
 
     /// <summary>

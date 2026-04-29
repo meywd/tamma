@@ -61,6 +61,12 @@
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
     <ProjectReference Include="..\Tamma.Data\Tamma.Data.csproj" />
     <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />
+    <!-- Story 31-2: platform abstraction + per-tenant resolver. The Api
+         registers IPlatformResolver / IPlatformCredentialReader in
+         Program.cs and adapts ISecretStore + ISecretStoreBackend into
+         the credential reader so every secret read goes through Epic 29. -->
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
+    <ProjectReference Include="..\Tamma.Platforms\Tamma.Platforms.csproj" />
   </ItemGroup>
 
 </Project>

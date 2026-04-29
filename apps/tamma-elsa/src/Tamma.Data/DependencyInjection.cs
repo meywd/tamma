@@ -116,6 +116,14 @@ public static class DependencyInjection
         services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
+        // Story 31-2: per-(tenant, platform_kind) installation registry. Scoped
+        // because ControlPlaneDbContext is. The installation row carries a
+        // SecretRef pointing at Epic 29's secret store; the resolver
+        // (registered in Tamma.Api) reads plaintext through ISecretStore +
+        // ISecretStoreBackend at resolve time.
+        services.AddScoped<
+            ITenantPlatformInstallationRepository,
+            TenantPlatformInstallationRepository>();
         // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
         // Scoped because it leans on ControlPlaneDbContext.
         services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
