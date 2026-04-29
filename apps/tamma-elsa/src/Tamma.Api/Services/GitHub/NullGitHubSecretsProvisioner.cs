@@ -1,5 +1,7 @@
 namespace Tamma.Api.Services.GitHub;
 
+#pragma warning disable CS0618 // Story 31-8: transitional impl of obsolete interface.
+
 /// <summary>
 /// Default <see cref="IGitHubSecretsProvisioner"/> when no GitHub App client
 /// or libsodium binding is wired. Returns one

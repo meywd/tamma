@@ -3,6 +3,8 @@ using Sodium;
 
 namespace Tamma.Api.Services.GitHub;
 
+#pragma warning disable CS0618 // Story 31-8: transitional impl of obsolete interface.
+
 /// <summary>
 /// Real <see cref="IGitHubSecretsProvisioner"/> implementation using
 /// libsodium sealed-box encryption (<c>crypto_box_seal</c>) + Octokit's
