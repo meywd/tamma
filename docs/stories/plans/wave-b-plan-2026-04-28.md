@@ -96,6 +96,91 @@ Within any option:
 
 α is fully sequential; β and γ have parallel branches after the foundation. δ runs all three concurrently — α + the β/γ foundation stories first, then β/γ branches in parallel.
 
+## Parallel execution plan (Option δ — selected 2026-04-29)
+
+Four batches across three concurrency layers. Each batch's agents run in their own worktree on a story-named branch (e.g. `story-27-2-saas-prompt-resolution`); branches merge into `feat/wave-b` directly via local merge + push (no PRs per the Wave-A pattern). Total work ~170-240h dispatched across ~14 agents with a critical-path of ~3 batches deep.
+
+### Batch 1 — foundations + small wins (4 parallel agents)
+
+Independent across all three options. No shared file domains.
+
+| Agent | Story | Worktree branch | File domain | ~Hours |
+|---|---|---|---|---|
+| **B1.1** | 27-2 — Prompt Store SaaS-mode resolution | `story-27-2-saas-prompt-resolution` | `apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/` (C#) | ~10h |
+| **B1.2** | 19-4 — Per-request repos follow-up | `story-19-4-per-request-followup` | `apps/tamma-elsa/src/Tamma.Data/Repositories/` (C#) | ~16h |
+| **B1.3** | 30-1 — `ITenantInfrastructureProvider` v2 | `story-30-1-provisioner-interface-v2` | new package: `apps/tamma-elsa/src/Tamma.Provisioning/` (C#) | ~16h |
+| **B1.4** | 31-1 — Git Platform Abstraction + Capability Matrix | `story-31-1-git-platform-abstraction` | new package: `apps/tamma-elsa/src/Tamma.GitPlatform/` (C#) | ~16h |
+
+All 4 are C# but in different packages — no file overlap. Lockfile (`pnpm-lock.yaml`) untouched. Merge order: B1.2 → B1.1 → B1.3 → B1.4 (size ascending; arbitrary since no conflicts).
+
+### Batch 2 — second-tier dependencies (5 parallel agents)
+
+Dispatched after Batch 1 lands. Three of these depend on Batch 1; two are independent.
+
+| Agent | Story | Depends on | File domain | ~Hours |
+|---|---|---|---|---|
+| **B2.1** | 27-3 — Prompt Store API tenant-admin path | B1.1 (27-2) | `apps/tamma-elsa/src/Tamma.Api/Endpoints/PromptEndpoints.cs` + RBAC plumbing | ~6h |
+| **B2.2** | 30-2 — Resumable Per-Backend Provisioning Workflow | B1.3 (30-1) | `apps/tamma-elsa/src/Tamma.Activities/TenantLifecycle/` (Elsa workflow) | ~18h |
+| **B2.3** | 30-3 — Cranl Provider Refactor to v2 | B1.3 (30-1) | `apps/tamma-elsa/src/Tamma.Api/Services/Provisioning/CranlTenantProvisioner.cs` | ~14h |
+| **B2.4** | 30-8 — Per-Tenant Routing Resolver | B1.3 (30-1) | `apps/tamma-elsa/src/Tamma.Data/Pooling/` (extends LRU pool) | ~16h |
+| **B2.5** | 31-2 — Platform Registry + Per-Tenant Routing Resolver | B1.4 (31-1) | new package: `apps/tamma-elsa/src/Tamma.GitPlatform.Registry/` | ~14h |
+
+5 parallel C# agents in different files. No shared edit surface.
+
+### Batch 3 — Epic 31 drivers (3 parallel agents — depends on B2.5)
+
+Dispatched after Batch 2's 31-2 lands.
+
+| Agent | Story | File domain | ~Hours |
+|---|---|---|---|
+| **B3.1** | 31-4 — Gitea Driver | new: `apps/tamma-elsa/src/Tamma.GitPlatform.Gitea/` | ~16h |
+| **B3.2** | 31-5 — Forgejo Compat Shim + Test-Matrix Extension | extends 31-4 + adds shim layer | ~14h |
+| **B3.3** | 31-6 — GitLab Driver | new: `apps/tamma-elsa/src/Tamma.GitPlatform.GitLab/` | ~16h |
+
+3 parallel agents, each adds a new driver subpackage.
+
+### Batch 4 — Epic 31 cross-cutting (4 parallel agents — depends on B2.5 + B3)
+
+Some can dispatch in parallel with Batch 3 (only depend on 31-2, not the drivers).
+
+| Agent | Story | Depends on | File domain | ~Hours |
+|---|---|---|---|---|
+| **B4.1** | 31-7 — Webhook Receiver Abstraction | B2.5 (31-2) | new: `apps/tamma-elsa/src/Tamma.GitPlatform.Webhooks/` — can run in parallel with B3 | ~10h |
+| **B4.2** | 31-8 — CI Secrets Provisioner Abstraction | B2.5 (31-2) + Epic 29 (already shipped) | extends `IPlatformGit` interface — can run in parallel with B3 | ~10h |
+| **B4.3** | 31-9 — Onboarding Platform Picker UI | B3.* (drivers exist for picker to list) | `packages/dashboard-user/src/pages/onboarding/` (TypeScript/React) | ~10h |
+| **B4.4** | 31-10 — Integration Test Harness | B3.* (drivers exist to test) | `apps/tamma-elsa/tests/Tamma.GitPlatform.IntegrationTests/` + CI workflow | ~10h |
+
+B4.1 + B4.2 can dispatch concurrently with Batch 3 (file-domain-isolated). B4.3 + B4.4 follow Batch 3.
+
+### Layer summary
+
+```
+                          time →
+Layer 1 (parallel):  [B1.1] [B1.2] [B1.3] [B1.4]
+                       ↓     ↓     ↓     ↓
+Layer 2 (parallel):  [B2.1] [B2.2] [B2.3] [B2.4] [B2.5] ← + B4.1 B4.2 (parallel-startable)
+                                                  ↓
+Layer 3 (parallel):                              [B3.1] [B3.2] [B3.3]
+                                                  ↓
+Layer 4 (parallel):                              [B4.3] [B4.4]
+```
+
+Critical path: B1.4 → B2.5 → B3.1 (or any driver) → B4.3 (or B4.4) — 4 stages × ~16h each ≈ 64h calendar at single-agent pace, but parallelism collapses it to whichever stage takes longest. Realistic Wave B duration: 1-2 weeks calendar.
+
+### Conflict surface
+
+- All Batch 1-3 work is C# in non-overlapping packages — pnpm lockfile only churns if a Batch adds a TS dep (B4.3 will). Predictable lockfile-reconciliation pattern from Wave A's deferred-majors merges applies.
+- Single-PR contract: `feat/wave-b → main` is the ONE integration PR. Per-story branches are scratchpads, deleted after merge.
+
+### Failure modes
+
+| Failure | Recovery |
+|---|---|
+| B1 foundation surfaces a design gap (e.g. 30-1 interface needs revision after 30-2 starts) | Pause Layer 2 dependents, revise B1's contract, re-dispatch. Layer-2 agents that depend on the bad interface burn ~1-2h before catching the gap. |
+| Two agents conflict on a shared utility file | Manual merge resolution (Wave A pattern). 5-10 min per conflict. |
+| Critical-path agent fails (kill or timeout) | Re-dispatch with the original brief; the failed agent's worktree is the diagnostic, not data loss. |
+| Story plan turns out to be obsolete (like the Wave-A plan-vs-reality mismatch) | Stop the agent, audit current state, revise the plan. Cheaper if caught in Batch 1 than Batch 4. |
+
 ## Acceptance — when is Wave B "done"?
 
 Wave B closes when ALL of:
