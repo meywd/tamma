@@ -67,6 +67,10 @@
          the credential reader so every secret read goes through Epic 29. -->
     <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <ProjectReference Include="..\Tamma.Platforms\Tamma.Platforms.csproj" />
+    <!-- Story 31-4: Gitea driver self-registers via AddGiteaPlatformDriver()
+         in Program.cs. Keyed-DI factory under PlatformKind.Gitea is the only
+         seam PlatformResolver consumes. -->
+    <ProjectReference Include="..\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
   </ItemGroup>
 
 </Project>
