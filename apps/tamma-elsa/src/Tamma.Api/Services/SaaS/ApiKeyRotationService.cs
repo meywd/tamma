@@ -7,6 +7,8 @@ using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.SaaS;
 
+#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
+
 /// <summary>
 /// Concrete <see cref="IApiKeyRotationService"/>.
 ///

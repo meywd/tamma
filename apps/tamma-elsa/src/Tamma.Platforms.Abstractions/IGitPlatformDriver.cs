@@ -48,6 +48,17 @@ public interface IGitPlatformDriver
     IGitPlatformActionsClient? Actions { get; }
 
     /// <summary>
+    /// Story 31-8 — CI secrets provisioner. Null when the driver
+    /// doesn't implement secret push (pure git, or a platform that
+    /// has no programmable secrets API). Equivalent to
+    /// <c>!Capabilities.Contains(PlatformCapability.Secrets)</c>;
+    /// callers should check <see cref="Capabilities"/> programmatically
+    /// and reach for this property only when they're invoking a
+    /// secrets call.
+    /// </summary>
+    ICiSecretsProvisioner? CiSecrets => null;
+
+    /// <summary>
     /// Effective capabilities for THIS driver instance. Mode
     /// behavior:
     /// <list type="bullet">

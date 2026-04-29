@@ -3,6 +3,8 @@ using Tamma.Api.Services.GitHub;
 
 namespace Tamma.Api.Extensions;
 
+#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
+
 /// <summary>
 /// DI wiring for the GitHub App installation router. Called by
 /// <c>Program.cs</c> or test fixtures to register
