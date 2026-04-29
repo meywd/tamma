@@ -2,18 +2,21 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
 
 #nullable disable
 
-namespace Tamma.Data.Migrations
+namespace Tamma.Data.Migrations.ControlPlane
 {
     [DbContext(typeof(ControlPlaneDbContext))]
-    partial class ControlPlaneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260429160554_AddV2ProviderColumns")]
+    partial class AddV2ProviderColumns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1336,110 +1339,6 @@ namespace Tamma.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("tenant_memberships", (string)null);
-                });
-
-            modelBuilder.Entity("Tamma.Data.Entities.TenantPlatformInstallation", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasDefaultValueSql("gen_random_uuid()");
-
-                    b.Property<string>("BaseUrl")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<string>("CredentialSecretName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("CredentialSecretScope")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasDefaultValue("tenant");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("InstallationExternalId")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<bool>("IsPrimary")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true);
-
-                    b.Property<string>("MetadataJson")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("Metadata")
-                        .HasDefaultValueSql("'{}'::jsonb");
-
-                    b.Property<string>("PlatformKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("connected");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<string>("WebhookSecretName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("WebhookSecretScope")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PlatformKind", "InstallationExternalId")
-                        .HasDatabaseName("IX_tenant_platform_installations_PlatformKind_ExternalId")
-                        .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
-
-                    b.HasIndex("TenantId", "PlatformKind")
-                        .IsUnique()
-                        .HasDatabaseName("UX_tenant_platform_installations_PrimaryPerKind")
-                        .HasFilter("\"IsPrimary\" = TRUE AND \"DeletedAt\" IS NULL");
-
-                    b.HasIndex("TenantId", "PlatformKind", "InstallationExternalId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_tenant_platform_installations_TenantId_Kind_ExternalId")
-                        .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
-
-                    b.ToTable("tenant_platform_installations", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_tenant_platform_installations_CredentialSecretScope", "\"CredentialSecretScope\" IN ('platform','tenant')");
-
-                            t.HasCheckConstraint("CK_tenant_platform_installations_PlatformKind", "\"PlatformKind\" IN ('github','gitea','forgejo','gitlab','bitbucket','azure_devops')");
-
-                            t.HasCheckConstraint("CK_tenant_platform_installations_Status", "\"Status\" IN ('connected','suspended','disconnected')");
-
-                            t.HasCheckConstraint("CK_tenant_platform_installations_WebhookSecretScope", "\"WebhookSecretScope\" IS NULL OR \"WebhookSecretScope\" IN ('platform','tenant')");
-                        });
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.User", b =>

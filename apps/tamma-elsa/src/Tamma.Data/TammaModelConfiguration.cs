@@ -161,6 +161,21 @@ internal static class TammaModelConfiguration
                 entity.Property<string?>("FailureReason");
                 entity.Property<DateTime?>("DeleteRequestedAt");
 
+                // ── Epic 30 shadow columns (Story 30-3) ──
+                //
+                // ProviderKey + ProviderResourceIds back the v2
+                // ITenantInfrastructureProvider contract: the dispatch
+                // workflow (30-2) selects a provider by tenants.provider_key
+                // and writes minted cloud-resource ids into
+                // tenants.provider_resource_ids JSONB. Both stay nullable so
+                // tenants that haven't been routed to a v2 backend yet (the
+                // shared-infra default) continue to work; the migration
+                // backfills 'cranl' for any row already populated with the
+                // legacy cranl_* identifiers.
+                entity.Property<string?>("ProviderKey").HasMaxLength(40);
+                entity.Property<string?>("ProviderResourceIds")
+                    .HasColumnType("jsonb");
+
                 // Epic 28 shadow-column indexes used by Admin tenant
                 // filtering + plan FK joins.
                 entity.HasIndex("Status");

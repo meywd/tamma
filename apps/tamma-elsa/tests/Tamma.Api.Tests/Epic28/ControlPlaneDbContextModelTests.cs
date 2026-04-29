@@ -112,6 +112,29 @@ public class ControlPlaneDbContextModelTests
     }
 
     [Test]
+    public void Tenant_Carries_V2ProviderShadowColumns_FromStory303()
+    {
+        using var ctx = CreateContext();
+
+        var tenant = ctx.Model.FindEntityType(typeof(Tenant))!;
+        var shadow = tenant.GetProperties()
+            .Where(p => p.IsShadowProperty())
+            .ToDictionary(p => p.Name, p => p);
+
+        shadow.Should().ContainKey("ProviderKey",
+            because: "Story 30-3 added tenants.provider_key for V2 dispatch routing");
+        shadow.Should().ContainKey("ProviderResourceIds",
+            because: "Story 30-3 added tenants.provider_resource_ids JSONB for V2 resource ids");
+
+        shadow["ProviderKey"].IsNullable.Should().BeTrue(
+            because: "shared-infra tenants have no provider; column must accept NULL");
+        shadow["ProviderResourceIds"].IsNullable.Should().BeTrue(
+            because: "JSONB stays NULL until the provider populates resource ids");
+
+        shadow["ProviderResourceIds"].GetColumnType().Should().Be("jsonb");
+    }
+
+    [Test]
     public void ApiKey_Carries_RateLimitRpm_ShadowProperty()
     {
         using var ctx = CreateContext();
