@@ -13,7 +13,15 @@ namespace Tamma.Api.Services.Provisioning;
 ///
 /// <para>This is the seam that keeps dev / self-hosted deployments
 /// working without a Cranl account.</para>
+///
+/// <para><b>Story 30-3 — DEPRECATED.</b> The v2 equivalent is
+/// <see cref="V2.NullTenantProvider"/>, which throws
+/// <see cref="NotSupportedException"/> on provisioning calls instead of
+/// faking a "Ready" state. Single-user mode still relies on this v1 seam
+/// while admin endpoints route through the v1 surface; Wave-C migrates
+/// admin endpoints to the v2 registry and retires this class.</para>
 /// </summary>
+[Obsolete("Use ITenantInfrastructureProvider (V2) instead. Removed in Wave C.")]
 public sealed class NullTenantProvisioner : ITenantProvisioner
 {
     private readonly ControlPlaneDbContext _db;

@@ -16,7 +16,15 @@ namespace Tamma.Api.Services.Provisioning;
 /// <para>All methods are idempotent: calling <see cref="ProvisionAsync"/>
 /// on a tenant that already has a Cranl project returns the current
 /// status without doing anything new.</para>
+///
+/// <para><b>Story 30-3 — DEPRECATED.</b> Replaced by the v2 surface
+/// <see cref="V2.ITenantInfrastructureProvider"/> + the
+/// <see cref="V2.TenantProviderRegistry"/>. Existing call sites
+/// (admin endpoints, the platform task handler) continue to compile —
+/// the wave-C migration converts them to the v2 contract. New code
+/// MUST use v2; no exceptions.</para>
 /// </summary>
+[Obsolete("Use ITenantInfrastructureProvider (V2) instead. Removed in Wave C.")]
 public interface ITenantProvisioner
 {
     /// <summary>

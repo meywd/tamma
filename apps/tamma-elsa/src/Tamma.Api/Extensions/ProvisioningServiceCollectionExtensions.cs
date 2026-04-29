@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
 using Tamma.Api.Services.Provisioning.V2;
+using Tamma.Api.Services.Provisioning.V2.Cranl;
 using Tamma.Api.Services.TaskQueue;
 
 namespace Tamma.Api.Extensions;
@@ -68,14 +69,27 @@ public static class ProvisioningServiceCollectionExtensions
                 return TenantSecretProtector.FromConfiguration(cfg, env, logger);
             });
             services.TryAddScoped<CranlProvisioningWorkflow>();
+#pragma warning disable CS0618 // v1 surface is [Obsolete] (Story 30-3) but still wired
+                               // alongside v2 until wave-C migrates callers.
             services.TryAddScoped<ITenantProvisioner, CranlTenantProvisioner>();
+#pragma warning restore CS0618
             // Register handler under both ITaskHandler (so the registry sees
             // it) and itself (so direct resolution works in tests).
             services.AddScoped<ITaskHandler, TenantProvisioningTaskHandler>();
+
+            // ── Story 30-3: v2 Cranl provider ──────────────────────────────
+            // Wired alongside v1 so both surfaces are available during the
+            // wave-B → wave-C transition. v2 takes the same dependencies
+            // (DbContext, platform queue repo, secret protector, options)
+            // and preserves the platform-queue dispatch pattern v1 relies on.
+            services.AddTenantProviderCranl();
         }
         else
         {
+#pragma warning disable CS0618 // v1 surface is [Obsolete] (Story 30-3) but still wired
+                               // alongside v2 until wave-C migrates callers.
             services.TryAddScoped<ITenantProvisioner, NullTenantProvisioner>();
+#pragma warning restore CS0618
         }
 
         // ── Story 30-1: v2 ITenantInfrastructureProvider registry ───────────
@@ -99,6 +113,46 @@ public static class ProvisioningServiceCollectionExtensions
             ServiceDescriptor.Singleton<ITenantInfrastructureProvider, NullTenantProvider>());
         services.TryAddSingleton<TenantProviderRegistry>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Story 30-3 — register the v2 Cranl <see cref="ITenantInfrastructureProvider"/>.
+    /// Called from <see cref="AddTenantProvisioning"/> when the Cranl
+    /// configuration is populated; exposed as a public extension so a
+    /// test fixture / future wave-C composition root can wire it
+    /// independently of the v1 path.
+    ///
+    /// <para><b>Lifetime</b>: scoped, mirroring v1's
+    /// <see cref="CranlTenantProvisioner"/>. The provider's only
+    /// not-thread-safe dependency is the scoped
+    /// <see cref="ControlPlaneDbContext"/>; everything else
+    /// (<see cref="IPlatformQueuedTaskRepository"/>,
+    /// <see cref="TenantSecretProtector"/>, <see cref="CranlOptions"/>) is
+    /// already singleton-friendly. This deviates from the 30-1 ADR §4
+    /// "platform-scoped singletons" recommendation because that guidance
+    /// targets providers that own a real API client + rate limiter; our
+    /// wrapper neither makes outbound calls nor holds any per-tenant
+    /// state, so it inherits v1's scope cleanly.</para>
+    ///
+    /// <para><b>Registry plumbing</b>: the v2 registry's constructor
+    /// expects <c>IEnumerable&lt;ITenantInfrastructureProvider&gt;</c> with
+    /// singleton lifetime (it caches the dictionary at construction time).
+    /// We adapt the scoped Cranl provider through
+    /// <see cref="ScopedTenantInfrastructureProviderAdapter"/>, which
+    /// resolves a fresh scope per method invocation. The adapter is
+    /// singleton + thread-safe by construction.</para>
+    ///
+    /// <para>Idempotent via <c>TryAddEnumerable</c>: a second call adds
+    /// nothing because the registration is keyed by implementation type.</para>
+    /// </summary>
+    public static IServiceCollection AddTenantProviderCranl(this IServiceCollection services)
+    {
+        services.TryAddScoped<CranlTenantProviderV2>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<
+                ITenantInfrastructureProvider,
+                ScopedTenantInfrastructureProviderAdapter<CranlTenantProviderV2>>());
         return services;
     }
 
