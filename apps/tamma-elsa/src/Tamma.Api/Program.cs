@@ -842,6 +842,17 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("settings:manage"));
         });
+        // Story 27-3 — Prompt Store tenant-admin policy. CLAUDE.md
+        // "Prompt Store Architecture / RBAC" allows PUT/DELETE override to
+        // tenant_owner OR tenant_admin (admin+owner in this codebase's role
+        // matrix). The existing SettingsManage policy is owner-only and would
+        // 403 every tenant_admin, so prompt PUT/DELETE/POST-reset routes use
+        // the dedicated PromptManage gate instead.
+        options.AddPolicy("PromptManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("prompts:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -918,7 +929,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -1434,16 +1445,22 @@ prompts.MapGet("/defaults", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/system/{role}/{action}", PromptEndpoints.GetSystemDefault);
 prompts.MapGet("/defaults/{role}/{action}", PromptEndpoints.GetSystemDefault);
 prompts.MapGet("/defaults/{action}", PromptEndpoints.GetActionDefault);
-// Resolved (per-user) reads + mutations
+// Resolved (per-user) reads + mutations.
+// Story 27-3 — PUT/DELETE/POST-reset gated by `PromptManage` (admin+owner)
+// instead of `SettingsManage` (owner-only). CLAUDE.md "Prompt Store
+// Architecture / RBAC" requires tenant_admin to be able to manage tenant
+// overrides in SaaS mode; the legacy SettingsManage gate would 403 every
+// admin-role caller. Single-user mode is unaffected — every signed-up user
+// is auto-`owner` of their personal tenant.
 prompts.MapGet("/{role}/{action}", PromptEndpoints.GetPrompt);
-prompts.MapPut("/{role}/{action}", PromptEndpoints.UpsertPrompt).RequireAuthorization("SettingsManage");
-prompts.MapDelete("/{role}/{action}", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
-prompts.MapPost("/{role}/{action}/reset", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
+prompts.MapPut("/{role}/{action}", PromptEndpoints.UpsertPrompt).RequireAuthorization("PromptManage");
+prompts.MapDelete("/{role}/{action}", PromptEndpoints.DeletePrompt).RequireAuthorization("PromptManage");
+prompts.MapPost("/{role}/{action}/reset", PromptEndpoints.DeletePrompt).RequireAuthorization("PromptManage");
 // Role-system overrides (preamble) — CLAUDE.md role-system scope is keyed by
 // (userId, role) only; no action axis. Dropped the {action} URL segment to
 // match (audit prompts/005).
-prompts.MapPut("/system/{role}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("SettingsManage");
-prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("SettingsManage");
+prompts.MapPut("/system/{role}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("PromptManage");
+prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("PromptManage");
 prompts.MapPost("/{role}/{action}/render", PromptEndpoints.RenderPrompt);
 
 // ── Convention Templates (no auth) ──
