@@ -11,14 +11,18 @@ namespace Tamma.Api.Services.PromptStore;
 /// </summary>
 public enum PromptSource
 {
-    /// <summary>User's tenant-scoped <c>role-action</c> override.</summary>
+    /// <summary>User's <c>role-action</c> override (single-user mode).</summary>
     UserOverride,
     /// <summary>System default for a specific role+action pair.</summary>
     SystemRoleAction,
-    /// <summary>User's tenant-scoped <c>action-default</c> override.</summary>
+    /// <summary>User's <c>action-default</c> override (single-user mode).</summary>
     UserActionDefault,
     /// <summary>Generic system default for an action, across all roles.</summary>
     SystemActionDefault,
+    /// <summary>Tenant's <c>role-action</c> override (SaaS mode, Story 27-2).</summary>
+    TenantOverride,
+    /// <summary>Tenant's <c>action-default</c> override (SaaS mode, Story 27-2).</summary>
+    TenantActionDefault,
 }
 
 /// <summary>
@@ -283,6 +287,217 @@ public sealed class PromptStoreService
 
     public Task<List<PromptOverride>> ListUserOverridesAsync(Guid? userId)
         => _repository.ListAsync(userId);
+
+    // =======================================================================
+    // SaaS-mode resolution (Story 27-2)
+    //
+    // The single-user methods above are keyed on <c>userId</c>. SaaS-mode
+    // methods are keyed on <c>tenantId</c> — tenant_admin owns the team's
+    // overrides, member users read them without edit access. There is
+    // intentionally NO per-user override layer on top of tenant overrides
+    // (CLAUDE.md "Prompt Store Architecture / Resolution Order — SaaS mode").
+    // The two surfaces are PARALLEL, not layered.
+    //
+    // Mode is settled at process startup (Tamma:Mode env or the entry-point
+    // binary); request handlers pick the right method by inspecting whether
+    // tenant_admin context is present, NOT by inspecting both keys per
+    // request.
+    // =======================================================================
+
+    /// <summary>
+    /// Resolve the prompt for a (<paramref name="tenantId"/>, <paramref name="role"/>, <paramref name="action"/>)
+    /// tuple following the SaaS-mode 4-layer fallback order:
+    /// <list type="number">
+    ///   <item>Tenant's role+action override → if exists, use it.</item>
+    ///   <item>System default role+action → if exists, use it.</item>
+    ///   <item>Tenant's action-default override → if exists, use it.</item>
+    ///   <item>System default action template → safety net.</item>
+    /// </list>
+    /// <para>Method name carries the <c>ForTenant</c> suffix instead of
+    /// overloading on parameter type — the user-scoped variant takes
+    /// <c>Guid? userId</c>, and a non-null <c>Guid</c> binds to BOTH the
+    /// nullable overload and a same-named <c>Guid</c> overload (the latter
+    /// always wins by C# overload-resolution rules), which would route
+    /// every existing single-user-mode call site to the SaaS path.
+    /// Distinct names keep the two surfaces unambiguous.</para>
+    /// </summary>
+    public async Task<ResolvedPrompt?> ResolveRoleActionForTenantAsync(Guid tenantId, string role, string action)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+
+        // Layer 1: tenant's role+action override
+        var tenantOverride = await _repository.GetByTenantAsync(tenantId, "role-action", role, action);
+        if (tenantOverride is not null)
+        {
+            return ToResolved(role, action, tenantOverride, PromptSource.TenantOverride);
+        }
+
+        // Layer 2: system default role+action
+        var systemRoleAction = SystemPrompts.GetRoleAction(role, action);
+        if (systemRoleAction is not null)
+        {
+            return new ResolvedPrompt(
+                Role: role,
+                Action: action,
+                Template: systemRoleAction.Template,
+                SystemPrompt: systemRoleAction.SystemPrompt,
+                Variables: systemRoleAction.Variables,
+                EnableTools: systemRoleAction.EnableTools,
+                MaxTokens: systemRoleAction.MaxTokens,
+                Source: PromptSource.SystemRoleAction);
+        }
+
+        // Layer 3: tenant's action-default override
+        var tenantActionDefault = await _repository.GetByTenantAsync(tenantId, "action-default", null, action);
+        if (tenantActionDefault is not null)
+        {
+            return ToResolved(role, action, tenantActionDefault, PromptSource.TenantActionDefault);
+        }
+
+        // Layer 4: system action default (safety net)
+        var systemActionDefault = SystemPrompts.GetActionDefault(action);
+        if (systemActionDefault is not null)
+        {
+            var sysPrompt = SystemPrompts.RoleSystemPrompts.TryGetValue(role, out var rolePrompt)
+                ? rolePrompt
+                : string.Empty;
+            return new ResolvedPrompt(
+                Role: role,
+                Action: action,
+                Template: systemActionDefault.Template,
+                SystemPrompt: sysPrompt,
+                Variables: systemActionDefault.Variables,
+                EnableTools: systemActionDefault.EnableTools,
+                MaxTokens: systemActionDefault.MaxTokens,
+                Source: PromptSource.SystemActionDefault);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolve the role system prompt (role identity preamble) for a tenant.
+    /// SaaS-mode 2-layer fallback:
+    /// <list type="number">
+    ///   <item>Tenant's role-system override → if exists, use it.</item>
+    ///   <item>System default role system prompt.</item>
+    /// </list>
+    /// </summary>
+    public async Task<string?> ResolveRoleSystemForTenantAsync(Guid tenantId, string role)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+
+        var tenantOverride = await _repository.GetByTenantAsync(tenantId, "role-system", role, null);
+        if (tenantOverride is not null)
+        {
+            return tenantOverride.Template;
+        }
+
+        return SystemPrompts.RoleSystemPrompts.TryGetValue(role, out var prompt) ? prompt : null;
+    }
+
+    /// <summary>
+    /// Upsert a tenant role+action override. Returns the persisted entity
+    /// and a <c>wasCreated</c> flag the endpoint uses to choose between
+    /// <c>PROMPT.CREATED.SUCCESS</c> and <c>PROMPT.UPDATED.SUCCESS</c> events.
+    /// <para><c>actingUserId</c> records WHO inside the tenant performed the
+    /// edit (audit trail) — only tenant_owner / tenant_admin should reach
+    /// here; the API layer enforces RBAC via the <c>settings:manage</c>
+    /// permission (members get 403).</para>
+    /// </summary>
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleActionForTenantAsync(
+        Guid tenantId,
+        Guid? actingUserId,
+        string role,
+        string action,
+        UpsertPromptInput input)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        return await _repository.UpsertAsync(new PromptOverride
+        {
+            UserId = null,           // SaaS-mode row: principal_xor → tenant_id only
+            TenantId = tenantId,
+            Scope = "role-action",
+            Role = role,
+            Action = action,
+            Template = input.Template,
+            SystemPrompt = input.SystemPrompt,
+            Variables = input.Variables?.ToArray() ?? Array.Empty<string>(),
+            EnableTools = input.EnableTools ?? false,
+            MaxTokens = input.MaxTokens ?? 4096,
+        }, actingUserId);
+    }
+
+    public Task<bool> DeleteRoleActionForTenantAsync(Guid tenantId, string role, string action)
+        => _repository.DeleteByTenantAsync(tenantId, "role-action", role, action);
+
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleSystemForTenantAsync(
+        Guid tenantId,
+        Guid? actingUserId,
+        string role,
+        UpsertPromptInput input)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        return await _repository.UpsertAsync(new PromptOverride
+        {
+            UserId = null,
+            TenantId = tenantId,
+            Scope = "role-system",
+            Role = role,
+            Action = null,
+            Template = input.Template,
+            SystemPrompt = input.SystemPrompt,
+            Variables = input.Variables?.ToArray() ?? Array.Empty<string>(),
+            EnableTools = input.EnableTools ?? false,
+            MaxTokens = input.MaxTokens ?? 4096,
+        }, actingUserId);
+    }
+
+    public Task<bool> DeleteRoleSystemForTenantAsync(Guid tenantId, string role)
+        => _repository.DeleteByTenantAsync(tenantId, "role-system", role, null);
+
+    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertActionDefaultForTenantAsync(
+        Guid tenantId,
+        Guid? actingUserId,
+        string action,
+        UpsertPromptInput input)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        return await _repository.UpsertAsync(new PromptOverride
+        {
+            UserId = null,
+            TenantId = tenantId,
+            Scope = "action-default",
+            Role = null,
+            Action = action,
+            Template = input.Template,
+            SystemPrompt = input.SystemPrompt,
+            Variables = input.Variables?.ToArray() ?? Array.Empty<string>(),
+            EnableTools = input.EnableTools ?? false,
+            MaxTokens = input.MaxTokens ?? 4096,
+        }, actingUserId);
+    }
+
+    public Task<bool> DeleteActionDefaultForTenantAsync(Guid tenantId, string action)
+        => _repository.DeleteByTenantAsync(tenantId, "action-default", null, action);
+
+    /// <summary>
+    /// List every tenant-scoped override row for <paramref name="tenantId"/>.
+    /// Equivalent of <see cref="ListUserOverridesAsync"/> for SaaS mode —
+    /// member users hit this through GET /api/prompts to see what their
+    /// tenant_admin has customised.
+    /// </summary>
+    public Task<List<PromptOverride>> ListTenantOverridesAsync(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        return _repository.ListByTenantAsync(tenantId);
+    }
 
     // -----------------------------------------------------------------------
     // Rendering (static — pure functions)

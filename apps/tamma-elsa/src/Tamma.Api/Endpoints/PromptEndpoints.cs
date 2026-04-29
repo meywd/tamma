@@ -3,6 +3,7 @@ using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Prompts;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
@@ -20,8 +21,28 @@ public static class PromptEndpoints
 
     public static async Task<IResult> ListAll(
         PromptStoreService store,
-        ClaimsPrincipal principal)
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
+        // Story 27-2 — SaaS mode lists tenant overrides; single-user mode
+        // lists the caller's user-scoped overrides. The two surfaces are
+        // disjoint thanks to the principal_xor CHECK on prompt_overrides.
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            var tenantOverrides = await store.ListTenantOverridesAsync(tenantId);
+            var tenantResponse = tenantOverrides.Select(p => new PromptResponse(
+                p.Role,
+                p.Action,
+                p.Template,
+                p.SystemPrompt,
+                p.Variables,
+                p.EnableTools,
+                p.MaxTokens,
+                "tenant")).ToList();
+            return Results.Ok(tenantResponse);
+        }
+
         var userId = TryGetUserId(principal);
         var overrides = await store.ListUserOverridesAsync(userId);
         var response = overrides.Select(p => new PromptResponse(
@@ -127,15 +148,36 @@ public static class PromptEndpoints
         string role,
         string action,
         PromptStoreService store,
-        ClaimsPrincipal principal)
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
-        var userId = TryGetUserId(principal);
-        var resolved = await store.ResolveRoleActionAsync(userId, role, action);
+        // Story 27-2 — SaaS mode reads through the tenant-scoped resolver
+        // (no user override layer on top, by design — see CLAUDE.md
+        // "Resolution Order — SaaS mode"). Single-user mode keeps the
+        // legacy 4-layer fallback keyed on userId.
+        ResolvedPrompt? resolved;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+        }
+        else
+        {
+            var userId = TryGetUserId(principal);
+            resolved = await store.ResolveRoleActionAsync(userId, role, action);
+        }
 
         if (resolved is null)
         {
             return Results.NotFound(new { error = "No prompt available for this role/action" });
         }
+
+        var sourceLabel = resolved.Source switch
+        {
+            PromptSource.UserOverride or PromptSource.UserActionDefault => "user",
+            PromptSource.TenantOverride or PromptSource.TenantActionDefault => "tenant",
+            _ => "system",
+        };
 
         return Results.Ok(new PromptResponse(
             resolved.Role,
@@ -145,9 +187,7 @@ public static class PromptEndpoints
             resolved.Variables.ToArray(),
             resolved.EnableTools,
             resolved.MaxTokens,
-            resolved.Source == PromptSource.UserOverride || resolved.Source == PromptSource.UserActionDefault
-                ? "user"
-                : "system"));
+            sourceLabel));
     }
 
     public static async Task<IResult> UpsertPrompt(
@@ -157,7 +197,8 @@ public static class PromptEndpoints
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
         var input = new UpsertPromptInput(
@@ -167,9 +208,24 @@ public static class PromptEndpoints
             EnableTools: req.EnableTools,
             MaxTokens: req.MaxTokens);
 
-        // Repository tells us whether this was a CREATE or UPDATE so we can
-        // emit the right DCB event type (audit prompts/007).
-        var (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, tenantContext.TenantId, role, action, input);
+        // Story 27-2 — SaaS mode upserts a tenant-scoped row; single-user
+        // mode upserts the caller's user-scoped row. The endpoint is RBAC-
+        // gated by the SettingsManage policy (settings:manage permission =
+        // owner-only — Auth/Permissions.cs), so member users in SaaS mode
+        // hit a 403 BEFORE reaching this method.
+        PromptOverride saved;
+        bool wasCreated;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            (saved, wasCreated) = await store.UpsertRoleActionForTenantAsync(
+                tenantId, userId, role, action, input);
+        }
+        else
+        {
+            // Repository tells us whether this was a CREATE or UPDATE so we can
+            // emit the right DCB event type (audit prompts/007).
+            (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, null, role, action, input);
+        }
 
         var emitData = new Dictionary<string, object?>
         {
@@ -186,6 +242,7 @@ public static class PromptEndpoints
             await events.EmitUpdatedAsync(tenantContext.TenantId, userId, role, action, emitData);
         }
 
+        var sourceLabel = modeProvider.Mode == TammaMode.SaaS ? "tenant" : "user";
         return Results.Ok(new PromptResponse(
             saved.Role,
             saved.Action,
@@ -194,7 +251,7 @@ public static class PromptEndpoints
             saved.Variables,
             saved.EnableTools,
             saved.MaxTokens,
-            "user"));
+            sourceLabel));
     }
 
     /// <summary>
@@ -209,10 +266,19 @@ public static class PromptEndpoints
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
-        var deleted = await store.DeleteRoleActionAsync(userId, role, action);
+        bool deleted;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            deleted = await store.DeleteRoleActionForTenantAsync(tenantId, role, action);
+        }
+        else
+        {
+            deleted = await store.DeleteRoleActionAsync(userId, role, action);
+        }
 
         if (!deleted)
         {
@@ -238,7 +304,8 @@ public static class PromptEndpoints
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
         var input = new UpsertPromptInput(
@@ -248,7 +315,17 @@ public static class PromptEndpoints
             EnableTools: req.EnableTools,
             MaxTokens: req.MaxTokens);
 
-        var (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, tenantContext.TenantId, role, input);
+        PromptOverride saved;
+        bool wasCreated;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            (saved, wasCreated) = await store.UpsertRoleSystemForTenantAsync(
+                tenantId, userId, role, input);
+        }
+        else
+        {
+            (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, null, role, input);
+        }
 
         var emitData = new Dictionary<string, object?>
         {
@@ -272,10 +349,19 @@ public static class PromptEndpoints
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
-        var deleted = await store.DeleteRoleSystemAsync(userId, role);
+        bool deleted;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            deleted = await store.DeleteRoleSystemForTenantAsync(tenantId, role);
+        }
+        else
+        {
+            deleted = await store.DeleteRoleSystemAsync(userId, role);
+        }
 
         if (!deleted)
         {
@@ -298,10 +384,19 @@ public static class PromptEndpoints
         PromptStoreService store,
         PromptEventsService events,
         ClaimsPrincipal principal,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
-        var resolved = await store.ResolveRoleActionAsync(userId, role, action);
+        ResolvedPrompt? resolved;
+        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        {
+            resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+        }
+        else
+        {
+            resolved = await store.ResolveRoleActionAsync(userId, role, action);
+        }
 
         if (resolved is null)
         {
