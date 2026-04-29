@@ -29,6 +29,16 @@ public sealed class GiteaWebhookSignatureVerifier
     public static readonly IReadOnlyList<string> GiteaAndForgejoHeaderNames =
         new[] { "X-Gitea-Signature", "X-Forgejo-Signature" };
 
+    /// <summary>
+    /// Header list with Forgejo's native header preferred — used by
+    /// the Forgejo driver (31-5). Forgejo emits
+    /// <c>X-Forgejo-Signature</c> on modern releases; older Gitea-
+    /// fork installs (pre-rename) still send <c>X-Gitea-Signature</c>,
+    /// so we keep the legacy name as a fallback.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ForgejoAndGiteaHeaderNames =
+        new[] { "X-Forgejo-Signature", "X-Gitea-Signature" };
+
     private readonly IReadOnlyList<string> _headerNames;
     private readonly ILogger _logger;
 
