@@ -17,6 +17,7 @@ using Tamma.Api.Services;
 using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Core.Interfaces;
 using Tamma.Api.Services.PlatformTasks;
+using Tamma.Api.Services.Webhooks;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
@@ -470,6 +471,14 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     Tamma.Platforms.IPlatformInstallationEventEmitter,
     Tamma.Platforms.PlatformInstallationEventEmitter>();
+
+// Story 31-7: webhook receiver. Registers per-platform signature
+// verifiers (HMAC for GitHub/Gitea/Forgejo, static-token for GitLab),
+// the in-process IWebhookEventDispatcher (single-handler-per-event for
+// now; multi-handler dispatch is a follow-up), the cross-platform
+// idempotency repo, and the secret-resolver that bridges the
+// installation row to its webhook secret via the Story 29 seam.
+builder.Services.AddTammaWebhookReceiver();
 
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
@@ -1609,8 +1618,22 @@ workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 var github = app.MapGroup("/api/github");
 github.MapGet("/callback", GitHubEndpoints.Callback)
     .RequireRateLimiting("OAuthStart");
+// Legacy GitHub-specific webhook path. Story 31-7 generalises the
+// receiver to /api/webhooks/{platform}; the old path stays active
+// (with the GitHub-specific install-linking logic) for the deprecation
+// window so in-flight GitHub deliveries during a deploy don't change
+// shape. New deployments wire downstream platforms (Gitea, Forgejo,
+// GitLab) through the new path; the next epic story will port the
+// install-linking handler into a neutral IWebhookHandler and retire
+// the legacy path.
 github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
     .RequireRateLimiting("GitHubWebhook");
+
+// Story 31-7 — generalised webhook receiver. Path-based routing for
+// GitHub/Gitea/Forgejo/GitLab; per-platform signature verification,
+// idempotency, and dispatch via IWebhookEventDispatcher.
+app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
+    .RequireRateLimiting("GitHubWebhook"); // reuse the 300/min budget
 
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
@@ -1706,6 +1729,7 @@ using (var scope = app.Services.CreateScope())
                     email_outbox,
                     github_installation_repos, github_installations,
                     github_webhook_deliveries,
+                    platform_webhook_deliveries,
                     junior_developers, kek_rotations,
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens, plans,

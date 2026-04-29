@@ -50,6 +50,15 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<TenantPlatformInstallation> TenantPlatformInstallations =>
         Set<TenantPlatformInstallation>();
 
+    /// <summary>
+    /// Story 31-7 — cross-platform webhook delivery idempotency journal.
+    /// Generalises <see cref="GitHubWebhookDeliveries"/>; the older
+    /// table stays for the deprecation window but new deliveries land
+    /// in this table for every <c>PlatformKind</c>.
+    /// </summary>
+    public DbSet<PlatformWebhookDelivery> PlatformWebhookDeliveries =>
+        Set<PlatformWebhookDelivery>();
+
     // ── Control-plane platform tables (Story 28-6 + 28-10) ──
     //
     // These three tables (platform_events, platform_queued_tasks,
@@ -222,6 +231,42 @@ public class ControlPlaneDbContext : DbContext
         ConfigureKekRotations(modelBuilder);
         ConfigurePlatformBootstrap(modelBuilder);
         ConfigureTenantPlatformInstallations(modelBuilder);
+        ConfigurePlatformWebhookDeliveries(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 31-7 — <c>platform_webhook_deliveries</c> table. CHECK
+    /// constraint pins <c>PlatformKind</c> to the same closed enum the
+    /// installations table uses; the unique
+    /// <c>(PlatformKind, DeliveryId)</c> index is the natural key the
+    /// receiver hashes against to drop duplicate deliveries.
+    /// </summary>
+    private static void ConfigurePlatformWebhookDeliveries(
+        ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformWebhookDelivery>(entity =>
+        {
+            entity.ToTable("platform_webhook_deliveries", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_platform_webhook_deliveries_PlatformKind",
+                    "\"PlatformKind\" IN ('github','gitea','forgejo','gitlab','bitbucket','azure_devops')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ReceivedAt).HasDefaultValueSql("now()");
+
+            // Natural key — receiver checks this composite before
+            // dispatching to drop a re-delivery of the same logical
+            // event from a platform that retried on transient errors.
+            entity.HasIndex(e => new { e.PlatformKind, e.DeliveryId })
+                .HasDatabaseName("UX_platform_webhook_deliveries_Kind_DeliveryId")
+                .IsUnique();
+
+            // Pruner support — drop rows older than N days for cleanup.
+            entity.HasIndex(e => e.ReceivedAt)
+                .HasDatabaseName("IX_platform_webhook_deliveries_ReceivedAt");
+        });
     }
 
     /// <summary>
