@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Tamma.Platforms.Abstractions</RootNamespace>
+    <AssemblyName>Tamma.Platforms.Abstractions</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Tamma Team</Authors>
+    <Description>
+      Story 31-1: platform-neutral git hosting abstraction. Drivers (GitHub,
+      Gitea, Forgejo, GitLab, Bitbucket, Azure DevOps) implement
+      IGitPlatformDriver / IGitPlatformClient / IGitPlatformActionsClient and
+      register via keyed DI. Capability matrix lets onboarding + workflow
+      runtime check feature support without instantiating the driver.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- System.Text.Json for JsonDocument? RawMetadata on workflow records.
+         Microsoft.Extensions.DependencyInjection.Abstractions for the keyed
+         DI helper extensions only - kept slim so consumers depending on this
+         reference assembly do not pull in the whole hosting stack. -->
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tamma.Platforms.Abstractions.Tests" />
+  </ItemGroup>
+
+</Project>
