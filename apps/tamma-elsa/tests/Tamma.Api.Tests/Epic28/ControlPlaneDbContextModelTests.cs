@@ -83,11 +83,16 @@ public class ControlPlaneDbContextModelTests
             // routing (webhook arrives with no tenant context) needs
             // cross-tenant lookups.
             "tenant_platform_installations",
+            // Story 31-7 — cross-platform webhook delivery idempotency
+            // journal. Generalises github_webhook_deliveries; the
+            // older table stays for the deprecation window but new
+            // deliveries land here for every PlatformKind.
+            "platform_webhook_deliveries",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
-            + "tenant_platform_installations as the generalised "
-            + "per-(tenant, kind) registry.");
+            + "tenant_platform_installations; Story 31-7 adds "
+            + "platform_webhook_deliveries.");
     }
 
     [Test]

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Tamma.Data;
@@ -11,9 +12,11 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations
 {
     [DbContext(typeof(ControlPlaneDbContext))]
-    partial class ControlPlaneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260429175335_PlatformWebhookDeliveries")]
+    partial class PlatformWebhookDeliveries
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1281,13 +1284,6 @@ namespace Tamma.Data.Migrations
 
                     b.Property<Guid?>("PlanId")
                         .HasColumnType("uuid");
-
-                    b.Property<string>("ProviderKey")
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("ProviderResourceIds")
-                        .HasColumnType("jsonb");
 
                     b.Property<string>("ProvisioningDetail")
                         .HasColumnType("text");
