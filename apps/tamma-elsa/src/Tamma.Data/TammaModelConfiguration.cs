@@ -566,9 +566,23 @@ internal static class TammaModelConfiguration
         });
 
         // ── PromptOverride ──
+        // Story 27-2: dual-scoping. Single-user-mode rows have user_id set
+        // (tenant_id IS NULL); SaaS-mode rows have tenant_id set
+        // (user_id IS NULL). The principal_xor CHECK constraint (added in
+        // migration 27-2) enforces exactly-one. Unique index covers BOTH
+        // keys with NULLS NOT DISTINCT semantics so the (null, tid, ...)
+        // and (uid, null, ...) row spaces are disjoint and both keys
+        // dedupe on null.
         modelBuilder.Entity<PromptOverride>(entity =>
         {
-            entity.ToTable("prompt_overrides");
+            entity.ToTable("prompt_overrides", t =>
+            {
+                // Story 27-2 — exactly one of user_id / tenant_id is non-null.
+                t.HasCheckConstraint(
+                    "ck_prompt_overrides_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
@@ -579,7 +593,16 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
+            // Story 27-2 — unique on (UserId, TenantId, Scope, Role, Action).
+            // The Postgres-side index uses NULLS NOT DISTINCT so a single
+            // (null, tenantId, scope, role, action) row is unique across
+            // all repeated NULLs in UserId. This is enforced through raw
+            // SQL in the migration; the EF HasIndex below is purely a
+            // model-graph hint so the migration generator + InMemory
+            // tests see the same shape. NULLS NOT DISTINCT requires PG15+
+            // (production runs PG17 — see Tamma project tech stack).
+            entity.HasIndex(e => new { e.UserId, e.TenantId, e.Scope, e.Role, e.Action })
+                .IsUnique();
 
             if (omitTenantIdColumn) entity.Ignore(e => e.TenantId);
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);

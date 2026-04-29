@@ -14,6 +14,13 @@ namespace Tamma.Data.Repositories;
 /// <see cref="ControlPlaneDbContext"/>; the CP fallback for system-scope
 /// lookups is gone. Callers without a tenant id receive an
 /// <see cref="InvalidOperationException"/> at the seam.</para>
+///
+/// <para>Story 27-2: dual scoping model. Single-user-mode rows have
+/// <c>user_id</c> set, <c>tenant_id IS NULL</c>; SaaS-mode rows have
+/// <c>tenant_id</c> set, <c>user_id IS NULL</c>. The DB
+/// <c>principal_xor</c> CHECK constraint forces exactly-one. The
+/// methods are parallel — pick the right one based on the caller's mode;
+/// no method silently joins both planes.</para>
 /// </summary>
 public class PromptRepository(
     ITenantDbContextFactory tenantDbFactory,
@@ -26,12 +33,16 @@ public class PromptRepository(
             "lookups now resolve from in-code defaults via PromptStore, not " +
             "from CP rows.");
 
+    // ───────────────────────── single-user mode ─────────────────────────
+
     public async Task<PromptOverride?> GetAsync(Guid? userId, string scope, string? role, string? action)
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
+        // tenant_id IS NULL discriminator keeps this query off SaaS-mode rows.
         return await db.PromptOverrides.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.Scope == scope && p.Role == role && p.Action == action);
+            .FirstOrDefaultAsync(p => p.UserId == userId && p.TenantId == default(Guid?)
+                && p.Scope == scope && p.Role == role && p.Action == action);
     }
 
     public async Task<(PromptOverride Entity, bool WasCreated)> UpsertAsync(
@@ -48,9 +59,14 @@ public class PromptRepository(
         PromptOverride prompt,
         Guid? actingUserId)
     {
+        // Story 27-2 — match on BOTH user_id AND tenant_id so single-user
+        // and SaaS rows for the same (scope, role, action) tuple don't
+        // collide. The principal_xor CHECK guarantees exactly one of the
+        // two predicates picks the existing row.
         var existing = await set.IgnoreQueryFilters()
             .FirstOrDefaultAsync(p =>
-                p.UserId == prompt.UserId && p.Scope == prompt.Scope &&
+                p.UserId == prompt.UserId && p.TenantId == prompt.TenantId &&
+                p.Scope == prompt.Scope &&
                 p.Role == prompt.Role && p.Action == prompt.Action);
         if (existing is not null)
         {
@@ -80,7 +96,8 @@ public class PromptRepository(
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
         var prompt = await db.PromptOverrides.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.Scope == scope && p.Role == role && p.Action == action);
+            .FirstOrDefaultAsync(p => p.UserId == userId && p.TenantId == default(Guid?)
+                && p.Scope == scope && p.Role == role && p.Action == action);
         if (prompt is null) return false;
         db.PromptOverrides.Remove(prompt);
         await db.SaveChangesAsync();
@@ -91,7 +108,52 @@ public class PromptRepository(
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
+        // tenant_id IS NULL keeps SaaS-mode rows out of the user list.
         return await db.PromptOverrides.IgnoreQueryFilters()
-            .Where(p => p.UserId == userId).ToListAsync();
+            .Where(p => p.UserId == userId && p.TenantId == default(Guid?)).ToListAsync();
+    }
+
+    // ───────────────────────── SaaS mode (Story 27-2) ───────────────────
+
+    public async Task<PromptOverride?> GetByTenantAsync(
+        Guid tenantId, string scope, string? role, string? action)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        // PromptRepository's ambient tenant id should match the requested
+        // tenant — the factory routes the connection. Use the scoped
+        // tenant id to pick the right physical DB.
+        var ambient = RequireTenantId();
+        await using var db = await tenantDbFactory.CreateAsync(ambient);
+        // user_id IS NULL discriminator excludes single-user-mode rows.
+        return await db.PromptOverrides.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.UserId == default(Guid?)
+                && p.Scope == scope && p.Role == role && p.Action == action);
+    }
+
+    public async Task<bool> DeleteByTenantAsync(
+        Guid tenantId, string scope, string? role, string? action)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        var ambient = RequireTenantId();
+        await using var db = await tenantDbFactory.CreateAsync(ambient);
+        var prompt = await db.PromptOverrides.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.UserId == default(Guid?)
+                && p.Scope == scope && p.Role == role && p.Action == action);
+        if (prompt is null) return false;
+        db.PromptOverrides.Remove(prompt);
+        await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<PromptOverride>> ListByTenantAsync(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+        var ambient = RequireTenantId();
+        await using var db = await tenantDbFactory.CreateAsync(ambient);
+        return await db.PromptOverrides.IgnoreQueryFilters()
+            .Where(p => p.TenantId == tenantId && p.UserId == default(Guid?)).ToListAsync();
     }
 }
