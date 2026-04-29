@@ -472,6 +472,45 @@ builder.Services.AddScoped<
     Tamma.Platforms.IPlatformInstallationEventEmitter,
     Tamma.Platforms.PlatformInstallationEventEmitter>();
 
+// Story 31-9 — onboarding platform picker connect service. Composes
+// the secret-cabinet (29-1/29-3 reveal-on-create), the 31-2 platform
+// installation registry, and the 31-1 driver factory to validate +
+// persist a new platform binding. Scoped because it touches the
+// per-request DbContext via the repository.
+//
+// Resolved via a factory lambda so the DI container does not eagerly
+// validate ISecretRevealService at startup. ISecretRevealService is
+// only registered when ConnectionStrings:SecretStore / ControlPlane
+// is configured (Program.cs lines 433-439). Test environments without
+// Postgres connection strings would fail container build-time
+// ValidateOnBuild if PlatformConnectService were registered with
+// constructor-injection sugar; the factory shape defers resolution to
+// the first request, at which point the endpoint is gated on
+// PlatformsManage so it would 401/403 long before the service is
+// invoked. When the reveal service is wired (production +
+// AddTammaPostgresSecrets-enabled tests) the factory hands back a
+// real PlatformConnectService.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Onboarding.IPlatformConnectService>(sp =>
+{
+    var reveal = sp.GetService<Tamma.Api.Services.Secrets.Reveal.ISecretRevealService>();
+    if (reveal is null)
+    {
+        // No secret cabinet wired — the endpoint will surface a
+        // 503-style error when invoked. Tests exercise the service
+        // directly via constructor injection.
+        return new Tamma.Api.Services.Onboarding.NullPlatformConnectService();
+    }
+    return new Tamma.Api.Services.Onboarding.PlatformConnectService(
+        sp.GetRequiredService<Tamma.Data.Repositories.ITenantPlatformInstallationRepository>(),
+        reveal,
+        sp,
+        sp.GetRequiredService<Tamma.Platforms.IPlatformInstallationEventEmitter>(),
+        sp.GetRequiredService<TimeProvider>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Api.Services.Onboarding.PlatformConnectService>>());
+});
+
 // Story 31-4: register the Gitea driver factory under keyed DI for
 // PlatformKind.Gitea. PlatformResolver picks the factory up via
 // GetKeyedService<IGitPlatformDriverFactory>(PlatformKind.Gitea) when
@@ -895,6 +934,16 @@ if (!string.IsNullOrEmpty(jwtSecret))
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("prompts:manage"));
+        });
+        // Story 31-9 — onboarding platform picker / connect. CLAUDE.md
+        // "Operating Modes" requires the same admin+owner reach as
+        // PromptManage so tenant admins (not just owners) can wire
+        // platform installations. SettingsManage is owner-only and
+        // would 403 every admin-role tenant member.
+        options.AddPolicy("PlatformsManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("platforms:manage"));
         });
         options.AddPolicy("WorkflowsView", p =>
         {
@@ -1458,6 +1507,21 @@ app.MapGet("/api/v1/secrets/reveal/{token}", SecretEndpoints.RevealSecret)
 app.MapGet("/api/v1/onboarding/status", OnboardingEndpoints.GetStatus)
     .RequireAuthorization("MemberAccess");
 app.MapGet("/api/v1/onboarding/install-github", OnboardingEndpoints.InstallGitHub)
+    .RequireAuthorization("MemberAccess");
+
+// ── Story 31-9 — onboarding platform picker + installation API ──
+// GET /platforms returns the list of platforms the picker renders +
+// per-kind capability flags, marking deferred kinds (Bitbucket /
+// AzureDevOps) as coming-soon. POST /install is gated by the new
+// PlatformsManage policy (admin+owner): wires a credential into the
+// Epic 29 cabinet, runs an auth dry-run via the driver factory, and
+// inserts a tenant_platform_installations row. GET /installations
+// powers the connected-platforms list on the settings panel.
+app.MapGet("/api/onboarding/platforms", PlatformInstallEndpoints.ListPlatforms)
+    .RequireAuthorization("MemberAccess");
+app.MapPost("/api/onboarding/install", PlatformInstallEndpoints.Install)
+    .RequireAuthorization("PlatformsManage");
+app.MapGet("/api/onboarding/installations", PlatformInstallEndpoints.ListInstallations)
     .RequireAuthorization("MemberAccess");
 
 // ── Agents Config ──

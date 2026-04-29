@@ -1,13 +1,16 @@
 /**
  * App — router tree for the user-facing dashboard SPA.
  *
- *   /login              public
- *   /register           public
- *   /verify-email       public (auto-verifies ?token=)
- *   /                   AuthGuard → AppLayout → DashboardHome
- *   /alerts             AuthGuard → AppLayout → TenantAlertFeed
- *   /settings/alerts    AuthGuard → TenantAdminGuard → AppLayout → TenantAlertChannels
- *   /* (future)         AuthGuard → AppLayout → …
+ *   /login                                public
+ *   /register                             public
+ *   /verify-email                         public (auto-verifies ?token=)
+ *   /                                     AuthGuard → AppLayout → DashboardHome
+ *   /alerts                               AuthGuard → AppLayout → TenantAlertFeed
+ *   /settings/alerts                      AuthGuard → TenantAdminGuard → AppLayout → TenantAlertChannels
+ *   /onboarding/platforms                 AuthGuard → TenantAdminGuard → AppLayout → PlatformPicker          (Story 31-9)
+ *   /onboarding/platforms/:kind/install   AuthGuard → TenantAdminGuard → AppLayout → PlatformInstallForm     (Story 31-9)
+ *   /settings/platforms                   AuthGuard → TenantAdminGuard → AppLayout → ConnectedPlatforms      (Story 31-9)
+ *   /* (future)                           AuthGuard → AppLayout → …
  */
 
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
@@ -21,6 +24,9 @@ import { VerifyEmailPage } from './pages/auth/VerifyEmailPage';
 import { DashboardHome } from './pages/DashboardHome';
 import { TenantAlertFeed } from './pages/alerts/TenantAlertFeed';
 import { TenantAlertChannels } from './pages/alerts/TenantAlertChannels';
+import { PlatformPicker } from './pages/onboarding/PlatformPicker';
+import { PlatformInstallForm } from './pages/onboarding/PlatformInstallForm';
+import { ConnectedPlatforms } from './pages/settings/ConnectedPlatforms';
 
 import type { JSX } from "react";
 
@@ -46,6 +52,30 @@ export function App(): JSX.Element {
               element={
                 <TenantAdminGuard>
                   <TenantAlertChannels />
+                </TenantAdminGuard>
+              }
+            />
+            <Route
+              path="/onboarding/platforms"
+              element={
+                <TenantAdminGuard>
+                  <PlatformPicker />
+                </TenantAdminGuard>
+              }
+            />
+            <Route
+              path="/onboarding/platforms/:kind/install"
+              element={
+                <TenantAdminGuard>
+                  <PlatformInstallForm />
+                </TenantAdminGuard>
+              }
+            />
+            <Route
+              path="/settings/platforms"
+              element={
+                <TenantAdminGuard>
+                  <ConnectedPlatforms />
                 </TenantAdminGuard>
               }
             />

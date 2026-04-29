@@ -32,6 +32,14 @@ public static class Permissions
         // signed-up user is auto-`owner` of their personal tenant, so the new
         // permission still grants them edit access without a code-path split.
         ["prompts:manage"] = ["admin", "owner"],
+        // Story 31-9 — onboarding platform picker / connect. The
+        // existing `settings:manage` permission is owner-only and
+        // would 403 every tenant_admin trying to wire a platform
+        // installation; the existing prompts:manage is named for
+        // prompts only. A dedicated `platforms:manage` permission
+        // with admin+owner reach keeps the picker accessible to
+        // tenant admins per the Epic 31 RBAC plan.
+        ["platforms:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)
