@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Tamma.Platforms</RootNamespace>
+    <AssemblyName>Tamma.Platforms</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Tamma Team</Authors>
+    <Description>
+      Story 31-2: per-tenant platform routing resolver. Composes the
+      registry (tenant_platform_installations) + credential reader
+      (Epic 29 secret store seam) + per-kind driver factory into a
+      ready-to-use IGitPlatformDriver for any (tenant, kind) tuple.
+      Drivers themselves live in sibling projects (Tamma.Platforms.GitHub,
+      Tamma.Platforms.Gitea, etc.) and register via keyed DI.
+    </Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 8.0.1 silences NU1903 advisory GHSA-qj66-m88j-hmgj that affects 8.0.0. -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
+    <ProjectReference Include="..\Tamma.Data\Tamma.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tamma.Platforms.Tests" />
+  </ItemGroup>
+
+</Project>

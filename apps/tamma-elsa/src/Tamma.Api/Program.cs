@@ -426,6 +426,40 @@ if (!string.IsNullOrWhiteSpace(
     builder.Services.AddTammaSecretReveal(builder.Configuration);
 }
 
+// Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
+// scoped service over a singleton driver cache and the Epic 29 secret
+// store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
+// sibling projects and self-register their per-kind
+// IGitPlatformDriverFactory via keyed DI; until 31-3 lands no kind has
+// a real factory and the resolver returns null for every tenant.
+//
+// Credential reader registration follows the same conditional pattern as
+// IAlertChannelSecretReader (Story 1.5-37): when the Story 29-2
+// SecretsDbContextFactory is registered we wire the real reader; in tests
+// or dev environments without it we fall back to NullPlatformCredentialReader
+// so a misconfigured host doesn't fail at DI-validation time.
+builder.Services.AddSingleton<Tamma.Platforms.PlatformDriverCache>();
+if (builder.Services.Any(d => d.ServiceType ==
+    typeof(Microsoft.EntityFrameworkCore.IDbContextFactory<
+        Tamma.Api.Services.Secrets.Postgres.SecretsDbContext>)))
+{
+    builder.Services.AddScoped<
+        Tamma.Platforms.Abstractions.IPlatformCredentialReader,
+        Tamma.Api.Services.Platforms.SecretStorePlatformCredentialReader>();
+}
+else
+{
+    builder.Services.AddSingleton<
+        Tamma.Platforms.Abstractions.IPlatformCredentialReader,
+        Tamma.Api.Services.Platforms.NullPlatformCredentialReader>();
+}
+builder.Services.AddScoped<
+    Tamma.Platforms.Abstractions.IPlatformResolver,
+    Tamma.Platforms.PlatformResolver>();
+builder.Services.AddScoped<
+    Tamma.Platforms.IPlatformInstallationEventEmitter,
+    Tamma.Platforms.PlatformInstallationEventEmitter>();
+
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
 //
@@ -1654,6 +1688,7 @@ using (var scope = app.Services.CreateScope())
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
                     sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
+                    tenant_platform_installations,
                     user_api_keys, user_installations, user_invites, users,
                     workflow_definitions, workflow_instances,
                     knex_migrations, knex_migrations_lock,

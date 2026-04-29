@@ -78,9 +78,16 @@ public class ControlPlaneDbContextModelTests
             "admin_impersonations",
             // PF-S9 — bootstrap superadmin sentinel (single-row).
             "platform_bootstrap",
+            // Story 31-2 — generalised per-(tenant, platform_kind)
+            // installation registry. Lives on CP because cross-tenant
+            // routing (webhook arrives with no tenant context) needs
+            // cross-tenant lookups.
+            "tenant_platform_installations",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
-            + "entities have moved to TenantDbContext.");
+            + "entities have moved to TenantDbContext. Story 31-2 adds "
+            + "tenant_platform_installations as the generalised "
+            + "per-(tenant, kind) registry.");
     }
 
     [Test]
