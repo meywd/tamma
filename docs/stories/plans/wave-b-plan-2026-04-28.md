@@ -1,121 +1,116 @@
-# Wave B Plan — 2026-04-28
+# Wave B Plan — 2026-04-29 (revised)
 
-**Status**: active
+**Status**: active (rev 2)
 **Branch**: `feat/wave-b`
 **Base**: `main` at `5321316` (post Wave-A merge of PR #329)
-**Predecessor**: [`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md) — superseded for items shipped in Wave A.
+**Predecessor**: [`layer-4-5-prioritization-2026-04-21.md`](./layer-4-5-prioritization-2026-04-21.md) — superseded.
 
-## Wave-A summary (now in `main`)
+## Revision note (2026-04-29)
 
-PR #329 squashed 100 commits onto main, landing:
+The original wave-b plan (rev 1) listed Stories 19-6, 29-1, 18-5 as "must-ship" — but a git-log audit on 2026-04-29 revealed all three already shipped during Wave A (including a Wave A.5 follow-up I'd missed that *deleted* TammaAppDbContext entirely and replaced it with `ControlPlaneDbContext + ITenantDbContextFactory`). Plan re-anchored against actual repo state, not stale plan-file `Status:` markers.
 
-- **Database-per-tenant foundation** — Story 28-1 (entity move + 2 EF migrations) + 28-2/3/4/5/6/7/9/12 (CP split, tenant factory, LRU pool, platform_events, JWT switch-org, etc.)
-- **Wave-4 deferred backlog** — 6 PRs (#335–#340) closing nested-lockfile alerts, vitest 4 migration, H6 flake doc, Story 28-1 PR A/B/C
-- **28 deferred-major dep batches** — chromadb 1→3, openai 4→6, pino 9→10, eslint 9→10, ts-eslint 8.18→8.59, zod 3→4, vite 6→8, react 18→19 (codemod across 132 files), typescript 5.7→6.0, plus chromadb server bump 0.6.3→1.5.8
-- **Infrastructure** — chromadb healthcheck migration (curl → bash /dev/tcp), self-healing volume-reset workflow with backup + reviewer-approval gate, CI trigger expansion to integration-branch PRs, force-resolve transitive CVEs
+## What's actually in `main` post Wave-A
 
-## Wave B — top 3 must-ship
+- **Database-per-tenant foundation** — Stories 28-1 through 28-13 (entity move + migrations + LRU pool + JWT switch-org + KEK rotation + everything in between)
+- **Wave A.5 architectural pivot** — `TammaDbContext` + `TammaAppDbContext` deleted; 20 repos routed through `ControlPlaneDbContext + ITenantDbContextFactory`. Closes review findings `orgs/002`, `orgs/004`, `admin-db/020`, `admin-db/021` via different mechanism than Story 19-6 originally specified.
+- **Epic 29 secret management** — Stories 29-1 through 29-10 all shipped (interface + Postgres-backed envelope-encrypted store + reveal-once UX + admin/tenant UIs + rotation primitives + Cranl/postgres credential rotation + stopgap migration + delete).
+- **Epic 18 dashboard + tenant admin** — Stories 18-3, 18-4, 18-5, 18-7, 18-8 all shipped.
+- **Epic 17 tenant-scoped event store** — 17-3, 17-4 shipped.
+- **Epic 27 prompt store (single-user mode)** — 27-1, 27-4, 27-5, 27-6, 27-7 shipped. **27-2 and 27-3 not yet shipped** (see below).
+- **28 deferred-major dep batches** — chromadb, openai, pino, eslint, ts-eslint, zod, vite, react, typescript all bumped + chromadb server bump 0.6.3→1.5.8 + healthcheck migration + self-healing volume-reset workflow with backup + reviewer-approval gate.
 
-These are the three highest-priority items that survived Wave A and are now unblocked.
+## What's genuinely pending (verified by 0 substantive commits in `main`)
 
-### #1 — Story 19-6: Wire per-request repos onto `TammaAppDbContext` (P0)
+| Epic | Theme | Pending | Status |
+|---|---|---|---|
+| **27** | Prompt Store — SaaS-mode resolution | 27-2 (service tenant-scope), 27-3 (API endpoint admin path) | ❌ not shipped |
+| **30** | Pluggable Tenant Infrastructure | 30-1, 30-2, 30-3, 30-4, 30-5, 30-6, 30-7, 30-8, 30-9, 30-10 | ❌ all 10 not shipped |
+| **31** | Git Platform Expansion | 31-1, 31-2, 31-4, 31-5, 31-6, 31-7, 31-8, 31-9, 31-10 (31-3 already 2 commits, 31-11/12 explicitly deferred) | ❌ 9 not shipped |
+| **19** | Per-request repos (post-Wave-A.5) | 19-4 (single small story) | ❌ not shipped |
+| **1.5** | Foundation (mixed) | ~22 of 53 — needs deeper audit (some stale, some real, some superseded) | ⚠️ mixed |
 
-**Plan**: [`epic-19/story-19-6-wire-app-role-context-impl-plan.md`](../epic-19/story-19-6-wire-app-role-context-impl-plan.md)
-**Effort**: 16.5h
-**Why first**: closes the only remaining P0 review finding from 2026-04-20. Phase-3 RLS shipped as scaffold-only — `tamma_app` role + tenant policies exist but no request paths use the app-role connection. Until 19-6 lands, RLS is dead code and every tenant story inherits the same false-remediation.
+## Why 27-2 + 27-3 reopen
 
-**Scope**:
+The shipped C# `PromptStoreService` resolves prompts keyed on `userId`, not `tenantId`. That works for **single-user mode** (CLI / standalone — sole user owns their overrides). It does NOT work for **SaaS mode** where the tenant_admin should set team-shared prompts and member users consume them without edit access.
 
-- Swap `TammaDbContext` → `TammaAppDbContext` across 21 repositories + 5 endpoint handlers
-- Fail-closed regression test: insert NULL-tenant row as superuser, prove the app-role connection doesn't return it
-- Runbook: rotate `tamma_app` password, flip `TammaAppDb` connection string
+CLAUDE.md was updated 2026-04-29 (commit on this branch) to make the mode split explicit. Stories 27-2 and 27-3 implement the SaaS-mode resolution path:
 
-**Closes**: review findings `orgs/002`, `orgs/004`, `admin-db/020`, `admin-db/021`.
-**Out of scope**: migration + background-service paths intentionally stay on the superuser connection.
+- **27-2 (service)**: add tenant-scoped resolution in `ResolveRoleActionAsync(Guid? tenantId, ...)`, parallel to the existing `ResolveRoleActionAsync(Guid? userId, ...)`. Mode detection at startup picks one resolution function.
+- **27-3 (API)**: gate PUT/DELETE on `SettingsManage` (`settings:manage` permission) in SaaS mode; reject member-role users with 403. The dashboard already consumes `/api/prompts/:role/:action` — the endpoint shape stays the same; only the override key changes.
 
-### #2 — Story 29-1: Secret Store Abstraction
+Both remain valid stories per the original plans. The plan files don't need updating; the git-log status was wrong.
 
-**Plan**: [`epic-29/29-1-secret-store-abstraction-impl-plan.md`](../epic-29/29-1-secret-store-abstraction-impl-plan.md)
-**Effort**: 16h
-**Why second**: gates the entire Epic 29 (29-2 through 29-10). Writing this interface wrong costs ~40h of rework downstream. Foundation work — interfaces, records, validators, xUnit mocks — no real data movement.
+## Wave B — proposed scope
 
-**Ships**: `ISecretStore`, metadata/version record types, `ISecretStoreBackend` driver port, `ISecretAccessAuditor` event port.
+Three coherent chunks. User picks scope at dispatch time.
 
-**Unblocks**: 29-2 (Postgres-backed envelope), 29-3 (reveal-once), 29-4 (platform-admin UI), 29-5 (tenant-admin UI), 29-6 (rotation primitive), 29-7 (DB credential rotation), 29-8 (Cranl env rotation), 29-9 (migrate stopgap secrets), 29-10 (delete stopgaps), plus 31-2's credential store.
+### Option α — small, focused (~30-40h)
 
-### #3 — Story 18-8: Tenant-Admin User Management UI
+Quick wins that close the SaaS-mode gap and tidy 19-4.
 
-**Plan**: [`epic-18/18-8-tenant-admin-user-mgmt-ui-impl-plan.md`](../epic-18/18-8-tenant-admin-user-mgmt-ui-impl-plan.md)
-**Effort**: 32h
-**Why third**: largest first-customer-visible gap. Backend is 90% done; 18-7 ships 14h of thin completions, then 18-8 ships the full UI surface.
+| # | Story | Hours | Why |
+|---|---|---|---|
+| 1 | **27-2** Prompt Store SaaS-mode resolution | ~10h | Closes the mode-confusion gap. Foundation for 27-3. |
+| 2 | **27-3** Prompt Store API tenant-admin path | ~6h | Wires 27-2 to the dashboard. Tests the RBAC gate. |
+| 3 | **19-4** Per-request repos follow-up | ~16h | Last loose thread from Epic 19. |
+| 4 | **CLAUDE.md SaaS-mode audit follow-ups** | ~4h | Spot-check Agent/Sanitization/Budget endpoints for mode-aware behavior surfaced by the audit. |
 
-**Hard blockers** (dependency chain):
+### Option β — Epic 30 foundation (~60-80h)
 
-1. **Story 18-5** (dashboard-user shell + sidebar + settings layout) — Status: Planned. Must land before 18-8.
-2. **Story 18-7** (tenant-admin user mgmt API completion) — Status: Planned. Adds resend-invite, tenant audit, role-change-event handlers.
+Pluggable provisioning. Front-loads the `ITenantInfrastructureProvider` v2 that gates every other Epic 30 story.
 
-So Wave B's #3 is actually a 3-story chain: **18-5 → 18-7 → 18-8**.
+| # | Story | Hours |
+|---|---|---|
+| 1 | **30-1** ITenantInfrastructureProvider v2 | ~16h |
+| 2 | **30-2** Resumable Per-Backend Provisioning Workflow | ~18h |
+| 3 | **30-3** Cranl Provider Refactor to v2 | ~14h |
+| 4 | **30-8** Per-Tenant Routing Resolver | ~16h |
 
-**Ships in 18-8**: members table, invite drawer, change-role dialog, remove-member confirm, pending-invites list (resend + revoke), transfer-ownership flow, tenant-scoped audit log. Gated by `tenant_owner` / `tenant_admin` RBAC.
+Defers 30-4/5/6 (provider impls — Hetzner Cloud, Cloudflare, BYO) + 30-7/9/10 (UI/ops) to later waves.
 
-## Wave B — second tier (post-must-ships)
+### Option γ — Epic 31 git platforms (~80-120h)
 
-Order by dependency unlock:
+Git platform expansion. Foundation (31-1) gates the rest.
 
-| # | Story | Epic | Hours | Unblocks |
-|---|---|---|---:|---|
-| 4 | **9-5** Provider chain API (C#) | 9 | 14 | Team A chain (9-9 → 9-12) |
-| 5 | **27-4** | 27 | TBD | needs status re-audit |
-| 6 | **27-5** | 27 | TBD | post-18-5/18-8 dashboard wire-up |
-| 7 | **18-4** GitHub App installation onboarding | 18 | TBD | tenant onboarding flow |
-| 8 | **29-2** Postgres-backed envelope-encrypted secret store | 29 | — | depends on 29-1 |
-| 9 | **29-3** Reveal-once-on-create UX | 29 | — | depends on 29-1 + 29-2 |
-| 10 | **17-3** Postgres-backed event store (in-progress) | 17 | — | event audit completeness |
+| # | Story | Hours |
+|---|---|---|
+| 1 | **31-1** Git Platform Abstraction + Capability Matrix | ~16h |
+| 2 | **31-2** Platform Registry + Per-Tenant Routing Resolver | ~14h |
+| 3-5 | **31-4/5/6** Gitea / Forgejo / GitLab Drivers | ~16h × 3 |
+| 6-9 | **31-7/8/9/10** Webhook / CI Secrets / UI / Test Harness | ~10h × 4 |
 
-## Out of scope for Wave B (deferred to Wave C+)
+### Option δ — Big bang (α + β + γ — ~170-240h)
 
-- **Epic 30** (pluggable provisioning — Hetzner Cloud, Cloudflare, BYO) — large surface, no urgent customer demand. Sequence: after Epic 29's secret store lands (gates 30-1's `ITenantInfrastructureProvider` v2 since it depends on `ISecretStoreBackend`).
-- **Epic 31 git-platform expansion** — Forgejo (31-5) + GitLab (31-3) + integration test harness (31-10). Bitbucket (31-11) + Azure DevOps (31-12) explicitly deferred per planning blockers.
-- **Epic 1.5 backup-and-recovery (Story 1.5-7)** — designed only; first hot-path implementation (Approach A: GitHub Actions cron daily backup to object storage) is unscheduled. Per user: backups not now.
-- **`@types/node` 22 → 25** bump — incompatible with Node 22 LTS runtime; revisit at Node 24 LTS (~2026-Q3).
+Everything. Expensive but coherent: SaaS-mode prompts done first (a real product gap), then the foundational architectural work in Epic 30 + Epic 31. Treats Wave B as "every genuinely-pending epic-30+ story" instead of a focused chunk.
 
-## Sequencing constraints
+## Sequencing
+
+Within any option:
 
 ```
-must-ship #1: 19-6           (independent — start immediately)
-must-ship #2: 29-1           (independent — start in parallel with 19-6)
-must-ship #3: 18-5 → 18-7 → 18-8     (sequential chain; start 18-5 in parallel with 19-6 + 29-1)
-
-post-must-ships:
-  9-5 (independent)           → enables 9-9 → 9-12 (Team A)
-  29-2 (after 29-1)           → enables 29-3 + 29-4 + ...
-  17-3 (in-progress)          → ship when ready
+27-2 → 27-3        (sequential: 27-3 needs 27-2's resolution model)
+30-1 → 30-2/3/8    (30-1 unblocks the other Epic 30 work)
+31-1 → 31-2 → 31-4/5/6      (31-1 then 31-2; drivers parallelize after)
+                     ↘ 31-7/8/9/10 (parallelize once 31-2 lands)
 ```
 
-Three parallel tracks at start (19-6, 29-1, 18-5). When 18-5 lands, branch: 18-7 picks up the sequential chain while 19-6 / 29-1 continue independently.
+α is fully sequential; β and γ have parallel branches after the foundation. δ runs all three concurrently — α + the β/γ foundation stories first, then β/γ branches in parallel.
 
 ## Acceptance — when is Wave B "done"?
 
 Wave B closes when ALL of:
 
-1. **Story 19-6 merged to feat/wave-b** — RLS plane is live, fail-closed regression test green
-2. **Story 29-1 merged to feat/wave-b** — `ISecretStore` + driver port shipped, mocks + tests landed
-3. **Story 18-8 merged to feat/wave-b** (with 18-5 + 18-7 as predecessors) — tenant-admin UI surface live; tenant_owner/admin can manage members end-to-end
-4. **Wave B → main PR opened** — single integration PR per the wave-A pattern, CI all green, ready for merge
+1. The chosen option's named stories merged to `feat/wave-b`
+2. CI all green (matches Wave A's 23/23 baseline)
+3. `feat/wave-b → main` PR opened — single integration PR per the wave-A pattern, ready for merge
 
-Stretch goal: ship 9-5 (Provider chain API) in Wave B if any of the must-ships finish ahead of estimate. It's independent and 14h, so a single agent can pick it up between blockers.
-
-## Risk register
-
-| Risk | Mitigation |
-|---|---|
-| 19-6's repository swap surfaces RLS policy gaps not caught in Phase-2 migration | Fail-closed regression test catches a NULL-tenant leak; runbook for rolling back to superuser connection if a critical regression appears |
-| 29-1's interface design needs revision after 29-2 surfaces a real backend constraint | Keep 29-1 narrow to the verified-needed surface; resist over-design. 40h of rework cost is the explicit warning. |
-| 18-8 depends on a 3-story chain (18-5 → 18-7 → 18-8) — chain delay propagates | Parallel-start 18-5 with 19-6/29-1 so the chain isn't waiting at start. If 18-5 slips, 18-7 + 18-8 can pre-author against stub backends. |
-| Wave B doesn't have an obvious 4th must-ship — danger of premature scope expansion | Hold to the named 3 + stretch 9-5. Defer everything else to Wave C explicitly. |
+Stretch: spot-check audit findings from CLAUDE.md's new "Operating Modes" rule. Any remaining SaaS-mode regressions surface in PR review.
 
 ## Working notes
 
-- **Branch**: `feat/wave-b` (created 2026-04-28, pushed to origin)
-- **Base**: `main` at commit `5321316` (Wave A integration merge)
-- **CI**: ci.yml + codeql.yml already include `feat/wave-a` in their pull_request triggers. Add `feat/wave-b` in the same shape (one-line update).
+- **Branch**: `feat/wave-b` (created 2026-04-28; revised plan 2026-04-29)
+- **Base**: `main` at commit `5321316`
+- **CI**: ci.yml + codeql.yml triggers don't include `feat/wave-b` directly; PR-into-main triggers them via the `pull_request: branches: [main]` rule. No CI trigger update needed (per user 2026-04-29).
+- **PR ceremony**: per-story branches merge into `feat/wave-b` directly; only ONE PR exists at end (`feat/wave-b → main`). Wave-A's "no extra PRs" pattern preserved.
+- **Backups (Story 1.5-7)**: still deferred per user 2026-04-29.
+- **`production-destructive` GitHub environment**: created by user; reviewer-approval gate is configured for the volume-reset workflow.

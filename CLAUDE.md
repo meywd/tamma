@@ -508,9 +508,20 @@ Tamma is designed to autonomously develop features for itself. This means:
 - **Discussions**: https://github.com/meywd/tamma/discussions
 - **Wiki**: https://github.com/meywd/tamma/wiki
 
-## Prompt Store Architecture
+## Operating Modes
 
-The prompt system has 3 layers with clear resolution order:
+Tamma deploys in one of two modes, chosen at process startup. Mode determines who is the **principal** (the entity that owns settings, prompts, providers, secrets) and what RBAC applies.
+
+| Mode | Process entry | Principal | RBAC | Typical tenancy |
+|---|---|---|---|---|
+| **single-user** | `tamma start` (self-hosted engine), `tamma server` (self-hosted HTTP) | The user | None — sole user owns everything | One user per Tamma instance |
+| **saas** | `tamma api` (SaaS / GitHub App) | The tenant (org) | `tenant_owner` / `tenant_admin` / `member` | Many tenants per Tamma instance |
+
+**Mode detection**: a deployment is either single-user OR SaaS — not both. The mode is settled by the entry-point binary plus env config (presence of `Tamma:TenantSharedSecret`, `ConnectionStrings:ControlPlane`, etc. signals SaaS). All request handlers can assume a stable mode for the lifetime of the process.
+
+**Universal rule for any tenant-aware feature**: design two scoping models, not one. Every feature that customizes Tamma's behavior (prompts, providers, sanitization rules, agent configs, budgets, ...) must answer "in single-user mode, who owns this?" AND "in SaaS mode, who owns this?" separately. The wrong default is to ship the single-user model and assume it works for SaaS.
+
+## Prompt Store Architecture
 
 ### Data Model
 
@@ -520,13 +531,13 @@ System Defaults (immutable, shipped with Tamma):
   ├── ACTION_DEFAULTS[action]        — 10 action base templates (safety net)
   └── ROLE_ACTION_DEFAULTS[role][action] — 80 role+action templates (good defaults)
 
-User Overrides (per userId, stored in Postgres):
-  ├── user role system prompt overrides
-  ├── user action default overrides
-  └── user role+action overrides
+Overrides (stored in Postgres `prompt_overrides`):
+  ├── single-user mode: keyed by user_id (the sole user owns their overrides)
+  └── SaaS mode:        keyed by tenant_id (tenant_admin owns the team's overrides;
+                                            member users don't have edit permission)
 ```
 
-### Resolution Order
+### Resolution Order — single-user mode
 
 For a given `(userId, role, action)`:
 1. User's role+action override → if exists, use it
@@ -538,14 +549,37 @@ For system prompt `(userId, role)`:
 1. User's role system prompt override → if exists, use it
 2. System default role system prompt
 
-### Storage
+### Resolution Order — SaaS mode
 
-Store in **Postgres** (not JSON file). Table: `prompt_overrides`
+For a given `(tenantId, role, action)`:
+1. Tenant's role+action override → if exists, use it
+2. System default role+action → if exists, use it
+3. Tenant's action default override → if exists, use it
+4. System default action template → safety net
+
+For system prompt `(tenantId, role)`:
+1. Tenant's role system prompt override → if exists, use it
+2. System default role system prompt
+
+**No per-user override layer in SaaS.** Member users see the tenant_admin's resolved prompt without edit access. Per-user personalization on top of tenant prompts is intentionally NOT a feature — keeps audit/compliance simple and avoids "one user's customization broke an agent run" support cases.
+
+### RBAC
+
+| Action | single-user | SaaS |
+|---|---|---|
+| GET resolved prompt | any user | any tenant member |
+| PUT/DELETE override | any user | `tenant_owner` or `tenant_admin` only |
+| GET system defaults | any user | any tenant member |
+
+In SaaS, the upsert/delete endpoints reject member-role users with 403.
+
+### Storage
 
 ```sql
 CREATE TABLE prompt_overrides (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id TEXT NOT NULL,
+  user_id UUID,                 -- set in single-user mode; NULL in SaaS mode
+  tenant_id UUID,               -- set in SaaS mode; NULL in single-user mode
   scope TEXT NOT NULL,          -- 'role-system' | 'action-default' | 'role-action'
   role TEXT,                    -- NULL for action-default scope
   action TEXT,                  -- NULL for role-system scope
@@ -556,24 +590,31 @@ CREATE TABLE prompt_overrides (
   max_tokens INTEGER DEFAULT 4096,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id, scope, role, action)
+  -- Exactly one of user_id / tenant_id is non-null (CHECK constraint)
+  CONSTRAINT principal_xor CHECK (
+    (user_id IS NOT NULL AND tenant_id IS NULL)
+    OR (user_id IS NULL AND tenant_id IS NOT NULL)
+  ),
+  UNIQUE NULLS NOT DISTINCT (user_id, tenant_id, scope, role, action)
 );
 ```
 
-System defaults remain in code (`default-prompts.ts`). User overrides in Postgres. PromptStore queries both and applies resolution order.
+System defaults remain in code (e.g. `SystemPrompts.cs`). Overrides in Postgres. The Prompt Store reads the appropriate column based on mode and applies the per-mode resolution order above.
 
 ### API
 
-```
-GET    /api/prompts                           — list all (resolved for current user)
-GET    /api/prompts/:role/:action             — get resolved prompt
-PUT    /api/prompts/:role/:action             — create/update user override
-DELETE /api/prompts/:role/:action             — delete user override (falls back to system default)
-POST   /api/prompts/:role/:action/reset       — alias for DELETE
-GET    /api/prompts/defaults                  — list system defaults (read-only)
-GET    /api/prompts/defaults/:action          — get action default template
-GET    /api/prompts/defaults/:role/:action    — get system default role+action template
-```
+| Endpoint | single-user | SaaS |
+|---|---|---|
+| `GET /api/prompts` | list all (resolved for current user) | list all (resolved for current tenant) |
+| `GET /api/prompts/:role/:action` | get resolved | get resolved |
+| `PUT /api/prompts/:role/:action` | create/update user override | create/update tenant override (owner/admin only) |
+| `DELETE /api/prompts/:role/:action` | delete user override → fall back to system | delete tenant override → fall back to system (owner/admin only) |
+| `POST /api/prompts/:role/:action/reset` | alias for DELETE | alias for DELETE |
+| `GET /api/prompts/defaults` | list system defaults | list system defaults |
+| `GET /api/prompts/defaults/:action` | get action default | get action default |
+| `GET /api/prompts/defaults/:role/:action` | get role+action default | get role+action default |
+
+The endpoint shape is identical between modes — the auth middleware decides which override key (`user_id` or `tenant_id`) to use based on mode + caller identity. Member users in SaaS mode hit a 403 on PUT/DELETE.
 
 ### Convention Templates
 
