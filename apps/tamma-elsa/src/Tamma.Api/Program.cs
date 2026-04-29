@@ -21,6 +21,7 @@ using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 using Tamma.Platforms.Gitea;
+using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -583,6 +584,12 @@ builder.Services.AddHostedService<Tamma.Api.Services.Engine.Lifecycle.EngineRegi
 // process only; multi-pod fanout pending a Postgres LISTEN/NOTIFY bridge
 // against platform_events. Repository registration lives in AddTammaData.
 builder.Services.AddPlatformEventBus();
+
+// Story 31-6: GitLab driver — registers the keyed
+// IGitPlatformDriverFactory the 31-2 PlatformResolver picks up. Same
+// driver serves SaaS gitlab.com and self-hosted; BaseUrl comes from
+// the per-tenant PlatformInstallation row.
+builder.Services.AddGitLabPlatform();
 
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 

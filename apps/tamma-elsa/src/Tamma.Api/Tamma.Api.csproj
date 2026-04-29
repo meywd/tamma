@@ -71,6 +71,11 @@
          in Program.cs. Keyed-DI factory under PlatformKind.Gitea is the only
          seam PlatformResolver consumes. -->
     <ProjectReference Include="..\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+    <!-- Story 31-6: GitLab driver. Registered via AddGitLabPlatform() in
+         Program.cs and consumed by 31-2's PlatformResolver via keyed DI
+         under PlatformKind.GitLab. -->
+    <ProjectReference Include="..\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
+
   </ItemGroup>
 
 </Project>
