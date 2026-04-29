@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
 using Tamma.Api.Services.Provisioning.V2;
@@ -98,6 +99,25 @@ public static class ProvisioningServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<ITenantInfrastructureProvider, NullTenantProvider>());
         services.TryAddSingleton<TenantProviderRegistry>();
+
+        // ── Story 30-2: v2 dispatch workflow + platform-queue handler ──────
+        //
+        // The dispatcher is the entry-point operators / admin endpoints
+        // call. It enqueues onto the platform queue (preserving the v1
+        // constraint that provisioning tasks ride the platform queue,
+        // not the per-tenant queue, because the tenant DB doesn't exist
+        // at provision time). The handler is the IPlatformTaskHandler
+        // PlatformTaskWorker dispatches into when it reserves the row.
+        // Both need ControlPlaneDbContext + the registry, so Scoped.
+        // The workflow itself is also Scoped because it persists
+        // tenant-row state via the same DbContext.
+        services.TryAddScoped<ProvisionTenantV2Workflow>();
+        services.TryAddScoped<ProvisionTenantV2Dispatcher>();
+        // Register the handler under both IPlatformTaskHandler (so
+        // PlatformTaskHandlerRegistry sees it) and as a concrete type
+        // (so direct resolution works in tests). Mirrors the v1
+        // TenantProvisioningTaskHandler dual-registration pattern.
+        services.AddScoped<IPlatformTaskHandler, ProvisionTenantV2TaskHandler>();
 
         return services;
     }
