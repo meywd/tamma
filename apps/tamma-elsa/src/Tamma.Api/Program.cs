@@ -20,6 +20,7 @@ using Tamma.Api.Services.PlatformTasks;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Gitea;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -470,6 +471,14 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     Tamma.Platforms.IPlatformInstallationEventEmitter,
     Tamma.Platforms.PlatformInstallationEventEmitter>();
+
+// Story 31-4: register the Gitea driver factory under keyed DI for
+// PlatformKind.Gitea. PlatformResolver picks the factory up via
+// GetKeyedService<IGitPlatformDriverFactory>(PlatformKind.Gitea) when
+// a tenant's installation row carries platform_kind = 'gitea'. The
+// extension is idempotent and registers the named tamma-gitea HTTP
+// client + OAuth2 token cache + webhook signature verifier.
+builder.Services.AddGiteaPlatformDriver();
 
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
