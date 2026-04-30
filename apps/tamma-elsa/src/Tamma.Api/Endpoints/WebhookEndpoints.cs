@@ -346,13 +346,18 @@ public static class WebhookEndpoints
     {
         // Each platform names its event header differently. Map to a
         // normalised lower-snake event type + optional action.
+        // Both values are sanitised before return — they originate in
+        // platform-controlled headers/JSON and flow into structured logs,
+        // the idempotency table, and control-plane event tags. The
+        // sanitiser strips control characters (CWE-117 log forging) and
+        // restricts to a known-safe webhook-identifier alphabet.
         switch (kind)
         {
             case PlatformKind.GitHub:
             {
                 var et = context.Request.Headers["X-GitHub-Event"].FirstOrDefault() ?? "";
                 var action = TryGetStringField(parsed, "action");
-                return (et, action);
+                return (SanitizeWebhookIdentifier(et) ?? "", SanitizeWebhookIdentifier(action));
             }
             case PlatformKind.Gitea:
             case PlatformKind.Forgejo:
@@ -361,7 +366,7 @@ public static class WebhookEndpoints
                     ?? context.Request.Headers["X-Forgejo-Event"].FirstOrDefault()
                     ?? "";
                 var action = TryGetStringField(parsed, "action");
-                return (et, action);
+                return (SanitizeWebhookIdentifier(et) ?? "", SanitizeWebhookIdentifier(action));
             }
             case PlatformKind.GitLab:
             {
@@ -370,11 +375,42 @@ public static class WebhookEndpoints
                 var normalised = NormaliseGitLabEvent(et);
                 var action = TryGetStringField(parsed, "object_attributes.action")
                     ?? TryGetStringField(parsed, "action");
-                return (normalised, action);
+                return (SanitizeWebhookIdentifier(normalised) ?? "", SanitizeWebhookIdentifier(action));
             }
             default:
                 return ("", null);
         }
+    }
+
+    /// <summary>
+    /// Restricts a webhook-supplied identifier to the alphabet shared by
+    /// all supported platforms (<c>[A-Za-z0-9._-]</c>) and caps length.
+    /// CWE-117 mitigation: any control character (including <c>\r\n</c>)
+    /// is dropped, so downstream log writes can't be poisoned with forged
+    /// log lines. Null in → null out (preserves the "no action field"
+    /// semantic for <see cref="PlatformWebhookEvent.Action"/>); a non-null
+    /// value that's entirely outside the allowlist collapses to
+    /// <c>""</c>, which the dispatcher treats as no-handler (the right
+    /// outcome for a malformed/hostile payload).
+    /// </summary>
+    private static string? SanitizeWebhookIdentifier(string? raw, int maxLen = 64)
+    {
+        if (raw is null) return null;
+        if (raw.Length == 0) return string.Empty;
+        var src = raw.AsSpan(0, Math.Min(raw.Length, maxLen));
+        Span<char> buf = stackalloc char[src.Length];
+        var n = 0;
+        foreach (var c in src)
+        {
+            if ((c >= 'a' && c <= 'z') ||
+                (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') ||
+                c == '_' || c == '.' || c == '-')
+            {
+                buf[n++] = c;
+            }
+        }
+        return n == src.Length ? raw[..n] : new string(buf[..n]);
     }
 
     private static string NormaliseGitLabEvent(string raw)
