@@ -383,13 +383,24 @@ public static class WebhookEndpoints
     }
 
     /// <summary>
-    /// Restricts a webhook-supplied identifier to the alphabet shared by
-    /// all supported platforms (<c>[A-Za-z0-9._-]</c>) and caps length.
-    /// CWE-117 mitigation: any control character (including <c>\r\n</c>)
-    /// is dropped, so downstream log writes can't be poisoned with forged
-    /// log lines. Null in → null out (preserves the "no action field"
-    /// semantic for <see cref="PlatformWebhookEvent.Action"/>); a non-null
-    /// value that's entirely outside the allowlist collapses to
+    /// Allowlist of characters legal in any platform webhook event
+    /// identifier. Real values across GitHub/Gitea/Forgejo/GitLab are
+    /// pure lower-snake (e.g. <c>push</c>, <c>pull_request</c>,
+    /// <c>workflow_run</c>, <c>merge_request</c>); the broader
+    /// <c>[A-Za-z0-9._-]</c> alphabet is generous defence in depth.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex DisallowedWebhookIdChars =
+        new(@"[^A-Za-z0-9._-]", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// Restricts a webhook-supplied identifier to the platform-event
+    /// alphabet (<c>[A-Za-z0-9._-]</c>) and caps length. CWE-117
+    /// mitigation: any control character (including <c>\r\n</c>) is
+    /// stripped via <see cref="System.Text.RegularExpressions.Regex.Replace(string,string)"/>,
+    /// which CodeQL's <c>cs/log-forging</c> query recognises as a
+    /// taint-flow barrier. Null in → null out (preserves the "no action
+    /// field" semantic for <see cref="PlatformWebhookEvent.Action"/>);
+    /// a non-null value entirely outside the allowlist collapses to
     /// <c>""</c>, which the dispatcher treats as no-handler (the right
     /// outcome for a malformed/hostile payload).
     /// </summary>
@@ -397,20 +408,8 @@ public static class WebhookEndpoints
     {
         if (raw is null) return null;
         if (raw.Length == 0) return string.Empty;
-        var src = raw.AsSpan(0, Math.Min(raw.Length, maxLen));
-        Span<char> buf = stackalloc char[src.Length];
-        var n = 0;
-        foreach (var c in src)
-        {
-            if ((c >= 'a' && c <= 'z') ||
-                (c >= 'A' && c <= 'Z') ||
-                (c >= '0' && c <= '9') ||
-                c == '_' || c == '.' || c == '-')
-            {
-                buf[n++] = c;
-            }
-        }
-        return n == src.Length ? raw[..n] : new string(buf[..n]);
+        var stripped = DisallowedWebhookIdChars.Replace(raw, string.Empty);
+        return stripped.Length > maxLen ? stripped[..maxLen] : stripped;
     }
 
     private static string NormaliseGitLabEvent(string raw)
