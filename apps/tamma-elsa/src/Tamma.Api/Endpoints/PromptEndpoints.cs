@@ -210,8 +210,8 @@ public static class PromptEndpoints
 
         // Story 27-2 — SaaS mode upserts a tenant-scoped row; single-user
         // mode upserts the caller's user-scoped row. The endpoint is RBAC-
-        // gated by the SettingsManage policy (settings:manage permission =
-        // owner-only — Auth/Permissions.cs), so member users in SaaS mode
+        // gated by the PromptManage policy (prompts:manage permission =
+        // admin+owner — Auth/Permissions.cs), so member users in SaaS mode
         // hit a 403 BEFORE reaching this method.
         PromptOverride saved;
         bool wasCreated;

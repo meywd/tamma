@@ -181,12 +181,17 @@ internal sealed class GitLabActionsClient : IGitPlatformActionsClient
             var response = await _http.SendStreamingAsync(req, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                // Snapshot status + retry-after BEFORE Dispose — accessing
+                // disposed HttpResponseMessage members is contract-undefined
+                // (CA2000). Body must also be read before dispose.
                 var body = response.Content is not null
                     ? await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false)
                     : null;
+                var status = response.StatusCode;
+                var retryAfter = ParseRetryAfter(response);
                 response.Dispose();
                 return PlatformResult<Stream>.FromError(
-                    GitLabErrorMapper.Map(response.StatusCode, body, ParseRetryAfter(response)));
+                    GitLabErrorMapper.Map(status, body, retryAfter));
             }
 
             // Pre-flight: if Content-Length is set and exceeds the
@@ -252,12 +257,12 @@ internal sealed class GitLabActionsClient : IGitPlatformActionsClient
         var conclusion = terminalStatuses.Contains(status) ? status : null;
 
         // Pipeline source goes into RawMetadata so callers can attribute
-        // pipelines triggered by web/api/schedule/etc.
-        JsonDocument? metadata = null;
-        if (!string.IsNullOrEmpty(pipeline.Source))
-        {
-            metadata = JsonDocument.Parse(JsonSerializer.Serialize(new { source = pipeline.Source }));
-        }
+        // pipelines triggered by web/api/schedule/etc. Raw JSON text —
+        // callers parse on demand (record can't own a JsonDocument
+        // without leaking pooled buffers).
+        string? metadata = !string.IsNullOrEmpty(pipeline.Source)
+            ? JsonSerializer.Serialize(new { source = pipeline.Source })
+            : null;
 
         return new WorkflowRun(
             RunId: pipeline.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -279,18 +284,17 @@ internal sealed class GitLabActionsClient : IGitPlatformActionsClient
         var conclusion = terminalStatuses.Contains(status) ? status : null;
 
         // Encode artifact bearer with the "job:" prefix so callers can
-        // pass directly to DownloadArtifactAsync.
-        JsonDocument? metadata = null;
-        if (job.ArtifactsFile is not null)
-        {
-            metadata = JsonDocument.Parse(JsonSerializer.Serialize(new
+        // pass directly to DownloadArtifactAsync. Raw JSON text — see
+        // WorkflowRun comment about no-JsonDocument-in-records.
+        string? metadata = job.ArtifactsFile is not null
+            ? JsonSerializer.Serialize(new
             {
                 stage = job.Stage,
                 artifact_filename = job.ArtifactsFile.Filename,
                 artifact_size = job.ArtifactsFile.Size,
                 artifact_id = $"job:{job.Id}",
-            }));
-        }
+            })
+            : null;
 
         return new WorkflowJob(
             JobId: job.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),

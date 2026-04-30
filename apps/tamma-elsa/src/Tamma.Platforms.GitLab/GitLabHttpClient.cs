@@ -174,23 +174,35 @@ internal sealed class GitLabHttpClient : IDisposable
         while (!string.IsNullOrEmpty(nextUrl))
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, nextUrl);
-            var resp = await SendAsync(req, ct).ConfigureAwait(false);
+            // Snapshot everything we need from the response BEFORE any
+            // yield, then dispose. Holding GitLabHttpResponse across a
+            // yield would (a) leak it if the caller stops enumerating
+            // early, and (b) keep the underlying HttpResponseMessage
+            // alive longer than necessary.
+            string? body;
+            System.Net.HttpStatusCode status;
+            TimeSpan? retryAfter;
+            string? linkHeader;
+            using (var resp = await SendAsync(req, ct).ConfigureAwait(false))
+            {
+                status = resp.Response.StatusCode;
+                body = resp.Body;
+                retryAfter = resp.RetryAfter;
+                linkHeader = ExtractNextLink(resp.Response.Headers);
+            }
 
             // Caller responsible for error handling on first page; we
             // surface a 4xx by simply stopping iteration with no items
             // rather than throwing — but a 401/404 on the first page
             // means the caller can't paginate anyway. Bubble up as
             // exception so the integration code translates.
-            if (!resp.Response.IsSuccessStatusCode)
+            if (!IsSuccessStatusCode(status))
             {
-                throw new GitLabRequestException(
-                    resp.Response.StatusCode,
-                    resp.Body,
-                    resp.RetryAfter);
+                throw new GitLabRequestException(status, body, retryAfter);
             }
 
-            var page = !string.IsNullOrEmpty(resp.Body)
-                ? JsonSerializer.Deserialize<List<T>>(resp.Body, JsonDefaults) ?? new List<T>()
+            var page = !string.IsNullOrEmpty(body)
+                ? JsonSerializer.Deserialize<List<T>>(body, JsonDefaults) ?? new List<T>()
                 : new List<T>();
 
             foreach (var item in page)
@@ -203,9 +215,12 @@ internal sealed class GitLabHttpClient : IDisposable
                 }
             }
 
-            nextUrl = ExtractNextLink(resp.Response.Headers);
+            nextUrl = linkHeader;
         }
     }
+
+    private static bool IsSuccessStatusCode(System.Net.HttpStatusCode code)
+        => (int)code is >= 200 and < 300;
 
     /// <summary>
     /// Build a full URI for a relative API path. Accepts paths with or

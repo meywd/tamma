@@ -18,6 +18,11 @@ namespace Tamma.Api.Services.Platforms;
 ///         <see cref="SecretsDbContext"/>.</item>
 ///   <item>Read the active version's plaintext via
 ///         <see cref="ISecretStoreBackend.GetVersionPlaintextAsync"/>.</item>
+///   <item>Emit a <see cref="SecretAuditEventTypes.Read"/> audit event
+///         on every successful and failed read (Story 29-1 AC5 — every
+///         secret read MUST be auditable; webhook traffic is the
+///         highest-volume reader). System-triggered reads use
+///         <c>Guid.Empty</c> as the actor sentinel.</item>
 /// </list>
 ///
 /// <para>This adapter ships in <c>Tamma.Api</c> (not
@@ -25,24 +30,30 @@ namespace Tamma.Api.Services.Platforms;
 /// <c>ISecretStoreBackend</c> live in <c>Tamma.Api</c>; the resolver
 /// consumes the slim
 /// <see cref="IPlatformCredentialReader"/> port so the platform layer
-/// has no compile-time dependency on the API project. The "no
-/// bypass" rule is enforced because every secret read in this class
-/// goes through Story 29's interfaces.</para>
+/// has no compile-time dependency on the API project.</para>
 /// </summary>
 public sealed class SecretStorePlatformCredentialReader
     : IPlatformCredentialReader
 {
     private readonly IDbContextFactory<SecretsDbContext> _secretsFactory;
     private readonly ISecretStoreBackend _backend;
+    private readonly ISecretAccessAuditor _auditor;
+    private readonly TimeProvider _timeProvider;
 
     public SecretStorePlatformCredentialReader(
         IDbContextFactory<SecretsDbContext> secretsFactory,
-        ISecretStoreBackend backend)
+        ISecretStoreBackend backend,
+        ISecretAccessAuditor auditor,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(secretsFactory);
         ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(auditor);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         _secretsFactory = secretsFactory;
         _backend = backend;
+        _auditor = auditor;
+        _timeProvider = timeProvider;
     }
 
     /// <inheritdoc />
@@ -77,6 +88,9 @@ public sealed class SecretStorePlatformCredentialReader
                 nameof(scope));
         }
 
+        var secretScope = scope == "platform" ? SecretScope.Platform : SecretScope.Tenant;
+        var auditRef = new SecretRef(secretScope, tenantId, name);
+
         await using var ctx = await _secretsFactory
             .CreateDbContextAsync(ct)
             .ConfigureAwait(false);
@@ -92,22 +106,63 @@ public sealed class SecretStorePlatformCredentialReader
 
         if (row is null)
         {
+            await EmitReadAsync(auditRef, versionNumber: null,
+                SecretAuditOutcome.Failure, detail: "row_not_found", ct)
+                .ConfigureAwait(false);
             return null;
         }
         if (row.ActiveVersionNumber <= 0)
         {
+            await EmitReadAsync(auditRef, versionNumber: null,
+                SecretAuditOutcome.Failure, detail: "no_active_version", ct)
+                .ConfigureAwait(false);
             return null;
         }
 
         try
         {
-            return await _backend
+            var plaintext = await _backend
                 .GetVersionPlaintextAsync(row.Id, row.ActiveVersionNumber, ct)
                 .ConfigureAwait(false);
+            if (plaintext is null)
+            {
+                await EmitReadAsync(auditRef, row.ActiveVersionNumber,
+                    SecretAuditOutcome.Failure, detail: "version_plaintext_missing", ct)
+                    .ConfigureAwait(false);
+                return null;
+            }
+            await EmitReadAsync(auditRef, row.ActiveVersionNumber,
+                SecretAuditOutcome.Success, detail: null, ct)
+                .ConfigureAwait(false);
+            return plaintext;
         }
         catch (KeyNotFoundException)
         {
+            await EmitReadAsync(auditRef, row.ActiveVersionNumber,
+                SecretAuditOutcome.Failure, detail: "version_scrubbed", ct)
+                .ConfigureAwait(false);
             return null;
         }
+    }
+
+    private Task EmitReadAsync(
+        SecretRef reference,
+        int? versionNumber,
+        SecretAuditOutcome outcome,
+        string? detail,
+        CancellationToken ct)
+    {
+        // System-triggered read (webhook/dispatcher). No HTTP user.
+        // Guid.Empty is the sentinel used elsewhere for non-user actors.
+        return _auditor.EmitAsync(
+            new SecretAuditEvent(
+                EventType: SecretAuditEventTypes.Read,
+                Reference: reference,
+                ActorUserId: Guid.Empty,
+                VersionNumber: versionNumber,
+                Outcome: outcome,
+                Detail: detail,
+                OccurredAt: _timeProvider.GetUtcNow()),
+            ct);
     }
 }

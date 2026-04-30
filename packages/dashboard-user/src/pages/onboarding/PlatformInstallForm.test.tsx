@@ -68,6 +68,96 @@ describe('PlatformInstallForm', () => {
       expect(screen.getByLabelText(/personal access token/i)).toBeInTheDocument();
     });
     expect(screen.getByLabelText(/base url/i)).toBeInTheDocument();
+    // Plaintext rule (form's own contract): PAT input MUST be type=password
+    // so the browser masks the value and disables most autocomplete/extension
+    // capture. A regression to type=text would silently expose tokens.
+    expect(screen.getByLabelText(/personal access token/i)).toHaveAttribute(
+      'type',
+      'password',
+    );
+  });
+
+  it('clears credential state after a successful submit', async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        platformsResponse({
+          kind: 'Gitea',
+          authMode: 'personal_access_token',
+          available: true,
+        }),
+      ),
+    );
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        installationId: '00000000-0000-0000-0000-000000000001',
+        kind: 'Gitea',
+        baseUrl: 'https://gitea.example.com',
+        externalId: null,
+        status: 'connected',
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    renderForKind('Gitea');
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/personal access token/i)).toBeInTheDocument();
+    });
+
+    await user.clear(screen.getByLabelText(/base url/i));
+    await user.type(screen.getByLabelText(/base url/i), 'https://gitea.example.com');
+    await user.type(screen.getByLabelText(/personal access token/i), 'tok-secret');
+    await user.click(screen.getByRole('button', { name: /connect gitea/i }));
+
+    // After settle, the credential MUST be empty so plaintext doesn't
+    // linger in React state past the round-trip.
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/personal access token/i) as HTMLInputElement)
+          .value,
+      ).toBe('');
+    });
+  });
+
+  it('clears credential state after a failed submit', async () => {
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        platformsResponse({
+          kind: 'Gitea',
+          authMode: 'personal_access_token',
+          available: true,
+        }),
+      ),
+    );
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ error: 'auth_probe_failed', hint: 'bad token' }, 400),
+    );
+    globalThis.fetch = fetchMock;
+
+    renderForKind('Gitea');
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/personal access token/i)).toBeInTheDocument();
+    });
+
+    await user.clear(screen.getByLabelText(/base url/i));
+    await user.type(screen.getByLabelText(/base url/i), 'https://gitea.example.com');
+    await user.type(screen.getByLabelText(/personal access token/i), 'tok-bad');
+    await user.click(screen.getByRole('button', { name: /connect gitea/i }));
+
+    // Even on failure, the credential is cleared so the operator
+    // re-types it (forces them off the stale value, and keeps the
+    // bytes off the React heap longer than they need to be).
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/personal access token/i) as HTMLInputElement)
+          .value,
+      ).toBe('');
+    });
   });
 
   it('renders deep-link for GitHub App, not the form', async () => {

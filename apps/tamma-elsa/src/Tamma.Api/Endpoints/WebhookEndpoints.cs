@@ -85,10 +85,15 @@ public static class WebhookEndpoints
         // ── 1. Platform path → PlatformKind ─────────────────────────────────
         if (!TryParsePlatform(platform, out var kind))
         {
+            // Platform value reflected to the caller in the JSON 400 must
+            // be sanitised — upstream proxies / WAF logs may persist
+            // response bodies, and the raw URL segment is attacker-
+            // controlled. Same allowlist the dispatcher uses.
+            var safePlatform = SanitizeWebhookIdentifier(platform) ?? "";
             logger.LogWarning(
                 "Webhook rejected: unknown platform path '{Platform}'",
                 LogSanitizer.Clean(platform));
-            return Results.BadRequest(new { error = "unknown_platform", platform = platform });
+            return Results.BadRequest(new { error = "unknown_platform", platform = safePlatform });
         }
 
         // ── 2. Resolve verifier (keyed-DI) ──────────────────────────────────

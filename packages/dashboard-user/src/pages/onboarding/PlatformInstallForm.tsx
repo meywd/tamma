@@ -80,6 +80,18 @@ export function PlatformInstallForm(): JSX.Element {
     };
   }, [kind]);
 
+  // Redirect to /settings/platforms 1.2 s after a successful submit so
+  // the operator reads the success line first. Stored in useEffect so
+  // the cleanup cancels the timer when the user navigates away
+  // manually before the redirect fires.
+  useEffect(() => {
+    if (success === null) return;
+    const timer = setTimeout(() => {
+      navigate('/settings/platforms');
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [success, navigate]);
+
   if (loading) {
     return (
       <div role="status" className="text-sm text-gray-500">
@@ -139,11 +151,10 @@ export function PlatformInstallForm(): JSX.Element {
       setSuccess(
         `Connected ${descriptor.displayName} (installation ${resp.installationId.slice(0, 8)}…).`,
       );
-      // Send the operator to the connected-platforms list after a
-      // brief moment so they see the success line.
-      setTimeout(() => {
-        navigate('/settings/platforms');
-      }, 1200);
+      // Redirect is scheduled by the useEffect below — keeping the
+      // timer there means an unmount (e.g. user navigated away
+      // manually before the 1.2 s elapses) cleanly cancels it instead
+      // of firing a stale navigate() on a torn-down tree.
     } catch (err) {
       setCredential(''); // force re-entry — keeps the bytes off the heap
       if (err instanceof ApiError) {

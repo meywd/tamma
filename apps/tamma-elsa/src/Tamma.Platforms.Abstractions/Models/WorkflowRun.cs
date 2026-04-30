@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Tamma.Platforms.Abstractions.Models;
 
 /// <summary>
@@ -20,9 +18,11 @@ namespace Tamma.Platforms.Abstractions.Models;
 /// <param name="CompletedAt">When the run completed (null while running).</param>
 /// <param name="RawMetadata">
 /// Optional driver-specific fields (GitLab pipeline source, Azure
-/// DevOps reason, etc.) — kept as JSON so abstraction-level callers
-/// can ignore it but drivers can round-trip platform metadata
-/// without losing fidelity.
+/// DevOps reason, etc.) — kept as raw JSON text so the record stays
+/// immutable + non-disposable. Callers that need structured access
+/// can <c>JsonDocument.Parse</c> on demand and dispose locally;
+/// drivers should NOT hand back a live <c>JsonDocument</c> from a
+/// record because pooled buffers leak.
 /// </param>
 public sealed record WorkflowRun(
     string RunId,
@@ -31,4 +31,4 @@ public sealed record WorkflowRun(
     string HtmlUrl,
     DateTimeOffset StartedAt,
     DateTimeOffset? CompletedAt,
-    JsonDocument? RawMetadata);
+    string? RawMetadata);
