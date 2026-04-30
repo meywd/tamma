@@ -50,6 +50,7 @@ public class TddWorkflow : WorkflowBase
 
         // Activity output variables (bound via Output<T>)
         var testGenResult = builder.WithVariable<TestGenerationResult>();
+        var testSyntaxResult = builder.WithVariable<TestSyntaxValidationResult>();
         var implResult = builder.WithVariable<ImplementationResult>();
         var analysisResult = builder.WithVariable<RefactoringAnalysis>();
         var refactorResult = builder.WithVariable<RefactoringResult>();
@@ -114,6 +115,32 @@ public class TddWorkflow : WorkflowBase
             Result = new Output<TestGenerationResult>(testGenResult)
         };
         writeTests.SetDisplayText("Write Tests");
+
+        // Validate test syntax BEFORE dispatching the testing-pipeline. This
+        // closes the validateTestSyntax() AC from story 2-5: catch obviously
+        // broken test files (compile/parse errors) before burning cycles
+        // running them. The validator is best-effort — if no compiler is on
+        // PATH the activity records the language as "skipped" and we proceed.
+        var validateTestSyntax = new ValidateTestSyntaxActivity
+        {
+            Id = "ValidateTestSyntax",
+            Name = "Validate Test Syntax",
+            SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
+            TestGeneration = new Input<TestGenerationResult>(ctx =>
+                testGenResult.Get(ctx) ?? new TestGenerationResult()),
+            Result = new Output<TestSyntaxValidationResult>(testSyntaxResult)
+        };
+        validateTestSyntax.SetDisplayText("Validate Test Syntax");
+
+        // True = invalid syntax → fall through to a finish step that fails the
+        // workflow. False = valid (or all-skipped) → continue to RED dispatch.
+        var testSyntaxValidCheck = new FlowDecision(ctx =>
+        {
+            var r = testSyntaxResult.Get(ctx);
+            return r != null && !r.IsValid;
+        })
+        { Id = "TestSyntaxValidCheck", Name = "Test Syntax Invalid?" };
+        testSyntaxValidCheck.SetDisplayText("Test Syntax Invalid?");
 
         // RED phase: dispatch testing-pipeline to run the newly written tests against
         // the (not-yet-implemented) target code. Per TDD, tests SHOULD fail here —
@@ -415,10 +442,34 @@ public class TddWorkflow : WorkflowBase
         };
         setFailedOutputs.SetDisplayText("Set Failed Outputs");
 
+        // Dedicated failure sink for the syntax-validation step. We surface
+        // both a finishReason ("test-syntax-invalid") and the parsed error
+        // payload so callers (and the audit trail) can tell exactly which
+        // file / line tripped the validator. Mirrors the SetFailedOutputs
+        // shape used elsewhere in this workflow.
+        var setSyntaxInvalidOutputs = new Sequence
+        {
+            Id = "SetSyntaxInvalidOutputs",
+            Name = "Set Syntax Invalid Outputs",
+            Activities =
+            {
+                WithLabel(new SetOutput { Id = "SetOutputSyntaxFailed", Name = "Set Failed (Syntax)", OutputName = new("success"), OutputValue = new(ctx => (object)false) }, "Set Failed (Syntax)"),
+                WithLabel(new SetOutput { Id = "SetOutputFinishReasonSyntax", Name = "Set Finish Reason", OutputName = new("finishReason"), OutputValue = new(ctx => (object)"test-syntax-invalid") }, "Set Finish Reason"),
+                WithLabel(new SetOutput { Id = "SetOutputSyntaxErrors", Name = "Set Syntax Errors", OutputName = new("syntaxErrors"), OutputValue = new(ctx =>
+                {
+                    var r = testSyntaxResult.Get(ctx);
+                    return (object)System.Text.Json.JsonSerializer.Serialize(r?.Errors ?? new List<TestSyntaxError>());
+                }) }, "Set Syntax Errors")
+            }
+        };
+        setSyntaxInvalidOutputs.SetDisplayText("Set Syntax Invalid Outputs");
+
         var finish = new Finish { Id = "FinishSuccess", Name = "Finish Success" };
         finish.SetDisplayText("Finish Success");
         var finishFailed = new Finish { Id = "FinishFailed", Name = "Finish Failed" };
         finishFailed.SetDisplayText("Finish Failed");
+        var finishSyntaxInvalid = new Finish { Id = "FinishSyntaxInvalid", Name = "Finish: Test Syntax Invalid" };
+        finishSyntaxInvalid.SetDisplayText("Finish: Test Syntax Invalid");
 
         // ============================
         // Flowchart
@@ -437,6 +488,7 @@ public class TddWorkflow : WorkflowBase
                 // RED phase
                 logRedPhaseStart,
                 writeTests,
+                validateTestSyntax, testSyntaxValidCheck,
                 dispatchTestsRed, setRedTestsAllPassed, setRedFailedCount, setRedPassedCount,
                 checkTestsFail,
                 incrementRewrite, maxRewritesCheck,
@@ -462,8 +514,8 @@ public class TddWorkflow : WorkflowBase
                 updateCodeIndex,
 
                 // Outputs
-                setCompletedOutputs, setFailedOutputs,
-                finish, finishFailed
+                setCompletedOutputs, setFailedOutputs, setSyntaxInvalidOutputs,
+                finish, finishFailed, finishSyntaxInvalid
             },
 
             Connections =
@@ -483,7 +535,14 @@ public class TddWorkflow : WorkflowBase
 
                 // --- RED PHASE ---
                 Connect(logRedPhaseStart, writeTests),
-                Connect(writeTests, dispatchTestsRed),
+                // WriteTests -> ValidateTestSyntax -> guard -> dispatch (or finish-with-reason)
+                Connect(writeTests, validateTestSyntax),
+                Connect(validateTestSyntax, testSyntaxValidCheck),
+                // True = invalid syntax → fail workflow with finishReason
+                ConnectOutcome(testSyntaxValidCheck, "True", setSyntaxInvalidOutputs),
+                Connect(setSyntaxInvalidOutputs, finishSyntaxInvalid),
+                // False = valid (or skipped) → continue to RED dispatch
+                ConnectOutcome(testSyntaxValidCheck, "False", dispatchTestsRed),
                 Connect(dispatchTestsRed, setRedTestsAllPassed),
                 Connect(setRedTestsAllPassed, setRedFailedCount),
                 Connect(setRedFailedCount, setRedPassedCount),
