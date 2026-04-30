@@ -12,11 +12,12 @@ import {
 } from '../factory.js';
 import { ChromaDBVectorStore } from '../providers/chromadb.js';
 import { PgVectorStore } from '../providers/pgvector.js';
-import { PineconeVectorStore } from '../providers/pinecone.js';
-import { QdrantVectorStore } from '../providers/qdrant.js';
-import { WeaviateVectorStore } from '../providers/weaviate.js';
+// Note: stub provider classes (Pinecone/Qdrant/Weaviate) are no longer
+// imported here — their constructors throw ProviderNotImplementedError, so the
+// factory tests below assert on the bubbled error rather than instance-of.
 import {
   ProviderNotSupportedError,
+  ProviderNotImplementedError,
   InvalidConfigError,
 } from '../errors.js';
 import type { VectorStoreConfig } from '../interfaces.js';
@@ -57,7 +58,7 @@ describe('VectorStoreFactory', () => {
       expect(store).toBeInstanceOf(PgVectorStore);
     });
 
-    it('should create Pinecone store (stub)', () => {
+    it('should fail fast for Pinecone stub at construction (factory bubbles error)', () => {
       const config: VectorStoreConfig = {
         provider: 'pinecone',
         dimensions: 1536,
@@ -69,11 +70,10 @@ describe('VectorStoreFactory', () => {
         },
       };
 
-      const store = factory.create(config);
-      expect(store).toBeInstanceOf(PineconeVectorStore);
+      expect(() => factory.create(config)).toThrow(ProviderNotImplementedError);
     });
 
-    it('should create Qdrant store (stub)', () => {
+    it('should fail fast for Qdrant stub at construction (factory bubbles error)', () => {
       const config: VectorStoreConfig = {
         provider: 'qdrant',
         dimensions: 1536,
@@ -83,11 +83,10 @@ describe('VectorStoreFactory', () => {
         },
       };
 
-      const store = factory.create(config);
-      expect(store).toBeInstanceOf(QdrantVectorStore);
+      expect(() => factory.create(config)).toThrow(ProviderNotImplementedError);
     });
 
-    it('should create Weaviate store (stub)', () => {
+    it('should fail fast for Weaviate stub at construction (factory bubbles error)', () => {
       const config: VectorStoreConfig = {
         provider: 'weaviate',
         dimensions: 1536,
@@ -98,8 +97,7 @@ describe('VectorStoreFactory', () => {
         },
       };
 
-      const store = factory.create(config);
-      expect(store).toBeInstanceOf(WeaviateVectorStore);
+      expect(() => factory.create(config)).toThrow(ProviderNotImplementedError);
     });
 
     it('should throw for unsupported provider', () => {

@@ -1,8 +1,9 @@
 /**
  * Pinecone Vector Store Adapter (Stub)
  *
- * Placeholder implementation for Pinecone vector database.
- * To be implemented in a future iteration.
+ * Placeholder implementation for Pinecone vector database. The constructor
+ * intentionally throws so misconfigured deployments fail fast at boot rather
+ * than at first query.
  */
 
 import type {
@@ -17,122 +18,61 @@ import type {
   SearchResult,
 } from '../interfaces.js';
 import { BaseVectorStore } from '../base-vector-store.js';
-import { ProviderNotImplementedError, InvalidConfigError } from '../errors.js';
+import { ProviderNotImplementedError } from '../errors.js';
+
+const PINECONE_STUB_MESSAGE =
+  'Pinecone provider is a stub; only chromadb and pgvector are production-ready in this Tamma version. Configure VECTOR_STORE_PROVIDER=chromadb or pgvector as a fallback.';
 
 /**
- * Pinecone Vector Store stub implementation
+ * Pinecone Vector Store stub implementation.
  *
- * This provider is not yet implemented. To use Pinecone:
+ * @deprecated This is a STUB and is not production-ready in this Tamma version.
+ * Construction always throws {@link ProviderNotImplementedError}. Configure
+ * `VECTOR_STORE_PROVIDER=chromadb` or `VECTOR_STORE_PROVIDER=pgvector` instead
+ * — those are the only fully implemented backends today.
  *
+ * To deliver this provider:
  * 1. Install the Pinecone client: `npm install @pinecone-database/pinecone`
- * 2. Configure your Pinecone API key and environment
- * 3. Wait for this adapter to be implemented
+ * 2. Replace the constructor body with real initialization
+ * 3. Implement all abstract `do*` methods below
  *
  * @see https://www.pinecone.io/docs/
  */
 export class PineconeVectorStore extends BaseVectorStore {
   constructor(config: VectorStoreConfig) {
     super('pinecone', config);
-
-    if (!config.pinecone) {
-      throw new InvalidConfigError('Pinecone configuration is required', 'pinecone');
-    }
-
-    // Validate configuration structure
-    if (!config.pinecone.apiKey) {
-      throw new InvalidConfigError('Pinecone API key is required', 'pinecone');
-    }
-    if (!config.pinecone.environment) {
-      throw new InvalidConfigError('Pinecone environment is required', 'pinecone');
-    }
-    if (!config.pinecone.indexName) {
-      throw new InvalidConfigError('Pinecone index name is required', 'pinecone');
-    }
+    throw new ProviderNotImplementedError('pinecone', undefined, {
+      context: { message: PINECONE_STUB_MESSAGE },
+    });
   }
 
-  protected override async doInitialize(): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'initialize');
+  /**
+   * Centralized stub failure. The do* overrides below all delegate here so the
+   * file satisfies the abstract `BaseVectorStore` contract at compile time
+   * without per-method boilerplate. These methods are unreachable at runtime
+   * because the constructor always throws.
+   */
+  private _stub(): never {
+    throw new ProviderNotImplementedError('pinecone', undefined, {
+      context: { message: PINECONE_STUB_MESSAGE },
+    });
   }
 
-  protected override async doDispose(): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'dispose');
-  }
-
-  protected override async doHealthCheck(): Promise<Record<string, unknown>> {
-    throw new ProviderNotImplementedError('pinecone', 'healthCheck');
-  }
-
-  protected override async doCreateCollection(
-    _name: string,
-    _options?: CollectionOptions,
-  ): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'createCollection');
-  }
-
-  protected override async doDeleteCollection(_name: string): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'deleteCollection');
-  }
-
-  protected override async doListCollections(): Promise<string[]> {
-    throw new ProviderNotImplementedError('pinecone', 'listCollections');
-  }
-
-  protected override async doGetCollectionStats(_name: string): Promise<CollectionStats> {
-    throw new ProviderNotImplementedError('pinecone', 'getCollectionStats');
-  }
-
-  protected override async doCollectionExists(_name: string): Promise<boolean> {
-    throw new ProviderNotImplementedError('pinecone', 'collectionExists');
-  }
-
-  protected override async doUpsert(
-    _collection: string,
-    _documents: VectorDocument[],
-  ): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'upsert');
-  }
-
-  protected override async doDelete(_collection: string, _ids: string[]): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'delete');
-  }
-
-  protected override async doGet(_collection: string, _ids: string[]): Promise<VectorDocument[]> {
-    throw new ProviderNotImplementedError('pinecone', 'get');
-  }
-
-  protected override async doCount(
-    _collection: string,
-    _filter?: MetadataFilter,
-  ): Promise<number> {
-    throw new ProviderNotImplementedError('pinecone', 'count');
-  }
-
-  protected override async doSearch(
-    _collection: string,
-    _query: SearchQuery,
-  ): Promise<SearchResult[]> {
-    throw new ProviderNotImplementedError('pinecone', 'search');
-  }
-
-  protected override async doHybridSearch(
-    _collection: string,
-    _query: HybridSearchQuery,
-  ): Promise<SearchResult[]> {
-    throw new ProviderNotImplementedError('pinecone', 'hybridSearch');
-  }
-
-  protected override async doMMRSearch(
-    _collection: string,
-    _query: MMRSearchQuery,
-  ): Promise<SearchResult[]> {
-    throw new ProviderNotImplementedError('pinecone', 'mmrSearch');
-  }
-
-  protected override async doOptimize(_collection: string): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'optimize');
-  }
-
-  protected override async doVacuum(_collection: string): Promise<void> {
-    throw new ProviderNotImplementedError('pinecone', 'vacuum');
-  }
+  protected override async doInitialize(): Promise<void> { this._stub(); }
+  protected override async doDispose(): Promise<void> { this._stub(); }
+  protected override async doHealthCheck(): Promise<Record<string, unknown>> { this._stub(); }
+  protected override async doCreateCollection(_name: string, _options?: CollectionOptions): Promise<void> { this._stub(); }
+  protected override async doDeleteCollection(_name: string): Promise<void> { this._stub(); }
+  protected override async doListCollections(): Promise<string[]> { this._stub(); }
+  protected override async doGetCollectionStats(_name: string): Promise<CollectionStats> { this._stub(); }
+  protected override async doCollectionExists(_name: string): Promise<boolean> { this._stub(); }
+  protected override async doUpsert(_collection: string, _documents: VectorDocument[]): Promise<void> { this._stub(); }
+  protected override async doDelete(_collection: string, _ids: string[]): Promise<void> { this._stub(); }
+  protected override async doGet(_collection: string, _ids: string[]): Promise<VectorDocument[]> { this._stub(); }
+  protected override async doCount(_collection: string, _filter?: MetadataFilter): Promise<number> { this._stub(); }
+  protected override async doSearch(_collection: string, _query: SearchQuery): Promise<SearchResult[]> { this._stub(); }
+  protected override async doHybridSearch(_collection: string, _query: HybridSearchQuery): Promise<SearchResult[]> { this._stub(); }
+  protected override async doMMRSearch(_collection: string, _query: MMRSearchQuery): Promise<SearchResult[]> { this._stub(); }
+  protected override async doOptimize(_collection: string): Promise<void> { this._stub(); }
+  protected override async doVacuum(_collection: string): Promise<void> { this._stub(); }
 }
