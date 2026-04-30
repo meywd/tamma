@@ -440,6 +440,117 @@ public class WebhookEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    // ─── log-injection sanitizer (CodeQL cs/log-forging) ────────────────────
+
+    [Test]
+    public async Task SanitizeWebhookIdentifier_StripsCrLfFromEventTypeBeforeDispatch()
+    {
+        // CWE-117 — a malicious X-GitHub-Event header containing CR/LF
+        // would otherwise flow into structured log calls and forge
+        // log lines. The receiver routes the header through
+        // SanitizeWebhookIdentifier (regex allowlist [A-Za-z0-9._-])
+        // BEFORE the value reaches PlatformWebhookEvent.EventType.
+        var captured = new List<PlatformWebhookEvent>();
+        using var factory = ConfigureFactory(services =>
+        {
+            services.AddSingleton<IWebhookEventDispatcher>(_ =>
+                new RecordingDispatcher(captured));
+        });
+        using var client = factory.CreateClient();
+
+        var bodyBytes = Encoding.UTF8.GetBytes(
+            """{"action":"created","installation":{"id":42}}""");
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/github")
+        {
+            Content = new ByteArrayContent(bodyBytes),
+        };
+        req.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        // Header value contains CR/LF + a forged "log line" — every
+        // disallowed char must be stripped.
+        req.Headers.TryAddWithoutValidation(
+            "X-GitHub-Event",
+            "installation\r\n2026-01-01 ERROR: forged");
+        req.Headers.Add("X-GitHub-Delivery", Guid.NewGuid().ToString());
+        req.Headers.Add("X-Hub-Signature-256", SignHmac(bodyBytes, GlobalSecret));
+
+        var response = await client.SendAsync(req);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        captured.Should().HaveCount(1);
+        var sanitized = captured[0].EventType;
+        sanitized.Should().NotContain("\r");
+        sanitized.Should().NotContain("\n");
+        sanitized.Should().NotContain(" ");
+        sanitized.Should().NotContain(":");
+        // The legitimate prefix survives the strip; everything after
+        // the first disallowed char is collapsed (the regex drops
+        // disallowed chars, keeping the rest).
+        sanitized.Should().StartWith("installation");
+    }
+
+    [Test]
+    public async Task SanitizeWebhookIdentifier_StripsCrLfFromActionField()
+    {
+        // Action comes from the JSON body's `action` field. Same
+        // CWE-117 risk as EventType — malicious payload must be
+        // sanitised before flowing into logs / dispatch / idempotency
+        // table.
+        var captured = new List<PlatformWebhookEvent>();
+        using var factory = ConfigureFactory(services =>
+        {
+            services.AddSingleton<IWebhookEventDispatcher>(_ =>
+                new RecordingDispatcher(captured));
+        });
+        using var client = factory.CreateClient();
+
+        var bodyBytes = Encoding.UTF8.GetBytes(
+            "{\"action\":\"created\\r\\nFAKE LOG LINE\",\"installation\":{\"id\":42}}");
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/github")
+        {
+            Content = new ByteArrayContent(bodyBytes),
+        };
+        req.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        req.Headers.Add("X-GitHub-Event", "installation");
+        req.Headers.Add("X-GitHub-Delivery", Guid.NewGuid().ToString());
+        req.Headers.Add("X-Hub-Signature-256", SignHmac(bodyBytes, GlobalSecret));
+
+        var response = await client.SendAsync(req);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        captured.Should().HaveCount(1);
+        var sanitized = captured[0].Action;
+        sanitized.Should().NotBeNull();
+        sanitized!.Should().NotContain("\r");
+        sanitized.Should().NotContain("\n");
+        sanitized.Should().NotContain(" ");
+    }
+
+    [Test]
+    public async Task UnknownPlatformPath_ResponseBodyIsSanitised()
+    {
+        // Reflected user input in the 400 JSON must also pass through
+        // the sanitiser — upstream proxies / WAF logs may persist
+        // response bodies, so the same CWE-117 rule applies.
+        using var factory = ConfigureFactory();
+        using var client = factory.CreateClient();
+
+        // URL path with disallowed chars URL-encoded so they reach the
+        // server intact: %0D%0A == CRLF.
+        var path = "/api/webhooks/notaplatform%0D%0Aforged";
+        var response = await client.PostAsync(path,
+            new StringContent("{}", Encoding.UTF8, "application/json"));
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("\r");
+        body.Should().NotContain("\n");
+        // The recognisable prefix should survive (the allowlist keeps
+        // [A-Za-z0-9._-]); everything else is dropped.
+        body.Should().Contain("notaplatform");
+    }
+
     // ─── helpers ────────────────────────────────────────────────────────────
 
     /// <summary>
