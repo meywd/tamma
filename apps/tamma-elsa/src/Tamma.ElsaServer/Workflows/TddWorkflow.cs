@@ -6,9 +6,11 @@ using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
+using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.TDD;
 using Tamma.Activities.TDD.Models;
+using Tamma.Activities.Testing.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 using TaskStatus = Tamma.Activities.TDD.Models.TaskStatus;
@@ -62,6 +64,11 @@ public class TddWorkflow : WorkflowBase
         var testRunFailedCount = builder.WithVariable<int>();
         var refactorApplied = builder.WithVariable<bool>();
 
+        // Captures the result dictionary returned by DispatchWorkflow("testing-pipeline").
+        // Reused across RED, GREEN, and REFACTOR phases (each dispatch overwrites it
+        // before the corresponding result-extraction SetVariable runs).
+        var testingPipelineResult = builder.WithVariable<IDictionary<string, object>?>();
+
         // Phase timestamps
         var redPhaseStart = builder.WithVariable<DateTime>();
         var greenPhaseStart = builder.WithVariable<DateTime>();
@@ -108,15 +115,36 @@ public class TddWorkflow : WorkflowBase
         };
         writeTests.SetDisplayText("Write Tests");
 
-        // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
-        // Mock: simulate running new tests (tests FAIL = correct TDD)
-        var mockNewTestsFail = Assign(testRunAllPassed, _ => (object)false, "MockNewTestsFail", "Mock: New Tests Fail");
-        var mockNewTestsFailCount = Assign(testRunFailedCount, ctx =>
+        // RED phase: dispatch testing-pipeline to run the newly written tests against
+        // the (not-yet-implemented) target code. Per TDD, tests SHOULD fail here —
+        // CheckTestsFail downstream routes "TestsPass" back to a rewrite loop.
+        var dispatchTestsRed = new DispatchWorkflow
         {
-            var gen = testGenResult.Get(ctx);
-            return (object)(gen?.TestCount ?? 2);
-        }, "MockNewTestsFailCount", "Mock: Set Failed Count");
-        var mockNewTestsPassCount = Assign(testRunPassedCount, _ => (object)0, "MockNewTestsPassCount", "Mock: Set Passed Count");
+            Id = "DispatchTestsRed",
+            Name = "Run New Tests (RED)",
+            WorkflowDefinitionId = new("testing-pipeline"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["SessionId"] = sessionId.Get(ctx),
+                ["Repository"] = repositoryUrl.Get(ctx),
+                ["Branch"] = branchName.Get(ctx),
+                ["SkillLevel"] = skillLevel.Get(ctx)
+            }),
+            WaitForCompletion = new(true),
+            Result = new(testingPipelineResult)
+        };
+        dispatchTestsRed.SetDisplayText("Run New Tests (RED)");
+
+        var setRedTestsAllPassed = Assign(testRunAllPassed,
+            ctx => (object)ExtractPassed(testingPipelineResult.Get(ctx)),
+            "SetRedTestsAllPassed", "Capture RED: AllPassed");
+        var setRedFailedCount = Assign(testRunFailedCount,
+            ctx => (object)ExtractFailedCount(testingPipelineResult.Get(ctx),
+                fallback: testGenResult.Get(ctx)?.TestCount ?? 0),
+            "SetRedFailedCount", "Capture RED: Failed Count");
+        var setRedPassedCount = Assign(testRunPassedCount,
+            ctx => (object)ExtractPassedCount(testingPipelineResult.Get(ctx), fallback: 0),
+            "SetRedPassedCount", "Capture RED: Passed Count");
 
         // RED phase guard
         var checkTestsFail = new CheckTestsFailActivity
@@ -170,15 +198,34 @@ public class TddWorkflow : WorkflowBase
         };
         writeImplementation.SetDisplayText("Write Implementation");
 
-        // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
-        // Mock: simulate full test suite passing
-        var mockFullTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockFullTestsPass", "Mock: Full Tests Pass");
-        var mockFullTestsPassedCount = Assign(testRunPassedCount, ctx =>
+        // GREEN phase: dispatch testing-pipeline to run the FULL test suite against
+        // the now-implemented code. Tests should pass; failure routes to the debug loop.
+        var dispatchTestsGreen = new DispatchWorkflow
         {
-            var gen = testGenResult.Get(ctx);
-            return (object)((gen?.TestCount ?? 0) + 10);
-        }, "MockFullTestsPassedCount", "Mock: Full Tests Passed Count");
-        var mockFullTestsFailedCount = Assign(testRunFailedCount, _ => (object)0, "MockFullTestsFailedCount", "Mock: Full Tests Failed Count");
+            Id = "DispatchTestsGreen",
+            Name = "Run Full Test Suite (GREEN)",
+            WorkflowDefinitionId = new("testing-pipeline"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["SessionId"] = sessionId.Get(ctx),
+                ["Repository"] = repositoryUrl.Get(ctx),
+                ["Branch"] = branchName.Get(ctx),
+                ["SkillLevel"] = skillLevel.Get(ctx)
+            }),
+            WaitForCompletion = new(true),
+            Result = new(testingPipelineResult)
+        };
+        dispatchTestsGreen.SetDisplayText("Run Full Test Suite (GREEN)");
+
+        var setGreenTestsAllPassed = Assign(testRunAllPassed,
+            ctx => (object)ExtractPassed(testingPipelineResult.Get(ctx)),
+            "SetGreenTestsAllPassed", "Capture GREEN: AllPassed");
+        var setGreenPassedCount = Assign(testRunPassedCount,
+            ctx => (object)ExtractPassedCount(testingPipelineResult.Get(ctx), fallback: 0),
+            "SetGreenPassedCount", "Capture GREEN: Passed Count");
+        var setGreenFailedCount = Assign(testRunFailedCount,
+            ctx => (object)ExtractFailedCount(testingPipelineResult.Get(ctx), fallback: 0),
+            "SetGreenFailedCount", "Capture GREEN: Failed Count");
 
         var greenTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
         { Id = "GreenTestsPassCheck", Name = "Green Tests Pass?" };
@@ -252,9 +299,28 @@ public class TddWorkflow : WorkflowBase
 
         var markRefactored = Assign(refactorApplied, _ => (object)true, "MarkRefactored", "Mark Refactoring Applied");
 
-        // TODO: Replace mock test runs with DispatchWorkflow calls to testing-pipeline (7-1C)
-        // Mock: refactored tests pass
-        var mockRefactorTestsPass = Assign(testRunAllPassed, _ => (object)true, "MockRefactorTestsPass", "Mock: Refactor Tests Pass");
+        // REFACTOR phase: re-run testing-pipeline after applying refactoring.
+        // If tests still pass, commit the refactored code; otherwise revert.
+        var dispatchTestsRefactor = new DispatchWorkflow
+        {
+            Id = "DispatchTestsRefactor",
+            Name = "Run Tests After Refactor",
+            WorkflowDefinitionId = new("testing-pipeline"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["SessionId"] = sessionId.Get(ctx),
+                ["Repository"] = repositoryUrl.Get(ctx),
+                ["Branch"] = branchName.Get(ctx),
+                ["SkillLevel"] = skillLevel.Get(ctx)
+            }),
+            WaitForCompletion = new(true),
+            Result = new(testingPipelineResult)
+        };
+        dispatchTestsRefactor.SetDisplayText("Run Tests After Refactor");
+
+        var setRefactorTestsAllPassed = Assign(testRunAllPassed,
+            ctx => (object)ExtractPassed(testingPipelineResult.Get(ctx)),
+            "SetRefactorTestsAllPassed", "Capture REFACTOR: AllPassed");
 
         var refactorTestsPassCheck = new FlowDecision(ctx => testRunAllPassed.Get(ctx))
         { Id = "RefactorTestsPassCheck", Name = "Refactor Tests Pass?" };
@@ -371,14 +437,14 @@ public class TddWorkflow : WorkflowBase
                 // RED phase
                 logRedPhaseStart,
                 writeTests,
-                mockNewTestsFail, mockNewTestsFailCount, mockNewTestsPassCount,
+                dispatchTestsRed, setRedTestsAllPassed, setRedFailedCount, setRedPassedCount,
                 checkTestsFail,
                 incrementRewrite, maxRewritesCheck,
 
                 // GREEN phase
                 logGreenPhaseStart,
                 writeImplementation,
-                mockFullTestsPass, mockFullTestsPassedCount, mockFullTestsFailedCount,
+                dispatchTestsGreen, setGreenTestsAllPassed, setGreenPassedCount, setGreenFailedCount,
                 greenTestsPassCheck,
                 markDebug, incrementDebug, maxDebugCheck,
 
@@ -387,7 +453,7 @@ public class TddWorkflow : WorkflowBase
                 analyzeCode,
                 refactoringNeededCheck,
                 applyRefactoring, markRefactored,
-                mockRefactorTestsPass,
+                dispatchTestsRefactor, setRefactorTestsAllPassed,
                 refactorTestsPassCheck,
                 revertRefactoring,
 
@@ -417,10 +483,11 @@ public class TddWorkflow : WorkflowBase
 
                 // --- RED PHASE ---
                 Connect(logRedPhaseStart, writeTests),
-                Connect(writeTests, mockNewTestsFail),
-                Connect(mockNewTestsFail, mockNewTestsFailCount),
-                Connect(mockNewTestsFailCount, mockNewTestsPassCount),
-                Connect(mockNewTestsPassCount, checkTestsFail),
+                Connect(writeTests, dispatchTestsRed),
+                Connect(dispatchTestsRed, setRedTestsAllPassed),
+                Connect(setRedTestsAllPassed, setRedFailedCount),
+                Connect(setRedFailedCount, setRedPassedCount),
+                Connect(setRedPassedCount, checkTestsFail),
 
                 // "TestsFail" (correct TDD) -> GREEN
                 ConnectOutcome(checkTestsFail, "TestsFail", logGreenPhaseStart),
@@ -435,10 +502,11 @@ public class TddWorkflow : WorkflowBase
 
                 // --- GREEN PHASE ---
                 Connect(logGreenPhaseStart, writeImplementation),
-                Connect(writeImplementation, mockFullTestsPass),
-                Connect(mockFullTestsPass, mockFullTestsPassedCount),
-                Connect(mockFullTestsPassedCount, mockFullTestsFailedCount),
-                Connect(mockFullTestsFailedCount, greenTestsPassCheck),
+                Connect(writeImplementation, dispatchTestsGreen),
+                Connect(dispatchTestsGreen, setGreenTestsAllPassed),
+                Connect(setGreenTestsAllPassed, setGreenPassedCount),
+                Connect(setGreenPassedCount, setGreenFailedCount),
+                Connect(setGreenFailedCount, greenTestsPassCheck),
 
                 // Tests pass (True) -> REFACTOR
                 ConnectOutcome(greenTestsPassCheck, "True", logRefactorPhaseStart),
@@ -461,8 +529,9 @@ public class TddWorkflow : WorkflowBase
                 // Refactoring (True) -> apply
                 ConnectOutcome(refactoringNeededCheck, "True", applyRefactoring),
                 Connect(applyRefactoring, markRefactored),
-                Connect(markRefactored, mockRefactorTestsPass),
-                Connect(mockRefactorTestsPass, refactorTestsPassCheck),
+                Connect(markRefactored, dispatchTestsRefactor),
+                Connect(dispatchTestsRefactor, setRefactorTestsAllPassed),
+                Connect(setRefactorTestsAllPassed, refactorTestsPassCheck),
 
                 // Refactored pass (True) -> commit
                 ConnectOutcome(refactorTestsPassCheck, "True", commitChanges),
@@ -512,5 +581,53 @@ public class TddWorkflow : WorkflowBase
     private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
     {
         return new FlowConnection(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
+    }
+
+    // ================================================================
+    // Helpers for parsing the dispatched testing-pipeline result.
+    // The testing-pipeline workflow exposes:
+    //   - "passed"        : bool
+    //   - "qualityReport" : JSON-serialized QualityReport (TotalTests/PassedTests/FailedTests/...)
+    //   - "teachingFeedback": string
+    // We tolerate missing keys / shape drift by falling back to safe defaults.
+    // ================================================================
+
+    private static bool ExtractPassed(IDictionary<string, object>? result)
+    {
+        if (result == null) return false;
+        if (result.TryGetValue("passed", out var p))
+        {
+            if (p is bool b) return b;
+            if (p is string s && bool.TryParse(s, out var parsed)) return parsed;
+        }
+        return false;
+    }
+
+    private static int ExtractPassedCount(IDictionary<string, object>? result, int fallback)
+    {
+        var report = TryParseQualityReport(result);
+        return report?.PassedTests ?? fallback;
+    }
+
+    private static int ExtractFailedCount(IDictionary<string, object>? result, int fallback)
+    {
+        var report = TryParseQualityReport(result);
+        return report?.FailedTests ?? fallback;
+    }
+
+    private static QualityReport? TryParseQualityReport(IDictionary<string, object>? result)
+    {
+        if (result == null) return null;
+        if (!result.TryGetValue("qualityReport", out var raw) || raw == null) return null;
+        try
+        {
+            var json = raw as string ?? raw.ToString();
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            return System.Text.Json.JsonSerializer.Deserialize<QualityReport>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
