@@ -146,55 +146,26 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
 
     private async Task<string> CallLlm(string prompt)
     {
-        var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? true;
-
-        if (useMock)
-        {
-            return SimulateRefinementResponse();
-        }
-
+        // No mock path: simulated refinement responses fed fake "what we learned"
+        // narratives and fabricated hypotheses into the iterative debug loop,
+        // poisoning subsequent attempts and the audit trail. All refinements now
+        // require a real engine callback. See: feat/wave-b cleanup.
         var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
         {
-            var client = _httpClientFactory.CreateClient();
-            var response = await client.PostAsJsonAsync(
-                $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
-                new { prompt, analysisType = "debugging_refinement", role = "debugger" });
-            response.EnsureSuccessStatusCode();
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-            return result.GetProperty("output").GetString() ?? "{}";
+            throw new InvalidOperationException(
+                "RefineHypothesisActivity requires Engine:CallbackUrl and IHttpClientFactory; "
+                + "no simulated fallback is permitted.");
         }
 
-        return SimulateRefinementResponse();
-    }
+        var client = _httpClientFactory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
+            new { prompt, analysisType = "debugging_refinement", role = "debugger" });
+        response.EnsureSuccessStatusCode();
 
-    private static string SimulateRefinementResponse()
-    {
-        return JsonSerializer.Serialize(new
-        {
-            analysis_summary = "The previous fix attempt reveals the issue is deeper than initially hypothesized. " +
-                "The error pattern shifted, suggesting the original root cause was partially correct but incomplete.",
-            hypotheses = new[]
-            {
-                new
-                {
-                    rank = 1,
-                    description = "The fix addressed a symptom but the root cause is in the data transformation layer",
-                    confidence = 0.70,
-                    suggested_fix = "Trace the data flow from input to the failing assertion and fix the transformation",
-                    affected_files = new[] { "src/transform.ts" }
-                },
-                new
-                {
-                    rank = 2,
-                    description = "Race condition in async initialization causes intermittent failure",
-                    confidence = 0.45,
-                    suggested_fix = "Add proper await/synchronization for the initialization sequence",
-                    affected_files = new[] { "src/init.ts" }
-                }
-            }
-        });
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return result.GetProperty("output").GetString() ?? "{}";
     }
 
     private DiagnosisResult ParseRefinementResponse(string response)
