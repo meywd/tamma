@@ -89,19 +89,12 @@ public class CommitFixActivity : CodeActivity<CommitFixResult>
 
         try
         {
-            var useMock = _configuration?.GetValue<bool>("Testing:UseMock") ?? true;
-
-            CommitFixResult result;
-            if (useMock)
-            {
-                result = SimulateCommitFix(sessionId, fixedIssues, attemptNumber, maxAttempts, fixDescription);
-            }
-            else
-            {
-                result = await CommitRealFix(
-                    sessionId, repository, branch, fixedIssues,
-                    attemptNumber, maxAttempts, fixDescription);
-            }
+            // No mock path: simulated commits with random success rates and synthetic
+            // commit SHAs were corrupting downstream audit events. All commits now
+            // route through the real engine callback. See: feat/wave-b cleanup.
+            var result = await CommitRealFix(
+                sessionId, repository, branch, fixedIssues,
+                attemptNumber, maxAttempts, fixDescription);
 
             _logger?.LogInformation(
                 "Auto-fix commit attempt {Attempt}/{Max}: Success={Success}, ShouldRetry={ShouldRetry}",
@@ -168,27 +161,6 @@ public class CommitFixActivity : CodeActivity<CommitFixResult>
             AttemptNumber = attemptNumber,
             MaxAttempts = maxAttempts,
             ShouldRetry = false, // Successful commit does not need retry
-            FixedIssues = fixedIssues.Select(i => i.Message).ToList()
-        };
-    }
-
-    private static CommitFixResult SimulateCommitFix(
-        Guid sessionId, List<QualityIssue> fixedIssues,
-        int attemptNumber, int maxAttempts, string? fixDescription)
-    {
-        var success = Random.Shared.Next(100) < 85; // 85% success rate for simulation
-        var commitMessage = GenerateCommitMessage(fixedIssues, attemptNumber, fixDescription);
-
-        return new CommitFixResult
-        {
-            Success = success,
-            CommitSha = success ? $"abc{Random.Shared.Next(1000, 9999):D4}" : null,
-            CommitMessage = commitMessage,
-            FilesChanged = success ? Random.Shared.Next(1, 5) : 0,
-            AttemptNumber = attemptNumber,
-            MaxAttempts = maxAttempts,
-            ShouldRetry = !success && attemptNumber < maxAttempts,
-            Error = success ? null : "Simulated commit failure",
             FixedIssues = fixedIssues.Select(i => i.Message).ToList()
         };
     }
