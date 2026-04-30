@@ -78,8 +78,14 @@ public sealed class SqlTenantProviderKeyLookup : ITenantProviderKeyLookup
         }
 
         await using var cmd = conn.CreateCommand();
+        // Column name is quoted PascalCase (`"ProviderKey"`) per the
+        // Story 30-3 migration. Without quoting, Postgres folds the
+        // identifier to lowercase (`provider_key`) which doesn't match
+        // the case-preserved column → ExecuteScalar returns null →
+        // V2 routing silently never activates. Same convention applies
+        // for `"DeletedAt"`.
         cmd.CommandText =
-            "SELECT provider_key FROM tenants WHERE \"Id\" = @id AND \"DeletedAt\" IS NULL LIMIT 1";
+            "SELECT \"ProviderKey\" FROM tenants WHERE \"Id\" = @id AND \"DeletedAt\" IS NULL LIMIT 1";
         var idParam = cmd.CreateParameter();
         idParam.ParameterName = "@id";
         idParam.Value = tenantId;
@@ -130,9 +136,14 @@ public sealed class SqlTenantProviderKeyLookup : ITenantProviderKeyLookup
             }
 
             await using var probe = conn.CreateCommand();
+            // information_schema.columns stores column_name in
+            // case-preserved form — the migration created the column as
+            // `"ProviderKey"` (PascalCase) so the probe must match
+            // exactly. A lowercase probe would always miss and force
+            // every tenant onto the legacy fallback path.
             probe.CommandText = """
                 SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'tenants' AND column_name = 'provider_key'
+                WHERE table_name = 'tenants' AND column_name = 'ProviderKey'
                 LIMIT 1
                 """;
             var found = await probe.ExecuteScalarAsync(ct).ConfigureAwait(false);
