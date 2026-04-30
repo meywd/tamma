@@ -36,6 +36,7 @@ const TARGETS = [
   { platform: 'darwin-x64', bunTarget: 'bun-darwin-x64' },
   { platform: 'linux-x64', bunTarget: 'bun-linux-x64' },
   { platform: 'linux-arm64', bunTarget: 'bun-linux-arm64' },
+  { platform: 'windows-x64', bunTarget: 'bun-windows-x64', exeExt: '.exe' },
 ];
 
 // Parse args
@@ -70,7 +71,8 @@ const entryPoint = join(cliDir, 'src/index.tsx');
 const assets = [];
 
 for (const target of selectedTargets) {
-  const binaryName = `tamma-${version}-${target.platform}`;
+  const exeExt = target.exeExt ?? '';
+  const binaryName = `tamma-${version}-${target.platform}${exeExt}`;
   const outfile = join(outputDir, binaryName);
 
   console.log(`\nBuilding ${binaryName}...`);
@@ -98,16 +100,20 @@ for (const target of selectedTargets) {
 
   const size = statSync(outfile).size;
 
-  // Create .tar.gz archive (Homebrew requires archives, not raw binaries)
-  // Archive contains a single file named "tamma" (matching Homebrew formula's bin.install)
-  const tarName = `${binaryName}.tar.gz`;
+  // Create .tar.gz archive (Homebrew requires archives, not raw binaries).
+  // Archive contains a single file named "tamma" (matching Homebrew formula's bin.install).
+  // On Windows the staged file is "tamma.exe" so it is directly runnable when extracted.
+  // Homebrew is mac/linux only, but we ship the archive for Windows as well for parity
+  // and so the checksums file is uniform across platforms.
+  const stagedExeName = exeExt ? `tamma${exeExt}` : 'tamma';
+  const tarName = `tamma-${version}-${target.platform}.tar.gz`;
   const tarPath = join(outputDir, tarName);
   const stagingDir = join(outputDir, `_staging-${target.platform}`);
   mkdirSync(stagingDir, { recursive: true });
-  copyFileSync(outfile, join(stagingDir, 'tamma'));
-  execSync(`tar -czf "${tarPath}" -C "${stagingDir}" tamma`, { stdio: 'inherit' });
+  copyFileSync(outfile, join(stagingDir, stagedExeName));
+  execSync(`tar -czf "${tarPath}" -C "${stagingDir}" ${stagedExeName}`, { stdio: 'inherit' });
   // Clean up staging
-  unlinkSync(join(stagingDir, 'tamma'));
+  unlinkSync(join(stagingDir, stagedExeName));
 
   // Generate SHA256 checksum for the tar.gz
   const tarBuffer = readFileSync(tarPath);
