@@ -19,10 +19,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 8.0.1 silences NU1903 advisory GHSA-qj66-m88j-hmgj that affects 8.0.0. -->
+    <!-- 8.0.1 silences NU1903 advisory GHSA-qj66-m88j-hmgj that affects 8.0.0.
+         Caching.Memory 8.0.1 transitively requires DI.Abstractions and
+         Logging.Abstractions >= 8.0.2; pin them here so per-project Docker
+         restores (which don't pick up the repo's Directory.Build.props NU1605
+         suppression) don't trip on the downgrade. -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
   </ItemGroup>
 
   <ItemGroup>
