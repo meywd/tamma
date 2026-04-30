@@ -126,5 +126,9 @@ public class PromptEventsServiceTests
         public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
             Guid tenantId, string? typePrefix, int limit, int offset)
             => throw new NotImplementedException();
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
+            => throw new NotImplementedException();
     }
 }

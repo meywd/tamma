@@ -799,6 +799,11 @@ public class AlertRuleEvaluatorTests
             Guid tenantId, string? typePrefix, int limit, int offset) =>
             Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
                 (Array.Empty<DomainEvent>(), 0));
+
+        public Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset) =>
+            Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
+                (Array.Empty<DomainEvent>(), 0));
     }
 }
 
@@ -983,6 +988,10 @@ public class AlertRuleEvaluatorPostgresTests
         public Task ClearAsync(Guid tenantId) => Task.CompletedTask;
         public Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
             Guid tenantId, string? typePrefix, int limit, int offset) =>
+            Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
+                (Array.Empty<DomainEvent>(), 0));
+        public Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset) =>
             Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
                 (Array.Empty<DomainEvent>(), 0));
     }

@@ -11,6 +11,21 @@ public interface IEventRepository
     Task ClearAsync(Guid tenantId);
 
     /// <summary>
+    /// Story 4-7 (event-query-API for time-travel) — paginated tenant-scoped
+    /// event read with exact <paramref name="type"/> match and optional
+    /// <paramref name="issueNumber"/> filter. Backs
+    /// <c>GET /api/engine/history</c>. Most-recent first; same exact-match
+    /// semantics as <see cref="QueryAsync"/> so callers can drop in the
+    /// paginated variant without changing filter behaviour.
+    ///
+    /// <para>Distinct from <see cref="ListByTenantAsync"/> which uses
+    /// prefix matching for the tenant-audit endpoint. Returning a Total
+    /// count enables <c>hasMore</c> / <c>nextOffset</c> on the wire.</para>
+    /// </summary>
+    Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+        Guid? tenantId, string? type, int? issueNumber, int limit, int offset);
+
+    /// <summary>
     /// Tenant-scoped audit log read. Returns events whose
     /// <see cref="DomainEvent.TenantId"/> matches <paramref name="tenantId"/>,
     /// most-recent first, with cursor-style pagination + an optional
