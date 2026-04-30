@@ -22,6 +22,7 @@ using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 using Tamma.Platforms.Gitea;
+using Tamma.Platforms.GitHub;
 using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -645,6 +646,15 @@ builder.Services.AddPlatformEventBus();
 // driver serves SaaS gitlab.com and self-hosted; BaseUrl comes from
 // the per-tenant PlatformInstallation row.
 builder.Services.AddGitLabPlatform();
+
+// Story 31-3: GitHub driver — wraps the existing
+// IGitHubActionsClient (Tamma.Activities) behind IGitPlatformDriver
+// so GitHub becomes a peer of Gitea/GitLab/Forgejo for the 31-2
+// PlatformResolver. The factory pulls the inner client from the
+// request scope on each CreateAsync call so it picks up the existing
+// Octokit / Null registration above without changing those code
+// paths.
+builder.Services.AddGitHubPlatformDriver();
 
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 

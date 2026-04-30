@@ -75,6 +75,12 @@
          Program.cs and consumed by 31-2's PlatformResolver via keyed DI
          under PlatformKind.GitLab. -->
     <ProjectReference Include="..\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
+    <!-- Story 31-3: GitHub driver. Wraps the existing
+         IGitHubAppClient / IGitHubActionsClient behind IGitPlatformDriver
+         so GitHub matches the Gitea / GitLab driver pattern. Registered
+         via AddGitHubPlatformDriver() in Program.cs and consumed by 31-2's
+         PlatformResolver via keyed DI under PlatformKind.GitHub. -->
+    <ProjectReference Include="..\Tamma.Platforms.GitHub\Tamma.Platforms.GitHub.csproj" />
 
   </ItemGroup>
 
