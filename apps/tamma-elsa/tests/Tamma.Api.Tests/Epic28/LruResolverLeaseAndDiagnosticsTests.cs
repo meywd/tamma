@@ -344,6 +344,55 @@ public class LruResolverLeaseAndDiagnosticsTests
         await resolver.DisposeAsync();
     }
 
+    // ── M12: DisposeAsync must NOT dispose the singleton metrics ───
+    //         and must be idempotent (double-dispose is a no-op).
+
+    [Test]
+    public async Task DisposeAsync_IsIdempotent_DoubleDispose_DoesNotThrow()
+    {
+        // Round-2 M12 — DisposeAsync gates on Interlocked.Exchange so a
+        // second dispose call returns immediately and never reaches the
+        // shared singleton (e.g. _metrics) again. This protects DI
+        // composition where the host may dispose a transient/scoped
+        // resolver more than once during shutdown.
+        var resolver = NewResolver();
+        var tid = await SeedTenantAsync();
+        _ = await resolver.GetDataSourceAsync(tid);
+
+        await resolver.DisposeAsync();
+
+        // Second call must be a no-op; ObjectDisposedException on the
+        // shared metrics singleton would surface here.
+        var act = async () => await resolver.DisposeAsync();
+        await act.Should().NotThrowAsync(
+            "DisposeAsync must be idempotent — DI may dispose the resolver more than once");
+    }
+
+    [Test]
+    public async Task DisposeAsync_DoesNotDisposeSharedMetricsSingleton()
+    {
+        // Round-2 M12 — _metrics is a DI-registered singleton owned by
+        // the IServiceProvider. Disposing the resolver must NOT reach
+        // across that boundary; otherwise a sibling resolver (or a
+        // direct consumer of TenantConnectionPoolMetrics) sees an
+        // ObjectDisposedException on the next access.
+        var tid = await SeedTenantAsync();
+
+        var resolverA = NewResolver();
+        _ = await resolverA.GetDataSourceAsync(tid);
+        await resolverA.DisposeAsync();
+
+        // The shared metrics instance must still be usable by a fresh
+        // resolver after the first one has been disposed.
+        await using var resolverB = NewResolver();
+        _ = await resolverB.GetDataSourceAsync(tid);
+
+        var stats = ((IAdminPoolDiagnostics)resolverB).GetDetailedStats();
+        // If _metrics had been disposed, accessing its counters would
+        // throw. The fact we got here proves the singleton survived.
+        stats.WarmPoolCount.Should().BeGreaterOrEqualTo(1);
+    }
+
     // ── M7: typed lease-race exception + per-tenant lease cap ──────
 
     [Test]
