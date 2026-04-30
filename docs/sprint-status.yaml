@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2026-03-31 (full-codebase-audit-all-26-epics-deep-verified)
+# updated: 2026-04-30 (post-audit-pass: superseded stories closed, vector stubs hardened, prompt-resolution verified done, multiple Wave-B findings reconciled)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -58,8 +58,8 @@ development_status:
   epic-1.5: contexted
   1.5-1-core-engine-separation: done
   1.5-2-cli-mode-enhancement: done
-  1.5-3-service-mode-implementation: done
-  1.5-4-web-server-api: done
+  1.5-3-service-mode-implementation: drafted          # No packages/server/ exists; spec only — service mode not built in TS port
+  1.5-4-web-server-api: drafted                       # No packages/server/ exists; HTTP server lives in packages/api (Fastify) + apps/tamma-elsa (C# Tamma.Api), this story's spec not built
   1.5-5-docker-packaging: done
   1.5-6-webhook-integration: done
   1.5-7-system-configuration-management: done
@@ -73,7 +73,7 @@ development_status:
   2-2-issue-context-analysis: done
   2-3-development-plan-generation-with-approval-checkpoint: done
   2-4-git-branch-creation: done
-  2-5-test-first-development-write-failing-tests: done
+  2-5-test-first-development-write-failing-tests: done  # RED: WriteTestsActivity. VALIDATE: ValidateTestSyntaxActivity (this PR). EXEC: TddWorkflow DispatchWorkflow to testing-pipeline. CONFIRM-FAIL: CheckTestsFailActivity. C# pipeline now satisfies all original 2-5 AC.
   2-6-implementation-code-generation: done
   2-7-code-refactoring-pass: done
   2-8-pull-request-creation: done
@@ -105,12 +105,12 @@ development_status:
   epic-4: contexted
 
   4-1-event-schema-design: done                         # EngineEvent, EngineEventType in packages/shared/src/types/index.ts (20+ event types)
-  4-2-event-store-backend-selection: in-progress        # InMemoryEventStore in packages/shared/src/event-store.ts; PostgreSQL backend not yet implemented
+  4-2-event-store-backend-selection: in-progress        # Placeholder superseded by Story 10-3 (PostgreSQL+Emmett with blob storage, LISTEN/NOTIFY, partitioning) — still ready-for-dev. C# port already ships tenant-scoped EventRepository (EF Core PostgreSQL) per Story 28-6. TS InMemoryEventStore is intentionally dev-only.
   4-3-event-capture-issue-selection-analysis: done      # Engine emits ISSUE_SELECTED, PLAN_GENERATED events via InMemoryEventStore
   4-4-event-capture-ai-provider-interactions: done      # InstrumentedAgentProvider/LlmProvider emit diagnostics; DiagnosticsQueue captures AI interactions
   4-5-event-capture-code-changes-git-operations: done   # Engine emits CODE_GENERATED, PR_CREATED, PR_MERGED events
   4-6-event-capture-approvals-escalations: done         # Engine emits PLAN_APPROVED, PLAN_REJECTED events; escalation events in Elsa workflows
-  4-7-event-query-api-for-time-travel: done             # GET /api/engine/history (paginated), GET /api/engine/events/state (SSE), event store getEvents()
+  4-7-event-query-api-for-time-travel: done             # GET /api/engine/history (paginated, eventType+issueNumber filters, tenant-scoped) in apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs:GetHistory; backed by IEventRepository.QueryWithPaginationAsync; SSE stream at GET /api/engine/events/state. AC1/2/3/6 covered. Tests: tests/Tamma.Api.Tests/Engine/EngineHistoryEndpointTests.cs (4 tests: pagination, type filter, issue filter, tenant scoping).
   4-8-black-box-replay-for-debugging: drafted           # No replay mechanism implemented; only event capture and query exist
   epic-4-retrospective: optional
 
@@ -119,8 +119,8 @@ development_status:
   5-2-metrics-collection-infrastructure: drafted        # No standalone metrics collection (counters/histograms/gauges); only Pino logs
   5-3-real-time-dashboard-system-health: done           # Admin HealthTab, useSystemHealth hook, dashboard summary API, SSE state streaming
   5-4-real-time-dashboard-development-velocity: drafted  # No velocity-specific dashboard page or API exists
-  5-5-event-trail-exploration-ui: in-progress           # SSE event streaming exists (GET /api/engine/events/state, /events/logs); no dedicated trail exploration UI
-  5-6-alert-system-for-critical-issues: in-progress     # AlertManager in @tamma/cost-monitor for cost alerts; no general critical issue alert system
+  5-5-event-trail-exploration-ui: superseded-by-23-3    # Superseded by Story 23-3 (Event Store Explorer in Epic 23 observability stack); same scope, newer spec.
+  5-6-alert-system-for-critical-issues: in-progress     # Cost-alert subsystem done in @tamma/cost-monitor (AlertManager). Rules engine + multi-channel + escalation NOT BUILT. TenantAlertFeed.tsx + TenantAlertChannels.tsx are UI stubs in dashboard-user. Engine MVP is its own future story.
   5-7-feedback-collection-system: in-progress           # RAG feedback module in packages/intelligence/src/rag/feedback.ts; no general user feedback UI
   5-8-integration-testing-suite: done                   # e2e-deploy.yml, ci.yml, docker-smoke-test.yml; engine integration tests
   5-9a-installation-setup-documentation: drafted
@@ -133,7 +133,7 @@ development_status:
 
   epic-6: contexted
   6-1-codebase-indexer: done                            # CodebaseIndexer (943 lines), chunking, file-discovery, git-diff, embedding service, triggers in packages/intelligence/src/indexer/
-  6-2-vector-database-integration: in-progress           # ChromaDB + PgVector real (775+954 lines); Pinecone, Qdrant, Weaviate are pure stubs
+  6-2-vector-database-integration: in-progress           # ChromaDB + PgVector production-ready. Pinecone/Qdrant/Weaviate now FAIL-FAST at constructor with ProviderNotImplementedError naming chromadb/pgvector as alternatives. Each has @deprecated JSDoc + 6 stub-providers tests.
   6-3-rag-pipeline: done                                # RAGPipeline (387 lines), retriever, ranker, assembler, query-processor, sources, feedback in packages/intelligence/src/rag/
   6-4-mcp-client-integration: done                      # Full MCP client (30 files): transports (stdio/SSE/websocket), interceptors, security, caching, pagination in packages/mcp-client/src/
   6-5-context-aggregator: done                          # Aggregator (259 lines), assembler, budget-manager, ranker, deduplicator, 4 sources in packages/intelligence/src/context/
@@ -152,7 +152,7 @@ development_status:
   7-5-assessment-sub-workflow: done                     # AssessmentWorkflow.cs (488 lines), 6 assessment activities (questions, response analysis, skill profile)
   7-6-context-gathering-sub-workflow: done              # ContextGatheringWorkflow.cs (432 lines), 8 context activities (files, commits, patterns, budget)
   7-7-blocker-diagnosis-sub-workflow: done              # BlockerDiagnosisWorkflow.cs (819 lines), 8 blocker activities (CI, git, communication, escalation)
-  7-8-tdd-sub-workflow: in-progress                     # TddWorkflow.cs (516 lines) structure real but test execution is mocked (TODO: wire testing-pipeline)
+  7-8-tdd-sub-workflow: done                            # TddWorkflow.cs structure real; RED/GREEN/REFACTOR phases now dispatch to testing-pipeline (mocks removed)
   7-9-debugging-sub-workflow: done                      # DebuggingWorkflow.cs (542 lines), 13 debug activities (collect, diagnose, hypothesize, fix)
   epic-7-retrospective: optional
 
@@ -250,10 +250,10 @@ development_status:
 
   epic-19: contexted
   19-1-tamma-agent-workflow-template: done               # .github/workflows/tamma-worker.yml with workflow_dispatch, installation_id, issue_number, callback_url
-  19-2-workflow-dispatch-from-elsa: drafted              # No DispatchAgentActivity in Elsa activities; ElsaClient can start workflows but no dispatch activity
-  19-3-agent-execution-monitoring: drafted               # No MonitorAgentActivity in Elsa
-  19-4-result-collection: in-progress                    # engine-callback.ts + saas/workflow-result.ts + workflow-status.ts exist; no CollectResultsActivity in Elsa
-  19-5-agent-executor-abstraction: drafted               # No IAgentExecutor interface found anywhere
+  19-2-workflow-dispatch-from-elsa: done                 # DispatchAgentWorkflowActivity.cs in apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/ with AgentDispatchService + tests
+  19-3-agent-execution-monitoring: done                  # MonitorAgentWorkflowActivity.cs + AgentMonitorService.cs in apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/ with WebhookSignalRegistry + tests
+  19-4-result-collection: done                           # CollectAgentResultsActivity.cs + AgentResultCollectorService.cs in apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/; engine-callback.ts wires the TS side
+  19-5-agent-executor-abstraction: done                  # IAgentExecutor.cs + AgentExecutorFactory.cs + LocalExecutor.cs + GitHubActionsExecutor.cs in apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/
   epic-19-retrospective: optional
 
   epic-20: contexted
@@ -308,4 +308,83 @@ development_status:
   epic-25: contexted
   25-1-custom-wiki-site: done                            # apps/wiki-site/ with Astro Starlight, sync-content.ts (358 lines), wrangler.toml, CSS, logos, GH Actions deploy
   epic-25-retrospective: optional
+
+  epic-26: contexted
+  26-1-issue-triage-workflow: done                       # IssueTriageWorkflow.cs in apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/; SelectWorkItemActivity dispatches triage on NeedsTriage outcome (commit 410b449c)
+  26-2-scrum-management-workflow: drafted                # No ScrumManagementWorkflow in apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/; story doc only
+  26-3-release-management-workflow: drafted              # No ReleaseManagementWorkflow in apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/; story doc only
+  26-4-priority-configuration-system: in-progress        # SelectWorkItemActivity.cs has priority resolution from labels (urgent/high/normal/low) per commit 410b449c; no separate config UI yet
+  epic-26-retrospective: optional
+
+  epic-27: contexted
+  27-1-prompt-store-database-schema: done                # prompt_overrides table in Tamma.Data, PromptOverride entity, principal_xor CHECK constraint
+  27-2-prompt-store-service: done                        # PromptStoreService.cs in apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/ — SaaS-mode resolution (commit fef3f89a)
+  27-3-prompt-store-api-endpoints: done                  # PromptEndpoints.cs in apps/tamma-elsa/src/Tamma.Api/Endpoints/; tenant-admin RBAC enforced (commit 826bd9ee)
+  27-4-prompt-store-admin-ui: done                       # Dashboard prompt store admin UI (commits add518ce, c9cbf735)
+  27-5-prompt-store-account-ui: done                     # Tenant-member override editor (commit d3bed2f6)
+  27-6-elsa-workflow-integration: done                   # ResolvePromptFromRegistryActivity.cs L49 TenantId input + L110-114 X-Tenant-Id header + L144 tenant logging; backward-compat fallback to system defaults when tenantId empty.
+  27-7-prompt-store-event-sourcing: done                 # Prompt store event sourcing gap-fill (commit 8bb155df)
+  epic-27-retrospective: optional
+
+  epic-28: contexted
+  28-1-ef-migration-scripts: done                        # EF migrations + entity split landed across PR A/B/C/D (commits 06208677, a7656270, 6d9dd18a, c90e03a6)
+  28-2-control-plane-dbcontext-split: done               # ControlPlaneDbContext.cs in apps/tamma-elsa/src/Tamma.Data/ (commit 770faddc)
+  28-3-tenant-dbcontext-factory: done                    # TenantDbContext.cs + TenantDbContextFactory.cs in apps/tamma-elsa/src/Tamma.Data/ (commit 6c5280d9)
+  28-4-connection-resolver-pool-cache: done              # LRU pooled tenant connection resolver (commit 318f963f); KEK rotation hardening done (epic-28-r2 batches)
+  28-5-create-delete-tenant-workflows: done              # Create/DeleteTenantWorkflow on global Elsa (commit 31a81c39); decomposed into Elsa Sequence (commit c61ec36b)
+  28-6-platform-tables: done                             # platform_events + platform_queued_tasks + platform_email_outbox + IPlatformEventBus (commit 6a454bbd)
+  28-7-api-key-prefix-routing: done                      # API-key prefix routing tk_t_/tk_pl_/tk_u_ (commit 84f648db); Argon2id hashing follow-up (commit e3ff366d)
+  28-8-tenant-context-middleware: done                   # TenantContextMiddleware.cs warms per-tenant pool + traces tenant id (commit 7551cd17)
+  28-9-jwt-claims-switch-org: done                       # JWT tenants[] + active_tenant_id + /auth/switch-org + cross-tenant refresh (commit 839e4aca)
+  28-10-platform-analytics-rollup: done                  # platform_analytics_hourly rollup workflow (commit 5ed59638; fact-table deferred)
+  28-11-admin-tenant-status-ux: done                     # Admin tenant-status list + detail + actions (commit 99d19fec)
+  28-12-postgres-roles-kek-rotation: done                # KEK rotation closes 28-4 decryptor gap + admin rotation endpoints (commit 6db6f095); KEK lifecycle hardening (epic-28-r2)
+  28-13-openbao-kms-backend: drafted                     # DEFERRED — planning blocker doc only; ships if OpenBao trigger conditions fire
+  epic-28-retrospective: optional
+
+  epic-29: contexted
+  29-1-secret-store-abstraction: done                    # Secret store abstraction + typed value model (commit 1870bebc); design ADR (commit 3abca9d8)
+  29-2-postgres-backed-store: done                       # Postgres-backed envelope-encrypted store with KEK from env (commit da6f09b9)
+  29-3-reveal-once-on-create: done                       # Reveal-once-on-create + access audit + rate-limited exchange endpoint (commit d40eb347); SecretRevealService + SecretRevealModal.tsx
+  29-4-platform-admin-ui: done                           # Platform-admin secret-management UI (commit 42187d97); merge in 07cb1a82
+  29-5-tenant-admin-ui: done                             # Tenant-admin secret-management UI (commit 542d5b87); TenantSecretsPage.tsx + SecretsListView.tsx + CreateSecretForm.tsx
+  29-6-rotation-workflow-primitive: done                 # RotateSecretWorkflow.cs + saga + handlers + sweeper in Tamma.Activities/SecretsRotation/ (commit 06659e22)
+  29-7-db-credential-rotation: done                      # Postgres role-password rotation handler (commit 73c748d9)
+  29-8-cranl-env-rotation: done                          # Cranl env-var rotation handler (commit c0410e15)
+  29-9-migrate-stopgap-secrets: done                     # Migrate stopgap secrets (tamma_app, Cranl API key, shared HMAC, DB URLs) to Secret Store (commit b0349852)
+  29-10-delete-stopgaps: done                            # Delete stopgap secret paths (commit b01c1afc); coverage-audit BLOCKING fixes (commit 9bf0341b)
+  epic-29-retrospective: optional
+
+  epic-30: contexted
+  30-1-provisioner-interface-v2: done                    # ITenantInfrastructureProvider.cs + ProvisioningTopology.cs in Tamma.Api/Services/Provisioning/V2/ (commit 85ce1de8)
+  30-2-provisioning-workflow-dispatch: done              # ProvisionTenantV2Workflow.cs + V2 dispatcher + task handler (commit 8a9a58c0)
+  30-3-cranl-provider-refactor: done                     # CranlTenantProviderV2 + tenants table v2 columns (commit 441cad39)
+  30-4-hetzner-cloud-provider: drafted                   # No Hetzner provider in apps/tamma-elsa/src/Tamma.Api/Services/Provisioning/V2/; story doc + impl plan only
+  30-5-cloudflare-provider: drafted                      # No Cloudflare provider in V2/; story doc + impl plan only
+  30-6-byo-provider: drafted                             # No Byo provider in V2/; story doc + impl plan only
+  30-7-onboarding-ui: drafted                            # Onboarding UI scaffold exists but no topology picker for V2 backends
+  30-8-per-tenant-routing: done                          # Per-tenant routing via V2 ResolveEndpointsAsync (commit 8a60c675); V2TenantEndpointDirectory.cs
+  30-9-deprovisioning-workflow: drafted                  # DeprovisioningRequest.cs scaffold exists; no Deprovision workflow saga implemented
+  30-10-cost-quota-dashboard: drafted                    # No cost/quota dashboard per tenant
+  epic-30-retrospective: optional
+
+  epic-31: contexted
+  31-1-git-platform-abstraction: done                    # IGitPlatformDriver.cs + IGitPlatformClient.cs + IGitPlatformActionsClient.cs + capability matrix in Tamma.Platforms.Abstractions (commit 8932edcb)
+  31-2-platform-registry-routing: done                   # IPlatformResolver.cs + PlatformResolver.cs + PlatformDriverCache.cs in Tamma.Platforms (commit 06b85a93); merged with 29 credential adapter (commit 31cd4db7)
+  31-3-github-driver-refactor: done                      # Tamma.Platforms.GitHub/GitHubPlatformDriver.cs + GitHubPlatformClient.cs + GitHubActionsPlatformClient.cs wrap existing IGitHubActionsClient behind IGitPlatformDriver/IGitPlatformActionsClient; AddGitHubPlatformDriver() registers keyed factory under PlatformKind.GitHub; 63 unit tests in Tamma.Platforms.GitHub.Tests
+  31-4-gitea-driver: done                                # GiteaPlatformDriver.cs + GiteaPlatformClient.cs + GiteaActionsPlatformClient.cs + GiteaWebhookSignatureVerifier.cs (commit c7d271a9)
+  31-5-forgejo-compat-matrix: done                       # ForgejoPlatformDriver.cs composes Gitea driver via compat shim (commit 6078d7f8)
+  31-6-gitlab-driver: done                               # GitLabPlatformDriver.cs + GitLabPlatformClient.cs + GitLabActionsClient.cs in Tamma.Platforms.GitLab (commit 935681b5)
+  31-7-webhook-receiver-abstraction: done                # IWebhookHandler.cs + IWebhookSignatureVerifier.cs + IWebhookEventDispatcher.cs (commit 29973150); SanitizeWebhookIdentifier coverage (commit 7fc5bc49)
+  31-8-ci-secrets-provisioner-abstraction: done          # ICiSecretsProvisioner.cs + CiSecretScope/Target/Metadata + Tamma cabinet sync (commit 4fbe445d)
+  31-9-onboarding-platform-picker-ui: done               # Onboarding platform picker UI + /api/onboarding/install (commit e265e58c)
+  31-10-integration-test-harness: done                   # Integration test harness for git platform drivers using Gitea/Forgejo/GitLab containers (commit cf1aa172)
+  31-11-bitbucket-driver: drafted                        # Planning blocker doc only — optional, deferred until customer demand
+  31-12-azure-devops-driver: drafted                     # Planning blocker doc only — optional, deferred until customer demand
+  epic-31-retrospective: optional
+
+  epic-33: backlog
+  # Epic 33 (Per-Tenant Identity Providers) is explicitly DEFERRED per docs/stories/epic-33/README.md
+  # Forward-looking stub only — no stories drafted; will be scoped when an enterprise SSO trigger fires
+  epic-33-retrospective: optional
 
