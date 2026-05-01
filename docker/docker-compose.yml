@@ -189,8 +189,15 @@ services:
       GitHub__AppId: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}
       GitHub__PrivateKeyPath: /etc/tamma/private-key.pem
       GitHub__WebhookSecret: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET is required}
-      GitHub__OAuthClientId: ${GITHUB_OAUTH_CLIENT_ID:-}
-      GitHub__OAuthClientSecret: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      # GitHub OAuth (user login). Tamma.Api binds config["GitHub:ClientId"]
+      # and config["GitHub:ClientSecret"] in AuthEndpoints.GitHubAuth and
+      # GitHubOAuthService. The previous mapping under GitHub__OAuthClientId
+      # never bound, so /api/auth/github responded with
+      #   {"error":"GitHub OAuth not configured"}
+      # even when GITHUB_OAUTH_CLIENT_ID was set in .env.
+      GitHub__ClientId: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GitHub__ClientSecret: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      GitHub__RedirectUri: ${GITHUB_OAUTH_REDIRECT_URI:-https://app.tamma.dev/api/auth/github/callback}
       Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
       ChromaDb__Url: http://chromadb:8000
       IntelligenceServer__Url: http://intelligence-server:4100

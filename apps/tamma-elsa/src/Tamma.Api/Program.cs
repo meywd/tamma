@@ -373,6 +373,25 @@ builder.Services.AddHttpClient("github-oauth", client =>
 builder.Services.AddScoped<Tamma.Api.Services.OAuth.IGitHubOAuthService,
     Tamma.Api.Services.OAuth.GitHubOAuthService>();
 
+// Surface missing GitHub OAuth config at boot rather than waiting for the
+// first /api/auth/github click to return {"error":"GitHub OAuth not
+// configured"}. The dashboard's "Sign in with GitHub" button links
+// directly to this endpoint, so an unconfigured deploy looks like a
+// hard outage to users. Use stderr so it shows up in `docker logs`
+// alongside the rest of the startup diagnostics.
+{
+    var ghClientId = builder.Configuration["GitHub:ClientId"];
+    var ghClientSecret = builder.Configuration["GitHub:ClientSecret"];
+    if (string.IsNullOrWhiteSpace(ghClientId) || string.IsNullOrWhiteSpace(ghClientSecret))
+    {
+        Console.Error.WriteLine(
+            "[startup-warning] GitHub OAuth credentials are not configured; " +
+            "/api/auth/github will return 400 \"GitHub OAuth not configured\". " +
+            "Set GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET in .env " +
+            "(mapped to GitHub__ClientId / GitHub__ClientSecret in compose).");
+    }
+}
+
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
 builder.Services.AddPromptStoreServices();
