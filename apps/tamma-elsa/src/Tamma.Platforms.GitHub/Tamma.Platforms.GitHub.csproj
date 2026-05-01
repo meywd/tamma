@@ -19,11 +19,12 @@
     </Description>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
-  </ItemGroup>
-
+  <!-- Microsoft.Extensions.DependencyInjection.Abstractions and
+       Microsoft.Extensions.Logging.Abstractions flow transitively from
+       Tamma.Activities (Elsa 3.5.3 → 9.0.11). Explicit references here
+       at older versions trigger NU1605 (package downgrade) outside the
+       Directory.Build.props scope (e.g., the Tamma.Api docker build
+       context which is one directory deeper than the props file). -->
   <ItemGroup>
     <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
     <!-- Tamma.Activities exposes IGitHubActionsClient — the narrow
