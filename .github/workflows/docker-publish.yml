@@ -763,6 +763,32 @@ jobs:
               exit \$FAIL
             "
 
+      # PR #343 deployed a Tamma.Api with no GitHub OAuth env binding —
+      # /api/auth/github silently 400'd. The earlier probe step accepts
+      # any 2xx/3xx, so it didn't catch a 400 on this specific endpoint.
+      # This step asserts the endpoint redirects to github.com (302 +
+      # Location header pointing at github.com/login/oauth/authorize) so
+      # an env-key naming regression fails the deploy instead of users.
+      - name: "Health check: GitHub OAuth start endpoint"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              for i in \$(seq 1 10); do
+                CODE=\$(curl -sk -H 'Host: api.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/api/auth/github' 2>/dev/null || echo '000')
+                LOC=\$(curl -sk -H 'Host: api.tamma.dev' -D - -o /dev/null 'https://localhost/api/auth/github' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
+                if [ \"\$CODE\" = '302' ] && echo \"\$LOC\" | grep -q 'github.com/login/oauth/authorize'; then
+                  echo ' /api/auth/github OK (302 → github.com/login/oauth/authorize)'
+                  exit 0
+                fi
+                BODY=\$(head -c 200 /tmp/oauth-probe.body 2>/dev/null || echo '')
+                echo \"OAuth probe attempt \$i/10: code=\$CODE loc=\$LOC body=\$BODY\"
+                sleep 5
+              done
+              echo '::error::/api/auth/github did not redirect to GitHub (final code: '\$CODE'). This usually means GitHub__ClientId is not bound — check docker-compose.yml env mapping vs config[\"GitHub:ClientId\"] in AuthEndpoints.cs.'
+              exit 1
+            "
+
       - name: "Post-deploy integration tests"
         run: |
           scp -i ~/.ssh/deploy_key \
