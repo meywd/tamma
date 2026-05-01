@@ -41,9 +41,23 @@ describe('startCommand service-mode config-error handling', () => {
 
   it('waits for SIGTERM/SIGINT instead of busy-looping', () => {
     // Idle implementation must register signal handlers so docker stop
-    // / compose down terminates cleanly.
-    expect(startSource).toMatch(/process\.on\(['"]SIGTERM['"]/);
-    expect(startSource).toMatch(/process\.on\(['"]SIGINT['"]/);
+    // / compose down terminates cleanly. Use process.once (not process.on)
+    // so cleanup happens once, paired with clearInterval below.
+    expect(startSource).toMatch(/process\.once\(['"]SIGTERM['"]/);
+    expect(startSource).toMatch(/process\.once\(['"]SIGINT['"]/);
+  });
+
+  it('anchors the idle Promise with a heartbeat timer', () => {
+    // Critical Node.js gotcha: signal handlers alone do NOT keep the
+    // event loop alive. A bare `await new Promise(r => process.on(...))`
+    // resolves immediately because Node sees no pending work and exits.
+    // The fix uses setInterval(... 1 << 30) as a no-op heartbeat that
+    // *is* counted as pending work, then clearInterval'd on signal.
+    // Verified empirically: without the heartbeat the engine container
+    // exits within milliseconds of printing "sitting idle" and docker
+    // restart-loops it indefinitely (PR #343 deploy failure mode).
+    expect(startSource).toMatch(/setInterval\([^,]+,\s*1\s*<<\s*30\)/);
+    expect(startSource).toMatch(/clearInterval\(heartbeat\)/);
   });
 
   it('logs a clear "sitting idle" message before parking', () => {

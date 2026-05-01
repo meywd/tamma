@@ -153,8 +153,16 @@ export async function startCommand(options: CLIOptions): Promise<void> {
       console.error('Configure GitHub credentials and restart to activate the worker loop.');
       try { fs.writeFileSync('/tmp/tamma-engine-healthy', String(Date.now())); } catch { /* best-effort */ }
       await new Promise<void>(resolve => {
-        process.on('SIGTERM', () => resolve());
-        process.on('SIGINT',  () => resolve());
+        // Node's event loop exits when there's no pending work; signal
+        // handlers alone aren't considered work, so without an active
+        // timer this Promise would never block — the process would exit
+        // immediately and docker would restart-loop the container. The
+        // 2^30ms (~12d) heartbeat keeps the loop alive at zero CPU cost
+        // until SIGTERM/SIGINT clears it and resolves the Promise.
+        const heartbeat = setInterval(() => { /* keep-alive */ }, 1 << 30);
+        const cleanup = (): void => { clearInterval(heartbeat); resolve(); };
+        process.once('SIGTERM', cleanup);
+        process.once('SIGINT',  cleanup);
       });
       return;
     }
