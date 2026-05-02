@@ -1,8 +1,9 @@
 /**
  * Login Page — GitHub OAuth entry point.
  *
- * Centered card with a "Sign in with GitHub" button that redirects
- * to /api/auth/github (same-origin). Displays errors from ?error= query param.
+ * Centered card with a "Sign in with GitHub" button that redirects to
+ * /oauth2/start (oauth2-proxy, same-origin). Displays errors from
+ * ?error= query param.
  */
 
 import { useSearchParams } from 'react-router-dom';
@@ -35,7 +36,7 @@ export function LoginPage(): JSX.Element {
         )}
 
         <a
-          href="/api/auth/github"
+          href="/oauth2/start?rd=%2F"
           className="inline-flex items-center justify-center gap-2 w-full px-4 py-2.5 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-md transition-colors"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
