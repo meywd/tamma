@@ -30,8 +30,6 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
         "/api/v1/auth/resend-verification",
         "/api/v1/auth/password-reset/request",
         "/api/v1/auth/password-reset/confirm",
-        "/api/auth/github",
-        "/api/auth/github/callback",
         "/api/github/callback",
         "/api/github/webhooks",
         "/api/convention-templates",

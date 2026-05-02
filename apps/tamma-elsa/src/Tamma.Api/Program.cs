@@ -363,35 +363,6 @@ builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter,
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();
-// GitHub OAuth http client (token exchange + profile fetch). User-Agent
-// header is required by the GitHub API.
-builder.Services.AddHttpClient("github-oauth", client =>
-{
-    client.DefaultRequestHeaders.Add("User-Agent", "Tamma-API");
-    client.DefaultRequestHeaders.Add("Accept", "application/json");
-});
-builder.Services.AddScoped<Tamma.Api.Services.OAuth.IGitHubOAuthService,
-    Tamma.Api.Services.OAuth.GitHubOAuthService>();
-
-// Surface missing GitHub OAuth config at boot rather than waiting for the
-// first /api/auth/github click to return {"error":"GitHub OAuth not
-// configured"}. The dashboard's "Sign in with GitHub" button links
-// directly to this endpoint, so an unconfigured deploy looks like a
-// hard outage to users. Use stderr so it shows up in `docker logs`
-// alongside the rest of the startup diagnostics.
-{
-    var ghClientId = builder.Configuration["GitHub:ClientId"];
-    var ghClientSecret = builder.Configuration["GitHub:ClientSecret"];
-    if (string.IsNullOrWhiteSpace(ghClientId) || string.IsNullOrWhiteSpace(ghClientSecret))
-    {
-        Console.Error.WriteLine(
-            "[startup-warning] GitHub OAuth credentials are not configured; " +
-            "/api/auth/github will return 400 \"GitHub OAuth not configured\". " +
-            "Set GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET in .env " +
-            "(mapped to GitHub__ClientId / GitHub__ClientSecret in compose).");
-    }
-}
-
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
 builder.Services.AddPromptStoreServices();
@@ -1178,14 +1149,9 @@ app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("Authentica
 // status alone (audit finding 010). AuthenticatedAny enforces auth; the
 // endpoint itself returns 403 for insufficient role.
 app.MapGet("/api/auth/role-check", AuthEndpoints.RoleCheck).RequireAuthorization("AuthenticatedAny");
-// Audit finding 014 — rate limit OAuth start + callback (60/min). Both share
-// the policy because the callback's HTTP-side cost is comparable to the start
-// (token exchange + GitHub API call) and an attacker spraying either consumes
-// the same downstream budget.
-app.MapGet("/api/auth/github", AuthEndpoints.GitHubAuth)
-    .RequireRateLimiting("OAuthStart");
-app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback)
-    .RequireRateLimiting("OAuthStart");
+// Browser user-login flow lives in oauth2-proxy (see docker/oauth2-proxy.cfg
+// + nginx auth_request). Tamma.Api does NOT own a /api/auth/github route;
+// the dashboard's "Sign in with GitHub" button links to /oauth2/start.
 
 // ── Admin ──
 var admin = app.MapGroup("/api/admin").RequireAuthorization("AdminAccess");
