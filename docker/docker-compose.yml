@@ -193,7 +193,11 @@ services:
       # consumed by oauth2-proxy (see service block below), not by
       # Tamma.Api. The /api/auth/github endpoint that previously read
       # GitHub:ClientId / GitHub:ClientSecret was retired; browser users
-      # authenticate via /oauth2/start → /oauth2/callback.
+      # authenticate via /oauth2/start → /oauth2/callback. Tamma.Api
+      # bridges that proxy session into a tamma_session JWT via the
+      # ProxyHeaderAuthMiddleware, which calls oauth2-proxy /oauth2/userinfo
+      # at this URL.
+      OAuth2Proxy__Url: http://oauth2-proxy:4180
       Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
       ChromaDb__Url: http://chromadb:8000
       IntelligenceServer__Url: http://intelligence-server:4100

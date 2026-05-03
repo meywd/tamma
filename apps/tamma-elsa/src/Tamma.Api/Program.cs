@@ -363,6 +363,14 @@ builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter,
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();
+// Bridge from oauth2-proxy (browser auth gateway) to Tamma's tamma_session
+// JWT. The middleware is wired in the request pipeline below; the
+// HttpClient feeds it /oauth2/userinfo lookups.
+builder.Services.AddHttpClient("oauth2-proxy", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddScoped<Tamma.Api.Middleware.ProxyHeaderAuthMiddleware>();
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
 builder.Services.AddPromptStoreServices();
@@ -1090,6 +1098,12 @@ app.UseHttpsRedirection();
 app.UseCors("AllowDashboard");
 
 app.UseAuthentication();
+// After UseAuthentication and BEFORE UseAuthorization: if the request
+// arrived without a valid JWT but with a _oauth2_proxy cookie, mint a
+// tamma_session JWT from the proxy's /oauth2/userinfo response. CLI /
+// API-key callers (no proxy cookie) pass through untouched. See
+// ProxyHeaderAuthMiddleware for the full rationale.
+app.UseMiddleware<Tamma.Api.Middleware.ProxyHeaderAuthMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 // Story 28-R2 follow-up B — verify the impersonation row backing any
