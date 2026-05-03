@@ -23,7 +23,8 @@ public static class PromptEndpoints
         PromptStoreService store,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
-        ITammaModeProvider modeProvider)
+        ITammaModeProvider modeProvider,
+        ILoggerFactory loggerFactory)
     {
         // Story 27-2 — SaaS mode lists tenant overrides; single-user mode
         // lists the caller's user-scoped overrides. The two surfaces are
@@ -43,18 +44,60 @@ public static class PromptEndpoints
             return Results.Ok(tenantResponse);
         }
 
+        // Story 28-1 PR D moved prompt_overrides to the per-tenant DB, so
+        // every read goes through PromptRepository.RequireTenantId() and
+        // tenantDbFactory.CreateAsync(tid). Two ways this can blow up at
+        // request time:
+        //   1. tenantContext.TenantId is null. Possible briefly during
+        //      oauth2-proxy → bridge → personal-tenant bootstrap, OR when
+        //      EnsurePersonalTenantMiddleware bails out (e.g. slug-
+        //      collision retries exhausted).
+        //   2. Tenant exists but its DB isn't reachable yet — CP says the
+        //      tenant is provisioning, the per-tenant DB is mid-migration,
+        //      or the connection resolver hasn't warmed the pool.
+        //
+        // Both of those used to surface as a 500 with
+        // InvalidOperationException, and the dashboard's useTenantPrompts
+        // hook would render an error banner instead of the (perfectly fine)
+        // system defaults that come from /api/prompts/system. Since "no
+        // overrides yet" is a real, valid state for any new user, we
+        // degrade to an empty list on either failure mode and log loudly
+        // so ops can see the underlying cause.
+        if (tenantContext.TenantId is null)
+        {
+            return Results.Ok(new List<PromptResponse>());
+        }
+
         var userId = TryGetUserId(principal);
-        var overrides = await store.ListUserOverridesAsync(userId);
-        var response = overrides.Select(p => new PromptResponse(
-            p.Role,
-            p.Action,
-            p.Template,
-            p.SystemPrompt,
-            p.Variables,
-            p.EnableTools,
-            p.MaxTokens,
-            "user")).ToList();
-        return Results.Ok(response);
+        try
+        {
+            var overrides = await store.ListUserOverridesAsync(userId);
+            var response = overrides.Select(p => new PromptResponse(
+                p.Role,
+                p.Action,
+                p.Template,
+                p.SystemPrompt,
+                p.Variables,
+                p.EnableTools,
+                p.MaxTokens,
+                "user")).ToList();
+            return Results.Ok(response);
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException
+            || ex is Npgsql.NpgsqlException
+            || ex is Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            // Don't 500 the dashboard for an infra hiccup — the user-visible
+            // behaviour matches "no overrides yet". The exception still
+            // shows up in tamma-api logs (LogError), and the system defaults
+            // still render via the parallel /api/prompts/system call.
+            loggerFactory.CreateLogger("PromptEndpoints.ListAll").LogError(ex,
+                "ListAll: returning empty list because per-tenant prompt store " +
+                "could not be queried (tenant={TenantId}, user={UserId})",
+                tenantContext.TenantId, userId);
+            return Results.Ok(new List<PromptResponse>());
+        }
     }
 
     // =======================================================================

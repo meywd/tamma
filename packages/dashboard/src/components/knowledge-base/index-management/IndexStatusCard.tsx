@@ -66,11 +66,11 @@ export function IndexStatusCard({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
         <div>
           <div style={{ fontSize: '12px', color: '#6b7280' }}>Files Indexed</div>
-          <div style={{ fontSize: '20px', fontWeight: 600 }}>{status.filesIndexed.toLocaleString()}</div>
+          <div style={{ fontSize: '20px', fontWeight: 600 }}>{(status.filesIndexed ?? 0).toLocaleString()}</div>
         </div>
         <div>
           <div style={{ fontSize: '12px', color: '#6b7280' }}>Chunks Created</div>
-          <div style={{ fontSize: '20px', fontWeight: 600 }}>{status.chunksCreated.toLocaleString()}</div>
+          <div style={{ fontSize: '20px', fontWeight: 600 }}>{(status.chunksCreated ?? 0).toLocaleString()}</div>
         </div>
         <div>
           <div style={{ fontSize: '12px', color: '#6b7280' }}>Last Run</div>
