@@ -42,7 +42,7 @@ export function isAdminPageActive(): boolean {
 }
 
 export function NavHeader(): JSX.Element {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const userRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -68,10 +68,7 @@ export function NavHeader(): JSX.Element {
 
   function handleSignOut(e: React.MouseEvent): void {
     e.preventDefault();
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-      .finally(() => {
-        window.location.href = '/login';
-      });
+    logout();
   }
 
   return (

@@ -11,13 +11,14 @@ import { NavHeader, isActiveService, isAdmin, isAdminPageActive } from './NavHea
 // Mock useAuth — returns whatever mockUser is set to
 // ---------------------------------------------------------------------------
 let mockUser: { id: string; username: string; githubId: number; role: string } | null = null;
+let mockLogout = vi.fn();
 
 vi.mock('../../hooks/useAuth.js', () => ({
   useAuth: () => ({
     user: mockUser,
     loading: false,
     error: null,
-    logout: vi.fn(),
+    logout: mockLogout,
   }),
 }));
 
@@ -51,6 +52,7 @@ beforeEach(() => {
   mockUser = MEMBER_USER;
   setHostname('app.tamma.dev');
   globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+  mockLogout = vi.fn();
 });
 
 afterEach(() => {
@@ -238,12 +240,17 @@ describe('NavHeader', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Test 10: Sign-out calls POST /api/auth/logout then redirects
+  // Test 10: Sign-out delegates to useAuth().logout()
+  //
+  // Previously this asserted that NavHeader called fetch('/api/auth/logout')
+  // directly. The implementation now routes through the useAuth hook, which
+  // owns the OAuth-logout HTTP call (and is the one place that can read the
+  // session-cookie state to know whether oauth2-proxy needs a /oauth2/sign_out
+  // bounce on top). The test was rewritten in lockstep — NavHeader's actual
+  // contract is "call logout(), don't make HTTP calls of your own."
   // -----------------------------------------------------------------------
-  it('calls POST /api/auth/logout on sign out', async () => {
+  it('calls useAuth().logout() on sign out', async () => {
     mockUser = MEMBER_USER;
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
-    globalThis.fetch = mockFetch;
 
     render(<NavHeader />);
 
@@ -252,32 +259,27 @@ describe('NavHeader', () => {
     const signOutLink = screen.getByText('Sign Out');
     fireEvent.click(signOutLink);
 
-    expect(mockFetch).toHaveBeenCalledWith('/api/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-    });
+    expect(mockLogout).toHaveBeenCalledOnce();
   });
 
   // -----------------------------------------------------------------------
-  // Test 11: Sign-out redirects even when fetch fails
+  // Test 11: Sign-out is fire-and-forget — NavHeader doesn't wait for the
+  // logout call to complete. Redirection is a useAuth concern (it does it
+  // in .finally()), not NavHeader's. Asserts that NavHeader doesn't try to
+  // do its own redirect either.
   // -----------------------------------------------------------------------
-  it('redirects to /login even when sign out fetch fails', async () => {
+  it('does not redirect synchronously — useAuth owns the redirect', async () => {
     mockUser = MEMBER_USER;
-    // Return a response with ok:false to simulate server error (not network
-    // failure) because .finally() does not catch rejections and would cause
-    // an unhandled rejection in the test runner.
-    const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
-    globalThis.fetch = mockFetch;
 
     render(<NavHeader />);
 
     fireEvent.click(screen.getByRole('button', { name: /member-user/i }));
     fireEvent.click(screen.getByText('Sign Out'));
 
-    // .finally() block fires redirect regardless of ok/not-ok
-    await vi.waitFor(() => {
-      expect(window.location.href).toBe('/login');
-    });
+    // NavHeader called logout once but did not redirect synchronously —
+    // window.location is whatever the test setup left it at (app.tamma.dev).
+    expect(mockLogout).toHaveBeenCalledOnce();
+    expect(window.location.href).not.toBe('/login');
   });
 
   // -----------------------------------------------------------------------

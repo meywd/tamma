@@ -11,18 +11,11 @@ import { useCurrentUser } from '../hooks/admin/useCurrentUser.js';
 import type { JSX } from "react";
 
 export function AccountPage(): JSX.Element {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { user: fullUser } = useCurrentUser();
 
   if (!user) {
     return <div className="p-6 text-gray-500">Not authenticated.</div>;
-  }
-
-  function handleSignOut(): void {
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-      .finally(() => {
-        window.location.href = '/login';
-      });
   }
 
   return (
@@ -61,7 +54,7 @@ export function AccountPage(): JSX.Element {
 
       <div className="mt-6">
         <button
-          onClick={handleSignOut}
+          onClick={logout}
           className="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-md hover:bg-red-50 transition-colors"
         >
           Sign Out

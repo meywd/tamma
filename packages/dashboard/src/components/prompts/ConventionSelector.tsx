@@ -6,47 +6,34 @@
  */
 
 import { useCallback, useEffect, useState, type JSX } from 'react';
-
-interface ConventionSummary {
-  key: string;
-  name: string;
-  description: string;
-}
-
-interface ConventionDetail extends ConventionSummary {
-  conventions: string;
-}
+import {
+  conventionTemplatesApi,
+  type ConventionTemplate,
+  type ConventionTemplateSummary,
+} from '../../services/admin/prompts-api-client.js';
 
 interface ConventionSelectorProps {
   onInsert: (text: string) => void;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
-
 export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.Element {
-  const [conventions, setConventions] = useState<ConventionSummary[]>([]);
+  const [conventions, setConventions] = useState<ConventionTemplateSummary[]>([]);
   const [selected, setSelected] = useState<string>('');
-  const [detail, setDetail] = useState<ConventionDetail | null>(null);
+  const [detail, setDetail] = useState<ConventionTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchList(): Promise<void> {
-      try {
-        const res = await fetch(`${API_BASE}/api/convention-templates`, {
-          credentials: 'include',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = (await res.json()) as ConventionSummary[];
+    conventionTemplatesApi.list()
+      .then((list) => {
         if (!cancelled) setConventions(list);
-      } catch (err) {
+      })
+      .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load conventions');
         }
-      }
-    }
-    void fetchList();
+      });
     return () => {
       cancelled = true;
     };
@@ -59,13 +46,7 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/convention-templates/${encodeURIComponent(key)}`,
-        { credentials: 'include' },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as ConventionDetail;
-      setDetail(body);
+      setDetail(await conventionTemplatesApi.get(key));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load convention');
     } finally {
