@@ -380,7 +380,7 @@ public static class AdminEndpoints
             TenantId = tenantContext.TenantId
         });
 
-        return Results.Created($"/api/admin/users/{id}/keys/{apiKey.Id}",
+        return Results.Created($"/api/admin/users/{id}/api-keys/{apiKey.Id}",
             new ServiceKeyResponse(
                 apiKey.Id,
                 apiKey.OwnerId,
