@@ -50,26 +50,26 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 // === Index Management ===
 
 export const indexApi = {
-  getStatus: () => fetchJSON<IndexStatus>('/knowledge-base/index/status'),
+  getStatus: () => fetchJSON<IndexStatus>('/kb/index/status'),
 
   triggerIndex: (request?: TriggerIndexRequest) =>
-    fetchJSON<{ message: string }>('/knowledge-base/index/trigger', {
+    fetchJSON<{ message: string }>('/kb/index/trigger', {
       method: 'POST',
       body: JSON.stringify(request ?? {}),
     }),
 
   cancelIndex: () =>
-    fetchJSON<{ message: string }>('/knowledge-base/index/cancel', {
+    fetchJSON<{ message: string }>('/kb/index/cancel', {
       method: 'DELETE',
     }),
 
   getHistory: (limit = 20) =>
-    fetchJSON<IndexHistoryEntry[]>(`/knowledge-base/index/history?limit=${limit}`),
+    fetchJSON<IndexHistoryEntry[]>(`/kb/index/history?limit=${limit}`),
 
-  getConfig: () => fetchJSON<IndexConfig>('/knowledge-base/index/config'),
+  getConfig: () => fetchJSON<IndexConfig>('/kb/index/config'),
 
   updateConfig: (config: Partial<IndexConfig>) =>
-    fetchJSON<IndexConfig>('/knowledge-base/index/config', {
+    fetchJSON<IndexConfig>('/kb/index/config', {
       method: 'PUT',
       body: JSON.stringify(config),
     }),
@@ -79,47 +79,47 @@ export const indexApi = {
 
 export const vectorDBApi = {
   listCollections: () =>
-    fetchJSON<CollectionInfo[]>('/knowledge-base/vector-db/collections'),
+    fetchJSON<CollectionInfo[]>('/kb/vector-db/collections'),
 
   createCollection: (request: CreateCollectionRequest) =>
-    fetchJSON<{ message: string }>('/knowledge-base/vector-db/collections', {
+    fetchJSON<{ message: string }>('/kb/vector-db/collections', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
 
   getCollectionStats: (name: string) =>
-    fetchJSON<CollectionStatsInfo>(`/knowledge-base/vector-db/collections/${name}/stats`),
+    fetchJSON<CollectionStatsInfo>(`/kb/vector-db/collections/${name}/stats`),
 
   deleteCollection: (name: string) =>
-    fetchJSON<{ message: string }>(`/knowledge-base/vector-db/collections/${name}`, {
+    fetchJSON<{ message: string }>(`/kb/vector-db/collections/${name}`, {
       method: 'DELETE',
     }),
 
   search: (request: VectorSearchRequest) =>
-    fetchJSON<VectorSearchResult[]>('/knowledge-base/vector-db/search', {
+    fetchJSON<VectorSearchResult[]>('/kb/vector-db/search', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
 
   getStorageUsage: () =>
-    fetchJSON<StorageUsage>('/knowledge-base/vector-db/storage'),
+    fetchJSON<StorageUsage>('/kb/vector-db/storage'),
 };
 
 // === RAG Pipeline ===
 
 export const ragApi = {
-  getConfig: () => fetchJSON<RAGConfigInfo>('/knowledge-base/rag/config'),
+  getConfig: () => fetchJSON<RAGConfigInfo>('/kb/rag/config'),
 
   updateConfig: (config: Partial<RAGConfigInfo>) =>
-    fetchJSON<RAGConfigInfo>('/knowledge-base/rag/config', {
+    fetchJSON<RAGConfigInfo>('/kb/rag/config', {
       method: 'PUT',
       body: JSON.stringify(config),
     }),
 
-  getMetrics: () => fetchJSON<RAGMetricsInfo>('/knowledge-base/rag/metrics'),
+  getMetrics: () => fetchJSON<RAGMetricsInfo>('/kb/rag/metrics'),
 
   testQuery: (request: RAGTestRequest) =>
-    fetchJSON<RAGTestResult>('/knowledge-base/rag/test', {
+    fetchJSON<RAGTestResult>('/kb/rag/test', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
@@ -129,56 +129,56 @@ export const ragApi = {
 
 export const mcpApi = {
   listServers: () =>
-    fetchJSON<MCPServerInfo[]>('/knowledge-base/mcp/servers'),
+    fetchJSON<MCPServerInfo[]>('/kb/mcp/servers'),
 
   getServerStatus: (name: string) =>
-    fetchJSON<MCPServerInfo>(`/knowledge-base/mcp/servers/${name}`),
+    fetchJSON<MCPServerInfo>(`/kb/mcp/servers/${name}`),
 
   startServer: (name: string) =>
-    fetchJSON<{ message: string }>(`/knowledge-base/mcp/servers/${name}/start`, {
+    fetchJSON<{ message: string }>(`/kb/mcp/servers/${name}/start`, {
       method: 'POST',
     }),
 
   stopServer: (name: string) =>
-    fetchJSON<{ message: string }>(`/knowledge-base/mcp/servers/${name}/stop`, {
+    fetchJSON<{ message: string }>(`/kb/mcp/servers/${name}/stop`, {
       method: 'POST',
     }),
 
   restartServer: (name: string) =>
-    fetchJSON<{ message: string }>(`/knowledge-base/mcp/servers/${name}/restart`, {
+    fetchJSON<{ message: string }>(`/kb/mcp/servers/${name}/restart`, {
       method: 'POST',
     }),
 
   listTools: (serverName: string) =>
-    fetchJSON<MCPTool[]>(`/knowledge-base/mcp/servers/${serverName}/tools`),
+    fetchJSON<MCPTool[]>(`/kb/mcp/servers/${serverName}/tools`),
 
   invokeTool: (serverName: string, toolName: string, args: Record<string, unknown>) =>
     fetchJSON<MCPToolInvokeResult>(
-      `/knowledge-base/mcp/servers/${serverName}/tools/${toolName}/invoke`,
+      `/kb/mcp/servers/${serverName}/tools/${toolName}/invoke`,
       { method: 'POST', body: JSON.stringify({ arguments: args }) },
     ),
 
   getServerLogs: (name: string, limit = 100) =>
-    fetchJSON<MCPServerLog[]>(`/knowledge-base/mcp/servers/${name}/logs?limit=${limit}`),
+    fetchJSON<MCPServerLog[]>(`/kb/mcp/servers/${name}/logs?limit=${limit}`),
 };
 
 // === Context Testing ===
 
 export const contextApi = {
   testContext: (request: ContextTestRequest) =>
-    fetchJSON<ContextTestResult>('/knowledge-base/context/test', {
+    fetchJSON<ContextTestResult>('/kb/context/test', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
 
   submitFeedback: (feedback: ContextFeedbackRequest) =>
-    fetchJSON<{ message: string }>('/knowledge-base/context/feedback', {
+    fetchJSON<{ message: string }>('/kb/context/feedback', {
       method: 'POST',
       body: JSON.stringify(feedback),
     }),
 
   getHistory: (limit = 10) =>
-    fetchJSON<ContextTestResult[]>(`/knowledge-base/context/history?limit=${limit}`),
+    fetchJSON<ContextTestResult[]>(`/kb/context/history?limit=${limit}`),
 };
 
 // === Analytics ===
@@ -188,20 +188,20 @@ export const analyticsApi = {
     const params = new URLSearchParams();
     if (start) params.set('start', start);
     if (end) params.set('end', end);
-    return fetchJSON<UsageAnalytics>(`/knowledge-base/analytics/usage?${params}`);
+    return fetchJSON<UsageAnalytics>(`/kb/analytics/usage?${params}`);
   },
 
   getQualityAnalytics: (start?: string, end?: string) => {
     const params = new URLSearchParams();
     if (start) params.set('start', start);
     if (end) params.set('end', end);
-    return fetchJSON<QualityAnalytics>(`/knowledge-base/analytics/quality?${params}`);
+    return fetchJSON<QualityAnalytics>(`/kb/analytics/quality?${params}`);
   },
 
   getCostAnalytics: (start?: string, end?: string) => {
     const params = new URLSearchParams();
     if (start) params.set('start', start);
     if (end) params.set('end', end);
-    return fetchJSON<CostAnalytics>(`/knowledge-base/analytics/costs?${params}`);
+    return fetchJSON<CostAnalytics>(`/kb/analytics/costs?${params}`);
   },
 };
