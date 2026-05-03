@@ -75,7 +75,66 @@ export function MyApiKeysPage(): JSX.Element {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">API Keys</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-2">API Keys</h1>
+      <p className="text-sm text-gray-600 mb-6">
+        Personal credentials for command-line tools and automated scripts that
+        need to call the Tamma API on your behalf.
+      </p>
+
+      {/* Documentation panel — explains who needs API keys, what they grant,
+          and how to use them. Lots of users land here unsure whether they
+          should generate one; this surfaces the answer without a docs trip. */}
+      <details className="mb-6 bg-blue-50 border border-blue-200 rounded-lg overflow-hidden">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-900 hover:bg-blue-100">
+          When do I need an API key?
+        </summary>
+        <div className="px-4 py-3 text-sm text-blue-900 space-y-3 border-t border-blue-200">
+          <div>
+            <div className="font-semibold mb-1">You need a key if you want to:</div>
+            <ul className="list-disc list-inside space-y-0.5 ml-2">
+              <li>
+                Run the Tamma CLI in worker mode (<code className="text-xs bg-blue-100 px-1 rounded">tamma process-issue</code>,
+                <code className="text-xs bg-blue-100 px-1 rounded ml-1">tamma execute-task</code>) outside this browser
+              </li>
+              <li>Call the Tamma API from a CI pipeline, GitHub Action, or external script</li>
+              <li>Pull dashboard data into another tool (status board, Slack notifier, etc.)</li>
+            </ul>
+          </div>
+          <div>
+            <div className="font-semibold mb-1">You don't need a key if you only use the dashboard.</div>
+            <div>The browser session cookie covers everything you do here.</div>
+          </div>
+          <div>
+            <div className="font-semibold mb-1">What this key can do:</div>
+            <div>
+              Read-only access to dashboard data and workflow status (
+              <code className="text-xs bg-blue-100 px-1 rounded">dashboard:view</code>{' '}
+              + <code className="text-xs bg-blue-100 px-1 rounded">workflows:view</code>).
+              It cannot create or modify resources, manage users, or read other tenants' data.
+              For tenant-wide automation use an organization key under{' '}
+              <span className="font-mono text-xs">Settings → Organization → API Keys</span>.
+            </div>
+          </div>
+          <div>
+            <div className="font-semibold mb-1">How to use it:</div>
+            <div className="space-y-1">
+              <div>Set as an environment variable:</div>
+              <code className="block p-2 bg-blue-100 rounded text-xs">
+                export TAMMA_API_KEY=tamma_sk_us_…
+              </code>
+              <div>Or pass on every request:</div>
+              <code className="block p-2 bg-blue-100 rounded text-xs">
+                curl -H "Authorization: Bearer tamma_sk_us_…" https://api.tamma.dev/api/dashboard/summary
+              </code>
+            </div>
+          </div>
+          <div className="text-xs text-blue-800 italic">
+            Security: the full key is shown <strong>once</strong> when you create it. Store it in a
+            secrets manager or your CI's secret store — never commit it. If a key is leaked,
+            revoke it here immediately; revoked keys reject all requests.
+          </div>
+        </div>
+      </details>
 
       {error && (
         <div className="mb-4 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md">
