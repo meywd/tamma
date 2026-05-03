@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -60,12 +61,7 @@ public static class GitHubEndpoints
         // GitHub-Marketplace-first install flow that Story 18-4 explicitly
         // documents. We persist regardless; only the linking semantics
         // depend on whether a user is signed in.
-        var userIdClaim = context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        Guid? userId = null;
-        if (!string.IsNullOrEmpty(userIdClaim) && Guid.TryParse(userIdClaim, out var parsedUserId))
-        {
-            userId = parsedUserId;
-        }
+        var userId = context.User?.GetUserId();
 
         int? setupActionId = int.TryParse(setupAction, out var s) ? s : null;
 

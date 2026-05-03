@@ -314,8 +314,7 @@ public class TenantContextMiddleware(RequestDelegate next)
             return (fromClaim, "jwt_claim");
 
         // Source 4: user-row fallback (JWT lacked tid).
-        var userIdRaw = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (Guid.TryParse(userIdRaw, out var userId))
+        if (context.User.GetUserId() is Guid userId)
         {
             var user = await userRepo.GetByIdAsync(userId).ConfigureAwait(false);
             if (user?.TenantId is not null && user.TenantId.Value != Guid.Empty)

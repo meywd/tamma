@@ -795,10 +795,7 @@ public static class OrgEndpoints
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static Guid? ResolveUserId(ClaimsPrincipal principal)
-    {
-        var raw = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
+        => principal.GetUserId();
 
     private static bool RoleAtLeast(HttpContext ctx, string min)
     {

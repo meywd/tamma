@@ -439,8 +439,5 @@ public static class PromptEndpoints
     // =======================================================================
 
     private static Guid? TryGetUserId(ClaimsPrincipal principal)
-    {
-        var raw = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
+        => principal.GetUserId();
 }

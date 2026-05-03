@@ -35,8 +35,7 @@ public class SelfOrPermissionHandler(IHttpContextAccessor httpContextAccessor)
             ? v?.ToString()
             : null;
 
-        var sub = context.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
-            ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var sub = context.User.GetUserIdString();
 
         if (!string.IsNullOrEmpty(routeId) && !string.IsNullOrEmpty(sub) &&
             string.Equals(routeId, sub, StringComparison.OrdinalIgnoreCase))

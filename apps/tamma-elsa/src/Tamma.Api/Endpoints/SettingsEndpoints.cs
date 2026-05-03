@@ -271,9 +271,5 @@ public static class SettingsEndpoints
     }
 
     private static Guid? ResolveUserId(System.Security.Claims.ClaimsPrincipal principal)
-    {
-        var sub = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                  ?? principal.FindFirst("sub")?.Value;
-        return Guid.TryParse(sub, out var g) ? g : null;
-    }
+        => Tamma.Api.Auth.ClaimsPrincipalExtensions.GetUserId(principal);
 }

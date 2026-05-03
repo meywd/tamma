@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -241,12 +242,7 @@ public static class TenantStatusEndpoint
         return startedAt + FallbackProvisioningEstimate;
     }
 
-    private static Guid? TryGetUserId(HttpContext http)
-    {
-        var sub = http.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? http.User.FindFirstValue("sub");
-        return Guid.TryParse(sub, out var userId) ? userId : null;
-    }
+    private static Guid? TryGetUserId(HttpContext http) => http.User.GetUserId();
 }
 
 /// <summary>

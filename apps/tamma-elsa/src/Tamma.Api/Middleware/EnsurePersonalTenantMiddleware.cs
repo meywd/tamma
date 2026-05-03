@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using System.Text.Json;
 using Tamma.Data;
 using Tamma.Data.Entities;
@@ -66,8 +67,7 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
             return;
         }
 
-        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userIdClaim is null || !Guid.TryParse(userIdClaim, out var userId))
+        if (context.User.GetUserId() is not Guid userId)
         {
             await next(context);
             return;
