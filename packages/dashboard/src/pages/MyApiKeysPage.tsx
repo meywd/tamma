@@ -1,39 +1,33 @@
 /**
  * My API Keys Page — Self-service API key management for the current user.
  *
- * Similar to the admin ApiKeysTab but scoped to the current user only.
- * Users can create and revoke their own API keys.
+ * Uses the Story 16.2 endpoints at /api/admin/users/:userId/keys, accessed
+ * through the apiKeysApi client in services/admin/admin-api-client.ts.
+ * That client owns the request/response shape contracts (path, label vs
+ * name, { apiKeys: [] } wrapper, raw-key-once response) — keeping the
+ * page logic free of low-level fetch boilerplate also means we can't
+ * accidentally drift from the contract again.
  */
 
 import { useState, useEffect, useCallback, type JSX } from 'react';
 import { useAuth } from '../hooks/useAuth.js';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.js';
-
-interface ApiKey {
-  id: string;
-  name: string;
-  prefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-}
+import { apiKeysApi, type ApiKeyEntry } from '../services/admin/admin-api-client.js';
 
 export function MyApiKeysPage(): JSX.Element {
   const { user } = useAuth();
-  const [keys, setKeys] = useState<ApiKey[]>([]);
+  const [keys, setKeys] = useState<ApiKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyLabel, setNewKeyLabel] = useState('');
   const [createdKey, setCreatedKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   const fetchKeys = useCallback(async () => {
     if (!user) return;
     try {
-      const res = await fetch(`/api/admin/users/${user.id}/api-keys`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to fetch API keys');
-      const data = (await res.json()) as { keys: ApiKey[] };
-      setKeys(data.keys);
+      const list = await apiKeysApi.list(user.id);
+      setKeys(list);
       setError(null);
     } catch {
       setError('Failed to load API keys');
@@ -47,19 +41,12 @@ export function MyApiKeysPage(): JSX.Element {
   }, [fetchKeys]);
 
   async function handleCreate(): Promise<void> {
-    if (!user || !newKeyName.trim()) return;
+    if (!user || !newKeyLabel.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch(`/api/admin/users/${user.id}/api-keys`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newKeyName.trim() }),
-      });
-      if (!res.ok) throw new Error('Failed to create API key');
-      const data = (await res.json()) as { key: string };
-      setCreatedKey(data.key);
-      setNewKeyName('');
+      const result = await apiKeysApi.create(user.id, newKeyLabel.trim());
+      setCreatedKey(result.key);
+      setNewKeyLabel('');
       void fetchKeys();
     } catch {
       setError('Failed to create API key');
@@ -71,11 +58,7 @@ export function MyApiKeysPage(): JSX.Element {
   async function handleRevoke(keyId: string): Promise<void> {
     if (!user) return;
     try {
-      const res = await fetch(`/api/admin/users/${user.id}/api-keys/${keyId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to revoke API key');
+      await apiKeysApi.revoke(user.id, keyId);
       void fetchKeys();
     } catch {
       setError('Failed to revoke API key');
@@ -119,14 +102,14 @@ export function MyApiKeysPage(): JSX.Element {
         <div className="flex gap-2">
           <input
             type="text"
-            value={newKeyName}
-            onChange={(e) => setNewKeyName(e.target.value)}
-            placeholder="Key name (e.g. CI pipeline)"
+            value={newKeyLabel}
+            onChange={(e) => setNewKeyLabel(e.target.value)}
+            placeholder="Label (e.g. CI pipeline)"
             className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
             onClick={() => void handleCreate()}
-            disabled={creating || !newKeyName.trim()}
+            disabled={creating || !newKeyLabel.trim()}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 transition-colors"
           >
             {creating ? 'Creating...' : 'Create'}
@@ -142,7 +125,7 @@ export function MyApiKeysPage(): JSX.Element {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-2 font-medium text-gray-500">Name</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-500">Label</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-500">Prefix</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-500">Created</th>
                 <th className="text-left px-4 py-2 font-medium text-gray-500">Last Used</th>
@@ -150,10 +133,10 @@ export function MyApiKeysPage(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {keys.map((k) => (
+              {keys.filter((k) => !k.revokedAt).map((k) => (
                 <tr key={k.id} className="border-b border-gray-100 last:border-0">
-                  <td className="px-4 py-3 font-medium text-gray-900">{k.name}</td>
-                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{k.prefix}...</td>
+                  <td className="px-4 py-3 font-medium text-gray-900">{k.label}</td>
+                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{k.keyPrefix}...</td>
                   <td className="px-4 py-3 text-gray-500">{new Date(k.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-gray-500">
                     {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : 'Never'}
