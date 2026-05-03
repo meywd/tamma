@@ -1147,7 +1147,12 @@ auth.MapPost("/verify-email", AuthEndpoints.VerifyEmail);
 auth.MapPost("/resend-verification", AuthEndpoints.ResendVerification);
 auth.MapPost("/login", AuthEndpoints.Login);
 auth.MapPost("/refresh", AuthEndpoints.Refresh);
-auth.MapPost("/logout", AuthEndpoints.Logout).RequireAuthorization("MemberAccess");
+// Logout sits at bare /api/auth/logout (not /api/v1/auth/logout) to match
+// the bare-path session endpoints /api/auth/me and /api/auth/role-check
+// that the dashboard polls. The /api/v1/auth/* group reserves login,
+// register, refresh — the OAuth2-flow endpoints — while the bare /api/auth
+// group is for "what is my current session" semantics.
+app.MapPost("/api/auth/logout", AuthEndpoints.Logout).RequireAuthorization("MemberAccess");
 auth.MapPost("/password-reset/request", AuthEndpoints.PasswordResetRequest);
 auth.MapPost("/password-reset/confirm", AuthEndpoints.PasswordResetConfirm);
 // Story 28-9 — switch-org owns refresh-token rotation alongside the new JWT
