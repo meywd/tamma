@@ -10,10 +10,33 @@ namespace Tamma.Api.Endpoints;
 
 public static class SettingsEndpoints
 {
-    public static async Task<IResult> GetAgentsConfig(IAgentConfigRepository configRepo, ITenantContext tc)
+    public static async Task<IResult> GetAgentsConfig(
+        IAgentConfigRepository configRepo,
+        ITenantContext tc,
+        ILoggerFactory loggerFactory)
     {
-        var config = await configRepo.GetAsync(tc.TenantId);
-        return Results.Ok(config is not null ? JsonSerializer.Deserialize<object>(config.Config) : new { });
+        // Same shape of guard the PromptEndpoints.ListAll path has: the
+        // per-tenant DB lookup can throw on a tenant id whose connection
+        // pool isn't warm (Story 28-4 LRU resolver miss path) or whose
+        // tenant DB hasn't completed migrations. Either case is "no
+        // tenant override yet" from the caller's perspective — degrade to
+        // `{}` (the default-platform sentinel the dashboard renders the
+        // baked-in defaults against) instead of 500-ing the page.
+        try
+        {
+            var config = await configRepo.GetAsync(tc.TenantId);
+            return Results.Ok(config is not null ? JsonSerializer.Deserialize<object>(config.Config) : new { });
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException
+            || ex is Npgsql.NpgsqlException
+            || ex is Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            loggerFactory.CreateLogger("SettingsEndpoints.GetAgentsConfig").LogError(ex,
+                "GetAgentsConfig: returning empty config because per-tenant lookup " +
+                "could not be executed (tenant={TenantId})", tc.TenantId);
+            return Results.Ok(new { });
+        }
     }
 
     public static async Task<IResult> UpdateAgentsConfig(UpdateAgentsConfigRequest req, IAgentConfigRepository configRepo, ITenantContext tc)
