@@ -28,8 +28,8 @@ export function Slider({
   return (
     <div className="py-3">
       <div className="flex items-center justify-between mb-2">
-        <label className="text-sm font-medium text-gray-900">{label}</label>
-        <span className="text-sm text-gray-500">{display}</span>
+        <label className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</label>
+        <span className="text-sm text-gray-500 dark:text-gray-400">{display}</span>
       </div>
       <input
         type="range"
@@ -39,7 +39,7 @@ export function Slider({
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={disabled}
-        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"
+        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50 dark:bg-gray-700"
       />
     </div>
   );

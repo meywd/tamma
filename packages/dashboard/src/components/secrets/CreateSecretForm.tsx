@@ -82,15 +82,15 @@ export function CreateSecretForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-4 bg-white rounded-lg border border-gray-200 p-6"
+      className="space-y-4 bg-white rounded-lg border border-gray-200 p-6 dark:bg-gray-800 dark:border-gray-700"
       aria-label={`Create ${scopeLabel} secret`}
     >
-      <h3 className="text-lg font-semibold text-gray-900">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
         Create {scopeLabel} secret
       </h3>
 
       <div>
-        <label htmlFor="secret-name" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="secret-name" className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
           Name
         </label>
         <input
@@ -99,30 +99,30 @@ export function CreateSecretForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="db/app-role"
-          className="w-full font-mono text-sm px-3 py-2 border border-gray-300 rounded-md"
+          className="w-full font-mono text-sm px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600"
           aria-invalid={Boolean(errors.name)}
           aria-describedby={errors.name ? 'secret-name-error' : undefined}
         />
         {errors.name ? (
-          <p id="secret-name-error" className="text-xs text-red-600 mt-1">
+          <p id="secret-name-error" className="text-xs text-red-600 mt-1 dark:text-red-400">
             {errors.name}
           </p>
         ) : (
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">
             Lower-kebab-case with optional <code>/</code> segments.
           </p>
         )}
       </div>
 
       <div>
-        <label htmlFor="secret-purpose" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="secret-purpose" className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
           Purpose
         </label>
         <select
           id="secret-purpose"
           value={purpose}
           onChange={(e) => setPurpose(e.target.value as SecretPurpose)}
-          className="w-full text-sm px-3 py-2 border border-gray-300 rounded-md"
+          className="w-full text-sm px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600"
         >
           {PURPOSES.map((p) => (
             <option key={p} value={p}>
@@ -133,7 +133,7 @@ export function CreateSecretForm({
       </div>
 
       <div>
-        <label htmlFor="secret-plaintext" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="secret-plaintext" className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
           Initial value (plaintext)
         </label>
         <input
@@ -141,23 +141,23 @@ export function CreateSecretForm({
           type="password"
           value={plaintext}
           onChange={(e) => setPlaintext(e.target.value)}
-          className="w-full font-mono text-sm px-3 py-2 border border-gray-300 rounded-md"
+          className="w-full font-mono text-sm px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600"
           aria-invalid={Boolean(errors.plaintext)}
           aria-describedby={errors.plaintext ? 'secret-plaintext-error' : 'secret-plaintext-help'}
         />
         {errors.plaintext ? (
-          <p id="secret-plaintext-error" className="text-xs text-red-600 mt-1">
+          <p id="secret-plaintext-error" className="text-xs text-red-600 mt-1 dark:text-red-400">
             {errors.plaintext}
           </p>
         ) : (
-          <p id="secret-plaintext-help" className="text-xs text-gray-500 mt-1">
+          <p id="secret-plaintext-help" className="text-xs text-gray-500 mt-1 dark:text-gray-400">
             You&apos;ll see this value once on the next screen. Save it before closing.
           </p>
         )}
       </div>
 
       <div>
-        <label htmlFor="secret-rotation-days" className="block text-sm font-medium text-gray-700 mb-1">
+        <label htmlFor="secret-rotation-days" className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
           Rotation cadence (days)
         </label>
         <input
@@ -170,22 +170,22 @@ export function CreateSecretForm({
             setRotationDays(raw === '' ? '' : Math.max(0, parseInt(raw, 10) || 0));
           }}
           placeholder="0 = manual only"
-          className="w-32 text-sm px-3 py-2 border border-gray-300 rounded-md"
+          className="w-32 text-sm px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600"
           aria-invalid={Boolean(errors.rotationDays)}
         />
         {errors.rotationDays ? (
-          <p className="text-xs text-red-600 mt-1">{errors.rotationDays}</p>
+          <p className="text-xs text-red-600 mt-1 dark:text-red-400">{errors.rotationDays}</p>
         ) : (
-          <p className="text-xs text-gray-500 mt-1">0 disables scheduled rotation.</p>
+          <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">0 disables scheduled rotation.</p>
         )}
       </div>
 
-      <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+      <div className="flex justify-end gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
         <button
           type="button"
           onClick={onCancel}
           disabled={submitting}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
         >
           Cancel
         </button>

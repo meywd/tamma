@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* Tailwind v4 — opt out of the default media-query-based dark mode and
+   wire it to a `dark` class on <html>. The theme store toggles this
+   class, with localStorage persistence + prefers-color-scheme default. */
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  :root.dark {
+    color-scheme: dark;
+  }
+
+  /* Smooth color transitions when toggling theme — keeps the swap from
+     looking like a hard repaint flash on slower machines. */
+  :where(html, body, *) {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  /* Body background follows the theme so iframed / legacy components
+     that don't set their own bg fall back to the right surface. */
+  body {
+    background-color: rgb(249 250 251);
+  }
+  .dark body {
+    background-color: rgb(17 24 39);
+  }
+}

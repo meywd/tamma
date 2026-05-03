@@ -41,21 +41,21 @@ export function PromptsPage(): JSX.Element {
 
   return (
     <div className="p-6 max-w-5xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">AI Prompts</h1>
-      <p className="text-sm text-gray-600 mb-4">
+      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">AI Prompts</h1>
+      <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
         Customize how Tamma's AI agents behave for your tenant. System defaults ship with Tamma
         and apply to everyone; saving a change here creates a tenant-scoped override that falls
         back to the default when deleted.
       </p>
 
       {readOnly && (
-        <div className="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded">
+        <div className="mb-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded dark:bg-yellow-950 dark:text-yellow-200 dark:border-yellow-800">
           You have read-only access. Contact a tenant admin or owner to modify prompts.
         </div>
       )}
 
       {error && (
-        <div className="mb-4 text-sm text-red-600" role="alert">
+        <div className="mb-4 text-sm text-red-600 dark:text-red-400" role="alert">
           {error}
         </div>
       )}

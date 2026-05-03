@@ -59,10 +59,10 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
   }, [detail, onInsert]);
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 dark:bg-gray-900 dark:border-gray-700">
       <label
         htmlFor="convention-template-select"
-        className="block text-xs font-medium text-gray-600 mb-1"
+        className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
       >
         Convention Template
       </label>
@@ -71,7 +71,7 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
         aria-label="Convention Template"
         value={selected}
         onChange={(e) => void handleSelect(e.target.value)}
-        className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white"
+        className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white dark:bg-gray-800 dark:border-gray-600"
       >
         <option value="">Choose a convention template…</option>
         {conventions.map((c) => (
@@ -81,15 +81,15 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
         ))}
       </select>
 
-      {error && <div className="mt-2 text-xs text-red-600">{error}</div>}
+      {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}
 
-      {loading && <div className="mt-2 text-xs text-gray-500">Loading…</div>}
+      {loading && <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Loading…</div>}
 
       {detail && (
         <div className="mt-3 space-y-2">
           <details className="text-xs">
-            <summary className="cursor-pointer text-gray-600">Preview</summary>
-            <pre className="mt-1 bg-white p-2 border border-gray-200 rounded max-h-40 overflow-auto whitespace-pre-wrap">
+            <summary className="cursor-pointer text-gray-600 dark:text-gray-400">Preview</summary>
+            <pre className="mt-1 bg-white p-2 border border-gray-200 rounded max-h-40 overflow-auto whitespace-pre-wrap dark:bg-gray-800 dark:border-gray-700">
               {detail.conventions}
             </pre>
           </details>

@@ -42,8 +42,8 @@ export function ForbiddenPage(): JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
       <div className="text-6xl font-bold text-gray-300 mb-4">403</div>
-      <h1 className="text-xl font-semibold text-gray-900 mb-2">Access Denied</h1>
-      <p className="text-gray-500 mb-6">
+      <h1 className="text-xl font-semibold text-gray-900 mb-2 dark:text-gray-100">Access Denied</h1>
+      <p className="text-gray-500 mb-6 dark:text-gray-400">
         You do not have permission to access the admin panel.
       </p>
       <a

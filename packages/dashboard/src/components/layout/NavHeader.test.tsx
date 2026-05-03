@@ -294,8 +294,14 @@ describe('NavHeader', () => {
     expect(screen.getByText('Workflows')).toBeInTheDocument();
     expect(screen.getByText('Logs')).toBeInTheDocument();
 
-    // No user menu button
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    // No user menu button — theme toggle is always rendered, scope the
+    // assertion to the user-trigger specifically. (Pre-toggle this just
+    // asserted "no buttons at all"; with the theme toggle that's no longer
+    // an invariant. The actual contract is "user menu is hidden when
+    // anonymous," which the targeted query checks.)
+    expect(screen.queryByRole('button', { name: /sign out|account/i })).not.toBeInTheDocument();
+    // The user-trigger button is only rendered when `user` is truthy.
+    expect(screen.queryByRole('button', { name: /admin-user|owner-user|member-user/i })).not.toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------

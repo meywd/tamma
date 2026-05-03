@@ -84,14 +84,14 @@ export function SystemPromptEditor({
 
   return (
     <div>
-      <p className="text-sm text-gray-600 mb-4">
+      <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
         Identity preambles prepended to every LLM call for each role. Saving an
         edit creates a per-user override; resetting removes it so the call
         falls back to the system-shipped preamble.
       </p>
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
           {error}
         </div>
       )}
@@ -103,7 +103,7 @@ export function SystemPromptEditor({
           return (
             <div
               key={id}
-              className="bg-white border border-gray-200 rounded-lg shadow-sm p-4"
+              className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 dark:bg-gray-800 dark:border-gray-700"
             >
               <div className="flex items-center justify-between mb-3">
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
@@ -115,14 +115,14 @@ export function SystemPromptEditor({
                       <button
                         type="button"
                         onClick={() => setConfirmReset(id)}
-                        className="px-3 py-1 text-xs font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50"
+                        className="px-3 py-1 text-xs font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50 dark:text-red-300 dark:border-red-700 dark:hover:bg-red-950"
                       >
                         Reset override
                       </button>
                       <button
                         type="button"
                         onClick={() => beginEdit(id)}
-                        className="px-3 py-1 text-xs font-medium text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50"
+                        className="px-3 py-1 text-xs font-medium text-blue-600 border border-blue-300 rounded-md hover:bg-blue-50 dark:text-blue-400"
                       >
                         Edit
                       </button>
@@ -142,14 +142,14 @@ export function SystemPromptEditor({
                     spellCheck={false}
                     disabled={saving}
                     aria-label={`System prompt for ${roleLabel(id)}`}
-                    className="w-full px-3 py-2 text-sm font-mono leading-6 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    className="w-full px-3 py-2 text-sm font-mono leading-6 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-600"
                   />
                   <div className="flex items-center justify-end gap-2 mt-2">
                     <button
                       type="button"
                       onClick={() => setEditing(null)}
                       disabled={saving}
-                      className="px-3 py-1 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 disabled:opacity-50"
+                      className="px-3 py-1 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
                     >
                       Cancel
                     </button>
@@ -167,11 +167,11 @@ export function SystemPromptEditor({
                   </div>
                 </div>
               ) : value.length > 0 ? (
-                <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words text-gray-700 bg-gray-50 border border-gray-100 rounded-md px-3 py-2 max-h-32 overflow-y-auto">
+                <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words text-gray-700 bg-gray-50 border border-gray-100 rounded-md px-3 py-2 max-h-32 overflow-y-auto dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800">
                   {value}
                 </pre>
               ) : (
-                <p className="text-xs italic text-gray-500">
+                <p className="text-xs italic text-gray-500 dark:text-gray-400">
                   No system preamble shipped for this role.
                 </p>
               )}

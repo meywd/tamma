@@ -119,7 +119,7 @@ export function DestructiveActions({
       {toast && (
         <div
           role="status"
-          className="bg-green-50 border border-green-200 text-sm text-green-800 rounded-md px-3 py-2"
+          className="bg-green-50 border border-green-200 text-sm text-green-800 rounded-md px-3 py-2 dark:bg-green-950 dark:text-green-200 dark:border-green-800"
         >
           {toast}
         </div>
@@ -127,7 +127,7 @@ export function DestructiveActions({
       {error && (
         <div
           role="alert"
-          className="bg-red-50 border border-red-200 text-sm text-red-800 rounded-md px-3 py-2"
+          className="bg-red-50 border border-red-200 text-sm text-red-800 rounded-md px-3 py-2 dark:bg-red-950 dark:border-red-800"
         >
           {error}
         </div>
@@ -150,29 +150,29 @@ export function DestructiveActions({
             }}
             aria-hidden="true"
           />
-          <div className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+          <div className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 dark:bg-gray-800">
             <h3
               id="tenant-action-confirm-title"
-              className="text-lg font-semibold text-gray-900 mb-2"
+              className="text-lg font-semibold text-gray-900 mb-2 dark:text-gray-100"
             >
               {ACTION_LABELS[confirming].confirmTitle}
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
               Tenant:{' '}
-              <code className="font-mono bg-gray-100 px-1 rounded">
+              <code className="font-mono bg-gray-100 px-1 rounded dark:bg-gray-800">
                 {tenant.name}
               </code>{' '}
-              <span className="text-gray-400">({tenant.slug})</span>
+              <span className="text-gray-400 dark:text-gray-500">({tenant.slug})</span>
             </p>
 
             {confirming === 'force-delete' && (
               <div className="mb-4">
                 <label
                   htmlFor="slug-confirm"
-                  className="block text-sm font-medium text-gray-700 mb-1"
+                  className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300"
                 >
                   Type the tenant slug to confirm:{' '}
-                  <code className="font-mono text-xs bg-gray-100 px-1 rounded">
+                  <code className="font-mono text-xs bg-gray-100 px-1 rounded dark:bg-gray-800">
                     {tenant.slug}
                   </code>
                 </label>
@@ -182,7 +182,7 @@ export function DestructiveActions({
                   value={slugInput}
                   onChange={(e) => setSlugInput(e.target.value)}
                   autoComplete="off"
-                  className="w-full text-sm font-mono border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full text-sm font-mono border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-600"
                 />
               </div>
             )}
@@ -195,7 +195,7 @@ export function DestructiveActions({
                   setSlugInput('');
                 }}
                 disabled={pending !== null}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
               >
                 Cancel
               </button>

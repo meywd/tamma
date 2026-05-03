@@ -13,6 +13,7 @@
 import { useState, useEffect, useRef, useCallback, type JSX } from 'react';
 import { useAuth } from '../../hooks/useAuth.js';
 import type { AuthUser } from '../../hooks/useAuth.js';
+import { useTheme, type ThemeMode } from '../../stores/theme-store.js';
 import './NavHeader.css';
 
 export interface ServiceLink {
@@ -104,6 +105,8 @@ export function NavHeader(): JSX.Element {
 
       <div className="tn-spacer" />
 
+      <ThemeToggleButton />
+
       {user && (
         <div
           className="tn-user"
@@ -137,5 +140,55 @@ export function NavHeader(): JSX.Element {
         </div>
       )}
     </nav>
+  );
+}
+
+/**
+ * Three-state theme toggle: light → dark → system → light. Single button so
+ * the nav bar doesn't grow a dropdown for what's a transient choice. The
+ * icon reflects the *resolved* theme (sun in light, moon in dark) and the
+ * tooltip names the active *mode* (which may be `system` even though the
+ * resolved appearance is light or dark).
+ */
+function ThemeToggleButton(): JSX.Element {
+  const { mode, resolved, cycle } = useTheme();
+  const label = themeLabel(mode);
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      title={`Theme: ${label} (click to cycle)`}
+      aria-label={`Theme: ${label}. Click to switch.`}
+      className="tn-theme-toggle"
+    >
+      {resolved === 'dark' ? <MoonIcon /> : <SunIcon />}
+    </button>
+  );
+}
+
+function themeLabel(mode: ThemeMode): string {
+  switch (mode) {
+    case 'light': return 'Light';
+    case 'dark': return 'Dark';
+    case 'system': return 'System';
+  }
+}
+
+function SunIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon(): JSX.Element {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
   );
 }

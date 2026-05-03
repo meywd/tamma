@@ -151,18 +151,18 @@ export function PromptEditDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="prompt-edit-title"
-        className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl bg-white shadow-xl flex flex-col"
+        className="fixed inset-y-0 right-0 z-50 w-full max-w-3xl bg-white shadow-xl flex flex-col dark:bg-gray-800"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 id="prompt-edit-title" className="text-lg font-semibold text-gray-900">
+            <h2 id="prompt-edit-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               Edit prompt
             </h2>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
               {roleLabel(role)}
             </span>
-            <span className="text-gray-400">/</span>
+            <span className="text-gray-400 dark:text-gray-500">/</span>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-cyan-100 text-cyan-800">
               {actionLabel(action)}
             </span>
@@ -171,7 +171,7 @@ export function PromptEditDialog({
                 user override
               </span>
             ) : (
-              <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+              <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                 system default
               </span>
             )}
@@ -180,7 +180,7 @@ export function PromptEditDialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-2"
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-2 dark:text-gray-500"
           >
             ×
           </button>
@@ -193,13 +193,13 @@ export function PromptEditDialog({
               <LoadingSpinner size="lg" />
             </div>
           ) : loadError ? (
-            <div className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-700">
+            <div className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
               {loadError}
             </div>
           ) : (
             <div className="space-y-5">
               {saveError && (
-                <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">
+                <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
                   {saveError}
                 </div>
               )}
@@ -207,7 +207,7 @@ export function PromptEditDialog({
               <div>
                 <label
                   htmlFor="prompt-template"
-                  className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2"
+                  className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 dark:text-gray-400"
                 >
                   Template
                 </label>
@@ -219,7 +219,7 @@ export function PromptEditDialog({
                   rows={18}
                   disabled={saving}
                 />
-                <p className="mt-2 text-xs text-gray-500">
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   Use <code className="font-mono text-purple-700">{'{{variable}}'}</code> tokens
                   for runtime substitutions. Variables are auto-extracted on save.
                 </p>
@@ -227,7 +227,7 @@ export function PromptEditDialog({
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     Variables ({variables.length})
                   </span>
                 </div>
@@ -241,7 +241,7 @@ export function PromptEditDialog({
               <div>
                 <label
                   htmlFor="prompt-system"
-                  className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2"
+                  className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 dark:text-gray-400"
                 >
                   System prompt override (optional)
                 </label>
@@ -253,7 +253,7 @@ export function PromptEditDialog({
                   placeholder="Leave empty to use the role's default system prompt."
                   disabled={saving}
                   spellCheck={false}
-                  className="w-full px-3 py-2 text-sm font-mono leading-6 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="w-full px-3 py-2 text-sm font-mono leading-6 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-600"
                 />
               </div>
 
@@ -261,7 +261,7 @@ export function PromptEditDialog({
                 <div>
                   <label
                     htmlFor="prompt-max-tokens"
-                    className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2"
+                    className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 dark:text-gray-400"
                   >
                     Max tokens
                   </label>
@@ -272,17 +272,17 @@ export function PromptEditDialog({
                     value={maxTokens}
                     onChange={(e) => setMaxTokens(Number(e.target.value))}
                     disabled={saving}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-600"
                   />
                 </div>
                 <div className="flex items-end">
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                     <input
                       type="checkbox"
                       checked={enableTools}
                       onChange={(e) => setEnableTools(e.target.checked)}
                       disabled={saving}
-                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:text-blue-400"
                     />
                     Enable tools
                   </label>
@@ -290,11 +290,11 @@ export function PromptEditDialog({
               </div>
 
               {systemDefault && isOverride && (
-                <details className="border border-gray-200 rounded-md">
-                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 rounded-md">
+                <details className="border border-gray-200 rounded-md dark:border-gray-700">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-gray-600 bg-gray-50 rounded-md dark:bg-gray-900 dark:text-gray-400">
                     Show system default for comparison
                   </summary>
-                  <pre className="px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words text-gray-700 max-h-64 overflow-y-auto border-t border-gray-200">
+                  <pre className="px-3 py-2 text-xs font-mono whitespace-pre-wrap break-words text-gray-700 max-h-64 overflow-y-auto border-t border-gray-200 dark:text-gray-300 dark:border-gray-700">
                     {systemDefault.template}
                   </pre>
                 </details>
@@ -304,14 +304,14 @@ export function PromptEditDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 dark:bg-gray-900 dark:border-gray-700">
           <div>
             {isOverride && (
               <button
                 type="button"
                 onClick={() => setConfirmReset(true)}
                 disabled={saving || loading}
-                className="px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50 disabled:opacity-50"
+                className="px-3 py-1.5 text-sm font-medium text-red-700 border border-red-300 rounded-md hover:bg-red-50 disabled:opacity-50 dark:text-red-300 dark:border-red-700 dark:hover:bg-red-950"
               >
                 Reset to default
               </button>
@@ -322,7 +322,7 @@ export function PromptEditDialog({
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 disabled:opacity-50"
+              className="px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
             >
               Cancel
             </button>

@@ -32,7 +32,7 @@ export function TenantAdminGuard({ children }: TenantAdminGuardProps): JSX.Eleme
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 m-6 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 m-6 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         Failed to verify your tenant role: {error}
       </div>
     );
@@ -43,10 +43,10 @@ export function TenantAdminGuard({ children }: TenantAdminGuardProps): JSX.Eleme
   if (!tenantId) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-        <h1 className="text-xl font-semibold text-gray-900 mb-2">
+        <h1 className="text-xl font-semibold text-gray-900 mb-2 dark:text-gray-100">
           No active organization
         </h1>
-        <p className="text-gray-500 mb-6 max-w-md">
+        <p className="text-gray-500 mb-6 max-w-md dark:text-gray-400">
           You're not currently in any organization. Create or join one
           first to manage members.
         </p>
@@ -58,10 +58,10 @@ export function TenantAdminGuard({ children }: TenantAdminGuardProps): JSX.Eleme
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
         <div className="text-6xl font-bold text-gray-300 mb-4">403</div>
-        <h1 className="text-xl font-semibold text-gray-900 mb-2">
+        <h1 className="text-xl font-semibold text-gray-900 mb-2 dark:text-gray-100">
           Admin access required
         </h1>
-        <p className="text-gray-500 mb-6 max-w-md">
+        <p className="text-gray-500 mb-6 max-w-md dark:text-gray-400">
           You need admin or owner role in this organization to view
           member management.
         </p>

@@ -37,7 +37,7 @@ export function SecuritySettingsPanel(): JSX.Element | null {
   }
 
   if (error && !draft) {
-    return <div className="text-red-600 text-sm">{error}</div>;
+    return <div className="text-red-600 text-sm dark:text-red-400">{error}</div>;
   }
 
   if (!draft) return null;
@@ -58,7 +58,7 @@ export function SecuritySettingsPanel(): JSX.Element | null {
           </button>
         }
       >
-        {saveError && <div className="mb-4 text-sm text-red-600">{saveError}</div>}
+        {saveError && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{saveError}</div>}
         <Toggle
           label="Sanitize Content"
           description="Sanitize content before passing to agents"

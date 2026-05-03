@@ -49,11 +49,11 @@ export function PromptPreview({
   }
 
   return (
-    <details className="mt-4 border border-gray-200 rounded-lg p-4">
-      <summary className="cursor-pointer font-medium text-gray-800">Preview / Test</summary>
+    <details className="mt-4 border border-gray-200 rounded-lg p-4 dark:border-gray-700">
+      <summary className="cursor-pointer font-medium text-gray-800 dark:text-gray-200">Preview / Test</summary>
       <div className="mt-4 space-y-4">
         {variables.length === 0 ? (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
             No variables detected in the template. Click Render Preview to see the raw text.
           </p>
         ) : (
@@ -75,7 +75,7 @@ export function PromptPreview({
                     onChange={(e) =>
                       setValues((prev) => ({ ...prev, [varName]: e.target.value }))
                     }
-                    className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md"
+                    className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md dark:border-gray-600"
                   />
                 </div>
               );
@@ -92,20 +92,20 @@ export function PromptPreview({
           {loading ? 'Rendering…' : 'Render Preview'}
         </button>
 
-        {error && <div className="text-sm text-red-600">{error}</div>}
+        {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
         {result && (
           <div className="space-y-3">
             <div>
-              <h4 className="text-sm font-semibold text-gray-700">Rendered Template</h4>
-              <pre className="mt-1 bg-gray-50 p-3 text-xs whitespace-pre-wrap break-words overflow-x-auto">
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Rendered Template</h4>
+              <pre className="mt-1 bg-gray-50 p-3 text-xs whitespace-pre-wrap break-words overflow-x-auto dark:bg-gray-900">
                 {result.renderedTemplate}
               </pre>
             </div>
             {result.renderedSystemPrompt && (
               <div>
-                <h4 className="text-sm font-semibold text-gray-700">System Prompt</h4>
-                <pre className="mt-1 bg-gray-50 p-3 text-xs whitespace-pre-wrap break-words overflow-x-auto">
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">System Prompt</h4>
+                <pre className="mt-1 bg-gray-50 p-3 text-xs whitespace-pre-wrap break-words overflow-x-auto dark:bg-gray-900">
                   {result.renderedSystemPrompt}
                 </pre>
               </div>
@@ -113,7 +113,7 @@ export function PromptPreview({
             {result.unresolvedVariables.length > 0 && (
               <div
                 data-testid="unresolved-variables"
-                className="text-sm text-red-600"
+                className="text-sm text-red-600 dark:text-red-400"
               >
                 Unresolved:{' '}
                 {result.unresolvedVariables.map((v) => `{{${v}}}`).join(', ')}

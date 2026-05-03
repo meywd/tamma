@@ -13,8 +13,8 @@ import type { JSX } from "react";
 export function SecretsAdminPage(): JSX.Element {
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Platform secrets</h1>
-      <p className="text-sm text-gray-600 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-1 dark:text-gray-100">Platform secrets</h1>
+      <p className="text-sm text-gray-600 mb-6 dark:text-gray-400">
         Database credentials, webhook HMACs, and other operational secrets used
         by the Tamma control plane. Values are stored envelope-encrypted; the
         plaintext is revealed to you exactly once at creation or rotation.

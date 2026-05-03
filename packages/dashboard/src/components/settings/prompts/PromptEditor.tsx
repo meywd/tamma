@@ -85,25 +85,25 @@ export function PromptEditor({ role, template, onSave }: PromptEditorProps): JSX
         </button>
       }
     >
-      {saveError && <div className="mb-4 text-sm text-red-600">{saveError}</div>}
+      {saveError && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{saveError}</div>}
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">System Prompt</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">System Prompt</label>
           <textarea
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={8}
             placeholder="Enter system prompt for this role..."
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono dark:border-gray-600"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
             Provider-Specific Prompts
           </label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-gray-500 mb-2 dark:text-gray-400">
             One per line, format: <code>provider-name: prompt text</code>
           </p>
           <textarea
@@ -111,7 +111,7 @@ export function PromptEditor({ role, template, onSave }: PromptEditorProps): JSX
             onChange={(e) => setProviderPromptsText(e.target.value)}
             rows={4}
             placeholder="claude-code: You are a coding assistant..."
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono dark:border-gray-600"
           />
         </div>
       </div>

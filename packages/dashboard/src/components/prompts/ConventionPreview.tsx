@@ -112,7 +112,7 @@ export function ConventionPreview(): JSX.Element {
 
   if (listError) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         {listError}
       </div>
     );
@@ -120,10 +120,10 @@ export function ConventionPreview(): JSX.Element {
 
   return (
     <div>
-      <p className="text-sm text-gray-600 mb-4">
+      <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
         Language and framework starter templates. Repo owners select one as
         the seed for their{' '}
-        <code className="font-mono text-purple-700 bg-gray-50 px-1 rounded-sm">
+        <code className="font-mono text-purple-700 bg-gray-50 px-1 rounded-sm dark:bg-gray-900">
           {'{{conventions}}'}
         </code>{' '}
         variable in <code className="font-mono">.tamma/config.json</code>.
@@ -139,23 +139,19 @@ export function ConventionPreview(): JSX.Element {
                 key={c.key}
                 type="button"
                 onClick={() => setSelectedKey(c.key)}
-                className={`w-full text-left p-3 rounded-md border transition-colors ${
-                  isActive
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
+                className={`w-full text-left p-3 rounded-md border transition-colors ${ isActive ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300' } dark:bg-gray-800`}
               >
-                <div className="text-sm font-medium text-gray-900">
+                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {c.name}
                 </div>
-                <div className="text-xs text-gray-500 mt-1 leading-snug">
+                <div className="text-xs text-gray-500 mt-1 leading-snug dark:text-gray-400">
                   {c.description}
                 </div>
               </button>
             );
           })}
           {list.length === 0 && (
-            <p className="text-sm text-gray-500 italic">
+            <p className="text-sm text-gray-500 italic dark:text-gray-400">
               No convention templates installed.
             </p>
           )}
@@ -163,14 +159,14 @@ export function ConventionPreview(): JSX.Element {
 
         {/* Right: detail */}
         <div className="lg:col-span-2">
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                   {selected?.name ?? 'Select a template'}
                 </h3>
                 {selected?.description && (
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="text-xs text-gray-500 mt-0.5 dark:text-gray-400">
                     {selected.description}
                   </p>
                 )}
@@ -179,7 +175,7 @@ export function ConventionPreview(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => void handleCopy()}
-                  className="px-3 py-1 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50"
+                  className="px-3 py-1 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
                 >
                   {copied ? 'Copied!' : 'Copy'}
                 </button>
@@ -191,15 +187,15 @@ export function ConventionPreview(): JSX.Element {
                   <LoadingSpinner />
                 </div>
               ) : detailError ? (
-                <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">
+                <div className="bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
                   {detailError}
                 </div>
               ) : selected ? (
-                <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words text-gray-800 bg-gray-50 border border-gray-100 rounded-md px-3 py-2 max-h-[55vh] overflow-y-auto">
+                <pre className="text-xs font-mono leading-relaxed whitespace-pre-wrap break-words text-gray-800 bg-gray-50 border border-gray-100 rounded-md px-3 py-2 max-h-[55vh] overflow-y-auto dark:bg-gray-900 dark:text-gray-200 dark:border-gray-800">
                   {selected.conventions}
                 </pre>
               ) : (
-                <p className="text-sm text-gray-500 italic">
+                <p className="text-sm text-gray-500 italic dark:text-gray-400">
                   Pick a template on the left to preview its conventions body.
                 </p>
               )}

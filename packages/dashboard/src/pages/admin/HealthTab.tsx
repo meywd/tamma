@@ -50,7 +50,7 @@ export function HealthTab(): JSX.Element {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         {error}
       </div>
     );
@@ -59,19 +59,19 @@ export function HealthTab(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">System Health</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">System Health</h2>
         <button
           type="button"
           onClick={() => void reload()}
           disabled={loading}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md disabled:opacity-50"
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
         >
           {loading ? 'Checking...' : 'Refresh'}
         </button>
       </div>
 
       {services.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-lg mb-2">No health data</p>
           <p className="text-sm">Health information will appear once the system reports status.</p>
         </div>
@@ -86,21 +86,21 @@ export function HealthTab(): JSX.Element {
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`inline-block h-2.5 w-2.5 rounded-full ${style.dot}`} />
-                      <h3 className="text-sm font-semibold text-gray-900">{service.name}</h3>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{service.name}</h3>
                     </div>
                     <p className={`text-sm font-medium ${style.text}`}>{style.label}</p>
                   </div>
 
                   {service.responseTime !== null && (
-                    <span className="text-xs text-gray-400">{service.responseTime}ms</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">{service.responseTime}ms</span>
                   )}
                 </div>
 
                 {service.details && (
-                  <p className="mt-2 text-xs text-gray-500">{service.details}</p>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{service.details}</p>
                 )}
 
-                <p className="mt-3 text-xs text-gray-400">
+                <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
                   Checked: {formatTime(service.checkedAt)}
                 </p>
               </Card>

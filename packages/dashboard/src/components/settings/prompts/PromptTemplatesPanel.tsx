@@ -22,7 +22,7 @@ export function PromptTemplatesPanel(): JSX.Element {
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
 
   if (loading && Object.keys(templates).length === 0) return <LoadingSpinner />;
-  if (error) return <div className="text-red-600 text-sm">{error}</div>;
+  if (error) return <div className="text-red-600 text-sm dark:text-red-400">{error}</div>;
 
   const roles = Object.keys(templates);
   // Sort: defaults first, then alphabetical
@@ -41,15 +41,11 @@ export function PromptTemplatesPanel(): JSX.Element {
               <li key={role}>
                 <button
                   onClick={() => setSelectedRole(role)}
-                  className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
-                    selectedRole === role
-                      ? 'bg-blue-100 text-blue-800 font-medium'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+                  className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${ selectedRole === role ? 'bg-blue-100 text-blue-800 font-medium' : 'text-gray-700 hover:bg-gray-100' } dark:text-blue-200`}
                 >
                   {ROLE_LABELS[role] ?? role}
                   {templates[role]?.systemPrompt && (
-                    <span className="ml-2 text-xs text-gray-400">custom</span>
+                    <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">custom</span>
                   )}
                 </button>
               </li>
@@ -67,7 +63,7 @@ export function PromptTemplatesPanel(): JSX.Element {
           />
         ) : (
           <Card>
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
               <p>Select a role to edit its prompt templates.</p>
             </div>
           </Card>

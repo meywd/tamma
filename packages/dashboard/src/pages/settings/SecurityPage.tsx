@@ -6,7 +6,7 @@ import type { JSX } from "react";
 export function SecurityPage(): JSX.Element {
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Security Settings</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6 dark:text-gray-100">Security Settings</h1>
       <SecuritySettingsPanel />
     </div>
   );

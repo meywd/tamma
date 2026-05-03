@@ -66,7 +66,7 @@ export function Sidebar(): JSX.Element {
       </div>
       {navGroups.map((group) => (
         <div key={group.label} className="mb-4">
-          <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             {group.label}
           </div>
           <ul className="list-none m-0 p-0">

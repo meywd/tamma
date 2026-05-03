@@ -23,14 +23,14 @@ export function LoginPage(): JSX.Element {
   const error = params.get('error');
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm bg-white rounded-lg shadow-md p-8 text-center">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="w-full max-w-sm bg-white rounded-lg shadow-md p-8 text-center dark:bg-gray-800">
         <img src="/logo.png" alt="Tamma" className="w-16 h-16 rounded-lg mx-auto mb-2" />
-        <div className="text-2xl font-bold text-gray-900 mb-2">Tamma</div>
-        <p className="text-sm text-gray-500 mb-6">Sign in to continue</p>
+        <div className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">Tamma</div>
+        <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">Sign in to continue</p>
 
         {error && (
-          <div className="mb-4 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md">
+          <div className="mb-4 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md dark:bg-red-950 dark:text-red-300 dark:border-red-800">
             {ERROR_MESSAGES[error] ?? `Authentication error: ${error}`}
           </div>
         )}

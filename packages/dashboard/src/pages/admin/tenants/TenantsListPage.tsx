@@ -114,19 +114,19 @@ export function TenantsListPage(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Tenants</h1>
-        <div className="text-sm text-gray-500">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Tenants</h1>
+        <div className="text-sm text-gray-500 dark:text-gray-400">
           {total.toLocaleString()} total
         </div>
       </div>
 
       {/* Filter bar */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 mb-6">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 mb-6 dark:bg-gray-800 dark:border-gray-700">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label
               htmlFor="tenant-filter-search"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               Search (name or slug)
             </label>
@@ -136,13 +136,13 @@ export function TenantsListPage(): JSX.Element {
               value={search}
               onChange={(e) => updateFilter('search', e.target.value)}
               placeholder="acme, initech, …"
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
             />
           </div>
           <div>
             <label
               htmlFor="tenant-filter-status"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               Status
             </label>
@@ -150,7 +150,7 @@ export function TenantsListPage(): JSX.Element {
               id="tenant-filter-status"
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
             >
               {STATUS_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -162,7 +162,7 @@ export function TenantsListPage(): JSX.Element {
           <div>
             <label
               htmlFor="tenant-filter-plan"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               Plan
             </label>
@@ -170,7 +170,7 @@ export function TenantsListPage(): JSX.Element {
               id="tenant-filter-plan"
               value={plan}
               onChange={(e) => updateFilter('plan', e.target.value)}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
             >
               {PLAN_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -191,14 +191,14 @@ export function TenantsListPage(): JSX.Element {
       {error && (
         <div
           role="alert"
-          className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-800 mb-4"
+          className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-800 mb-4 dark:bg-red-950 dark:border-red-800"
         >
           {error}
         </div>
       )}
 
       {!loading && tenants.length === 0 && !error && (
-        <div className="text-center py-12 text-gray-500 bg-white rounded-lg border border-gray-200">
+        <div className="text-center py-12 text-gray-500 bg-white rounded-lg border border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700">
           <p className="text-lg mb-1">No tenants match these filters.</p>
           <p className="text-sm">Clear the filters or broaden the search.</p>
         </div>
@@ -206,39 +206,39 @@ export function TenantsListPage(): JSX.Element {
 
       {tenants.length > 0 && (
         <>
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
             <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 dark:bg-gray-900">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Tenant
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Plan
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Owner
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Last activity
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
                 {tenants.map((t) => (
-                  <tr key={t.id} className="hover:bg-gray-50">
+                  <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex flex-col">
-                        <span className="text-sm font-medium text-gray-900">
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {t.name}
                         </span>
-                        <code className="text-xs text-gray-400 font-mono">
+                        <code className="text-xs text-gray-400 font-mono dark:text-gray-500">
                           {t.slug}
                         </code>
                       </div>
@@ -248,30 +248,30 @@ export function TenantsListPage(): JSX.Element {
                       {t.failureReason && (
                         <div
                           title={t.failureReason}
-                          className="text-xs text-red-600 mt-1 max-w-[16rem] truncate"
+                          className="text-xs text-red-600 mt-1 max-w-[16rem] truncate dark:text-red-400"
                         >
                           {t.failureReason}
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                       {t.planName ?? t.legacyPlan}
                       {t.planSlug && (
-                        <span className="ml-1 text-xs text-gray-400 font-mono">
+                        <span className="ml-1 text-xs text-gray-400 font-mono dark:text-gray-500">
                           ({t.planSlug})
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       {t.ownerEmail ?? '—'}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                       {formatRelative(t.updatedAt)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       <Link
                         to={`/admin/tenants/${t.id}`}
-                        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                        className="text-sm text-blue-600 hover:text-blue-800 font-medium dark:text-blue-400"
                       >
                         View
                       </Link>
@@ -283,7 +283,7 @@ export function TenantsListPage(): JSX.Element {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+            <div className="flex items-center justify-between mt-4 text-sm text-gray-600 dark:text-gray-400">
               <span>
                 Page {page} of {totalPages}
               </span>
@@ -292,7 +292,7 @@ export function TenantsListPage(): JSX.Element {
                   type="button"
                   disabled={page <= 1 || loading}
                   onClick={() => goToPage(page - 1)}
-                  className="px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-800"
                 >
                   Previous
                 </button>
@@ -300,7 +300,7 @@ export function TenantsListPage(): JSX.Element {
                   type="button"
                   disabled={page >= totalPages || loading}
                   onClick={() => goToPage(page + 1)}
-                  className="px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-800"
                 >
                   Next
                 </button>

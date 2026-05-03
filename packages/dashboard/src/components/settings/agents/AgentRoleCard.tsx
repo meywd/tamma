@@ -56,7 +56,7 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
 
       <div className="mt-4 space-y-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Max Budget (USD)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Max Budget (USD)</label>
           <input
             type="number"
             min={0}
@@ -74,12 +74,12 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
               onChange(updated);
             }}
             placeholder="No limit"
-            className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Permission Mode</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Permission Mode</label>
           <select
             value={config.permissionMode ?? 'default'}
             onChange={(e) =>
@@ -88,7 +88,7 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
                 permissionMode: e.target.value as 'default' | 'bypassPermissions',
               })
             }
-            className="w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           >
             <option value="default">Default</option>
             <option value="bypassPermissions">Bypass Permissions</option>
