@@ -30,6 +30,37 @@ public record ServiceKeyResponse(
 public record UpdateUserRoleRequest(string Role);
 public record InviteUserRequest(string Email, string Role);
 public record CreateUserApiKeyRequest(string Label);
+
+/// <summary>
+/// Story 16.2 contract for <c>GET /api/admin/users/{id}/keys</c>. The
+/// dashboard's <c>apiKeysApi.list</c> client unwraps <c>r.apiKeys</c> and
+/// expects the seven fields on <see cref="UserApiKeyEntry"/> — keep them
+/// in sync if either side changes.
+/// </summary>
+public record UserApiKeyListResponse(List<UserApiKeyEntry> ApiKeys);
+
+public record UserApiKeyEntry(
+    Guid Id,
+    string KeyPrefix,
+    string Label,
+    string UserId,
+    DateTime? LastUsedAt,
+    DateTime CreatedAt,
+    DateTime? RevokedAt);
+
+/// <summary>
+/// Story 16.2 contract for <c>POST /api/admin/users/{id}/keys</c>. The
+/// raw <c>key</c> is returned ONCE here so the dashboard can show it to
+/// the user; subsequent reads via the list endpoint never include it.
+/// Mirrors the dashboard's <c>CreateApiKeyResult</c> type.
+/// </summary>
+public record CreateUserApiKeyResponse(
+    Guid Id,
+    string Key,
+    string Prefix,
+    string Label,
+    DateTime CreatedAt);
+
 public record AdminUserResponse(Guid Id, string Email, string? DisplayName, string Role, bool IsActive, DateTime CreatedAt);
 
 /// <summary>

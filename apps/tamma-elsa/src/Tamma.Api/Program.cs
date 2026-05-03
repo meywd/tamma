@@ -1201,13 +1201,14 @@ admin.MapPost("/users/invite", AdminEndpoints.InviteUser);
 admin.MapGet("/users/invites", AdminEndpoints.ListInvites);
 admin.MapDelete("/users/invites/{id}", AdminEndpoints.DeleteInvite);
 // SelfOrApiKeysManage: a regular member can manage their own keys; admins
-// can manage anyone's. Audit finding 016. Path uses "api-keys" (not "keys")
-// to match the rest of the codebase: /api/admin/api-keys (platform-owner)
-// and /api/v1/orgs/{tenantId}/api-keys (tenant-scoped) both use the same
-// hyphenated form, and the dashboard's MyApiKeysPage hits this exact path.
-admin.MapPost("/users/{id}/api-keys", AdminEndpoints.CreateUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
-admin.MapGet("/users/{id}/api-keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("SelfOrApiKeysManage");
-admin.MapDelete("/users/{id}/api-keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
+// can manage anyone's. Audit finding 016. The path is "/keys" (not
+// "/api-keys") and the response shape is { apiKeys: [...] } per the
+// Story 16.2 contract — see the apiKeysApi client at
+// packages/dashboard/src/services/admin/admin-api-client.ts which is the
+// canonical consumer of these endpoints.
+admin.MapPost("/users/{id}/keys", AdminEndpoints.CreateUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
+admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("SelfOrApiKeysManage");
+admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
 
 // Tenant provisioning (audit cranl/003). Platform-owner-only — these flip
 // per-tenant Cranl resources into existence (POST), report status (GET), or
