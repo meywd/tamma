@@ -28,7 +28,11 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }: AgentRoleCardProps): JSX.Element {
   const label = ROLE_LABELS[role] ?? role;
-  const chainLength = roleConfig.providerChain?.length ?? 0;
+  // Defensive — when /api/config/agents returns `{}` (no tenant override
+  // yet, fresh deploy) the parent passes `roleConfig={undefined}` for the
+  // defaults card. Treat undefined as empty so the card still renders.
+  const config = roleConfig ?? {};
+  const chainLength = config.providerChain?.length ?? 0;
 
   return (
     <Card
@@ -39,14 +43,14 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
           {chainLength > 0 && (
             <Badge variant="neutral">{chainLength} provider{chainLength !== 1 ? 's' : ''}</Badge>
           )}
-          {roleConfig.maxBudgetUsd !== undefined && (
-            <Badge variant="warning">${roleConfig.maxBudgetUsd}</Badge>
+          {config.maxBudgetUsd !== undefined && (
+            <Badge variant="warning">${config.maxBudgetUsd}</Badge>
           )}
         </div>
       }
     >
       <ProviderChainEditor
-        chain={roleConfig.providerChain ?? []}
+        chain={config.providerChain ?? []}
         onChange={(chain) => onChange({ ...roleConfig, providerChain: chain })}
       />
 
@@ -58,7 +62,7 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
             min={0}
             max={100}
             step={0.5}
-            value={roleConfig.maxBudgetUsd ?? ''}
+            value={config.maxBudgetUsd ?? ''}
             onChange={(e) => {
               const val = e.target.value;
               const updated = { ...roleConfig };
@@ -77,7 +81,7 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Permission Mode</label>
           <select
-            value={roleConfig.permissionMode ?? 'default'}
+            value={config.permissionMode ?? 'default'}
             onChange={(e) =>
               onChange({
                 ...roleConfig,
