@@ -30,4 +30,27 @@
   .dark body {
     background-color: rgb(17 24 39);
   }
+
+  /* Native form controls — <select>, <option>, <input type="date">,
+     scrollbars — are rendered by the OS, not the page CSS. They look at
+     the `color-scheme` property on the *element* (or its ancestors) to
+     decide which palette to use. Without this, a Tailwind-styled
+     <select class="dark:bg-gray-800"> looks correct when closed but
+     opens a white-on-white dropdown panel because the option list is
+     drawn by the OS in light mode. Forcing `color-scheme: dark` on form
+     controls inside `.dark` lets the browser render the dropdown panel
+     in dark mode. */
+  .dark select,
+  .dark input,
+  .dark textarea {
+    color-scheme: dark;
+  }
+
+  /* Belt-and-braces — set the option color too. Chrome respects it on
+     the panel; Firefox/Safari fall back to color-scheme above. */
+  .dark select option,
+  .dark select optgroup {
+    background-color: rgb(31 41 55); /* gray-800 */
+    color: rgb(243 244 246); /* gray-100 */
+  }
 }
