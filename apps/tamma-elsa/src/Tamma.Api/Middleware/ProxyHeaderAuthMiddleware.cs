@@ -101,17 +101,31 @@ public class ProxyHeaderAuthMiddleware : IMiddleware
             return;
         }
 
+        // Visible-by-default tracing during the rollout. Once the bridge is
+        // proven stable in prod, downgrade these to LogDebug.
+        _log.LogInformation(
+            "Proxy bridge: invoked for {Path} — cookie present, user not yet authenticated",
+            context.Request.Path);
+
         try
         {
             var userInfo = await FetchUserInfoAsync(proxyCookie, context.RequestAborted);
+            _log.LogInformation(
+                "Proxy bridge: userinfo result email={Email} user={User} preferred={PreferredUsername}",
+                userInfo?.Email ?? "<null>",
+                userInfo?.User ?? "<null>",
+                userInfo?.PreferredUsername ?? "<null>");
             if (userInfo is null || string.IsNullOrEmpty(userInfo.Email))
             {
-                _log.LogDebug("Proxy bridge: userinfo returned no email; passing through anonymous");
+                _log.LogWarning("Proxy bridge: userinfo returned no email; passing through anonymous");
                 await next(context);
                 return;
             }
 
             var user = await UpsertUserAsync(userInfo, context.RequestAborted);
+            _log.LogInformation(
+                "Proxy bridge: user upserted id={UserId} email={Email} tenantId={TenantId}",
+                user.Id, user.Email, user.TenantId);
 
             var activeTenantId = user.TenantId ?? Guid.Empty;
             var role = "member";
@@ -135,6 +149,9 @@ public class ProxyHeaderAuthMiddleware : IMiddleware
 
             context.Response.Cookies.Append(SessionCookieName, jwt, BuildSessionCookie());
             context.User = BuildPrincipalFromJwt(jwt);
+            _log.LogInformation(
+                "Proxy bridge: JWT minted + tamma_session cookie set for user {UserId}",
+                user.Id);
 
             await _userRepo.UpdateLastActiveAsync(user.Id);
         }
@@ -143,7 +160,7 @@ public class ProxyHeaderAuthMiddleware : IMiddleware
             // Swallow — let the request continue as anonymous so RequireAuth
             // returns its normal 401 / lets-through-anonymous response. Log
             // for diagnosis but do not surface to the caller.
-            _log.LogWarning(ex, "Proxy bridge failed; continuing as anonymous");
+            _log.LogError(ex, "Proxy bridge failed; continuing as anonymous");
         }
 
         await next(context);
