@@ -48,6 +48,12 @@ These migrations already exist in `database/migrations/`:
 | 016 | `016_tenant_memberships.sql` | 18-3 | Create `tenant_memberships` (M:N user-to-tenant) and `tenant_invites` tables | 008 (tenants table), 002 (users table) |
 | 017 | `017_user_auth_fields.sql` | 18-1 | Add `password_hash`, `email_verified`, `email_verification_token_hash`, `email_verification_expires_at`, `auth_method` columns to `users`. Add unique index on `LOWER(email)`. | 002 |
 
+### Convention Store (Epic 27, Stories 27-8+)
+
+| Number | File | Story | Description | Dependencies |
+|--------|------|-------|-------------|-------------|
+| 018 | `018_convention_store.sql` | 27-8 | Create `conventions` table + normalized `convention_keywords` table with B-tree index on `keyword`, partial unique indexes for system defaults / tenant overrides, seed 20 system defaults + ~80 keyword rows from `ConventionTemplates.cs`. FK to `tenants(id)` on `tenant_id`. **No RLS** (exempt — same as prompts). | 008 (tenants table for FK) |
+
 ## Migration Dependency Graph
 
 ```
@@ -57,8 +63,8 @@ These migrations already exist in `database/migrations/`:
 008 (tenants) ----+----+----+----+----+----+
   |               |    |    |    |    |    |
   v               v    v    v    v    v    v
-009 (RLS)       011  012  013  014  015  016
-  |             (prompts)(configs)(diag)(health)(sanit)(memberships)
+009 (RLS)       011  012  013  014  015  016  018
+  |             (prompts)(configs)(diag)(health)(sanit)(memberships)(conventions)
   v
 010 (event+wf scoping)
                                            017 (user auth fields)
