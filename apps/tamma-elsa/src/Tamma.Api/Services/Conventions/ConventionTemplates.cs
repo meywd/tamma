@@ -1234,6 +1234,97 @@ Refactoring changes structure without changing behavior. If behavior changes, it
 - Flag dependencies on other teams/systems early
 - Update the plan when reality diverges — plans are living documents");
 
+    private static readonly ConventionTemplate ActionContextScan = new(
+        Key: "action-context-scan",
+        Name: "Context Research",
+        Description: "Conventions for codebase research: systematic exploration, findings structure, evidence-based",
+        Conventions: @"# Context Research Conventions
+
+## Approach
+- Start with the broadest view: project structure, entry points, dependency graph
+- Follow data flow: how does input reach the area of interest?
+- Identify relevant files by tracing imports/references, not by guessing paths
+- Read existing tests to understand intended behavior and edge cases
+
+## What to Capture
+- Architecture patterns in use (layering, DI, event-driven, etc.)
+- Naming conventions and code style already established
+- Existing abstractions that new code should reuse (not reinvent)
+- Integration points: how does this module connect to others?
+- Dependencies: external libraries, services, databases involved
+
+## Structure Your Findings
+- Separate facts (""this file does X"") from interpretations (""this suggests Y"")
+- Note file paths and line numbers for key discoveries
+- Flag ambiguities and unknowns explicitly — don't fill gaps with assumptions
+- Prioritize: what's most relevant to the task at hand?
+
+## Anti-Patterns
+- Don't read every file — be targeted; follow the dependency chain
+- Don't assume architecture from file names alone — read the actual code
+- Don't conflate ""how it is"" with ""how it should be"" — report current state
+- Don't skip test files — they document intended behavior and constraints");
+
+    private static readonly ConventionTemplate ActionTriage = new(
+        Key: "action-triage",
+        Name: "Issue Triage",
+        Description: "Conventions for issue analysis: classify, assess impact, identify unknowns, recommend action",
+        Conventions: @"# Issue Triage Conventions
+
+## Classification
+- Categorize: bug, feature request, improvement, tech debt, documentation, security
+- Severity: critical (system down), high (major function broken), medium (degraded), low (cosmetic)
+- Effort estimate: XS (< 1h), S (1-4h), M (4-16h), L (16-40h), XL (40h+)
+- Identify affected areas: which modules, services, or user flows are impacted?
+
+## Analysis
+- Reproduce the issue (for bugs): what steps trigger it? Is it consistent?
+- Identify root cause vs symptom — the reported problem may not be the real problem
+- Check for duplicates or related issues already in the backlog
+- Assess blast radius: how many users/tenants are affected?
+
+## Unknowns & Dependencies
+- Flag what you DON'T know and what investigation is needed
+- Identify blocking dependencies: does this require another team's work first?
+- Note environment-specific factors: does it only happen in production? Under load?
+- Consider timing: is this urgent (SLA breach) or can it wait for the next sprint?
+
+## Recommendation
+- Recommend an action: fix now, schedule for sprint, needs-more-info, won't-fix, duplicate
+- Suggest an assignee role: who is best suited to handle this?
+- Define acceptance criteria: what does ""resolved"" look like?
+- If deferring: document the risk of NOT fixing it now");
+
+    private static readonly ConventionTemplate ActionDeploy = new(
+        Key: "action-deploy",
+        Name: "Deployment",
+        Description: "Conventions for deployment execution: pre-checks, rollout strategy, verification, rollback",
+        Conventions: @"# Deployment Conventions
+
+## Pre-Deployment
+- Verify all tests pass on the exact artifact being deployed (not just the branch)
+- Check database migrations are backward-compatible with the running app version
+- Confirm secrets and environment variables are set in the target environment
+- Review what changed since last deploy — are there risky changes that need extra monitoring?
+
+## Rollout Strategy
+- Use progressive rollout: canary (1%) → partial (10%) → full (100%)
+- Monitor error rates and latency at each stage before proceeding
+- Deploy during low-traffic windows when possible (not Fridays at 5pm)
+- For database migrations: deploy migration first, verify, then deploy app
+
+## Post-Deployment Verification
+- Smoke test critical paths immediately after deploy
+- Check health endpoints return healthy status
+- Monitor dashboards for: error rate spike, latency increase, traffic drop
+- Verify new features are accessible (feature flags enabled if applicable)
+
+## Rollback Plan
+- Know the rollback command BEFORE you deploy (and test it works)
+- Rollback triggers: error rate > 2x baseline, p99 latency > 3x baseline, health check failing
+- Database rollbacks: if migration is not backward-compatible, rollback is ""deploy previous app version"" not ""revert migration""
+- Post-rollback: create incident ticket, gather logs, understand root cause before re-attempting");
+
     // ────────────────────────────────────────────────────────────────────
     // Role-triggered conventions — fire when the agent's role matches.
     // ────────────────────────────────────────────────────────────────────
@@ -1422,6 +1513,95 @@ Refactoring changes structure without changing behavior. If behavior changes, it
 - Breaking changes require: migration guide, deprecation period, or feature flag
 - Performance-sensitive changes require benchmarks (before vs after)
 - Security-sensitive changes require security review");
+
+    private static readonly ConventionTemplate RoleDeveloper = new(
+        Key: "role-developer",
+        Name: "Developer",
+        Description: "Developer role conventions: ownership, implementation focus, testing discipline, pragmatism",
+        Conventions: @"# Developer Conventions
+
+## Implementation Mindset
+- Own the code you write: it's your responsibility to make it work, test it, and maintain it
+- Understand the requirement fully before writing code — ask questions, don't assume
+- Prefer working software over perfect software — ship incrementally
+- Leave code better than you found it, but don't refactor everything you touch
+
+## Working Style
+- Start with the interface/contract, then implement — outside-in development
+- Write the test first when the behavior is well-defined (TDD where appropriate)
+- Commit working increments frequently — don't batch large changes
+- When stuck for > 30 minutes, step back and re-read the problem statement
+
+## Code Quality
+- Functions do one thing; classes have one responsibility
+- Name things by what they DO, not what they ARE (verbs for functions, nouns for data)
+- Handle errors at the appropriate level — don't swallow, don't over-catch
+- Performance: correct first, then fast — but don't write obviously O(n²) code
+
+## Collaboration
+- Document non-obvious decisions in commit messages (the WHY)
+- Flag risks and unknowns early — don't discover them the day before deadline
+- If changing shared code, check who else uses it (grep for callers)
+- PR size: < 400 lines of logic changes; split larger work into stacked PRs");
+
+    private static readonly ConventionTemplate RoleProductOwner = new(
+        Key: "role-product-owner",
+        Name: "Product Owner",
+        Description: "Product owner conventions: requirements clarity, prioritization, acceptance criteria, stakeholder alignment",
+        Conventions: @"# Product Owner Conventions
+
+## Requirements
+- Every requirement must have clear acceptance criteria: ""Done when...""
+- Separate the WHAT (requirement) from the HOW (implementation) — let developers choose the how
+- Include context: WHY is this needed? What user problem does it solve?
+- Specify edge cases explicitly — don't leave them for developers to discover
+
+## Prioritization
+- Prioritize by impact × urgency, not by who asks loudest
+- Every sprint has exactly one #1 priority — if everything is urgent, nothing is
+- Tech debt and reliability work gets explicit allocation (not ""if we have time"")
+- Say NO explicitly to things that won't be done — don't leave them in limbo
+
+## Communication
+- Write user stories from the user's perspective: ""As a [role], I want [goal], so that [benefit]""
+- Define scope boundaries: what is IN scope and what is explicitly OUT of scope
+- Provide examples and scenarios — concrete beats abstract for alignment
+- When requirements change mid-sprint, acknowledge the trade-off (something else moves out)
+
+## Quality Gate
+- Review delivered work against acceptance criteria — not against unstated expectations
+- Report bugs with: steps to reproduce, expected behavior, actual behavior, environment
+- Distinguish: must-fix (blocks release) vs. nice-to-fix (next iteration) vs. won't-fix");
+
+    private static readonly ConventionTemplate RoleTechWriter = new(
+        Key: "role-tech-writer",
+        Name: "Tech Writer",
+        Description: "Tech writer conventions: audience awareness, structure, accuracy, maintainability",
+        Conventions: @"# Tech Writer Conventions
+
+## Audience
+- Identify the reader: developer? operator? end user? executive?
+- Match vocabulary to audience — no jargon for non-technical readers
+- State prerequisites: what must the reader already know or have installed?
+- Provide escape hatches: if stuck at step N, here's how to get help
+
+## Structure
+- Lead with the one-sentence purpose: what does this document help the reader DO?
+- Table of contents for anything over 3 sections
+- Progressive disclosure: overview → quickstart → detailed reference
+- Use headings, bullet points, and code blocks — dense paragraphs lose readers
+
+## Accuracy
+- Every code example must be tested — copy-paste it and verify it works
+- Version-pin references (""as of v2.3"") so readers know when docs may be stale
+- Distinguish: stable API (safe to depend on) vs. experimental (may change)
+- Cross-reference related docs rather than duplicating content
+
+## Maintainability
+- Keep docs close to the code they describe (README in the package, not a separate wiki)
+- Date-stamp guides that reference specific versions or configurations
+- Use relative links within the repo (survive renames better than absolute URLs)
+- When code changes, the docs PR is part of the same change — not a follow-up");
 
     // ────────────────────────────────────────────────────────────────────
     // Cross-cutting conventions — broad keywords or always_apply.
@@ -1691,7 +1871,7 @@ Refactoring changes structure without changing behavior. If behavior changes, it
         ElixirPhoenix,
         Scala,
 
-        // Action-triggered (8)
+        // Action-triggered (11)
         ActionWriteCode,
         ActionReviewCode,
         ActionDesign,
@@ -1700,13 +1880,19 @@ Refactoring changes structure without changing behavior. If behavior changes, it
         ActionRefactor,
         ActionDocument,
         ActionPlan,
+        ActionContextScan,
+        ActionTriage,
+        ActionDeploy,
 
-        // Role-triggered (5)
+        // Role-triggered (8)
         RoleSecurityReviewer,
         RoleArchitect,
         RoleQaEngineer,
         RoleDevopsEngineer,
         RoleTechLead,
+        RoleDeveloper,
+        RoleProductOwner,
+        RoleTechWriter,
 
         // Cross-cutting (7)
         UniversalSafety,

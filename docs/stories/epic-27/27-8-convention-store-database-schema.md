@@ -19,7 +19,7 @@ so that conventions are persisted in the database with tenant-level isolation an
 7. B-tree indexes on: `conventions(tenant_id)`, `conventions(category)`, `conventions(enabled, priority DESC)`
 8. CHECK constraint: `match_mode IN ('any', 'all')`
 9. CHECK constraint: `version > 0`
-10. Seed migration inserts 40 system default convention rows from `ConventionTemplates.cs` with `tenant_id = NULL`: 20 language/framework, 8 action-triggered, 5 role-triggered, 7 cross-cutting
+10. Seed migration inserts 46 system default convention rows from `ConventionTemplates.cs` with `tenant_id = NULL`: 20 language/framework, 11 action-triggered, 8 role-triggered, 7 cross-cutting
 11. Seed migration inserts corresponding `convention_keywords` rows for each convention (~160 rows total; e.g., `typescript-react` gets rows for `typescript`, `react`, `nextjs`, `tsx`; `universal-safety` and `universal-quality` get zero keywords but `always_apply = true`)
 12. All seed inserts use `ON CONFLICT DO NOTHING` for idempotency
 13. Migration is idempotent (running it twice produces no errors)
@@ -28,7 +28,7 @@ so that conventions are persisted in the database with tenant-level isolation an
 
 ### Current State
 
-Convention templates are static in-code constants in `apps/tamma-elsa/src/Tamma.Api/Services/Conventions/ConventionTemplates.cs`. There are 40 templates across four groups: 20 language/framework (keyed by language slug), 8 action-triggered (keyed by `action-*`), 5 role-triggered (keyed by `role-*`), and 7 cross-cutting (universal rules, git, error handling, API, database, observability). Each has:
+Convention templates are static in-code constants in `apps/tamma-elsa/src/Tamma.Api/Services/Conventions/ConventionTemplates.cs`. There are 46 templates across four groups: 20 language/framework (keyed by language slug), 11 action-triggered (keyed by `action-*`), 8 role-triggered (keyed by `role-*`), and 7 cross-cutting (universal rules, git, error handling, API, database, observability). Each has:
 - `Key`: stable identifier slug
 - `Name`: human-readable name
 - `Description`: one-line summary
@@ -107,28 +107,34 @@ The 40 `ConventionTemplates.cs` entries map to seed rows:
 | `elixir-phoenix` | Elixir + Phoenix | coding | `['elixir','phoenix','ecto']` |
 | `scala` | Scala | coding | `['scala','akka','zio','cats']` |
 
-#### Action-Triggered (8)
+#### Action-Triggered (11)
 
 | Key | Name | Category | Keywords (derived) |
 |-----|------|----------|--------------------|
-| `action-write-code` | Code Writing | coding | `['writeCode','implement','code']` |
-| `action-review-code` | Code Review | review | `['reviewCode','review','pr']` |
+| `action-write-code` | Code Writing | coding | `['implement','writeCode','code']` |
+| `action-review-code` | Code Review | review | `['code-review','reviewCode','review','pr']` |
 | `action-design` | System Design | design | `['design','architect','plan']` |
-| `action-write-tests` | Test Writing | testing | `['writeTests','test','tdd']` |
+| `action-write-tests` | Test Writing | testing | `['write-tests','writeTests','test','tdd']` |
 | `action-debug` | Debugging | debugging | `['debug','fix','investigate','troubleshoot']` |
 | `action-refactor` | Refactoring | coding | `['refactor','cleanup','restructure']` |
-| `action-document` | Documentation Writing | documentation | `['writeDocs','document','readme']` |
+| `action-document` | Documentation Writing | documentation | `['summarize','writeDocs','document','readme']` |
 | `action-plan` | Planning & Scoping | planning | `['plan','breakdown','estimate','scope']` |
+| `action-context-scan` | Context Research | research | `['context-scan','research','analysis','codebase']` |
+| `action-triage` | Issue Triage | planning | `['triage','prioritize','classify','assess']` |
+| `action-deploy` | Deployment | devops | `['deploy','deployment','release','rollout']` |
 
-#### Role-Triggered (5)
+#### Role-Triggered (8)
 
 | Key | Name | Category | Keywords (derived) |
 |-----|------|----------|--------------------|
-| `role-security-reviewer` | Security Review | security | `['securityReviewer','security','owasp','vulnerability']` |
+| `role-security-reviewer` | Security Review | security | `['security','securityReviewer','owasp','vulnerability']` |
 | `role-architect` | Architect | design | `['architect','systemDesign','scalability']` |
-| `role-qa-engineer` | QA Engineer | testing | `['qa','qualityAssurance','tester']` |
+| `role-qa-engineer` | QA Engineer | testing | `['tester','qa','qualityAssurance']` |
 | `role-devops-engineer` | DevOps Engineer | devops | `['devops','deploy','infrastructure','ci']` |
-| `role-tech-lead` | Tech Lead | coding | `['techLead','mentor','standards']` |
+| `role-tech-lead` | Tech Lead | coding | `['senior_developer','techLead','mentor','standards']` |
+| `role-developer` | Developer | coding | `['developer','implementer','coder']` |
+| `role-product-owner` | Product Owner | planning | `['product_owner','analyst','stakeholder','requirements']` |
+| `role-tech-writer` | Tech Writer | documentation | `['tech_writer','documenter','technical-writing']` |
 
 #### Cross-Cutting (7)
 
@@ -225,7 +231,7 @@ VALUES
    'TypeScript + React 19/Next.js 15, RSC, hooks, Tailwind CSS, Vitest/RTL',
    'coding', E'# TypeScript + React/Next.js Conventions\n...',
    'any', false, 0, true, 1),
-  -- ... 39 more rows (20 language + 8 action + 5 role + 7 cross-cutting)
+  -- ... 45 more rows (20 language + 11 action + 8 role + 7 cross-cutting)
 ON CONFLICT DO NOTHING;
 
 -- Insert keywords (FK to conventions via deterministic UUIDs)
@@ -267,7 +273,7 @@ Same approach as Story 27-1: create a one-time script that reads `ConventionTemp
 4. Partial unique indexes allow the same key for different tenant_ids
 5. `convention_keywords` UNIQUE constraint prevents duplicate keywords per convention
 6. B-tree index on `convention_keywords(keyword)` exists
-7. Seed data inserts 40 convention rows and corresponding keyword rows (~160 keyword rows)
+7. Seed data inserts 46 convention rows and corresponding keyword rows (~190 keyword rows)
 8. Re-running seed (ON CONFLICT DO NOTHING) does not change row counts
 9. `match_mode` CHECK rejects values other than 'any' / 'all'
 10. `version <= 0` rejected by CHECK constraint
@@ -296,7 +302,7 @@ This story uses **migration 018** (`018_convention_store.sql`). See `/docs/stori
 |------|-------|
 | Migration SQL (2 tables, indexes, constraints) | 2.5 |
 | Seed script to generate INSERT statements from ConventionTemplates.cs | 2 |
-| Seed data SQL (40 convention rows + ~160 keyword rows) | 3 |
+| Seed data SQL (46 convention rows + ~190 keyword rows) | 3 |
 | Unit tests (10 tests) | 1.5 |
 | Integration tests (6 tests) | 2 |
 | Update migration-ordering.md | 0.5 |

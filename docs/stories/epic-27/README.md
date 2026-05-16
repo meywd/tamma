@@ -7,7 +7,7 @@
 **Value Delivered**:
 - Multi-tenant prompt isolation: each tenant (organization) sees its own prompts without cross-tenant leakage
 - Two-tier resolution: tenant overrides take precedence over system defaults, with transparent fallback
-- Platform admin control over the 80 system default role+action templates, 8 role system prompts, and 40 convention templates
+- Platform admin control over the 80 system default role+action templates, 8 role system prompts, and 46 convention templates
 - Tenant admin self-service for customizing prompts without touching system defaults
 - Full audit trail via DCB events for every prompt change (who, when, what)
 - Elsa workflows resolve prompts per-tenant, enabling different organizations to use different prompt strategies
@@ -193,7 +193,7 @@ Story 27-11  Story 27-12
 
 1. **Tenant scoping**: `tenant_id` maps to `tenants.id` from Epic 17. The sentinel `DEFAULT_TENANT_ID` (`00000000-...`) is used for system defaults (NULL tenant_id) and self-hosted/CLI mode.
 2. **NULL tenant_id = system default**: System defaults have `tenant_id IS NULL`, not the sentinel UUID. This differentiates "system-shipped" from "default tenant's overrides."
-3. **Convention templates → Convention Store (Stories 27-8 to 27-14)**: The 40 convention templates (20 language/framework + 8 action + 5 role + 7 cross-cutting) are migrated to a PostgreSQL-backed Convention Store with keyword-based matching and tenant override support. The store follows the same two-tier pattern as the prompt store (system defaults + tenant overrides), keyed by slug with keywords stored in a normalized `convention_keywords` table (B-tree indexed) for matching against LLM call context. The `{{conventions}}` variable is now populated by the convention store resolver instead of `.tamma/config.json`.
+3. **Convention templates → Convention Store (Stories 27-8 to 27-14)**: The 46 convention templates (20 language/framework + 11 action + 8 role + 7 cross-cutting) are migrated to a PostgreSQL-backed Convention Store with keyword-based matching and tenant override support. The store follows the same two-tier pattern as the prompt store (system defaults + tenant overrides), keyed by slug with keywords stored in a normalized `convention_keywords` table (B-tree indexed) for matching against LLM call context. The `{{conventions}}` variable is now populated by the convention store resolver instead of `.tamma/config.json`.
 4. **Backward compatibility**: Existing prompt API routes (`/api/prompts/:role/:action`) must continue working for the self-hosted/CLI mode (resolved against system defaults).
 5. **No RLS on prompt tables**: Prompt resolution crosses tenant boundaries by design (reading system defaults when tenant override is absent). Application-level filtering is used instead of RLS. See Story 17-2 for the RLS exemption list.
 6. **Seed data from code**: The migration seeds all 80 role+action templates, 8 system prompts, and 10 action defaults from the existing `default-prompts.ts` code. The seed SQL is generated from the TypeScript constants to avoid duplication.
@@ -236,7 +236,7 @@ All new API endpoints introduced by Epic 27 stories **must include rate limiting
 
 ### Convention Store (Stories 27-8 to 27-14)
 
-The 40 convention templates are now migrated to a PostgreSQL-backed Convention Store via Stories 27-8 through 27-14. Each convention's keywords are stored in a normalized `convention_keywords` table with a B-tree index on `keyword` for fast resolution hot-path queries (`WHERE keyword IN (...)`). The store follows the same two-tier pattern as prompts: system defaults (`tenant_id IS NULL`) seeded from `ConventionTemplates.cs`, with tenant-level overrides by key.
+The 46 convention templates are now migrated to a PostgreSQL-backed Convention Store via Stories 27-8 through 27-14. Each convention's keywords are stored in a normalized `convention_keywords` table with a B-tree index on `keyword` for fast resolution hot-path queries (`WHERE keyword IN (...)`). The store follows the same two-tier pattern as prompts: system defaults (`tenant_id IS NULL`) seeded from `ConventionTemplates.cs`, with tenant-level overrides by key.
 
 Convention resolution happens at LLM-call time in `ResolveConventionsActivity` (Story 27-13): keywords on each convention are matched against the action, tools, repo languages, and searchable text of the call. Matching conventions are concatenated by priority and substituted into the `{{conventions}}` template variable. Story 12-7b's `search_conventions` tool reads from the same store.
 
