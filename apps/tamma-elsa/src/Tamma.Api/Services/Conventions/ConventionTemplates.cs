@@ -968,8 +968,700 @@ public static class ConventionTemplates
 - Circe or zio-json for JSON serialization");
 
     // ────────────────────────────────────────────────────────────────────
-    // Aggregates
+    // Action-triggered conventions — fire when the LLM call's action
+    // matches the convention's keywords (e.g. writeCode, reviewCode).
     // ────────────────────────────────────────────────────────────────────
+
+    private static readonly ConventionTemplate ActionWriteCode = new(
+        Key: "action-write-code",
+        Name: "Code Writing",
+        Description: "Conventions for writing new code: incremental changes, compile-first, minimal scope",
+        Conventions: @"# Code Writing Conventions
+
+## Approach
+- Work in small increments; compile/type-check after each logical change
+- Write the simplest implementation that satisfies the requirement — no speculative generality
+- Run existing tests before and after changes to catch regressions immediately
+- Prefer editing existing files to creating new ones
+
+## Scope & Abstraction
+- Do not introduce abstractions until a pattern repeats at least three times
+- One concern per function; one purpose per file
+- Keep functions under 40 lines; if longer, extract a named helper
+- Don't add features, helpers, or cleanup beyond what the task requires
+
+## Code Hygiene
+- Remove dead code; don't comment it out
+- No TODO/FIXME without an associated issue/ticket reference
+- Prefer standard library and existing project utilities over new dependencies
+- Match surrounding code style — consistency over personal preference
+
+## Safety
+- Validate inputs at system boundaries (user input, external APIs)
+- Never concatenate user input into SQL, shell commands, or templates
+- Use parameterized queries, escaping functions, or type-safe builders
+- Handle all possible error states — don't rely on happy path assumptions");
+
+    private static readonly ConventionTemplate ActionReviewCode = new(
+        Key: "action-review-code",
+        Name: "Code Review",
+        Description: "Conventions for reviewing PRs: bug severity, security lens, signal over noise",
+        Conventions: @"# Code Review Conventions
+
+## Priorities (highest to lowest)
+1. Security vulnerabilities (injection, auth bypass, secrets exposure, SSRF)
+2. Correctness bugs (logic errors, race conditions, null dereference, off-by-one)
+3. Data integrity issues (missing transactions, inconsistent state, lost updates)
+4. Performance regressions (N+1 queries, unbounded allocations, missing indexes)
+5. API contract violations (breaking changes, missing validation, wrong status codes)
+6. Maintainability concerns (naming, duplication, coupling) — lowest priority
+
+## What NOT to flag
+- Style/formatting issues handled by linters (let tools enforce these)
+- Personal preference with no objective justification
+- Theoretical future problems with no current evidence
+- Trivial naming suggestions unless genuinely confusing
+
+## Review Approach
+- Verify the change matches the stated intent (PR description, linked issue)
+- Check edge cases: empty inputs, boundary values, concurrent access, error paths
+- Look for missing tests for new logic paths
+- Consider rollback safety: can this change be reverted without data loss?
+- Check for secrets, credentials, or PII in code or logs
+
+## Feedback Style
+- Lead with what the change gets right
+- Frame issues as questions when uncertain: ""Could this race if...?""
+- Severity-tag findings: [critical] [bug] [nit] [question]
+- Provide suggested fix when flagging an issue, not just the problem");
+
+    private static readonly ConventionTemplate ActionDesign = new(
+        Key: "action-design",
+        Name: "System Design",
+        Description: "Conventions for architecture & system design: constraints-first, trade-off documentation",
+        Conventions: @"# System Design Conventions
+
+## Process
+- Start with constraints: latency budget, throughput target, consistency requirement, team size
+- Define system boundaries and data ownership before implementation details
+- Document trade-offs explicitly: what you're gaining, what you're sacrificing, why
+- Prefer boring, proven technology unless a novel approach has measurable advantage
+
+## Architecture Principles
+- Design for failure: every external dependency will be unavailable at some point
+- Make the common path fast and the error path safe
+- Prefer stateless services; push state to the database or cache layer
+- Define API contracts (schemas, status codes, error formats) before implementation
+- Separate reads from writes when access patterns differ significantly
+
+## Documentation
+- Record decisions as ADRs (context → decision → consequences)
+- Diagrams: data flow for understanding, sequence for interactions, deployment for ops
+- Specify what is NOT in scope to prevent scope creep
+- Include capacity estimates: expected load, storage growth, scaling triggers
+
+## Anti-Patterns to Avoid
+- Distributed monolith: microservices that all deploy together
+- Premature optimization: measure before you optimize
+- Resume-driven development: picking tech for novelty over fitness
+- Ignoring operational burden: every service is a pager at 3am");
+
+    private static readonly ConventionTemplate ActionWriteTests = new(
+        Key: "action-write-tests",
+        Name: "Test Writing",
+        Description: "Conventions for writing tests: TDD rhythm, one behavior per test, meaningful assertions",
+        Conventions: @"# Test Writing Conventions
+
+## TDD Rhythm
+- RED: Write a failing test that defines the expected behavior
+- GREEN: Write the minimal implementation to make it pass
+- REFACTOR: Clean up while keeping tests green
+- Commit at each green state — don't batch large untested changes
+
+## Test Structure
+- One behavior per test; test name describes the scenario and expected outcome
+- Arrange-Act-Assert (or Given-When-Then) structure in every test
+- Tests must be independent — no shared mutable state between tests
+- Tests must be deterministic — no flakiness from timing, ordering, or randomness
+
+## What to Test
+- Happy path: the feature works as intended
+- Edge cases: empty input, null/undefined, boundary values, maximum lengths
+- Error cases: invalid input, network failures, permission denied
+- State transitions: before/after for mutations
+
+## What NOT to Test
+- Implementation details (private methods, internal state shape)
+- Framework/library behavior (trust that React renders, that Express routes)
+- Trivial code with no logic (simple getters, pass-through functions)
+
+## Mocking
+- Mock at system boundaries: external APIs, databases, file system, clock
+- Don't mock what you don't own — wrap the dependency, mock the wrapper
+- Prefer real implementations over mocks when fast enough (in-memory DB, test server)
+- Assert on mock interactions only when the side effect IS the behavior");
+
+    private static readonly ConventionTemplate ActionDebug = new(
+        Key: "action-debug",
+        Name: "Debugging",
+        Description: "Conventions for systematic debugging: reproduce, isolate, verify",
+        Conventions: @"# Debugging Conventions
+
+## Process (in order)
+1. REPRODUCE: Get a reliable reproduction of the bug before anything else
+2. ISOLATE: Narrow the scope — which commit, which file, which function, which input
+3. UNDERSTAND: Read the code path; form a hypothesis about root cause
+4. FIX: Make the minimal change that addresses root cause, not symptoms
+5. VERIFY: Write a test that fails without the fix and passes with it
+6. CHECK: Ensure no regressions — run the full relevant test suite
+
+## Techniques
+- Use git bisect to find the introducing commit for regressions
+- Add targeted logging/tracing at decision points, not everywhere
+- Check recent changes to the affected code path (git log -p -- file)
+- Reproduce with minimal input — strip away unrelated complexity
+- Check the obvious first: typos, wrong variable, stale cache, wrong environment
+
+## Anti-Patterns
+- Don't refactor while debugging — fix the bug, then clean up separately
+- Don't apply speculative fixes — understand before changing
+- Don't fix symptoms: if you're adding a null check, ask WHY it's null
+- Don't ignore the stack trace — read it bottom to top
+- Don't assume the bug is in your code — check dependencies, configs, data
+
+## After the Fix
+- Document the root cause in the commit message (not just ""fix bug"")
+- Consider: are there similar patterns elsewhere that could have the same issue?
+- Add monitoring/alerting if the failure was silent");
+
+    private static readonly ConventionTemplate ActionRefactor = new(
+        Key: "action-refactor",
+        Name: "Refactoring",
+        Description: "Conventions for safe refactoring: small steps, green tests, preserve behavior",
+        Conventions: @"# Refactoring Conventions
+
+## Core Principle
+Refactoring changes structure without changing behavior. If behavior changes, it's not a refactoring — it's a rewrite.
+
+## Process
+- Ensure test coverage exists BEFORE refactoring (add tests first if needed)
+- Make one structural change at a time; run tests between each step
+- Commit after each successful step — small atomic commits, not one big bang
+- If tests break, revert the last step and try a smaller change
+
+## Safe Refactoring Patterns
+- Rename: variable, function, class, file — update all references
+- Extract: pull code into a named function/method/module
+- Inline: replace a trivial abstraction with its implementation
+- Move: relocate code to a more appropriate module/layer
+- Replace conditional with polymorphism (when the conditional repeats)
+
+## Scope Control
+- Don't mix refactoring with feature work in the same commit
+- Don't refactor code you don't understand yet — understand first, then refactor
+- Limit blast radius: refactor one module/layer at a time
+- Don't rename public API surfaces without a migration plan
+- Preserve git blame where possible (use git mv for file moves)
+
+## When NOT to Refactor
+- Under time pressure with no test coverage
+- Code that is about to be deleted/replaced
+- Code you've never run or tested
+- Hot paths in production without performance benchmarks");
+
+    private static readonly ConventionTemplate ActionDocument = new(
+        Key: "action-document",
+        Name: "Documentation Writing",
+        Description: "Conventions for writing docs: audience-aware, examples-first, explain WHY",
+        Conventions: @"# Documentation Conventions
+
+## Core Principles
+- Explain WHY, not WHAT — code shows what; docs explain intent and context
+- Lead with examples — a code snippet is worth a thousand words
+- Write for the reader's level, not your own
+- Keep docs adjacent to code — proximity reduces staleness
+
+## Structure
+- Start with the one-sentence summary: what does this do and why would I use it?
+- Quickstart/example first, detailed reference after
+- Use headings and bullet points for scanability
+- Include: prerequisites, common use cases, error scenarios, migration notes
+
+## What to Document
+- Public APIs: parameters, return values, error conditions, examples
+- Architecture decisions: the WHY (use ADRs for permanent record)
+- Setup/onboarding: getting from zero to running in minimal steps
+- Non-obvious behavior: gotchas, implicit dependencies, ordering requirements
+
+## What NOT to Document
+- Implementation details that change frequently (they'll go stale)
+- Things the type system already expresses (parameter types, return types)
+- Obvious code: don't write ""// increment counter"" above counter++
+- Removed features — delete the docs when you delete the code
+
+## Maintenance
+- Treat stale docs as bugs — wrong docs are worse than no docs
+- Review docs in PR review — if code changed, did the docs keep up?
+- Date-stamp guides that reference specific versions");
+
+    private static readonly ConventionTemplate ActionPlan = new(
+        Key: "action-plan",
+        Name: "Planning & Scoping",
+        Description: "Conventions for task planning: decompose, define done, sequence by dependency",
+        Conventions: @"# Planning Conventions
+
+## Decomposition
+- Break work into tasks that can be completed and verified independently
+- Each task should be achievable in one focused session (< 4 hours)
+- Define acceptance criteria for each task: what does ""done"" look like?
+- Identify unknowns and spikes upfront — research before estimating
+
+## Sequencing
+- Order by dependency: foundation first, features on top
+- Identify the critical path: what blocks everything else?
+- Front-load risky/uncertain work — fail fast on unknowns
+- Separate ""must have"" from ""nice to have"" explicitly
+
+## Scoping
+- Define what is NOT in scope as clearly as what IS in scope
+- Don't gold-plate: the minimum viable solution that meets criteria wins
+- Account for testing, documentation, and deployment — not just coding
+- Include rollback/revert plan for risky changes
+
+## Communication
+- State assumptions explicitly — don't assume the reader shares your context
+- Estimate in ranges, not points (""2-4 hours"" not ""3 hours"")
+- Flag dependencies on other teams/systems early
+- Update the plan when reality diverges — plans are living documents");
+
+    // ────────────────────────────────────────────────────────────────────
+    // Role-triggered conventions — fire when the agent's role matches.
+    // ────────────────────────────────────────────────────────────────────
+
+    private static readonly ConventionTemplate RoleSecurityReviewer = new(
+        Key: "role-security-reviewer",
+        Name: "Security Review",
+        Description: "OWASP-aligned security review: injection, auth, secrets, access control, data protection",
+        Conventions: @"# Security Review Conventions
+
+## Injection Prevention
+- Verify all user input is parameterized in SQL queries (no string concatenation)
+- Check for command injection in shell/exec calls — use allowlists, not blocklists
+- Verify template engines auto-escape output (XSS prevention)
+- Check for SSRF: validate/allowlist URLs before server-side fetching
+- Look for path traversal in file operations (../../../etc/passwd)
+
+## Authentication & Authorization
+- Verify auth checks on every endpoint — not just the happy path
+- Check for IDOR: is the user authorized for THIS specific resource?
+- Verify password/token comparison uses constant-time comparison
+- Check session/token expiry and rotation
+- Look for privilege escalation: can a regular user access admin endpoints?
+
+## Secrets Management
+- No hardcoded secrets, API keys, or credentials in source code
+- Verify secrets are loaded from env vars or secret managers
+- Check that secrets are excluded from logs, error messages, and stack traces
+- Verify .env files are in .gitignore
+- Check for secrets in CI/CD config files, Docker images, or client bundles
+
+## Data Protection
+- Verify PII is not logged or exposed in error responses
+- Check encryption at rest for sensitive fields (passwords → bcrypt/argon2)
+- Verify TLS for all external communications
+- Check for mass assignment vulnerabilities (accepting arbitrary fields from user input)
+- Verify proper CORS configuration (not wildcard * in production)
+
+## Supply Chain
+- Check for known vulnerabilities in dependencies (npm audit, cargo audit)
+- Verify dependency lockfiles are committed and up to date
+- Look for suspicious post-install scripts in new dependencies");
+
+    private static readonly ConventionTemplate RoleArchitect = new(
+        Key: "role-architect",
+        Name: "Architect",
+        Description: "Architecture conventions: boundaries, contracts, trade-offs, operational readiness",
+        Conventions: @"# Architect Conventions
+
+## System Boundaries
+- Define clear ownership: which team/service owns which data?
+- APIs are contracts — version them, document them, don't break them
+- Services communicate via well-defined interfaces (REST, gRPC, events)
+- Data flows in one direction through the pipeline — no circular dependencies
+
+## Decision Making
+- Every significant decision gets an ADR: Context → Decision → Consequences
+- Evaluate at least two alternatives before choosing — document why others were rejected
+- Consider: what's the cost of changing this decision later? (reversibility)
+- Separate ""decisions we must get right now"" from ""decisions we can defer""
+
+## Operational Readiness
+- Every service must have: health check endpoint, structured logging, graceful shutdown
+- Define SLOs before launch: availability target, latency p99, error budget
+- Plan for failure: what happens when this dependency is down for 30 minutes?
+- Capacity planning: what's the growth rate? When do we hit limits?
+
+## Scalability Patterns
+- Stateless services scale horizontally; push state to managed stores
+- Cache aggressively but invalidate correctly (prefer TTL over manual invalidation)
+- Use queues/events to decouple producers from consumers
+- Partition/shard early if data volume is predictable to grow
+
+## Anti-Patterns
+- Distributed monolith: everything deploys together despite being ""microservices""
+- Shared database between services: couples everything through the data layer
+- Chatty services: 50 network calls to serve one user request
+- Schemaless everything: ""flexibility"" that becomes chaos at scale");
+
+    private static readonly ConventionTemplate RoleQaEngineer = new(
+        Key: "role-qa-engineer",
+        Name: "QA Engineer",
+        Description: "QA conventions: coverage gaps, boundary testing, regression suites, test independence",
+        Conventions: @"# QA Engineer Conventions
+
+## Coverage Strategy
+- Prioritize testing by risk: what breaks costs the most? Test that first
+- Cover all public API paths: success, validation errors, auth errors, server errors
+- Test state transitions: create → update → delete lifecycle
+- Verify error messages are helpful and don't leak internal details
+
+## Boundary & Edge Cases
+- Empty/null/undefined inputs at every entry point
+- Maximum length strings, integer overflow, special characters (unicode, emoji, null bytes)
+- Concurrent access: two users editing the same resource simultaneously
+- Clock/timezone sensitivity: DST transitions, UTC vs local, midnight boundaries
+
+## Regression Testing
+- Every bug fix must include a regression test that fails without the fix
+- Regression suite runs on every PR — no exceptions
+- Flaky tests are bugs: fix immediately or quarantine (never just re-run)
+- Monitor test execution time — slow tests get skipped, defeating their purpose
+
+## Test Data
+- Tests create their own data — never depend on pre-existing database state
+- Use factories/builders for test data — not raw object literals everywhere
+- Clean up after tests (or use transactions that roll back)
+- Test with realistic data volumes when performance matters
+
+## Integration Testing
+- Test the real integration points: database queries, external API contracts, message formats
+- Use contract tests for service-to-service boundaries
+- Test deployment artifacts (Docker images, compiled binaries) not just source code
+- Verify health checks, graceful shutdown, and startup behavior");
+
+    private static readonly ConventionTemplate RoleDevopsEngineer = new(
+        Key: "role-devops-engineer",
+        Name: "DevOps Engineer",
+        Description: "DevOps conventions: idempotent deploys, rollback plans, observability, security hardening",
+        Conventions: @"# DevOps Engineer Conventions
+
+## Deployment
+- Deployments must be idempotent — running the same deploy twice produces the same result
+- Every deploy has a rollback plan: what command/action reverts to the previous state?
+- Zero-downtime deploys: rolling updates, blue-green, or canary — never full-stop deploys
+- Database migrations run BEFORE app deploy; they must be backward-compatible with N-1 app version
+- No manual steps in deploy: if a human has to remember something, automate it
+
+## Infrastructure as Code
+- All infrastructure is defined in code (Terraform, Pulumi, CloudFormation) — no click-ops
+- Infrastructure changes go through PR review like application code
+- Environments are reproducible: destroy and recreate from code should work
+- Secrets are never in IaC source — reference secret managers by ID/path
+
+## Observability
+- Every service emits: structured logs (JSON), metrics (counters/gauges/histograms), traces
+- Correlation IDs propagate across all service boundaries
+- Alerts fire on symptoms (SLO breach), not causes (CPU > 80%)
+- Dashboards answer: ""Is the system healthy? If not, where is it broken?""
+
+## Security Hardening
+- Least privilege for all service accounts and IAM roles
+- Network segmentation: services only reach what they need
+- Secrets rotate on a schedule; compromised secrets rotate immediately
+- Container images scanned for vulnerabilities; base images updated monthly
+- No SSH to production; use exec/debug containers with audit trail
+
+## Reliability
+- Health checks: liveness (process alive), readiness (accepting traffic), startup (warm-up done)
+- Graceful shutdown: drain connections, finish in-flight requests, then exit
+- Circuit breakers on all external dependencies
+- Capacity headroom: scale trigger at 60-70%, not 90%");
+
+    private static readonly ConventionTemplate RoleTechLead = new(
+        Key: "role-tech-lead",
+        Name: "Tech Lead",
+        Description: "Tech lead conventions: team consistency, decision documentation, unblocking, standards enforcement",
+        Conventions: @"# Tech Lead Conventions
+
+## Standards & Consistency
+- Consistency across the codebase is more important than individual perfection
+- Document conventions that are not enforceable by linters (architecture patterns, naming schemes)
+- When two approaches are equally valid, pick one and enforce it — don't allow both
+- New patterns require a migration plan for existing code (or accept the inconsistency explicitly)
+
+## Decision Making
+- Decisions are documented (ADRs): what was decided, why, what alternatives were considered
+- Distinguish between reversible and irreversible decisions — spend time proportionally
+- Default to the boring solution unless the interesting one has measurable advantage
+- ""We'll fix it later"" must have a ticket — otherwise it's ""we'll never fix it""
+
+## Code Health
+- Technical debt is tracked and paid down regularly — not just accumulated
+- Every PR should leave the code slightly better than it found it (boy scout rule)
+- Enforce: no warnings in CI, no skipped tests, no TODO without ticket
+- Major refactors get their own focused PR — don't mix with feature work
+
+## Team Enablement
+- Unblock others before starting your own work
+- Review PRs within 4 hours — blocked PRs are the #1 velocity killer
+- Pair on complex problems — two people arrive at better solutions faster
+- Share context: why was this decision made? What's the history?
+
+## Quality Gates
+- CI must pass before merge — no exceptions, no ""I'll fix it in the next commit""
+- Breaking changes require: migration guide, deprecation period, or feature flag
+- Performance-sensitive changes require benchmarks (before vs after)
+- Security-sensitive changes require security review");
+
+    // ────────────────────────────────────────────────────────────────────
+    // Cross-cutting conventions — broad keywords or always_apply.
+    // ────────────────────────────────────────────────────────────────────
+
+    private static readonly ConventionTemplate UniversalSafety = new(
+        Key: "universal-safety",
+        Name: "Universal Safety Rules",
+        Description: "Always-on safety conventions: no secrets in code, input validation, output sanitization",
+        Conventions: @"# Universal Safety Rules
+
+## Secrets
+- NEVER hardcode secrets, API keys, tokens, or passwords in source code
+- NEVER log secrets, even at DEBUG level
+- NEVER include secrets in error messages, stack traces, or user-facing responses
+- Load secrets from environment variables or dedicated secret managers
+- Verify .env, credentials.json, and key files are in .gitignore
+
+## Input Validation
+- Validate and sanitize ALL external input at system boundaries
+- Use allowlists over blocklists (define what's valid, reject everything else)
+- Parameterize all database queries — never concatenate user input into SQL
+- Escape output for the target context (HTML, shell, SQL, regex)
+
+## Dangerous Operations
+- Never use eval(), exec(), or similar dynamic code execution with untrusted input
+- Never construct shell commands from user input without proper escaping
+- Never deserialize untrusted data without schema validation
+- Never follow redirects to user-controlled URLs without validation (SSRF)
+
+## Data Protection
+- Hash passwords with bcrypt, scrypt, or argon2 — never MD5/SHA for passwords
+- Use constant-time comparison for secrets and tokens
+- Encrypt sensitive data at rest; use TLS for data in transit
+- Minimize PII collection and retention — don't store what you don't need");
+
+    private static readonly ConventionTemplate UniversalQuality = new(
+        Key: "universal-quality",
+        Name: "Universal Quality Standards",
+        Description: "Always-on quality conventions: type-check, test, don't break APIs",
+        Conventions: @"# Universal Quality Standards
+
+## Before Committing
+- Code compiles / type-checks without errors or new warnings
+- All existing tests pass (don't commit with known test failures)
+- New logic has corresponding tests (at minimum: happy path + one error case)
+- No debugging artifacts left behind (console.log, TODO hacks, commented-out code)
+
+## API Stability
+- Public APIs are contracts: don't change signatures without versioning/deprecation
+- Additive changes (new fields, new endpoints) are safe
+- Removal or rename of existing fields/endpoints is a breaking change
+- Breaking changes require: version bump, migration guide, deprecation period
+
+## Dependencies
+- Pin dependency versions (lockfile committed)
+- Audit dependencies for known vulnerabilities before adding
+- Prefer well-maintained packages with active communities
+- One dependency per concern — don't add a kitchen-sink library for one utility
+
+## Performance Awareness
+- Don't introduce O(n²) or worse when O(n) exists
+- Database queries in loops are almost always wrong (batch them)
+- Don't allocate unbounded memory based on user input (pagination, limits)
+- Measure before optimizing — profiler data beats intuition");
+
+    private static readonly ConventionTemplate GitConventions = new(
+        Key: "git-conventions",
+        Name: "Git & PR Conventions",
+        Description: "Commit messages, branch naming, PR discipline, atomic commits",
+        Conventions: @"# Git & PR Conventions
+
+## Commits
+- Conventional commit format: type(scope): description (e.g. feat(auth): add JWT refresh)
+- Types: feat, fix, refactor, test, docs, chore, perf, ci, build
+- Subject line: imperative mood, < 72 chars, no period at end
+- Body: explain WHY (motivation), not WHAT (the diff shows what)
+- One logical change per commit — don't mix features with refactoring
+
+## Branches
+- Branch from main/develop; keep branches short-lived (< 3 days ideal)
+- Naming: type/short-description (e.g. feat/user-auth, fix/null-pointer-crash)
+- Rebase on target before merge to resolve conflicts in your branch
+- Delete branch after merge — don't accumulate stale branches
+
+## Pull Requests
+- PR title: same format as commit subject (type(scope): description)
+- PR description: what changed, why, how to test, any risks/considerations
+- Keep PRs small (< 400 lines of logic change) — large PRs get rubber-stamped
+- One concern per PR: don't mix feature + refactor + dependency update
+- Mark draft until ready for review; don't push broken code for review
+
+## Code Review Flow
+- Address all comments before merging (resolve or explain why you disagree)
+- Don't force-push after review started — add new commits instead
+- Squash-merge to main for clean history (or rebase if commits are meaningful)
+- CI must pass before merge — no exceptions");
+
+    private static readonly ConventionTemplate ErrorHandling = new(
+        Key: "error-handling",
+        Name: "Error Handling & Resilience",
+        Description: "Structured errors, retry patterns, circuit breakers, graceful degradation",
+        Conventions: @"# Error Handling & Resilience Conventions
+
+## Error Design
+- Use structured error types with: code, message, context, retryable flag
+- Errors must be actionable: tell the caller what went wrong and what they can do
+- Internal errors: log full context (stack trace, input data, system state)
+- External errors: return safe message without internal details (no stack traces to users)
+- Distinguish: client errors (400s — bad input) from server errors (500s — our fault)
+
+## Error Propagation
+- Don't swallow exceptions silently — log at minimum, re-throw or return error
+- Wrap errors with context as they bubble up: original error + where it happened
+- Don't catch generic Exception unless you're at the top-level error boundary
+- Let unrecoverable errors crash — don't mask them with fallback logic
+
+## Retry & Backoff
+- Retry only on transient failures (network timeout, 503, connection reset)
+- Don't retry on: 400 (bad input won't fix itself), 401/403 (auth won't magically work)
+- Exponential backoff with jitter: base * 2^attempt + random(0, base)
+- Max attempts (3-5) and max delay (30s-60s) — don't retry forever
+- Circuit breaker for cascading failures: open after N failures, half-open to probe
+
+## Graceful Degradation
+- Prefer partial results over total failure (serve cached data if fresh fetch fails)
+- Timeouts on every external call — never wait forever
+- Bulkheads: isolate failures so one broken dependency doesn't take down everything
+- Health endpoints must report downstream dependency status");
+
+    private static readonly ConventionTemplate ApiDesign = new(
+        Key: "api-design",
+        Name: "API Design",
+        Description: "REST/GraphQL conventions: naming, status codes, versioning, pagination, errors",
+        Conventions: @"# API Design Conventions
+
+## URL Structure
+- Nouns for resources, verbs for actions: /api/users (not /api/getUsers)
+- Plural resource names: /api/issues, /api/comments
+- Nesting for ownership: /api/repos/:id/issues (issues belong to repo)
+- Max 2 levels of nesting; deeper relationships use query params or links
+
+## HTTP Methods & Status Codes
+- GET: read (200), POST: create (201), PUT/PATCH: update (200), DELETE (204)
+- 400: client sent invalid input; 401: not authenticated; 403: not authorized
+- 404: resource doesn't exist; 409: conflict (duplicate, version mismatch)
+- 500: server error (our fault — include correlation ID for debugging)
+
+## Request/Response
+- Consistent envelope: { data, error, meta } or direct body with typed errors
+- Pagination: cursor-based for large/mutable lists; offset for small/static
+- Filtering: query params (GET /api/users?role=admin&active=true)
+- Partial responses: fields query param or GraphQL field selection
+
+## Versioning & Compatibility
+- Version in URL path (/api/v1/) or header (Accept: application/vnd.app.v1+json)
+- Additive changes (new fields, new endpoints) are non-breaking
+- Removal/rename/type-change of existing fields IS breaking → new version
+- Deprecation headers before removal; sunset period of at least one release cycle
+
+## Error Format
+- Consistent error shape: { error: { code, message, details? } }
+- Machine-readable code for programmatic handling
+- Human-readable message for developer debugging
+- Correlation ID in every error response for log tracing");
+
+    private static readonly ConventionTemplate DatabaseConventions = new(
+        Key: "database-conventions",
+        Name: "Database Conventions",
+        Description: "Schema design, migrations, query patterns, indexing, transactions",
+        Conventions: @"# Database Conventions
+
+## Schema Design
+- Every table has a primary key (prefer UUID or ULID for distributed systems)
+- Use created_at and updated_at timestamps on every mutable table
+- Foreign keys with appropriate ON DELETE behavior (CASCADE, SET NULL, RESTRICT)
+- Column naming: snake_case, singular (user_id not users_id)
+- Avoid nullable columns unless NULL has distinct semantic meaning from empty/default
+
+## Migrations
+- Migrations are forward-only and idempotent (IF NOT EXISTS, ON CONFLICT DO NOTHING)
+- One concern per migration file — don't mix schema change with data migration
+- Test migration against a copy of production data (size, edge cases)
+- Backward-compatible migrations: new columns are nullable or have defaults
+- Never drop columns in the same deploy that stops writing them — separate deploys
+
+## Query Patterns
+- Use indexes for all WHERE, JOIN, and ORDER BY columns in frequent queries
+- Avoid SELECT * — specify columns explicitly
+- Batch operations instead of loops (INSERT INTO ... VALUES (row1), (row2), ...)
+- Use EXPLAIN ANALYZE to verify query plans before shipping
+- N+1 queries are bugs: use JOINs, subqueries, or batch fetching
+
+## Transactions
+- Wrap multi-step mutations in transactions — partial success is data corruption
+- Keep transactions short — don't hold locks while calling external services
+- Use optimistic concurrency (version column) for low-contention updates
+- Use advisory locks or SELECT FOR UPDATE for high-contention resources
+
+## Safety
+- Never execute raw user input as SQL — always parameterize
+- Limit result sets (LIMIT/OFFSET or cursor) — never return unbounded rows
+- Audit log for sensitive data changes (who changed what, when)
+- Backup verification: regularly test restoring from backups");
+
+    private static readonly ConventionTemplate Observability = new(
+        Key: "observability",
+        Name: "Observability & Monitoring",
+        Description: "Structured logging, distributed tracing, metrics, alerting conventions",
+        Conventions: @"# Observability Conventions
+
+## Logging
+- Structured logs (JSON): { level, timestamp, service, correlationId, message, ...context }
+- Log levels: DEBUG (dev detail), INFO (milestones), WARN (degraded), ERROR (failures)
+- Every request gets a correlation ID; propagate it across all service calls
+- NEVER log: secrets, tokens, passwords, full credit card numbers, PII without masking
+- DO log: request ID, user ID, action performed, duration, error codes
+
+## Distributed Tracing
+- Every service boundary creates a span: name, duration, status, attributes
+- Propagate trace context (W3C traceparent header) across HTTP, gRPC, message queues
+- Tag spans with: service.name, operation, tenant_id, user_id, error (boolean)
+- Trace significant internal operations (DB queries, cache lookups, external API calls)
+
+## Metrics
+- Four golden signals: latency, traffic, errors, saturation
+- Use histograms for latency (not averages — p50, p95, p99 matter)
+- Counter for events (requests served, errors encountered, jobs processed)
+- Gauge for current state (queue depth, connection pool size, active users)
+- Label dimensions: endpoint, method, status_code, tenant (cardinality-aware)
+
+## Alerting
+- Alert on symptoms (SLO breach: error rate > 1%, p99 > 2s), not causes (CPU > 80%)
+- Every alert must have a runbook: what to check, how to mitigate, who to escalate to
+- Severity levels: page (immediate action), ticket (next business day), log (informational)
+- Alert fatigue is worse than missing alerts — tune aggressively, deduplicate");
+
+    // ────────────────────────────────────────────────────────────────────
+    // Aggregates
+    // ───��────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// All shipped templates, in a stable listing order (matches the TS
@@ -977,6 +1669,7 @@ public static class ConventionTemplates
     /// </summary>
     public static IReadOnlyList<ConventionTemplate> All { get; } = new ConventionTemplate[]
     {
+        // Language/framework (20)
         TypescriptNode,
         TypescriptReact,
         TypescriptReactNative,
@@ -997,6 +1690,32 @@ public static class ConventionTemplates
         PhpLaravel,
         ElixirPhoenix,
         Scala,
+
+        // Action-triggered (8)
+        ActionWriteCode,
+        ActionReviewCode,
+        ActionDesign,
+        ActionWriteTests,
+        ActionDebug,
+        ActionRefactor,
+        ActionDocument,
+        ActionPlan,
+
+        // Role-triggered (5)
+        RoleSecurityReviewer,
+        RoleArchitect,
+        RoleQaEngineer,
+        RoleDevopsEngineer,
+        RoleTechLead,
+
+        // Cross-cutting (7)
+        UniversalSafety,
+        UniversalQuality,
+        GitConventions,
+        ErrorHandling,
+        ApiDesign,
+        DatabaseConventions,
+        Observability,
     };
 
     private static readonly IReadOnlyDictionary<string, ConventionTemplate> ByKey =
