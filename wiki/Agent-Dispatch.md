@@ -71,6 +71,8 @@ A misconfiguration (e.g. `TAMMA_AGENT_MODE=GitHubActions` with no GitHub App) **
 
 ## Activity pipeline
 
+The `(role, action)` vocabulary is the single shared taxonomy — see [Role/Action Taxonomy](Role-Action-Taxonomy.md).
+
 ```
 ExecuteAgentActivity
   ├─ DispatchAgentWorkflowActivity   → AgentDispatchService.DispatchAsync()

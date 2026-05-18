@@ -885,6 +885,14 @@ Edge services deploy via `wrangler publish` to Cloudflare Workers; the main stac
 
 ---
 
+## Role/Action Taxonomy & Resolution
+
+Prompts and conventions resolve by exact `(role, action)` lookup against one
+shared code-defined taxonomy (no keyword matching). See
+[Role/Action Taxonomy](Role-Action-Taxonomy.md).
+
+---
+
 ## For more detail
 
 - [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, Phase-3 RLS runbook

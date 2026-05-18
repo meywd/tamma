@@ -503,6 +503,11 @@ Replaces the file-based, single-tenant `PromptStore` with a PostgreSQL-backed, m
 | 27-5 | Prompt Store Tenant UI | Planned |
 | 27-6 | Elsa Workflow Integration | Planned |
 | 27-7 | Prompt Store Event Sourcing | Planned |
+| 27-15 | AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild | Planned |
+| 27-16 | Taxonomy Codegen (Prompt + Convention Seed) | Planned |
+| 27-17 | Taxonomy Drift Build Test | Planned |
+| 27-18 | Prompt Store Taxonomy Reshape | Planned |
+| 27-19 | Workflow Dispatch-Site Migration | Planned |
 
 [Detailed Breakdown](Epics/Epic-27-Prompt-Store) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-27)
 
