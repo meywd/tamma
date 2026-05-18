@@ -983,6 +983,29 @@ class WorkflowEngine {
 
 ---
 
+## Role/Action Taxonomy & Prompt/Convention Resolution
+
+Tamma resolves both **prompts** and **coding conventions** by exact
+`(role, action)` lookup against a single shared, code-defined taxonomy owned by
+`RolePhaseMap`. There is no keyword matching, no tokenizer, no composite action
+string.
+
+- **Taxonomy:** `AgentRole` (8 roles) × per-role specific actions (~80 jagged
+  cells, e.g. architect/`plan-system-design`, developer/`plan-implementation`).
+  Strong-typed via `AgentRole`/`AgentAction` enums with `ToWire()`/`Parse()`;
+  the wire format stays a primitive string (Elsa serialization back-compat).
+- **Resolution:** at the prompt-pull boundary in `LlmCallWorkflow`,
+  `(role, action)` resolves tenant-override → system-default → error. Prompts
+  and conventions use the identical key.
+- **Anti-drift:** prompt seed and convention seed are codegen'd from the one
+  taxonomy; a build test fails if any workflow dispatch site emits a pair
+  outside it.
+- **Scope note:** dynamic selection of `(role, action)` per issue context
+  (the `SingleIssueCycleWorkflow` "roundabout") is a separate initiative that
+  consumes this model unchanged.
+
+Full design: `docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md`.
+
 ## Implementation Patterns (AI Agent Consistency)
 
 ### 1. Naming Conventions
