@@ -135,13 +135,18 @@ This enables per-provider prompt tuning while maintaining backward compatibility
 | 27-5 | Prompt Store Tenant UI | P1 (High) | Story 27-3 | Planned |
 | 27-6 | Elsa Workflow Integration | P0 (Critical) | Story 27-2 | Planned |
 | 27-7 | Prompt Store Event Sourcing | P1 (High) | Story 27-2 | Planned |
-| 27-8 | Convention Store Database Schema + Migration | P1 (High) | Epic 17, Story 27-1 | Planned |
-| 27-9 | Convention Store Service (C#) | P1 (High) | Story 27-8 | Planned |
+| 27-8 | Convention Store Database Schema + Migration | P1 (High) | Epic 17, Story 27-1, Story 27-15 | Planned |
+| 27-9 | Convention Store Service (C#) | P1 (High) | Story 27-8, Story 27-15 | Planned |
 | 27-10 | Convention Store API Endpoints | P1 (High) | Story 27-9 | Planned |
 | 27-11 | Convention Store Admin UI | P2 (Medium) | Story 27-10 | Planned |
 | 27-12 | Convention Store Tenant UI | P2 (Medium) | Story 27-10, Story 27-11 | Planned |
-| 27-13 | Convention Store Elsa Integration | P1 (High) | Story 27-9, Story 27-6 | Planned |
+| 27-13 | Convention Store Elsa Integration | P1 (High) | Story 27-9, Story 27-6, Story 27-15 | Planned |
 | 27-14 | Convention Store Event Sourcing | P2 (Medium) | Story 27-9 | Planned |
+| 27-15 | AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild | P0 (Critical) | None | Planned |
+| 27-16 | Taxonomy Codegen (Prompt + Convention Seed) | P0 (Critical) | Story 27-15 | Planned |
+| 27-17 | Taxonomy Drift Build Test | P0 (Critical) | Story 27-15, 27-19 | Planned |
+| 27-18 | Prompt Store Taxonomy Reshape | P0 (Critical) | Story 27-15, 27-16, 27-1 | Planned |
+| 27-19 | Workflow Dispatch-Site Migration | P0 (Critical) | Story 27-15 | Planned |
 
 ## Dependency Graph
 
@@ -165,18 +170,31 @@ Story 27-4  Story 27-5
 (admin UI)  (tenant UI)
 ```
 
-### Convention Store (Stories 27-8 through 27-14)
+### Convention Store (Stories 27-8 through 27-19)
 
 ```
+Story 27-15 (AgentRole/AgentAction taxonomy + RolePhaseMap rebuild)
+  │
+  ├──────────────────────────────────────────────┐
+  │                                              │
+  ▼                                              ▼
+Story 27-16 (taxonomy codegen — prompt +    Story 27-19 (workflow dispatch-site
+             convention seed)                    migration)
+  │                                              │
+  └──────────────────────┬────────────────────── ┘
+                         │
+                         ▼
+              Story 27-17 (taxonomy drift build test)
+
 Story 27-1 (prompt schema patterns)    Epic 17 (tenants table)
   │                                      │
   └──────────────┬───────────────────────┘
                  │
                  ▼
-Story 27-8 (convention DB schema + migration)
+Story 27-8 (convention DB schema + migration — (role,action) keyed)
                  │
                  ▼
-Story 27-9 (convention store service — C#)
+Story 27-9 (convention store service — C# — exact (role,action) lookup)
                  │
   ┌──────────────┼──────────────────────┐
   ▼              ▼                      ▼
@@ -187,13 +205,15 @@ Story 27-10    Story 27-13            Story 27-14
   ▼        ▼
 Story 27-11  Story 27-12
 (admin UI)   (tenant UI)
+
+Story 27-18 (prompt store taxonomy reshape — depends on 27-15, 27-16, 27-1)
 ```
 
 ## Design Constraints
 
 1. **Tenant scoping**: `tenant_id` maps to `tenants.id` from Epic 17. The sentinel `DEFAULT_TENANT_ID` (`00000000-...`) is used for system defaults (NULL tenant_id) and self-hosted/CLI mode.
 2. **NULL tenant_id = system default**: System defaults have `tenant_id IS NULL`, not the sentinel UUID. This differentiates "system-shipped" from "default tenant's overrides."
-3. **Convention templates → Convention Store (Stories 27-8 to 27-14)**: The 46 convention templates (20 language/framework + 11 action + 8 role + 7 cross-cutting) are migrated to a PostgreSQL-backed Convention Store with keyword-based matching and tenant override support. The store follows the same two-tier pattern as the prompt store (system defaults + tenant overrides), keyed by slug with keywords stored in a normalized `convention_keywords` table (B-tree indexed) for matching against LLM call context. The `{{conventions}}` variable is now populated by the convention store resolver instead of `.tamma/config.json`.
+3. **Convention templates → Convention Store (Stories 27-8 to 27-19)**: The 46 convention templates (20 language/framework + 11 action + 8 role + 7 cross-cutting) are migrated to a PostgreSQL-backed Convention Store with exact `(role, action)` lookup and tenant override support. There is no keyword matching, no `convention_keywords` table, no tokenizer. The `(role, action)` vocabulary is the single shared taxonomy owned by `RolePhaseMap` (Story 27-15). The `{{conventions}}` variable is now populated by the convention store resolver instead of `.tamma/config.json`.
 4. **Backward compatibility**: Existing prompt API routes (`/api/prompts/:role/:action`) must continue working for the self-hosted/CLI mode (resolved against system defaults).
 5. **No RLS on prompt tables**: Prompt resolution crosses tenant boundaries by design (reading system defaults when tenant override is absent). Application-level filtering is used instead of RLS. See Story 17-2 for the RLS exemption list.
 6. **Seed data from code**: The migration seeds all 80 role+action templates, 8 system prompts, and 10 action defaults from the existing `default-prompts.ts` code. The seed SQL is generated from the TypeScript constants to avoid duplication.
@@ -209,14 +229,19 @@ Story 27-11  Story 27-12
 | 27-5 Prompt Store Tenant UI | 16 hours |
 | 27-6 Elsa Workflow Integration | 10 hours |
 | 27-7 Prompt Store Event Sourcing | 8 hours |
-| 27-8 Convention Store Database Schema + Migration | 10.5 hours |
-| 27-9 Convention Store Service (C#) | 15.5 hours |
+| 27-8 Convention Store Database Schema + Migration | 7 hours |
+| 27-9 Convention Store Service (C#) | 8 hours |
 | 27-10 Convention Store API Endpoints | 12 hours |
 | 27-11 Convention Store Admin UI | 21 hours |
 | 27-12 Convention Store Tenant UI | 16 hours |
-| 27-13 Convention Store Elsa Integration | 14 hours |
+| 27-13 Convention Store Elsa Integration | 8 hours |
 | 27-14 Convention Store Event Sourcing | 6.5 hours |
-| **Total** | **181.5 hours** |
+| 27-15 AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild | 8 hours |
+| 27-16 Taxonomy Codegen (Prompt + Convention Seed) | 10 hours |
+| 27-17 Taxonomy Drift Build Test | 6 hours |
+| 27-18 Prompt Store Taxonomy Reshape | 12 hours |
+| 27-19 Workflow Dispatch-Site Migration | 10 hours |
+| **Total** | **210.5 hours** |
 
 ## Host Constraints
 
@@ -234,11 +259,15 @@ All new API endpoints introduced by Epic 27 stories **must include rate limiting
 - Write endpoints (`POST`, `PUT`, `DELETE`): 30 requests/minute per tenant
 - Prompt resolution (called by Elsa): 300 requests/minute per tenant
 
-### Convention Store (Stories 27-8 to 27-14)
+### Convention Store (Stories 27-8 to 27-19)
 
-The 46 convention templates are now migrated to a PostgreSQL-backed Convention Store via Stories 27-8 through 27-14. Each convention's keywords are stored in a normalized `convention_keywords` table with a B-tree index on `keyword` for fast resolution hot-path queries (`WHERE keyword IN (...)`). The store follows the same two-tier pattern as prompts: system defaults (`tenant_id IS NULL`) seeded from `ConventionTemplates.cs`, with tenant-level overrides by key.
-
-Convention resolution happens at LLM-call time in `ResolveConventionsActivity` (Story 27-13): keywords on each convention are matched against the action, tools, repo languages, and searchable text of the call. Matching conventions are concatenated by priority and substituted into the `{{conventions}}` template variable. Story 12-7b's `search_conventions` tool reads from the same store.
+Conventions are resolved by **exact `(role, action)` lookup with tenant
+override**, mirroring the prompt store — there is no keyword matching, no
+`convention_keywords` table, no tokenizer. The `(role, action)` vocabulary is
+the single shared taxonomy owned by `RolePhaseMap` (Story 27-15), consumed
+identically by prompts and conventions; both seeds are codegen'd from it
+(Story 27-16) and a build test prevents drift (Story 27-17). See
+`docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md`.
 
 Rate limiting for convention endpoints follows the same defaults as prompt endpoints.
 
