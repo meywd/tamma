@@ -17,8 +17,8 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 3. Each convention row shows: Name, Role, Action, Source (System Default / Tenant Override), Enabled, Last Updated
 4. Clicking a convention row opens an edit panel with all fields editable
 5. When editing a system default, the panel shows: "This is a platform default. Saving will create a tenant override."
-6. The "Save" button calls `PUT /api/conventions/:key` to create/update the tenant override
-7. For overridden conventions, a "Reset to Default" button calls `DELETE /api/conventions/:key` to remove the override and fall back to the system default
+6. The "Save" button calls `PUT /api/conventions/:role/:action` to create/update the tenant override
+7. For overridden conventions, a "Reset to Default" button calls `DELETE /api/conventions/:role/:action` to remove the override and fall back to the system default
 8. A "New Convention" button allows tenant admins to create tenant-only conventions (keys that don't exist in system defaults)
 9. Filtering by role (dropdown) and source (System Default / Override / Tenant-Only) is supported
 10. A count indicator shows "X of Y conventions overridden" at the top of the page
@@ -54,11 +54,11 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `GET /api/conventions` | GET | List resolved conventions (merged view for current tenant) |
-| `GET /api/conventions/:key` | GET | Get resolved convention |
-| `PUT /api/conventions/:key` | PUT | Create/update tenant override |
-| `DELETE /api/conventions/:key` | DELETE | Remove tenant override |
+| `GET /api/conventions/:role/:action` | GET | Get resolved convention |
+| `PUT /api/conventions/:role/:action` | PUT | Create/update tenant override |
+| `DELETE /api/conventions/:role/:action` | DELETE | Remove tenant override |
 | `POST /api/conventions/resolve` | POST | Test resolution for current tenant |
-| `GET /api/conventions/defaults/:key` | GET | Get system default for comparison |
+| `GET /api/conventions/defaults/:role/:action` | GET | Get system default for comparison |
 | `GET /api/conventions/registry/roles` | GET | Role list for filter |
 | `GET /api/conventions/registry/actions` | GET | Action list scoped to role |
 | `GET /api/conventions/registry/role-actions` | GET | Full `(role, action)` matrix |
@@ -88,9 +88,9 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 
 Create `useTenantConventions()` hook:
 - `fetchConventions()`: `GET /api/conventions` (merged view)
-- `upsertOverride(key, data)`: `PUT /api/conventions/:key`
-- `deleteOverride(key)`: `DELETE /api/conventions/:key`
-- `getSystemDefault(key)`: `GET /api/conventions/defaults/:key` (for diff comparison)
+- `upsertOverride(role, action, data)`: `PUT /api/conventions/:role/:action`
+- `deleteOverride(role, action)`: `DELETE /api/conventions/:role/:action`
+- `getSystemDefault(role, action)`: `GET /api/conventions/defaults/:role/:action` (for diff comparison)
 - `overrideCount`: computed from merged list
 
 ### Step 2: Tenant Convention Table (3h)
@@ -139,11 +139,11 @@ Reuse `ResolutionTestPanel` component from Story 27-11 (or extract a shared comp
 4. Role and source filters work correctly
 5. `TenantConventionEditor` shows info banner for system defaults
 6. `TenantConventionEditor` shows "Reset to Default" for overrides
-7. Save button calls `PUT /api/conventions/:key`
-8. Reset button calls `DELETE /api/conventions/:key`
+7. Save button calls `PUT /api/conventions/:role/:action`
+8. Reset button calls `DELETE /api/conventions/:role/:action`
 9. `ConventionDiff` displays inline diff correctly
 10. `ConventionDiff` shows "No changes" when override matches default
-11. Resolution test panel displays triggered/skipped results
+11. Resolution test panel displays the single resolved convention
 12. Read-only mode hides Save/Delete for regular members
 13. "New Convention" creates a blank form with key input
 

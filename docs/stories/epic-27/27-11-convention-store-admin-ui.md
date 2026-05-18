@@ -21,9 +21,9 @@ so that I can author and tune coding conventions that are automatically injected
 5. Clicking a row opens an edit panel (inline split view) with all editable fields
 6. A "New Convention" button opens a blank edit panel for creating a new system default
 7. The edit panel has fields: Role (dropdown, read-only after creation), Action (dropdown scoped to selected role, read-only after creation), Name, Description, Body (Markdown editor), Enabled (toggle)
-8. The edit panel has a "Save" button that calls `PUT /api/admin/conventions/:key`
-9. The edit panel has a "Reset to Default" button (for seeded conventions) that calls `POST /api/admin/conventions/:key/reset`
-10. The edit panel has a "Delete" button that calls `DELETE /api/admin/conventions/:key` with confirmation dialog
+8. The edit panel has a "Save" button that calls `PUT /api/admin/conventions/:role/:action`
+9. The edit panel has a "Reset to Default" button (for seeded conventions) that calls `POST /api/admin/conventions/:role/:action/reset`
+10. The edit panel has a "Delete" button that calls `DELETE /api/admin/conventions/:role/:action` with confirmation dialog
 11. All changes require confirmation dialog
 12. Error states are displayed inline (API failures, validation errors)
 13. Only platform admin users (owner role) can access this page
@@ -67,10 +67,10 @@ Same as Story 27-4: React 19 + Vite + Tailwind CSS, served from `app.tamma.dev`.
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `GET /api/conventions/defaults` | GET | List all system default conventions |
-| `GET /api/conventions/defaults/:key` | GET | Get specific system default |
-| `PUT /api/admin/conventions/:key` | PUT | Create/update system default |
-| `DELETE /api/admin/conventions/:key` | DELETE | Delete system default |
-| `POST /api/admin/conventions/:key/reset` | POST | Reset to hardcoded default |
+| `GET /api/conventions/defaults/:role/:action` | GET | Get specific system default |
+| `PUT /api/admin/conventions/:role/:action` | PUT | Create/update system default |
+| `DELETE /api/admin/conventions/:role/:action` | DELETE | Delete system default |
+| `POST /api/admin/conventions/:role/:action/reset` | POST | Reset to hardcoded default |
 | `POST /api/conventions/resolve` | POST | Test resolution with `{ role, action }` |
 | `GET /api/conventions/registry/roles` | GET | Role list for dropdown |
 | `GET /api/conventions/registry/actions` | GET | Action list scoped to role |
@@ -103,7 +103,7 @@ Same as Story 27-4: React 19 + Vite + Tailwind CSS, served from `app.tamma.dev`.
 
 1. `useConventions()` hook wrapping admin API calls (list, get, upsert, delete, reset)
 2. `useConventionResolve()` hook wrapping the resolve test endpoint
-3. `ConventionTable` with category filter, enabled filter, text search
+3. `ConventionTable` with role filter, enabled filter, text search
 4. Route and navigation wiring
 
 ### Phase 2: Edit Panel (6h)

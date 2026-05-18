@@ -213,20 +213,20 @@ Conventions are keyed by `(role, action)` path parameters: `PUT /api/conventions
 ### Unit Tests
 
 1. `GET /api/conventions` returns merged view with correct `isOverride` flags
-2. `GET /api/conventions/:key` returns tenant override when exists
-3. `GET /api/conventions/:key` falls back to system default when no override
-4. `PUT /api/conventions/:key` creates tenant override
+2. `GET /api/conventions/:role/:action` returns tenant override when exists
+3. `GET /api/conventions/:role/:action` falls back to system default when no override
+4. `PUT /api/conventions/:role/:action` creates tenant override
 5. `PUT /api/conventions/:role/:action` returns 400 for invalid body (missing name) or unknown `(role, action)` combination
-6. `PUT /api/conventions/:key` returns 403 for non-admin tenant members
-7. `DELETE /api/conventions/:key` removes override, returns 204
-8. `POST /api/conventions/resolve` returns triggered + skipped conventions
+6. `PUT /api/conventions/:role/:action` returns 403 for non-admin tenant members
+7. `DELETE /api/conventions/:role/:action` removes override, returns 204
+8. `POST /api/conventions/resolve` returns the single resolved convention (tenant override → system default)
 9. `POST /api/conventions/resolve` returns empty body when nothing matches
 10. `GET /api/conventions/defaults` lists system defaults
-11. `PUT /api/admin/conventions/:key` returns 403 for non-platform-admins
-12. `PUT /api/admin/conventions/:key` creates system default for platform admin
-13. `POST /api/admin/conventions/:key/reset` restores hardcoded default
+11. `PUT /api/admin/conventions/:role/:action` returns 403 for non-platform-admins
+12. `PUT /api/admin/conventions/:role/:action` creates system default for platform admin
+13. `POST /api/admin/conventions/:role/:action/reset` restores hardcoded default
 14. `GET /api/conventions/registry/roles` returns valid role list; `GET /api/conventions/registry/role-actions` returns full `(role, action)` matrix
-15. Key validation rejects invalid slugs
+15. `(role, action)` validation rejects pairs not in the taxonomy
 
 ### Integration Tests
 

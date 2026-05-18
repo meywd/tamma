@@ -20,8 +20,8 @@ so that I can trace who changed which conventions, when, and why — supporting 
 6. Event `data` includes: previous version number, new version number, changed fields (diff summary, not full body text)
 7. Events follow the DCB pattern: `AGGREGATE.ACTION.STATUS` naming
 8. Events are emitted from the `IConventionStore` implementation (not the endpoint handler) to ensure all mutation paths are covered
-9. Event queries support: "show all convention changes for tenant X", "show all changes by user Y", "show history of key=typescript-react"
-10. Events are queryable via the existing event store API (`GET /api/v1/events?tags.key=typescript-react`)
+9. Event queries support: "show all convention changes for tenant X", "show all changes by user Y", "show history of role=developer, action=implement-fix"
+10. Events are queryable via the existing event store API (`GET /api/v1/events?tags.role=developer&tags.action=implement-fix`)
 11. Backward compatibility: if the event store is unavailable, convention mutations still succeed (emit is best-effort, not transactional)
 
 ## Technical Context
@@ -178,7 +178,7 @@ Implement the field comparison utility. Convention diffable fields are: `name`, 
 10. `DeleteAsync()` emits `CONVENTION.DELETED.SUCCESS` with deleted version
 11. `ResetSystemDefaultAsync()` emits `CONVENTION.RESET.SUCCESS`
 12. Events are queryable by tenantId tag
-13. Events are queryable by key tag
+13. Events are queryable by role and action tags
 
 ### Backward Compatibility
 
