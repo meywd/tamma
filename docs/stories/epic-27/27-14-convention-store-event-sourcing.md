@@ -1,5 +1,7 @@
 # Story 27-14: Convention Store Event Sourcing
 
+> Updated 2026-05-18: keyword model removed; see SPEC docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md
+
 Status: ready-for-dev
 
 ## Story
@@ -11,10 +13,10 @@ so that I can trace who changed which conventions, when, and why — supporting 
 ## Acceptance Criteria
 
 1. `CONVENTION.CREATED.SUCCESS` event emitted when a new convention is created (tenant override or system default)
-2. `CONVENTION.UPDATED.SUCCESS` event emitted when an existing convention is modified (body, keywords, priority, enabled, etc.)
+2. `CONVENTION.UPDATED.SUCCESS` event emitted when an existing convention is modified (body, name, description, enabled, etc.)
 3. `CONVENTION.DELETED.SUCCESS` event emitted when a convention is removed
 4. `CONVENTION.RESET.SUCCESS` event emitted when a system default is reset to the hardcoded original from `ConventionTemplates.cs`
-5. All events include tags: `tenantId` (or `null` for system defaults), `key`, `category`, `userId` (who made the change)
+5. All events include tags: `tenantId` (or `null` for system defaults), `role`, `action`, `source` (`"system"` or `"tenant"`), `userId` (who made the change)
 6. Event `data` includes: previous version number, new version number, changed fields (diff summary, not full body text)
 7. Events follow the DCB pattern: `AGGREGATE.ACTION.STATUS` naming
 8. Events are emitted from the `IConventionStore` implementation (not the endpoint handler) to ensure all mutation paths are covered
@@ -35,8 +37,9 @@ interface DomainEvent {
   timestamp: string;
   tags: {
     tenantId?: string;
-    key?: string;
-    category?: string;
+    role?: string;
+    action?: string;
+    source?: 'system' | 'tenant';
     userId?: string;
     [key: string]: string | undefined;
   };
@@ -52,10 +55,10 @@ interface DomainEvent {
 
 | Event Type | Trigger | Tags | Data |
 |-----------|---------|------|------|
-| `CONVENTION.CREATED.SUCCESS` | New convention created | tenantId, key, category, userId | `{ version: 1, keywords, matchMode, alwaysApply, priority, enabled }` |
-| `CONVENTION.UPDATED.SUCCESS` | Existing convention modified | tenantId, key, category, userId | `{ previousVersion, newVersion, changedFields: ["body","keywords",...] }` |
-| `CONVENTION.DELETED.SUCCESS` | Convention removed | tenantId, key, category, userId | `{ deletedVersion }` |
-| `CONVENTION.RESET.SUCCESS` | System default restored | key, category, userId | `{ previousVersion, newVersion, resetFrom: "custom", resetTo: "hardcoded" }` |
+| `CONVENTION.CREATED.SUCCESS` | New convention created | tenantId, role, action, source, userId | `{ version: 1, enabled }` |
+| `CONVENTION.UPDATED.SUCCESS` | Existing convention modified | tenantId, role, action, source, userId | `{ previousVersion, newVersion, changedFields: ["body","name","description","enabled",...] }` |
+| `CONVENTION.DELETED.SUCCESS` | Convention removed | tenantId, role, action, source, userId | `{ deletedVersion }` |
+| `CONVENTION.RESET.SUCCESS` | System default restored | role, action, source: "system", userId | `{ previousVersion, newVersion, resetFrom: "custom", resetTo: "hardcoded" }` |
 
 ### changedFields Calculation
 
@@ -67,12 +70,7 @@ private static string[] DiffFields(Convention before, Convention after)
     var fields = new List<string>();
     if (before.Name != after.Name) fields.Add("name");
     if (before.Description != after.Description) fields.Add("description");
-    if (before.Category != after.Category) fields.Add("category");
     if (before.Body != after.Body) fields.Add("body");
-    if (!before.Keywords.SequenceEqual(after.Keywords)) fields.Add("keywords");
-    if (before.MatchMode != after.MatchMode) fields.Add("matchMode");
-    if (before.AlwaysApply != after.AlwaysApply) fields.Add("alwaysApply");
-    if (before.Priority != after.Priority) fields.Add("priority");
     if (before.Enabled != after.Enabled) fields.Add("enabled");
     return fields.ToArray();
 }
@@ -93,16 +91,16 @@ public async Task<Convention> UpsertAsync(Guid? tenantId, string key,
         ? "CONVENTION.CREATED.SUCCESS"
         : "CONVENTION.UPDATED.SUCCESS";
 
+    var source = tenantId is null ? "system" : "tenant";
     await EmitEventAsync(eventType, new
     {
         tenantId = tenantId?.ToString(),
-        key,
-        category = result.Category,
+        role = result.Role,
+        action = result.Action,
+        source,
         userId = userId?.ToString()
     }, existing is null
-        ? new { version = result.Version, keywords = result.Keywords,
-                matchMode = result.MatchMode, alwaysApply = result.AlwaysApply,
-                priority = result.Priority, enabled = result.Enabled }
+        ? new { version = result.Version, enabled = result.Enabled }
         : new { previousVersion = existing.Version, newVersion = result.Version,
                 changedFields = DiffFields(existing, result) },
     ct);
@@ -149,17 +147,17 @@ Inject `IEventStore` into `PgConventionStore` constructor. Emit events in `Upser
 
 ### Step 4: DiffFields Utility
 
-Implement the field comparison utility. Convention has more diffable fields than prompts (keywords array, matchMode, alwaysApply, priority in addition to body/name/category).
+Implement the field comparison utility. Convention diffable fields are: `name`, `description`, `body`, `enabled`.
 
 ## Implementation Notes
 
 1. **Best-effort emission** — same as Story 27-7. Event store failure does not block convention mutations.
 2. **No full body in events** — body text can be 500-5000 characters. Storing it in every update event would bloat the event store. Only `changedFields` is stored. The actual body is in the `conventions` table with version tracking.
-3. **Keywords diff** — keywords are stored in the normalized `convention_keywords` table (see Story 27-8), not as a column on `conventions`. The `DiffFields` utility compares the `Keywords` arrays on the `Convention` record (which are populated by joining from `convention_keywords` on read). Use `SequenceEqual` after sorting both arrays to detect keyword changes regardless of order.
+3. **`(role, action)` are immutable** — once a convention is created for a `(role, action)` pair, those fields do not change. `DiffFields` only compares `name`, `description`, `body`, and `enabled`. The `role` and `action` are carried in the event tags, not in `changedFields`.
 4. **System seed operations do NOT emit events** — only user-initiated changes emit events.
 5. **The `CONVENTIONS.RESOLVED.SUCCESS` event (from Story 27-13) is separate** — it's emitted at runtime during LLM calls. This story covers CRUD events only.
 6. **userId comes from the API layer** — passed as parameter to mutation methods, same as Story 27-7.
-7. **Keyword change detail** — when `changedFields` includes `"keywords"`, the event `data` does NOT include the full keyword lists (they can be large). The convention version number + the `convention_keywords` table provide the authoritative before/after state for audit purposes.
+7. **Body change detail** — when `changedFields` includes `"body"`, the event `data` does NOT include the full body text (it can be 500-5000 characters). The convention version number in the `conventions` table provides the authoritative before/after state for audit purposes.
 
 ## Testing Strategy
 
@@ -171,7 +169,7 @@ Implement the field comparison utility. Convention has more diffable fields than
 4. Event emission does not throw when eventStore fails (best-effort)
 5. `DiffFields()` correctly identifies changed fields
 6. `DiffFields()` returns empty array when nothing changed
-7. `DiffFields()` detects keyword array changes regardless of order
+7. `DiffFields()` detects `enabled` toggle changes
 
 ### Integration Tests (with in-memory stores)
 
@@ -190,6 +188,7 @@ Implement the field comparison utility. Convention has more diffable fields than
 ## Dependencies
 
 - **Story 27-9** (Convention Store Service) — `IConventionStore` and `PgConventionStore` must exist
+- **Story 27-15** (Taxonomy) — canonical `(role, action)` enum values used in event tags
 - **Epic 4** (Event Sourcing & Audit Trail) — `IEventStore` interface must exist
 - Same event store infrastructure as Story 27-7
 

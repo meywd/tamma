@@ -1,5 +1,7 @@
 # Story 27-12: Convention Store Tenant UI
 
+> Updated 2026-05-18: keyword model removed; see SPEC docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md
+
 Status: ready-for-dev
 
 ## Story
@@ -12,13 +14,13 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 
 1. A "Conventions" page is accessible from the tenant settings navigation under "Settings > Conventions"
 2. The page displays all resolved conventions for the current tenant: system defaults with tenant overrides visually highlighted (badge, different background color, or left border)
-3. Each convention row shows: Name, Key, Category, Keywords (tag pills), Source (System Default / Tenant Override), Priority, Always Apply, Enabled, Last Updated
+3. Each convention row shows: Name, Role, Action, Source (System Default / Tenant Override), Enabled, Last Updated
 4. Clicking a convention row opens an edit panel with all fields editable
 5. When editing a system default, the panel shows: "This is a platform default. Saving will create a tenant override."
 6. The "Save" button calls `PUT /api/conventions/:key` to create/update the tenant override
 7. For overridden conventions, a "Reset to Default" button calls `DELETE /api/conventions/:key` to remove the override and fall back to the system default
 8. A "New Convention" button allows tenant admins to create tenant-only conventions (keys that don't exist in system defaults)
-9. Filtering by category (dropdown) and source (System Default / Override / Tenant-Only) is supported
+9. Filtering by role (dropdown) and source (System Default / Override / Tenant-Only) is supported
 10. A count indicator shows "X of Y conventions overridden" at the top of the page
 11. Only tenant admin or owner users can modify conventions; regular members see conventions as read-only
 12. All changes display a success/error toast notification
@@ -27,7 +29,7 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 
 13. Same resolution test panel as Story 27-11 but scoped to the tenant's resolved conventions
 14. The test panel calls `POST /api/conventions/resolve` (which resolves for the current tenant)
-15. Results show which conventions would fire for a given context, helping tenant admins verify their keyword configuration
+15. Results show the resolved convention body and source for the selected `(role, action)` pair, helping tenant admins verify their overrides via exact `(role, action)` lookup (SPEC §3.3)
 
 ### Convention Comparison
 
@@ -57,9 +59,9 @@ so that I can customize which coding conventions apply to my team's LLM calls wi
 | `DELETE /api/conventions/:key` | DELETE | Remove tenant override |
 | `POST /api/conventions/resolve` | POST | Test resolution for current tenant |
 | `GET /api/conventions/defaults/:key` | GET | Get system default for comparison |
-| `GET /api/conventions/registry/categories` | GET | Category list for filter |
-| `GET /api/conventions/registry/actions` | GET | Action list for test panel |
-| `GET /api/conventions/registry/tools` | GET | Tool list for test panel |
+| `GET /api/conventions/registry/roles` | GET | Role list for filter |
+| `GET /api/conventions/registry/actions` | GET | Action list scoped to role |
+| `GET /api/conventions/registry/role-actions` | GET | Full `(role, action)` matrix |
 
 ### Files to Create
 
@@ -103,7 +105,7 @@ Table with:
 
 Editor panel:
 - Info banner for system defaults vs. overrides
-- Full field editing: name, description, category, body, keywords, match mode, priority, always_apply, enabled
+- Full field editing: name, description, body, enabled (role/action are read-only for overrides of system defaults; editable only for tenant-only conventions)
 - Save/Delete/Reset buttons with override-aware behavior
 - "New Convention" flow for tenant-only entries
 
@@ -121,11 +123,11 @@ Reuse `ResolutionTestPanel` component from Story 27-11 (or extract a shared comp
 ## Implementation Notes
 
 1. The `GET /api/conventions` response must include `isOverride` and `source` fields. `source` can be: `"system"` (platform default), `"override"` (tenant override of a system default), `"tenant"` (tenant-only, no system default with same key).
-2. Read-only mode for regular members: the editor opens but Save/Delete buttons are hidden. Keywords and test panel are still usable for reference.
+2. Read-only mode for regular members: the editor opens but Save/Delete buttons are hidden. The body and test panel are still usable for reference.
 3. The diff component should be lightweight — not a full code editor. A simple side-by-side or inline diff renderer is sufficient.
 4. When a tenant creates a convention with a key that matches a system default, it becomes an override. When they create one with a new key, it's tenant-only. The UI should explain this distinction.
-5. Shared components with Story 27-11: `KeywordEditor`, `BodyEditor`, `ResolutionTestPanel` should live in `components/conventions/` and be imported by both admin and tenant pages.
-6. **Keyword display**: Keywords shown as tag pills in the table and editor are sourced from the API response's `keywords` array, which is joined from the normalized `convention_keywords` table by the service layer. The UI does not interact with the keywords table directly — it sends/receives `keywords: string[]` in JSON.
+5. Shared components with Story 27-11: `RoleActionSelector`, `BodyEditor`, `ResolutionTestPanel` should live in `components/conventions/` and be imported by both admin and tenant pages.
+6. **No keyword fields**: The keyword model (`keywords`, `matchMode`, `alwaysApply`, `priority`, `category`) has been removed. Conventions are identified and resolved by `(role, action)` only (SPEC §3.3).
 
 ## Testing Strategy
 
@@ -134,7 +136,7 @@ Reuse `ResolutionTestPanel` component from Story 27-11 (or extract a shared comp
 1. `TenantConventionTable` renders conventions with correct source badges
 2. Override conventions have visual distinction from system defaults
 3. Override count shows correct number
-4. Category and source filters work correctly
+4. Role and source filters work correctly
 5. `TenantConventionEditor` shows info banner for system defaults
 6. `TenantConventionEditor` shows "Reset to Default" for overrides
 7. Save button calls `PUT /api/conventions/:key`
@@ -148,14 +150,15 @@ Reuse `ResolutionTestPanel` component from Story 27-11 (or extract a shared comp
 ### Integration Tests
 
 14. Full override lifecycle: view system default → create override → see highlighted → reset → falls back
-15. Test resolution flow: create override with different keywords → test → verify changed behavior
+15. Test resolution flow: create override for a `(role, action)` → test with that pair → verify override body is returned
 16. Diff view: create override → toggle diff → verify diff shows changes
 
 ## Dependencies
 
 - **Story 27-10** (Convention Store API Endpoints) — API endpoints must exist
+- **Story 27-15** (Taxonomy) — canonical `(role, action)` enum values for registry dropdowns
 - **Epic 16** (Story 16.1: OAuth, Story 16.5: RBAC) — authentication and tenant context
-- **Story 27-11** (Admin UI) — shared components (KeywordEditor, BodyEditor, ResolutionTestPanel)
+- **Story 27-11** (Admin UI) — shared components (RoleActionSelector, BodyEditor, ResolutionTestPanel)
 
 ## Estimated Effort
 
