@@ -24,7 +24,7 @@ public class ConventionEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task ListAll_Returns200WithTwentyEntries()
+    public async Task ListAll_Returns200WithFullCatalogue()
     {
         var response = await _client.GetAsync("/api/convention-templates");
 
@@ -32,7 +32,9 @@ public class ConventionEndpointsIntegrationTests
 
         var items = await response.Content.ReadFromJsonAsync<List<ConventionTemplateSummaryDto>>();
         items.Should().NotBeNull();
-        items!.Should().HaveCount(20);
+        // 20 language/framework + 11 action + 8 role + 7 cross-cutting.
+        // Source of truth: ConventionTemplates.All (see ConventionTemplatesTests).
+        items!.Should().HaveCount(46);
         items.Select(i => i!.Key).Should().Contain(new[]
         {
             "typescript-react",
