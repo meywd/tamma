@@ -1,4 +1,4 @@
-namespace Tamma.Api.Logging;
+namespace Tamma.Core.Logging;
 
 /// <summary>
 /// Strips log-injection vectors from user-controlled strings before they are
@@ -6,7 +6,12 @@ namespace Tamma.Api.Logging;
 /// logging alone isn't enough: when the sink serialises a parameter into the
 /// final message text (console, file), raw <c>\r\n</c> can forge additional
 /// log entries. CodeQL's "Log entries created from user input" rule flags any
-/// unsanitized flow from HTTP inputs into logs.
+/// unsanitized flow from HTTP / webhook inputs into logs.
+///
+/// <para>Lives in <c>Tamma.Core</c> so both the API layer
+/// (<c>Tamma.Api</c>) and the platform layer (<c>Tamma.Platforms</c>,
+/// which cannot reference <c>Tamma.Api</c>) share one canonical
+/// implementation.</para>
 /// </summary>
 public static class LogSanitizer
 {

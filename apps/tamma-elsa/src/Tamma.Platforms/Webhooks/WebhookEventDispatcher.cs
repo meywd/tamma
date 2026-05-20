@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using Tamma.Core.Logging;
 using Tamma.Platforms.Abstractions;
 
 namespace Tamma.Platforms.Webhooks;
@@ -84,7 +85,8 @@ public sealed class WebhookEventDispatcher : IWebhookEventDispatcher
         {
             _logger.LogDebug(
                 "No handler registered for {Kind}/{EventType}/{Action}",
-                evt.Kind, evt.EventType, evt.Action ?? "<no-action>");
+                evt.Kind, LogSanitizer.Clean(evt.EventType),
+                LogSanitizer.Clean(evt.Action ?? "<no-action>"));
             return 0;
         }
 
@@ -117,7 +119,8 @@ public sealed class WebhookEventDispatcher : IWebhookEventDispatcher
             _logger.LogError(ex,
                 "Webhook handler {HandlerType} ({Kind}/{Pattern}) threw on {EventType}/{Action}",
                 handler.GetType().Name, handler.Kind, handler.EventTypePattern,
-                evt.EventType, evt.Action ?? "<no-action>");
+                LogSanitizer.Clean(evt.EventType),
+                LogSanitizer.Clean(evt.Action ?? "<no-action>"));
 
             if (HandlerFailedHook is not null)
             {

@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Tamma.Api.Logging;
+using Tamma.Core.Logging;
 using Tamma.Api.Services.Webhooks;
 using Tamma.Data.Repositories;
 using Tamma.Platforms.Abstractions;

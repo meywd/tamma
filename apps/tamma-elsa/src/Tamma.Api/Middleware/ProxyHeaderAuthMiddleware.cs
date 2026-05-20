@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using Tamma.Api.Auth;
+using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -105,7 +106,7 @@ public class ProxyHeaderAuthMiddleware : IMiddleware
         // proven stable in prod, downgrade these to LogDebug.
         _log.LogInformation(
             "Proxy bridge: invoked for {Path} — cookie present, user not yet authenticated",
-            context.Request.Path);
+            LogSanitizer.Clean(context.Request.Path.Value));
 
         try
         {

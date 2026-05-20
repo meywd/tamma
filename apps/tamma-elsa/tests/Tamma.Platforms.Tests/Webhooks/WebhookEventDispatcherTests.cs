@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Platforms.Abstractions;
@@ -55,6 +56,80 @@ public class WebhookEventDispatcherTests
 
     private static WebhookEventDispatcher New() =>
         new(NullLogger<WebhookEventDispatcher>.Instance);
+
+    /// <summary>
+    /// Captures the fully-formatted log message so we can assert that
+    /// attacker-controlled webhook fields (EventType / Action) never reach
+    /// the log with raw CR/LF (CWE-117 log injection).
+    /// </summary>
+    private sealed class CapturingLogger : ILogger<WebhookEventDispatcher>
+    {
+        public List<string> Messages { get; } = new();
+        IDisposable ILogger.BeginScope<TState>(TState state) => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    private sealed class CrlfThrowingHandler(string pattern) : IWebhookHandler
+    {
+        public PlatformKind Kind => PlatformKind.GitHub;
+        public string EventTypePattern { get; } = pattern;
+        public Task HandleAsync(PlatformWebhookEvent evt, CancellationToken ct = default)
+            => throw new InvalidOperationException("handler-blew-up");
+    }
+
+    [Test]
+    public async Task DispatchAsync_NoHandler_CrlfInEventType_IsSanitizedInLog()
+    {
+        // CodeQL #102 — WebhookEventDispatcher.cs:87 logs evt.EventType /
+        // evt.Action (attacker-controlled webhook fields) on the
+        // no-handler debug path.
+        var log = new CapturingLogger();
+        var dispatcher = new WebhookEventDispatcher(log);
+
+        var evt = MakeEvent(
+            PlatformKind.GitHub,
+            "push\r\nFAKE 2099-01-01 INJECTED forged-entry",
+            action: "opened\nanother-forged-line");
+
+        await dispatcher.DispatchAsync(evt);
+
+        log.Messages.Should().NotBeEmpty();
+        log.Messages.Should().OnlyContain(
+            m => !m.Contains('\n') && !m.Contains('\r'),
+            "user-controlled webhook fields must be CR/LF-sanitized before logging (CWE-117)");
+    }
+
+    [Test]
+    public async Task DispatchAsync_HandlerThrows_CrlfInAction_IsSanitizedInLog()
+    {
+        // CodeQL #103 — WebhookEventDispatcher.cs:120 logs evt.EventType /
+        // evt.Action in the handler-failure catch block.
+        var log = new CapturingLogger();
+        var dispatcher = new WebhookEventDispatcher(log);
+        dispatcher.RegisterHandler(new CrlfThrowingHandler("push"));
+
+        var evt = MakeEvent(
+            PlatformKind.GitHub,
+            "push",
+            action: "opened\r\nFAKE 2099-01-01 INJECTED forged-entry");
+
+        await dispatcher.DispatchAsync(evt);
+
+        log.Messages.Should().NotBeEmpty();
+        log.Messages.Should().OnlyContain(
+            m => !m.Contains('\n') && !m.Contains('\r'),
+            "user-controlled webhook fields must be CR/LF-sanitized before logging (CWE-117)");
+    }
 
     [Test]
     public void RegisterHandler_NullThrows()

@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -194,9 +195,57 @@ public class ProxyHeaderAuthMiddlewareTests
         ctx.User.Identity?.IsAuthenticated.Should().BeFalse();
     }
 
+    /// <summary>
+    /// CodeQL #104 — ProxyHeaderAuthMiddleware.cs:108 logs the
+    /// attacker-controlled <c>context.Request.Path</c>. <c>PathString</c>
+    /// URI-encodes CR/LF so raw injection is already blocked, but the
+    /// codebase convention is to route user input through
+    /// <see cref="Tamma.Core.Logging.LogSanitizer"/> for defense-in-depth
+    /// and to clear the static-analysis finding. The observable,
+    /// non-fakeable signal that the sanitizer is actually applied is its
+    /// 200-char truncation marker, which <c>PathString.ToUriComponent()</c>
+    /// does not produce.
+    /// </summary>
+    [Test]
+    public async Task LogsSanitizedRequestPath_TruncatesOverlongUserPath()
+    {
+        _handler.NextResponse = (HttpStatusCode.Unauthorized, "");
+
+        var log = new CapturingLogger();
+        var ctx = BuildContext(authenticated: false, proxyCookie: ValidProxyCookieValue);
+        ctx.Request.Path = new PathString("/" + new string('a', 400));
+
+        var middleware = BuildMiddleware(log);
+
+        await middleware.InvokeAsync(ctx, _ => Task.CompletedTask);
+
+        var pathLog = log.Messages.Should().ContainSingle(
+            m => m.Contains("Proxy bridge: invoked for")).Subject;
+        pathLog.Should().Contain("…[truncated]",
+            "the request path is user-controlled and must pass through LogSanitizer.Clean before logging (CWE-117)");
+    }
+
+    private sealed class CapturingLogger : ILogger<ProxyHeaderAuthMiddleware>
+    {
+        public List<string> Messages { get; } = new();
+        IDisposable ILogger.BeginScope<TState>(TState state) => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+
     // ─── helpers ─────────────────────────────────────────────────────────
 
-    private ProxyHeaderAuthMiddleware BuildMiddleware()
+    private ProxyHeaderAuthMiddleware BuildMiddleware(
+        ILogger<ProxyHeaderAuthMiddleware>? log = null)
     {
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -213,7 +262,7 @@ public class ProxyHeaderAuthMiddlewareTests
             _membershipRepo.Object,
             _bootstrapRepo.Object,
             _jwt.Object,
-            NullLogger<ProxyHeaderAuthMiddleware>.Instance);
+            log ?? NullLogger<ProxyHeaderAuthMiddleware>.Instance);
     }
 
     private static DefaultHttpContext BuildContext(bool authenticated, string? proxyCookie)

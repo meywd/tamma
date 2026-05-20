@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-using Tamma.Api.Logging;
+using Tamma.Core.Logging;
 using Tamma.Api.Services.GitHub;
 using Tamma.Data.Repositories;
 
