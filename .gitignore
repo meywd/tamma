@@ -187,3 +187,4 @@ e2e/playwright-report/
 playwright-report/
 .nano-banana-config.json
 .screenshots/
+.serena/
