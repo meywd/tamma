@@ -10,6 +10,7 @@ import {
   Position,
   Handle,
   BackgroundVariant,
+  SelectionMode,
   useNodesState,
   useEdgesState,
 } from '@xyflow/react';
@@ -1361,9 +1362,9 @@ function DiagramCanvas({
       maxZoom={3}
       panOnDrag={[0]}
       zoomOnScroll
-      selectionOnDrag={[2]}
+      selectionOnDrag={true}
       multiSelectionKeyCode="Shift"
-      selectionMode={1}
+      selectionMode={SelectionMode.Full}
       selectionKeyCode="Shift"
       nodesDraggable={true}
       nodesConnectable={false}

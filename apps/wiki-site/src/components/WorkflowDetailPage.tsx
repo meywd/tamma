@@ -413,7 +413,7 @@ export default function WorkflowDetailPage() {
       </div>
 
       {/* Flow Diagram */}
-      {flowSection && (
+      {flowSection && slug && (
         <div>
           <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">
             {flowSection.heading}
