@@ -22,7 +22,7 @@
     "drizzle-orm": "^0.45.2",
     "express-validator": "^7.3.0",
     "handlebars": "^4.7.8",
-    "hono": "^4.10.5",
+    "hono": "^4.12.18",
     "isomorphic-dompurify": "^2.31.0",
     "nanoid": "^5.1.6",
     "resend": "^6.4.2",
