@@ -40,6 +40,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Typecheck wiki-site
+        run: pnpm --filter @tamma/wiki-site run typecheck
+
       - name: Run tests
         run: pnpm vitest run
 

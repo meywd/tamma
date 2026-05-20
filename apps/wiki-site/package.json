@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "sync-content": "tsx scripts/sync-content.ts",
+    "typecheck": "tsc --noEmit",
     "dev": "pnpm sync-content && vite",
     "build": "pnpm sync-content && vite build",
     "preview": "vite preview",

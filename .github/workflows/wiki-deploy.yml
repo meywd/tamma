@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --filter @tamma/wiki-site...
 
+      - name: Typecheck
+        run: pnpm --filter @tamma/wiki-site run typecheck
+
       - name: Build (syncs content + builds Astro)
         run: pnpm --filter @tamma/wiki-site build
 
