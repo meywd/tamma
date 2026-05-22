@@ -24,6 +24,7 @@ Two more standing constraints from `CLAUDE.md` + the prompt-store precedent:
 
 - **C4 — Dual scoping is mandatory.** Every store method needs parallel single-user (`userId`) and SaaS (`…ForTenant(tenantId, …)`) variants with **distinct names** (the prompt store documents an overload-resolution hazard — do not overload, name them differently).
 - **C5 — Per-tenant DB routing.** Convention overrides live in the per-tenant DB via `ITenantDbContextFactory` / `RequireTenantId()`, exactly like `prompt_overrides` — **not** the control-plane DB.
+- **C6 — 27-15 is a clean cut, and AC#8 is reinterpreted.** The project is pre-production (`CLAUDE.md`: "No migration anxiety… all data stores can be replaced"). SPEC §4 is **not** a superset of today's 10-action matrix — it removes bare `plan`/`implement`/`triage`/`summarize` and narrows `code-review`/`refactor`/`debug`. So AC#8's literal "4 consumers behave identically" is **void**; read it as "consumers compile and pass tests **updated to the new vocabulary**." No compat shim, no deprecated-alias transition, no coupled 27-15+27-19 landing — just migrate consumers + tests and repoint/drop `LegacyPhaseAliases`. (A brief red on an intermediate WIP commit is fine on our own branch.)
 
 ---
 
@@ -359,9 +360,11 @@ git add apps/tamma-elsa/src/Tamma.Api/Services/Agents/AgentAction.cs \
 git commit -m "feat(epic-27): AgentAction enum from SPEC §4 (Story 27-15)"
 ```
 
-### Task 0.3: Rebuild RolePhaseMap on the enums, preserving behaviour (TDD)
+### Task 0.3: Rebuild RolePhaseMap on the enums — clean cut to SPEC §4 (TDD)
 
-- [ ] **Step 1: Write the regression test** — `tests/Tamma.Api.Tests/Agents/RolePhaseMapTaxonomyTests.cs` — pin the **current observable behaviour** so the rebuild can't change it:
+**Clean-cut, not preserve-identical.** This project is pre-production (`CLAUDE.md`: "No migration anxiety… all data stores can be replaced"). The vocabulary change is intentional, so the old eligibility answers are NOT a contract to keep. This task **replaces** the matrix with SPEC §4, **migrates the 4 consumers + their tests** to the new tokens, and **repoints/drops** `LegacyPhaseAliases` (they exist only for a dead TS engine + non-production workflow state). See correction C6.
+
+- [ ] **Step 1: Write the test for the NEW SPEC §4 behaviour** — `tests/Tamma.Api.Tests/Agents/RolePhaseMapTaxonomyTests.cs`. Assert eligibility against SPEC §4's per-role sets (these values are transcribed from SPEC §4 — the source of truth):
 
 ```csharp
 using FluentAssertions;
@@ -380,36 +383,35 @@ public class RolePhaseMapTaxonomyTests
             Enum.GetValues<AgentRole>().Select(r => r.ToWire()));
     }
 
-    [TestCase("developer", "implement")]
-    [TestCase("architect", "plan")]
-    [TestCase("product_owner", "triage")]
-    [TestCase("tech_writer", "summarize")]
-    public void GetPrimaryPhaseForRole_unchanged(string role, string action)
+    [Test]
+    public void ValidActions_derive_from_enum()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole(role).Should().Be(action);
+        RolePhaseMap.ValidActions.Should().BeEquivalentTo(
+            Enum.GetValues<AgentAction>().Select(a => a.ToWire()));
     }
 
-    [TestCase("implement", "developer", true)]
-    [TestCase("implement", "tester", false)]
-    [TestCase("code-review", "security", true)]
-    public void IsRoleEligibleForPhase_unchanged(string action, string role, bool eligible)
+    // New SPEC §4 vocabulary — bare plan/implement/triage/summarize no longer exist.
+    [TestCase("implement-feature", "developer", true)]
+    [TestCase("implement-feature", "tester", false)]
+    [TestCase("code-review-security", "security", true)]
+    [TestCase("code-review", "security", false)]   // security now does code-review-security
+    [TestCase("context-scan", "tech_writer", true)] // context-scan stays universal
+    public void IsRoleEligibleForPhase_matches_spec4(string action, string role, bool eligible)
     {
         RolePhaseMap.IsRoleEligibleForPhase(action, role).Should().Be(eligible);
     }
 }
 ```
 
-  ⚠️ **Note the AC#2 vs AC#8 tension:** expanding `AgentAction` to ~70 tokens must NOT change `ValidActions`-driven eligibility for the original 10 phases the consumers use. If SPEC §4's per-role sets would change an existing eligibility answer, that is a SPEC reconciliation question — surface it, don't silently change behaviour.
+  ⚠️ **Open item for SPEC §4:** `GetPrimaryActionForRole` needs a single designated primary per role under the new vocabulary (SPEC §4 lists *sets*, not an explicit primary). Pin the chosen primary per role in SPEC §4 before writing that assertion, or derive a documented rule (e.g. "first specialized action after `context-scan`"). This is the one genuine spec gap — resolve it here, in the foundational story.
 
-- [ ] **Step 2: Run test to verify current behaviour passes (baseline)**
-  Run: `cd apps/tamma-elsa && dotnet test Tamma.sln --filter FullyQualifiedName~RolePhaseMapTaxonomyTests`
-  Expected: PASS against the *current* string implementation (it's a characterization test).
+- [ ] **Step 2: Delete/replace the old characterization expectations.** Any existing test asserting bare-token behaviour (`GetPrimaryPhaseForRole("architect") == "plan"`, eligibility of `implement`/`triage`/`summarize`) is updated to the SPEC §4 token or removed. Run: `cd apps/tamma-elsa && dotnet test Tamma.sln --filter FullyQualifiedName~RolePhaseMapTaxonomyTests` — expected FAIL until Step 3 (the matrix doesn't exist yet).
 
-- [ ] **Step 3: Rebuild `RolePhaseMap.cs`** so `ValidRoles`/`ValidActions` derive from `Enum.GetValues<AgentRole>().Select(r => r.ToWire())` / `…<AgentAction>()`, and `s_eligibleRoles` is replaced by the SPEC §4 per-role action sets. Express that matrix **with typed `AgentRole`/`AgentAction` values** (e.g. `Dictionary<AgentRole, FrozenSet<AgentAction>>`) so an invalid pair is a compile error; project to wire strings only where the existing string-keyed public methods need them. Keep `GetPrimaryPhaseForRole`, `Normalize*`, `Assert*`, legacy aliases observably identical, and **keep the public string-keyed method signatures** (so the 4 consumers compile unchanged — AC#8). Internally those methods convert string→enum at entry via `AgentRole.Parse`/`AgentAction.Parse`.
+- [ ] **Step 3: Rebuild `RolePhaseMap.cs`** so `ValidRoles`/`ValidActions` derive from `Enum.GetValues<AgentRole>().Select(r => r.ToWire())` / `…<AgentAction>()`, and `s_eligibleRoles` is **replaced** by the SPEC §4 per-role action sets. Express the matrix **with typed `AgentRole`/`AgentAction` values** (e.g. `Dictionary<AgentRole, FrozenSet<AgentAction>>`) so an invalid pair is a compile error; project to wire strings only where string-keyed public methods need them. Keep the public string-keyed signatures (so call sites compile), converting string→enum at entry via `AgentRole.Parse`/`AgentAction.Parse`. **Repoint or delete the now-obsolete `LegacyPhaseAliases`** (the UPPER_SNAKE→bare-token entries point at tokens that no longer exist) — map them to the chosen SPEC §4 replacement or remove if the dispatch site is migrated in 27-19.
 
-- [ ] **Step 4: Run the full taxonomy + consumer tests**
+- [ ] **Step 4: Migrate the 4 consumers + their tests to the new vocabulary.** `AgentResolverService`, `ProviderChainResolver`, `AgentEndpoints`, `DefaultAgentConfig` — update any literal/expected old token (`plan`/`implement`/`triage`/`summarize`/bare `code-review` for security/tester) to its SPEC §4 replacement, and update their tests to assert the new answers. This is a deliberate behaviour change, not a regression.
   Run: `cd apps/tamma-elsa && dotnet test Tamma.sln --filter "FullyQualifiedName~Agents|FullyQualifiedName~AgentResolver|FullyQualifiedName~ProviderChain"`
-  Expected: PASS (taxonomy + the 4-consumer regression).
+  Expected: PASS (taxonomy + consumers on the NEW vocabulary).
 
 - [ ] **Step 5: Full wave gate**
   Run: `cd apps/tamma-elsa && dotnet build Tamma.sln --no-restore -c Release && dotnet test Tamma.sln --no-build -c Release`
@@ -423,7 +425,7 @@ git add apps/tamma-elsa/src/Tamma.Api/Services/Agents/RolePhaseMap.cs \
 git commit -m "feat(epic-27): rebuild RolePhaseMap on AgentRole/AgentAction enums (Story 27-15)"
 ```
 
-**Wave 0 exit criteria:** all of 27-15 AC#1-8 satisfied; `dotnet build` + `dotnet test` green on `feat/wave-b`; the 4 consumers unchanged. → I review, then write the Wave 1 detailed plan.
+**Wave 0 exit criteria:** 27-15 AC#1-7 satisfied; AC#8 reinterpreted per C6 (consumers **migrated** to the new vocabulary with updated tests, not frozen to old answers); `dotnet build` + `dotnet test` green on `feat/wave-b`. → I review, then write the Wave 1 detailed plan.
 
 ---
 
@@ -467,7 +469,7 @@ Story: `27-18-prompt-store-taxonomy-reshape.md`. Depends on 27-15, 27-16, 27-1. 
 
 ## Risks & open decisions (resolve with user during review)
 
-1. **AC#2 ↔ AC#8 tension (27-15):** expanding actions 10→70 while keeping the 4 consumers' behaviour identical. If SPEC §4 changes an existing eligibility answer, that's a design reconciliation, not a silent code change. **Highest-risk item; it's why Wave 0 is solo and gated hard.**
+1. **27-15 is a clean-cut vocabulary swap (resolved — see C6).** SPEC §4 removes bare `plan`/`implement`/`triage`/`summarize` and narrows `code-review`/`refactor`/`debug`; it is not behaviour-preserving. Because the project is pre-production, this is fine: migrate the 4 consumers + tests to the new tokens, repoint/drop legacy aliases. The only genuine spec gap is **`GetPrimaryActionForRole` needs an explicit primary per role under SPEC §4** (it lists sets, not a primary) — resolve in Wave 0 Task 0.3.
 2. **`feat/wave-b` landing — confirmed appropriate.** `feat/wave-b` is the "Wave B" multi-epic integration branch (PR #343: *"SaaS-mode prompts + Epic 30 pluggable provisioning + Epic 31 git platforms"*, 112 commits, ~52k additions). It already contains Epic 27 work (stories 27-2, 27-3) plus Epics 30/31. Adding the convention store epic (27-8…27-19) is consistent with the branch's purpose — no separate-branch concern. (An earlier draft of this plan wrongly called this a "small security PR"; that was incorrect and is retracted.)
 3. **Migration ordering on a shared DB:** 27-8's EF migration must slot after the latest existing migration; if other branches add migrations, snapshot rebases are needed. Keep 27-8 as the only migration in flight.
 4. **`TammaError` shape:** Wave 0 tests assume `TammaError(code, message)` with a `.Code`. Verify the C# port's actual ctor/property names before Task 0.1 Step 3.
