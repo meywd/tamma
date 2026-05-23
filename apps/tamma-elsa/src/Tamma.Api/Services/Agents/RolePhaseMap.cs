@@ -3,52 +3,189 @@ using System.Collections.Frozen;
 namespace Tamma.Api.Services.Agents;
 
 /// <summary>
-/// Static mapping between agent roles and workflow phases (actions).
+/// The authoritative role ↔ action taxonomy, rebuilt on the
+/// <see cref="AgentRole"/> / <see cref="AgentAction"/> enums (SPEC §4 —
+/// <c>docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md</c>).
 ///
-/// Ported from the deleted <c>packages/api/src/services/default-prompts.ts</c>
-/// (Story 12-5 — Prompt Engineering Framework). Roles and phases are kept
-/// stable across the TS → C# migration (Epic 19).
+/// This is a CLEAN CUT to the new typed action vocabulary (Story 27-15). The
+/// old flat 8×10 string vocabulary is gone; the union of the per-role action
+/// sets is the 68-token <see cref="AgentAction"/> enum. Which <c>(role,
+/// action)</c> pairs are valid is the per-role eligibility matrix below — shared
+/// tokens (<c>context-scan</c>, <c>code-review</c>, <c>plan-review</c>,
+/// <c>write-tests</c>) appear in multiple role sets intentionally; the role half
+/// of the key disambiguates them.
 ///
-/// There are 8 roles × 10 phases. Each role has a primary phase, and each
-/// phase has one or more eligible roles.
+/// <para>
+/// The public surface keeps the string-keyed signatures so existing callers
+/// (<c>AgentResolverService</c>, <c>ProviderChainResolver</c>,
+/// <c>AgentEndpoints</c>, <c>DefaultAgentConfig</c>) compile unchanged; strings
+/// are parsed to enums internally so a typo'd token is a <see cref="AgentAction.Parse"/>
+/// throw, never a silent mismatch.
+/// </para>
 /// </summary>
 public static class RolePhaseMap
 {
     // -----------------------------------------------------------------------
-    // Constants
+    // Typed eligibility matrix — SPEC §4 per-role action sets
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// The 8 agent roles supported by the Tamma platform.
+    /// The per-role action sets from SPEC §4. Built typed from enum members so
+    /// every entry is compile-checked: a non-existent member is a compile
+    /// error, never a silent string mismatch.
     /// </summary>
-    public static readonly FrozenSet<string> ValidRoles = new HashSet<string>
-    {
-        "developer",
-        "tester",
-        "security",
-        "devops",
-        "architect",
-        "product_owner",
-        "senior_developer",
-        "tech_writer",
-    }.ToFrozenSet();
+    private static readonly FrozenDictionary<AgentRole, FrozenSet<AgentAction>> s_eligibleActions =
+        new Dictionary<AgentRole, FrozenSet<AgentAction>>
+        {
+            // product_owner — intake, requirements, prioritisation, acceptance
+            [AgentRole.ProductOwner] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.TriageIntake,
+                AgentAction.ClarifyRequirements,
+                AgentAction.PlanScope,
+                AgentAction.DefineAcceptanceCriteria,
+                AgentAction.PrioritizeBacklog,
+                AgentAction.PlanRoadmap,
+                AgentAction.SummarizeStakeholder,
+                AgentAction.ReviewAcceptance),
+
+            // architect — system design, technical strategy
+            [AgentRole.Architect] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.TriageTechnical,
+                AgentAction.PlanSystemDesign,
+                AgentAction.DesignApiContract,
+                AgentAction.DesignDataModel,
+                AgentAction.DesignIntegration,
+                AgentAction.PlanMigrationStrategy,
+                AgentAction.WriteAdr,
+                AgentAction.PlanReview,
+                AgentAction.CodeReviewArchitecture,
+                AgentAction.AssessTechnicalRisk),
+
+            // senior_developer — tech lead: decomposition, review, mentorship
+            [AgentRole.SeniorDeveloper] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.CreateTasks,
+                AgentAction.PlanImplementation,
+                AgentAction.PlanReview,
+                AgentAction.CodeReview,
+                AgentAction.PlanRefactor,
+                AgentAction.DebugRootcause,
+                AgentAction.TriageTechnical,
+                AgentAction.SummarizeTechnical,
+                AgentAction.ResolveBlocker,
+                AgentAction.MentorFeedback),
+
+            // developer — implementation
+            [AgentRole.Developer] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.PlanImplementation,
+                AgentAction.PlanFix,
+                AgentAction.PlanDebugging,
+                AgentAction.ImplementFeature,
+                AgentAction.ImplementFix,
+                AgentAction.WriteTests,
+                AgentAction.Refactor,
+                AgentAction.Debug,
+                AgentAction.CodeReview,
+                AgentAction.AddressReviewComments,
+                AgentAction.SelfReview),
+
+            // tester — QA, test engineering
+            [AgentRole.Tester] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.PlanTestStrategy,
+                AgentAction.WriteTestCases,
+                AgentAction.WriteTests,
+                AgentAction.WriteRegressionTest,
+                AgentAction.ExploratoryTest,
+                AgentAction.VerifyAcceptance,
+                AgentAction.CodeReviewCoverage,
+                AgentAction.TriageDefect),
+
+            // security — security review, threat modelling
+            [AgentRole.Security] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.ThreatModel,
+                AgentAction.PlanReviewSecurity,
+                AgentAction.CodeReviewSecurity,
+                AgentAction.AssessVulnerability,
+                AgentAction.AuditDependencies,
+                AgentAction.AuditSecrets,
+                AgentAction.ReviewCompliance,
+                AgentAction.AnalyzeSecurityIncident),
+
+            // devops — infra, CI/CD, deployment, ops
+            [AgentRole.Devops] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.PlanDeployment,
+                AgentAction.ImplementInfrastructure,
+                AgentAction.ConfigureCicd,
+                AgentAction.Deploy,
+                AgentAction.Rollback,
+                AgentAction.MonitorHealth,
+                AgentAction.DiagnoseIncident,
+                AgentAction.PlanIncidentResponse,
+                AgentAction.WritePostmortem,
+                AgentAction.AssessCapacity),
+
+            // tech_writer — documentation
+            [AgentRole.TechWriter] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.SummarizeChanges,
+                AgentAction.WriteUserDocs,
+                AgentAction.WriteApiDocs,
+                AgentAction.WriteReleaseNotes,
+                AgentAction.WriteRunbook,
+                AgentAction.UpdateChangelog,
+                AgentAction.ReviewDocs),
+        }.ToFrozenDictionary();
 
     /// <summary>
-    /// The 10 workflow phases (a.k.a. actions) the engine dispatches to.
+    /// Reverse map: action → roles whose set contains it. Built once from
+    /// <see cref="s_eligibleActions"/> so <see cref="GetEligibleRolesForPhase"/>
+    /// is a single dictionary lookup.
     /// </summary>
-    public static readonly FrozenSet<string> ValidActions = new HashSet<string>
-    {
-        "context-scan",
-        "plan",
-        "plan-review",
-        "implement",
-        "write-tests",
-        "refactor",
-        "code-review",
-        "triage",
-        "summarize",
-        "debug",
-    }.ToFrozenSet();
+    private static readonly FrozenDictionary<AgentAction, FrozenSet<string>> s_rolesForAction =
+        BuildRolesForAction();
+
+    /// <summary>
+    /// Role → primary action. Old-intent → new-token mapping (Story 27-15):
+    /// this API has no runtime callers (test-only), so it just needs to stay
+    /// coherent. Every value is in that role's §4 set.
+    /// </summary>
+    private static readonly FrozenDictionary<AgentRole, AgentAction> s_primaryAction =
+        new Dictionary<AgentRole, AgentAction>
+        {
+            [AgentRole.Developer] = AgentAction.ImplementFeature,
+            [AgentRole.Tester] = AgentAction.WriteTests,
+            [AgentRole.Security] = AgentAction.CodeReviewSecurity,
+            [AgentRole.Devops] = AgentAction.ImplementInfrastructure,
+            [AgentRole.Architect] = AgentAction.PlanSystemDesign,
+            [AgentRole.ProductOwner] = AgentAction.TriageIntake,
+            [AgentRole.SeniorDeveloper] = AgentAction.PlanReview,
+            [AgentRole.TechWriter] = AgentAction.SummarizeChanges,
+        }.ToFrozenDictionary();
+
+    // -----------------------------------------------------------------------
+    // Constants — ValidRoles / ValidActions derived from the enums
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The 8 agent roles, as wire strings, derived from <see cref="AgentRole"/>.
+    /// Kept as <see cref="FrozenSet{T}"/> of string so string-keyed callers
+    /// compile unchanged.
+    /// </summary>
+    public static readonly FrozenSet<string> ValidRoles =
+        Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToFrozenSet();
+
+    /// <summary>
+    /// The 68 workflow actions, as wire strings, derived from
+    /// <see cref="AgentAction"/> (the union of the per-role §4 sets).
+    /// </summary>
+    public static readonly FrozenSet<string> ValidActions =
+        Enum.GetValues<AgentAction>().Select(a => a.ToWire()).ToFrozenSet();
 
     /// <summary>
     /// Keys rejected to prevent prototype-pollution-style lookups — port of
@@ -85,21 +222,24 @@ public static class RolePhaseMap
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Legacy TS workflow phase keys (UPPER_SNAKE) mapped onto the C#
-    /// hyphen-lowercase action vocabulary. Keeps Elsa workflows that still
-    /// emit TS-era phase identifiers compatible with the new resolver.
+    /// Legacy TS workflow phase keys (UPPER_SNAKE) repointed onto the new
+    /// typed action vocabulary (Story 27-15). Surviving tokens map to
+    /// themselves (<c>context-scan</c>, <c>code-review</c>); dead tokens map to
+    /// the best-fit new specific action. Keeps Elsa workflows that still emit
+    /// TS-era phase identifiers green until the dispatch sites are specialised
+    /// (Story 27-19).
     /// </summary>
     public static readonly FrozenDictionary<string, string> LegacyPhaseAliases =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["ISSUE_SELECTION"] = "triage",
-            ["CONTEXT_ANALYSIS"] = "context-scan",
-            ["PLAN_GENERATION"] = "plan",
-            ["CODE_GENERATION"] = "implement",
-            ["PR_CREATION"] = "implement",
-            ["CODE_REVIEW"] = "code-review",
-            ["TEST_EXECUTION"] = "write-tests",
-            ["STATUS_MONITORING"] = "triage",
+            ["CONTEXT_ANALYSIS"] = "context-scan",            // survives
+            ["CODE_REVIEW"] = "code-review",                  // survives
+            ["TEST_EXECUTION"] = "write-tests",               // survives
+            ["CODE_GENERATION"] = "implement-feature",
+            ["PR_CREATION"] = "implement-feature",
+            ["PLAN_GENERATION"] = "plan-system-design",
+            ["ISSUE_SELECTION"] = "triage-intake",
+            ["STATUS_MONITORING"] = "triage-intake",
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -127,59 +267,12 @@ public static class RolePhaseMap
     }
 
     // -----------------------------------------------------------------------
-    // Role → primary phase
-    // -----------------------------------------------------------------------
-
-    private static readonly FrozenDictionary<string, string> s_primaryPhase =
-        new Dictionary<string, string>
-        {
-            ["developer"] = "implement",
-            ["tester"] = "write-tests",
-            ["security"] = "code-review",
-            ["devops"] = "implement",
-            ["architect"] = "plan",
-            ["product_owner"] = "triage",
-            ["senior_developer"] = "plan-review",
-            ["tech_writer"] = "summarize",
-        }.ToFrozenDictionary();
-
-    // -----------------------------------------------------------------------
-    // Phase → eligible roles
-    // -----------------------------------------------------------------------
-
-    private static readonly FrozenDictionary<string, FrozenSet<string>> s_eligibleRoles =
-        new Dictionary<string, FrozenSet<string>>
-        {
-            // Research / analysis — any role can scan context
-            ["context-scan"] = FreezeSet(
-                "developer", "tester", "security", "devops",
-                "architect", "product_owner", "senior_developer", "tech_writer"),
-            // Planning — architect primary, senior_developer & product_owner contribute
-            ["plan"] = FreezeSet("architect", "senior_developer", "product_owner"),
-            // Plan review — senior_developer primary, architect + security sanity-check
-            ["plan-review"] = FreezeSet("senior_developer", "architect", "security"),
-            // Implementation — developer primary, devops for infra changes
-            ["implement"] = FreezeSet("developer", "devops"),
-            // Test authoring — tester primary, developer writes companion tests
-            ["write-tests"] = FreezeSet("tester", "developer"),
-            // Refactor — developer + senior_developer
-            ["refactor"] = FreezeSet("developer", "senior_developer"),
-            // Code review — security, senior_developer, developer; tester can eyeball
-            ["code-review"] = FreezeSet("security", "senior_developer", "developer", "tester"),
-            // Triage — product_owner primary, senior_developer + architect for tech triage
-            ["triage"] = FreezeSet("product_owner", "senior_developer", "architect"),
-            // Summarize / write docs — tech_writer primary, senior_developer for tech write-ups
-            ["summarize"] = FreezeSet("tech_writer", "senior_developer", "product_owner"),
-            // Debug — developer, senior_developer, devops
-            ["debug"] = FreezeSet("developer", "senior_developer", "devops"),
-        }.ToFrozenDictionary();
-
-    // -----------------------------------------------------------------------
-    // Public API
+    // Public API — string-keyed for backward source compatibility
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Get the primary phase (action) for a given role.
+    /// Get the primary action for a given role. No runtime callers (test-only);
+    /// kept coherent with the §4 sets.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// Thrown if <paramref name="role"/> is unknown or a forbidden key.
@@ -187,24 +280,33 @@ public static class RolePhaseMap
     public static string GetPrimaryPhaseForRole(string role)
     {
         AssertValidRole(role);
-        return s_primaryPhase[role];
+        var parsed = AgentRoleExtensions.Parse(role);
+        return s_primaryAction[parsed].ToWire();
     }
 
     /// <summary>
-    /// Get the set of roles eligible for a given phase (action).
+    /// Get the set of roles eligible for a given action.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// Thrown if <paramref name="phase"/> is unknown.
+    /// Thrown if <paramref name="phase"/> is unknown (matches old
+    /// AssertValidPhase behaviour).
     /// </exception>
     public static IReadOnlySet<string> GetEligibleRolesForPhase(string phase)
     {
         AssertValidPhase(phase);
-        return s_eligibleRoles[phase];
+        var action = AgentActionExtensions.Parse(phase);
+        // Every valid action appears in s_rolesForAction (union completeness is
+        // enforced by the round-trip / coverage tests), but guard defensively.
+        return s_rolesForAction.TryGetValue(action, out var roles)
+            ? roles
+            : FrozenSet<string>.Empty;
     }
 
     /// <summary>
-    /// Check whether a role is eligible for a given phase. Returns
-    /// <c>false</c> for unknown roles or phases (non-throwing predicate).
+    /// Check whether a role is eligible for a given action. Non-throwing:
+    /// returns <c>false</c> for unknown/unparseable role or action (a dead
+    /// token like <c>"implement"</c> yields <c>false</c>, not a throw —
+    /// <c>AgentResolverService</c> relies on this predicate).
     /// </summary>
     public static bool IsRoleEligibleForPhase(string phase, string role)
     {
@@ -212,11 +314,13 @@ public static class RolePhaseMap
         {
             return false;
         }
-        if (!s_eligibleRoles.TryGetValue(phase, out var eligible))
+        if (!TryParseRole(role, out var parsedRole) ||
+            !TryParseAction(phase, out var parsedAction))
         {
             return false;
         }
-        return eligible.Contains(role);
+        return s_eligibleActions.TryGetValue(parsedRole, out var actions) &&
+               actions.Contains(parsedAction);
     }
 
     /// <summary>
@@ -263,6 +367,49 @@ public static class RolePhaseMap
     // Private helpers
     // -----------------------------------------------------------------------
 
-    private static FrozenSet<string> FreezeSet(params string[] items)
-        => new HashSet<string>(items).ToFrozenSet();
+    private static FrozenSet<AgentAction> FreezeSet(params AgentAction[] items)
+        => new HashSet<AgentAction>(items).ToFrozenSet();
+
+    private static FrozenDictionary<AgentAction, FrozenSet<string>> BuildRolesForAction()
+    {
+        var accumulator = new Dictionary<AgentAction, HashSet<string>>();
+        foreach (var (role, actions) in s_eligibleActions)
+        {
+            var roleWire = role.ToWire();
+            foreach (var action in actions)
+            {
+                if (!accumulator.TryGetValue(action, out var roles))
+                {
+                    roles = new HashSet<string>(StringComparer.Ordinal);
+                    accumulator[action] = roles;
+                }
+                roles.Add(roleWire);
+            }
+        }
+        return accumulator.ToFrozenDictionary(
+            kvp => kvp.Key,
+            kvp => kvp.Value.ToFrozenSet());
+    }
+
+    /// <summary>
+    /// Non-throwing role parse used by <see cref="IsRoleEligibleForPhase"/>.
+    /// <see cref="AgentRole.Parse"/> throws on unknown; this swallows that to
+    /// keep the predicate total.
+    /// </summary>
+    private static bool TryParseRole(string role, out AgentRole parsed)
+    {
+        var normalized = NormalizeRole(role);
+        return EnumWire<AgentRole>.TryParse(normalized, out parsed);
+    }
+
+    /// <summary>
+    /// Non-throwing action parse used by <see cref="IsRoleEligibleForPhase"/>.
+    /// A dead token (e.g. <c>"implement"</c>) that maps to no canonical action
+    /// yields <c>false</c> instead of throwing.
+    /// </summary>
+    private static bool TryParseAction(string phase, out AgentAction parsed)
+    {
+        var normalized = NormalizePhase(phase);
+        return EnumWire<AgentAction>.TryParse(normalized, out parsed);
+    }
 }

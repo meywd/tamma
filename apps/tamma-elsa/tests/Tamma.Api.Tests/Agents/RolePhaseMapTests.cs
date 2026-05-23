@@ -5,19 +5,20 @@ using Tamma.Api.Services.Agents;
 namespace Tamma.Api.Tests.Agents;
 
 /// <summary>
-/// Tests for the static role ↔ phase mapping.
+/// Tests for the static role ↔ action mapping, rebuilt on the
+/// <see cref="AgentRole"/> / <see cref="AgentAction"/> enums (SPEC §4).
 ///
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 10 actions (≈ phases): context-scan, plan, plan-review, implement,
-/// write-tests, refactor, code-review, triage, summarize, debug.
+/// The 68 actions are the union of the per-role action sets in SPEC §4.
+/// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
 public class RolePhaseMapTests
 {
     // -----------------------------------------------------------------------
-    // Roles / Actions constants
+    // Roles / Actions constants — derived from the enums
     // -----------------------------------------------------------------------
 
     [Test]
@@ -31,23 +32,33 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_All_Ten_Actions()
+    public void ValidRoles_Should_Be_Derived_From_AgentRole_Enum()
     {
-        RolePhaseMap.ValidActions.Should().BeEquivalentTo(new[]
-        {
-            "context-scan", "plan", "plan-review", "implement", "write-tests",
-            "refactor", "code-review", "triage", "summarize", "debug"
-        });
+        RolePhaseMap.ValidRoles.Should().BeEquivalentTo(
+            Enum.GetValues<AgentRole>().Select(r => r.ToWire()));
+    }
+
+    [Test]
+    public void ValidActions_Should_Contain_Sixty_Eight_Actions()
+    {
+        RolePhaseMap.ValidActions.Should().HaveCount(68);
+    }
+
+    [Test]
+    public void ValidActions_Should_Be_Derived_From_AgentAction_Enum()
+    {
+        RolePhaseMap.ValidActions.Should().BeEquivalentTo(
+            Enum.GetValues<AgentAction>().Select(a => a.ToWire()));
     }
 
     // -----------------------------------------------------------------------
-    // Role → Phase (primary phase per role)
+    // Role → primary action
     // -----------------------------------------------------------------------
 
     [Test]
-    public void GetPrimaryPhaseForRole_Developer_Returns_Implement()
+    public void GetPrimaryPhaseForRole_Developer_Returns_ImplementFeature()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("developer").Should().Be("implement");
+        RolePhaseMap.GetPrimaryPhaseForRole("developer").Should().Be("implement-feature");
     }
 
     [Test]
@@ -57,27 +68,27 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void GetPrimaryPhaseForRole_Security_Returns_CodeReview()
+    public void GetPrimaryPhaseForRole_Security_Returns_CodeReviewSecurity()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("security").Should().Be("code-review");
+        RolePhaseMap.GetPrimaryPhaseForRole("security").Should().Be("code-review-security");
     }
 
     [Test]
-    public void GetPrimaryPhaseForRole_Devops_Returns_Implement()
+    public void GetPrimaryPhaseForRole_Devops_Returns_ImplementInfrastructure()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("devops").Should().Be("implement");
+        RolePhaseMap.GetPrimaryPhaseForRole("devops").Should().Be("implement-infrastructure");
     }
 
     [Test]
-    public void GetPrimaryPhaseForRole_Architect_Returns_Plan()
+    public void GetPrimaryPhaseForRole_Architect_Returns_PlanSystemDesign()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("architect").Should().Be("plan");
+        RolePhaseMap.GetPrimaryPhaseForRole("architect").Should().Be("plan-system-design");
     }
 
     [Test]
-    public void GetPrimaryPhaseForRole_ProductOwner_Returns_Triage()
+    public void GetPrimaryPhaseForRole_ProductOwner_Returns_TriageIntake()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("product_owner").Should().Be("triage");
+        RolePhaseMap.GetPrimaryPhaseForRole("product_owner").Should().Be("triage-intake");
     }
 
     [Test]
@@ -87,9 +98,20 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void GetPrimaryPhaseForRole_TechWriter_Returns_Summarize()
+    public void GetPrimaryPhaseForRole_TechWriter_Returns_SummarizeChanges()
     {
-        RolePhaseMap.GetPrimaryPhaseForRole("tech_writer").Should().Be("summarize");
+        RolePhaseMap.GetPrimaryPhaseForRole("tech_writer").Should().Be("summarize-changes");
+    }
+
+    [Test]
+    public void GetPrimaryPhaseForRole_Every_Primary_Is_In_That_Roles_Set()
+    {
+        foreach (var role in RolePhaseMap.ValidRoles)
+        {
+            var primary = RolePhaseMap.GetPrimaryPhaseForRole(role);
+            RolePhaseMap.IsRoleEligibleForPhase(primary, role)
+                .Should().BeTrue($"primary action '{primary}' must be in role '{role}'s set");
+        }
     }
 
     [Test]
@@ -110,46 +132,70 @@ public class RolePhaseMapTests
     }
 
     // -----------------------------------------------------------------------
-    // Phase → Eligible Roles
+    // Action → eligible roles
     // -----------------------------------------------------------------------
 
     [Test]
-    public void GetEligibleRolesForPhase_Implement_Includes_Developer_And_Devops()
+    public void GetEligibleRolesForPhase_ContextScan_Includes_All_Eight_Roles()
     {
-        RolePhaseMap.GetEligibleRolesForPhase("implement")
-            .Should().Contain(new[] { "developer", "devops" });
+        RolePhaseMap.GetEligibleRolesForPhase("context-scan")
+            .Should().BeEquivalentTo(RolePhaseMap.ValidRoles);
     }
 
     [Test]
-    public void GetEligibleRolesForPhase_CodeReview_Includes_Security_And_Senior()
+    public void GetEligibleRolesForPhase_ImplementFeature_Is_Developer_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("implement-feature")
+            .Should().BeEquivalentTo(new[] { "developer" });
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_CodeReview_Includes_SeniorDeveloper_And_Developer()
     {
         RolePhaseMap.GetEligibleRolesForPhase("code-review")
-            .Should().Contain(new[] { "security", "senior_developer" });
+            .Should().BeEquivalentTo(new[] { "senior_developer", "developer" });
     }
 
     [Test]
-    public void GetEligibleRolesForPhase_WriteTests_Includes_Tester()
+    public void GetEligibleRolesForPhase_CodeReviewSecurity_Is_Security_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("code-review-security")
+            .Should().BeEquivalentTo(new[] { "security" });
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_WriteTests_Includes_Tester_And_Developer()
     {
         RolePhaseMap.GetEligibleRolesForPhase("write-tests")
-            .Should().Contain("tester");
+            .Should().BeEquivalentTo(new[] { "tester", "developer" });
     }
 
     [Test]
-    public void GetEligibleRolesForPhase_Plan_Includes_Architect()
+    public void GetEligibleRolesForPhase_PlanSystemDesign_Is_Architect_Only()
     {
-        RolePhaseMap.GetEligibleRolesForPhase("plan").Should().Contain("architect");
+        RolePhaseMap.GetEligibleRolesForPhase("plan-system-design")
+            .Should().BeEquivalentTo(new[] { "architect" });
     }
 
     [Test]
-    public void GetEligibleRolesForPhase_Triage_Includes_ProductOwner()
+    public void GetEligibleRolesForPhase_PlanReview_Includes_Architect_And_SeniorDeveloper()
     {
-        RolePhaseMap.GetEligibleRolesForPhase("triage").Should().Contain("product_owner");
+        RolePhaseMap.GetEligibleRolesForPhase("plan-review")
+            .Should().BeEquivalentTo(new[] { "architect", "senior_developer" });
     }
 
     [Test]
-    public void GetEligibleRolesForPhase_Summarize_Includes_TechWriter()
+    public void GetEligibleRolesForPhase_TriageTechnical_Includes_Architect_And_SeniorDeveloper()
     {
-        RolePhaseMap.GetEligibleRolesForPhase("summarize").Should().Contain("tech_writer");
+        RolePhaseMap.GetEligibleRolesForPhase("triage-technical")
+            .Should().BeEquivalentTo(new[] { "architect", "senior_developer" });
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_SummarizeChanges_Is_TechWriter_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("summarize-changes")
+            .Should().BeEquivalentTo(new[] { "tech_writer" });
     }
 
     [Test]
@@ -159,25 +205,157 @@ public class RolePhaseMapTests
         act.Should().Throw<ArgumentException>().WithMessage("*unknown-phase*");
     }
 
+    [Test]
+    public void GetEligibleRolesForPhase_DeadToken_Throws()
+    {
+        // 'implement' and 'plan' are dead tokens from the old vocabulary.
+        Action act = () => RolePhaseMap.GetEligibleRolesForPhase("implement");
+        act.Should().Throw<ArgumentException>();
+    }
+
     // -----------------------------------------------------------------------
-    // Resolve (phase, role) → validates pairing
+    // (action, role) eligibility — non-throwing predicate
     // -----------------------------------------------------------------------
 
     [Test]
-    public void IsRoleEligibleForPhase_Valid_Pair_Returns_True()
+    public void IsRoleEligibleForPhase_CodeReviewSecurity_Security_Returns_True()
     {
-        RolePhaseMap.IsRoleEligibleForPhase("implement", "developer").Should().BeTrue();
+        RolePhaseMap.IsRoleEligibleForPhase("code-review-security", "security").Should().BeTrue();
     }
 
     [Test]
-    public void IsRoleEligibleForPhase_Invalid_Pair_Returns_False()
+    public void IsRoleEligibleForPhase_CodeReview_Security_Returns_False()
     {
-        RolePhaseMap.IsRoleEligibleForPhase("plan", "tester").Should().BeFalse();
+        // security reviews via code-review-security, not the generic code-review.
+        RolePhaseMap.IsRoleEligibleForPhase("code-review", "security").Should().BeFalse();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ImplementFeature_Developer_Returns_True()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("implement-feature", "developer").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ImplementFeature_Tester_Returns_False()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("implement-feature", "tester").Should().BeFalse();
+    }
+
+    [Test]
+    [TestCase("developer")]
+    [TestCase("tester")]
+    [TestCase("security")]
+    [TestCase("devops")]
+    [TestCase("architect")]
+    [TestCase("product_owner")]
+    [TestCase("senior_developer")]
+    [TestCase("tech_writer")]
+    public void IsRoleEligibleForPhase_ContextScan_True_For_Every_Role(string role)
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("context-scan", role).Should().BeTrue();
+    }
+
+    [Test]
+    [TestCase("implement")]
+    [TestCase("plan")]
+    [TestCase("triage")]
+    [TestCase("summarize")]
+    public void IsRoleEligibleForPhase_DeadToken_ReturnsFalse_Not_Throws(string deadToken)
+    {
+        // Dead tokens from the old 10-action vocabulary must return false,
+        // never throw — AgentResolverService relies on the non-throwing path.
+        RolePhaseMap.IsRoleEligibleForPhase(deadToken, "developer").Should().BeFalse();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_UnknownRole_ReturnsFalse()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("context-scan", "no_such_role").Should().BeFalse();
     }
 
     [Test]
     public void IsRoleEligibleForPhase_UnknownPhase_ReturnsFalse()
     {
         RolePhaseMap.IsRoleEligibleForPhase("bogus", "developer").Should().BeFalse();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_Empty_ReturnsFalse()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("", "developer").Should().BeFalse();
+        RolePhaseMap.IsRoleEligibleForPhase("context-scan", "").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Legacy phase aliases — repointed to surviving / best-fit new tokens
+    // -----------------------------------------------------------------------
+
+    [Test]
+    [TestCase("CONTEXT_ANALYSIS", "context-scan")]
+    [TestCase("CODE_REVIEW", "code-review")]
+    [TestCase("TEST_EXECUTION", "write-tests")]
+    [TestCase("CODE_GENERATION", "implement-feature")]
+    [TestCase("PR_CREATION", "implement-feature")]
+    [TestCase("PLAN_GENERATION", "plan-system-design")]
+    [TestCase("ISSUE_SELECTION", "triage-intake")]
+    [TestCase("STATUS_MONITORING", "triage-intake")]
+    public void NormalizePhase_LegacyAlias_Resolves_To_New_Token(string legacy, string expected)
+    {
+        RolePhaseMap.NormalizePhase(legacy).Should().Be(expected);
+    }
+
+    [Test]
+    public void NormalizePhase_Every_Alias_Target_Is_A_Valid_Action()
+    {
+        foreach (var (_, target) in RolePhaseMap.LegacyPhaseAliases)
+        {
+            RolePhaseMap.ValidActions.Should().Contain(target);
+        }
+    }
+
+    [Test]
+    public void NormalizePhase_CanonicalToken_Passes_Through()
+    {
+        RolePhaseMap.NormalizePhase("implement-feature").Should().Be("implement-feature");
+    }
+
+    // -----------------------------------------------------------------------
+    // Legacy role aliases — unchanged
+    // -----------------------------------------------------------------------
+
+    [Test]
+    [TestCase("implementer", "developer")]
+    [TestCase("reviewer", "senior_developer")]
+    [TestCase("documenter", "tech_writer")]
+    [TestCase("analyst", "product_owner")]
+    public void NormalizeRole_LegacyAlias_Resolves(string legacy, string expected)
+    {
+        RolePhaseMap.NormalizeRole(legacy).Should().Be(expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // Validation helpers
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void AssertValidPhase_NewToken_DoesNotThrow()
+    {
+        Action act = () => RolePhaseMap.AssertValidPhase("plan-system-design");
+        act.Should().NotThrow();
+    }
+
+    [Test]
+    public void AssertValidPhase_DeadToken_Throws()
+    {
+        Action act = () => RolePhaseMap.AssertValidPhase("implement");
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Test]
+    public void AssertValidRole_KnownRole_DoesNotThrow()
+    {
+        Action act = () => RolePhaseMap.AssertValidRole("developer");
+        act.Should().NotThrow();
     }
 }

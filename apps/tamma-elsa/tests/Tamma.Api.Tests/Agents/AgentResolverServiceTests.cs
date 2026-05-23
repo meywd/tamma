@@ -263,14 +263,14 @@ public class AgentResolverServiceTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public async Task ResolveForPhaseAsync_Implement_Developer_Returns_Config()
+    public async Task ResolveForPhaseAsync_ImplementFeature_Developer_Returns_Config()
     {
         _repoMock.Setup(r => r.GetTenantConfigAsync(It.IsAny<Guid?>()))
             .ReturnsAsync((JsonDocument?)null);
 
-        var result = await _service.ResolveForPhaseAsync(null, "implement", "developer");
+        var result = await _service.ResolveForPhaseAsync(null, "implement-feature", "developer");
 
-        result.Phase.Should().Be("implement");
+        result.Phase.Should().Be("implement-feature");
         result.Role.Should().Be("developer");
         result.Provider.Should().NotBeNullOrEmpty();
     }
@@ -279,9 +279,9 @@ public class AgentResolverServiceTests
     public async Task ResolveForPhaseAsync_IneligibleRole_Throws()
     {
         Func<Task> act = async () =>
-            await _service.ResolveForPhaseAsync(null, "plan", "tester");
+            await _service.ResolveForPhaseAsync(null, "plan-system-design", "tester");
         await act.Should().ThrowAsync<ArgumentException>()
-            .WithMessage("*tester*plan*");
+            .WithMessage("*tester*plan-system-design*");
     }
 
     [Test]
