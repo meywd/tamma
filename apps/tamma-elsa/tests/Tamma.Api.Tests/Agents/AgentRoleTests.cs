@@ -37,4 +37,19 @@ public class AgentRoleTests
         foreach (var r in Enum.GetValues<AgentRole>())
             AgentRoleExtensions.Parse(r.ToWire()).Should().Be(r);
     }
+
+    [Test]
+    public void Parse_throws_on_null_or_empty()
+    {
+        ((Action)(() => AgentRoleExtensions.Parse(null!))).Should().Throw<ArgumentException>();
+        ((Action)(() => AgentRoleExtensions.Parse(""))).Should().Throw<ArgumentException>();
+        ((Action)(() => AgentRoleExtensions.Parse("   "))).Should().Throw<ArgumentException>();
+    }
+
+    [Test]
+    public void Parse_is_case_sensitive_for_canonical_roles()
+    {
+        // Wire strings are canonical lowercase; non-canonical casing is rejected.
+        ((Action)(() => AgentRoleExtensions.Parse("DEVELOPER"))).Should().Throw<ArgumentException>();
+    }
 }

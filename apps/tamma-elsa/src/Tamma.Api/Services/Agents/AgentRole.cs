@@ -14,12 +14,22 @@ public enum AgentRole
 
 public static class AgentRoleExtensions
 {
+    /// <summary>The canonical wire string for <paramref name="role"/>.</summary>
     public static string ToWire(this AgentRole role) => EnumWire<AgentRole>.ToWire(role);
 
+    /// <summary>
+    /// Resolves a wire string (or legacy alias) to an <see cref="AgentRole"/>.
+    /// Applies <see cref="RolePhaseMap.NormalizeRole"/> first, then exact match.
+    /// </summary>
+    /// <exception cref="ArgumentException">Null, empty, or unknown role.</exception>
     public static AgentRole Parse(string input)
     {
+        if (string.IsNullOrWhiteSpace(input))
+            throw new ArgumentException("Role must not be null or empty.", nameof(input));
+
         var normalized = RolePhaseMap.NormalizeRole(input);
         if (EnumWire<AgentRole>.TryParse(normalized, out var role)) return role;
+
         throw new ArgumentException(
             $"Unknown role: '{input}'. Valid roles: {string.Join(", ", Enum.GetValues<AgentRole>().Select(r => r.ToWire()))}.",
             nameof(input));
