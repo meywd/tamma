@@ -358,4 +358,12 @@ public class RolePhaseMapTests
         Action act = () => RolePhaseMap.AssertValidRole("developer");
         act.Should().NotThrow();
     }
+
+    [Test]
+    public void Every_action_is_eligible_for_at_least_one_role()
+    {
+        foreach (var action in Enum.GetValues<AgentAction>())
+            RolePhaseMap.GetEligibleRolesForPhase(action.ToWire()).Should()
+                .NotBeEmpty($"action '{action.ToWire()}' must belong to at least one role's SPEC §4 set");
+    }
 }

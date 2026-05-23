@@ -19,7 +19,7 @@ namespace Tamma.Api.Services.Agents;
 /// The public surface keeps the string-keyed signatures so existing callers
 /// (<c>AgentResolverService</c>, <c>ProviderChainResolver</c>,
 /// <c>AgentEndpoints</c>, <c>DefaultAgentConfig</c>) compile unchanged; strings
-/// are parsed to enums internally so a typo'd token is a <see cref="AgentAction.Parse"/>
+/// are parsed to enums internally so a typo'd token is a <see cref="AgentActionExtensions.Parse"/>
 /// throw, never a silent mismatch.
 /// </para>
 /// </summary>
@@ -393,7 +393,7 @@ public static class RolePhaseMap
 
     /// <summary>
     /// Non-throwing role parse used by <see cref="IsRoleEligibleForPhase"/>.
-    /// <see cref="AgentRole.Parse"/> throws on unknown; this swallows that to
+    /// <see cref="AgentRoleExtensions.Parse"/> throws on unknown; this swallows that to
     /// keep the predicate total.
     /// </summary>
     private static bool TryParseRole(string role, out AgentRole parsed)
