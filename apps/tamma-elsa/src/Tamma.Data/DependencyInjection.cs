@@ -131,6 +131,7 @@ public static class DependencyInjection
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
+        services.AddScoped<IConventionRepository, ConventionRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();
         services.AddScoped<IDiagnosticsRepository, DiagnosticsRepository>();
         services.AddScoped<ISanitizationRepository, SanitizationRepository>();

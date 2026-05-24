@@ -20,6 +20,12 @@ public static class ConventionServiceCollectionExtensions
     {
         services.AddSingleton<IConventionTemplateService, ConventionTemplateService>();
 
+        // Story 27-9 — convention store service. Scoped (mirrors
+        // PromptStoreService) because it leans on the tenant-scoped
+        // IConventionRepository which resolves the per-request tenant DbContext.
+        // Assumes AddTammaData() has registered IConventionRepository.
+        services.AddScoped<IConventionStore, ConventionStore>();
+
         // TimeProvider is registered by Program.cs already; fall back to the
         // system provider for compositions that haven't staged one.
         services.TryAddSingleton(TimeProvider.System);
