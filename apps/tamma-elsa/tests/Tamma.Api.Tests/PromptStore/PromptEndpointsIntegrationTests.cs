@@ -49,8 +49,8 @@ public class PromptEndpointsIntegrationTests
     [Test]
     public async Task GetDefaultsRoleAction_AliasOfGetSystemRoleAction_Returns200()
     {
-        var fromDefaults = await _client.GetAsync("/api/prompts/defaults/developer/plan");
-        var fromSystem = await _client.GetAsync("/api/prompts/system/developer/plan");
+        var fromDefaults = await _client.GetAsync("/api/prompts/defaults/developer/plan-implementation");
+        var fromSystem = await _client.GetAsync("/api/prompts/system/developer/plan-implementation");
 
         fromDefaults.StatusCode.Should().Be(HttpStatusCode.OK);
         fromSystem.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -61,26 +61,11 @@ public class PromptEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task GetDefaultsAction_ReturnsActionDefaultTemplate()
+    public async Task GetSystemRoleAction_UnknownPair_Returns404()
     {
-        var response = await _client.GetAsync("/api/prompts/defaults/plan");
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var raw = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(raw);
-
-        // Action-default templates have a null role and the queried action
-        var action = doc.RootElement.GetProperty("action").GetString();
-        action.Should().Be("plan");
-        var template = doc.RootElement.GetProperty("template").GetString();
-        template.Should().Contain("{{role}}", "action defaults are role-agnostic — placeholder is interpolated at render time");
-    }
-
-    [Test]
-    public async Task GetDefaultsAction_UnknownAction_Returns404()
-    {
-        var response = await _client.GetAsync("/api/prompts/defaults/not-a-real-action");
+        // Story 27-18 — there is no generic action-default tier. A pair the role
+        // does not own (deploy is devops-only) has no system default → 404.
+        var response = await _client.GetAsync("/api/prompts/system/developer/deploy");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -104,7 +89,10 @@ public class PromptEndpointsIntegrationTests
             "ConfigureHttpJsonOptions locks the framework default to CamelCase");
 
         doc.RootElement.TryGetProperty("systemPrompts", out _).Should().BeTrue();
-        doc.RootElement.TryGetProperty("actionDefaults", out _).Should().BeTrue();
+        // Story 27-18 — the action-default tier is gone; the payload no longer
+        // carries an actionDefaults map.
+        doc.RootElement.TryGetProperty("actionDefaults", out _).Should().BeFalse(
+            "the generic action-default tier was removed (Story 27-18)");
     }
 
     // ------------------------------------------------------------------
@@ -115,7 +103,7 @@ public class PromptEndpointsIntegrationTests
     public async Task RenderPrompt_Returns_AllEightFields_MatchingTsContract()
     {
         var response = await _client.PostAsJsonAsync(
-            "/api/prompts/developer/plan/render",
+            "/api/prompts/developer/plan-implementation/render",
             new { variables = new Dictionary<string, string>() });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -129,7 +117,7 @@ public class PromptEndpointsIntegrationTests
         role.GetString().Should().Be("developer");
 
         root.TryGetProperty("action", out var action).Should().BeTrue();
-        action.GetString().Should().Be("plan");
+        action.GetString().Should().Be("plan-implementation");
 
         root.TryGetProperty("version", out var version).Should().BeTrue();
         version.GetInt32().Should().Be(1, "system defaults are unversioned (default 1)");

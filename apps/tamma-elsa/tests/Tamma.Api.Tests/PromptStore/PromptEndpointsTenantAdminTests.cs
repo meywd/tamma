@@ -120,7 +120,7 @@ public class PromptEndpointsTenantAdminTests
             MaxTokens: null);
 
         var result = await PromptEndpoints.UpsertPrompt(
-            "developer", "plan", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
 
         result.Should().NotBeNull();
 
@@ -148,7 +148,7 @@ public class PromptEndpointsTenantAdminTests
         // Admin sets the tenant prompt
         await _store.UpsertRoleActionForTenantAsync(
             tenantId, actingUserId: Guid.NewGuid(),
-            "developer", "plan",
+            "developer", "plan-implementation",
             new UpsertPromptInput(Template: "TENANT-CANONICAL"));
 
         // Member-role reader (different user) — sees the tenant override,
@@ -159,12 +159,12 @@ public class PromptEndpointsTenantAdminTests
         // IResult unwrapping but still covers the dispatch path).
         var memberPrincipal = PrincipalWithUserId(Guid.NewGuid(), "member");
         var result = await PromptEndpoints.GetPrompt(
-            "developer", "plan", _store, memberPrincipal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, memberPrincipal, tc, Mode(TammaMode.SaaS));
         result.Should().NotBeNull();
         await AssertOkAsync(result);
 
         var resolved = await _store.ResolveRoleActionForTenantAsync(
-            tenantId, "developer", "plan");
+            tenantId, "developer", "plan-implementation");
         resolved!.Template.Should().Be("TENANT-CANONICAL");
         resolved.Source.Should().Be(PromptSource.TenantOverride);
     }
@@ -177,18 +177,18 @@ public class PromptEndpointsTenantAdminTests
         tc.SetTenantId(tenantId);
 
         await _store.UpsertRoleActionForTenantAsync(
-            tenantId, null, "developer", "plan",
+            tenantId, null, "developer", "plan-implementation",
             new UpsertPromptInput(Template: "TO-BE-DELETED"));
 
         var admin = PrincipalWithUserId(Guid.NewGuid(), "owner");
         var result = await PromptEndpoints.DeletePrompt(
-            "developer", "plan", _store, _events, admin, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, _events, admin, tc, Mode(TammaMode.SaaS));
 
         result.Should().NotBeNull();
 
         // After deletion, resolution falls through to the system role+action
         // default — the tenant-scoped row is gone.
-        var resolved = await _store.ResolveRoleActionForTenantAsync(tenantId, "developer", "plan");
+        var resolved = await _store.ResolveRoleActionForTenantAsync(tenantId, "developer", "plan-implementation");
         resolved!.Source.Should().Be(PromptSource.SystemRoleAction);
     }
 
@@ -211,31 +211,31 @@ public class PromptEndpointsTenantAdminTests
         var adminG = PrincipalWithUserId(Guid.NewGuid(), "admin");
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan",
+            "developer", "plan-implementation",
             new UpsertPromptRequest(Template: "ACME-PROMPT", SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null),
             _store, _events, adminA, tcA, Mode(TammaMode.SaaS));
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan",
+            "developer", "plan-implementation",
             new UpsertPromptRequest(Template: "GLOBEX-PROMPT", SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null),
             _store, _events, adminG, tcG, Mode(TammaMode.SaaS));
 
         // Acme's GET sees Acme's row only
         var acmeMember = PrincipalWithUserId(Guid.NewGuid(), "member");
         var acmeRes = await PromptEndpoints.GetPrompt(
-            "developer", "plan", _store, acmeMember, tcA, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, acmeMember, tcA, Mode(TammaMode.SaaS));
         await AssertOkAsync(acmeRes);
 
         // Globex's GET sees Globex's row only
         var globexMember = PrincipalWithUserId(Guid.NewGuid(), "member");
         var globexRes = await PromptEndpoints.GetPrompt(
-            "developer", "plan", _store, globexMember, tcG, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, globexMember, tcG, Mode(TammaMode.SaaS));
         await AssertOkAsync(globexRes);
 
         // Verify the persisted rows via the service surface — the GET path
         // routes through the same Resolve*ForTenant call.
-        var acmeResolved = await _store.ResolveRoleActionForTenantAsync(acme, "developer", "plan");
-        var globexResolved = await _store.ResolveRoleActionForTenantAsync(globex, "developer", "plan");
+        var acmeResolved = await _store.ResolveRoleActionForTenantAsync(acme, "developer", "plan-implementation");
+        var globexResolved = await _store.ResolveRoleActionForTenantAsync(globex, "developer", "plan-implementation");
         acmeResolved!.Template.Should().Be("ACME-PROMPT");
         globexResolved!.Template.Should().Be("GLOBEX-PROMPT");
 
@@ -264,23 +264,23 @@ public class PromptEndpointsTenantAdminTests
         // Tenant prompt (the one the team should see)
         await _store.UpsertRoleActionForTenantAsync(
             tenantId, actingUserId: Guid.NewGuid(),
-            "developer", "plan",
+            "developer", "plan-implementation",
             new UpsertPromptInput(Template: "TENANT-OFFICIAL"));
 
         // A user-scoped row for the same role+action (would only happen if
         // someone bypassed the SaaS-mode endpoint dispatcher; we still want
         // to assert it's invisible to the tenant resolver).
         await _store.UpsertRoleActionAsync(
-            memberUserId, tenantId: null, "developer", "plan",
+            memberUserId, tenantId: null, "developer", "plan-implementation",
             new UpsertPromptInput(Template: "MEMBER-PERSONAL-LEAK"));
 
         var memberPrincipal = PrincipalWithUserId(memberUserId, "member");
         var result = await PromptEndpoints.GetPrompt(
-            "developer", "plan", _store, memberPrincipal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, memberPrincipal, tc, Mode(TammaMode.SaaS));
         await AssertOkAsync(result);
 
         var resolved = await _store.ResolveRoleActionForTenantAsync(
-            tenantId, "developer", "plan");
+            tenantId, "developer", "plan-implementation");
         resolved!.Template.Should().Be("TENANT-OFFICIAL");
         resolved.Source.Should().Be(PromptSource.TenantOverride);
     }
@@ -301,7 +301,7 @@ public class PromptEndpointsTenantAdminTests
             SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null);
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
 
         var rows = await _store.ListUserOverridesAsync(userId);
         rows.Should().HaveCount(1);
@@ -318,15 +318,15 @@ public class PromptEndpointsTenantAdminTests
         var principal = PrincipalWithUserId(userId, "owner");
 
         await _store.UpsertRoleActionAsync(
-            userId, tenantId: null, "developer", "plan",
+            userId, tenantId: null, "developer", "plan-implementation",
             new UpsertPromptInput(Template: "USER-LEVEL"));
 
         var result = await PromptEndpoints.GetPrompt(
-            "developer", "plan", _store, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "plan-implementation", _store, principal, tc, Mode(TammaMode.SingleUser));
         await AssertOkAsync(result);
 
         // The user-scoped resolver returns the user override.
-        var resolved = await _store.ResolveRoleActionAsync(userId, "developer", "plan");
+        var resolved = await _store.ResolveRoleActionAsync(userId, "developer", "plan-implementation");
         resolved!.Template.Should().Be("USER-LEVEL");
         resolved.Source.Should().Be(PromptSource.UserOverride);
     }
@@ -351,7 +351,7 @@ public class PromptEndpointsTenantAdminTests
             SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null);
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
 
         // Wrote to the user surface, not the tenant surface.
         var userRows = await _store.ListUserOverridesAsync(userId);

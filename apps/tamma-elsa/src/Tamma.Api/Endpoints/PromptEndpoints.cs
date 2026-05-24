@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Prompts;
 using Tamma.Api.Services.PromptStore;
+using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -118,22 +119,12 @@ public static class PromptEndpoints
                 "system"))
             .ToList();
 
-        var actionDefaults = SystemPrompts.ActionDefaults.ToDictionary(
-            kv => kv.Key,
-            kv => new PromptResponse(
-                kv.Value.Role,
-                kv.Value.Action,
-                kv.Value.Template,
-                kv.Value.SystemPrompt,
-                kv.Value.Variables.ToArray(),
-                kv.Value.EnableTools,
-                kv.Value.MaxTokens,
-                "system"));
-
+        // Story 27-18 — the generic action-default tier is gone; the payload now
+        // exposes only the jagged (role, action) templates + the role identity
+        // preambles.
         var response = new SystemDefaultsResponse(
             RoleActionTemplates: roleAction,
-            SystemPrompts: SystemPrompts.RoleSystemPrompts,
-            ActionDefaults: actionDefaults);
+            SystemPrompts: SystemPrompts.RoleSystemPrompts);
 
         return Task.FromResult(Results.Ok(response));
     }
@@ -144,32 +135,6 @@ public static class PromptEndpoints
         if (template is null)
         {
             return Task.FromResult(Results.NotFound(new { error = "No system default for this role/action" }));
-        }
-
-        return Task.FromResult(Results.Ok(new PromptResponse(
-            template.Role,
-            template.Action,
-            template.Template,
-            template.SystemPrompt,
-            template.Variables.ToArray(),
-            template.EnableTools,
-            template.MaxTokens,
-            "system")));
-    }
-
-    /// <summary>
-    /// Get the system action-default template for an action (Layer-4 safety net
-    /// in the 4-layer resolution model). Per CLAUDE.md API spec
-    /// <c>GET /api/prompts/defaults/:action</c>. The template's Role is null
-    /// because action-defaults are role-agnostic; the <c>{{role}}</c>
-    /// placeholder in the body is interpolated at render time.
-    /// </summary>
-    public static Task<IResult> GetActionDefault(string action)
-    {
-        var template = SystemPrompts.GetActionDefault(action);
-        if (template is null)
-        {
-            return Task.FromResult(Results.NotFound(new { error = "No action default for this action" }));
         }
 
         return Task.FromResult(Results.Ok(new PromptResponse(
@@ -198,27 +163,34 @@ public static class PromptEndpoints
         // Story 27-2 — SaaS mode reads through the tenant-scoped resolver
         // (no user override layer on top, by design — see CLAUDE.md
         // "Resolution Order — SaaS mode"). Single-user mode keeps the
-        // legacy 4-layer fallback keyed on userId.
-        ResolvedPrompt? resolved;
-        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        // user-scoped resolution keyed on userId.
+        //
+        // Story 27-18 — resolution now throws TammaError (no override + no
+        // system default) instead of returning null. At this HTTP boundary we
+        // translate that into the existing 404 contract; the service still fails
+        // loud internally (no silent empty/plain fallback).
+        ResolvedPrompt resolved;
+        try
         {
-            resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+            if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+            {
+                resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+            }
+            else
+            {
+                var userId = TryGetUserId(principal);
+                resolved = await store.ResolveRoleActionAsync(userId, role, action);
+            }
         }
-        else
-        {
-            var userId = TryGetUserId(principal);
-            resolved = await store.ResolveRoleActionAsync(userId, role, action);
-        }
-
-        if (resolved is null)
+        catch (TammaError)
         {
             return Results.NotFound(new { error = "No prompt available for this role/action" });
         }
 
         var sourceLabel = resolved.Source switch
         {
-            PromptSource.UserOverride or PromptSource.UserActionDefault => "user",
-            PromptSource.TenantOverride or PromptSource.TenantActionDefault => "tenant",
+            PromptSource.UserOverride => "user",
+            PromptSource.TenantOverride => "tenant",
             _ => "system",
         };
 
@@ -431,17 +403,21 @@ public static class PromptEndpoints
         ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
-        ResolvedPrompt? resolved;
-        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        // Story 27-18 — resolution fails loud; translate TammaError into the
+        // existing 404 contract at this HTTP boundary.
+        ResolvedPrompt resolved;
+        try
         {
-            resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+            if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+            {
+                resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
+            }
+            else
+            {
+                resolved = await store.ResolveRoleActionAsync(userId, role, action);
+            }
         }
-        else
-        {
-            resolved = await store.ResolveRoleActionAsync(userId, role, action);
-        }
-
-        if (resolved is null)
+        catch (TammaError)
         {
             return Results.NotFound(new { error = "No prompt available for this role/action" });
         }

@@ -8,14 +8,32 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
+using Tamma.Api.Services.Agents;
+using Tamma.Core;
 
 namespace Tamma.Activities.LlmCall;
 
 /// <summary>
 /// Resolves a prompt from the prompt registry using role + action.
 /// Calls: POST /api/prompts/{role}/{action}/render with variables.
-/// Falls back to the taskPrompt input if no action is specified
-/// or if the registry is unavailable.
+///
+/// <para>
+/// <b>Story 27-18 — fail-loud resolution.</b> When an <see cref="Action"/> is
+/// specified, the <c>(role, action)</c> pair is validated against the taxonomy
+/// via <see cref="AgentRoleExtensions.Parse"/> / <see cref="AgentActionExtensions.Parse"/>
+/// at the boundary (an unknown role/action throws). A registry miss (404 /
+/// error / empty rendered body) now PROPAGATES a <see cref="TammaError"/> — it
+/// does NOT silently fall back to the plain <see cref="FallbackPrompt"/>. A
+/// taxonomy-valid pair always ships a system default, so a miss is a real
+/// fault worth failing loud on.
+/// </para>
+/// <para>
+/// The <see cref="FallbackPrompt"/> is retained ONLY for the empty-action legacy
+/// path: dispatch sites that send a raw prompt with no registry action (e.g.
+/// BlockerDiagnosis-style dict inputs) still use it. That legacy path is a
+/// separate concern from registry-miss fallback and is left intact pending the
+/// dispatch-site specialisation work (SPEC §6 initiative 2 / Story 27-19).
+/// </para>
 ///
 /// When TenantId is provided, sends the X-Tenant-Id header for
 /// tenant-scoped prompt resolution (Story 27-6).
@@ -81,7 +99,11 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         var fallback = FallbackPrompt.Get(context);
         var tenantId = TenantId.Get(context);
 
-        // If no action specified, use fallback prompt (legacy path)
+        // Empty-action legacy path: a dispatch site that supplies a raw prompt
+        // with no registry action (e.g. BlockerDiagnosis dict inputs) keeps
+        // using the fallback. This is NOT a registry-miss fallback — it's a
+        // distinct "no action requested" mode (SPEC §3.5 / §6 transitional).
+        // See activity XML doc + Story 27-18 report (remaining blast radius).
         if (string.IsNullOrEmpty(action))
         {
             ResolvedPrompt.Set(context, fallback);
@@ -94,6 +116,11 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
             return;
         }
 
+        // Boundary validation (Story 27-18): a taxonomy-invalid role/action is a
+        // hard fail-fast, never a silent mismatch. Throws on unknown; the base
+        // activity emits FAILED and rethrows.
+        ValidateTaxonomy(role, action);
+
         // Try the prompt registry
         var callbackUrl = _configuration?["Engine:CallbackUrl"];
         if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
@@ -102,6 +129,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
             callbackUrl = _configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
         }
 
+        HttpResponseMessage response;
         try
         {
             var httpClient = _httpClientFactory?.CreateClient() ?? new HttpClient();
@@ -121,47 +149,82 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
             }
 
             // Call render endpoint
-            var response = await httpClient.PostAsJsonAsync(
+            response = await httpClient.PostAsJsonAsync(
                 $"{callbackUrl.TrimEnd('/')}/api/prompts/{Uri.EscapeDataString(role)}/{Uri.EscapeDataString(action)}/render",
                 new { variables = variables ?? new Dictionary<string, object>() });
-
-            if (response.IsSuccessStatusCode)
-            {
-                var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-                var rendered = result.TryGetProperty("rendered", out var r) ? r.GetString() ?? "" : "";
-                var systemPrompt = result.TryGetProperty("systemPrompt", out var sp) ? sp.GetString() ?? "" : "";
-                var enableTools = result.TryGetProperty("enableTools", out var et) && et.GetBoolean();
-                var maxTokens = result.TryGetProperty("maxTokens", out var mt) ? mt.GetInt32() : 4096;
-
-                ResolvedPrompt.Set(context, rendered);
-                ResolvedSystemPrompt.Set(context, systemPrompt);
-                EnableTools.Set(context, enableTools);
-                MaxTokens.Set(context, maxTokens);
-                context.TransientProperties["resolvedPromptLength"] = rendered.Length;
-                context.TransientProperties["hasSystemPrompt"] = !string.IsNullOrEmpty(systemPrompt);
-
-                Logger?.LogInformation("Resolved prompt from registry: {Role}/{Action} ({Length} chars, tenantId={TenantId})",
-                    role, action, rendered.Length, string.IsNullOrEmpty(tenantId) ? "system" : tenantId);
-                return;
-            }
-
-            Logger?.LogWarning("Prompt registry returned {Status} for {Role}/{Action}, using fallback",
-                response.StatusCode, role, action);
         }
         catch (Exception ex)
         {
-            Logger?.LogWarning(ex, "Failed to resolve prompt from registry for {Role}/{Action}, using fallback",
-                role, action);
+            // Story 27-18: NO plain fallback. A registry call that can't complete
+            // (network/transient) fails loud — retryable so the workflow engine
+            // can retry rather than running an LLM on the wrong/empty prompt.
+            Logger?.LogError(ex, "Failed to reach prompt registry for {Role}/{Action}", role, action);
+            throw new TammaError(
+                "LLM.PROMPT.RESOLVE.REGISTRY_UNAVAILABLE",
+                $"Could not reach the prompt registry for (role='{role}', action='{action}'): {ex.Message}",
+                new Dictionary<string, object?> { ["role"] = role, ["action"] = action, ["tenantId"] = tenantId },
+                retryable: true,
+                severity: TammaErrorSeverity.High);
         }
 
-        // Fallback
-        ResolvedPrompt.Set(context, fallback);
-        ResolvedSystemPrompt.Set(context, "");
-        EnableTools.Set(context, false);
-        MaxTokens.Set(context, 4096);
-        context.TransientProperties["resolvedPromptLength"] = fallback?.Length ?? 0;
-        context.TransientProperties["hasSystemPrompt"] = false;
+        if (!response.IsSuccessStatusCode)
+        {
+            // Story 27-18: a 404/non-success is a real fault for a taxonomy-valid
+            // pair (every valid (role, action) ships a system default). Fail loud
+            // instead of degrading to the plain prompt.
+            Logger?.LogError("Prompt registry returned {Status} for {Role}/{Action}", response.StatusCode, role, action);
+            throw new TammaError(
+                "LLM.PROMPT.RESOLVE.REGISTRY_MISS",
+                $"Prompt registry returned {(int)response.StatusCode} for (role='{role}', action='{action}').",
+                new Dictionary<string, object?>
+                {
+                    ["role"] = role,
+                    ["action"] = action,
+                    ["tenantId"] = tenantId,
+                    ["status"] = (int)response.StatusCode,
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        // Render endpoint returns the user-prompt half under "renderedTemplate"
+        // (audit prompts/003). Keep the legacy "rendered" key as a tolerant
+        // fallback for any older serialisation, then "renderedSystemPrompt".
+        var rendered = result.TryGetProperty("renderedTemplate", out var rt) ? rt.GetString() ?? ""
+            : result.TryGetProperty("rendered", out var r) ? r.GetString() ?? ""
+            : "";
+        var systemPrompt = result.TryGetProperty("renderedSystemPrompt", out var rsp) ? rsp.GetString() ?? ""
+            : result.TryGetProperty("systemPrompt", out var sp) ? sp.GetString() ?? ""
+            : "";
+        var enableTools = result.TryGetProperty("enableTools", out var et) && et.GetBoolean();
+        var maxTokens = result.TryGetProperty("maxTokens", out var mt) ? mt.GetInt32() : 4096;
+
+        ResolvedPrompt.Set(context, rendered);
+        ResolvedSystemPrompt.Set(context, systemPrompt);
+        EnableTools.Set(context, enableTools);
+        MaxTokens.Set(context, maxTokens);
+        context.TransientProperties["resolvedPromptLength"] = rendered.Length;
+        context.TransientProperties["hasSystemPrompt"] = !string.IsNullOrEmpty(systemPrompt);
+
+        Logger?.LogInformation("Resolved prompt from registry: {Role}/{Action} ({Length} chars, tenantId={TenantId})",
+            role, action, rendered.Length, string.IsNullOrEmpty(tenantId) ? "system" : tenantId);
+    }
+
+    /// <summary>
+    /// Boundary taxonomy validation for a non-empty <c>(role, action)</c> pair
+    /// (Story 27-18). A taxonomy-invalid role or action throws (fail-fast); the
+    /// activity then surfaces the failure rather than silently rendering the
+    /// wrong prompt. Extracted as a static so it is unit-testable without an
+    /// Elsa <c>ActivityExecutionContext</c> (per the convention in
+    /// <c>CheckBudgetActivityEmissionTests</c>).
+    /// </summary>
+    /// <exception cref="ArgumentException">Unknown role or action.</exception>
+    public static void ValidateTaxonomy(string role, string action)
+    {
+        AgentRoleExtensions.Parse(role);
+        AgentActionExtensions.Parse(action);
     }
 
     public override Dictionary<string, object?> BuildStartData(ActivityExecutionContext context) => new()

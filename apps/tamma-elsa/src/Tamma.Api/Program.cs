@@ -1592,7 +1592,9 @@ prompts.MapGet("/system", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/defaults", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/system/{role}/{action}", PromptEndpoints.GetSystemDefault);
 prompts.MapGet("/defaults/{role}/{action}", PromptEndpoints.GetSystemDefault);
-prompts.MapGet("/defaults/{action}", PromptEndpoints.GetActionDefault);
+// Story 27-18 — the generic action-default tier and its
+// `GET /api/prompts/defaults/{action}` route were removed (clean cut, no
+// compat shim). Resolution is override → system default → error.
 // Resolved (per-user) reads + mutations.
 // Story 27-3 — PUT/DELETE/POST-reset gated by `PromptManage` (admin+owner)
 // instead of `SettingsManage` (owner-only). CLAUDE.md "Prompt Store

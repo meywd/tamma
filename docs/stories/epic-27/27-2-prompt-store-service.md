@@ -2,6 +2,21 @@
 
 Status: ready-for-dev
 
+> **Annotation (Story 27-18 — taxonomy reshape).** The prompt-store **schema and
+> service surface are structurally unchanged** by Story 27-18; the C# port is
+> `PromptStoreService` over the single `prompt_overrides` table. What 27-18
+> changed:
+> - The **seed + action vocabulary** is now the typed `(role, action)` taxonomy
+>   governed by **Story 27-15** (`RolePhaseMap` / `AgentAction`) and regenerated
+>   by **Story 27-16** codegen — not the flat 8×10 / 10-action set this doc
+>   assumes.
+> - The generic **action-default** tier is **removed**: there is no
+>   `getActionDefault` / `upsertActionDefault` / `action-default` scope, and no
+>   `GET /api/prompts/defaults/:action` route.
+> - Resolution is **tenant override → system default → `TammaError`** (AC 2/7
+>   below): a taxonomy-valid `(role, action)` with no override and no system
+>   default is a hard `TammaError`, never an empty/plain fallback.
+
 ## Story
 
 As a **backend developer**,

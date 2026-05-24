@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Tamma.Api.Auth;
+using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -8,6 +9,11 @@ namespace Tamma.Api.Services.PromptStore;
 
 /// <summary>
 /// Source layer from which a resolved prompt was produced.
+///
+/// <para>Story 27-18 — the generic <c>action-default</c> tier is GONE.
+/// Resolution is exactly <c>override → system default → TammaError</c>; there is
+/// no <c>UserActionDefault</c> / <c>SystemActionDefault</c> / <c>TenantActionDefault</c>
+/// source any more.</para>
 /// </summary>
 public enum PromptSource
 {
@@ -15,14 +21,8 @@ public enum PromptSource
     UserOverride,
     /// <summary>System default for a specific role+action pair.</summary>
     SystemRoleAction,
-    /// <summary>User's <c>action-default</c> override (single-user mode).</summary>
-    UserActionDefault,
-    /// <summary>Generic system default for an action, across all roles.</summary>
-    SystemActionDefault,
     /// <summary>Tenant's <c>role-action</c> override (SaaS mode, Story 27-2).</summary>
     TenantOverride,
-    /// <summary>Tenant's <c>action-default</c> override (SaaS mode, Story 27-2).</summary>
-    TenantActionDefault,
 }
 
 /// <summary>
@@ -67,16 +67,20 @@ public sealed record UpsertPromptInput(
     int? MaxTokens = null);
 
 /// <summary>
-/// Prompt resolution service implementing the 4-layer role+action fallback
-/// and 2-layer role-system fallback defined in <c>CLAUDE.md</c>.
+/// Prompt resolution service implementing the fail-loud role+action resolution
+/// and 2-layer role-system fallback defined in <c>CLAUDE.md</c> /
+/// SPEC §3, §7 (<c>docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md</c>).
 /// <para>
-/// Resolution order for <c>(userId, role, action)</c>:
+/// <b>Story 27-18.</b> Resolution order for <c>(userId, role, action)</c> follows
+/// EXACTLY one chain — there is NO generic action-default tier and NO empty/plain
+/// terminal fallback:
 /// </para>
 /// <list type="number">
 ///   <item>User's role+action override → if exists, use it.</item>
 ///   <item>System default role+action template → if exists, use it.</item>
-///   <item>User's action default override → if exists, use it.</item>
-///   <item>System default action template → safety net.</item>
+///   <item>Otherwise → throw <see cref="TammaError"/>. A taxonomy-valid
+///         <c>(role, action)</c> with no override and no system default is a hard
+///         error, never a silent empty/degraded prompt (SPEC §7).</item>
 /// </list>
 /// <para>
 /// Resolution order for system prompt <c>(userId, role)</c>:
@@ -111,9 +115,15 @@ public sealed class PromptStoreService
 
     /// <summary>
     /// Resolve the prompt for a (<paramref name="userId"/>, <paramref name="role"/>, <paramref name="action"/>)
-    /// tuple following the 4-layer fallback order.
+    /// tuple following the fail-loud chain: user override → system default →
+    /// <see cref="TammaError"/>. There is no action-default tier and no
+    /// empty/plain terminal — a <c>(role, action)</c> with neither an override
+    /// nor a system default is a hard error (SPEC §7, Story 27-18).
     /// </summary>
-    public async Task<ResolvedPrompt?> ResolveRoleActionAsync(Guid? userId, string role, string action)
+    /// <exception cref="TammaError">
+    /// No user override and no system default for <c>(role, action)</c>.
+    /// </exception>
+    public async Task<ResolvedPrompt> ResolveRoleActionAsync(Guid? userId, string role, string action)
     {
         // Layer 1: user's role+action override
         if (userId is not null)
@@ -140,36 +150,8 @@ public sealed class PromptStoreService
                 Source: PromptSource.SystemRoleAction);
         }
 
-        // Layer 3: user's action-default override
-        if (userId is not null)
-        {
-            var userActionDefault = await _repository.GetAsync(userId, "action-default", null, action);
-            if (userActionDefault is not null)
-            {
-                return ToResolved(role, action, userActionDefault, PromptSource.UserActionDefault);
-            }
-        }
-
-        // Layer 4: system action default (safety net)
-        var systemActionDefault = SystemPrompts.GetActionDefault(action);
-        if (systemActionDefault is not null)
-        {
-            // Use the role-system prompt if the role is known, otherwise no system prompt
-            var sysPrompt = SystemPrompts.RoleSystemPrompts.TryGetValue(role, out var rolePrompt)
-                ? rolePrompt
-                : string.Empty;
-            return new ResolvedPrompt(
-                Role: role,
-                Action: action,
-                Template: systemActionDefault.Template,
-                SystemPrompt: sysPrompt,
-                Variables: systemActionDefault.Variables,
-                EnableTools: systemActionDefault.EnableTools,
-                MaxTokens: systemActionDefault.MaxTokens,
-                Source: PromptSource.SystemActionDefault);
-        }
-
-        return null;
+        // No fallback tier — fail loud (Story 27-18 / SPEC §7).
+        throw NoPromptError(role, action, userId: userId, tenantId: null);
     }
 
     /// <summary>
@@ -254,34 +236,6 @@ public sealed class PromptStoreService
         => _repository.DeleteAsync(userId, "role-system", role, null);
 
     // -----------------------------------------------------------------------
-    // Mutations (scope = action-default)
-    // -----------------------------------------------------------------------
-
-    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertActionDefaultAsync(
-        Guid? userId,
-        Guid? tenantId,
-        string action,
-        UpsertPromptInput input)
-    {
-        return await _repository.UpsertAsync(new PromptOverride
-        {
-            UserId = userId,
-            TenantId = tenantId,
-            Scope = "action-default",
-            Role = null,
-            Action = action,
-            Template = input.Template,
-            SystemPrompt = input.SystemPrompt,
-            Variables = input.Variables?.ToArray() ?? Array.Empty<string>(),
-            EnableTools = input.EnableTools ?? false,
-            MaxTokens = input.MaxTokens ?? 4096,
-        });
-    }
-
-    public Task<bool> DeleteActionDefaultAsync(Guid? userId, string action)
-        => _repository.DeleteAsync(userId, "action-default", null, action);
-
-    // -----------------------------------------------------------------------
     // Listing
     // -----------------------------------------------------------------------
 
@@ -306,12 +260,12 @@ public sealed class PromptStoreService
 
     /// <summary>
     /// Resolve the prompt for a (<paramref name="tenantId"/>, <paramref name="role"/>, <paramref name="action"/>)
-    /// tuple following the SaaS-mode 4-layer fallback order:
+    /// tuple following the SaaS-mode fail-loud chain (Story 27-18 / SPEC §7):
     /// <list type="number">
     ///   <item>Tenant's role+action override → if exists, use it.</item>
     ///   <item>System default role+action → if exists, use it.</item>
-    ///   <item>Tenant's action-default override → if exists, use it.</item>
-    ///   <item>System default action template → safety net.</item>
+    ///   <item>Otherwise → throw <see cref="TammaError"/>. No action-default tier,
+    ///         no empty/plain terminal.</item>
     /// </list>
     /// <para>Method name carries the <c>ForTenant</c> suffix instead of
     /// overloading on parameter type — the user-scoped variant takes
@@ -321,7 +275,10 @@ public sealed class PromptStoreService
     /// every existing single-user-mode call site to the SaaS path.
     /// Distinct names keep the two surfaces unambiguous.</para>
     /// </summary>
-    public async Task<ResolvedPrompt?> ResolveRoleActionForTenantAsync(Guid tenantId, string role, string action)
+    /// <exception cref="TammaError">
+    /// No tenant override and no system default for <c>(role, action)</c>.
+    /// </exception>
+    public async Task<ResolvedPrompt> ResolveRoleActionForTenantAsync(Guid tenantId, string role, string action)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
@@ -348,32 +305,8 @@ public sealed class PromptStoreService
                 Source: PromptSource.SystemRoleAction);
         }
 
-        // Layer 3: tenant's action-default override
-        var tenantActionDefault = await _repository.GetByTenantAsync(tenantId, "action-default", null, action);
-        if (tenantActionDefault is not null)
-        {
-            return ToResolved(role, action, tenantActionDefault, PromptSource.TenantActionDefault);
-        }
-
-        // Layer 4: system action default (safety net)
-        var systemActionDefault = SystemPrompts.GetActionDefault(action);
-        if (systemActionDefault is not null)
-        {
-            var sysPrompt = SystemPrompts.RoleSystemPrompts.TryGetValue(role, out var rolePrompt)
-                ? rolePrompt
-                : string.Empty;
-            return new ResolvedPrompt(
-                Role: role,
-                Action: action,
-                Template: systemActionDefault.Template,
-                SystemPrompt: sysPrompt,
-                Variables: systemActionDefault.Variables,
-                EnableTools: systemActionDefault.EnableTools,
-                MaxTokens: systemActionDefault.MaxTokens,
-                Source: PromptSource.SystemActionDefault);
-        }
-
-        return null;
+        // No fallback tier — fail loud (Story 27-18 / SPEC §7).
+        throw NoPromptError(role, action, userId: null, tenantId: tenantId);
     }
 
     /// <summary>
@@ -460,32 +393,6 @@ public sealed class PromptStoreService
     public Task<bool> DeleteRoleSystemForTenantAsync(Guid tenantId, string role)
         => _repository.DeleteByTenantAsync(tenantId, "role-system", role, null);
 
-    public async Task<(PromptOverride Entity, bool WasCreated)> UpsertActionDefaultForTenantAsync(
-        Guid tenantId,
-        Guid? actingUserId,
-        string action,
-        UpsertPromptInput input)
-    {
-        if (tenantId == Guid.Empty)
-            throw new ArgumentException("Tenant id required.", nameof(tenantId));
-        return await _repository.UpsertAsync(new PromptOverride
-        {
-            UserId = null,
-            TenantId = tenantId,
-            Scope = "action-default",
-            Role = null,
-            Action = action,
-            Template = input.Template,
-            SystemPrompt = input.SystemPrompt,
-            Variables = input.Variables?.ToArray() ?? Array.Empty<string>(),
-            EnableTools = input.EnableTools ?? false,
-            MaxTokens = input.MaxTokens ?? 4096,
-        }, actingUserId);
-    }
-
-    public Task<bool> DeleteActionDefaultForTenantAsync(Guid tenantId, string action)
-        => _repository.DeleteByTenantAsync(tenantId, "action-default", null, action);
-
     /// <summary>
     /// List every tenant-scoped override row for <paramref name="tenantId"/>.
     /// Equivalent of <see cref="ListUserOverridesAsync"/> for SaaS mode —
@@ -565,6 +472,29 @@ public sealed class PromptStoreService
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Build the fail-loud <see cref="TammaError"/> for a <c>(role, action)</c>
+    /// that resolved past every override layer with no system default. Carries
+    /// the scope keys in <see cref="TammaError.Context"/> for diagnostics. This
+    /// path should only be reachable for a taxonomy-INVALID action (a valid
+    /// action always ships a system default seed — Story 27-18) or a genuinely
+    /// missing seed, both of which are bugs worth failing loud on.
+    /// </summary>
+    private static TammaError NoPromptError(string role, string action, Guid? userId, Guid? tenantId)
+        => new(
+            "PROMPT.RESOLVE.NO_DEFAULT",
+            $"No prompt available for (role='{role}', action='{action}'): no override and no system default. " +
+            "Resolution is override → system default → error; there is no generic action-default fallback (Story 27-18 / SPEC §7).",
+            new Dictionary<string, object?>
+            {
+                ["role"] = role,
+                ["action"] = action,
+                ["userId"] = userId,
+                ["tenantId"] = tenantId,
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
 
     private static ResolvedPrompt ToResolved(
         string role,

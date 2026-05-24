@@ -29,10 +29,13 @@ public record RenderedPromptResponse(
     string[] UnresolvedVariables);
 
 /// <summary>
-/// Bulk payload returned by <c>GET /api/prompts/system</c>. Exposes every layer
-/// of the system-shipped prompt registry.
+/// Bulk payload returned by <c>GET /api/prompts/system</c>. Exposes the
+/// system-shipped prompt registry.
+///
+/// <para>Story 27-18 — the generic <c>action-default</c> tier was removed, so
+/// the payload no longer carries an <c>ActionDefaults</c> map. It exposes the
+/// jagged <c>(role, action)</c> templates and the role identity preambles.</para>
 /// </summary>
 public record SystemDefaultsResponse(
     IReadOnlyList<PromptResponse> RoleActionTemplates,
-    IReadOnlyDictionary<string, string> SystemPrompts,
-    IReadOnlyDictionary<string, PromptResponse> ActionDefaults);
+    IReadOnlyDictionary<string, string> SystemPrompts);
