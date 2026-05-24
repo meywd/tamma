@@ -12,7 +12,7 @@
 
 ## ▶ EXECUTION STATUS — READ FIRST ON RESUME (updated 2026-05-24)
 
-**Branch:** `feat/wave-b`. **HEAD at last update:** `2c7c823f`. Working tree clean; full suite green (**4133 passed / 0 failed / 11 skipped**; `~Agents` filter = 143 passed).
+**Branch:** `feat/wave-b`. **HEAD at last update:** `a267f0a8`. Working tree clean; full suite green (**4145 passed / 0 failed / 11 skipped**).
 
 **⚠️ Environment — CRITICAL for running tests:** the `Tamma.Api.Tests` assembly boots Postgres Testcontainers via a root-namespace `[SetUpFixture]` (`ApiTestFixture`), so EVERY test in it needs Docker. This shell's user is in the `docker` group in `/etc/group` but NOT in the live session's group set, so **wrap every test run as `sg docker -c "dotnet test …"`** — plain `dotnet test` fails with a socket permission error. `dotnet build` does NOT need the wrapper. Do NOT start/stop Docker yourself (user rule); if `sg docker` stops working, ask the user.
 
@@ -21,10 +21,18 @@
 **Done:**
 - ✅ **Wave 0 — Story 27-15** (taxonomy foundation): `d9008e10`, `9b9c4687`, `3293d8f7`, `98950e33`, `b21b3efa`.
 - ✅ **Wave 1 — Story 27-19** (dispatch migration) + taxonomy amendment: `7fca96d9` (+4 review tokens), `32e201cd` (migrated ~22 dispatch sites; **moved taxonomy → `Tamma.Core/Agents/`**), `2c7c823f` (notes). BlockerDiagnosis + Mentorship included.
+- ✅ **Wave 2 — Story 27-8** (conventions EF table, SCHEMA ONLY — seed deferred to 27-16): `3e62263e`, `977da9ec` (review fixes). Two-tier `(tenant_id, role, action)`, `tenant_id IS NULL`=system default, `NULLS NOT DISTINCT` unique index, no user_id/principal_xor (unlike prompt_overrides), no RLS, no keyword artifacts. Entity `Tamma.Data/Entities/Convention.cs`, migration `Migrations/Tenant/20260524143833_ConventionStore`.
+- ✅ **Wave 2 — Story 27-18** (prompt store reshape, structure + fail-loud — bodies TRANSITIONAL pending 27-16): `b740d295`, `a267f0a8` (review fixes). Jagged 85 cells / 72 tokens from `RolePhaseMap.EligibleActions`; **action-default tier DELETED** (clean cut); **resolution is tenant→system→`TammaError`, NEVER empty/plain** (USER MANDATE); new `Tamma.Core/TammaError.cs`; activity `Parse`-at-boundary + no plain-fallback-on-miss; `RoleSystemPrompts` retained.
 
-**Taxonomy now:** 8 roles, **72 actions** (68 SPEC §4 + 4 review verbs: `review-feasibility`/`-testability`/`-operability`/`-scope`). Source: `apps/tamma-elsa/src/Tamma.Core/Agents/{AgentRole,AgentAction,EnumWire,RolePhaseMap}.cs` (namespace kept `Tamma.Api.Services.Agents` — see C7). Tests: `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/`.
+**USER MANDATE (locked):** prompt/convention resolution = tenant → system → **error** (`TammaError`); NO empty/plain fallback anywhere (service AND activity). A separate **missing-config notification system** (system + tenant sides) is a planned NEW epic — out of Epic 27 scope.
 
-**Next — Wave 2:** **27-8** (convention EF entity + migration, per C1) and **27-18** (prompt-store taxonomy reshape) — both unblocked + independent. Then **27-16** (codegen — RESEQUENCED to here; it seeds *into* 27-8's table + 27-18's reshaped prompts, so it needs both first) → **27-17** (drift test) → **27-9** (service, C4/C5) → **27-10** (API) → **27-13** (Elsa over HTTP, C2) ∥ **27-14** (events) → **27-11**/**27-12** (UIs).
+**Taxonomy now:** 8 roles, **72 actions** (68 SPEC §4 + 4 review verbs: `review-feasibility`/`-testability`/`-operability`/`-scope`). Source: `apps/tamma-elsa/src/Tamma.Core/Agents/{AgentRole,AgentAction,EnumWire,RolePhaseMap}.cs` (namespace kept `Tamma.Api.Services.Agents` — see C7). `RolePhaseMap.EligibleActions` is the shared `(role,action)` accessor (added in 27-18). Tests: `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/`.
+
+**Next — Wave 3:** **27-16** (codegen — generates the authoritative prompt-store bodies into `SystemPrompts.cs` AND the convention seed rows for 27-8's table; both seeds share the `RolePhaseMap` keyset) → **27-17** (drift test) → **27-9** (convention service, C4/C5 — MUST validate `(role,action)` through `AgentRole.Parse`/`AgentAction.Parse` against `RolePhaseMap.EligibleActions`, same vocabulary as prompts; implement tenant→system→error) → **27-10** (API) → **27-13** (Elsa over HTTP, C2) ∥ **27-14** (events) → **27-11**/**27-12** (UIs).
+
+**Wave 2 follow-ups (tracked, NOT done):**
+- **Dashboard breakage:** the React dashboard (`packages/dashboard`, separate TS pkg, not in `Tamma.sln`) consumes the removed action-default API (`actionDefaults` field on `GET /api/prompts/system`; deleted `GET /api/prompts/defaults/{action}`) — `ActionDefaultsList.tsx`, `PromptsAdminPage.tsx`, `prompts-api-client.ts`, `useTenantPrompts.ts`. Will break at runtime; governed by 27-4/27-5/27-11/27-12.
+- **27-9 vocabulary guard:** the `conventions` columns are free TEXT (validation deferred). 27-9 must route role/action through `Parse` against `RolePhaseMap.EligibleActions` so convention rows can't use a vocabulary that prompts can't resolve.
 
 **Deferred cleanup story (tracked, do later):** realign namespace `Tamma.Api.Services.Agents` → `Tamma.Core.Agents` and relocate the Agents tests `Tamma.Api.Tests` → `Tamma.Core.Tests` (~33 files, purely cosmetic).
 
