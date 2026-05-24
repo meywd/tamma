@@ -43,7 +43,7 @@ public class Convention
     /// in later stories.</summary>
     public string Role { get; set; } = null!;
 
-    /// <summary>Agent action (e.g. "write-code", "review-code"). Stored as
+    /// <summary>Agent action (e.g. "implement-feature", "code-review"). Stored as
     /// plain TEXT; validated at the API boundary.</summary>
     public string Action { get; set; } = null!;
 

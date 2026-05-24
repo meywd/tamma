@@ -99,7 +99,7 @@ public class ConventionStoreMigrationTests
         await using var cmd = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (NULL, 'developer', 'write-code', 'default body');
+            VALUES (NULL, 'developer', 'implement-feature', 'default body');
             """, conn);
 
         var rows = await cmd.ExecuteNonQueryAsync();
@@ -115,7 +115,7 @@ public class ConventionStoreMigrationTests
         await using var cmd = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'developer', 'write-code', 'tenant body');
+            VALUES (@tid, 'developer', 'implement-feature', 'tenant body');
             """, conn);
         cmd.Parameters.AddWithValue("tid", Guid.NewGuid());
 
@@ -134,7 +134,7 @@ public class ConventionStoreMigrationTests
         await using (var insert1 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (NULL, 'developer', 'plan', 'system default');
+            VALUES (NULL, 'developer', 'code-review', 'system default');
             """, conn))
         {
             await insert1.ExecuteNonQueryAsync();
@@ -143,7 +143,7 @@ public class ConventionStoreMigrationTests
         await using var insert2 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'developer', 'plan', 'tenant override');
+            VALUES (@tid, 'developer', 'code-review', 'tenant override');
             """, conn);
         insert2.Parameters.AddWithValue("tid", tenantId);
 
@@ -164,7 +164,7 @@ public class ConventionStoreMigrationTests
         await using (var insert1 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'architect', 'review-code', 'tenant1 body');
+            VALUES (@tid, 'devops', 'deploy', 'tenant1 body');
             """, conn))
         {
             insert1.Parameters.AddWithValue("tid", t1);
@@ -174,7 +174,7 @@ public class ConventionStoreMigrationTests
         await using var insert2 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'architect', 'review-code', 'tenant2 body');
+            VALUES (@tid, 'devops', 'deploy', 'tenant2 body');
             """, conn);
         insert2.Parameters.AddWithValue("tid", t2);
 
@@ -227,7 +227,7 @@ public class ConventionStoreMigrationTests
         await using (var insert1 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'developer', 'document', 'first override');
+            VALUES (@tid, 'tester', 'write-tests', 'first override');
             """, conn))
         {
             insert1.Parameters.AddWithValue("tid", tenantId);
@@ -237,7 +237,7 @@ public class ConventionStoreMigrationTests
         await using var insert2 = new NpgsqlCommand(
             """
             INSERT INTO conventions ("TenantId", "Role", "Action", "Body")
-            VALUES (@tid, 'developer', 'document', 'second override — must be rejected');
+            VALUES (@tid, 'tester', 'write-tests', 'second override — must be rejected');
             """, conn);
         insert2.Parameters.AddWithValue("tid", tenantId);
 
@@ -307,7 +307,7 @@ public class ConventionStoreMigrationTests
         await using (var insert = new NpgsqlCommand(
             """
             INSERT INTO conventions ("Role", "Action", "Body")
-            VALUES ('developer', 'write-code', 'minimal body');
+            VALUES ('developer', 'implement-feature', 'minimal body');
             """, conn))
         {
             await insert.ExecuteNonQueryAsync();
@@ -317,7 +317,7 @@ public class ConventionStoreMigrationTests
             """
             SELECT "Enabled", "Version", "CreatedAt", "UpdatedAt"
             FROM conventions
-            WHERE "Role" = 'developer' AND "Action" = 'write-code';
+            WHERE "Role" = 'developer' AND "Action" = 'implement-feature';
             """, conn);
 
         await using var reader = await select.ExecuteReaderAsync();
