@@ -623,6 +623,59 @@ internal static class TammaModelConfiguration
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
+        // ── Convention ──
+        // Story 27-8: two-tier convention store.
+        //   tenant_id IS NULL  → system default (shipped by Tamma, seeded in 27-16)
+        //   tenant_id NOT NULL → tenant override (tenant admin owns it)
+        //
+        // Unlike PromptOverride this table has only ONE principal key column
+        // (tenant_id). There is no user_id column, no principal_xor CHECK, and
+        // no per-user override layer — tenant admins own the whole team's
+        // conventions; members cannot personalise them.
+        //
+        // omitTenantIdColumn is NOT applied here. TenantId is the two-tier
+        // discriminator: omitting it in single-user mode would destroy the
+        // ability to distinguish system defaults (null) from overrides
+        // (non-null). Following BudgetConfig precedent which also retains the
+        // nullable tenant_id column for system-vs-tenant discrimination.
+        //
+        // No FK to tenants table — per-tenant DB routing makes a hard FK
+        // awkward (same precedent as PromptOverride). See Convention.cs
+        // doc-comment.
+        //
+        // The UNIQUE(TenantId, Role, Action) index uses NULLS NOT DISTINCT
+        // (enforced via raw SQL in the migration, EF model hint below) so
+        // exactly one system-default row per (role, action) cell is permitted.
+        // This index also serves as the resolution hot-path B-tree seek —
+        // no separate non-unique index is needed (it would be fully covered
+        // by the unique index and would be redundant).
+        modelBuilder.Entity<Convention>(entity =>
+        {
+            entity.ToTable("conventions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Role).IsRequired();
+            entity.Property(e => e.Action).IsRequired();
+            entity.Property(e => e.Body).IsRequired();
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            entity.Property(e => e.Enabled).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // EF model-graph hint for (TenantId, Role, Action).
+            // The Postgres index uses NULLS NOT DISTINCT (applied via raw SQL
+            // in the migration) so the single null-tenant system-default per
+            // (role, action) cell is unique. NULLS NOT DISTINCT requires
+            // PG 15+ (production runs PG17).
+            entity.HasIndex(e => new { e.TenantId, e.Role, e.Action })
+                .IsUnique();
+
+            // No omitTenantIdColumn branch — see comment above.
+            // ApplyTenantFilter is a no-op (see its implementation) but we
+            // call it for structural consistency with all other tenant entities.
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+
         // ── ProviderHealth ──
         modelBuilder.Entity<ProviderHealth>(entity =>
         {
