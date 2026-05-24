@@ -35,6 +35,28 @@ namespace Tamma.Activities.LlmCall;
 /// dispatch-site specialisation work (SPEC §6 initiative 2 / Story 27-19).
 /// </para>
 ///
+/// <para>
+/// <b>Intentional two-exception-type boundary.</b> This activity surfaces exactly
+/// two exception types from the resolve path:
+/// <list type="bullet">
+///   <item><term><see cref="ArgumentException"/></term><description>
+///     Thrown by <see cref="AgentRoleExtensions.Parse"/> or
+///     <see cref="AgentActionExtensions.Parse"/> when the supplied role or action
+///     is not a recognised taxonomy token. This is a caller/config error (the
+///     workflow was wired with a dead or misspelled token) and should NOT be
+///     retried.</description></item>
+///   <item><term><see cref="TammaError"/></term><description>
+///     Thrown when the prompt registry cannot be reached or returns an error for
+///     an otherwise taxonomy-valid pair (operational / transient failure). The
+///     <c>PromptEndpoints</c> HTTP boundary translates <see cref="TammaError"/>
+///     into HTTP 404; <see cref="ArgumentException"/> is NOT caught there and
+///     surfaces as a 500 (it represents a configuration bug, not a lookup miss).
+///     Do NOT change <see cref="AgentRoleExtensions.Parse"/> /
+///     <see cref="AgentActionExtensions.Parse"/> to throw
+///     <see cref="TammaError"/> — that is Story 27-15 scope.</description></item>
+/// </list>
+/// </para>
+///
 /// When TenantId is provided, sends the X-Tenant-Id header for
 /// tenant-scoped prompt resolution (Story 27-6).
 /// </summary>
@@ -54,7 +76,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
     [Input(Description = "LLM role (developer, tester, architect, etc.)")]
     public Input<string> Role { get; set; } = default!;
 
-    [Input(Description = "Action (context-scan, plan, implement, etc.) — empty to skip registry")]
+    [Input(Description = "Action (context-scan, plan-implementation, implement-feature, etc.) — empty to skip registry")]
     public Input<string> Action { get; set; } = new("");
 
     [Input(Description = "Variables JSON for template interpolation")]
@@ -104,6 +126,7 @@ public class ResolvePromptFromRegistryActivity : TammaAsyncActivity
         // using the fallback. This is NOT a registry-miss fallback — it's a
         // distinct "no action requested" mode (SPEC §3.5 / §6 transitional).
         // See activity XML doc + Story 27-18 report (remaining blast radius).
+        // TODO(27-19): dispatch specialisation — every site should emit a specific action; remove this opt-out when no raw-prompt dispatch sites remain.
         if (string.IsNullOrEmpty(action))
         {
             ResolvedPrompt.Set(context, fallback);

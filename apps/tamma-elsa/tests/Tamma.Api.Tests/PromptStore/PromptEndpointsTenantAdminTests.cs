@@ -193,6 +193,82 @@ public class PromptEndpointsTenantAdminTests
     }
 
     // ------------------------------------------------------------------
+    // Story 27-18 — TammaError → 404 at the endpoint boundary.
+    //
+    // A taxonomy-valid (role, action) pair that the role does NOT own (e.g.
+    // developer/deploy — deploy is devops-only) has no system default. When no
+    // override exists either, PromptStoreService throws TammaError with code
+    // PROMPT.RESOLVE.NO_DEFAULT. The endpoint must catch that and return 404,
+    // NOT let it surface as a 500.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Mirrors the <see cref="AssertOkAsync"/> helper but asserts HTTP 404.
+    /// </summary>
+    private static async Task AssertNotFoundAsync(IResult result)
+    {
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddOptions()
+            .BuildServiceProvider();
+        var ctx = new DefaultHttpContext
+        {
+            RequestServices = services,
+            Response = { Body = new MemoryStream() },
+        };
+        await result.ExecuteAsync(ctx);
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Test]
+    public async Task GetPrompt_TaxonomyValidButRoleDoesNotOwnAction_Returns404()
+    {
+        // 'deploy' is a devops-only action — developer has no system default for
+        // it. No override exists either, so resolution throws TammaError
+        // (PROMPT.RESOLVE.NO_DEFAULT). GetPrompt must translate that to 404.
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        var principal = PrincipalWithUserId(userId, "owner");
+
+        var result = await PromptEndpoints.GetPrompt(
+            "developer", "deploy", _store, principal, tc, Mode(TammaMode.SingleUser));
+
+        await AssertNotFoundAsync(result);
+    }
+
+    [Test]
+    public async Task RenderPrompt_TaxonomyValidButRoleDoesNotOwnAction_Returns404()
+    {
+        // Same pair through the render surface — resolution throws TammaError
+        // before any rendering or event emission, so 404 is returned.
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        var principal = PrincipalWithUserId(userId, "owner");
+
+        var req = new RenderPromptRequest(new Dictionary<string, string>());
+
+        var result = await PromptEndpoints.RenderPrompt(
+            "developer", "deploy", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+
+        await AssertNotFoundAsync(result);
+    }
+
+    [Test]
+    public async Task GetPrompt_SaaSMode_TaxonomyValidButRoleDoesNotOwnAction_Returns404()
+    {
+        // SaaS-mode path through the tenant resolver — same TammaError contract.
+        var tenantId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(tenantId);
+        var principal = PrincipalWithUserId(Guid.NewGuid(), "member");
+
+        var result = await PromptEndpoints.GetPrompt(
+            "developer", "deploy", _store, principal, tc, Mode(TammaMode.SaaS));
+
+        await AssertNotFoundAsync(result);
+    }
+
+    // ------------------------------------------------------------------
     // SaaS mode — cross-tenant isolation through the endpoint surface.
     // ------------------------------------------------------------------
 

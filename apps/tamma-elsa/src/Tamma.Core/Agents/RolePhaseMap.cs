@@ -292,15 +292,6 @@ public static class RolePhaseMap
         => s_eligibleActions;
 
     /// <summary>
-    /// The set of actions eligible for <paramref name="role"/> (SPEC §4 per-role
-    /// set), as typed enum members.
-    /// </summary>
-    public static IReadOnlySet<AgentAction> GetActionsForRole(AgentRole role)
-        => s_eligibleActions.TryGetValue(role, out var actions)
-            ? actions
-            : FrozenSet<AgentAction>.Empty;
-
-    /// <summary>
     /// Get the primary action for a given role. No runtime callers (test-only);
     /// kept coherent with the §4 sets.
     /// </summary>
