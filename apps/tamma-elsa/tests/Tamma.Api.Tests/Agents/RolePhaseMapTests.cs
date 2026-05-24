@@ -417,4 +417,76 @@ public class RolePhaseMapTests
             RolePhaseMap.GetEligibleRolesForPhase(action.ToWire()).Should()
                 .NotBeEmpty($"action '{action.ToWire()}' must belong to at least one role's SPEC §4 set");
     }
+
+    // -----------------------------------------------------------------------
+    // Story 27-19 — per-role review / triage panel action selection
+    // -----------------------------------------------------------------------
+
+    [Test]
+    [TestCase(AgentRole.Architect, AgentAction.PlanReview)]
+    [TestCase(AgentRole.SeniorDeveloper, AgentAction.PlanReview)]
+    [TestCase(AgentRole.Security, AgentAction.PlanReviewSecurity)]
+    [TestCase(AgentRole.Developer, AgentAction.ReviewFeasibility)]
+    [TestCase(AgentRole.Tester, AgentAction.ReviewTestability)]
+    [TestCase(AgentRole.Devops, AgentAction.ReviewOperability)]
+    [TestCase(AgentRole.ProductOwner, AgentAction.ReviewScope)]
+    public void GetReviewActionForRole_Maps_Each_Panel_Role(AgentRole role, AgentAction expected)
+    {
+        RolePhaseMap.GetReviewActionForRole(role).Should().Be(expected);
+    }
+
+    [Test]
+    [TestCase(AgentRole.Architect)]
+    [TestCase(AgentRole.SeniorDeveloper)]
+    [TestCase(AgentRole.Security)]
+    [TestCase(AgentRole.Developer)]
+    [TestCase(AgentRole.Tester)]
+    [TestCase(AgentRole.Devops)]
+    [TestCase(AgentRole.ProductOwner)]
+    public void GetReviewActionForRole_Result_Is_Eligible_For_That_Role(AgentRole role)
+    {
+        var action = RolePhaseMap.GetReviewActionForRole(role);
+        RolePhaseMap.IsRoleEligibleForPhase(action.ToWire(), role.ToWire())
+            .Should().BeTrue($"({role.ToWire()}, {action.ToWire()}) must be a taxonomy-valid pair");
+    }
+
+    [Test]
+    public void GetReviewActionForRole_TechWriter_Throws()
+    {
+        Action act = () => RolePhaseMap.GetReviewActionForRole(AgentRole.TechWriter);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    [TestCase(AgentRole.Security, AgentAction.AssessVulnerability)]
+    [TestCase(AgentRole.Developer, AgentAction.TriageDefect)]
+    [TestCase(AgentRole.Devops, AgentAction.DiagnoseIncident)]
+    [TestCase(AgentRole.Tester, AgentAction.TriageDefect)]
+    public void GetTriageActionForRole_Maps_Each_Panel_Role(AgentRole role, AgentAction expected)
+    {
+        RolePhaseMap.GetTriageActionForRole(role).Should().Be(expected);
+    }
+
+    [Test]
+    [TestCase(AgentRole.Security)]
+    [TestCase(AgentRole.Developer)]
+    [TestCase(AgentRole.Devops)]
+    [TestCase(AgentRole.Tester)]
+    public void GetTriageActionForRole_Result_Is_Eligible_For_That_Role(AgentRole role)
+    {
+        var action = RolePhaseMap.GetTriageActionForRole(role);
+        RolePhaseMap.IsRoleEligibleForPhase(action.ToWire(), role.ToWire())
+            .Should().BeTrue($"({role.ToWire()}, {action.ToWire()}) must be a taxonomy-valid pair");
+    }
+
+    [Test]
+    [TestCase(AgentRole.Architect)]
+    [TestCase(AgentRole.SeniorDeveloper)]
+    [TestCase(AgentRole.ProductOwner)]
+    [TestCase(AgentRole.TechWriter)]
+    public void GetTriageActionForRole_NonPanelRole_Throws(AgentRole role)
+    {
+        Action act = () => RolePhaseMap.GetTriageActionForRole(role);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

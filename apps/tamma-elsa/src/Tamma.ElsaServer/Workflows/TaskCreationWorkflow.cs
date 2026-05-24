@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -85,8 +86,8 @@ public class TaskCreationWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "senior_developer",
-                ["action"] = "create-tasks",
+                ["role"] = AgentRole.SeniorDeveloper.ToWire(),
+                ["action"] = AgentAction.CreateTasks.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),

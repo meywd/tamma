@@ -9,6 +9,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using Tamma.ElsaServer.Workflows.Helpers;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
@@ -17,7 +18,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// <summary>
 /// Plan Generation — architect LLM produces an implementation blueprint.
 ///
-/// Prompts come from the prompt registry (role=architect, action=plan).
+/// Prompts come from the prompt registry (role=architect, action=plan-system-design).
 /// No inline prompts. No approval step (approval is in SingleIssueCycle).
 ///
 /// Validates the plan has required fields. Retries on invalid (max 2).
@@ -90,8 +91,8 @@ public class PlanGenerationWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "architect",
-                ["action"] = "plan",
+                ["role"] = AgentRole.Architect.ToWire(),
+                ["action"] = AgentAction.PlanSystemDesign.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {

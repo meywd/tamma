@@ -10,6 +10,8 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
+
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -86,8 +88,8 @@ public class TriageContextGatheringWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "developer",
-                ["action"] = "context-scan",
+                ["role"] = AgentRole.Developer.ToWire(),
+                ["action"] = AgentAction.ContextScan.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["itemJson"] = itemJson.Get(ctx),

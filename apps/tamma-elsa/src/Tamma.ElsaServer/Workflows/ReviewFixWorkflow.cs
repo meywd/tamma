@@ -11,6 +11,7 @@ using Tamma.Activities.ADL;
 using Tamma.Activities.ADL.Models;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Security;
+using Tamma.Api.Services.Agents;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -51,7 +52,8 @@ public class ReviewFixWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["agentRole"] = "implementer",
+                ["agentRole"] = AgentRole.Developer.ToWire(),
+                ["action"] = AgentAction.AddressReviewComments.ToWire(),
                 ["taskPrompt"] = $"Apply fixes for the following review comments:\n{SecurityHelpers.SanitizeForPrompt(analysisJsonVar.Get(ctx))}",
                 ["sessionId"] = $"adl-review-fix-{ctx.GetInput<int>("prNumber")}"
             }),

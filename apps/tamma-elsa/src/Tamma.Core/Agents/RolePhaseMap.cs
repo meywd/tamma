@@ -329,6 +329,64 @@ public static class RolePhaseMap
     }
 
     /// <summary>
+    /// Select the cross-role <b>plan/task review</b> action for <paramref name="role"/>
+    /// on a review panel (Story 27-19). Each reviewing role critiques the plan
+    /// through its own lens, so the action is role-specific rather than a single
+    /// generic <c>plan-review</c>:
+    /// <list type="bullet">
+    /// <item>architect / senior_developer → <c>plan-review</c></item>
+    /// <item>security → <c>plan-review-security</c></item>
+    /// <item>developer → <c>review-feasibility</c></item>
+    /// <item>tester → <c>review-testability</c></item>
+    /// <item>devops → <c>review-operability</c></item>
+    /// <item>product_owner → <c>review-scope</c></item>
+    /// </list>
+    /// Every returned <c>(role, action)</c> satisfies
+    /// <see cref="IsRoleEligibleForPhase"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown for a role that is not part of a review panel
+    /// (<see cref="AgentRole.TechWriter"/>).
+    /// </exception>
+    public static AgentAction GetReviewActionForRole(AgentRole role) => role switch
+    {
+        AgentRole.Architect => AgentAction.PlanReview,
+        AgentRole.SeniorDeveloper => AgentAction.PlanReview,
+        AgentRole.Security => AgentAction.PlanReviewSecurity,
+        AgentRole.Developer => AgentAction.ReviewFeasibility,
+        AgentRole.Tester => AgentAction.ReviewTestability,
+        AgentRole.Devops => AgentAction.ReviewOperability,
+        AgentRole.ProductOwner => AgentAction.ReviewScope,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(role), role, $"Role '{role.ToWire()}' is not on a review panel."),
+    };
+
+    /// <summary>
+    /// Select the <b>triage panel</b> action for <paramref name="role"/>
+    /// (Story 27-19). Each panellist triages the item through its own lens:
+    /// <list type="bullet">
+    /// <item>security → <c>assess-vulnerability</c></item>
+    /// <item>developer → <c>triage-defect</c></item>
+    /// <item>devops → <c>diagnose-incident</c></item>
+    /// <item>tester → <c>triage-defect</c></item>
+    /// </list>
+    /// Every returned <c>(role, action)</c> satisfies
+    /// <see cref="IsRoleEligibleForPhase"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown for a role that is not part of the triage panel.
+    /// </exception>
+    public static AgentAction GetTriageActionForRole(AgentRole role) => role switch
+    {
+        AgentRole.Security => AgentAction.AssessVulnerability,
+        AgentRole.Developer => AgentAction.TriageDefect,
+        AgentRole.Devops => AgentAction.DiagnoseIncident,
+        AgentRole.Tester => AgentAction.TriageDefect,
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(role), role, $"Role '{role.ToWire()}' is not on the triage panel."),
+    };
+
+    /// <summary>
     /// Throw if <paramref name="role"/> is empty, forbidden, or not in
     /// <see cref="ValidRoles"/>.
     /// </summary>
