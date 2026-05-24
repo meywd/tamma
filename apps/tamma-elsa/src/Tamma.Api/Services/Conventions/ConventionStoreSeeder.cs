@@ -161,7 +161,7 @@ public sealed class ConventionStoreSeeder : IHostedService
         // round-trip, keyed by (role, action). Tenant overrides (tenant_id
         // NOT NULL) are never touched by the seeder.
         var existing = await db.Conventions
-            .Where(c => c.TenantId == default(Guid?))
+            .Where(c => c.TenantId == null)
             .ToDictionaryAsync(c => (c.Role, c.Action), ct)
             .ConfigureAwait(false);
 
