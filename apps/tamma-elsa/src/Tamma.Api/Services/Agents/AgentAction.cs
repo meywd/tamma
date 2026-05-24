@@ -21,6 +21,7 @@ public enum AgentAction
     [Wire("plan-roadmap")] PlanRoadmap,
     [Wire("summarize-stakeholder")] SummarizeStakeholder,
     [Wire("review-acceptance")] ReviewAcceptance,
+    [Wire("review-scope")] ReviewScope,
 
     // architect
     [Wire("triage-technical")] TriageTechnical,
@@ -54,6 +55,7 @@ public enum AgentAction
     [Wire("debug")] Debug,
     [Wire("address-review-comments")] AddressReviewComments,
     [Wire("self-review")] SelfReview,
+    [Wire("review-feasibility")] ReviewFeasibility,
 
     // tester
     [Wire("plan-test-strategy")] PlanTestStrategy,
@@ -63,6 +65,7 @@ public enum AgentAction
     [Wire("verify-acceptance")] VerifyAcceptance,
     [Wire("code-review-coverage")] CodeReviewCoverage,
     [Wire("triage-defect")] TriageDefect,
+    [Wire("review-testability")] ReviewTestability,
 
     // security
     [Wire("threat-model")] ThreatModel,
@@ -85,6 +88,7 @@ public enum AgentAction
     [Wire("plan-incident-response")] PlanIncidentResponse,
     [Wire("write-postmortem")] WritePostmortem,
     [Wire("assess-capacity")] AssessCapacity,
+    [Wire("review-operability")] ReviewOperability,
 
     // tech_writer
     [Wire("summarize-changes")] SummarizeChanges,

@@ -11,7 +11,7 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 68 actions are the union of the per-role action sets in SPEC §4.
+/// The 72 actions are the union of the per-role action sets in SPEC §4.
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -39,9 +39,9 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Sixty_Eight_Actions()
+    public void ValidActions_Should_Contain_Seventy_Two_Actions()
     {
-        RolePhaseMap.ValidActions.Should().HaveCount(68);
+        RolePhaseMap.ValidActions.Should().HaveCount(72);
     }
 
     [Test]
@@ -285,6 +285,57 @@ public class RolePhaseMapTests
     {
         RolePhaseMap.IsRoleEligibleForPhase("", "developer").Should().BeFalse();
         RolePhaseMap.IsRoleEligibleForPhase("context-scan", "").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 27-19 — 4 new per-role review tokens + developer/triage-defect widening
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void IsRoleEligibleForPhase_ReviewFeasibility_Developer_Returns_True()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("review-feasibility", "developer").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ReviewTestability_Tester_Returns_True()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("review-testability", "tester").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ReviewOperability_Devops_Returns_True()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("review-operability", "devops").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ReviewScope_ProductOwner_Returns_True()
+    {
+        RolePhaseMap.IsRoleEligibleForPhase("review-scope", "product_owner").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_TriageDefect_Developer_Returns_True()
+    {
+        // triage-defect widening (Story 27-19): developer can now triage defects
+        RolePhaseMap.IsRoleEligibleForPhase("triage-defect", "developer").Should().BeTrue();
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ReviewFeasibility_Tester_Returns_False()
+    {
+        // review-feasibility is single-role (developer only)
+        RolePhaseMap.IsRoleEligibleForPhase("review-feasibility", "tester").Should().BeFalse();
+    }
+
+    [Test]
+    public void ValidActions_Contains_All_Four_New_Review_Tokens()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("review-feasibility");
+        RolePhaseMap.ValidActions.Should().Contain("review-testability");
+        RolePhaseMap.ValidActions.Should().Contain("review-operability");
+        RolePhaseMap.ValidActions.Should().Contain("review-scope");
     }
 
     // -----------------------------------------------------------------------

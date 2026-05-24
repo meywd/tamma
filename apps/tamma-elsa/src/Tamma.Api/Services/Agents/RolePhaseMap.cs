@@ -9,7 +9,7 @@ namespace Tamma.Api.Services.Agents;
 ///
 /// This is a CLEAN CUT to the new typed action vocabulary (Story 27-15). The
 /// old flat 8×10 string vocabulary is gone; the union of the per-role action
-/// sets is the 68-token <see cref="AgentAction"/> enum. Which <c>(role,
+/// sets is the 72-token <see cref="AgentAction"/> enum. Which <c>(role,
 /// action)</c> pairs are valid is the per-role eligibility matrix below — shared
 /// tokens (<c>context-scan</c>, <c>code-review</c>, <c>plan-review</c>,
 /// <c>write-tests</c>) appear in multiple role sets intentionally; the role half
@@ -47,7 +47,8 @@ public static class RolePhaseMap
                 AgentAction.PrioritizeBacklog,
                 AgentAction.PlanRoadmap,
                 AgentAction.SummarizeStakeholder,
-                AgentAction.ReviewAcceptance),
+                AgentAction.ReviewAcceptance,
+                AgentAction.ReviewScope),
 
             // architect — system design, technical strategy
             [AgentRole.Architect] = FreezeSet(
@@ -90,7 +91,9 @@ public static class RolePhaseMap
                 AgentAction.Debug,
                 AgentAction.CodeReview,
                 AgentAction.AddressReviewComments,
-                AgentAction.SelfReview),
+                AgentAction.SelfReview,
+                AgentAction.ReviewFeasibility,
+                AgentAction.TriageDefect),
 
             // tester — QA, test engineering
             [AgentRole.Tester] = FreezeSet(
@@ -102,7 +105,8 @@ public static class RolePhaseMap
                 AgentAction.ExploratoryTest,
                 AgentAction.VerifyAcceptance,
                 AgentAction.CodeReviewCoverage,
-                AgentAction.TriageDefect),
+                AgentAction.TriageDefect,
+                AgentAction.ReviewTestability),
 
             // security — security review, threat modelling
             [AgentRole.Security] = FreezeSet(
@@ -128,7 +132,8 @@ public static class RolePhaseMap
                 AgentAction.DiagnoseIncident,
                 AgentAction.PlanIncidentResponse,
                 AgentAction.WritePostmortem,
-                AgentAction.AssessCapacity),
+                AgentAction.AssessCapacity,
+                AgentAction.ReviewOperability),
 
             // tech_writer — documentation
             [AgentRole.TechWriter] = FreezeSet(
@@ -181,7 +186,7 @@ public static class RolePhaseMap
         Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToFrozenSet();
 
     /// <summary>
-    /// The 68 workflow actions, as wire strings, derived from
+    /// The 72 workflow actions, as wire strings, derived from
     /// <see cref="AgentAction"/> (the union of the per-role §4 sets).
     /// </summary>
     public static readonly FrozenSet<string> ValidActions =

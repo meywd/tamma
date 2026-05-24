@@ -160,7 +160,7 @@ differentiates them.
 ### product_owner — intake, requirements, prioritisation, acceptance
 `context-scan`, `triage-intake`, `clarify-requirements`, `plan-scope`,
 `define-acceptance-criteria`, `prioritize-backlog`, `plan-roadmap`,
-`summarize-stakeholder`, `review-acceptance`
+`summarize-stakeholder`, `review-acceptance`, `review-scope`
 
 ### architect — system design, technical strategy
 `context-scan`, `triage-technical`, `plan-system-design`,
@@ -176,12 +176,13 @@ differentiates them.
 ### developer — implementation
 `context-scan`, `plan-implementation`, `plan-fix`, `plan-debugging`,
 `implement-feature`, `implement-fix`, `write-tests`, `refactor`, `debug`,
-`code-review`, `address-review-comments`, `self-review`
+`code-review`, `address-review-comments`, `self-review`, `review-feasibility`,
+`triage-defect`
 
 ### tester — QA, test engineering
 `context-scan`, `plan-test-strategy`, `write-test-cases`, `write-tests`,
 `write-regression-test`, `exploratory-test`, `verify-acceptance`,
-`code-review-coverage`, `triage-defect`
+`code-review-coverage`, `triage-defect`, `review-testability`
 
 ### security — security review, threat modelling
 `context-scan`, `threat-model`, `plan-review-security`,
@@ -192,13 +193,15 @@ differentiates them.
 `context-scan`, `plan-deployment`, `implement-infrastructure`,
 `configure-cicd`, `deploy`, `rollback`, `monitor-health`,
 `diagnose-incident`, `plan-incident-response`, `write-postmortem`,
-`assess-capacity`
+`assess-capacity`, `review-operability`
 
 ### tech_writer — documentation
 `context-scan`, `summarize-changes`, `write-user-docs`, `write-api-docs`,
 `write-release-notes`, `write-runbook`, `update-changelog`, `review-docs`
 
-~80 meaningful jagged cells (vs the old flat 8×10). Mapping to existing
+**Story 27-19 additions:** `review-feasibility` (developer), `review-testability` (tester), `review-operability` (devops), and `review-scope` (product_owner) were added to fully-specialise the cross-role review/triage panels — no generic actions. The developer set was also widened to include `triage-defect` (previously tester-only) so developers can triage defects directly.
+
+~84 meaningful jagged cells (vs the old flat 8×10). Mapping to existing
 workflow reality:
 
 | Existing workflow | Maps to |
