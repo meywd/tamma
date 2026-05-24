@@ -267,10 +267,13 @@ public class ConventionStoreMigrationTests
             """, conn);
 
         var columns = new List<string>();
+        var nullability = new Dictionary<string, string>();
         await using var reader = await cmd.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            columns.Add(reader.GetString(0));
+            var colName = reader.GetString(0);
+            columns.Add(colName);
+            nullability[colName] = reader.GetString(1); // is_nullable: YES or NO
         }
 
         columns.Should().Contain(new[]
@@ -280,6 +283,51 @@ public class ConventionStoreMigrationTests
             "CreatedAt", "UpdatedAt",
             "CreatedBy", "UpdatedBy",
         });
+
+        // Required columns must not allow NULL.
+        nullability["Role"].Should().Be("NO",   "Role is a required key column");
+        nullability["Action"].Should().Be("NO",  "Action is a required key column");
+        nullability["Body"].Should().Be("NO",    "Body is the convention content");
+
+        // Nullable columns — optional by design.
+        nullability["TenantId"].Should().Be("YES",   "NULL tenant_id marks a system-default row");
+        nullability["CreatedBy"].Should().Be("YES",  "CreatedBy is optional (system seeds have no user)");
+        nullability["UpdatedBy"].Should().Be("YES",  "UpdatedBy is optional");
+    }
+
+    [Test]
+    public async Task Insert_MinimalRow_ReadsBackDefaultsCorrectly()
+    {
+        // Verifies that Enabled = true, Version = 1, and CreatedAt/UpdatedAt
+        // are set by DB-side defaults (not left null) when only the required
+        // columns are supplied.
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync();
+
+        await using (var insert = new NpgsqlCommand(
+            """
+            INSERT INTO conventions ("Role", "Action", "Body")
+            VALUES ('developer', 'write-code', 'minimal body');
+            """, conn))
+        {
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        await using var select = new NpgsqlCommand(
+            """
+            SELECT "Enabled", "Version", "CreatedAt", "UpdatedAt"
+            FROM conventions
+            WHERE "Role" = 'developer' AND "Action" = 'write-code';
+            """, conn);
+
+        await using var reader = await select.ExecuteReaderAsync();
+        var hasRow = await reader.ReadAsync();
+
+        hasRow.Should().BeTrue("the row we just inserted must be selectable");
+        reader.GetBoolean(0).Should().BeTrue("Enabled must default to true");
+        reader.GetInt32(1).Should().Be(1,        "Version must default to 1");
+        reader.GetDateTime(2).Should().NotBe(default, "CreatedAt must be set by now() default");
+        reader.GetDateTime(3).Should().NotBe(default, "UpdatedAt must be set by now() default");
     }
 
     [Test]

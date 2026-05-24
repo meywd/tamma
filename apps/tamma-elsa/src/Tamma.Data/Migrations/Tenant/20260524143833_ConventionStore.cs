@@ -51,8 +51,8 @@ namespace Tamma.Data.Migrations.Tenant
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     TenantId = table.Column<Guid>(type: "uuid", nullable: true),
-                    Role = table.Column<string>(type: "text", nullable: false),
-                    Action = table.Column<string>(type: "text", nullable: false),
+                    Role = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    Action = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     Body = table.Column<string>(type: "text", nullable: false),
                     Version = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
                     Enabled = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
@@ -86,6 +86,13 @@ namespace Tamma.Data.Migrations.Tenant
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // DropTable cascades — it implicitly drops all indexes on the
+            // table including the raw-SQL NULLS NOT DISTINCT unique index
+            // (IX_conventions_TenantId_Role_Action). No separate DROP INDEX
+            // is needed here. (Contrast with the PromptOverride migration's
+            // explicit DROP INDEX: that index was on a table that is NOT
+            // dropped in that migration's Down(), making the explicit drop
+            // necessary. That pattern does not apply here.)
             migrationBuilder.DropTable(
                 name: "conventions");
         }

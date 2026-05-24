@@ -51,7 +51,10 @@ public class Convention
     /// <c>{{conventions}}</c>.</summary>
     public string Body { get; set; } = null!;
 
-    /// <summary>Optimistic-concurrency token.</summary>
+    /// <summary>Application-layer version counter, incremented by the service
+    /// on each update. This is NOT an EF-enforced concurrency token
+    /// (<c>.IsConcurrencyToken()</c> is not set); it is used by the service
+    /// layer for optimistic-conflict detection and audit purposes only.</summary>
     public int Version { get; set; } = 1;
 
     /// <summary>Whether this convention row is active. Disabled rows are

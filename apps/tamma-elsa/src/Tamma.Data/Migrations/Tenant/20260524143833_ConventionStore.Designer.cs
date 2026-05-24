@@ -482,7 +482,8 @@ namespace Tamma.Data.Migrations.Tenant
 
                     b.Property<string>("Action")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("Body")
                         .IsRequired()
@@ -503,7 +504,8 @@ namespace Tamma.Data.Migrations.Tenant
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<Guid?>("TenantId")
                         .HasColumnType("uuid");

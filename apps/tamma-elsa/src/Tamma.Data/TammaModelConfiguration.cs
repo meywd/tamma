@@ -654,8 +654,8 @@ internal static class TammaModelConfiguration
             entity.ToTable("conventions");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
-            entity.Property(e => e.Role).IsRequired();
-            entity.Property(e => e.Action).IsRequired();
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Action).IsRequired().HasMaxLength(64);
             entity.Property(e => e.Body).IsRequired();
             entity.Property(e => e.Version).HasDefaultValue(1);
             entity.Property(e => e.Enabled).HasDefaultValue(true);
@@ -670,9 +670,21 @@ internal static class TammaModelConfiguration
             entity.HasIndex(e => new { e.TenantId, e.Role, e.Action })
                 .IsUnique();
 
-            // No omitTenantIdColumn branch — see comment above.
-            // ApplyTenantFilter is a no-op (see its implementation) but we
-            // call it for structural consistency with all other tenant entities.
+            // No omitTenantIdColumn branch — intentional. Unlike BudgetConfig,
+            // where tenant_id is a simple ownership column that can be dropped
+            // in a per-tenant DB, here tenant_id IS the two-tier discriminator:
+            // NULL = system-default row, non-null = tenant override. Dropping
+            // it would destroy the semantics of the entire table. This is
+            // therefore NOT analogous to BudgetConfig's omitTenantIdColumn
+            // pattern.
+            //
+            // Epic 28 per-tenant DB cutover (Story 28-13+): when
+            // omitTenantIdColumn is set to true for a per-tenant DB, it is an
+            // OPEN design decision how system-default convention rows are
+            // provided in that DB (options include: replicate them during
+            // provisioning, resolve them via the control-plane DB, or keep a
+            // shared read-only conventions DB). Do NOT add a branch here until
+            // that design is resolved.
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
