@@ -171,7 +171,10 @@ public sealed class ConventionStore : IConventionStore
             }
         }
 
-        return result;
+        return result
+            .OrderBy(s => s.Role, StringComparer.Ordinal)
+            .ThenBy(s => s.Action, StringComparer.Ordinal)
+            .ToList();
     }
 
     private static TammaError NoConventionError(string role, string action, Guid? tenantId)

@@ -66,6 +66,11 @@ public class ConventionRepository(
         var dbTenant = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
 
+        // NOTE: check-then-insert — concurrent same-key (tenant_id, role, action)
+        // upserts surface as a Postgres unique-violation (23505) via the
+        // NULLS NOT DISTINCT unique index (Story 27-8); consistent with
+        // PromptRepository on the low-concurrency admin-edit path.
+
         // Match ONLY tenant-override rows — system defaults (tenant_id IS NULL)
         // are never mutated here (AC2).
         var existing = await db.Conventions.IgnoreQueryFilters()

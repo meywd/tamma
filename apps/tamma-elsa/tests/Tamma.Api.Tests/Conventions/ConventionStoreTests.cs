@@ -412,6 +412,26 @@ public class ConventionStoreTests
     }
 
     [Test]
+    public async Task List_IsDeterministicallyOrderedByRoleThenAction()
+    {
+        // ListAsync must return a stable (Role ASC, Action ASC) order so that
+        // Story 27-10's pagination / diff is reproducible regardless of
+        // FrozenDictionary enumeration order.
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+
+        var list = await store.ListAsync(tenantId, default);
+
+        list.Should().NotBeEmpty();
+        var expected = list
+            .OrderBy(s => s.Role, StringComparer.Ordinal)
+            .ThenBy(s => s.Action, StringComparer.Ordinal)
+            .ToList();
+        list.Should().Equal(expected,
+            because: "ListAsync must return items sorted by (Role, Action) for deterministic pagination");
+    }
+
+    [Test]
     public async Task List_DisabledOverride_ResolvesToSystem_AC9()
     {
         var store = NewStore();

@@ -74,6 +74,12 @@ public interface IConventionStore
     /// guarantee. Prefers the tenant override (enabled), else the system
     /// default, else <c>null</c>. Use <see cref="ResolveAsync"/> for the
     /// fail-loud path that backs <c>{{conventions}}</c>.
+    ///
+    /// <para><b>Enabled asymmetry.</b> The tenant-override tier is
+    /// <c>Enabled</c>-filtered (a disabled override is treated as absent and
+    /// falls through). The system-default tier is returned REGARDLESS of its
+    /// <c>Enabled</c> flag — callers needing the fully enabled-filtered chain
+    /// (both tiers) must use <see cref="ResolveAsync"/>.</para>
     /// </summary>
     Task<Convention?> GetAsync(Guid? tenantId, AgentRole role, AgentAction action, CancellationToken ct);
 
