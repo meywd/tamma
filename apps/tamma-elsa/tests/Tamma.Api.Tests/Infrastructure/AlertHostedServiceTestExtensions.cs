@@ -3,15 +3,18 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Rules;
+using Tamma.Api.Services.Conventions;
 using Tamma.Api.Services.PlatformTasks;
 
 namespace Tamma.Api.Tests.Infrastructure;
 
 /// <summary>
-/// Shared helper for test fixtures: gates the three always-on hosted
-/// services that PR #329 wired into <c>Program.cs</c>
+/// Shared helper for test fixtures: gates the always-on hosted
+/// services wired into <c>Program.cs</c>
 /// (<see cref="BuiltInAlertRuleSeeder"/>,
-/// <see cref="AlertRuleEvaluator"/>, <see cref="NotificationDispatcher"/>)
+/// <see cref="AlertRuleEvaluator"/>, <see cref="NotificationDispatcher"/>,
+/// the Story 28-6 platform task worker, and the Story 27-16
+/// <see cref="ConventionStoreSeeder"/>)
 /// off for the test host. Each gated service still ships its public
 /// drive-once entry point (<c>SeedAsync</c>, <c>ProcessOnceAsync</c>,
 /// <c>DispatchOnceAsync</c>) so opt-in tests can exercise them
@@ -50,6 +53,14 @@ internal static class AlertHostedServiceTestExtensions
             // Story 28-6 — gate the platform task worker the same way.
             services.RemoveAll<PlatformTaskWorkerOptions>();
             services.AddSingleton(new PlatformTaskWorkerOptions
+            {
+                RunOnStartup = false,
+            });
+
+            // Story 27-16 — gate the convention system-default seeder so the
+            // WebApplicationFactory boot doesn't round-trip the DB per test.
+            services.RemoveAll<ConventionStoreSeederOptions>();
+            services.AddSingleton(new ConventionStoreSeederOptions
             {
                 RunOnStartup = false,
             });
