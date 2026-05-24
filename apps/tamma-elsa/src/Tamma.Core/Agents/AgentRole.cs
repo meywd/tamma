@@ -1,3 +1,9 @@
+// NOTE: This type lives in the Tamma.Core assembly but intentionally keeps the
+// `Tamma.Api.Services.Agents` namespace. It was moved here (Story 27-19) so the
+// Elsa workflows (Tamma.ElsaServer) can reference the taxonomy without a
+// dependency cycle through Tamma.Api. The namespace is preserved to avoid
+// churning every caller's `using`. A future cleanup story may realign the
+// namespace to Tamma.Core.Agents and relocate the tests to Tamma.Core.Tests.
 namespace Tamma.Api.Services.Agents;
 
 public enum AgentRole

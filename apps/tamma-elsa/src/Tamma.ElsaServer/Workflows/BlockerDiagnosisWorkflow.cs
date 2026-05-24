@@ -582,7 +582,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Level 3: Code Assistance. 45-minute wait. Uses implementer role.
+    /// Level 3: Code Assistance. 45-minute wait. Uses the developer role
+    /// (implement-fix) to produce working solution code.
     /// </summary>
     private static If BuildAssistanceLevel(
         Variable<Guid> sessionId,
