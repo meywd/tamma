@@ -10,6 +10,26 @@
 
 ---
 
+## ▶ EXECUTION STATUS — READ FIRST ON RESUME (updated 2026-05-24)
+
+**Branch:** `feat/wave-b`. **HEAD at last update:** `2c7c823f`. Working tree clean; full suite green (**4133 passed / 0 failed / 11 skipped**; `~Agents` filter = 143 passed).
+
+**⚠️ Environment — CRITICAL for running tests:** the `Tamma.Api.Tests` assembly boots Postgres Testcontainers via a root-namespace `[SetUpFixture]` (`ApiTestFixture`), so EVERY test in it needs Docker. This shell's user is in the `docker` group in `/etc/group` but NOT in the live session's group set, so **wrap every test run as `sg docker -c "dotnet test …"`** — plain `dotnet test` fails with a socket permission error. `dotnet build` does NOT need the wrapper. Do NOT start/stop Docker yourself (user rule); if `sg docker` stops working, ask the user.
+
+**Execution method:** subagent-driven-development — one implementer subagent per task, then a TWO-stage review (spec-compliance, then code-quality) per task with a fix→re-review loop. User wants the FULL two-stage review on every task. Build+test gate (`sg docker`) green before moving on.
+
+**Done:**
+- ✅ **Wave 0 — Story 27-15** (taxonomy foundation): `d9008e10`, `9b9c4687`, `3293d8f7`, `98950e33`, `b21b3efa`.
+- ✅ **Wave 1 — Story 27-19** (dispatch migration) + taxonomy amendment: `7fca96d9` (+4 review tokens), `32e201cd` (migrated ~22 dispatch sites; **moved taxonomy → `Tamma.Core/Agents/`**), `2c7c823f` (notes). BlockerDiagnosis + Mentorship included.
+
+**Taxonomy now:** 8 roles, **72 actions** (68 SPEC §4 + 4 review verbs: `review-feasibility`/`-testability`/`-operability`/`-scope`). Source: `apps/tamma-elsa/src/Tamma.Core/Agents/{AgentRole,AgentAction,EnumWire,RolePhaseMap}.cs` (namespace kept `Tamma.Api.Services.Agents` — see C7). Tests: `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/`.
+
+**Next — Wave 2:** **27-8** (convention EF entity + migration, per C1) and **27-18** (prompt-store taxonomy reshape) — both unblocked + independent. Then **27-16** (codegen — RESEQUENCED to here; it seeds *into* 27-8's table + 27-18's reshaped prompts, so it needs both first) → **27-17** (drift test) → **27-9** (service, C4/C5) → **27-10** (API) → **27-13** (Elsa over HTTP, C2) ∥ **27-14** (events) → **27-11**/**27-12** (UIs).
+
+**Deferred cleanup story (tracked, do later):** realign namespace `Tamma.Api.Services.Agents` → `Tamma.Core.Agents` and relocate the Agents tests `Tamma.Api.Tests` → `Tamma.Core.Tests` (~33 files, purely cosmetic).
+
+---
+
 ## ⚠️ Story-file corrections (read before dispatching ANY wave)
 
 The research pass found three places where the story files describe a codebase that doesn't exist. **These corrections override the story text.** An agent that follows the story verbatim will build the wrong thing.
@@ -25,12 +45,16 @@ Two more standing constraints from `CLAUDE.md` + the prompt-store precedent:
 - **C4 — Dual scoping is mandatory.** Every store method needs parallel single-user (`userId`) and SaaS (`…ForTenant(tenantId, …)`) variants with **distinct names** (the prompt store documents an overload-resolution hazard — do not overload, name them differently).
 - **C5 — Per-tenant DB routing.** Convention overrides live in the per-tenant DB via `ITenantDbContextFactory` / `RequireTenantId()`, exactly like `prompt_overrides` — **not** the control-plane DB.
 - **C6 — 27-15 is a clean cut, and AC#8 is reinterpreted.** The project is pre-production (`CLAUDE.md`: "No migration anxiety… all data stores can be replaced"). SPEC §4 is **not** a superset of today's 10-action matrix — it removes bare `plan`/`implement`/`triage`/`summarize` and narrows `code-review`/`refactor`/`debug`. So AC#8's literal "4 consumers behave identically" is **void**; read it as "consumers compile and pass tests **updated to the new vocabulary**." No compat shim, no deprecated-alias transition, no coupled 27-15+27-19 landing — just migrate consumers + tests and repoint/drop `LegacyPhaseAliases`. (A brief red on an intermediate WIP commit is fine on our own branch.)
+- **C7 — Taxonomy lives in `Tamma.Core/Agents/` (moved in 27-19).** `AgentRole`/`AgentAction`/`EnumWire`/`RolePhaseMap` were moved out of `Tamma.Api` because `Tamma.ElsaServer` (workflows) cannot reference `Tamma.Api` (cycle). `Tamma.Core` is the leaf assembly that ElsaServer + Activities + Api all reference. **Namespace intentionally kept `Tamma.Api.Services.Agents`** to avoid churning callers (a `// NOTE:` block sits atop each moved file). New convention-store code that needs the taxonomy references `Tamma.Core`. Resolving the namespace + test-location mismatch is the deferred cleanup story.
+- **C8 — Taxonomy was extended to 72 actions for fully-specialised panels.** Per user decision (no transitional generics), the cross-role review/triage panels emit role-specific actions: +4 review verbs `review-feasibility`(developer) / `review-testability`(tester) / `review-operability`(devops) / `review-scope`(product_owner), and `triage-defect` widened to developer. Panel dispatch uses tested helpers `RolePhaseMap.GetReviewActionForRole` / `GetTriageActionForRole` (throw for off-panel roles). The 27-16 seed codegen + 27-17 drift test must use the full 72-token set + these helper-emitted pairs.
 
 ---
 
 ## Dependency DAG & wave structure
 
 Source: `docs/stories/epic-27/README.md` dependency graph, reconciled with the corrections above (C2 adds 27-10 → 27-13).
+
+> **⚠️ Sequencing revised during execution.** The diagram below is the original dependency analysis. **27-16 (codegen) was moved OUT of Wave 1** — it seeds into 27-8's table + 27-18's reshaped prompts, so it now runs after both. Wave 1 ended up being **27-19 only + the C8 taxonomy amendment**. For the authoritative current order, see **EXECUTION STATUS** above.
 
 ```
 Wave 0:  27-15  taxonomy (AgentRole/AgentAction + RolePhaseMap rebuild)   [solo]
