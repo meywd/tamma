@@ -76,12 +76,59 @@ public class TaxonomyDriftBuildTests
     /// enumeration must find. A COVERAGE TRIPWIRE: if the reflection ever silently
     /// stops resolving dispatch inputs (e.g. an Elsa upgrade changes the Input
     /// delegate shape), the count collapses and this guard fails instead of the
-    /// test degrading into a green no-op. Observed at authoring time: 43 runtime
-    /// pairs across the assembly (panels expand to one dispatch per role). Kept
-    /// deliberately below the observed count so legitimately removing a site
-    /// doesn't trip it.
+    /// test degrading into a green no-op. Observed at authoring time: 44 runtime
+    /// pairs across the assembly (panels expand to one dispatch per role). Set to
+    /// 40 — just 4 below observed — so a legitimate single-site removal (or one
+    /// review panel losing a role) doesn't trip it, while a wholesale collapse
+    /// does. NOTE: this floor catches BULK breakage; it does NOT catch one whole
+    /// workflow's dispatches vanishing within the slack — that is the job of
+    /// <see cref="ExpectedContributingWorkflows"/> +
+    /// <see cref="EveryKnownContributingWorkflow_StillEmitsPairs"/>.
     /// </summary>
-    private const int MinExpectedDispatchPairs = 30;
+    private const int MinExpectedDispatchPairs = 40;
+
+    /// <summary>
+    /// The set of workflow type-names that each contribute ≥1 <c>(role, action)</c>
+    /// dispatch pair today (materialised OR supplemented). Derived by running the
+    /// enumeration at authoring time (44 pairs across these 14 workflows). This is
+    /// a documented EXPECTED-SUBSET floor: a known contributor silently dropping to
+    /// zero dispatch pairs (e.g. an Elsa upgrade changing a container property so
+    /// the activity-tree walk misses that workflow, or a panel collapsing) would
+    /// still clear <see cref="MinExpectedDispatchPairs"/> — but it FAILS
+    /// <see cref="EveryKnownContributingWorkflow_StillEmitsPairs"/>. The check is a
+    /// SUBSET assertion (known ⊆ discovered), not exact-equality: adding a NEW
+    /// dispatch-bearing workflow must NOT fail this test, but losing a known one
+    /// MUST. If a removal is intentional, delete its name here with a note.
+    /// </summary>
+    private static readonly IReadOnlySet<string> ExpectedContributingWorkflows = new HashSet<string>
+    {
+        "BlockerDiagnosisWorkflow",
+        "ContextGatheringWorkflow",
+        "DebuggingWorkflow",
+        "DeploymentPipelineWorkflow",
+        "MentorshipWorkflow",
+        "PlanGenerationWorkflow",
+        "PlanReviewWorkflow",
+        "ReviewFixWorkflow",
+        "TaskCreationWorkflow",
+        "TaskReviewWorkflow",
+        "TestCaseCreationWorkflow",
+        "TriageContextGatheringWorkflow",
+        "TriagePanelReviewWorkflow",
+        "TriagePODecisionWorkflow",
+    };
+
+    /// <summary>
+    /// Concrete <see cref="WorkflowBase"/> subclasses that the discovery path
+    /// CANNOT instantiate for drift introspection (no parameterless ctor / throws
+    /// on construction) and are deliberately exempted from
+    /// <see cref="EveryConcreteWorkflow_IsIntrospectableOrAllowListed"/>. EMPTY
+    /// today — every concrete workflow has a parameterless ctor. RULE: anything
+    /// added here MUST carry a written reason (e.g. "DI-only ctor, has no llm-call
+    /// dispatch — verified manually on YYYY-MM-DD"). An entry without a reason is a
+    /// silent hole in the drift coverage and defeats the guard's purpose.
+    /// </summary>
+    private static readonly IReadOnlySet<string> NonIntrospectableAllowList = new HashSet<string>();
 
     /// <summary>
     /// Dispatch sites whose Input delegate cannot be materialised in an
@@ -97,6 +144,12 @@ public class TaxonomyDriftBuildTests
         {
             // ReviewFixWorkflow: ["sessionId"] = $"…{ctx.GetInput<int>("prNumber")}".
             // Emits agentRole=developer, action=address-review-comments as constants.
+            // MANUAL-SYNC: this (role, action) pair must be kept in lockstep with the
+            // dispatch constants in ReviewFixWorkflow.cs (currently
+            // AgentRole.Developer.ToWire() / AgentAction.AddressReviewComments.ToWire()).
+            // The sync guard (NonMaterializableSupplement_StaysInSyncWithReality) only
+            // verifies the (workflow, dispatchId) KEY exists — it does NOT re-read the
+            // pair from source — so if those constants change, update this pair by hand.
             [("ReviewFixWorkflow", "DispatchFixGeneration")] = ("developer", "address-review-comments"),
         };
 
@@ -193,6 +246,73 @@ public class TaxonomyDriftBuildTests
             "these NonMaterializableSupplement entries now materialise normally and should be " +
             "removed (the reflection already covers them):" + Environment.NewLine +
             string.Join(Environment.NewLine, staleEntries));
+    }
+
+    [Test]
+    public void EveryKnownContributingWorkflow_StillEmitsPairs()
+    {
+        // PER-WORKFLOW coverage guard (complements MinExpectedDispatchPairs, which
+        // only catches BULK collapse). A single workflow's dispatches can vanish
+        // entirely — e.g. an Elsa upgrade renames a container property so the
+        // activity-tree walk misses that workflow, or a review panel collapses —
+        // while the total pair count still clears the floor inside its slack. That
+        // would silently blind the drift test to every dispatch in that workflow.
+        // Assert: every KNOWN contributor still emits ≥1 (role, action) pair, i.e.
+        // ExpectedContributingWorkflows ⊆ discovered. Subset (not exact) so adding
+        // a NEW dispatch-bearing workflow doesn't fail — but losing a known one does.
+        var discovered = EnumerateAllDispatchPairs()
+            .Select(p => p.Workflow)
+            .ToHashSet();
+
+        var vanished = ExpectedContributingWorkflows
+            .Where(w => !discovered.Contains(w))
+            .OrderBy(w => w)
+            .Select(w =>
+                $"  {w}: previously emitted llm-call dispatch pairs but now contributes none " +
+                "— discovery may be broken or the dispatch was removed; update " +
+                "ExpectedContributingWorkflows if intentional.")
+            .ToList();
+
+        vanished.Should().BeEmpty(
+            "every workflow in the known contributing set must still emit at least one " +
+            "(role, action) dispatch pair; a contributor dropping to zero hides ALL of its " +
+            "dispatch sites from the drift check while the pair-count floor's slack absorbs " +
+            "the loss. Vanished contributors:" + Environment.NewLine +
+            string.Join(Environment.NewLine, vanished));
+    }
+
+    [Test]
+    public void EveryConcreteWorkflow_IsIntrospectableOrAllowListed()
+    {
+        // DiscoverWorkflows() silently skips a concrete WorkflowBase it can't
+        // default-construct (no parameterless ctor, or Activator.CreateInstance
+        // throws). Today every concrete workflow has a parameterless ctor, but a
+        // future DI-ctor workflow carrying an ineligible dispatch pair would vanish
+        // from the drift test with NO guard tripping. Convert "silently skipped"
+        // into a LOUD failure: every concrete (non-abstract) WorkflowBase subclass
+        // in Tamma.ElsaServer must EITHER be successfully instantiated by the
+        // discovery path OR be on the documented NonIntrospectableAllowList.
+        var assembly = typeof(LlmCallWorkflow).Assembly;
+        var introspectable = DiscoverWorkflows()
+            .Select(w => w.GetType())
+            .ToHashSet();
+
+        var invisible = assembly.GetTypes()
+            .Where(t => !t.IsAbstract && typeof(WorkflowBase).IsAssignableFrom(t))
+            .Where(t => !introspectable.Contains(t) && !NonIntrospectableAllowList.Contains(t.Name))
+            .OrderBy(t => t.Name)
+            .Select(t =>
+                $"  {t.Name}: cannot be instantiated for drift introspection and is not " +
+                "allow-listed — its dispatch sites are invisible to the drift test; add a " +
+                "parameterless test ctor or allow-list it (with a written reason) in " +
+                "NonIntrospectableAllowList.")
+            .ToList();
+
+        invisible.Should().BeEmpty(
+            "every concrete WorkflowBase subclass must be instantiable by DiscoverWorkflows() " +
+            "(so its llm-call dispatch sites are checked for drift) or explicitly allow-listed. " +
+            "Non-introspectable, non-allow-listed workflows:" + Environment.NewLine +
+            string.Join(Environment.NewLine, invisible));
     }
 
     // ====================================================================
@@ -429,6 +549,11 @@ public class TaxonomyDriftBuildTests
     /// <summary>
     /// The Input delegate is <c>Func&lt;ExpressionExecutionContext,
     /// ValueTask&lt;object&gt;&gt;</c>. Unwrap the ValueTask to its result.
+    /// ASSUMPTION: the dispatch Input delegates complete SYNCHRONOUSLY (they build a
+    /// plain dictionary from constants + variable .Get(ctx) reads — no awaits), so
+    /// reading <c>.Result</c> / <c>AsTask().Result</c> never blocks or deadlocks. If
+    /// a future dispatch ever does real async work here, switch the result reads to
+    /// <c>.GetAwaiter().GetResult()</c> for a cleaner failure than a blocked .Result.
     /// </summary>
     private static object? Unwrap(object? raw)
     {
@@ -522,6 +647,11 @@ public class TaxonomyDriftBuildTests
             if (!string.IsNullOrEmpty(reference.Id)) return;
         }
         catch { return; }
+        // SAFETY BACKSTOP: if reading/assigning the Id throws and the variable ends
+        // up undeclared, the dispatch Input delegate's .Get(ctx) throws → the site
+        // falls into the non-materialisable set → NonMaterializableSupplement_StaysInSync
+        // flags it as an unlisted escapee. So a failure here can't silently pass: it
+        // surfaces as a coverage-guard failure, not a dropped dispatch pair.
 
         var idProp = typeof(MemoryBlockReference).GetProperty("Id",
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
