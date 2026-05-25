@@ -1634,7 +1634,11 @@ app.MapGet("/api/convention-templates/{key}", ConventionEndpoints.GetByKey);
 // ── Convention Store (DB-backed, Story 27-10) ──
 // Tenant CRUD + tenant-scoped resolution + registry pickers. All endpoints
 // require auth (any authed tenant member can READ; ConventionManage gates the
-// tenant override mutations). Mirrors the prompt-store registration in style.
+// tenant override mutations). Mirrors the prompt-store registration in style,
+// with one DELIBERATE difference: convention reads use AuthenticatedAny (any
+// authed tenant member) rather than SettingsView (admin/owner) because
+// conventions are per-workflow context injected into prompts — all agents
+// running a workflow need read access, not just admins (Story 27-10 spec §5).
 //
 // Route ordering (mirrors prompt store Story 27-3): the specific routes
 // (/defaults*, /resolve, /registry/*) MUST be registered BEFORE the

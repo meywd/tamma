@@ -36,17 +36,30 @@ public sealed record ConventionResolution(
 
 /// <summary>
 /// A single row in the <see cref="IConventionStore.ListAsync"/> result — the
-/// resolved convention for one taxonomy cell, plus its source tier.
+/// resolved convention for one taxonomy cell, plus its source tier and the
+/// real row metadata (id, version, enabled, updatedAt) from the winning row.
+/// Carrying these avoids the list/detail metadata disagreement that arises when
+/// callers hardcode constants (e.g. <c>Version = 1</c>) instead of surfacing
+/// the actual stored values.
 /// </summary>
 /// <param name="Role">Agent role wire string.</param>
 /// <param name="Action">Agent action wire string.</param>
 /// <param name="Body">Resolved body (tenant override if present-and-enabled, else system default).</param>
 /// <param name="Source">Which tier produced <see cref="Body"/>.</param>
+/// <param name="Id">Primary key of the winning row.</param>
+/// <param name="Enabled">Whether the winning row is enabled (always true for rows returned by
+/// <see cref="IConventionStore.ListAsync"/>, since disabled cells are omitted).</param>
+/// <param name="Version">Application-layer version counter of the winning row.</param>
+/// <param name="UpdatedAt">Last-modified timestamp of the winning row.</param>
 public sealed record ConventionSummary(
     string Role,
     string Action,
     string Body,
-    ConventionSource Source);
+    ConventionSource Source,
+    Guid Id,
+    bool Enabled,
+    int Version,
+    DateTime UpdatedAt);
 
 /// <summary>
 /// Convention store service (Story 27-9). Resolves a coding-convention body by

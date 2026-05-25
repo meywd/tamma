@@ -43,7 +43,8 @@ public sealed record ConventionResponse(
     DateTime? UpdatedAt);
 
 /// <summary>
-/// Response shape for <c>POST /api/conventions/resolve</c> — the resolved body
+/// Response shape for <c>POST /api/conventions/resolve</c> and
+/// <c>GET /api/conventions/defaults/:role/:action</c> — the resolved body
 /// for a <c>(role, action)</c> with its source tier and version.
 /// </summary>
 public sealed record ResolvedConventionResponse(

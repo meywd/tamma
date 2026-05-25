@@ -157,13 +157,15 @@ public sealed class ConventionStore : IConventionStore
                 if (overridesByCell.TryGetValue(cell, out var tenantRow))
                 {
                     result.Add(new ConventionSummary(
-                        roleWire, actionWire, tenantRow.Body, ConventionSource.Tenant));
+                        roleWire, actionWire, tenantRow.Body, ConventionSource.Tenant,
+                        tenantRow.Id, tenantRow.Enabled, tenantRow.Version, tenantRow.UpdatedAt));
                 }
                 else if (systemByCell.TryGetValue(cell, out var systemRow)
                     && systemRow.Enabled)
                 {
                     result.Add(new ConventionSummary(
-                        roleWire, actionWire, systemRow.Body, ConventionSource.System));
+                        roleWire, actionWire, systemRow.Body, ConventionSource.System,
+                        systemRow.Id, systemRow.Enabled, systemRow.Version, systemRow.UpdatedAt));
                 }
                 // A cell with neither an enabled override nor an enabled system
                 // default is a seed bug (Story 27-16); ListAsync omits it rather

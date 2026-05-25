@@ -200,6 +200,73 @@ public class ConventionStoreEndpointsTests
     }
 
     // ======================================================================
+    // CRUD lifecycle: list/detail metadata consistency (Fix 1 guard)
+    // ======================================================================
+
+    /// <summary>
+    /// Full CRUD lifecycle: upsert a tenant override → the list endpoint reports
+    /// the CORRECT version/id/source (not hardcoded constants) → delete the
+    /// override → the list falls back to system and reflects the real system
+    /// metadata. Guards the Fix-1 metadata correctness (list/detail agreement).
+    /// </summary>
+    [Test]
+    public async Task ListAll_AfterUpsert_ShowsRealVersionAndId_MatchingSingleItemGet()
+    {
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+        var admin = Principal(Guid.NewGuid(), "admin");
+
+        // 1. Create the override so it has a version bump (v1 is insert; a second
+        //    upsert will produce v2 to prove we surface real version, not hardcoded 1).
+        var req1 = new UpsertConventionRequest("V1-BODY", Enabled: true);
+        await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
+            RoleWire, ActionWire, req1, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+
+        var req2 = new UpsertConventionRequest("V2-BODY", Enabled: true);
+        await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
+            RoleWire, ActionWire, req2, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+
+        // 2. List must show isOverride:true, source:tenant, with the CORRECT version (2).
+        var listResult = await ConventionStoreEndpoints.ListAll(
+            store, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+        var (listStatus, listBody) = await ExecuteAsync(listResult);
+        listStatus.Should().Be(StatusCodes.Status200OK);
+
+        var listItems = Deserialize<List<ConventionResponse>>(listBody);
+        var listCell = listItems.Single(i => i.Role == RoleWire && i.Action == ActionWire);
+        listCell.IsOverride.Should().BeTrue();
+        listCell.Source.Should().Be("tenant");
+        listCell.Version.Should().Be(2, "list must surface real version, not hardcoded 1");
+        listCell.Id.Should().NotBeNull("list must surface real row id, not null");
+
+        // 3. Single-item GET must agree with the list on version and id.
+        var singleResult = await ConventionStoreEndpoints.GetResolved(
+            RoleWire, ActionWire, store, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+        var (singleStatus, singleBody) = await ExecuteAsync(singleResult);
+        singleStatus.Should().Be(StatusCodes.Status200OK);
+
+        var singleDto = Deserialize<ConventionResponse>(singleBody);
+        singleDto.Version.Should().Be(listCell.Version, "list and detail version must agree");
+        singleDto.Id.Should().Be(listCell.Id, "list and detail id must agree");
+
+        // 4. Delete the override → list falls back to system (source:system, isOverride:false).
+        var deleteResult = await ConventionStoreEndpoints.DeleteTenantOverride(
+            RoleWire, ActionWire, store, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+        var (deleteStatus, _) = await ExecuteAsync(deleteResult);
+        deleteStatus.Should().Be(StatusCodes.Status204NoContent);
+
+        var listAfterDelete = await ConventionStoreEndpoints.ListAll(
+            store, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+        var (_, listAfterBody) = await ExecuteAsync(listAfterDelete);
+        var listAfterItems = Deserialize<List<ConventionResponse>>(listAfterBody);
+
+        var fallbackCell = listAfterItems.Single(i => i.Role == RoleWire && i.Action == ActionWire);
+        fallbackCell.IsOverride.Should().BeFalse("after delete, cell falls back to system");
+        fallbackCell.Source.Should().Be("system");
+        fallbackCell.Id.Should().NotBeNull("system default has a real id too");
+    }
+
+    // ======================================================================
     // Get tenant-override vs system fallback
     // ======================================================================
 

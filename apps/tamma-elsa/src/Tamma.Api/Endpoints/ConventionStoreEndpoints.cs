@@ -508,15 +508,23 @@ public static class ConventionStoreEndpoints
     /// single-user mode uses the sole user's personal tenant (also the ambient
     /// tenant — EnsurePersonalTenantMiddleware binds it). Returns null only when
     /// no ambient tenant is set (resolution then targets system defaults).
+    ///
+    /// <para><b>Note:</b> <see cref="RequireTenantScope"/> is intentionally
+    /// identical in implementation — the two methods are distinct names so
+    /// read paths and write paths read intentionally at their call sites.
+    /// The <paramref name="modeProvider"/> parameter is retained for future
+    /// mode-aware scoping; today both modes derive the tenant from the ambient
+    /// context and the parameter is unused.</para>
     /// </summary>
     private static Guid? ResolveTenantScope(
         ITenantContext tenantContext, ITammaModeProvider modeProvider)
         => tenantContext.TenantId;
 
     /// <summary>
-    /// The tenant id to scope WRITES against (tenant overrides). Same source as
-    /// <see cref="ResolveTenantScope"/>; named distinctly so the write paths
-    /// read intentionally.
+    /// The tenant id to scope WRITES against (tenant overrides). Same source and
+    /// same implementation as <see cref="ResolveTenantScope"/>; named distinctly
+    /// so the write paths read intentionally. See that method's doc-comment for
+    /// the note on <paramref name="modeProvider"/> retention.
     /// </summary>
     private static Guid? RequireTenantScope(
         ITenantContext tenantContext, ITammaModeProvider modeProvider)
@@ -531,15 +539,15 @@ public static class ConventionStoreEndpoints
     };
 
     private static ConventionResponse ToResponse(ConventionSummary s) => new(
-        Id: null,
+        Id: s.Id,
         Role: s.Role,
         Action: s.Action,
         Body: s.Body,
-        Enabled: true,
-        Version: 1,
+        Enabled: s.Enabled,
+        Version: s.Version,
         IsOverride: s.Source == ConventionSource.Tenant,
         Source: SourceLabel(s.Source),
-        UpdatedAt: null);
+        UpdatedAt: s.UpdatedAt);
 
     private static IResult NotFound(TammaError ex)
         => Results.NotFound(new { error = ex.Message, code = ex.Code });
