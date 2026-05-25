@@ -177,6 +177,66 @@ public sealed class ConventionStore : IConventionStore
             .ToList();
     }
 
+    // ------------------------------------------------------------------
+    // System-default admin CRUD + reset (Story 27-10 enablement). Operate ONLY
+    // on system-default rows (tenant_id IS NULL); the repository's
+    // tenant_id IS NULL discriminator keeps these off tenant overrides — the
+    // mutation-safe mirror-image of UpsertAsync/DeleteAsync above.
+    // ------------------------------------------------------------------
+
+    public async Task UpsertSystemDefaultAsync(
+        AgentRole role, AgentAction action, string body, Guid adminUserId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(body);
+
+        await _repository
+            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), body, adminUserId, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task DeleteSystemDefaultAsync(
+        AgentRole role, AgentAction action, CancellationToken ct)
+    {
+        await _repository
+            .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task ResetSystemDefaultAsync(
+        AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct)
+    {
+        // Source the canonical baseline from the SAME code spec the seeder uses
+        // (ConventionSeedSpecs) — a reset restores the system default to exactly
+        // what a fresh seed would have written. DefaultBodyFor validates the
+        // pair is a taxonomy cell and throws ArgumentException if not; rethrow
+        // as a structured TammaError so the API boundary (Story 27-10) returns a
+        // clean error rather than a 500.
+        string baseline;
+        try
+        {
+            baseline = ConventionSeedSpecs.DefaultBodyFor(role, action);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new TammaError(
+                "CONVENTION_NOT_A_TAXONOMY_CELL",
+                $"Cannot reset (role='{role.ToWire()}', action='{action.ToWire()}'): "
+                + "it is not a valid taxonomy cell, so it has no code-baseline "
+                + "system default to reset to.",
+                new Dictionary<string, object?>
+                {
+                    ["role"] = role.ToWire(),
+                    ["action"] = action.ToWire(),
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.Medium);
+        }
+
+        await _repository
+            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), baseline, adminUserId, ct)
+            .ConfigureAwait(false);
+    }
+
     private static TammaError NoConventionError(string role, string action, Guid? tenantId)
         => new(
             "CONVENTION_NOT_FOUND",

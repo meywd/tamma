@@ -68,6 +68,34 @@ public static class ConventionSeedSpecs
     }
 
     /// <summary>
+    /// The code-baseline default body for a single typed <c>(role, action)</c>
+    /// taxonomy cell — the canonical source the admin <c>ResetSystemDefaultAsync</c>
+    /// re-applies (it restores a system default to exactly what a fresh seed
+    /// would have written). Validates the pair against
+    /// <see cref="RolePhaseMap.IsRoleEligibleForPhase"/> so a non-taxonomy cell
+    /// (which has no baseline and is never seeded) is rejected rather than
+    /// silently fabricating a body.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <c>(role, action)</c> is not a valid taxonomy cell — such a
+    /// pair has no system default to reset to.
+    /// </exception>
+    public static string DefaultBodyFor(AgentRole role, AgentAction action)
+    {
+        var roleWire = role.ToWire();
+        var actionWire = action.ToWire();
+        if (!RolePhaseMap.IsRoleEligibleForPhase(actionWire, roleWire))
+        {
+            throw new ArgumentException(
+                $"({roleWire}, {actionWire}) is not a taxonomy cell — it has no "
+                + "seeded system default and therefore no baseline to reset to.",
+                nameof(action));
+        }
+
+        return DefaultBody(roleWire, actionWire);
+    }
+
+    /// <summary>
     /// Transitional default convention body for a <c>(role, action)</c> cell
     /// (SPEC §3.5). A single parameterised template — honest, non-empty, and
     /// clearly marked as a system default a tenant admin should replace. NOT a

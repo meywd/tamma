@@ -453,4 +453,221 @@ public class ConventionStoreTests
         cell.Source.Should().Be(ConventionSource.System);
         cell.Body.Should().NotBe("DISABLED-IN-LIST");
     }
+
+    // ------------------------------------------------------------------
+    // System-default admin CRUD + reset (Story 27-10 enablement).
+    //
+    // These mutate the SYSTEM-DEFAULT tier (tenant_id IS NULL) and MUST be the
+    // mutation-safe mirror-image of the tenant methods: they never touch tenant
+    // overrides, and the tenant methods never touch system defaults.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task UpsertSystemDefault_UpdatesSeededRow_BumpsVersion_StampsAdmin()
+    {
+        var store = NewStore();
+        var admin = Guid.NewGuid();
+        var seededBody = ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire);
+
+        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED DEFAULT", admin, default);
+
+        await using var db = NewContext();
+        var row = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire);
+
+        row.Body.Should().Be("ADMIN-MANAGED DEFAULT").And.NotBe(seededBody);
+        row.Version.Should().Be(2, "Version bumps when editing the seeded system default");
+        row.UpdatedBy.Should().Be(admin);
+        row.CreatedBy.Should().Be(admin,
+            "the seeded row had a null creator; the first admin edit stamps CreatedBy");
+        row.TenantId.Should().BeNull("it remains a system default");
+
+        // Resolution (no tenant override) returns the admin-managed body.
+        var resolved = await store.ResolveAsync(Guid.NewGuid(), Role, Action, default);
+        resolved.Source.Should().Be(ConventionSource.System);
+        resolved.Body.Should().Be("ADMIN-MANAGED DEFAULT");
+    }
+
+    [Test]
+    public async Task UpsertSystemDefault_InsertsRow_WhenNoSystemDefaultExists()
+    {
+        var store = NewStore();
+        var admin = Guid.NewGuid();
+
+        // Remove the seeded system default first, then upsert fresh.
+        await store.DeleteSystemDefaultAsync(Role, Action, default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "FRESH-DEFAULT", admin, default);
+
+        await using var db = NewContext();
+        var row = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire);
+        row.Body.Should().Be("FRESH-DEFAULT");
+        row.Version.Should().Be(1, "a freshly-inserted system default starts at Version 1");
+        row.CreatedBy.Should().Be(admin);
+        row.UpdatedBy.Should().Be(admin);
+    }
+
+    [Test]
+    public async Task UpsertSystemDefault_RejectsEmptyBody()
+    {
+        var store = NewStore();
+
+        var act = async () =>
+            await store.UpsertSystemDefaultAsync(Role, Action, "  ", Guid.NewGuid(), default);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Test]
+    public async Task DeleteSystemDefault_RemovesSystemDefault()
+    {
+        var store = NewStore();
+
+        await store.DeleteSystemDefaultAsync(Role, Action, default);
+
+        await using var db = NewContext();
+        (await db.Conventions.IgnoreQueryFilters()
+            .CountAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire))
+            .Should().Be(0, "the system default is deleted");
+
+        // With no system default and no tenant override, resolution fails loud.
+        var act = async () => await store.ResolveAsync(Guid.NewGuid(), Role, Action, default);
+        var ex = await act.Should().ThrowAsync<TammaError>();
+        ex.Which.Code.Should().Be("CONVENTION_NOT_FOUND");
+    }
+
+    [Test]
+    public async Task ResetSystemDefault_ReappliesCodeBaseline_OverAdminEdit()
+    {
+        var store = NewStore();
+        var admin = Guid.NewGuid();
+        var baseline = ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire);
+
+        // Admin edits the system default away from the baseline...
+        await store.UpsertSystemDefaultAsync(Role, Action, "DRIFTED ADMIN BODY", admin, default);
+        await using (var verify = NewContext())
+        {
+            (await verify.Conventions.IgnoreQueryFilters()
+                .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire))
+                .Body.Should().Be("DRIFTED ADMIN BODY");
+        }
+
+        // ...then resets it back to the code baseline.
+        await store.ResetSystemDefaultAsync(Role, Action, admin, default);
+
+        await using var db = NewContext();
+        var row = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire);
+        row.Body.Should().Be(baseline, "reset restores the ConventionSeedSpecs code baseline");
+        row.Version.Should().Be(3, "upsert(v2) → reset-as-upsert(v3) both bump Version");
+    }
+
+    [Test]
+    public async Task ResetSystemDefault_NonTaxonomyCell_ThrowsTammaError()
+    {
+        var store = NewStore();
+
+        // developer does not own 'deploy' (devops-only) → not a taxonomy cell,
+        // so there is no code baseline to reset to.
+        var act = async () =>
+            await store.ResetSystemDefaultAsync(Role, UnseededAction, Guid.NewGuid(), default);
+
+        var ex = await act.Should().ThrowAsync<TammaError>();
+        ex.Which.Code.Should().Be("CONVENTION_NOT_A_TAXONOMY_CELL");
+    }
+
+    // -- Mutation safety: system-default ops never touch tenant overrides ------
+
+    [Test]
+    public async Task UpsertSystemDefault_DoesNotTouchTenantOverride()
+    {
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-BODY", Guid.NewGuid(), default);
+
+        await store.UpsertSystemDefaultAsync(Role, Action, "NEW-SYSTEM-BODY", Guid.NewGuid(), default);
+
+        await using var db = NewContext();
+        var tenantRow = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == tenantId && c.Role == RoleWire && c.Action == ActionWire);
+        tenantRow.Body.Should().Be("TENANT-BODY", "tenant override is untouched by a system-default upsert");
+        tenantRow.Version.Should().Be(1);
+
+        // The tenant override still wins resolution.
+        var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
+        resolved.Source.Should().Be(ConventionSource.Tenant);
+        resolved.Body.Should().Be("TENANT-BODY");
+    }
+
+    [Test]
+    public async Task DeleteSystemDefault_DoesNotTouchTenantOverride()
+    {
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-SURVIVES", Guid.NewGuid(), default);
+
+        await store.DeleteSystemDefaultAsync(Role, Action, default);
+
+        await using var db = NewContext();
+        (await db.Conventions.IgnoreQueryFilters()
+            .CountAsync(c => c.TenantId == tenantId && c.Role == RoleWire && c.Action == ActionWire))
+            .Should().Be(1, "tenant override survives a system-default delete");
+        (await db.Conventions.IgnoreQueryFilters()
+            .CountAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire))
+            .Should().Be(0, "only the system default was deleted");
+
+        var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
+        resolved.Source.Should().Be(ConventionSource.Tenant);
+        resolved.Body.Should().Be("TENANT-SURVIVES");
+    }
+
+    [Test]
+    public async Task ResetSystemDefault_DoesNotTouchTenantOverride()
+    {
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-KEEP", Guid.NewGuid(), default);
+
+        await store.ResetSystemDefaultAsync(Role, Action, Guid.NewGuid(), default);
+
+        await using var db = NewContext();
+        var tenantRow = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == tenantId && c.Role == RoleWire && c.Action == ActionWire);
+        tenantRow.Body.Should().Be("TENANT-KEEP", "tenant override is untouched by a system-default reset");
+        tenantRow.Version.Should().Be(1);
+    }
+
+    // -- Mutation safety (mirror): tenant ops never touch system defaults ------
+    // (Upsert/Delete tenant-vs-system already covered above; this asserts the
+    //  reverse direction explicitly against the system-default ROW VALUES.)
+
+    [Test]
+    public async Task TenantUpsertAndDelete_DoNotTouchAdminManagedSystemDefault()
+    {
+        var store = NewStore();
+        var tenantId = Guid.NewGuid();
+
+        // Admin manages the system default to a known value first.
+        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED", Guid.NewGuid(), default);
+
+        // A full tenant override lifecycle must leave that system default intact.
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-V1", Guid.NewGuid(), default);
+        await store.DeleteAsync(tenantId, Role, Action, default);
+
+        await using var db = NewContext();
+        var systemRow = await db.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire);
+        systemRow.Body.Should().Be("ADMIN-MANAGED",
+            "tenant upsert/delete must never mutate the admin-managed system default");
+        systemRow.Version.Should().Be(2, "system default version unchanged by tenant ops (still the admin's v2)");
+
+        // After the tenant override is gone, resolution falls back to the
+        // admin-managed system default (not the original code baseline).
+        var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
+        resolved.Source.Should().Be(ConventionSource.System);
+        resolved.Body.Should().Be("ADMIN-MANAGED");
+    }
 }

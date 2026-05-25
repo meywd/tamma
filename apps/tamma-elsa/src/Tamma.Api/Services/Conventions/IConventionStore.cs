@@ -111,4 +111,47 @@ public interface IConventionStore
     /// <see cref="ConventionSummary"/> per <c>RolePhaseMap</c> cell.
     /// </summary>
     Task<IReadOnlyList<ConventionSummary>> ListAsync(Guid? tenantId, CancellationToken ct);
+
+    // ------------------------------------------------------------------
+    // System-default admin CRUD + reset (Story 27-10 enablement).
+    //
+    // Per the product decision (2026-05-25), convention system defaults are
+    // DB-managed at runtime by a PLATFORM ADMIN — distinct from the
+    // tenant-override surface above. These methods operate ONLY on
+    // system-default rows (tenant_id IS NULL) and are named distinct from the
+    // tenant-override methods (NOT overloads) so the two tiers can never be
+    // confused at a call site. They are the mutation-safe mirror-image of the
+    // tenant methods: they NEVER touch tenant-override rows.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Create/update the SYSTEM-DEFAULT convention (<c>tenant_id IS NULL</c>)
+    /// for <c>(role, action)</c>. Platform-admin only (authz enforced at the
+    /// API boundary — Story 27-10). Validates <paramref name="body"/> non-empty,
+    /// stamps <paramref name="adminUserId"/> as the updater (and creator on
+    /// insert / first edit of a seeded row), and bumps <c>Version</c> on update.
+    /// NEVER mutates a tenant override.
+    /// </summary>
+    Task UpsertSystemDefaultAsync(
+        AgentRole role, AgentAction action, string body, Guid adminUserId, CancellationToken ct);
+
+    /// <summary>
+    /// Delete the SYSTEM-DEFAULT convention (<c>tenant_id IS NULL</c>) for
+    /// <c>(role, action)</c>. Platform-admin only. A no-op when no system
+    /// default exists. NEVER deletes a tenant override.
+    /// </summary>
+    Task DeleteSystemDefaultAsync(
+        AgentRole role, AgentAction action, CancellationToken ct);
+
+    /// <summary>
+    /// Reset the SYSTEM-DEFAULT convention for <c>(role, action)</c> back to the
+    /// code baseline (<see cref="ConventionSeedSpecs.DefaultBodyFor"/>) —
+    /// re-applies exactly what a fresh seed would write, overwriting any admin
+    /// edit. This is the EXPLICIT reset source the seeder no longer provides on
+    /// startup. Platform-admin only. Throws <see cref="Tamma.Core.TammaError"/>
+    /// (<c>CONVENTION_NOT_A_TAXONOMY_CELL</c>) when <c>(role, action)</c> is not
+    /// a taxonomy cell — such a pair has no baseline to reset to.
+    /// </summary>
+    Task ResetSystemDefaultAsync(
+        AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct);
 }

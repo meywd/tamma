@@ -154,4 +154,80 @@ public class ConventionRepository(
             .Where(c => c.TenantId == default(Guid?))
             .ToListAsync(ct);
     }
+
+    public async Task<Convention> UpsertSystemDefaultAsync(
+        string role, string action, string body, Guid? updatedBy, CancellationToken ct)
+    {
+        var dbTenant = RequireTenantId();
+        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+
+        // NOTE: check-then-insert — concurrent same-key (NULL, role, action)
+        // upserts surface as a Postgres unique-violation (23505) via the
+        // NULLS NOT DISTINCT unique index (Story 27-8); consistent with the
+        // tenant upsert on the low-concurrency admin-edit path.
+
+        // Match ONLY the system-default row (tenant_id IS NULL) — tenant
+        // overrides (tenant_id NOT NULL) are never mutated here (mirror-image
+        // of UpsertTenantOverrideAsync's tenant_id = @tenantId discriminator).
+        var existing = await db.Conventions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                c => c.TenantId == default(Guid?) && c.Role == role && c.Action == action,
+                ct);
+
+        var now = DateTime.UtcNow;
+        if (existing is not null)
+        {
+            existing.Body = body;
+            existing.Version += 1;
+            existing.Enabled = true;
+            existing.UpdatedAt = now;
+            existing.UpdatedBy = updatedBy;
+            // Seeded system defaults may have a null creator (the seeder leaves
+            // CreatedBy null); stamp the editing admin as the creator the first
+            // time one touches the row, never overwriting a real creator.
+            existing.CreatedBy ??= updatedBy;
+            await db.SaveChangesAsync(ct);
+            return existing;
+        }
+
+        var row = new Convention
+        {
+            // Set Id client-side so EF InMemory (test shim) doesn't collide on
+            // the Guid.Empty default; production Postgres applies
+            // gen_random_uuid() anyway (strict superset — mirrors the seeder).
+            Id = Guid.NewGuid(),
+            TenantId = null, // system default
+            Role = role,
+            Action = action,
+            Body = body,
+            Version = 1,
+            Enabled = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+            CreatedBy = updatedBy,
+            UpdatedBy = updatedBy,
+        };
+        db.Conventions.Add(row);
+        await db.SaveChangesAsync(ct);
+        return row;
+    }
+
+    public async Task<bool> DeleteSystemDefaultAsync(
+        string role, string action, CancellationToken ct)
+    {
+        var dbTenant = RequireTenantId();
+        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+
+        // tenant_id IS NULL discriminator keeps DELETE off tenant overrides
+        // (mirror-image of DeleteTenantOverrideAsync).
+        var row = await db.Conventions.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                c => c.TenantId == default(Guid?) && c.Role == role && c.Action == action,
+                ct);
+        if (row is null) return false;
+
+        db.Conventions.Remove(row);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 }

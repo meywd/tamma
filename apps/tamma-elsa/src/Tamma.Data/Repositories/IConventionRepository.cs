@@ -69,4 +69,39 @@ public interface IConventionRepository
     /// service to build the full resolved list across all taxonomy cells.
     /// </summary>
     Task<IReadOnlyList<Convention>> ListSystemDefaultsAsync(CancellationToken ct);
+
+    // ------------------------------------------------------------------
+    // System-default admin CRUD (Story 27-10 enablement). These operate on the
+    // SYSTEM-DEFAULT tier (tenant_id IS NULL) and are deliberately named
+    // distinct from the tenant-override methods (NOT overloads) so a caller can
+    // never confuse the two tiers — mirrors the prompt-store
+    // overload-resolution-hazard convention. They are the MUTATION-SAFE
+    // mirror-image of the tenant methods: they NEVER touch tenant-override rows
+    // (tenant_id NOT NULL), just as the tenant methods never touch
+    // system defaults.
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Insert-or-update the SYSTEM-DEFAULT row (<c>tenant_id IS NULL</c>) for
+    /// <c>(role, action)</c>. Operates ONLY on the system-default tier — tenant
+    /// overrides (<c>tenant_id NOT NULL</c>) are never touched. Bumps
+    /// <see cref="Convention.Version"/> on update and sets
+    /// <see cref="Convention.UpdatedBy"/> (and <see cref="Convention.CreatedBy"/>
+    /// when inserting, or when an existing seeded row still has a null creator)
+    /// to <paramref name="updatedBy"/> when provided. Returns the persisted
+    /// entity. Same check-then-insert pattern as the tenant upsert — a
+    /// concurrent same-key insert surfaces as a Postgres unique-violation
+    /// (23505) via the <c>NULLS NOT DISTINCT</c> unique index.
+    /// </summary>
+    Task<Convention> UpsertSystemDefaultAsync(
+        string role, string action, string body, Guid? updatedBy, CancellationToken ct);
+
+    /// <summary>
+    /// Delete the SYSTEM-DEFAULT row (<c>tenant_id IS NULL</c>) for
+    /// <c>(role, action)</c>. Operates ONLY on the system-default tier — tenant
+    /// overrides are never deleted. Returns false when no system default
+    /// matched.
+    /// </summary>
+    Task<bool> DeleteSystemDefaultAsync(
+        string role, string action, CancellationToken ct);
 }
