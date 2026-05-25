@@ -32,6 +32,15 @@ public static class Permissions
         // signed-up user is auto-`owner` of their personal tenant, so the new
         // permission still grants them edit access without a code-path split.
         ["prompts:manage"] = ["admin", "owner"],
+        // Story 27-10 — convention store tenant-admin path. Mirrors
+        // `prompts:manage`: CLAUDE.md "Prompt Store Architecture / RBAC" (the
+        // convention store follows the same tenant-scoped RBAC) requires
+        // PUT/DELETE of a tenant override to be reachable by `tenant_owner` OR
+        // `tenant_admin` (not member). The owner-only `settings:manage` would
+        // 403 every tenant_admin, so the dedicated `conventions:manage`
+        // permission grants admin+owner reach. Single-user mode is unaffected —
+        // every signed-up user is auto-`owner` of their personal tenant.
+        ["conventions:manage"] = ["admin", "owner"],
         // Story 31-9 — onboarding platform picker / connect. The
         // existing `settings:manage` permission is owner-only and
         // would 403 every tenant_admin trying to wire a platform

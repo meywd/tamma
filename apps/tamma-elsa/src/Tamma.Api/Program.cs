@@ -966,6 +966,18 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("prompts:manage"));
         });
+        // Story 27-10 — Convention Store tenant-admin policy. Mirrors
+        // PromptManage exactly: tenant PUT/DELETE of a convention override must
+        // be reachable by tenant_owner OR tenant_admin (admin+owner here);
+        // member-role callers hit 403. SettingsManage is owner-only and would
+        // 403 every tenant_admin, so the dedicated ConventionManage gate is used
+        // for the tenant override mutations. The /api/admin/conventions/* system
+        // -default routes use PlatformOwnerAccess instead (platform-admin only).
+        options.AddPolicy("ConventionManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("conventions:manage"));
+        });
         // Story 31-9 — onboarding platform picker / connect. CLAUDE.md
         // "Operating Modes" requires the same admin+owner reach as
         // PromptManage so tenant admins (not just owners) can wire
@@ -1052,7 +1064,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "PlatformsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -1614,8 +1626,50 @@ prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireA
 prompts.MapPost("/{role}/{action}/render", PromptEndpoints.RenderPrompt);
 
 // ── Convention Templates (no auth) ──
+// Legacy starter-template catalogue (Story 27 prep). LEFT UNCHANGED for
+// backward compat — distinct surface from the DB-backed convention store below.
 app.MapGet("/api/convention-templates", ConventionEndpoints.ListAll);
 app.MapGet("/api/convention-templates/{key}", ConventionEndpoints.GetByKey);
+
+// ── Convention Store (DB-backed, Story 27-10) ──
+// Tenant CRUD + tenant-scoped resolution + registry pickers. All endpoints
+// require auth (any authed tenant member can READ; ConventionManage gates the
+// tenant override mutations). Mirrors the prompt-store registration in style.
+//
+// Route ordering (mirrors prompt store Story 27-3): the specific routes
+// (/defaults*, /resolve, /registry/*) MUST be registered BEFORE the
+// parameterized /{role}/{action} so a literal segment like "resolve" is not
+// swallowed by the {role} route.
+//
+// Rate limiting: the prompt-store endpoints do NOT apply per-endpoint rate
+// limiting (the /api/prompts group carries no RequireRateLimiting), so for
+// consistency the convention store does the same here rather than inventing a
+// bespoke per-tenant limiter. The story's GET 100/min / write 30/min / resolve
+// 300/min targets are tracked as a deferred item (would reuse the existing
+// AddFixedWindowLimiter policies in Program.cs once the prompt store adopts
+// them too).
+var conventions = app.MapGroup("/api/conventions").RequireAuthorization("AuthenticatedAny");
+conventions.MapGet("/", ConventionStoreEndpoints.ListAll);
+// Specific routes first — defaults, resolve, registry.
+conventions.MapGet("/defaults", ConventionStoreEndpoints.ListSystemDefaults);
+conventions.MapGet("/defaults/{role}/{action}", ConventionStoreEndpoints.GetSystemDefault);
+conventions.MapPost("/resolve", ConventionStoreEndpoints.Resolve);
+conventions.MapGet("/registry/roles", ConventionStoreEndpoints.RegistryRoles);
+conventions.MapGet("/registry/actions", ConventionStoreEndpoints.RegistryActions);
+conventions.MapGet("/registry/role-actions", ConventionStoreEndpoints.RegistryRoleActions);
+// Parameterized routes last. Tenant override mutations gated by ConventionManage
+// (tenant_owner/tenant_admin; member → 403). Reads are any authed member.
+conventions.MapGet("/{role}/{action}", ConventionStoreEndpoints.GetResolved);
+conventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertTenantOverride).RequireAuthorization("ConventionManage");
+conventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteTenantOverride).RequireAuthorization("ConventionManage");
+
+// ── Convention Store — system-default admin (platform-admin only) ──
+// PlatformOwnerAccess matches the prompt/other admin routes' platform-admin
+// gate. Non-platform-admin → 403.
+var adminConventions = app.MapGroup("/api/admin/conventions").RequireAuthorization("PlatformOwnerAccess");
+adminConventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertSystemDefault);
+adminConventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteSystemDefault);
+adminConventions.MapPost("/{role}/{action}/reset", ConventionStoreEndpoints.ResetSystemDefault);
 
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
