@@ -58,7 +58,7 @@ public class ConventionRepository(
     }
 
     public async Task<Convention> UpsertTenantOverrideAsync(
-        Guid tenantId, string role, string action, string body, Guid userId, CancellationToken ct)
+        Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
@@ -83,7 +83,9 @@ public class ConventionRepository(
         {
             existing.Body = body;
             existing.Version += 1;
-            existing.Enabled = true;
+            // Story 27-10 — honour the caller's enabled flag on EDIT so a tenant
+            // can disable its override (resolution then falls through to system).
+            existing.Enabled = enabled;
             existing.UpdatedAt = now;
             existing.UpdatedBy = userId;
             await db.SaveChangesAsync(ct);
@@ -101,7 +103,7 @@ public class ConventionRepository(
             Action = action,
             Body = body,
             Version = 1,
-            Enabled = true,
+            Enabled = enabled,
             CreatedAt = now,
             UpdatedAt = now,
             CreatedBy = userId,
@@ -156,7 +158,7 @@ public class ConventionRepository(
     }
 
     public async Task<Convention> UpsertSystemDefaultAsync(
-        string role, string action, string body, Guid? updatedBy, CancellationToken ct)
+        string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct)
     {
         var dbTenant = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
@@ -179,7 +181,10 @@ public class ConventionRepository(
         {
             existing.Body = body;
             existing.Version += 1;
-            existing.Enabled = true;
+            // Story 27-10 — honour the caller's enabled flag on EDIT so a
+            // platform-admin can disable a system default (the reset path passes
+            // enabled: true for a canonical restore).
+            existing.Enabled = enabled;
             existing.UpdatedAt = now;
             existing.UpdatedBy = updatedBy;
             // Seeded system defaults may have a null creator (the seeder leaves
@@ -201,7 +206,7 @@ public class ConventionRepository(
             Action = action,
             Body = body,
             Version = 1,
-            Enabled = true,
+            Enabled = enabled,
             CreatedAt = now,
             UpdatedAt = now,
             CreatedBy = updatedBy,

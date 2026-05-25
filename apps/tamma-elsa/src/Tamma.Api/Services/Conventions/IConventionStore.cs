@@ -86,10 +86,12 @@ public interface IConventionStore
     /// <summary>
     /// Create/update a tenant override (AC2). Operates ONLY on tenant-override
     /// rows (<c>tenant_id = @tenantId</c>); never mutates system defaults. Sets
-    /// <c>CreatedBy</c> / <c>UpdatedBy = userId</c> and bumps <c>Version</c> on
-    /// update.
+    /// <c>CreatedBy</c> / <c>UpdatedBy = userId</c>, persists
+    /// <paramref name="enabled"/> on both insert and update (Story 27-10 — a
+    /// tenant edit must be able to disable an override without silently
+    /// re-enabling it), and bumps <c>Version</c> on update.
     /// </summary>
-    Task UpsertAsync(Guid tenantId, AgentRole role, AgentAction action, string body, Guid userId, CancellationToken ct);
+    Task UpsertAsync(Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct);
 
     /// <summary>
     /// Delete a tenant override (AC2). Operates ONLY on tenant-override rows;
@@ -128,12 +130,15 @@ public interface IConventionStore
     /// Create/update the SYSTEM-DEFAULT convention (<c>tenant_id IS NULL</c>)
     /// for <c>(role, action)</c>. Platform-admin only (authz enforced at the
     /// API boundary — Story 27-10). Validates <paramref name="body"/> non-empty,
-    /// stamps <paramref name="adminUserId"/> as the updater (and creator on
-    /// insert / first edit of a seeded row), and bumps <c>Version</c> on update.
-    /// NEVER mutates a tenant override.
+    /// persists <paramref name="enabled"/> on both insert and update (Story
+    /// 27-10 — a platform-admin edit must be able to disable a default;
+    /// <see cref="ResetSystemDefaultAsync"/> passes <c>enabled: true</c> for a
+    /// canonical restore), stamps <paramref name="adminUserId"/> as the updater
+    /// (and creator on insert / first edit of a seeded row), and bumps
+    /// <c>Version</c> on update. NEVER mutates a tenant override.
     /// </summary>
     Task UpsertSystemDefaultAsync(
-        AgentRole role, AgentAction action, string body, Guid adminUserId, CancellationToken ct);
+        AgentRole role, AgentAction action, string body, bool enabled, Guid adminUserId, CancellationToken ct);
 
     /// <summary>
     /// Delete the SYSTEM-DEFAULT convention (<c>tenant_id IS NULL</c>) for

@@ -56,14 +56,14 @@ public sealed class ConventionStore : IConventionStore
     }
 
     public async Task UpsertAsync(
-        Guid tenantId, AgentRole role, AgentAction action, string body, Guid userId, CancellationToken ct)
+        Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
         await _repository
-            .UpsertTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), body, userId, ct)
+            .UpsertTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), body, enabled, userId, ct)
             .ConfigureAwait(false);
     }
 
@@ -185,12 +185,12 @@ public sealed class ConventionStore : IConventionStore
     // ------------------------------------------------------------------
 
     public async Task UpsertSystemDefaultAsync(
-        AgentRole role, AgentAction action, string body, Guid adminUserId, CancellationToken ct)
+        AgentRole role, AgentAction action, string body, bool enabled, Guid adminUserId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
         await _repository
-            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), body, adminUserId, ct)
+            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), body, enabled, adminUserId, ct)
             .ConfigureAwait(false);
     }
 
@@ -232,8 +232,10 @@ public sealed class ConventionStore : IConventionStore
                 severity: TammaErrorSeverity.Medium);
         }
 
+        // A reset is a CANONICAL restore — force enabled:true so a previously
+        // disabled system default comes back live (Story 27-10).
         await _repository
-            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), baseline, adminUserId, ct)
+            .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), baseline, enabled: true, adminUserId, ct)
             .ConfigureAwait(false);
     }
 

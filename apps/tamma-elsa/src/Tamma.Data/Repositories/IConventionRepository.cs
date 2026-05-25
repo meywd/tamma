@@ -41,11 +41,14 @@ public interface IConventionRepository
     /// Upsert a tenant-override row. Operates ONLY on the tenant tier
     /// (<c>tenant_id = @tenantId</c>) — system defaults (<c>tenant_id IS NULL</c>)
     /// are never touched. Sets <see cref="Convention.CreatedBy"/> /
-    /// <see cref="Convention.UpdatedBy"/> to <paramref name="userId"/> and bumps
+    /// <see cref="Convention.UpdatedBy"/> to <paramref name="userId"/>, sets
+    /// <see cref="Convention.Enabled"/> to <paramref name="enabled"/> on both
+    /// insert and update (Story 27-10 — a tenant edit must be able to disable an
+    /// override without silently re-enabling it), and bumps
     /// <see cref="Convention.Version"/> on update. Returns the persisted entity.
     /// </summary>
     Task<Convention> UpsertTenantOverrideAsync(
-        Guid tenantId, string role, string action, string body, Guid userId, CancellationToken ct);
+        Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct);
 
     /// <summary>
     /// Delete a tenant-override row. Operates ONLY on the tenant tier — system
@@ -84,7 +87,11 @@ public interface IConventionRepository
     /// <summary>
     /// Insert-or-update the SYSTEM-DEFAULT row (<c>tenant_id IS NULL</c>) for
     /// <c>(role, action)</c>. Operates ONLY on the system-default tier — tenant
-    /// overrides (<c>tenant_id NOT NULL</c>) are never touched. Bumps
+    /// overrides (<c>tenant_id NOT NULL</c>) are never touched. Sets
+    /// <see cref="Convention.Enabled"/> to <paramref name="enabled"/> on both
+    /// insert and update (Story 27-10 — a platform-admin edit must be able to
+    /// disable a system default without silently re-enabling it; the reset path
+    /// passes <c>enabled: true</c> for a canonical restore). Bumps
     /// <see cref="Convention.Version"/> on update and sets
     /// <see cref="Convention.UpdatedBy"/> (and <see cref="Convention.CreatedBy"/>
     /// when inserting, or when an existing seeded row still has a null creator)
@@ -94,7 +101,7 @@ public interface IConventionRepository
     /// (23505) via the <c>NULLS NOT DISTINCT</c> unique index.
     /// </summary>
     Task<Convention> UpsertSystemDefaultAsync(
-        string role, string action, string body, Guid? updatedBy, CancellationToken ct);
+        string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct);
 
     /// <summary>
     /// Delete the SYSTEM-DEFAULT row (<c>tenant_id IS NULL</c>) for

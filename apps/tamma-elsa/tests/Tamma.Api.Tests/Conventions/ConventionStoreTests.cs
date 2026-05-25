@@ -146,7 +146,7 @@ public class ConventionStoreTests
         var tenantId = Guid.NewGuid();
         var admin = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-OVERRIDDEN", admin, default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-OVERRIDDEN", enabled: true, admin, default);
 
         var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
 
@@ -204,7 +204,7 @@ public class ConventionStoreTests
         var admin = Guid.NewGuid();
 
         // Create a tenant override then disable it directly in the DB.
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-DISABLED", admin, default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-DISABLED", enabled: true, admin, default);
         await using (var db = NewContext())
         {
             var row = await db.Conventions.IgnoreQueryFilters()
@@ -229,7 +229,7 @@ public class ConventionStoreTests
         var acme = Guid.NewGuid();
         var globex = Guid.NewGuid();
 
-        await store.UpsertAsync(acme, Role, Action, "ACME-ONLY", Guid.NewGuid(), default);
+        await store.UpsertAsync(acme, Role, Action, "ACME-ONLY", enabled: true, Guid.NewGuid(), default);
 
         var acmeResolved = await store.ResolveAsync(acme, Role, Action, default);
         var globexResolved = await store.ResolveAsync(globex, Role, Action, default);
@@ -250,7 +250,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "RAW-TENANT", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "RAW-TENANT", enabled: true, Guid.NewGuid(), default);
 
         var row = await store.GetAsync(tenantId, Role, Action, default);
 
@@ -295,7 +295,7 @@ public class ConventionStoreTests
         var tenantId = Guid.NewGuid();
         var systemBodyBefore = ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire);
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-BODY", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-BODY", enabled: true, Guid.NewGuid(), default);
 
         await using var db = NewContext();
         var systemRow = await db.Conventions.IgnoreQueryFilters()
@@ -318,8 +318,8 @@ public class ConventionStoreTests
         var firstAdmin = Guid.NewGuid();
         var secondAdmin = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "v1", firstAdmin, default);
-        await store.UpsertAsync(tenantId, Role, Action, "v2", secondAdmin, default);
+        await store.UpsertAsync(tenantId, Role, Action, "v1", enabled: true, firstAdmin, default);
+        await store.UpsertAsync(tenantId, Role, Action, "v2", enabled: true, secondAdmin, default);
 
         await using var db = NewContext();
         var row = await db.Conventions.IgnoreQueryFilters()
@@ -338,7 +338,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-T", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-T", enabled: true, Guid.NewGuid(), default);
 
         var beforeDelete = await store.ResolveAsync(tenantId, Role, Action, default);
         beforeDelete.Source.Should().Be(ConventionSource.Tenant);
@@ -384,7 +384,7 @@ public class ConventionStoreTests
         var tenantId = Guid.NewGuid();
 
         // One override on top of the full system-default set.
-        await store.UpsertAsync(tenantId, Role, Action, "LIST-OVERRIDE", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "LIST-OVERRIDE", enabled: true, Guid.NewGuid(), default);
 
         var list = await store.ListAsync(tenantId, default);
 
@@ -437,7 +437,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "DISABLED-IN-LIST", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "DISABLED-IN-LIST", enabled: true, Guid.NewGuid(), default);
         await using (var db = NewContext())
         {
             var row = await db.Conventions.IgnoreQueryFilters()
@@ -469,7 +469,7 @@ public class ConventionStoreTests
         var admin = Guid.NewGuid();
         var seededBody = ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire);
 
-        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED DEFAULT", admin, default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED DEFAULT", enabled: true, admin, default);
 
         await using var db = NewContext();
         var row = await db.Conventions.IgnoreQueryFilters()
@@ -496,7 +496,7 @@ public class ConventionStoreTests
 
         // Remove the seeded system default first, then upsert fresh.
         await store.DeleteSystemDefaultAsync(Role, Action, default);
-        await store.UpsertSystemDefaultAsync(Role, Action, "FRESH-DEFAULT", admin, default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "FRESH-DEFAULT", enabled: true, admin, default);
 
         await using var db = NewContext();
         var row = await db.Conventions.IgnoreQueryFilters()
@@ -513,7 +513,7 @@ public class ConventionStoreTests
         var store = NewStore();
 
         var act = async () =>
-            await store.UpsertSystemDefaultAsync(Role, Action, "  ", Guid.NewGuid(), default);
+            await store.UpsertSystemDefaultAsync(Role, Action, "  ", enabled: true, Guid.NewGuid(), default);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -544,7 +544,7 @@ public class ConventionStoreTests
         var baseline = ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire);
 
         // Admin edits the system default away from the baseline...
-        await store.UpsertSystemDefaultAsync(Role, Action, "DRIFTED ADMIN BODY", admin, default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "DRIFTED ADMIN BODY", enabled: true, admin, default);
         await using (var verify = NewContext())
         {
             (await verify.Conventions.IgnoreQueryFilters()
@@ -584,9 +584,9 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-BODY", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-BODY", enabled: true, Guid.NewGuid(), default);
 
-        await store.UpsertSystemDefaultAsync(Role, Action, "NEW-SYSTEM-BODY", Guid.NewGuid(), default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "NEW-SYSTEM-BODY", enabled: true, Guid.NewGuid(), default);
 
         await using var db = NewContext();
         var tenantRow = await db.Conventions.IgnoreQueryFilters()
@@ -606,7 +606,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-SURVIVES", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-SURVIVES", enabled: true, Guid.NewGuid(), default);
 
         await store.DeleteSystemDefaultAsync(Role, Action, default);
 
@@ -629,7 +629,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-KEEP", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-KEEP", enabled: true, Guid.NewGuid(), default);
 
         await store.ResetSystemDefaultAsync(Role, Action, Guid.NewGuid(), default);
 
@@ -651,10 +651,10 @@ public class ConventionStoreTests
         var tenantId = Guid.NewGuid();
 
         // Admin manages the system default to a known value first.
-        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED", Guid.NewGuid(), default);
+        await store.UpsertSystemDefaultAsync(Role, Action, "ADMIN-MANAGED", enabled: true, Guid.NewGuid(), default);
 
         // A full tenant override lifecycle must leave that system default intact.
-        await store.UpsertAsync(tenantId, Role, Action, "TENANT-V1", Guid.NewGuid(), default);
+        await store.UpsertAsync(tenantId, Role, Action, "TENANT-V1", enabled: true, Guid.NewGuid(), default);
         await store.DeleteAsync(tenantId, Role, Action, default);
 
         await using var db = NewContext();
