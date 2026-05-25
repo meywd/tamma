@@ -216,7 +216,7 @@ public sealed class ConventionStore : IConventionStore
         {
             baseline = ConventionSeedSpecs.DefaultBodyFor(role, action);
         }
-        catch (ArgumentException ex)
+        catch (ArgumentException)
         {
             throw new TammaError(
                 "CONVENTION_NOT_A_TAXONOMY_CELL",
