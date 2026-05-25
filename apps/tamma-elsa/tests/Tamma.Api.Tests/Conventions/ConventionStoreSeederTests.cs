@@ -17,11 +17,16 @@ namespace Tamma.Api.Tests.Conventions;
 /// <c>NULLS NOT DISTINCT</c> or DB-side defaults, so the only faithful path is a
 /// container — same pattern as <see cref="ConventionStoreMigrationTests"/>).
 ///
-/// <para>Asserts: seeding populates EXACTLY the taxonomy cells; every seeded
+/// <para>The seeder is INSERT-MISSING-ONLY (product decision 2026-05-25):
+/// convention system defaults are DB-managed at runtime via admin CRUD, so the
+/// seeder only initial-populates absent taxonomy cells and MUST NOT revert an
+/// admin-edited system default on re-run.</para>
+///
+/// <para>Asserts: first run populates EXACTLY the taxonomy cells; every seeded
 /// body is non-empty; system-default rows are <c>tenant_id IS NULL</c>; the
-/// seeder is idempotent (re-run = no-op); a drifted body is surgically updated
-/// (Version bumped) while <c>Enabled</c> survives; tenant overrides are never
-/// touched.</para>
+/// seeder is idempotent (re-run = no-op, zero writes); an admin-edited
+/// system-default row is PRESERVED (not reverted) on re-run; tenant overrides
+/// are never touched.</para>
 /// </summary>
 [TestFixture]
 public class ConventionStoreSeederTests
@@ -104,7 +109,6 @@ public class ConventionStoreSeederTests
         var result = await seeder.SeedAsync(db, default);
 
         result.Inserted.Should().Be(ExpectedCellCount);
-        result.Updated.Should().Be(0);
         result.Unchanged.Should().Be(0);
 
         await using var verify = NewContext();
@@ -147,7 +151,6 @@ public class ConventionStoreSeederTests
         }
 
         second.Inserted.Should().Be(0);
-        second.Updated.Should().Be(0);
         second.Unchanged.Should().Be(ExpectedCellCount);
 
         await using var verify = NewContext();
@@ -156,8 +159,12 @@ public class ConventionStoreSeederTests
     }
 
     [Test]
-    public async Task BodyDrift_TriggersSurgicalUpdate_AndBumpsVersion_PreservingEnabled()
+    public async Task AdminEditedSystemDefault_IsPreserved_NotReverted_OnRerun()
     {
+        // Product decision (2026-05-25): convention system defaults are
+        // DB-managed at runtime via admin CRUD. The seeder is initial-populate
+        // ONLY — it must NEVER revert an admin's edit to an existing
+        // system-default row on a later deploy / re-run.
         var seeder = NewSeeder();
 
         await using (var db1 = NewContext())
@@ -165,15 +172,19 @@ public class ConventionStoreSeederTests
             await seeder.SeedAsync(db1, default);
         }
 
-        // Simulate a stale row from an earlier release: mangle the body and
-        // disable it (an admin/override-style toggle the seeder must preserve).
+        // Simulate a platform admin editing a system default via the CRUD
+        // surface (Story 27-10): change the body, bump version, toggle Enabled.
         Guid id;
+        int versionAfterEdit;
+        const string adminBody = "ADMIN-EDITED system default — must survive re-seed";
         await using (var mutate = NewContext())
         {
             var row = await mutate.Conventions.FirstAsync(c => c.TenantId == null);
             id = row.Id;
-            row.Body = "stale body from earlier release";
+            row.Body = adminBody;
+            row.Version += 1; // admin CRUD bumps version
             row.Enabled = false;
+            versionAfterEdit = row.Version;
             await mutate.SaveChangesAsync();
         }
 
@@ -183,15 +194,22 @@ public class ConventionStoreSeederTests
             result = await seeder.SeedAsync(db2, default);
         }
 
-        result.Updated.Should().Be(1, "exactly the drifted row is surgically updated");
-        result.Unchanged.Should().Be(ExpectedCellCount - 1);
+        // The seeder performs NO updates — every cell already exists, so the
+        // re-run is a pure no-op (zero inserts).
+        result.Inserted.Should().Be(0, "all cells already present → nothing to insert");
+        result.Unchanged.Should().Be(ExpectedCellCount,
+            "every existing system default is left untouched");
 
         await using var verify = NewContext();
-        var fixedRow = await verify.Conventions.FirstAsync(c => c.Id == id);
-        fixedRow.Body.Should().NotBe("stale body from earlier release");
-        fixedRow.Body.Should().Be(ConventionSeedSpecs.DefaultBody(fixedRow.Role, fixedRow.Action));
-        fixedRow.Version.Should().Be(2, "Version bumps on body drift");
-        fixedRow.Enabled.Should().BeFalse("the Enabled toggle survives re-seed");
+        var preserved = await verify.Conventions.FirstAsync(c => c.Id == id);
+        preserved.Body.Should().Be(adminBody,
+            "the admin-edited body must be PRESERVED, never reverted to the code baseline");
+        preserved.Body.Should().NotBe(
+            ConventionSeedSpecs.DefaultBody(preserved.Role, preserved.Action),
+            "the seeder must not re-apply the code-baseline body over an admin edit");
+        preserved.Version.Should().Be(versionAfterEdit,
+            "the seeder must not bump Version on an existing row");
+        preserved.Enabled.Should().BeFalse("the admin's Enabled toggle survives re-seed");
     }
 
     [Test]

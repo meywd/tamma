@@ -51,15 +51,25 @@ public sealed class ConventionStoreSeederOptions
 /// implements ONLY the startup / shared-DB path; the provisioning path is a
 /// follow-up for the Story 27-9 + provisioning flow.</para>
 ///
+/// <para><b>INSERT-MISSING-ONLY (product decision 2026-05-25).</b> Convention
+/// system defaults are DB-managed at runtime via platform-admin CRUD
+/// (Story 27-10). This seeder is ONLY an initial-population + explicit-reset
+/// source — it inserts a system-default row for a taxonomy cell that has NO
+/// existing <c>tenant_id IS NULL</c> row and NEVER updates, overwrites, or
+/// reverts an existing system-default row's <c>Body</c> / <c>Enabled</c>. An
+/// admin edit applied via the CRUD surface therefore survives every re-deploy;
+/// the code baseline is re-applied only on an EXPLICIT admin
+/// <c>ResetSystemDefaultAsync</c> call (see <c>IConventionStore</c>), never
+/// silently at startup.</para>
+///
 /// <para><b>Idempotency contract</b>:</para>
 /// <list type="bullet">
-///   <item><description>Re-run = no-op when existing rows match the spec.</description></item>
-///   <item><description>Body drift (a release changed a transitional default)
-///     triggers a surgical update on <c>Body</c> and bumps <c>Version</c>; it
-///     does NOT touch <c>Enabled</c> or admin-set audit fields so overrides /
-///     toggles survive re-deploy.</description></item>
-///   <item><description>New <c>(role, action)</c> cell → insert a fresh
-///     system-default row.</description></item>
+///   <item><description>Re-run with all cells present = no-op (zero writes).</description></item>
+///   <item><description>Existing system-default row (even with an admin-edited
+///     <c>Body</c> or toggled <c>Enabled</c>) → left UNTOUCHED. The seeder does
+///     NOT bump <c>Version</c> or revert the body.</description></item>
+///   <item><description>New <c>(role, action)</c> cell (newly-added taxonomy on
+///     a later deploy) → insert a fresh system-default row.</description></item>
 ///   <item><description>Existing system-default row no longer in the taxonomy →
 ///     left alone (no silent deletion). A future release retiring a cell should
 ///     delete it explicitly.</description></item>
@@ -148,72 +158,81 @@ public sealed class ConventionStoreSeeder : IHostedService
     }
 
     /// <summary>
-    /// Core idempotent upsert against a supplied context — the test seam (no
-    /// resolver / DI required). Loads existing system-default rows once
-    /// (<c>tenant_id IS NULL</c>), inserts missing cells, and surgically
-    /// updates drifted bodies while preserving <c>Enabled</c>.
+    /// Core INSERT-MISSING-ONLY seed against a supplied context — the test seam
+    /// (no resolver / DI required). Loads existing system-default rows once
+    /// (<c>tenant_id IS NULL</c>) and inserts ONLY the taxonomy cells with no
+    /// existing row. An existing system-default row is left UNTOUCHED — its
+    /// <c>Body</c> / <c>Enabled</c> / <c>Version</c> are never modified, so an
+    /// admin edit survives re-deploy (product decision 2026-05-25). Tenant
+    /// overrides (<c>tenant_id NOT NULL</c>) are never touched.
     /// </summary>
     public async Task<SeedResult> SeedAsync(TenantDbContext db, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        // Fetch all existing system-default rows (tenant_id IS NULL) in one
-        // round-trip, keyed by (role, action). Tenant overrides (tenant_id
-        // NOT NULL) are never touched by the seeder.
-        var existing = await db.Conventions
-            .Where(c => c.TenantId == null)
-            .ToDictionaryAsync(c => (c.Role, c.Action), ct)
-            .ConfigureAwait(false);
+        // Fetch the existing system-default (role, action) keyset (tenant_id
+        // IS NULL) in one round-trip. We need only the keys — we never read or
+        // mutate an existing row's columns. Tenant overrides (tenant_id NOT
+        // NULL) are excluded by the predicate and never touched.
+        var existingCells = (await db.Conventions
+                .Where(c => c.TenantId == null)
+                .Select(c => new { c.Role, c.Action })
+                .ToListAsync(ct)
+                .ConfigureAwait(false))
+            .Select(c => (c.Role, c.Action))
+            .ToHashSet();
 
         var now = _timeProvider.GetUtcNow().UtcDateTime;
-        int inserted = 0, updated = 0, unchanged = 0;
+        int inserted = 0, unchanged = 0;
 
         foreach (var spec in ConventionSeedSpecs.Build())
         {
-            if (existing.TryGetValue((spec.Role, spec.Action), out var row))
+            if (existingCells.Contains((spec.Role, spec.Action)))
             {
-                if (row.Body != spec.Body)
-                {
-                    row.Body = spec.Body;
-                    row.Version += 1;
-                    row.UpdatedAt = now;
-                    updated++;
-                }
-                else
-                {
-                    unchanged++;
-                }
+                // Existing system default — NEVER reverted/updated. This is the
+                // anti-clobber guarantee: admin edits made via the CRUD surface
+                // (Story 27-10) persist across deploys.
+                unchanged++;
+                continue;
             }
-            else
+
+            db.Conventions.Add(new Convention
             {
-                db.Conventions.Add(new Convention
-                {
-                    // Set Id client-side so EF InMemory (test shim) doesn't
-                    // collide on the Guid.Empty default. Production Postgres
-                    // applies gen_random_uuid() anyway — strict superset.
-                    Id = Guid.NewGuid(),
-                    TenantId = null, // system default
-                    Role = spec.Role,
-                    Action = spec.Action,
-                    Body = spec.Body,
-                    Version = 1,
-                    Enabled = true,
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                });
-                inserted++;
-            }
+                // Set Id client-side so EF InMemory (test shim) doesn't
+                // collide on the Guid.Empty default. Production Postgres
+                // applies gen_random_uuid() anyway — strict superset.
+                Id = Guid.NewGuid(),
+                TenantId = null, // system default
+                Role = spec.Role,
+                Action = spec.Action,
+                Body = spec.Body,
+                Version = 1,
+                Enabled = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            inserted++;
         }
 
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        if (inserted > 0)
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
 
         _logger.LogInformation(
-            "Convention system defaults seeded: {Inserted} inserted, " +
-            "{Updated} updated, {Unchanged} unchanged.",
-            inserted, updated, unchanged);
+            "Convention system defaults seeded (insert-missing-only): "
+            + "{Inserted} inserted, {Unchanged} left untouched.",
+            inserted, unchanged);
 
-        return new SeedResult(inserted, updated, unchanged);
+        return new SeedResult(inserted, unchanged);
     }
 
-    public sealed record SeedResult(int Inserted, int Updated, int Unchanged);
+    /// <summary>
+    /// Result of an insert-missing-only seed run. <see cref="Inserted"/> = new
+    /// system-default rows added for previously-absent taxonomy cells;
+    /// <see cref="Unchanged"/> = existing rows left UNTOUCHED (the seeder never
+    /// updates them — admin edits survive). There is deliberately no
+    /// <c>Updated</c> count: the seeder performs no updates.
+    /// </summary>
+    public sealed record SeedResult(int Inserted, int Unchanged);
 }
