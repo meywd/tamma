@@ -8,6 +8,7 @@ using Elsa.Workflows.Activities.Flowchart.Models;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
+using Tamma.Activities.Context;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
@@ -87,6 +88,12 @@ public class LlmCallWorkflow : WorkflowBase
         var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "");
         var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
 
+        // Story 27-13 — conventions resolved from the convention store (or the
+        // legacy `.tamma/config.json` string for the empty-action passthrough
+        // path). Feeds {{conventions}} in the prompt-render variables.
+        var legacyConventionsVar = builder.WithVariable<string>("LegacyConventions", "");
+        var resolvedConventionsVar = builder.WithVariable<string>("ResolvedConventions", "");
+
         // Tool loop variables
         var enableToolLoopVar = builder.WithVariable<bool>("EnableToolLoop", false);
         var toolLoopConfigJsonVar = builder.WithVariable<string>("ToolLoopConfigJson", "");
@@ -110,6 +117,13 @@ public class LlmCallWorkflow : WorkflowBase
                 var action = context.GetInput<string>("action") ?? "";
                 actionVar.Set(context, action);
 
+                // Capture the legacy `.tamma/config.json` conventions string so
+                // ResolveConventionsActivity can use it for the empty-action
+                // passthrough path (Story 27-13). When Action is non-empty the
+                // store result takes precedence and this is ignored.
+                var legacyConv = context.GetInput<string>("conventions") ?? "";
+                legacyConventionsVar.Set(context, legacyConv);
+
                 // Serialize variables dict if provided, injecting defaults for common template vars
                 var variables = context.GetInput<IDictionary<string, object>>("variables");
                 if (variables != null)
@@ -120,10 +134,13 @@ public class LlmCallWorkflow : WorkflowBase
                         var r = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role") ?? "assistant";
                         variables["role"] = r;
                     }
-                    // Inject 'conventions' if not provided — read from workflow input, fall back to empty
+                    // 'conventions' will be overwritten downstream by the
+                    // ResolveConventionsActivity result; leave a placeholder
+                    // here so callers that bypass the resolve activity (or
+                    // use the empty-action path) still see a sensible value.
                     if (!variables.ContainsKey("conventions"))
                     {
-                        variables["conventions"] = context.GetInput<string>("conventions") ?? "";
+                        variables["conventions"] = legacyConv;
                     }
                     variablesJsonVar.Set(context, JsonSerializer.Serialize(variables));
                 }
@@ -177,6 +194,49 @@ public class LlmCallWorkflow : WorkflowBase
             })
         };
         initInputs.SetDisplayText("Initialize Inputs");
+
+        // 1a. Resolve conventions from the convention store (Story 27-13).
+        // Output feeds {{conventions}} in the prompt-render variables (the
+        // store result takes precedence over any legacy passthrough value).
+        // Empty-action callers bypass the store; see ResolveConventionsActivity.
+        var resolveConventions = new ResolveConventionsActivity
+        {
+            Id = "ResolveConventions",
+            Name = "Resolve Conventions",
+            Role = new Input<string>(ctx => agentRoleVar.Get(ctx)),
+            Action = new Input<string>(ctx => actionVar.Get(ctx)),
+            TenantId = new Input<string>(ctx => tenantIdVar.Get(ctx)),
+            LegacyConventions = new Input<string>(ctx => legacyConventionsVar.Get(ctx)),
+            ResolvedConventions = new Output<string>(resolvedConventionsVar),
+        };
+        resolveConventions.SetDisplayText("Resolve Conventions");
+
+        // 1a'. Merge the resolved conventions back into the variables JSON
+        // so {{conventions}} renders the convention-store body (or the legacy
+        // passthrough, when Action was empty). This runs unconditionally —
+        // the resolve activity already chose the correct value.
+        var mergeConventionsIntoVariables = new SetVariable
+        {
+            Id = "MergeConventions",
+            Name = "Merge Conventions Into Variables",
+            Variable = variablesJsonVar,
+            Value = new(context => {
+                var json = variablesJsonVar.Get(context) ?? "{}";
+                var conventions = resolvedConventionsVar.Get(context) ?? "";
+                Dictionary<string, object?> variables;
+                try
+                {
+                    variables = JsonSerializer.Deserialize<Dictionary<string, object?>>(json) ?? new();
+                }
+                catch
+                {
+                    variables = new Dictionary<string, object?>();
+                }
+                variables["conventions"] = conventions;
+                return JsonSerializer.Serialize(variables);
+            })
+        };
+        mergeConventionsIntoVariables.SetDisplayText("Merge Conventions");
 
         // 1b. Resolve prompt from registry (role + action → rendered prompt)
         var resolvePrompt = new ResolvePromptFromRegistryActivity
@@ -604,14 +664,17 @@ public class LlmCallWorkflow : WorkflowBase
             Start = initInputs,
             Activities =
             {
-                initInputs, resolvePrompt, setupBudget, resolveAgentConfig, resolveChain,
+                initInputs, resolveConventions, mergeConventionsIntoVariables,
+                resolvePrompt, setupBudget, resolveAgentConfig, resolveChain,
                 checkConcurrency, concurrencyDelay,
                 forEachProviders, failureCheck, buildFailureOutput, setOutputs
             },
             Connections =
             {
-                // InitInputs → Resolve Prompt → Setup Budget
-                Connect(initInputs, resolvePrompt),
+                // InitInputs → Resolve Conventions → Merge Conventions → Resolve Prompt → Setup Budget
+                Connect(initInputs, resolveConventions),
+                Connect(resolveConventions, mergeConventionsIntoVariables),
+                Connect(mergeConventionsIntoVariables, resolvePrompt),
                 Connect(resolvePrompt, setupBudget),
 
                 // Setup Budget → Resolve Agent Config (DB lookup)
