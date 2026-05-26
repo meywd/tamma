@@ -57,10 +57,11 @@ namespace Tamma.Activities.Context;
 ///     error (the workflow was wired with a dead or misspelled token) and
 ///     should NOT be retried.</description></item>
 ///   <item><term><see cref="TammaError"/></term><description>
-///     Thrown when the convention registry cannot be reached
-///     (<c>REGISTRY_UNAVAILABLE</c> — retryable) or returns a non-success
-///     status for a taxonomy-valid pair (<c>NO_ROW</c> on 404 / generic
-///     miss — non-retryable). Operational / transient failure.</description></item>
+///     Thrown for operational / transient failures:
+///     <c>REGISTRY_UNAVAILABLE</c> (retryable) — network exception OR
+///     5xx server error; <c>NO_ROW</c> (non-retryable) — 404 (row
+///     genuinely absent) or other 4xx (auth/policy — retrying won't
+///     help).</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -143,11 +144,6 @@ public class ResolveConventionsActivity : TammaAsyncActivity
         }
 
         var httpClient = _httpClientFactory?.CreateClient() ?? new HttpClient();
-        if (!string.IsNullOrEmpty(tenantId))
-        {
-            httpClient.DefaultRequestHeaders.Remove("X-Tenant-Id");
-            httpClient.DefaultRequestHeaders.Add("X-Tenant-Id", tenantId);
-        }
 
         var (body, source, version) = await CallResolveAsync(httpClient, callbackUrl!, role, action, tenantId, Logger);
 
@@ -168,11 +164,20 @@ public class ResolveConventionsActivity : TammaAsyncActivity
     /// <see cref="ActivityExecutionContext"/>, matching the test convention
     /// used elsewhere in this assembly.
     /// </summary>
+    /// <remarks>
+    /// The <paramref name="tenantId"/> is forwarded as an <c>X-Tenant-Id</c>
+    /// request header (set on the outgoing <see cref="HttpRequestMessage"/>
+    /// rather than on <see cref="HttpClient.DefaultRequestHeaders"/> so
+    /// that the behaviour is fully visible in per-request tests).
+    /// </remarks>
     /// <exception cref="TammaError">
-    /// <c>LLM.CONVENTIONS.RESOLVE.REGISTRY_UNAVAILABLE</c> on network/transient
-    /// failure (retryable); <c>LLM.CONVENTIONS.RESOLVE.NO_ROW</c> on any
-    /// non-success status (taxonomy-valid pairs always have a system default;
-    /// a miss is a real fault — non-retryable).
+    /// <list type="bullet">
+    ///   <item><c>LLM.CONVENTIONS.RESOLVE.REGISTRY_UNAVAILABLE</c> (retryable):
+    ///     network / transport exception, OR any 5xx status (transient server fault).</item>
+    ///   <item><c>LLM.CONVENTIONS.RESOLVE.NO_ROW</c> (non-retryable):
+    ///     HTTP 404 (the row genuinely doesn't exist) OR any other 4xx (auth
+    ///     failure, 403 policy denial — retrying won't help).</item>
+    /// </list>
     /// </exception>
     public static async Task<(string Body, string Source, int Version)> CallResolveAsync(
         HttpClient httpClient,
@@ -185,9 +190,16 @@ public class ResolveConventionsActivity : TammaAsyncActivity
         HttpResponseMessage response;
         try
         {
-            response = await httpClient.PostAsJsonAsync(
-                $"{callbackUrl.TrimEnd('/')}/api/conventions/resolve",
-                new { role, action });
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{callbackUrl.TrimEnd('/')}/api/conventions/resolve");
+
+            if (!string.IsNullOrEmpty(tenantId))
+                request.Headers.Add("X-Tenant-Id", tenantId);
+
+            request.Content = JsonContent.Create(new { role, action });
+
+            response = await httpClient.SendAsync(request);
         }
         catch (Exception ex)
         {
@@ -202,21 +214,46 @@ public class ResolveConventionsActivity : TammaAsyncActivity
 
         if (!response.IsSuccessStatusCode)
         {
-            // 404 (CONVENTION_NOT_FOUND) and any other non-success collapse to
-            // a single fail-loud code. Taxonomy-valid (role,action) always has
-            // a system default per Story 27-9, so a miss is a real fault.
+            var statusCode = (int)response.StatusCode;
+
+            // 5xx: transient server fault (DB outage, unhandled exception on the
+            // server, etc.). Retryable — the row may well exist once the server
+            // recovers. Must NOT be labelled NO_ROW.
+            if (statusCode >= 500)
+            {
+                logger?.LogError(
+                    "Convention store returned transient {Status} for {Role}/{Action}",
+                    response.StatusCode, role, action);
+                throw new TammaError(
+                    "LLM.CONVENTIONS.RESOLVE.REGISTRY_UNAVAILABLE",
+                    $"Convention store returned server error {statusCode} for (role='{role}', action='{action}').",
+                    new Dictionary<string, object?>
+                    {
+                        ["role"] = role,
+                        ["action"] = action,
+                        ["tenantId"] = tenantId,
+                        ["status"] = statusCode,
+                    },
+                    retryable: true,
+                    severity: TammaErrorSeverity.High);
+            }
+
+            // 404 or other 4xx: the row doesn't exist (404) or a permanent
+            // client-side fault (401/403 — retrying won't help). Both are
+            // non-retryable. Taxonomy-valid (role,action) always has a system
+            // default per Story 27-9, so a miss is a real fault.
             logger?.LogError(
                 "Convention store returned {Status} for {Role}/{Action}",
                 response.StatusCode, role, action);
             throw new TammaError(
                 "LLM.CONVENTIONS.RESOLVE.NO_ROW",
-                $"Convention store returned {(int)response.StatusCode} for (role='{role}', action='{action}').",
+                $"Convention store returned {statusCode} for (role='{role}', action='{action}').",
                 new Dictionary<string, object?>
                 {
                     ["role"] = role,
                     ["action"] = action,
                     ["tenantId"] = tenantId,
-                    ["status"] = (int)response.StatusCode,
+                    ["status"] = statusCode,
                 },
                 retryable: false,
                 severity: TammaErrorSeverity.High);
@@ -254,6 +291,7 @@ public class ResolveConventionsActivity : TammaAsyncActivity
     {
         var chars = context.TransientProperties.TryGetValue("resolvedConventionsLength", out var len) ? len : 0;
         var src = context.TransientProperties.TryGetValue("conventionsSource", out var s) ? s : "system";
+        var ver = context.TransientProperties.TryGetValue("conventionsVersion", out var v) ? v : 0;
         return new()
         {
             ["role"] = Role.Get(context),
@@ -261,6 +299,7 @@ public class ResolveConventionsActivity : TammaAsyncActivity
             ["tenantId"] = TenantId.Get(context),
             ["chars"] = chars,
             ["source"] = src,
+            ["version"] = ver,
         };
     }
 }

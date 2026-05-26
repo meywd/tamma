@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -167,8 +168,10 @@ public class ResolveConventionsActivityTests
     }
 
     [Test]
-    public async Task CallResolveAsync_500_ThrowsNoRowNonRetryable()
+    public async Task CallResolveAsync_500_ThrowsRegistryUnavailableRetryable()
     {
+        // 5xx is a transient server fault (DB outage, unhandled exception).
+        // Must be REGISTRY_UNAVAILABLE + retryable=true, never NO_ROW.
         var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
 
         using var client = new HttpClient(handler);
@@ -176,10 +179,25 @@ public class ResolveConventionsActivityTests
             client, "http://test", "developer", "implement-feature", tenantId: "");
 
         var ex = (await act.Should().ThrowAsync<TammaError>()).Which;
-        ex.Code.Should().Be("LLM.CONVENTIONS.RESOLVE.NO_ROW");
-        ex.Retryable.Should().BeFalse();
+        ex.Code.Should().Be("LLM.CONVENTIONS.RESOLVE.REGISTRY_UNAVAILABLE");
+        ex.Retryable.Should().BeTrue();
         ex.Context.Should().ContainKey("status");
         ex.Context["status"].Should().Be(500);
+    }
+
+    [Test]
+    public async Task CallResolveAsync_503_ThrowsRegistryUnavailableRetryable()
+    {
+        // 503 Service Unavailable — also a transient 5xx.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        using var client = new HttpClient(handler);
+        Func<Task> act = () => ResolveConventionsActivity.CallResolveAsync(
+            client, "http://test", "developer", "implement-feature", tenantId: "");
+
+        var ex = (await act.Should().ThrowAsync<TammaError>()).Which;
+        ex.Code.Should().Be("LLM.CONVENTIONS.RESOLVE.REGISTRY_UNAVAILABLE");
+        ex.Retryable.Should().BeTrue();
     }
 
     [Test]
@@ -200,6 +218,83 @@ public class ResolveConventionsActivityTests
             client, "http://test/", "developer", "implement-feature", tenantId: "");
 
         capturedUri!.AbsoluteUri.Should().Be("http://test/api/conventions/resolve");
+    }
+
+    [Test]
+    public async Task CallResolveAsync_WithTenantId_SendsXTenantIdHeader()
+    {
+        // Fix D: X-Tenant-Id must be set on the outgoing request (not on
+        // DefaultRequestHeaders) so it is visible in per-request tests.
+        string? capturedTenantId = null;
+        var handler = new StubHandler(req =>
+        {
+            req.Headers.TryGetValues("X-Tenant-Id", out var values);
+            capturedTenantId = values?.FirstOrDefault();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { role = "developer", action = "implement-feature", body = "ok", source = "system", version = 1 }),
+            };
+        });
+
+        using var client = new HttpClient(handler);
+        await ResolveConventionsActivity.CallResolveAsync(
+            client, "http://test", "developer", "implement-feature", tenantId: "tenant-abc");
+
+        capturedTenantId.Should().Be("tenant-abc");
+    }
+
+    [Test]
+    public async Task CallResolveAsync_NoTenantId_DoesNotSendXTenantIdHeader()
+    {
+        // When tenantId is empty, no X-Tenant-Id header should be forwarded.
+        bool headerPresent = false;
+        var handler = new StubHandler(req =>
+        {
+            headerPresent = req.Headers.Contains("X-Tenant-Id");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { role = "developer", action = "implement-feature", body = "ok", source = "system", version = 1 }),
+            };
+        });
+
+        using var client = new HttpClient(handler);
+        await ResolveConventionsActivity.CallResolveAsync(
+            client, "http://test", "developer", "implement-feature", tenantId: "");
+
+        headerPresent.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task CallResolveAsync_401_ThrowsNoRowNonRetryable()
+    {
+        // 4xx other than 404: permanent client-side fault — non-retryable NO_ROW.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        using var client = new HttpClient(handler);
+        Func<Task> act = () => ResolveConventionsActivity.CallResolveAsync(
+            client, "http://test", "developer", "implement-feature", tenantId: "");
+
+        var ex = (await act.Should().ThrowAsync<TammaError>()).Which;
+        ex.Code.Should().Be("LLM.CONVENTIONS.RESOLVE.NO_ROW");
+        ex.Retryable.Should().BeFalse();
+    }
+
+    // ============================================================
+    // Empty-action legacy passthrough
+    // ============================================================
+
+    [Test]
+    public void ValidateTaxonomy_EmptyAction_ShouldNotBeCalledOnLegacyPath()
+    {
+        // When action is empty the activity short-circuits BEFORE calling
+        // ValidateTaxonomy — the legacy conventions string is passed through
+        // directly without any HTTP call or taxonomy parse. This test documents
+        // the contract: ValidateTaxonomy itself rejects empty action (ParseAction
+        // would throw), confirming that the RunAsync guard is load-bearing.
+        var act = () => ResolveConventionsActivity.ValidateTaxonomy("developer", "");
+
+        act.Should().Throw<ArgumentException>(
+            "an empty action is not a taxonomy token; RunAsync guards it before this call");
     }
 
     // ============================================================
