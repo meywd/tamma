@@ -131,6 +131,11 @@ public static class PromptEndpoints
 
     public static Task<IResult> GetSystemDefault(string role, string action)
     {
+        if (!RoleActionParsing.TryParsePair(role, action, out _, out _, out var parseError))
+        {
+            return Task.FromResult(parseError);
+        }
+
         var template = SystemPrompts.GetRoleAction(role, action);
         if (template is null)
         {
@@ -160,6 +165,11 @@ public static class PromptEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
     {
+        if (!RoleActionParsing.TryParsePair(role, action, out _, out _, out var parseError))
+        {
+            return parseError;
+        }
+
         // Story 27-2 — SaaS mode reads through the tenant-scoped resolver
         // (no user override layer on top, by design — see CLAUDE.md
         // "Resolution Order — SaaS mode"). Single-user mode keeps the
@@ -215,6 +225,11 @@ public static class PromptEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
     {
+        if (!RoleActionParsing.TryParsePair(role, action, out _, out _, out var parseError))
+        {
+            return parseError;
+        }
+
         var userId = TryGetUserId(principal);
         var input = new UpsertPromptInput(
             Template: req.Template,
@@ -284,6 +299,11 @@ public static class PromptEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
     {
+        if (!RoleActionParsing.TryParsePair(role, action, out _, out _, out var parseError))
+        {
+            return parseError;
+        }
+
         var userId = TryGetUserId(principal);
         bool deleted;
         if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
@@ -402,6 +422,11 @@ public static class PromptEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
     {
+        if (!RoleActionParsing.TryParsePair(role, action, out _, out _, out var parseError))
+        {
+            return parseError;
+        }
+
         var userId = TryGetUserId(principal);
         // Story 27-18 — resolution fails loud; translate TammaError into the
         // existing 404 contract at this HTTP boundary.

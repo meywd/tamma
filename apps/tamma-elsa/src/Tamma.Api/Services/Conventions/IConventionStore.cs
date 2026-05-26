@@ -23,16 +23,31 @@ public enum ConventionSource
 /// <c>{{conventions}}</c> workflow variable (AC7). There are deliberately NO
 /// <c>Triggered</c> / <c>Skipped</c> lists — the keyword/tokeniser design is
 /// deleted (AC6); resolution is a single exact-key seek.
+///
+/// <para>
+/// <see cref="Id"/>, <see cref="Version"/>, and <see cref="UpdatedAt"/> carry the
+/// real metadata from the winning row so callers (endpoint handlers) can build a
+/// complete response in a single DB roundtrip without re-fetching via
+/// <see cref="IConventionStore.GetAsync"/>. They match the fields already carried
+/// by <see cref="ConventionSummary"/> (the list-result shape), keeping both
+/// single-item and list paths consistent.
+/// </para>
 /// </summary>
 /// <param name="Role">Agent role wire string (e.g. <c>developer</c>).</param>
 /// <param name="Action">Agent action wire string (e.g. <c>implement-feature</c>).</param>
 /// <param name="Body">The resolved convention body (non-empty for a valid pair).</param>
 /// <param name="Source">Which tier produced <see cref="Body"/>.</param>
+/// <param name="Id">Primary key of the winning row.</param>
+/// <param name="Version">Application-layer version counter of the winning row.</param>
+/// <param name="UpdatedAt">Last-modified timestamp of the winning row.</param>
 public sealed record ConventionResolution(
     string Role,
     string Action,
     string Body,
-    ConventionSource Source);
+    ConventionSource Source,
+    Guid Id,
+    int Version,
+    DateTime UpdatedAt);
 
 /// <summary>
 /// A single row in the <see cref="IConventionStore.ListAsync"/> result — the

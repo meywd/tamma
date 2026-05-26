@@ -96,7 +96,8 @@ public sealed class ConventionStore : IConventionStore
             if (tenantOverride is { Enabled: true })
             {
                 return new ConventionResolution(
-                    roleWire, actionWire, tenantOverride.Body, ConventionSource.Tenant);
+                    roleWire, actionWire, tenantOverride.Body, ConventionSource.Tenant,
+                    tenantOverride.Id, tenantOverride.Version, tenantOverride.UpdatedAt);
             }
         }
 
@@ -107,7 +108,8 @@ public sealed class ConventionStore : IConventionStore
         if (systemDefault is { Enabled: true })
         {
             return new ConventionResolution(
-                roleWire, actionWire, systemDefault.Body, ConventionSource.System);
+                roleWire, actionWire, systemDefault.Body, ConventionSource.System,
+                systemDefault.Id, systemDefault.Version, systemDefault.UpdatedAt);
         }
 
         // 4c. else fail loud. A taxonomy-valid pair MUST have a seeded system

@@ -94,7 +94,7 @@ public static class ConventionStoreEndpoints
             resolved.Action,
             resolved.Body,
             SourceLabel(resolved.Source),
-            VersionFor(await store.GetAsync(tenantId, role, action, ct))));
+            resolved.Version));
     }
 
     // =======================================================================
@@ -148,7 +148,7 @@ public static class ConventionStoreEndpoints
             resolved.Action,
             resolved.Body,
             SourceLabel(resolved.Source),
-            VersionFor(await store.GetAsync(null, parsedRole, parsedAction, ct))));
+            resolved.Version));
     }
 
     // =======================================================================
@@ -230,19 +230,18 @@ public static class ConventionStoreEndpoints
             return NotFound(ex);
         }
 
-        // Surface the resolved row's id/version/updatedAt (GetAsync returns the
-        // same tier ResolveAsync picked, so the metadata is consistent).
-        var row = await store.GetAsync(tenantId, parsedRole, parsedAction, ct);
+        // resolved already carries Id/Version/UpdatedAt from the winning row —
+        // no second DB roundtrip needed (I-4: single-roundtrip resolve).
         return Results.Ok(new ConventionResponse(
-            row?.Id,
+            resolved.Id,
             resolved.Role,
             resolved.Action,
             resolved.Body,
-            row?.Enabled ?? true,
-            VersionFor(row),
+            Enabled: true,
+            resolved.Version,
             IsOverride: resolved.Source == ConventionSource.Tenant,
             Source: SourceLabel(resolved.Source),
-            UpdatedAt: row?.UpdatedAt));
+            UpdatedAt: resolved.UpdatedAt));
     }
 
     /// <summary>
@@ -468,6 +467,9 @@ public static class ConventionStoreEndpoints
 
     /// <summary>
     /// Parse + taxonomy-validate a <c>(role, action)</c> pair at the boundary.
+    /// Delegates to the shared <see cref="RoleActionParsing.TryParsePair"/>
+    /// helper (I-5) so the same taxonomy contract is enforced by both the
+    /// convention store and the prompt store endpoints.
     /// Returns false with a 400 <paramref name="error"/> result when the token
     /// is unknown (parse throws) OR the pair is known-but-ineligible
     /// (e.g. developer/deploy). Never returns a parsed pair that fails
@@ -479,44 +481,7 @@ public static class ConventionStoreEndpoints
         out AgentRole parsedRole,
         out AgentAction parsedAction,
         out IResult error)
-    {
-        parsedRole = default;
-        parsedAction = default;
-        error = Results.Empty;
-
-        if (string.IsNullOrWhiteSpace(role) || string.IsNullOrWhiteSpace(action))
-        {
-            error = Results.BadRequest(new { error = "Both role and action are required.", code = "CONVENTION_INVALID_KEY" });
-            return false;
-        }
-
-        try
-        {
-            parsedRole = AgentRoleExtensions.Parse(role);
-            parsedAction = AgentActionExtensions.Parse(action);
-        }
-        catch (ArgumentException ex)
-        {
-            error = Results.BadRequest(new { error = ex.Message, code = "CONVENTION_INVALID_KEY" });
-            return false;
-        }
-
-        // Known tokens but the role doesn't own the action (e.g. developer/deploy):
-        // there is no taxonomy cell, hence no system default, hence resolution
-        // could only ever 404. Reject up-front as a 400 (bad key), distinct from
-        // a 404 (valid key, no row).
-        if (!RolePhaseMap.IsRoleEligibleForPhase(parsedAction.ToWire(), parsedRole.ToWire()))
-        {
-            error = Results.BadRequest(new
-            {
-                error = $"(role='{parsedRole.ToWire()}', action='{parsedAction.ToWire()}') is not a valid taxonomy cell.",
-                code = "CONVENTION_INELIGIBLE_PAIR",
-            });
-            return false;
-        }
-
-        return true;
-    }
+        => RoleActionParsing.TryParsePair(role, action, out parsedRole, out parsedAction, out error);
 
     private static bool TryValidateBody(string? body, out IResult error)
     {
@@ -535,31 +500,35 @@ public static class ConventionStoreEndpoints
     }
 
     /// <summary>
-    /// The tenant id to scope reads against. SaaS mode uses the ambient tenant;
-    /// single-user mode uses the sole user's personal tenant (also the ambient
-    /// tenant — EnsurePersonalTenantMiddleware binds it). Returns null only when
-    /// no ambient tenant is set (resolution then targets system defaults).
+    /// The ambient tenant id to scope convention reads and writes against.
+    /// SaaS mode uses the request-ambient tenant; single-user mode uses the
+    /// sole user's personal tenant (also the ambient tenant —
+    /// <c>EnsurePersonalTenantMiddleware</c> binds it on startup). Returns
+    /// <c>null</c> only when no ambient tenant is set (resolution then
+    /// targets system defaults only).
     ///
-    /// <para><b>Note:</b> <see cref="RequireTenantScope"/> is intentionally
-    /// identical in implementation — the two methods are distinct names so
-    /// read paths and write paths read intentionally at their call sites.
-    /// The <paramref name="modeProvider"/> parameter is retained for future
-    /// mode-aware scoping; today both modes derive the tenant from the ambient
-    /// context and the parameter is unused.</para>
+    /// <para>The <paramref name="modeProvider"/> parameter is retained for
+    /// future mode-aware scoping; today both modes derive the tenant from
+    /// the ambient context and the parameter is unused.</para>
+    ///
+    /// <para><b>Read vs write callers.</b> <see cref="ResolveTenantScope"/>
+    /// and <see cref="RequireTenantScope"/> are thin aliases for this single
+    /// implementation; their distinct names signal read-path vs write-path
+    /// intent at call sites without duplicating the logic (M-1 collapse).</para>
     /// </summary>
-    private static Guid? ResolveTenantScope(
+    private static Guid? TenantScope(
         ITenantContext tenantContext, ITammaModeProvider modeProvider)
         => tenantContext.TenantId;
 
-    /// <summary>
-    /// The tenant id to scope WRITES against (tenant overrides). Same source and
-    /// same implementation as <see cref="ResolveTenantScope"/>; named distinctly
-    /// so the write paths read intentionally. See that method's doc-comment for
-    /// the note on <paramref name="modeProvider"/> retention.
-    /// </summary>
+    /// <summary>Read-path alias for <see cref="TenantScope"/>.</summary>
+    private static Guid? ResolveTenantScope(
+        ITenantContext tenantContext, ITammaModeProvider modeProvider)
+        => TenantScope(tenantContext, modeProvider);
+
+    /// <summary>Write-path alias for <see cref="TenantScope"/>.</summary>
     private static Guid? RequireTenantScope(
         ITenantContext tenantContext, ITammaModeProvider modeProvider)
-        => tenantContext.TenantId;
+        => TenantScope(tenantContext, modeProvider);
 
     private static int VersionFor(Convention? row) => row?.Version ?? 1;
 

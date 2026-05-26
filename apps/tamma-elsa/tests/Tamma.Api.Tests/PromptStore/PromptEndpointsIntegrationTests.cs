@@ -61,13 +61,17 @@ public class PromptEndpointsIntegrationTests
     }
 
     [Test]
-    public async Task GetSystemRoleAction_UnknownPair_Returns404()
+    public async Task GetSystemRoleAction_IneligiblePair_Returns400()
     {
-        // Story 27-18 — there is no generic action-default tier. A pair the role
-        // does not own (deploy is devops-only) has no system default → 404.
+        // I-5 — the shared TryParsePair boundary guard now rejects a known-but-
+        // ineligible pair (developer/deploy — deploy is devops-only) with 400
+        // CONVENTION_INELIGIBLE_PAIR before the store is touched. Previously
+        // returned 404 (no system default → TammaError); with TryParsePair wired
+        // into PromptEndpoints this is now correctly a 400 (bad input, not a
+        // missing resource).
         var response = await _client.GetAsync("/api/prompts/system/developer/deploy");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     // ------------------------------------------------------------------
