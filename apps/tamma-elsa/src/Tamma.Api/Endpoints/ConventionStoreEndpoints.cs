@@ -255,6 +255,7 @@ public static class ConventionStoreEndpoints
         string action,
         UpsertConventionRequest req,
         IConventionStore store,
+        ConventionEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider,
@@ -264,7 +265,11 @@ public static class ConventionStoreEndpoints
         {
             return error;
         }
-        if (!TryValidateBody(req?.Body, out var bodyError))
+        if (req is null)
+        {
+            return Results.BadRequest(new { error = "Request body required.", code = "CONVENTION_BODY_REQUIRED" });
+        }
+        if (!TryValidateBody(req.Body, out var bodyError))
         {
             return bodyError;
         }
@@ -276,22 +281,23 @@ public static class ConventionStoreEndpoints
         }
 
         var userId = principal.GetUserId() ?? Guid.Empty;
-        var enabled = req!.Enabled ?? true;
+        var enabled = req.Enabled ?? true;
 
-        await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
+        var (row, wasCreated) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
 
-        // Echo back the resolved view of the row we just wrote.
-        var row = await store.GetAsync(tenantId.Value, parsedRole, parsedAction, ct);
+        await events.EmitTenantOverrideUpsertedAsync(
+            tenantId.Value, parsedRole, parsedAction, userId, wasCreated, row.Version, ct);
+
         return Results.Ok(new ConventionResponse(
-            row?.Id,
+            row.Id,
             parsedRole.ToWire(),
             parsedAction.ToWire(),
             req.Body,
             enabled,
-            VersionFor(row),
+            row.Version,
             IsOverride: true,
             Source: "tenant",
-            UpdatedAt: row?.UpdatedAt));
+            UpdatedAt: row.UpdatedAt));
     }
 
     /// <summary>
@@ -303,6 +309,8 @@ public static class ConventionStoreEndpoints
         string role,
         string action,
         IConventionStore store,
+        ConventionEventsService events,
+        ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider,
         CancellationToken ct)
@@ -318,10 +326,16 @@ public static class ConventionStoreEndpoints
             return Results.BadRequest(new { error = "No ambient tenant — cannot delete a tenant override.", code = "TENANT_REQUIRED" });
         }
 
-        // DeleteAsync is a no-op when no override exists; either way the cell
-        // falls back to the system default, so 204 is the right contract
-        // (mirrors a reset-to-default).
-        await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, ct);
+        var userId = principal.GetUserId() ?? Guid.Empty;
+
+        // DeleteAsync returns true if a row was actually removed; no-op when no
+        // override exists. Either way the cell falls back to the system default,
+        // so 204 is the right contract (mirrors a reset-to-default).
+        var wasDeleted = await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, ct);
+
+        await events.EmitTenantOverrideDeletedAsync(
+            tenantId.Value, parsedRole, parsedAction, userId, wasDeleted, ct);
+
         return Results.NoContent();
     }
 
@@ -339,6 +353,7 @@ public static class ConventionStoreEndpoints
         string action,
         UpsertConventionRequest req,
         IConventionStore store,
+        ConventionEventsService events,
         ClaimsPrincipal principal,
         CancellationToken ct)
     {
@@ -346,27 +361,33 @@ public static class ConventionStoreEndpoints
         {
             return error;
         }
-        if (!TryValidateBody(req?.Body, out var bodyError))
+        if (req is null)
+        {
+            return Results.BadRequest(new { error = "Request body required.", code = "CONVENTION_BODY_REQUIRED" });
+        }
+        if (!TryValidateBody(req.Body, out var bodyError))
         {
             return bodyError;
         }
 
         var adminUserId = principal.GetUserId() ?? Guid.Empty;
-        var enabled = req!.Enabled ?? true;
+        var enabled = req.Enabled ?? true;
 
-        await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
+        var (row, wasCreated) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
 
-        var row = await store.GetAsync(null, parsedRole, parsedAction, ct);
+        await events.EmitSystemDefaultUpsertedAsync(
+            parsedRole, parsedAction, adminUserId, wasCreated, row.Version, ct);
+
         return Results.Ok(new ConventionResponse(
-            row?.Id,
+            row.Id,
             parsedRole.ToWire(),
             parsedAction.ToWire(),
             req.Body,
             enabled,
-            VersionFor(row),
+            row.Version,
             IsOverride: false,
             Source: "system",
-            UpdatedAt: row?.UpdatedAt));
+            UpdatedAt: row.UpdatedAt));
     }
 
     /// <summary>
@@ -377,6 +398,8 @@ public static class ConventionStoreEndpoints
         string role,
         string action,
         IConventionStore store,
+        ConventionEventsService events,
+        ClaimsPrincipal principal,
         CancellationToken ct)
     {
         if (!TryParsePair(role, action, out var parsedRole, out var parsedAction, out var error))
@@ -384,7 +407,12 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, ct);
+        var adminUserId = principal.GetUserId() ?? Guid.Empty;
+        var wasDeleted = await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, ct);
+
+        await events.EmitSystemDefaultDeletedAsync(
+            parsedRole, parsedAction, adminUserId, wasDeleted, ct);
+
         return Results.NoContent();
     }
 
@@ -397,6 +425,7 @@ public static class ConventionStoreEndpoints
         string role,
         string action,
         IConventionStore store,
+        ConventionEventsService events,
         ClaimsPrincipal principal,
         CancellationToken ct)
     {
@@ -417,6 +446,8 @@ public static class ConventionStoreEndpoints
             // fire, but map it cleanly rather than letting it 500.
             return Results.BadRequest(new { error = ex.Message, code = ex.Code });
         }
+
+        await events.EmitSystemDefaultResetAsync(parsedRole, parsedAction, adminUserId, ct);
 
         var row = await store.GetAsync(null, parsedRole, parsedAction, ct);
         return Results.Ok(new ConventionResponse(
@@ -442,7 +473,7 @@ public static class ConventionStoreEndpoints
     /// (e.g. developer/deploy). Never returns a parsed pair that fails
     /// <see cref="RolePhaseMap.IsRoleEligibleForPhase"/>.
     /// </summary>
-    private static bool TryParsePair(
+    internal static bool TryParsePair(
         string? role,
         string? action,
         out AgentRole parsedRole,

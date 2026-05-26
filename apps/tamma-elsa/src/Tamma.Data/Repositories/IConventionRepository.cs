@@ -45,9 +45,11 @@ public interface IConventionRepository
     /// <see cref="Convention.Enabled"/> to <paramref name="enabled"/> on both
     /// insert and update (Story 27-10 — a tenant edit must be able to disable an
     /// override without silently re-enabling it), and bumps
-    /// <see cref="Convention.Version"/> on update. Returns the persisted entity.
+    /// <see cref="Convention.Version"/> on update. Returns the persisted entity
+    /// and a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> = UPDATE)
+    /// so callers can emit the correct DCB audit event type.
     /// </summary>
-    Task<Convention> UpsertTenantOverrideAsync(
+    Task<(Convention Row, bool WasCreated)> UpsertTenantOverrideAsync(
         Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct);
 
     /// <summary>
@@ -96,11 +98,13 @@ public interface IConventionRepository
     /// <see cref="Convention.UpdatedBy"/> (and <see cref="Convention.CreatedBy"/>
     /// when inserting, or when an existing seeded row still has a null creator)
     /// to <paramref name="updatedBy"/> when provided. Returns the persisted
-    /// entity. Same check-then-insert pattern as the tenant upsert — a
-    /// concurrent same-key insert surfaces as a Postgres unique-violation
-    /// (23505) via the <c>NULLS NOT DISTINCT</c> unique index.
+    /// entity and a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> =
+    /// UPDATE) so callers can emit the correct DCB audit event type. Same
+    /// check-then-insert pattern as the tenant upsert — a concurrent same-key
+    /// insert surfaces as a Postgres unique-violation (23505) via the
+    /// <c>NULLS NOT DISTINCT</c> unique index.
     /// </summary>
-    Task<Convention> UpsertSystemDefaultAsync(
+    Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct);
 
     /// <summary>

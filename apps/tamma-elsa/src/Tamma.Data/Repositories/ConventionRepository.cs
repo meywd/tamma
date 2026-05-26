@@ -24,6 +24,15 @@ public class ConventionRepository(
     ITenantDbContextFactory tenantDbFactory,
     ITenantContext tenantContext) : IConventionRepository
 {
+    /// <remarks>
+    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
+    /// routing even when reading or writing system-default rows
+    /// (<c>tenant_id IS NULL</c>): the per-tenant DB factory routes the request
+    /// to the correct physical database based on the ambient tenant, regardless
+    /// of whether the rows being read/written are system defaults or tenant
+    /// overrides. In single-user mode <see cref="EnsurePersonalTenantMiddleware"/>
+    /// always binds a personal tenant up-front, so this should never be unset.
+    /// </remarks>
     private Guid RequireTenantId() => tenantContext.TenantId
         ?? throw new InvalidOperationException(
             "ConventionRepository requires an ambient tenant id. The per-tenant "
@@ -46,6 +55,11 @@ public class ConventionRepository(
                 ct);
     }
 
+    /// <remarks>
+    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
+    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
+    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// </remarks>
     public async Task<Convention?> GetSystemDefaultAsync(
         string role, string action, CancellationToken ct)
     {
@@ -57,7 +71,7 @@ public class ConventionRepository(
                 ct);
     }
 
-    public async Task<Convention> UpsertTenantOverrideAsync(
+    public async Task<(Convention Row, bool WasCreated)> UpsertTenantOverrideAsync(
         Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
@@ -89,7 +103,7 @@ public class ConventionRepository(
             existing.UpdatedAt = now;
             existing.UpdatedBy = userId;
             await db.SaveChangesAsync(ct);
-            return existing;
+            return (existing, false);
         }
 
         var row = new Convention
@@ -111,7 +125,7 @@ public class ConventionRepository(
         };
         db.Conventions.Add(row);
         await db.SaveChangesAsync(ct);
-        return row;
+        return (row, true);
     }
 
     public async Task<bool> DeleteTenantOverrideAsync(
@@ -148,6 +162,11 @@ public class ConventionRepository(
             .ToListAsync(ct);
     }
 
+    /// <remarks>
+    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
+    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
+    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// </remarks>
     public async Task<IReadOnlyList<Convention>> ListSystemDefaultsAsync(CancellationToken ct)
     {
         var dbTenant = RequireTenantId();
@@ -157,7 +176,12 @@ public class ConventionRepository(
             .ToListAsync(ct);
     }
 
-    public async Task<Convention> UpsertSystemDefaultAsync(
+    /// <remarks>
+    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
+    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
+    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// </remarks>
+    public async Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct)
     {
         var dbTenant = RequireTenantId();
@@ -192,7 +216,7 @@ public class ConventionRepository(
             // time one touches the row, never overwriting a real creator.
             existing.CreatedBy ??= updatedBy;
             await db.SaveChangesAsync(ct);
-            return existing;
+            return (existing, false);
         }
 
         var row = new Convention
@@ -214,9 +238,14 @@ public class ConventionRepository(
         };
         db.Conventions.Add(row);
         await db.SaveChangesAsync(ct);
-        return row;
+        return (row, true);
     }
 
+    /// <remarks>
+    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
+    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
+    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// </remarks>
     public async Task<bool> DeleteSystemDefaultAsync(
         string role, string action, CancellationToken ct)
     {

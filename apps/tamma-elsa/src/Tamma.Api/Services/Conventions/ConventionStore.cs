@@ -55,25 +55,26 @@ public sealed class ConventionStore : IConventionStore
             .ConfigureAwait(false);
     }
 
-    public async Task UpsertAsync(
+    public async Task<(Convention Row, bool WasCreated)> UpsertAsync(
         Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
-        await _repository
+        var (row, wasCreated) = await _repository
             .UpsertTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), body, enabled, userId, ct)
             .ConfigureAwait(false);
+        return (row, wasCreated);
     }
 
-    public async Task DeleteAsync(
+    public async Task<bool> DeleteAsync(
         Guid tenantId, AgentRole role, AgentAction action, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
 
-        await _repository
+        return await _repository
             .DeleteTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
     }
@@ -186,20 +187,21 @@ public sealed class ConventionStore : IConventionStore
     // mutation-safe mirror-image of UpsertAsync/DeleteAsync above.
     // ------------------------------------------------------------------
 
-    public async Task UpsertSystemDefaultAsync(
+    public async Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
         AgentRole role, AgentAction action, string body, bool enabled, Guid adminUserId, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
-        await _repository
+        var (row, wasCreated) = await _repository
             .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), body, enabled, adminUserId, ct)
             .ConfigureAwait(false);
+        return (row, wasCreated);
     }
 
-    public async Task DeleteSystemDefaultAsync(
+    public async Task<bool> DeleteSystemDefaultAsync(
         AgentRole role, AgentAction action, CancellationToken ct)
     {
-        await _repository
+        return await _repository
             .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
     }

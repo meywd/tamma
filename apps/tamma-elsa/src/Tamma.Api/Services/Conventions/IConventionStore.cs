@@ -102,15 +102,20 @@ public interface IConventionStore
     /// <c>CreatedBy</c> / <c>UpdatedBy = userId</c>, persists
     /// <paramref name="enabled"/> on both insert and update (Story 27-10 — a
     /// tenant edit must be able to disable an override without silently
-    /// re-enabling it), and bumps <c>Version</c> on update.
+    /// re-enabling it), and bumps <c>Version</c> on update. Returns
+    /// <c>(row, wasCreated)</c> where <c>wasCreated</c> is <c>true</c> for an
+    /// INSERT and <c>false</c> for an UPDATE — used by callers to emit the
+    /// correct DCB audit event type.
     /// </summary>
-    Task UpsertAsync(Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct);
+    Task<(Convention Row, bool WasCreated)> UpsertAsync(Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct);
 
     /// <summary>
     /// Delete a tenant override (AC2). Operates ONLY on tenant-override rows;
-    /// never deletes system defaults. A no-op when no override exists.
+    /// never deletes system defaults. Returns <c>true</c> when a row was
+    /// actually removed, <c>false</c> when no override existed (no-op). Callers
+    /// use the return value to decide whether to emit a DCB deletion event.
     /// </summary>
-    Task DeleteAsync(Guid tenantId, AgentRole role, AgentAction action, CancellationToken ct);
+    Task<bool> DeleteAsync(Guid tenantId, AgentRole role, AgentAction action, CancellationToken ct);
 
     /// <summary>
     /// Fail-loud resolution (AC4) — tenant override (enabled) → system default
@@ -148,17 +153,21 @@ public interface IConventionStore
     /// <see cref="ResetSystemDefaultAsync"/> passes <c>enabled: true</c> for a
     /// canonical restore), stamps <paramref name="adminUserId"/> as the updater
     /// (and creator on insert / first edit of a seeded row), and bumps
-    /// <c>Version</c> on update. NEVER mutates a tenant override.
+    /// <c>Version</c> on update. NEVER mutates a tenant override. Returns
+    /// <c>(row, wasCreated)</c> — used by callers to emit the correct DCB audit
+    /// event type.
     /// </summary>
-    Task UpsertSystemDefaultAsync(
+    Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
         AgentRole role, AgentAction action, string body, bool enabled, Guid adminUserId, CancellationToken ct);
 
     /// <summary>
     /// Delete the SYSTEM-DEFAULT convention (<c>tenant_id IS NULL</c>) for
-    /// <c>(role, action)</c>. Platform-admin only. A no-op when no system
-    /// default exists. NEVER deletes a tenant override.
+    /// <c>(role, action)</c>. Platform-admin only. Returns <c>true</c> when a
+    /// row was actually removed, <c>false</c> when no system default existed
+    /// (no-op). Callers use the return value to decide whether to emit a DCB
+    /// deletion event. NEVER deletes a tenant override.
     /// </summary>
-    Task DeleteSystemDefaultAsync(
+    Task<bool> DeleteSystemDefaultAsync(
         AgentRole role, AgentAction action, CancellationToken ct);
 
     /// <summary>
