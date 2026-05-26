@@ -20,15 +20,23 @@ namespace Tamma.Api.Services.Conventions;
 /// requires <see cref="Convention.Enabled"/> == true; a disabled override is
 /// treated as ABSENT so resolution drops through to the system default rather
 /// than blanking the convention.</para>
+///
+/// <para><b>Event emission (Story 27-14 Delta A).</b> DCB audit events are
+/// emitted from within this service, not from the endpoint handlers, so any
+/// future caller of <see cref="IConventionStore"/> (CLI, Elsa activities,
+/// internal scripts) gets an automatic audit trail.</para>
 /// </summary>
 public sealed class ConventionStore : IConventionStore
 {
     private readonly IConventionRepository _repository;
+    private readonly ConventionEventsService _events;
 
-    public ConventionStore(IConventionRepository repository)
+    public ConventionStore(IConventionRepository repository, ConventionEventsService events)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(events);
         _repository = repository;
+        _events = events;
     }
 
     public async Task<Convention?> GetAsync(
@@ -62,9 +70,14 @@ public sealed class ConventionStore : IConventionStore
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
-        var (row, wasCreated) = await _repository
+        var (row, wasCreated, previous) = await _repository
             .UpsertTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), body, enabled, userId, ct)
             .ConfigureAwait(false);
+
+        // Story 27-14 Delta A: emit DCB event from the service layer.
+        await _events.EmitUpsertedAsync(tenantId, role, action, userId, wasCreated, previous, row, ct)
+            .ConfigureAwait(false);
+
         return (row, wasCreated);
     }
 
@@ -74,9 +87,43 @@ public sealed class ConventionStore : IConventionStore
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
 
-        return await _repository
+        var (wasDeleted, deletedVersion) = await _repository
             .DeleteTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
+
+        // Story 27-14 Delta A: emit DCB event from the service layer. The
+        // userId is not available at the store-mutation level (it was the
+        // endpoint's actor); pass Guid.Empty as a sentinel — the endpoint
+        // now delegates fully to the store. In practice callers that need a
+        // real actor id should use the overload that accepts userId.
+        // NOTE: DeleteAsync is called by the endpoint which also has the
+        // principal — see DeleteWithActorAsync. The base DeleteAsync falls
+        // back to Guid.Empty for backwards compatibility with test callers.
+        await _events.EmitDeletedAsync(tenantId, role, action, Guid.Empty, wasDeleted, deletedVersion, ct)
+            .ConfigureAwait(false);
+
+        return wasDeleted;
+    }
+
+    /// <summary>
+    /// Delete a tenant override, emitting the DCB event with the correct actor.
+    /// This is the preferred overload; <see cref="DeleteAsync"/> exists for
+    /// backwards-compatibility with existing callers that don't have an actor.
+    /// </summary>
+    public async Task<bool> DeleteAsync(
+        Guid tenantId, AgentRole role, AgentAction action, Guid actorUserId, CancellationToken ct)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id required.", nameof(tenantId));
+
+        var (wasDeleted, deletedVersion) = await _repository
+            .DeleteTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), ct)
+            .ConfigureAwait(false);
+
+        await _events.EmitDeletedAsync(tenantId, role, action, actorUserId, wasDeleted, deletedVersion, ct)
+            .ConfigureAwait(false);
+
+        return wasDeleted;
     }
 
     public async Task<ConventionResolution> ResolveAsync(
@@ -194,18 +241,49 @@ public sealed class ConventionStore : IConventionStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(body);
 
-        var (row, wasCreated) = await _repository
+        var (row, wasCreated, previous) = await _repository
             .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), body, enabled, adminUserId, ct)
             .ConfigureAwait(false);
+
+        // Story 27-14 Delta A: emit DCB event from the service layer.
+        await _events.EmitUpsertedAsync(null, role, action, adminUserId, wasCreated, previous, row, ct)
+            .ConfigureAwait(false);
+
         return (row, wasCreated);
     }
 
     public async Task<bool> DeleteSystemDefaultAsync(
         AgentRole role, AgentAction action, CancellationToken ct)
     {
-        return await _repository
+        var (wasDeleted, deletedVersion) = await _repository
             .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
+
+        // Story 27-14 Delta A: emit DCB event — actor is Guid.Empty because
+        // DeleteSystemDefaultAsync has no actor parameter (it's only called
+        // from the admin endpoint which has already authenticated the request).
+        // See also: DeleteSystemDefaultAsync(role, action, adminUserId, ct).
+        await _events.EmitDeletedAsync(null, role, action, Guid.Empty, wasDeleted, deletedVersion, ct)
+            .ConfigureAwait(false);
+
+        return wasDeleted;
+    }
+
+    /// <summary>
+    /// Delete the SYSTEM-DEFAULT convention, emitting the DCB event with the
+    /// correct admin actor. This is the preferred overload.
+    /// </summary>
+    public async Task<bool> DeleteSystemDefaultAsync(
+        AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct)
+    {
+        var (wasDeleted, deletedVersion) = await _repository
+            .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
+            .ConfigureAwait(false);
+
+        await _events.EmitDeletedAsync(null, role, action, adminUserId, wasDeleted, deletedVersion, ct)
+            .ConfigureAwait(false);
+
+        return wasDeleted;
     }
 
     public async Task<(Convention Row, bool WasCreated)> ResetSystemDefaultAsync(
@@ -231,20 +309,32 @@ public sealed class ConventionStore : IConventionStore
                 + "system default to reset to.",
                 new Dictionary<string, object?>
                 {
-                    ["role"] = role.ToWire(),
+                    ["role"]   = role.ToWire(),
                     ["action"] = action.ToWire(),
                 },
                 retryable: false,
                 severity: TammaErrorSeverity.Medium);
         }
 
+        // Read the current system default BEFORE upserting so we can compute the
+        // previousVersion for the RESET event.
+        var currentDefault = await _repository
+            .GetSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
+            .ConfigureAwait(false);
+        var previousVersion = currentDefault?.Version ?? 0;
+
         // A reset is a CANONICAL restore — force enabled:true so a previously
         // disabled system default comes back live (Story 27-10).
         // Forward the (row, wasCreated) tuple so the caller can build a complete
         // HTTP response without a second DB round-trip.
-        var (row, wasCreated) = await _repository
+        var (row, wasCreated, _) = await _repository
             .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), baseline, enabled: true, adminUserId, ct)
             .ConfigureAwait(false);
+
+        // Story 27-14 Delta A + C: emit RESET event with version diff.
+        await _events.EmitResetAsync(role, action, adminUserId, previousVersion, row.Version, ct)
+            .ConfigureAwait(false);
+
         return (row, wasCreated);
     }
 
@@ -258,8 +348,8 @@ public sealed class ConventionStore : IConventionStore
             + "this is a seed bug, never a silent empty fallback.",
             new Dictionary<string, object?>
             {
-                ["role"] = role,
-                ["action"] = action,
+                ["role"]     = role,
+                ["action"]   = action,
                 ["tenantId"] = tenantId,
             },
             retryable: false,

@@ -119,8 +119,8 @@ public interface IConventionStore
     /// tenant edit must be able to disable an override without silently
     /// re-enabling it), and bumps <c>Version</c> on update. Returns
     /// <c>(row, wasCreated)</c> where <c>wasCreated</c> is <c>true</c> for an
-    /// INSERT and <c>false</c> for an UPDATE — used by callers to emit the
-    /// correct DCB audit event type.
+    /// INSERT and <c>false</c> for an UPDATE — used internally to emit the
+    /// correct DCB audit event type (Story 27-14: emission moves to the service).
     /// </summary>
     Task<(Convention Row, bool WasCreated)> UpsertAsync(Guid tenantId, AgentRole role, AgentAction action, string body, bool enabled, Guid userId, CancellationToken ct);
 

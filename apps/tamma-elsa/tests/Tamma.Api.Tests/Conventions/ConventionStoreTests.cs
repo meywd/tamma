@@ -125,6 +125,12 @@ public class ConventionStoreTests
     /// Build a service whose repository routes the physical DB via the
     /// ambient tenant id (mirrors production: the factory + ITenantContext
     /// pick the DB; the method's tenantId arg picks the row tier).
+    ///
+    /// Story 27-14: pass a no-op <see cref="ConventionEventsService"/> so event
+    /// emission is exercised structurally (best-effort: swallows silently) but
+    /// does not require a running event-store DB. The
+    /// <see cref="ConventionEventsServiceTests"/> fixture covers the event
+    /// assertions in detail.
     /// </summary>
     private ConventionStore NewStore()
     {
@@ -132,7 +138,29 @@ public class ConventionStoreTests
         var tc = new TenantContext();
         tc.SetTenantId(AmbientTenant);
         var repo = new ConventionRepository(factory, tc);
-        return new ConventionStore(repo);
+        var eventsService = new ConventionEventsService(new NullConventionEventRepository());
+        return new ConventionStore(repo, eventsService);
+    }
+
+    // Null event repository for store tests — events are verified separately in
+    // ConventionEventsServiceTests; here we just need emission to not throw.
+    private sealed class NullConventionEventRepository : IEventRepository
+    {
+        public Task<Tamma.Data.Entities.DomainEvent> AppendAsync(Tamma.Data.Entities.DomainEvent evt)
+            => Task.FromResult(evt);
+        public Task<Tamma.Data.Entities.DomainEvent?> GetByIdAsync(Guid id)
+            => Task.FromResult<Tamma.Data.Entities.DomainEvent?>(null);
+        public Task<List<Tamma.Data.Entities.DomainEvent>> QueryAsync(Guid? tenantId, string? type, int? issueNumber, int limit)
+            => Task.FromResult(new List<Tamma.Data.Entities.DomainEvent>());
+        public Task<Tamma.Data.Entities.DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)
+            => Task.FromResult<Tamma.Data.Entities.DomainEvent?>(null);
+        public Task ClearAsync(Guid tenantId) => Task.CompletedTask;
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
+            Guid tenantId, string? typePrefix, int limit, int offset)
+            => Task.FromResult<(IReadOnlyList<Tamma.Data.Entities.DomainEvent>, int)>((new List<Tamma.Data.Entities.DomainEvent>(), 0));
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
+            => Task.FromResult<(IReadOnlyList<Tamma.Data.Entities.DomainEvent>, int)>((new List<Tamma.Data.Entities.DomainEvent>(), 0));
     }
 
     // ------------------------------------------------------------------

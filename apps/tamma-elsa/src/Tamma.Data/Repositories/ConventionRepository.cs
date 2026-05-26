@@ -71,7 +71,7 @@ public class ConventionRepository(
                 ct);
     }
 
-    public async Task<(Convention Row, bool WasCreated)> UpsertTenantOverrideAsync(
+    public async Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertTenantOverrideAsync(
         Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
@@ -95,6 +95,21 @@ public class ConventionRepository(
         var now = DateTime.UtcNow;
         if (existing is not null)
         {
+            // Snapshot the previous state BEFORE mutating (for changedFields diff).
+            var previous = new Convention
+            {
+                Id = existing.Id,
+                TenantId = existing.TenantId,
+                Role = existing.Role,
+                Action = existing.Action,
+                Body = existing.Body,
+                Version = existing.Version,
+                Enabled = existing.Enabled,
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = existing.UpdatedAt,
+                CreatedBy = existing.CreatedBy,
+                UpdatedBy = existing.UpdatedBy,
+            };
             existing.Body = body;
             existing.Version += 1;
             // Story 27-10 — honour the caller's enabled flag on EDIT so a tenant
@@ -103,7 +118,7 @@ public class ConventionRepository(
             existing.UpdatedAt = now;
             existing.UpdatedBy = userId;
             await db.SaveChangesAsync(ct);
-            return (existing, false);
+            return (existing, false, previous);
         }
 
         var row = new Convention
@@ -125,10 +140,10 @@ public class ConventionRepository(
         };
         db.Conventions.Add(row);
         await db.SaveChangesAsync(ct);
-        return (row, true);
+        return (row, true, null);
     }
 
-    public async Task<bool> DeleteTenantOverrideAsync(
+    public async Task<(bool WasDeleted, int? DeletedVersion)> DeleteTenantOverrideAsync(
         Guid tenantId, string role, string action, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
@@ -142,11 +157,12 @@ public class ConventionRepository(
             .FirstOrDefaultAsync(
                 c => c.TenantId == tenantId && c.Role == role && c.Action == action,
                 ct);
-        if (row is null) return false;
+        if (row is null) return (false, null);
 
+        var deletedVersion = row.Version;
         db.Conventions.Remove(row);
         await db.SaveChangesAsync(ct);
-        return true;
+        return (true, deletedVersion);
     }
 
     public async Task<IReadOnlyList<Convention>> ListTenantOverridesAsync(
@@ -181,7 +197,7 @@ public class ConventionRepository(
     /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
     /// — see <see cref="RequireTenantId"/> doc-comment.
     /// </remarks>
-    public async Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
+    public async Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct)
     {
         var dbTenant = RequireTenantId();
@@ -203,6 +219,21 @@ public class ConventionRepository(
         var now = DateTime.UtcNow;
         if (existing is not null)
         {
+            // Snapshot the previous state BEFORE mutating (for changedFields diff).
+            var previous = new Convention
+            {
+                Id = existing.Id,
+                TenantId = existing.TenantId,
+                Role = existing.Role,
+                Action = existing.Action,
+                Body = existing.Body,
+                Version = existing.Version,
+                Enabled = existing.Enabled,
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = existing.UpdatedAt,
+                CreatedBy = existing.CreatedBy,
+                UpdatedBy = existing.UpdatedBy,
+            };
             existing.Body = body;
             existing.Version += 1;
             // Story 27-10 — honour the caller's enabled flag on EDIT so a
@@ -216,7 +247,7 @@ public class ConventionRepository(
             // time one touches the row, never overwriting a real creator.
             existing.CreatedBy ??= updatedBy;
             await db.SaveChangesAsync(ct);
-            return (existing, false);
+            return (existing, false, previous);
         }
 
         var row = new Convention
@@ -238,7 +269,7 @@ public class ConventionRepository(
         };
         db.Conventions.Add(row);
         await db.SaveChangesAsync(ct);
-        return (row, true);
+        return (row, true, null);
     }
 
     /// <remarks>
@@ -246,7 +277,7 @@ public class ConventionRepository(
     /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
     /// — see <see cref="RequireTenantId"/> doc-comment.
     /// </remarks>
-    public async Task<bool> DeleteSystemDefaultAsync(
+    public async Task<(bool WasDeleted, int? DeletedVersion)> DeleteSystemDefaultAsync(
         string role, string action, CancellationToken ct)
     {
         var dbTenant = RequireTenantId();
@@ -258,10 +289,11 @@ public class ConventionRepository(
             .FirstOrDefaultAsync(
                 c => c.TenantId == default(Guid?) && c.Role == role && c.Action == action,
                 ct);
-        if (row is null) return false;
+        if (row is null) return (false, null);
 
+        var deletedVersion = row.Version;
         db.Conventions.Remove(row);
         await db.SaveChangesAsync(ct);
-        return true;
+        return (true, deletedVersion);
     }
 }

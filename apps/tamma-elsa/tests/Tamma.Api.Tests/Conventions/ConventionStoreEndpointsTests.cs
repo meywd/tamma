@@ -122,7 +122,10 @@ public class ConventionStoreEndpointsTests
         var tc = new TenantContext();
         tc.SetTenantId(AmbientTenant);
         var repo = new ConventionRepository(factory, tc);
-        return new ConventionStore(repo);
+        // Story 27-14: events now emit from the store — pass a no-op event repo
+        // so the endpoint tests don't need an event-store DB.
+        var eventsService = new ConventionEventsService(new NullConventionEventRepository());
+        return new ConventionStore(repo, eventsService);
     }
 
     private static TenantContext TenantCtx(Guid? tenantId)
@@ -142,12 +145,6 @@ public class ConventionStoreEndpointsTests
 
     private static ITammaModeProvider Mode(TammaMode mode) => new StubModeProvider(mode);
 
-
-    private static ConventionEventsService NoOpEvents()
-    {
-        var nullRepo = new NullConventionEventRepository();
-        return new ConventionEventsService(nullRepo);
-    }
 
     private sealed class NullConventionEventRepository : Tamma.Data.Repositories.IEventRepository
     {
@@ -247,11 +244,11 @@ public class ConventionStoreEndpointsTests
         //    upsert will produce v2 to prove we surface real version, not hardcoded 1).
         var req1 = new UpsertConventionRequest("V1-BODY", Enabled: true);
         await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
-            RoleWire, ActionWire, req1, store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+            RoleWire, ActionWire, req1, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
 
         var req2 = new UpsertConventionRequest("V2-BODY", Enabled: true);
         await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
-            RoleWire, ActionWire, req2, store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+            RoleWire, ActionWire, req2, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
 
         // 2. List must show isOverride:true, source:tenant, with the CORRECT version (2).
         var listResult = await ConventionStoreEndpoints.ListAll(
@@ -278,7 +275,7 @@ public class ConventionStoreEndpointsTests
 
         // 4. Delete the override → list falls back to system (source:system, isOverride:false).
         var deleteResult = await ConventionStoreEndpoints.DeleteTenantOverride(
-            RoleWire, ActionWire, store, NoOpEvents(), Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+            RoleWire, ActionWire, store, Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
         var (deleteStatus, _) = await ExecuteAsync(deleteResult);
         deleteStatus.Should().Be(StatusCodes.Status204NoContent);
 
@@ -348,7 +345,7 @@ public class ConventionStoreEndpointsTests
         var req = new UpsertConventionRequest("TENANT-CREATED", Enabled: true);
 
         var result = await ConventionStoreEndpoints.UpsertTenantOverride(
-            RoleWire, ActionWire, req, store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+            RoleWire, ActionWire, req, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
@@ -372,7 +369,7 @@ public class ConventionStoreEndpointsTests
         var req = new UpsertConventionRequest("TENANT-DISABLED", Enabled: false);
 
         var result = await ConventionStoreEndpoints.UpsertTenantOverride(
-            RoleWire, ActionWire, req, store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+            RoleWire, ActionWire, req, store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
 
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
@@ -400,11 +397,11 @@ public class ConventionStoreEndpointsTests
 
         await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
             RoleWire, ActionWire, new UpsertConventionRequest("V1", Enabled: false),
-            store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+            store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
 
         await ExecuteAsync(await ConventionStoreEndpoints.UpsertTenantOverride(
             RoleWire, ActionWire, new UpsertConventionRequest("V2", Enabled: true),
-            store, NoOpEvents(), admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
+            store, admin, TenantCtx(tenantId), Mode(TammaMode.SaaS), default));
 
         var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
         resolved.Source.Should().Be(ConventionSource.Tenant);
@@ -419,7 +416,7 @@ public class ConventionStoreEndpointsTests
         await store.UpsertAsync(tenantId, Role, Action, "TO-DELETE", enabled: true, Guid.NewGuid(), default);
 
         var result = await ConventionStoreEndpoints.DeleteTenantOverride(
-            RoleWire, ActionWire, store, NoOpEvents(), Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+            RoleWire, ActionWire, store, Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
 
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status204NoContent);
@@ -435,7 +432,7 @@ public class ConventionStoreEndpointsTests
         var tenantId = Guid.NewGuid();
 
         var result = await ConventionStoreEndpoints.DeleteTenantOverride(
-            RoleWire, ActionWire, store, NoOpEvents(), Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+            RoleWire, ActionWire, store, Principal(Guid.Empty), TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
 
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status204NoContent);
@@ -523,7 +520,7 @@ public class ConventionStoreEndpointsTests
 
         var result = await ConventionStoreEndpoints.UpsertTenantOverride(
             RoleWire, ActionWire, new UpsertConventionRequest("   ", Enabled: true),
-            store, NoOpEvents(), admin, TenantCtx(Guid.NewGuid()), Mode(TammaMode.SaaS), default);
+            store, admin, TenantCtx(Guid.NewGuid()), Mode(TammaMode.SaaS), default);
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
@@ -578,7 +575,7 @@ public class ConventionStoreEndpointsTests
 
         var result = await ConventionStoreEndpoints.UpsertSystemDefault(
             RoleWire, ActionWire, new UpsertConventionRequest("ADMIN-DEFAULT", Enabled: true),
-            store, NoOpEvents(), admin, default);
+            store, admin, default);
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
@@ -600,7 +597,7 @@ public class ConventionStoreEndpointsTests
 
         var result = await ConventionStoreEndpoints.UpsertSystemDefault(
             RoleWire, ActionWire, new UpsertConventionRequest("ADMIN-DISABLED", Enabled: false),
-            store, NoOpEvents(), admin, default);
+            store, admin, default);
 
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
@@ -627,11 +624,11 @@ public class ConventionStoreEndpointsTests
         // Admin disables + drifts the default first …
         await ExecuteAsync(await ConventionStoreEndpoints.UpsertSystemDefault(
             RoleWire, ActionWire, new UpsertConventionRequest("DRIFTED", Enabled: false),
-            store, NoOpEvents(), admin, default));
+            store, admin, default));
 
         // … then reset restores the baseline and re-enables.
         var result = await ConventionStoreEndpoints.ResetSystemDefault(
-            RoleWire, ActionWire, store, NoOpEvents(), admin, default);
+            RoleWire, ActionWire, store, admin, default);
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
 
@@ -647,7 +644,7 @@ public class ConventionStoreEndpointsTests
     {
         var store = NewStore();
         var result = await ConventionStoreEndpoints.DeleteSystemDefault(
-            RoleWire, ActionWire, store, NoOpEvents(), Principal(Guid.Empty), default);
+            RoleWire, ActionWire, store, Principal(Guid.Empty), default);
 
         var (status, _) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status204NoContent);

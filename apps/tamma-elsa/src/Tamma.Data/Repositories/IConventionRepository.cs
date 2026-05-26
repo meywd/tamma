@@ -45,19 +45,22 @@ public interface IConventionRepository
     /// <see cref="Convention.Enabled"/> to <paramref name="enabled"/> on both
     /// insert and update (Story 27-10 — a tenant edit must be able to disable an
     /// override without silently re-enabling it), and bumps
-    /// <see cref="Convention.Version"/> on update. Returns the persisted entity
-    /// and a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> = UPDATE)
-    /// so callers can emit the correct DCB audit event type.
+    /// <see cref="Convention.Version"/> on update. Returns the persisted entity,
+    /// a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> = UPDATE),
+    /// and the <c>previousRow</c> snapshot (non-null on UPDATE, null on INSERT)
+    /// so callers can compute a <c>changedFields</c> diff for the DCB UPDATED event.
     /// </summary>
-    Task<(Convention Row, bool WasCreated)> UpsertTenantOverrideAsync(
+    Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertTenantOverrideAsync(
         Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct);
 
     /// <summary>
     /// Delete a tenant-override row. Operates ONLY on the tenant tier — system
     /// defaults are never deleted. Returns false when no tenant override matched
-    /// (caller falls back to the system default).
+    /// (caller falls back to the system default); when a row IS deleted, the
+    /// <c>deletedVersion</c> field carries its version at deletion time (for the
+    /// DCB DELETED event's <c>data.deletedVersion</c>).
     /// </summary>
-    Task<bool> DeleteTenantOverrideAsync(
+    Task<(bool WasDeleted, int? DeletedVersion)> DeleteTenantOverrideAsync(
         Guid tenantId, string role, string action, CancellationToken ct);
 
     /// <summary>
@@ -97,22 +100,24 @@ public interface IConventionRepository
     /// <see cref="Convention.Version"/> on update and sets
     /// <see cref="Convention.UpdatedBy"/> (and <see cref="Convention.CreatedBy"/>
     /// when inserting, or when an existing seeded row still has a null creator)
-    /// to <paramref name="updatedBy"/> when provided. Returns the persisted
-    /// entity and a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> =
-    /// UPDATE) so callers can emit the correct DCB audit event type. Same
-    /// check-then-insert pattern as the tenant upsert — a concurrent same-key
-    /// insert surfaces as a Postgres unique-violation (23505) via the
+    /// to <paramref name="updatedBy"/> when provided. Returns the persisted entity,
+    /// a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> = UPDATE),
+    /// and the <c>previousRow</c> snapshot (non-null on UPDATE, null on INSERT)
+    /// so callers can compute a <c>changedFields</c> diff for the DCB UPDATED
+    /// event. Same check-then-insert pattern as the tenant upsert — a concurrent
+    /// same-key insert surfaces as a Postgres unique-violation (23505) via the
     /// <c>NULLS NOT DISTINCT</c> unique index.
     /// </summary>
-    Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
+    Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct);
 
     /// <summary>
     /// Delete the SYSTEM-DEFAULT row (<c>tenant_id IS NULL</c>) for
     /// <c>(role, action)</c>. Operates ONLY on the system-default tier — tenant
-    /// overrides are never deleted. Returns false when no system default
-    /// matched.
+    /// overrides are never deleted. Returns false when no system default matched;
+    /// when a row IS deleted, the <c>deletedVersion</c> field carries its version
+    /// at deletion time (for the DCB DELETED event's <c>data.deletedVersion</c>).
     /// </summary>
-    Task<bool> DeleteSystemDefaultAsync(
+    Task<(bool WasDeleted, int? DeletedVersion)> DeleteSystemDefaultAsync(
         string role, string action, CancellationToken ct);
 }

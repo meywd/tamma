@@ -248,13 +248,14 @@ public static class ConventionStoreEndpoints
     /// <c>PUT /api/conventions/:role/:action</c> — create/update the caller's
     /// TENANT override. Gated by the <c>ConventionManage</c> policy
     /// (tenant_owner / tenant_admin; member → 403 before this method runs).
+    /// DCB audit events are emitted by <see cref="IConventionStore.UpsertAsync"/>
+    /// (Story 27-14 Delta A).
     /// </summary>
     public static async Task<IResult> UpsertTenantOverride(
         string role,
         string action,
         UpsertConventionRequest req,
         IConventionStore store,
-        ConventionEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider,
@@ -284,9 +285,6 @@ public static class ConventionStoreEndpoints
 
         var (row, wasCreated) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
 
-        await events.EmitTenantOverrideUpsertedAsync(
-            tenantId.Value, parsedRole, parsedAction, userId, wasCreated, row.Version, ct);
-
         return Results.Ok(new ConventionResponse(
             row.Id,
             parsedRole.ToWire(),
@@ -302,13 +300,13 @@ public static class ConventionStoreEndpoints
     /// <summary>
     /// <c>DELETE /api/conventions/:role/:action</c> — delete the caller's TENANT
     /// override (falls back to the system default). 204 on success. Gated by the
-    /// <c>ConventionManage</c> policy.
+    /// <c>ConventionManage</c> policy. DCB audit events are emitted by the store
+    /// (Story 27-14 Delta A).
     /// </summary>
     public static async Task<IResult> DeleteTenantOverride(
         string role,
         string action,
         IConventionStore store,
-        ConventionEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider,
@@ -325,15 +323,9 @@ public static class ConventionStoreEndpoints
             return Results.BadRequest(new { error = "No ambient tenant — cannot delete a tenant override.", code = "TENANT_REQUIRED" });
         }
 
-        var userId = principal.GetUserId() ?? Guid.Empty;
-
-        // DeleteAsync returns true if a row was actually removed; no-op when no
-        // override exists. Either way the cell falls back to the system default,
-        // so 204 is the right contract (mirrors a reset-to-default).
-        var wasDeleted = await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, ct);
-
-        await events.EmitTenantOverrideDeletedAsync(
-            tenantId.Value, parsedRole, parsedAction, userId, wasDeleted, ct);
+        // DCB event is emitted inside the store's DeleteAsync. Either way the
+        // cell falls back to the system default, so 204 is the right contract.
+        await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, ct);
 
         return Results.NoContent();
     }
@@ -345,14 +337,14 @@ public static class ConventionStoreEndpoints
 
     /// <summary>
     /// <c>PUT /api/admin/conventions/:role/:action</c> — create/update the
-    /// SYSTEM default. Platform-admin only.
+    /// SYSTEM default. Platform-admin only. DCB audit events are emitted by the
+    /// store (Story 27-14 Delta A).
     /// </summary>
     public static async Task<IResult> UpsertSystemDefault(
         string role,
         string action,
         UpsertConventionRequest req,
         IConventionStore store,
-        ConventionEventsService events,
         ClaimsPrincipal principal,
         CancellationToken ct)
     {
@@ -374,9 +366,6 @@ public static class ConventionStoreEndpoints
 
         var (row, wasCreated) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
 
-        await events.EmitSystemDefaultUpsertedAsync(
-            parsedRole, parsedAction, adminUserId, wasCreated, row.Version, ct);
-
         return Results.Ok(new ConventionResponse(
             row.Id,
             parsedRole.ToWire(),
@@ -391,13 +380,13 @@ public static class ConventionStoreEndpoints
 
     /// <summary>
     /// <c>DELETE /api/admin/conventions/:role/:action</c> — delete the SYSTEM
-    /// default. Platform-admin only. 204 on success.
+    /// default. Platform-admin only. 204 on success. DCB audit events are
+    /// emitted by the store (Story 27-14 Delta A).
     /// </summary>
     public static async Task<IResult> DeleteSystemDefault(
         string role,
         string action,
         IConventionStore store,
-        ConventionEventsService events,
         ClaimsPrincipal principal,
         CancellationToken ct)
     {
@@ -406,11 +395,7 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        var adminUserId = principal.GetUserId() ?? Guid.Empty;
-        var wasDeleted = await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, ct);
-
-        await events.EmitSystemDefaultDeletedAsync(
-            parsedRole, parsedAction, adminUserId, wasDeleted, ct);
+        await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, ct);
 
         return Results.NoContent();
     }
@@ -418,13 +403,13 @@ public static class ConventionStoreEndpoints
     /// <summary>
     /// <c>POST /api/admin/conventions/:role/:action/reset</c> — reset the SYSTEM
     /// default to the code baseline (<see cref="ConventionSeedSpecs"/>).
-    /// Platform-admin only.
+    /// Platform-admin only. DCB audit events are emitted by the store
+    /// (Story 27-14 Delta A).
     /// </summary>
     public static async Task<IResult> ResetSystemDefault(
         string role,
         string action,
         IConventionStore store,
-        ConventionEventsService events,
         ClaimsPrincipal principal,
         CancellationToken ct)
     {
@@ -446,8 +431,6 @@ public static class ConventionStoreEndpoints
             // fire, but map it cleanly rather than letting it 500.
             return Results.BadRequest(new { error = ex.Message, code = ex.Code });
         }
-
-        await events.EmitSystemDefaultResetAsync(parsedRole, parsedAction, adminUserId, ct);
 
         return Results.Ok(new ConventionResponse(
             row.Id,
