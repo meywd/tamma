@@ -97,6 +97,7 @@ public sealed class ConventionEventsService
                 new Dictionary<string, object?>
                 {
                     ["version"] = current.Version,
+                    ["enabled"] = current.Enabled,
                 },
                 ct);
         }
@@ -189,6 +190,8 @@ public sealed class ConventionEventsService
             {
                 ["previousVersion"] = previousVersion,
                 ["newVersion"]      = newVersion,
+                ["resetFrom"]       = "custom",
+                ["resetTo"]         = "hardcoded",
             },
             ct);
 

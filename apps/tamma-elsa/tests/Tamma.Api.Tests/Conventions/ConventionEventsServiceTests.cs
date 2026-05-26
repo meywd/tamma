@@ -96,6 +96,7 @@ public class ConventionEventsServiceTests
 
         using var data = JsonDocument.Parse(evt.Data);
         data.RootElement.GetProperty("version").GetInt32().Should().Be(1);
+        data.RootElement.GetProperty("enabled").GetBoolean().Should().BeTrue();
     }
 
     // ======================================================================
@@ -171,8 +172,9 @@ public class ConventionEventsServiceTests
         using var data = JsonDocument.Parse(events[0].Data);
         var changedFields = data.RootElement.GetProperty("changedFields")
             .EnumerateArray().Select(e => e.GetString()).ToList();
-        changedFields.Should().Contain("body");
-        changedFields.Should().Contain("enabled");
+        // Positional assertion — locks the deterministic order (body before enabled)
+        // so a future reorder of the if-blocks would surface as a test failure.
+        changedFields.Should().Equal(new[] { "body", "enabled" });
     }
 
     // ======================================================================
@@ -240,6 +242,9 @@ public class ConventionEventsServiceTests
         tags.RootElement.GetProperty("userId").GetString().Should().Be(adminId.ToString());
         tags.RootElement.TryGetProperty("tenantId", out _).Should().BeFalse(
             "tenantId must be absent for platform-wide events");
+
+        using var data = JsonDocument.Parse(evt.Data);
+        data.RootElement.GetProperty("enabled").GetBoolean().Should().BeTrue();
     }
 
     [Test]
@@ -327,6 +332,8 @@ public class ConventionEventsServiceTests
         using var data = JsonDocument.Parse(evt.Data);
         data.RootElement.GetProperty("previousVersion").GetInt32().Should().Be(5);
         data.RootElement.GetProperty("newVersion").GetInt32().Should().Be(6);
+        data.RootElement.GetProperty("resetFrom").GetString().Should().Be("custom");
+        data.RootElement.GetProperty("resetTo").GetString().Should().Be("hardcoded");
     }
 
     // ======================================================================

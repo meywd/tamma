@@ -13,6 +13,7 @@ using Tamma.Api.Endpoints;
 using Tamma.Api.Services.Agents;
 using Tamma.Api.Services.Conventions;
 using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
@@ -439,6 +440,63 @@ public class ConventionStoreEndpointsTests
     }
 
     // ======================================================================
+    // Fix B: actor propagation — DELETE event carries the real userId (NOT Guid.Empty)
+    // ======================================================================
+
+    /// <summary>
+    /// Invokes <see cref="ConventionStoreEndpoints.DeleteTenantOverride"/> with a
+    /// principal carrying a known user id and asserts the resulting
+    /// <c>CONVENTION.DELETED.SUCCESS</c> event's <c>tags.userId</c> equals that
+    /// id — NOT <c>Guid.Empty</c>. Pins the Fix A actor-propagation path end-to-end.
+    /// </summary>
+    [Test]
+    public async Task DeleteTenantOverride_EmitsDeletedEvent_WithRealActorUserId()
+    {
+        // Arrange: build a store wired to a real InMemory event repo so we can
+        // query the emitted events after the endpoint call.
+        var fx = new InMemoryDbFixture();
+        await using var fxScope = fx;
+
+        var factory = new TenantDbContextFactory(_resolver);
+        var tc = new TenantContext();
+        tc.SetTenantId(AmbientTenant);
+        var repo = new ConventionRepository(factory, tc);
+
+        var eventRepo = new EventRepository(
+            fx.Factory,
+            new TenantContext(),
+            new PlatformEventRepository(fx.Cp));
+        var eventsService = new ConventionEventsService(eventRepo);
+        var store = new ConventionStore(repo, eventsService);
+
+        var tenantId = Guid.NewGuid();
+        var actorUserId = Guid.NewGuid();
+
+        // Seed a tenant override first so the delete actually fires the event
+        // (a no-op delete emits nothing, per EmitDeletedAsync contract).
+        await store.UpsertAsync(tenantId, Role, Action, "TO-DELETE-WITH-ACTOR", enabled: true, actorUserId, default);
+
+        var principal = Principal(actorUserId);
+
+        // Act: invoke the endpoint directly (mirrors endpoint tests pattern).
+        var result = await ConventionStoreEndpoints.DeleteTenantOverride(
+            RoleWire, ActionWire, store, principal, TenantCtx(tenantId), Mode(TammaMode.SaaS), default);
+
+        var (status, _) = await ExecuteAsync(result);
+        status.Should().Be(StatusCodes.Status204NoContent);
+
+        // Assert: the CONVENTION.DELETED.SUCCESS event must carry the real actor,
+        // not Guid.Empty (the bug that Fix A closes).
+        var events = await eventRepo.QueryAsync(tenantId, ConventionEventsService.DeletedType, null, 10);
+        events.Should().HaveCount(1, "exactly one deleted event must be emitted for an actual row removal");
+
+        using var tags = JsonDocument.Parse(events[0].Tags);
+        var emittedUserId = tags.RootElement.GetProperty("userId").GetString();
+        emittedUserId.Should().Be(actorUserId.ToString(),
+            "the DELETE audit event must carry the real actor userId, not Guid.Empty");
+    }
+
+    // ======================================================================
     // Resolve — correct body + miss → 404 (NOT empty)
     // ======================================================================
 
@@ -471,7 +529,7 @@ public class ConventionStoreEndpointsTests
 
         // Remove the system default so a taxonomy-valid cell has nothing to
         // resolve to — ResolveAsync throws CONVENTION_NOT_FOUND.
-        await store.DeleteSystemDefaultAsync(Role, Action, default);
+        await store.DeleteSystemDefaultAsync(Role, Action, Guid.NewGuid(), default);
 
         var result = await ConventionStoreEndpoints.Resolve(
             new ResolveConventionRequest(RoleWire, ActionWire),

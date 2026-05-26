@@ -371,7 +371,7 @@ public class ConventionStoreTests
         var beforeDelete = await store.ResolveAsync(tenantId, Role, Action, default);
         beforeDelete.Source.Should().Be(ConventionSource.Tenant);
 
-        await store.DeleteAsync(tenantId, Role, Action, default);
+        await store.DeleteAsync(tenantId, Role, Action, Guid.NewGuid(), default);
 
         // System default survives; resolution falls through to it.
         var afterDelete = await store.ResolveAsync(tenantId, Role, Action, default);
@@ -394,7 +394,7 @@ public class ConventionStoreTests
         var store = NewStore();
         var tenantId = Guid.NewGuid();
 
-        var act = async () => await store.DeleteAsync(tenantId, Role, Action, default);
+        var act = async () => await store.DeleteAsync(tenantId, Role, Action, Guid.NewGuid(), default);
 
         await act.Should().NotThrowAsync();
         (await store.ResolveAsync(tenantId, Role, Action, default)).Source
@@ -523,7 +523,7 @@ public class ConventionStoreTests
         var admin = Guid.NewGuid();
 
         // Remove the seeded system default first, then upsert fresh.
-        await store.DeleteSystemDefaultAsync(Role, Action, default);
+        await store.DeleteSystemDefaultAsync(Role, Action, admin, default);
         await store.UpsertSystemDefaultAsync(Role, Action, "FRESH-DEFAULT", enabled: true, admin, default);
 
         await using var db = NewContext();
@@ -550,8 +550,9 @@ public class ConventionStoreTests
     public async Task DeleteSystemDefault_RemovesSystemDefault()
     {
         var store = NewStore();
+        var admin = Guid.NewGuid();
 
-        await store.DeleteSystemDefaultAsync(Role, Action, default);
+        await store.DeleteSystemDefaultAsync(Role, Action, admin, default);
 
         await using var db = NewContext();
         (await db.Conventions.IgnoreQueryFilters()
@@ -636,7 +637,7 @@ public class ConventionStoreTests
 
         await store.UpsertAsync(tenantId, Role, Action, "TENANT-SURVIVES", enabled: true, Guid.NewGuid(), default);
 
-        await store.DeleteSystemDefaultAsync(Role, Action, default);
+        await store.DeleteSystemDefaultAsync(Role, Action, Guid.NewGuid(), default);
 
         await using var db = NewContext();
         (await db.Conventions.IgnoreQueryFilters()
@@ -683,7 +684,7 @@ public class ConventionStoreTests
 
         // A full tenant override lifecycle must leave that system default intact.
         await store.UpsertAsync(tenantId, Role, Action, "TENANT-V1", enabled: true, Guid.NewGuid(), default);
-        await store.DeleteAsync(tenantId, Role, Action, default);
+        await store.DeleteAsync(tenantId, Role, Action, Guid.NewGuid(), default);
 
         await using var db = NewContext();
         var systemRow = await db.Conventions.IgnoreQueryFilters()

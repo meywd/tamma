@@ -129,8 +129,10 @@ public interface IConventionStore
     /// never deletes system defaults. Returns <c>true</c> when a row was
     /// actually removed, <c>false</c> when no override existed (no-op). Callers
     /// use the return value to decide whether to emit a DCB deletion event.
+    /// <paramref name="actorUserId"/> is the user performing the delete — stamped
+    /// on the <c>CONVENTION.DELETED.SUCCESS</c> audit event.
     /// </summary>
-    Task<bool> DeleteAsync(Guid tenantId, AgentRole role, AgentAction action, CancellationToken ct);
+    Task<bool> DeleteAsync(Guid tenantId, AgentRole role, AgentAction action, Guid actorUserId, CancellationToken ct);
 
     /// <summary>
     /// Fail-loud resolution (AC4) — tenant override (enabled) → system default
@@ -181,9 +183,11 @@ public interface IConventionStore
     /// row was actually removed, <c>false</c> when no system default existed
     /// (no-op). Callers use the return value to decide whether to emit a DCB
     /// deletion event. NEVER deletes a tenant override.
+    /// <paramref name="adminUserId"/> is the admin performing the delete —
+    /// stamped on the <c>CONVENTION.DELETED.SUCCESS</c> audit event.
     /// </summary>
     Task<bool> DeleteSystemDefaultAsync(
-        AgentRole role, AgentAction action, CancellationToken ct);
+        AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct);
 
     /// <summary>
     /// Reset the SYSTEM-DEFAULT convention for <c>(role, action)</c> back to the

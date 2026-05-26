@@ -82,35 +82,6 @@ public sealed class ConventionStore : IConventionStore
     }
 
     public async Task<bool> DeleteAsync(
-        Guid tenantId, AgentRole role, AgentAction action, CancellationToken ct)
-    {
-        if (tenantId == Guid.Empty)
-            throw new ArgumentException("Tenant id required.", nameof(tenantId));
-
-        var (wasDeleted, deletedVersion) = await _repository
-            .DeleteTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), ct)
-            .ConfigureAwait(false);
-
-        // Story 27-14 Delta A: emit DCB event from the service layer. The
-        // userId is not available at the store-mutation level (it was the
-        // endpoint's actor); pass Guid.Empty as a sentinel — the endpoint
-        // now delegates fully to the store. In practice callers that need a
-        // real actor id should use the overload that accepts userId.
-        // NOTE: DeleteAsync is called by the endpoint which also has the
-        // principal — see DeleteWithActorAsync. The base DeleteAsync falls
-        // back to Guid.Empty for backwards compatibility with test callers.
-        await _events.EmitDeletedAsync(tenantId, role, action, Guid.Empty, wasDeleted, deletedVersion, ct)
-            .ConfigureAwait(false);
-
-        return wasDeleted;
-    }
-
-    /// <summary>
-    /// Delete a tenant override, emitting the DCB event with the correct actor.
-    /// This is the preferred overload; <see cref="DeleteAsync"/> exists for
-    /// backwards-compatibility with existing callers that don't have an actor.
-    /// </summary>
-    public async Task<bool> DeleteAsync(
         Guid tenantId, AgentRole role, AgentAction action, Guid actorUserId, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
@@ -120,6 +91,8 @@ public sealed class ConventionStore : IConventionStore
             .DeleteTenantOverrideAsync(tenantId, role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
 
+        // Story 27-14 Delta A: emit DCB event from the service layer with the
+        // real actor so the audit trail carries the user who performed the delete.
         await _events.EmitDeletedAsync(tenantId, role, action, actorUserId, wasDeleted, deletedVersion, ct)
             .ConfigureAwait(false);
 
@@ -253,33 +226,14 @@ public sealed class ConventionStore : IConventionStore
     }
 
     public async Task<bool> DeleteSystemDefaultAsync(
-        AgentRole role, AgentAction action, CancellationToken ct)
-    {
-        var (wasDeleted, deletedVersion) = await _repository
-            .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
-            .ConfigureAwait(false);
-
-        // Story 27-14 Delta A: emit DCB event — actor is Guid.Empty because
-        // DeleteSystemDefaultAsync has no actor parameter (it's only called
-        // from the admin endpoint which has already authenticated the request).
-        // See also: DeleteSystemDefaultAsync(role, action, adminUserId, ct).
-        await _events.EmitDeletedAsync(null, role, action, Guid.Empty, wasDeleted, deletedVersion, ct)
-            .ConfigureAwait(false);
-
-        return wasDeleted;
-    }
-
-    /// <summary>
-    /// Delete the SYSTEM-DEFAULT convention, emitting the DCB event with the
-    /// correct admin actor. This is the preferred overload.
-    /// </summary>
-    public async Task<bool> DeleteSystemDefaultAsync(
         AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct)
     {
         var (wasDeleted, deletedVersion) = await _repository
             .DeleteSystemDefaultAsync(role.ToWire(), action.ToWire(), ct)
             .ConfigureAwait(false);
 
+        // Story 27-14 Delta A: emit DCB event from the service layer with the
+        // real admin actor so the audit trail carries the user who performed the delete.
         await _events.EmitDeletedAsync(null, role, action, adminUserId, wasDeleted, deletedVersion, ct)
             .ConfigureAwait(false);
 

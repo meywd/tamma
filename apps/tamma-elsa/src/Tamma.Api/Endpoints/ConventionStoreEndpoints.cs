@@ -283,7 +283,7 @@ public static class ConventionStoreEndpoints
         var userId = principal.GetUserId() ?? Guid.Empty;
         var enabled = req.Enabled ?? true;
 
-        var (row, wasCreated) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
+        var (row, _) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
 
         return Results.Ok(new ConventionResponse(
             row.Id,
@@ -323,9 +323,11 @@ public static class ConventionStoreEndpoints
             return Results.BadRequest(new { error = "No ambient tenant — cannot delete a tenant override.", code = "TENANT_REQUIRED" });
         }
 
-        // DCB event is emitted inside the store's DeleteAsync. Either way the
-        // cell falls back to the system default, so 204 is the right contract.
-        await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, ct);
+        var actorUserId = principal.GetUserId() ?? Guid.Empty;
+
+        // DCB event is emitted inside the store's DeleteAsync with the real
+        // actor so the audit trail carries the user who performed the delete.
+        await store.DeleteAsync(tenantId.Value, parsedRole, parsedAction, actorUserId, ct);
 
         return Results.NoContent();
     }
@@ -364,7 +366,7 @@ public static class ConventionStoreEndpoints
         var adminUserId = principal.GetUserId() ?? Guid.Empty;
         var enabled = req.Enabled ?? true;
 
-        var (row, wasCreated) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
+        var (row, _) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
 
         return Results.Ok(new ConventionResponse(
             row.Id,
@@ -395,7 +397,11 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, ct);
+        var adminUserId = principal.GetUserId() ?? Guid.Empty;
+
+        // DCB event is emitted inside the store's DeleteSystemDefaultAsync with
+        // the real admin actor so the audit trail carries the user who deleted.
+        await store.DeleteSystemDefaultAsync(parsedRole, parsedAction, adminUserId, ct);
 
         return Results.NoContent();
     }
