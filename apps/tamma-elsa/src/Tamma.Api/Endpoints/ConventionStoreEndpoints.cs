@@ -49,7 +49,7 @@ public static class ConventionStoreEndpoints
         ITammaModeProvider modeProvider,
         CancellationToken ct)
     {
-        var tenantId = ResolveTenantScope(tenantContext, modeProvider);
+        var tenantId = TenantScope(tenantContext, modeProvider);
         var summaries = await store.ListAsync(tenantId, ct);
         var response = summaries.Select(ToResponse).ToList();
         return Results.Ok(response);
@@ -76,7 +76,7 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        var tenantId = ResolveTenantScope(tenantContext, modeProvider);
+        var tenantId = TenantScope(tenantContext, modeProvider);
         ConventionResolution resolved;
         try
         {
@@ -219,7 +219,7 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        var tenantId = ResolveTenantScope(tenantContext, modeProvider);
+        var tenantId = TenantScope(tenantContext, modeProvider);
         ConventionResolution resolved;
         try
         {
@@ -273,7 +273,7 @@ public static class ConventionStoreEndpoints
             return bodyError;
         }
 
-        var tenantId = RequireTenantScope(tenantContext, modeProvider);
+        var tenantId = TenantScope(tenantContext, modeProvider);
         if (tenantId is null)
         {
             return Results.BadRequest(new { error = "No ambient tenant — cannot write a tenant override.", code = "TENANT_REQUIRED" });
@@ -319,7 +319,7 @@ public static class ConventionStoreEndpoints
             return error;
         }
 
-        var tenantId = RequireTenantScope(tenantContext, modeProvider);
+        var tenantId = TenantScope(tenantContext, modeProvider);
         if (tenantId is null)
         {
             return Results.BadRequest(new { error = "No ambient tenant — cannot delete a tenant override.", code = "TENANT_REQUIRED" });
@@ -434,9 +434,10 @@ public static class ConventionStoreEndpoints
         }
 
         var adminUserId = principal.GetUserId() ?? Guid.Empty;
+        Convention row;
         try
         {
-            await store.ResetSystemDefaultAsync(parsedRole, parsedAction, adminUserId, ct);
+            (row, _) = await store.ResetSystemDefaultAsync(parsedRole, parsedAction, adminUserId, ct);
         }
         catch (TammaError ex)
         {
@@ -448,17 +449,16 @@ public static class ConventionStoreEndpoints
 
         await events.EmitSystemDefaultResetAsync(parsedRole, parsedAction, adminUserId, ct);
 
-        var row = await store.GetAsync(null, parsedRole, parsedAction, ct);
         return Results.Ok(new ConventionResponse(
-            row?.Id,
+            row.Id,
             parsedRole.ToWire(),
             parsedAction.ToWire(),
-            row?.Body ?? string.Empty,
-            row?.Enabled ?? true,
-            VersionFor(row),
+            row.Body,
+            row.Enabled,
+            row.Version,
             IsOverride: false,
             Source: "system",
-            UpdatedAt: row?.UpdatedAt));
+            UpdatedAt: row.UpdatedAt));
     }
 
     // =======================================================================
@@ -510,27 +510,10 @@ public static class ConventionStoreEndpoints
     /// <para>The <paramref name="modeProvider"/> parameter is retained for
     /// future mode-aware scoping; today both modes derive the tenant from
     /// the ambient context and the parameter is unused.</para>
-    ///
-    /// <para><b>Read vs write callers.</b> <see cref="ResolveTenantScope"/>
-    /// and <see cref="RequireTenantScope"/> are thin aliases for this single
-    /// implementation; their distinct names signal read-path vs write-path
-    /// intent at call sites without duplicating the logic (M-1 collapse).</para>
     /// </summary>
     private static Guid? TenantScope(
         ITenantContext tenantContext, ITammaModeProvider modeProvider)
         => tenantContext.TenantId;
-
-    /// <summary>Read-path alias for <see cref="TenantScope"/>.</summary>
-    private static Guid? ResolveTenantScope(
-        ITenantContext tenantContext, ITammaModeProvider modeProvider)
-        => TenantScope(tenantContext, modeProvider);
-
-    /// <summary>Write-path alias for <see cref="TenantScope"/>.</summary>
-    private static Guid? RequireTenantScope(
-        ITenantContext tenantContext, ITammaModeProvider modeProvider)
-        => TenantScope(tenantContext, modeProvider);
-
-    private static int VersionFor(Convention? row) => row?.Version ?? 1;
 
     private static string SourceLabel(ConventionSource source) => source switch
     {

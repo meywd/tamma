@@ -208,7 +208,7 @@ public sealed class ConventionStore : IConventionStore
             .ConfigureAwait(false);
     }
 
-    public async Task ResetSystemDefaultAsync(
+    public async Task<(Convention Row, bool WasCreated)> ResetSystemDefaultAsync(
         AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct)
     {
         // Source the canonical baseline from the SAME code spec the seeder uses
@@ -240,9 +240,12 @@ public sealed class ConventionStore : IConventionStore
 
         // A reset is a CANONICAL restore — force enabled:true so a previously
         // disabled system default comes back live (Story 27-10).
-        await _repository
+        // Forward the (row, wasCreated) tuple so the caller can build a complete
+        // HTTP response without a second DB round-trip.
+        var (row, wasCreated) = await _repository
             .UpsertSystemDefaultAsync(role.ToWire(), action.ToWire(), baseline, enabled: true, adminUserId, ct)
             .ConfigureAwait(false);
+        return (row, wasCreated);
     }
 
     private static TammaError NoConventionError(string role, string action, Guid? tenantId)

@@ -499,7 +499,7 @@ public class ConventionStoreEndpointsTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INVALID_KEY");
+        body.Should().Contain("INVALID_ROLE_ACTION");
     }
 
     [Test]
@@ -512,7 +512,7 @@ public class ConventionStoreEndpointsTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     [Test]

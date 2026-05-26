@@ -16,10 +16,10 @@ namespace Tamma.Api.Endpoints;
 ///   <item>The token strings are recognised by
 ///     <see cref="AgentRoleExtensions.Parse"/> /
 ///     <see cref="AgentActionExtensions.Parse"/> — unknown token → 400
-///     <c>CONVENTION_INVALID_KEY</c>.</item>
+///     <c>INVALID_ROLE_ACTION</c>.</item>
 ///   <item>The pair is a valid taxonomy cell per
 ///     <see cref="RolePhaseMap.IsRoleEligibleForPhase"/> — known-but-ineligible
-///     (e.g. developer/deploy) → 400 <c>CONVENTION_INELIGIBLE_PAIR</c>.</item>
+///     (e.g. developer/deploy) → 400 <c>INELIGIBLE_ROLE_ACTION</c>.</item>
 /// </list>
 /// This prevents the prompt endpoint from doing a store round-trip and then a 404
 /// for a pair that the taxonomy guarantees will never have data, surfacing it as a
@@ -31,7 +31,8 @@ internal static class RoleActionParsing
     /// <summary>
     /// Parse and taxonomy-validate a <c>(role, action)</c> pair at the HTTP
     /// boundary. Returns <c>false</c> with a 400 <paramref name="error"/> result
-    /// when the token is unknown OR when the pair is known-but-ineligible.
+    /// when the token is unknown (<c>INVALID_ROLE_ACTION</c>) OR when the pair is
+    /// known-but-ineligible (<c>INELIGIBLE_ROLE_ACTION</c>).
     /// </summary>
     internal static bool TryParsePair(
         string? role,
@@ -46,7 +47,7 @@ internal static class RoleActionParsing
 
         if (string.IsNullOrWhiteSpace(role) || string.IsNullOrWhiteSpace(action))
         {
-            error = Results.BadRequest(new { error = "Both role and action are required.", code = "CONVENTION_INVALID_KEY" });
+            error = Results.BadRequest(new { error = "Both role and action are required.", code = "INVALID_ROLE_ACTION" });
             return false;
         }
 
@@ -57,7 +58,7 @@ internal static class RoleActionParsing
         }
         catch (ArgumentException ex)
         {
-            error = Results.BadRequest(new { error = ex.Message, code = "CONVENTION_INVALID_KEY" });
+            error = Results.BadRequest(new { error = ex.Message, code = "INVALID_ROLE_ACTION" });
             return false;
         }
 
@@ -70,7 +71,7 @@ internal static class RoleActionParsing
             error = Results.BadRequest(new
             {
                 error = $"(role='{parsedRole.ToWire()}', action='{parsedAction.ToWire()}') is not a valid taxonomy cell.",
-                code = "CONVENTION_INELIGIBLE_PAIR",
+                code = "INELIGIBLE_ROLE_ACTION",
             });
             return false;
         }

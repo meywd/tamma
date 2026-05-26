@@ -198,8 +198,8 @@ public class PromptEndpointsTenantAdminTests
     // ineligible pair (e.g. developer/deploy — deploy is devops-only) is
     // rejected before the store is even touched. Previously these returned 404
     // via TammaError from PromptStoreService; now they return 400
-    // (CONVENTION_INELIGIBLE_PAIR) from the shared taxonomy boundary guard.
-    // A truly unknown token (e.g. not-a-role) returns 400 CONVENTION_INVALID_KEY.
+    // (INELIGIBLE_ROLE_ACTION) from the shared taxonomy boundary guard.
+    // A truly unknown token (e.g. not-a-role) returns 400 INVALID_ROLE_ACTION.
     // ------------------------------------------------------------------
 
     private static async Task<(int Status, string Body)> ExecuteAsync(IResult result)
@@ -229,8 +229,8 @@ public class PromptEndpointsTenantAdminTests
             "developer", "deploy", _store, principal, tc, Mode(TammaMode.SingleUser));
 
         var (status, body) = await ExecuteAsync(result);
-        status.Should().Be(StatusCodes.Status400BadRequest, "ineligible pair → 400 CONVENTION_INELIGIBLE_PAIR");
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        status.Should().Be(StatusCodes.Status400BadRequest, "ineligible pair → 400 INELIGIBLE_ROLE_ACTION");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     [Test]
@@ -244,7 +244,7 @@ public class PromptEndpointsTenantAdminTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INVALID_KEY");
+        body.Should().Contain("INVALID_ROLE_ACTION");
     }
 
     [Test]
@@ -261,7 +261,7 @@ public class PromptEndpointsTenantAdminTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     [Test]
@@ -277,7 +277,7 @@ public class PromptEndpointsTenantAdminTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     [Test]
@@ -292,7 +292,7 @@ public class PromptEndpointsTenantAdminTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     [Test]
@@ -309,7 +309,7 @@ public class PromptEndpointsTenantAdminTests
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
-        body.Should().Contain("CONVENTION_INELIGIBLE_PAIR");
+        body.Should().Contain("INELIGIBLE_ROLE_ACTION");
     }
 
     // ------------------------------------------------------------------

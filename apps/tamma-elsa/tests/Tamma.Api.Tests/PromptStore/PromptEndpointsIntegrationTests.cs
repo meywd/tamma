@@ -65,7 +65,7 @@ public class PromptEndpointsIntegrationTests
     {
         // I-5 — the shared TryParsePair boundary guard now rejects a known-but-
         // ineligible pair (developer/deploy — deploy is devops-only) with 400
-        // CONVENTION_INELIGIBLE_PAIR before the store is touched. Previously
+        // INELIGIBLE_ROLE_ACTION before the store is touched. Previously
         // returned 404 (no system default → TammaError); with TryParsePair wired
         // into PromptEndpoints this is now correctly a 400 (bad input, not a
         // missing resource).

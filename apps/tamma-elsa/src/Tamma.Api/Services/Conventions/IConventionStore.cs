@@ -193,7 +193,12 @@ public interface IConventionStore
     /// startup. Platform-admin only. Throws <see cref="Tamma.Core.TammaError"/>
     /// (<c>CONVENTION_NOT_A_TAXONOMY_CELL</c>) when <c>(role, action)</c> is not
     /// a taxonomy cell — such a pair has no baseline to reset to.
+    ///
+    /// <para>Returns <c>(row, wasCreated)</c> — the restored system-default row
+    /// and whether it was freshly inserted (as opposed to updating an existing
+    /// row). Mirrors <see cref="UpsertSystemDefaultAsync"/>'s return shape so
+    /// callers can build a complete HTTP response without a second DB round-trip.</para>
     /// </summary>
-    Task ResetSystemDefaultAsync(
+    Task<(Convention Row, bool WasCreated)> ResetSystemDefaultAsync(
         AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct);
 }
