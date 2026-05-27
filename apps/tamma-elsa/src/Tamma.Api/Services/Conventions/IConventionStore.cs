@@ -173,6 +173,25 @@ public interface IConventionStore
     /// <c>Version</c> on update. NEVER mutates a tenant override. Returns
     /// <c>(row, wasCreated)</c> — used by callers to emit the correct DCB audit
     /// event type.
+    ///
+    /// <para>
+    /// <b>EPIC 28 CUTOVER HAZARD — I-2 (silent partial write in per-tenant-DB mode).</b>
+    /// When Epic 28 lands and the deployment flips to per-tenant physical DBs,
+    /// the convention <c>conventions</c> table physically lives on each tenant's
+    /// own DB (Story 28-1 PR D moved it to the tenant-tier schema). A
+    /// platform-admin mutating a system default through this method writes ONLY
+    /// to the admin's ambient tenant DB — every other tenant's <c>conventions</c>
+    /// table is untouched. The intended semantics ("system default = every
+    /// tenant sees the change") quietly fails: the change becomes a silent
+    /// per-tenant write. Either:
+    /// (a) a fanout mechanism (publish CONVENTION.SYSTEM_DEFAULT.CHANGED to a
+    ///     control-plane bus + per-tenant projection workers replay into each
+    ///     tenant DB), OR
+    /// (b) a runtime fail-loud guard (mode-detect "per-tenant-DB" and reject
+    ///     system-default writes with a clear error) must ship in the same
+    ///     story as the cutover. Pure documentation here — when Epic 28's
+    ///     mode-detection seam is wired, look for "I-2 hazard" references.
+    /// </para>
     /// </summary>
     Task<(Convention Row, bool WasCreated)> UpsertSystemDefaultAsync(
         AgentRole role, AgentAction action, string body, bool enabled, Guid adminUserId, CancellationToken ct);
@@ -185,6 +204,14 @@ public interface IConventionStore
     /// deletion event. NEVER deletes a tenant override.
     /// <paramref name="adminUserId"/> is the admin performing the delete —
     /// stamped on the <c>CONVENTION.DELETED.SUCCESS</c> audit event.
+    ///
+    /// <para>
+    /// <b>EPIC 28 CUTOVER HAZARD — I-2.</b> Same per-tenant-DB silent-partial
+    /// hazard as <see cref="UpsertSystemDefaultAsync"/>: a platform-admin DELETE
+    /// touches only the admin's ambient tenant DB. Pair the cutover with a
+    /// fanout-or-fail-loud guard. See the I-2 doc on
+    /// <see cref="UpsertSystemDefaultAsync"/> for the full hazard description.
+    /// </para>
     /// </summary>
     Task<bool> DeleteSystemDefaultAsync(
         AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct);
@@ -202,6 +229,14 @@ public interface IConventionStore
     /// and whether it was freshly inserted (as opposed to updating an existing
     /// row). Mirrors <see cref="UpsertSystemDefaultAsync"/>'s return shape so
     /// callers can build a complete HTTP response without a second DB round-trip.</para>
+    ///
+    /// <para>
+    /// <b>EPIC 28 CUTOVER HAZARD — I-2.</b> Same per-tenant-DB silent-partial
+    /// hazard as <see cref="UpsertSystemDefaultAsync"/> — a RESET only touches
+    /// the admin's ambient tenant DB. See the I-2 doc on
+    /// <see cref="UpsertSystemDefaultAsync"/> for the full hazard description
+    /// and the fanout / fail-loud options.
+    /// </para>
     /// </summary>
     Task<(Convention Row, bool WasCreated)> ResetSystemDefaultAsync(
         AgentRole role, AgentAction action, Guid adminUserId, CancellationToken ct);

@@ -24,6 +24,33 @@ namespace Tamma.Data.Entities;
 /// loaded by Story 27-16's seed step; this entity/migration is schema
 /// only.
 /// </para>
+///
+/// <para>
+/// <b>EPIC 28 CUTOVER NOTE (Task #12 — pure documentation).</b> Per the
+/// 2026-05-25 decision, system defaults are DB-managed at runtime by a
+/// platform admin (not compile-time constants). The <c>conventions</c>
+/// table physically lives on the tenant tier (Story 28-1 PR D moved it
+/// there alongside <c>prompt_overrides</c>). When Epic 28 flips the
+/// deployment to per-tenant physical DBs, two hazards land on the admin
+/// CRUD path:
+/// </para>
+/// <list type="bullet">
+///   <item><b>I-2 (silent partial system-default write).</b> A platform-admin
+///     mutating a system default (<see cref="TenantId"/>=NULL row) writes ONLY
+///     into the admin's ambient tenant DB. The change is invisible to every
+///     other tenant. Either a control-plane fanout or a runtime fail-loud
+///     guard must ship with the cutover.</item>
+///   <item><b>X-1 (defence-in-depth cross-tenant write guard).</b> In
+///     per-tenant-DB mode the ambient tenant id determines the physical DB;
+///     the tenantId argument to a write must equal it, else the write is
+///     mis-routed. Add a runtime assertion at the repository methods when the
+///     cutover ships.</item>
+/// </list>
+/// <para>Detail per-method on
+/// <see cref="Tamma.Api.Services.Conventions.IConventionStore"/> and
+/// <see cref="Tamma.Data.Repositories.IConventionRepository"/>. Grep
+/// "I-2 hazard" / "X-1" to find every annotated site.
+/// </para>
 /// </summary>
 public class Convention
 {

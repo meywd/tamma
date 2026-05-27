@@ -49,6 +49,28 @@ public interface IConventionRepository
     /// a <c>wasCreated</c> flag (<c>true</c> = INSERT, <c>false</c> = UPDATE),
     /// and the <c>previousRow</c> snapshot (non-null on UPDATE, null on INSERT)
     /// so callers can compute a <c>changedFields</c> diff for the DCB UPDATED event.
+    ///
+    /// <para>
+    /// <b>EPIC 28 CUTOVER HAZARDS</b> (Task #12 — pure documentation, no runtime
+    /// guard yet):
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><b>X-1 (cross-tenant write defence-in-depth).</b> In per-tenant-DB
+    ///     mode the ambient <see cref="ITenantContext.TenantId"/> selects WHICH
+    ///     DB this call hits. If a misbehaving caller passes a
+    ///     <paramref name="tenantId"/> different from the ambient tenant, the
+    ///     write still happens — but it's persisted into the WRONG tenant's DB
+    ///     under the ambient-tenant connection, which is a cross-tenant write
+    ///     leak. When Epic 28 cutover ships, add a runtime guard asserting
+    ///     <c>tenantId == ITenantContext.TenantId</c> here so this layer
+    ///     fail-louds instead of silently mis-routing.</item>
+    ///   <item><b>I-2 (per-tenant-DB system-default semantics).</b> A tenant
+    ///     override lives in the tenant's own DB, so tenant-tier writes are
+    ///     correct under per-tenant-DB. The hazard applies only to the
+    ///     <i>system-default</i> tier (<see cref="UpsertSystemDefaultAsync"/>);
+    ///     it is listed here only for symmetry with the I-2 doc on
+    ///     <see cref="IConventionStore.UpsertSystemDefaultAsync"/>.</item>
+    /// </list>
     /// </summary>
     Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertTenantOverrideAsync(
         Guid tenantId, string role, string action, string body, bool enabled, Guid userId, CancellationToken ct);
@@ -107,6 +129,20 @@ public interface IConventionRepository
     /// event. Same check-then-insert pattern as the tenant upsert — a concurrent
     /// same-key insert surfaces as a Postgres unique-violation (23505) via the
     /// <c>NULLS NOT DISTINCT</c> unique index.
+    ///
+    /// <para>
+    /// <b>EPIC 28 CUTOVER HAZARD — I-2 (system-default partial-write under per-tenant DB).</b>
+    /// When Epic 28 lands and the deployment flips to per-tenant physical DBs,
+    /// this method writes to ONLY the ambient tenant's DB. The intended
+    /// semantics ("system default = visible to every tenant") quietly fails;
+    /// only the admin-impersonated tenant sees the change. Either:
+    /// (a) a control-plane fanout (publish the change + projection workers
+    ///     replay into every tenant DB), OR
+    /// (b) a runtime fail-loud guard (detect per-tenant-DB mode and reject
+    ///     system-default writes with a clear error).
+    /// Pure doc here — when Epic 28's mode-detection seam is wired, grep
+    /// "I-2 hazard" to find every site that needs the fanout-or-guard.
+    /// </para>
     /// </summary>
     Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct);
