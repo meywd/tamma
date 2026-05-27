@@ -14,8 +14,19 @@ namespace Tamma.Api.Tests.Secrets.Migration;
 /// TDD harness for Story 29-9's
 /// <see cref="StopgapSecretMigrator"/>. Pins idempotency, audit-event
 /// emission, and the config-or-env source resolution order.
+///
+/// <para><b>Parallelism</b>: marked <see cref="NonParallelizableAttribute"/>
+/// because <see cref="RunAsync_ProbesEnvFallback_WhenConfigMissing"/> mutates
+/// a process-wide environment variable (<c>TAMMA_SHARED_SECRET</c>) that is
+/// also probed by every other test's migrator via
+/// <see cref="StopgapSecretDescriptor.ResolveFromConfig"/>. Running
+/// concurrently with sibling fixtures (or with other methods in this fixture
+/// via <c>ParallelScope.Children</c>) would inject a spurious second
+/// <c>MigratedSuccess</c> event and break the
+/// <see cref="RunAsync_EmitsMigratedSuccessAuditEvent"/> assertion.</para>
 /// </summary>
 [TestFixture]
+[NonParallelizable]
 public class StopgapSecretMigratorTests
 {
     private SecretsDbContextFactoryDouble _factory = null!;
