@@ -36,6 +36,15 @@ public sealed class ProviderSessionCleanupService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Task #10 (post-review): test-fixture gate. Without it the loop
+        // races test assertions on provider-session state.
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "ProviderSessionCleanupService gated off (RunOnStartup=false); skipping eviction loop.");
+            return;
+        }
+
         _logger.LogInformation(
             "ProviderSessionCleanupService started (interval={Interval}, ttl={Ttl})",
             _options.CleanupInterval, _options.InactivityTtl);

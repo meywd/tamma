@@ -4,7 +4,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Alerts;
 using Tamma.Api.Services.Alerts.Rules;
 using Tamma.Api.Services.Conventions;
+using Tamma.Api.Services.Email;
+using Tamma.Api.Services.Engine.Lifecycle;
 using Tamma.Api.Services.PlatformTasks;
+using Tamma.Api.Services.Providers;
+using Tamma.Api.Services.TaskQueue;
 
 namespace Tamma.Api.Tests.Infrastructure;
 
@@ -24,6 +28,16 @@ namespace Tamma.Api.Tests.Infrastructure;
 /// boot. With 75 integration tests in <c>Tamma.Api.Tests</c> the
 /// regression added ~2.5 minutes of wall-clock time; this helper claws
 /// it back.</para>
+///
+/// <para>Task #10 (post-review) — also gates four BackgroundService loops
+/// that race test assertions on per-row DB state
+/// (<see cref="OutboxSmtpSender"/>, <see cref="TaskQueueProcessor"/>,
+/// <see cref="ProviderSessionCleanupService"/>,
+/// <see cref="EngineRegistryHeartbeatService"/>). The
+/// <c>AuthRegisterTxnIdIntegrationTests.Register_OutboxRowPersistedWithMatchingTxnId</c>
+/// flake was caused by the sender flipping <c>status="pending"</c> to
+/// <c>"sent"</c>/<c>"failed"</c> before the assertion ran; the other three
+/// are pre-emptive because they all do DB work on startup.</para>
 /// </summary>
 internal static class AlertHostedServiceTestExtensions
 {
@@ -61,6 +75,36 @@ internal static class AlertHostedServiceTestExtensions
             // WebApplicationFactory boot doesn't round-trip the DB per test.
             services.RemoveAll<ConventionStoreSeederOptions>();
             services.AddSingleton(new ConventionStoreSeederOptions
+            {
+                RunOnStartup = false,
+            });
+
+            // Task #10 — OutboxSmtpSender is the root cause of the
+            // AuthRegisterTxnId flake. Gate it off; opt-in email tests can
+            // override per-fixture.
+            services.RemoveAll<OutboxSmtpSenderOptions>();
+            services.AddSingleton(new OutboxSmtpSenderOptions
+            {
+                RunOnStartup = false,
+            });
+
+            // Task #10 — TaskQueueProcessor, ProviderSessionCleanupService,
+            // and EngineRegistryHeartbeatService were all visible in the
+            // flaky test logs hitting the DB on startup. Pre-emptive gate.
+            services.RemoveAll<TaskQueueProcessorOptions>();
+            services.AddSingleton(new TaskQueueProcessorOptions
+            {
+                RunOnStartup = false,
+            });
+
+            services.RemoveAll<ProviderSessionOptions>();
+            services.AddSingleton(new ProviderSessionOptions
+            {
+                RunOnStartup = false,
+            });
+
+            services.RemoveAll<EngineRegistryHeartbeatOptions>();
+            services.AddSingleton(new EngineRegistryHeartbeatOptions
             {
                 RunOnStartup = false,
             });

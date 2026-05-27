@@ -5,6 +5,22 @@ using Microsoft.Extensions.Logging;
 namespace Tamma.Api.Services.Engine.Lifecycle;
 
 /// <summary>
+/// Task #10 (post-review) — options for <see cref="EngineRegistryHeartbeatService"/>.
+/// Registered as a singleton (DI-discoverable) so the shared API test fixture
+/// can toggle <see cref="RunOnStartup"/> off without removing the hosted
+/// service registration. Mirrors <c>BuiltInAlertRuleSeederOptions</c>.
+/// </summary>
+public sealed class EngineRegistryHeartbeatOptions
+{
+    /// <summary>
+    /// When <c>true</c> (default) the heartbeat loop runs. Tests gate this
+    /// off so per-test <c>ApiTestFixture</c> boots don't fire heartbeat
+    /// events into the lifecycle bus during assertions.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
+}
+
+/// <summary>
 /// Periodically snapshots <see cref="IEngineRegistry"/> and publishes the
 /// per-tenant engine state to the <see cref="IEngineLifecycleBus"/> as
 /// <c>engine.heartbeat</c> events. Dashboards subscribed to the SSE
@@ -26,19 +42,38 @@ public sealed class EngineRegistryHeartbeatService : BackgroundService
     private readonly IServiceProvider _services;
     private readonly IEngineLifecycleBus _bus;
     private readonly ILogger<EngineRegistryHeartbeatService> _logger;
+    private readonly EngineRegistryHeartbeatOptions _options;
 
     public EngineRegistryHeartbeatService(
         IServiceProvider services,
         IEngineLifecycleBus bus,
         ILogger<EngineRegistryHeartbeatService> logger)
+        : this(services, bus, logger, new EngineRegistryHeartbeatOptions())
+    {
+    }
+
+    public EngineRegistryHeartbeatService(
+        IServiceProvider services,
+        IEngineLifecycleBus bus,
+        ILogger<EngineRegistryHeartbeatService> logger,
+        EngineRegistryHeartbeatOptions options)
     {
         _services = services;
         _bus = bus;
         _logger = logger;
+        _options = options;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Task #10 (post-review): test-fixture gate.
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "EngineRegistryHeartbeatService gated off (RunOnStartup=false); skipping cadence loop.");
+            return;
+        }
+
         _logger.LogInformation("EngineRegistryHeartbeatService started (cadence={Cadence})", Cadence);
         using var timer = new PeriodicTimer(Cadence);
         try

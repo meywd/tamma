@@ -632,6 +632,11 @@ builder.Services.AddSingleton<Tamma.Api.Services.Engine.Lifecycle.IEngineLifecyc
     Tamma.Api.Services.Engine.Lifecycle.InMemoryEngineLifecycleBus>();
 builder.Services.Configure<Tamma.Api.Services.Engine.Lifecycle.EngineLifecycleOptions>(
     builder.Configuration.GetSection("EngineLifecycle"));
+// Task #10 (post-review) — register the heartbeat options as a singleton
+// so the shared API test fixture can flip RunOnStartup=false without
+// removing the hosted-service registration. Default options (RunOnStartup=true)
+// preserve production behaviour.
+builder.Services.TryAddSingleton<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatOptions>();
 builder.Services.AddHostedService<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatService>();
 
 // Story 28-6: in-process platform-event bus. Subscribers attach in this
