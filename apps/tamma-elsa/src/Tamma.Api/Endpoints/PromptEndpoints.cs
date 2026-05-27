@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Prompts;
 using Tamma.Api.Services.PromptStore;
@@ -245,16 +246,26 @@ public static class PromptEndpoints
         // hit a 403 BEFORE reaching this method.
         PromptOverride saved;
         bool wasCreated;
-        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        try
         {
-            (saved, wasCreated) = await store.UpsertRoleActionForTenantAsync(
-                tenantId, userId, role, action, input);
+            if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+            {
+                (saved, wasCreated) = await store.UpsertRoleActionForTenantAsync(
+                    tenantId, userId, role, action, input);
+            }
+            else
+            {
+                // Repository tells us whether this was a CREATE or UPDATE so we can
+                // emit the right DCB event type (audit prompts/007).
+                (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, null, role, action, input);
+            }
         }
-        else
+        catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
         {
-            // Repository tells us whether this was a CREATE or UPDATE so we can
-            // emit the right DCB event type (audit prompts/007).
-            (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, null, role, action, input);
+            // Two concurrent same-key upserts race past the repository's
+            // check-then-insert window → Postgres 23505. Surface as 409 so
+            // the caller can retry; pre-fix this leaked as a 500.
+            return Conflict();
         }
 
         var emitData = new Dictionary<string, object?>
@@ -352,14 +363,22 @@ public static class PromptEndpoints
 
         PromptOverride saved;
         bool wasCreated;
-        if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+        try
         {
-            (saved, wasCreated) = await store.UpsertRoleSystemForTenantAsync(
-                tenantId, userId, role, input);
+            if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
+            {
+                (saved, wasCreated) = await store.UpsertRoleSystemForTenantAsync(
+                    tenantId, userId, role, input);
+            }
+            else
+            {
+                (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, null, role, input);
+            }
         }
-        else
+        catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
         {
-            (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, null, role, input);
+            // Same concurrent-upsert race on the system-prompt path. 409.
+            return Conflict();
         }
 
         var emitData = new Dictionary<string, object?>
@@ -484,4 +503,26 @@ public static class PromptEndpoints
 
     private static Guid? TryGetUserId(ClaimsPrincipal principal)
         => principal.GetUserId();
+
+    /// <summary>
+    /// Detects the Postgres 23505 unique-violation that surfaces when two
+    /// concurrent same-key upserts race past the check-then-insert window
+    /// in the repository. EF wraps the underlying Npgsql exception in a
+    /// <see cref="DbUpdateException"/>. Same shape + intent as
+    /// <c>ConventionStoreEndpoints.IsUniqueViolation</c>.
+    /// </summary>
+    internal static bool IsUniqueViolation(DbUpdateException dbEx)
+        => dbEx.InnerException is Npgsql.PostgresException pgEx
+           && string.Equals(pgEx.SqlState, "23505", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Canonical 409 Conflict payload for the prompt-store concurrent
+    /// upsert race. Mirrors the convention-store endpoint so callers see
+    /// one shape across both stores.
+    /// </summary>
+    internal static IResult Conflict() => Results.Conflict(new
+    {
+        error = "Conflict — concurrent same-key upsert race; retry.",
+        code = "CONCURRENT_UPSERT_CONFLICT",
+    });
 }

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Conventions;
 using Tamma.Api.Services.Agents;
@@ -283,7 +284,20 @@ public static class ConventionStoreEndpoints
         var userId = principal.GetUserId() ?? Guid.Empty;
         var enabled = req.Enabled ?? true;
 
-        var (row, _) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
+        Tamma.Data.Entities.Convention row;
+        try
+        {
+            (row, _) = await store.UpsertAsync(tenantId.Value, parsedRole, parsedAction, req.Body, enabled, userId, ct);
+        }
+        catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
+        {
+            // Two concurrent same-key upserts race past the check-then-insert
+            // window inside the repository → Postgres returns 23505. The
+            // pre-fix behaviour surfaced this as a raw 500; the API contract
+            // is that this is a transient client-visible conflict — return
+            // 409 so the caller can retry.
+            return Conflict();
+        }
 
         return Results.Ok(new ConventionResponse(
             row.Id,
@@ -366,7 +380,17 @@ public static class ConventionStoreEndpoints
         var adminUserId = principal.GetUserId() ?? Guid.Empty;
         var enabled = req.Enabled ?? true;
 
-        var (row, _) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
+        Tamma.Data.Entities.Convention row;
+        try
+        {
+            (row, _) = await store.UpsertSystemDefaultAsync(parsedRole, parsedAction, req.Body, enabled, adminUserId, ct);
+        }
+        catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
+        {
+            // Same concurrent-upsert race as UpsertTenantOverride, but on the
+            // platform-admin path. 409 conveys the right retry semantics.
+            return Conflict();
+        }
 
         return Results.Ok(new ConventionResponse(
             row.Id,
@@ -523,4 +547,27 @@ public static class ConventionStoreEndpoints
 
     private static IResult NotFound(TammaError ex)
         => Results.NotFound(new { error = ex.Message, code = ex.Code });
+
+    /// <summary>
+    /// Detects the Postgres 23505 unique-violation that surfaces when two
+    /// concurrent same-key upserts race past the repository's check-then-
+    /// insert window. The EF wrapper is <see cref="DbUpdateException"/> and
+    /// the underlying Npgsql exception is <c>PostgresException</c> with
+    /// <c>SqlState == "23505"</c>. Matches the existing pattern in
+    /// <c>OutboxSmtpSender</c> for symmetry.
+    /// </summary>
+    internal static bool IsUniqueViolation(DbUpdateException dbEx)
+        => dbEx.InnerException is Npgsql.PostgresException pgEx
+           && string.Equals(pgEx.SqlState, "23505", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Canonical 409 Conflict payload for the convention-store concurrent
+    /// upsert race. Single source of truth so the tenant + system-default
+    /// paths return the same shape.
+    /// </summary>
+    internal static IResult Conflict() => Results.Conflict(new
+    {
+        error = "Conflict — concurrent same-key upsert race; retry.",
+        code = "CONCURRENT_UPSERT_CONFLICT",
+    });
 }
