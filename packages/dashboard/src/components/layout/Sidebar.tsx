@@ -16,6 +16,8 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
       { to: '/account', label: 'Account' },
       { to: '/keys', label: 'API Keys' },
       { to: '/settings/prompts', label: 'AI Prompts' },
+      // Story 27-12: tenant convention management.
+      { to: '/settings/conventions', label: 'Conventions' },
     ],
   },
   {
@@ -49,6 +51,8 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { to: '/admin', label: 'Admin Panel' },
       // Story 27-4: prompt-store admin UI.
       { to: '/admin/prompts', label: 'System Prompts' },
+      // Story 27-11: convention admin UI.
+      { to: '/admin/conventions', label: 'System Conventions' },
     ],
   },
 ];
