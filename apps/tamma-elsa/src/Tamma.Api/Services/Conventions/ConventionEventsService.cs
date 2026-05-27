@@ -190,8 +190,13 @@ public sealed class ConventionEventsService
             {
                 ["previousVersion"] = previousVersion,
                 ["newVersion"]      = newVersion,
-                ["resetFrom"]       = "custom",
-                ["resetTo"]         = "hardcoded",
+                // IMP-3 (post-review rename): system defaults are now DB-managed
+                // at runtime via admin CRUD (2026-05-25 decision). The previous
+                // "hardcoded" label is no longer truthful — the reset source is
+                // ConventionSeedSpecs (the code-baseline restored by ResetSystemDefaultAsync).
+                // "admin-edited" → "code-baseline" reads as exactly what happened.
+                ["resetFrom"]       = "admin-edited",
+                ["resetTo"]         = "code-baseline",
             },
             ct);
 

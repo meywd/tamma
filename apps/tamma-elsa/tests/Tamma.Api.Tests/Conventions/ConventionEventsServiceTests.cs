@@ -332,8 +332,11 @@ public class ConventionEventsServiceTests
         using var data = JsonDocument.Parse(evt.Data);
         data.RootElement.GetProperty("previousVersion").GetInt32().Should().Be(5);
         data.RootElement.GetProperty("newVersion").GetInt32().Should().Be(6);
-        data.RootElement.GetProperty("resetFrom").GetString().Should().Be("custom");
-        data.RootElement.GetProperty("resetTo").GetString().Should().Be("hardcoded");
+        // IMP-3 rename: "custom"→"admin-edited", "hardcoded"→"code-baseline"
+        // — system defaults are admin-managed at runtime, the reset source is
+        // ConventionSeedSpecs (code baseline), not anything truly hardcoded.
+        data.RootElement.GetProperty("resetFrom").GetString().Should().Be("admin-edited");
+        data.RootElement.GetProperty("resetTo").GetString().Should().Be("code-baseline");
     }
 
     // ======================================================================
