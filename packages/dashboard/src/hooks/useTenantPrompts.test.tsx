@@ -50,7 +50,6 @@ describe('useTenantPrompts', () => {
         },
       ],
       systemPrompts: {},
-      actionDefaults: {},
     };
     const userOverrides = [
       {
@@ -117,7 +116,7 @@ describe('useTenantPrompts', () => {
       }
       if (url.endsWith('/api/prompts/system')) {
         return Promise.resolve(
-          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {}, actionDefaults: {} } }),
+          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
         );
       }
       return Promise.resolve(mockResponse({ body: [] }));
@@ -146,7 +145,7 @@ describe('useTenantPrompts', () => {
         return Promise.resolve(mockResponse({ body: { message: 'deleted' } }));
       }
       return Promise.resolve(
-        mockResponse({ body: { roleActionTemplates: [], systemPrompts: {}, actionDefaults: {} } }),
+        mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
       );
     }) as typeof fetch;
     const { result } = renderHook(() => useTenantPrompts());
@@ -178,7 +177,7 @@ describe('useTenantPrompts', () => {
       }
       if (url.endsWith('/api/prompts/system')) {
         return Promise.resolve(
-          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {}, actionDefaults: {} } }),
+          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
         );
       }
       return Promise.resolve(mockResponse({ body: [] }));

@@ -76,8 +76,6 @@ export interface SystemDefaultsResponse {
   roleActionTemplates: PromptResponse[];
   /** `{ [role]: identityPrompt }` — the 8 role preambles. */
   systemPrompts: Record<string, string>;
-  /** `{ [action]: ActionDefault }` — the 10 layer-4 safety-net templates. */
-  actionDefaults: Record<string, PromptResponse>;
 }
 
 export interface UpsertPromptRequest {

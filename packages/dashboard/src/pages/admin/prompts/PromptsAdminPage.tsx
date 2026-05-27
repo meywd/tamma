@@ -16,14 +16,13 @@
 
 import { useState, type JSX } from 'react';
 import { LoadingSpinner } from '../../../components/common/LoadingSpinner.js';
-import { ActionDefaultsList } from '../../../components/prompts/ActionDefaultsList.js';
 import { ConventionPreview } from '../../../components/prompts/ConventionPreview.js';
 import { PromptEditDialog } from '../../../components/prompts/PromptEditDialog.js';
 import { PromptTable } from '../../../components/prompts/PromptTable.js';
 import { SystemPromptEditor } from '../../../components/prompts/SystemPromptEditor.js';
 import { useSystemPrompts } from '../../../hooks/admin/useSystemPrompts.js';
 
-type PromptsTab = 'templates' | 'system-prompts' | 'action-defaults' | 'conventions';
+type PromptsTab = 'templates' | 'system-prompts' | 'conventions';
 
 interface TabDef {
   id: PromptsTab;
@@ -33,7 +32,6 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'templates', label: 'Role + Action Templates' },
   { id: 'system-prompts', label: 'System Prompts' },
-  { id: 'action-defaults', label: 'Action Defaults' },
   { id: 'conventions', label: 'Conventions' },
 ];
 
@@ -115,12 +113,6 @@ export function PromptsAdminPage(): JSX.Element {
               systemPrompts={data.systemPrompts}
               upsertSystemPromptOverride={upsertSystemPromptOverride}
               resetSystemPromptOverride={resetSystemPromptOverride}
-            />
-          )}
-          {activeTab === 'action-defaults' && (
-            <ActionDefaultsList
-              actionDefaults={data.actionDefaults}
-              onCustomise={() => setActiveTab('templates')}
             />
           )}
           {activeTab === 'conventions' && <ConventionPreview />}

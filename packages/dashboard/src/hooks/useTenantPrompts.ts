@@ -105,7 +105,6 @@ interface WirePromptResponse {
 interface WireSystemDefaults {
   roleActionTemplates: WirePromptResponse[];
   systemPrompts: Record<string, string>;
-  actionDefaults: Record<string, WirePromptResponse>;
 }
 
 interface WireRenderedPromptResponse {
