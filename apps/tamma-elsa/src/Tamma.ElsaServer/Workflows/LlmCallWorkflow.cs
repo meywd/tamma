@@ -215,6 +215,19 @@ public class LlmCallWorkflow : WorkflowBase
         // so {{conventions}} renders the convention-store body (or the legacy
         // passthrough, when Action was empty). This runs unconditionally —
         // the resolve activity already chose the correct value.
+        //
+        // IMP-1 fix (post-review): the prior catch-all silently swallowed a
+        // malformed variablesJsonVar by resetting the dict to empty — which
+        // dropped role / workItemJson / every other variable a caller had
+        // already wired in. A malformed state at this stage is a real fault
+        // (the variables JSON was produced upstream by SerializeVariables in
+        // the same workflow, so a parse failure means the upstream write is
+        // broken). Rethrow with context as a TammaError so the workflow
+        // engine surfaces the failure instead of running the LLM on a
+        // stripped variable bag.
+        // TODO(coverage): SetVariable lambdas can't be unit-tested cheaply
+        // without a real ActivityExecutionContext; this fix is asserted
+        // indirectly by the existing LlmCallWorkflow integration coverage.
         var mergeConventionsIntoVariables = new SetVariable
         {
             Id = "MergeConventions",
@@ -228,9 +241,22 @@ public class LlmCallWorkflow : WorkflowBase
                 {
                     variables = JsonSerializer.Deserialize<Dictionary<string, object?>>(json) ?? new();
                 }
-                catch
+                catch (JsonException ex)
                 {
-                    variables = new Dictionary<string, object?>();
+                    // IMP-1: fail loud — a malformed VariablesJson at this
+                    // stage is a real upstream bug (SerializeVariables wrote
+                    // it). Swallowing it would silently strip every variable
+                    // the caller wired in (role, workItemJson, …).
+                    throw new Tamma.Core.TammaError(
+                        "LLM.CONVENTIONS.MERGE.MALFORMED_VARIABLES_JSON",
+                        $"MergeConventions could not parse upstream VariablesJson: {ex.Message}",
+                        new Dictionary<string, object?>
+                        {
+                            ["jsonLength"] = json.Length,
+                            ["conventionsLength"] = conventions.Length,
+                        },
+                        retryable: false,
+                        severity: Tamma.Core.TammaErrorSeverity.High);
                 }
                 variables["conventions"] = conventions;
                 return JsonSerializer.Serialize(variables);
