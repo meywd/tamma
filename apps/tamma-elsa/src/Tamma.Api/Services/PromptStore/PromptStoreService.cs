@@ -103,10 +103,29 @@ public sealed class PromptStoreService
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly IPromptRepository _repository;
+    private readonly PromptEventsService? _events;
 
-    public PromptStoreService(IPromptRepository repository)
+    /// <summary>
+    /// IMP-2 (Wave B): primary constructor — inject <see cref="PromptEventsService"/> so
+    /// all DCB audit events are emitted from the service layer, not from endpoint handlers.
+    /// Any future non-HTTP caller (CLI tool, Elsa activity, admin script) therefore gets
+    /// a full audit trail automatically, mirroring the 27-14 convention-store pattern.
+    /// </summary>
+    public PromptStoreService(IPromptRepository repository, PromptEventsService events)
     {
         _repository = repository;
+        _events = events;
+    }
+
+    /// <summary>
+    /// Backward-compat constructor used by unit tests that construct the service
+    /// without an event repository. Production DI always uses the two-argument
+    /// overload.
+    /// </summary>
+    internal PromptStoreService(IPromptRepository repository)
+    {
+        _repository = repository;
+        _events = null;
     }
 
     // -----------------------------------------------------------------------
@@ -178,9 +197,8 @@ public sealed class PromptStoreService
 
     /// <summary>
     /// Upsert a user role+action override. Returns the persisted entity and
-    /// a <c>wasCreated</c> flag the endpoint uses to choose between the
-    /// <c>PROMPT.CREATED.SUCCESS</c> and <c>PROMPT.UPDATED.SUCCESS</c> event
-    /// types (audit prompts/007).
+    /// a <c>wasCreated</c> flag. DCB audit events (<c>PROMPT.CREATED.SUCCESS</c> /
+    /// <c>PROMPT.UPDATED.SUCCESS</c>) are emitted from within this method (IMP-2).
     /// </summary>
     public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleActionAsync(
         Guid? userId,
@@ -189,7 +207,7 @@ public sealed class PromptStoreService
         string action,
         UpsertPromptInput input)
     {
-        return await _repository.UpsertAsync(new PromptOverride
+        var (saved, wasCreated) = await _repository.UpsertAsync(new PromptOverride
         {
             UserId = userId,
             TenantId = tenantId,
@@ -202,22 +220,56 @@ public sealed class PromptStoreService
             EnableTools = input.EnableTools ?? false,
             MaxTokens = input.MaxTokens ?? 4096,
         });
+
+        // IMP-2: emit DCB event from the service layer so any future non-HTTP
+        // caller (CLI tool, Elsa activity, admin script) gets a full audit trail.
+        if (_events is not null)
+        {
+            var emitData = new Dictionary<string, object?>
+            {
+                ["templateLength"] = saved.Template.Length,
+                ["enableTools"]    = saved.EnableTools,
+                ["maxTokens"]      = saved.MaxTokens,
+            };
+            if (wasCreated)
+                await _events.EmitCreatedAsync(tenantId, userId, role, action, emitData);
+            else
+                await _events.EmitUpdatedAsync(tenantId, userId, role, action, emitData);
+        }
+
+        return (saved, wasCreated);
     }
 
-    public Task<bool> DeleteRoleActionAsync(Guid? userId, string role, string action)
-        => _repository.DeleteAsync(userId, "role-action", role, action);
+    /// <summary>
+    /// Delete a user role+action override. Emits <c>PROMPT.RESET.SUCCESS</c>
+    /// on success (IMP-2 — audit trail from the service layer).
+    /// </summary>
+    public async Task<bool> DeleteRoleActionAsync(Guid? userId, string role, string action)
+    {
+        var deleted = await _repository.DeleteAsync(userId, "role-action", role, action);
+
+        if (deleted && _events is not null)
+            await _events.EmitResetAsync(null, userId, role, action);
+
+        return deleted;
+    }
 
     // -----------------------------------------------------------------------
     // Mutations (scope = role-system)
     // -----------------------------------------------------------------------
 
+    /// <summary>
+    /// Upsert a user role-system (identity preamble) override. Emits
+    /// <c>PROMPT.CREATED.SUCCESS</c> or <c>PROMPT.UPDATED.SUCCESS</c> from
+    /// within this method (IMP-2).
+    /// </summary>
     public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleSystemAsync(
         Guid? userId,
         Guid? tenantId,
         string role,
         UpsertPromptInput input)
     {
-        return await _repository.UpsertAsync(new PromptOverride
+        var (saved, wasCreated) = await _repository.UpsertAsync(new PromptOverride
         {
             UserId = userId,
             TenantId = tenantId,
@@ -230,10 +282,38 @@ public sealed class PromptStoreService
             EnableTools = input.EnableTools ?? false,
             MaxTokens = input.MaxTokens ?? 4096,
         });
+
+        // IMP-2: emit DCB event from the service layer (action = "" matches the
+        // pre-refactor endpoint convention for role-system scope).
+        if (_events is not null)
+        {
+            var emitData = new Dictionary<string, object?>
+            {
+                ["scope"]          = "role-system",
+                ["templateLength"] = saved.Template.Length,
+            };
+            if (wasCreated)
+                await _events.EmitCreatedAsync(tenantId, userId, role, string.Empty, emitData);
+            else
+                await _events.EmitUpdatedAsync(tenantId, userId, role, string.Empty, emitData);
+        }
+
+        return (saved, wasCreated);
     }
 
-    public Task<bool> DeleteRoleSystemAsync(Guid? userId, string role)
-        => _repository.DeleteAsync(userId, "role-system", role, null);
+    /// <summary>
+    /// Delete a user role-system override. Emits <c>PROMPT.RESET.SUCCESS</c>
+    /// on success (IMP-2 — audit trail from the service layer).
+    /// </summary>
+    public async Task<bool> DeleteRoleSystemAsync(Guid? userId, string role)
+    {
+        var deleted = await _repository.DeleteAsync(userId, "role-system", role, null);
+
+        if (deleted && _events is not null)
+            await _events.EmitResetAsync(null, userId, role, string.Empty);
+
+        return deleted;
+    }
 
     // -----------------------------------------------------------------------
     // Listing
@@ -332,9 +412,8 @@ public sealed class PromptStoreService
     }
 
     /// <summary>
-    /// Upsert a tenant role+action override. Returns the persisted entity
-    /// and a <c>wasCreated</c> flag the endpoint uses to choose between
-    /// <c>PROMPT.CREATED.SUCCESS</c> and <c>PROMPT.UPDATED.SUCCESS</c> events.
+    /// Upsert a tenant role+action override. Emits <c>PROMPT.CREATED.SUCCESS</c> /
+    /// <c>PROMPT.UPDATED.SUCCESS</c> from within this method (IMP-2).
     /// <para><c>actingUserId</c> records WHO inside the tenant performed the
     /// edit (audit trail) — only tenant_owner / tenant_admin should reach
     /// here; the API layer enforces RBAC via the <c>settings:manage</c>
@@ -349,7 +428,8 @@ public sealed class PromptStoreService
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
-        return await _repository.UpsertAsync(new PromptOverride
+
+        var (saved, wasCreated) = await _repository.UpsertAsync(new PromptOverride
         {
             UserId = null,           // SaaS-mode row: principal_xor → tenant_id only
             TenantId = tenantId,
@@ -362,11 +442,43 @@ public sealed class PromptStoreService
             EnableTools = input.EnableTools ?? false,
             MaxTokens = input.MaxTokens ?? 4096,
         }, actingUserId);
+
+        // IMP-2: emit DCB event from the service layer.
+        if (_events is not null)
+        {
+            var emitData = new Dictionary<string, object?>
+            {
+                ["templateLength"] = saved.Template.Length,
+                ["enableTools"]    = saved.EnableTools,
+                ["maxTokens"]      = saved.MaxTokens,
+            };
+            if (wasCreated)
+                await _events.EmitCreatedAsync(tenantId, actingUserId, role, action, emitData);
+            else
+                await _events.EmitUpdatedAsync(tenantId, actingUserId, role, action, emitData);
+        }
+
+        return (saved, wasCreated);
     }
 
-    public Task<bool> DeleteRoleActionForTenantAsync(Guid tenantId, string role, string action)
-        => _repository.DeleteByTenantAsync(tenantId, "role-action", role, action);
+    /// <summary>
+    /// Delete a tenant role+action override. Emits <c>PROMPT.RESET.SUCCESS</c>
+    /// on success (IMP-2).
+    /// </summary>
+    public async Task<bool> DeleteRoleActionForTenantAsync(Guid tenantId, string role, string action)
+    {
+        var deleted = await _repository.DeleteByTenantAsync(tenantId, "role-action", role, action);
 
+        if (deleted && _events is not null)
+            await _events.EmitResetAsync(tenantId, null, role, action);
+
+        return deleted;
+    }
+
+    /// <summary>
+    /// Upsert a tenant role-system override. Emits <c>PROMPT.CREATED.SUCCESS</c> /
+    /// <c>PROMPT.UPDATED.SUCCESS</c> from within this method (IMP-2).
+    /// </summary>
     public async Task<(PromptOverride Entity, bool WasCreated)> UpsertRoleSystemForTenantAsync(
         Guid tenantId,
         Guid? actingUserId,
@@ -375,7 +487,8 @@ public sealed class PromptStoreService
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
-        return await _repository.UpsertAsync(new PromptOverride
+
+        var (saved, wasCreated) = await _repository.UpsertAsync(new PromptOverride
         {
             UserId = null,
             TenantId = tenantId,
@@ -388,10 +501,38 @@ public sealed class PromptStoreService
             EnableTools = input.EnableTools ?? false,
             MaxTokens = input.MaxTokens ?? 4096,
         }, actingUserId);
+
+        // IMP-2: emit DCB event from the service layer (action = "" mirrors the
+        // pre-refactor endpoint convention for role-system scope).
+        if (_events is not null)
+        {
+            var emitData = new Dictionary<string, object?>
+            {
+                ["scope"]          = "role-system",
+                ["templateLength"] = saved.Template.Length,
+            };
+            if (wasCreated)
+                await _events.EmitCreatedAsync(tenantId, actingUserId, role, string.Empty, emitData);
+            else
+                await _events.EmitUpdatedAsync(tenantId, actingUserId, role, string.Empty, emitData);
+        }
+
+        return (saved, wasCreated);
     }
 
-    public Task<bool> DeleteRoleSystemForTenantAsync(Guid tenantId, string role)
-        => _repository.DeleteByTenantAsync(tenantId, "role-system", role, null);
+    /// <summary>
+    /// Delete a tenant role-system override. Emits <c>PROMPT.RESET.SUCCESS</c>
+    /// on success (IMP-2).
+    /// </summary>
+    public async Task<bool> DeleteRoleSystemForTenantAsync(Guid tenantId, string role)
+    {
+        var deleted = await _repository.DeleteByTenantAsync(tenantId, "role-system", role, null);
+
+        if (deleted && _events is not null)
+            await _events.EmitResetAsync(tenantId, null, role, string.Empty);
+
+        return deleted;
+    }
 
     /// <summary>
     /// List every tenant-scoped override row for <paramref name="tenantId"/>.
@@ -467,6 +608,52 @@ public sealed class PromptStoreService
         }
 
         return new RenderedPromptPair(system.Rendered, user.Rendered, combined.ToArray());
+    }
+
+    // -----------------------------------------------------------------------
+    // Render + emit (IMP-2)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolve, render, and emit <c>PROMPT.RENDERED.SUCCESS</c> in one call.
+    /// The endpoint delegates here so the DCB audit event for a render is emitted
+    /// from the service layer rather than the handler body (IMP-2 pattern).
+    /// </summary>
+    /// <exception cref="TammaError">
+    /// No override and no system default for <c>(role, action)</c> — same as
+    /// <see cref="ResolveRoleActionAsync"/>.
+    /// </exception>
+    public async Task<(ResolvedPrompt Resolved, RenderedPromptPair Rendered)> RenderRoleActionAsync(
+        Guid? userId,
+        Guid? tenantId,
+        string role,
+        string action,
+        IReadOnlyDictionary<string, string> variables)
+    {
+        ResolvedPrompt resolved;
+        if (tenantId is { } tid && tid != Guid.Empty)
+            resolved = await ResolveRoleActionForTenantAsync(tid, role, action);
+        else
+            resolved = await ResolveRoleActionAsync(userId, role, action);
+
+        var rendered = RenderFull(
+            systemTemplate: resolved.SystemPrompt,
+            userTemplate:   resolved.Template,
+            variables:      variables);
+
+        // IMP-2: emit the render audit event from the service layer.
+        if (_events is not null)
+        {
+            await _events.EmitRenderedAsync(
+                tenantId,
+                userId,
+                role,
+                action,
+                variableCount:    variables.Count,
+                unresolvedCount:  rendered.Unresolved.Count);
+        }
+
+        return (resolved, rendered);
     }
 
     // -----------------------------------------------------------------------

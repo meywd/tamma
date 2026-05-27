@@ -40,8 +40,10 @@ public class PromptEndpointsUpsertConflictTests
         repo.Setup(r => r.UpsertAsync(It.IsAny<PromptOverride>(), It.IsAny<Guid?>()))
             .ThrowsAsync(MakeUniqueViolation());
 
+        // IMP-2: PromptStoreService constructor takes events; internal ctor used for
+        // tests that mock the repo (no events needed — the mock throws before the
+        // emit path is reached).
         var store = new PromptStoreService(repo.Object);
-        var events = new PromptEventsService(Mock.Of<IEventRepository>());
         var tenantContext = new TenantContext();
 
         var result = await PromptEndpoints.UpsertPrompt(
@@ -54,7 +56,6 @@ public class PromptEndpointsUpsertConflictTests
                 EnableTools: false,
                 MaxTokens: 4096),
             store: store,
-            events: events,
             principal: PrincipalWith(Guid.Parse("11111111-1111-1111-1111-111111111111")),
             tenantContext: tenantContext,
             modeProvider: new StubModeProvider(TammaMode.SingleUser));
@@ -70,7 +71,6 @@ public class PromptEndpointsUpsertConflictTests
             .ThrowsAsync(MakeUniqueViolation());
 
         var store = new PromptStoreService(repo.Object);
-        var events = new PromptEventsService(Mock.Of<IEventRepository>());
         var tenantContext = new TenantContext();
 
         var result = await PromptEndpoints.UpsertSystemPrompt(
@@ -82,7 +82,6 @@ public class PromptEndpointsUpsertConflictTests
                 EnableTools: false,
                 MaxTokens: 4096),
             store: store,
-            events: events,
             principal: PrincipalWith(Guid.Parse("22222222-2222-2222-2222-222222222222")),
             tenantContext: tenantContext,
             modeProvider: new StubModeProvider(TammaMode.SingleUser));

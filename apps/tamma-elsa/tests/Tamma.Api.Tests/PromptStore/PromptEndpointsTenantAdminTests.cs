@@ -35,7 +35,6 @@ public class PromptEndpointsTenantAdminTests
 {
     private InMemoryDbFixture _fx = null!;
     private PromptStoreService _store = null!;
-    private PromptEventsService _events = null!;
     private TenantContext _tenantContext = null!;
 
     [SetUp]
@@ -49,13 +48,15 @@ public class PromptEndpointsTenantAdminTests
         _tenantContext.SetTenantId(Guid.NewGuid());
 
         var repo = new PromptRepository(_fx.Factory, _tenantContext);
-        _store = new PromptStoreService(repo);
-
+        // IMP-2: PromptStoreService now receives PromptEventsService for
+        // service-layer audit event emission. Wire a real event repo here so
+        // integration-style tests can verify events if needed.
         var eventRepo = new EventRepository(
             _fx.Factory,
             new TenantContext(),
             new PlatformEventRepository(_fx.Cp));
-        _events = new PromptEventsService(eventRepo);
+        var events = new PromptEventsService(eventRepo);
+        _store = new PromptStoreService(repo, events);
     }
 
     [TearDown]
@@ -120,7 +121,7 @@ public class PromptEndpointsTenantAdminTests
             MaxTokens: null);
 
         var result = await PromptEndpoints.UpsertPrompt(
-            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", req, _store, principal, tc, Mode(TammaMode.SaaS));
 
         result.Should().NotBeNull();
 
@@ -182,7 +183,7 @@ public class PromptEndpointsTenantAdminTests
 
         var admin = PrincipalWithUserId(Guid.NewGuid(), "owner");
         var result = await PromptEndpoints.DeletePrompt(
-            "developer", "plan-implementation", _store, _events, admin, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", _store, admin, tc, Mode(TammaMode.SaaS));
 
         result.Should().NotBeNull();
 
@@ -257,7 +258,7 @@ public class PromptEndpointsTenantAdminTests
         var req = new RenderPromptRequest(new Dictionary<string, string>());
 
         var result = await PromptEndpoints.RenderPrompt(
-            "developer", "deploy", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "deploy", req, _store, principal, tc, Mode(TammaMode.SingleUser));
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
@@ -273,7 +274,7 @@ public class PromptEndpointsTenantAdminTests
         var req = new UpsertPromptRequest(Template: "X", SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null);
 
         var result = await PromptEndpoints.UpsertPrompt(
-            "developer", "deploy", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "deploy", req, _store, principal, tc, Mode(TammaMode.SingleUser));
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
@@ -288,7 +289,7 @@ public class PromptEndpointsTenantAdminTests
         var principal = PrincipalWithUserId(userId, "admin");
 
         var result = await PromptEndpoints.DeletePrompt(
-            "developer", "deploy", _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "deploy", _store, principal, tc, Mode(TammaMode.SingleUser));
 
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
@@ -333,12 +334,12 @@ public class PromptEndpointsTenantAdminTests
         await PromptEndpoints.UpsertPrompt(
             "developer", "plan-implementation",
             new UpsertPromptRequest(Template: "ACME-PROMPT", SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null),
-            _store, _events, adminA, tcA, Mode(TammaMode.SaaS));
+            _store, adminA, tcA, Mode(TammaMode.SaaS));
 
         await PromptEndpoints.UpsertPrompt(
             "developer", "plan-implementation",
             new UpsertPromptRequest(Template: "GLOBEX-PROMPT", SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null),
-            _store, _events, adminG, tcG, Mode(TammaMode.SaaS));
+            _store, adminG, tcG, Mode(TammaMode.SaaS));
 
         // Acme's GET sees Acme's row only
         var acmeMember = PrincipalWithUserId(Guid.NewGuid(), "member");
@@ -421,7 +422,7 @@ public class PromptEndpointsTenantAdminTests
             SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null);
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SingleUser));
+            "developer", "plan-implementation", req, _store, principal, tc, Mode(TammaMode.SingleUser));
 
         var rows = await _store.ListUserOverridesAsync(userId);
         rows.Should().HaveCount(1);
@@ -471,7 +472,7 @@ public class PromptEndpointsTenantAdminTests
             SystemPrompt: null, Variables: null, EnableTools: null, MaxTokens: null);
 
         await PromptEndpoints.UpsertPrompt(
-            "developer", "plan-implementation", req, _store, _events, principal, tc, Mode(TammaMode.SaaS));
+            "developer", "plan-implementation", req, _store, principal, tc, Mode(TammaMode.SaaS));
 
         // Wrote to the user surface, not the tenant surface.
         var userRows = await _store.ListUserOverridesAsync(userId);

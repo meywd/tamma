@@ -13,7 +13,9 @@ namespace Tamma.Api.Endpoints;
 /// <summary>
 /// Minimal-API handlers for <c>/api/prompts</c>. These are the single-line
 /// delegates wired in <c>Program.cs</c>; the heavy lifting lives in
-/// <see cref="PromptStoreService"/> and <see cref="PromptEventsService"/>.
+/// <see cref="PromptStoreService"/>. DCB audit events are emitted from within
+/// <see cref="PromptStoreService"/>'s mutation methods (IMP-2 refactor), not
+/// from the handlers here.
 /// </summary>
 public static class PromptEndpoints
 {
@@ -221,7 +223,6 @@ public static class PromptEndpoints
         string action,
         UpsertPromptRequest req,
         PromptStoreService store,
-        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
@@ -244,20 +245,18 @@ public static class PromptEndpoints
         // gated by the PromptManage policy (prompts:manage permission =
         // admin+owner — Auth/Permissions.cs), so member users in SaaS mode
         // hit a 403 BEFORE reaching this method.
+        // IMP-2: DCB audit events are now emitted inside the store methods.
         PromptOverride saved;
-        bool wasCreated;
         try
         {
             if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
             {
-                (saved, wasCreated) = await store.UpsertRoleActionForTenantAsync(
+                (saved, _) = await store.UpsertRoleActionForTenantAsync(
                     tenantId, userId, role, action, input);
             }
             else
             {
-                // Repository tells us whether this was a CREATE or UPDATE so we can
-                // emit the right DCB event type (audit prompts/007).
-                (saved, wasCreated) = await store.UpsertRoleActionAsync(userId, null, role, action, input);
+                (saved, _) = await store.UpsertRoleActionAsync(userId, null, role, action, input);
             }
         }
         catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
@@ -266,21 +265,6 @@ public static class PromptEndpoints
             // check-then-insert window → Postgres 23505. Surface as 409 so
             // the caller can retry; pre-fix this leaked as a 500.
             return Conflict();
-        }
-
-        var emitData = new Dictionary<string, object?>
-        {
-            ["templateLength"] = saved.Template.Length,
-            ["enableTools"] = saved.EnableTools,
-            ["maxTokens"] = saved.MaxTokens,
-        };
-        if (wasCreated)
-        {
-            await events.EmitCreatedAsync(tenantContext.TenantId, userId, role, action, emitData);
-        }
-        else
-        {
-            await events.EmitUpdatedAsync(tenantContext.TenantId, userId, role, action, emitData);
         }
 
         var sourceLabel = modeProvider.Mode == TammaMode.SaaS ? "tenant" : "user";
@@ -298,14 +282,13 @@ public static class PromptEndpoints
     /// <summary>
     /// Delete a user's role+action override. Per CLAUDE.md ("delete user
     /// override — falls back to system default"), this is semantically a
-    /// reset-to-default operation, so we emit <c>PROMPT.RESET.SUCCESS</c>
-    /// rather than a generic delete (audit prompts/007).
+    /// reset-to-default operation; <c>PROMPT.RESET.SUCCESS</c> is emitted
+    /// from within the store method (IMP-2).
     /// </summary>
     public static async Task<IResult> DeletePrompt(
         string role,
         string action,
         PromptStoreService store,
-        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
@@ -316,6 +299,7 @@ public static class PromptEndpoints
         }
 
         var userId = TryGetUserId(principal);
+        // IMP-2: DCB RESET event is emitted inside the store method.
         bool deleted;
         if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
         {
@@ -331,8 +315,6 @@ public static class PromptEndpoints
             return Results.NotFound(new { error = "Prompt override not found" });
         }
 
-        await events.EmitResetAsync(tenantContext.TenantId, userId, role, action);
-
         return Results.Ok(new { message = "Prompt override deleted" });
     }
 
@@ -344,11 +326,12 @@ public static class PromptEndpoints
     // 005); the route is now {role}-only to match the data model.
     // =======================================================================
 
+    // IMP-2: DCB audit events for role-system upserts/deletes are emitted from
+    // within the PromptStoreService methods; no events parameter here.
     public static async Task<IResult> UpsertSystemPrompt(
         string role,
         UpsertPromptRequest req,
         PromptStoreService store,
-        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
@@ -361,18 +344,15 @@ public static class PromptEndpoints
             EnableTools: req.EnableTools,
             MaxTokens: req.MaxTokens);
 
-        PromptOverride saved;
-        bool wasCreated;
         try
         {
             if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
             {
-                (saved, wasCreated) = await store.UpsertRoleSystemForTenantAsync(
-                    tenantId, userId, role, input);
+                await store.UpsertRoleSystemForTenantAsync(tenantId, userId, role, input);
             }
             else
             {
-                (saved, wasCreated) = await store.UpsertRoleSystemAsync(userId, null, role, input);
+                await store.UpsertRoleSystemAsync(userId, null, role, input);
             }
         }
         catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
@@ -381,32 +361,18 @@ public static class PromptEndpoints
             return Conflict();
         }
 
-        var emitData = new Dictionary<string, object?>
-        {
-            ["scope"] = "role-system",
-            ["templateLength"] = saved.Template.Length,
-        };
-        if (wasCreated)
-        {
-            await events.EmitCreatedAsync(tenantContext.TenantId, userId, role, string.Empty, emitData);
-        }
-        else
-        {
-            await events.EmitUpdatedAsync(tenantContext.TenantId, userId, role, string.Empty, emitData);
-        }
-
         return Results.Ok(new { message = "System prompt updated", scope = "role-system", role });
     }
 
     public static async Task<IResult> DeleteSystemPrompt(
         string role,
         PromptStoreService store,
-        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
     {
         var userId = TryGetUserId(principal);
+        // IMP-2: DCB RESET event is emitted inside the store method.
         bool deleted;
         if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
         {
@@ -422,8 +388,6 @@ public static class PromptEndpoints
             return Results.NotFound(new { error = "System prompt override not found" });
         }
 
-        await events.EmitResetAsync(tenantContext.TenantId, userId, role, string.Empty);
-
         return Results.Ok(new { message = "System prompt deleted" });
     }
 
@@ -431,12 +395,13 @@ public static class PromptEndpoints
     // Render
     // =======================================================================
 
+    // IMP-2: PROMPT.RENDERED.SUCCESS is emitted from within store.RenderRoleActionAsync;
+    // the endpoint no longer injects PromptEventsService.
     public static async Task<IResult> RenderPrompt(
         string role,
         string action,
         RenderPromptRequest req,
         PromptStoreService store,
-        PromptEventsService events,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
@@ -447,41 +412,27 @@ public static class PromptEndpoints
         }
 
         var userId = TryGetUserId(principal);
+
+        // Ensure the role variable is always available if missing from the request.
+        var variables = new Dictionary<string, string>(req.Variables ?? new Dictionary<string, string>());
+        variables.TryAdd("role", role);
+
         // Story 27-18 — resolution fails loud; translate TammaError into the
         // existing 404 contract at this HTTP boundary.
+        // IMP-2: RenderRoleActionAsync resolves, renders, and emits the audit
+        // event from the service layer in one call.
         ResolvedPrompt resolved;
+        RenderedPromptPair rendered;
         try
         {
-            if (modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId)
-            {
-                resolved = await store.ResolveRoleActionForTenantAsync(tenantId, role, action);
-            }
-            else
-            {
-                resolved = await store.ResolveRoleActionAsync(userId, role, action);
-            }
+            var tenantId = modeProvider.Mode == TammaMode.SaaS ? tenantContext.TenantId : null;
+            (resolved, rendered) = await store.RenderRoleActionAsync(
+                userId, tenantId, role, action, variables);
         }
         catch (TammaError)
         {
             return Results.NotFound(new { error = "No prompt available for this role/action" });
         }
-
-        // Ensure the role variable is always available if missing from the request
-        var variables = new Dictionary<string, string>(req.Variables ?? new Dictionary<string, string>());
-        variables.TryAdd("role", role);
-
-        var rendered = PromptStoreService.RenderFull(
-            systemTemplate: resolved.SystemPrompt,
-            userTemplate: resolved.Template,
-            variables: variables);
-
-        await events.EmitRenderedAsync(
-            tenantContext.TenantId,
-            userId,
-            role,
-            action,
-            variableCount: variables.Count,
-            unresolvedCount: rendered.Unresolved.Count);
 
         // Version is sourced from the resolved override row when present, else 1
         // (system-shipped templates are unversioned in the SystemPrompts registry).
