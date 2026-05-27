@@ -143,7 +143,14 @@ public class ResolveConventionsActivity : TammaAsyncActivity
             callbackUrl = _configuration?["PromptRegistry:BaseUrl"] ?? "http://localhost:3100";
         }
 
-        var httpClient = _httpClientFactory?.CreateClient() ?? new HttpClient();
+        // Production blocker fix — use the named "tamma-engine" client (wired
+        // in Tamma.ElsaServer/Program.cs with TammaEngineAuthHandler) so the
+        // outgoing POST to /api/conventions/resolve carries the Authorization:
+        // Bearer <token> header when Tamma:ApiToken is configured. Without
+        // this, the API returns 401 in production and the activity maps that
+        // to a non-retryable NO_ROW — permanently failing the workflow before
+        // any LLM runs.
+        var httpClient = _httpClientFactory?.CreateClient("tamma-engine") ?? new HttpClient();
 
         var (body, source, version) = await CallResolveAsync(httpClient, callbackUrl!, role, action, tenantId, Logger);
 

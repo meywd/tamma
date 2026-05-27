@@ -179,6 +179,23 @@ builder.Services.AddHttpClient();
 // Fastify/ASP.NET API plane.
 builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
 
+// Production blocker fix (post-Story 27-18) — Engine → API authentication for
+// the resolve activities. ResolveConventionsActivity (Story 27-13) and
+// ResolvePromptFromRegistryActivity (Story 27-18) POST to API endpoints gated
+// by AuthenticatedAny / SettingsView; previously they used a plain
+// CreateClient() with NO Authorization header, which 401'd in production
+// (Dev mode silently passed via AllowAnonymousHandler, masking the issue).
+//
+// The DelegatingHandler reads Tamma:ApiToken (env: TAMMA_API_TOKEN) — the
+// same key TammaApiClient already uses — and stamps Authorization: Bearer
+// <token> on every outgoing request. Token absent → no-op (dev-friendly).
+//
+// Activities resolve this client via IHttpClientFactory.CreateClient("tamma-engine").
+builder.Services.AddTransient<Tamma.Activities.LlmCall.TammaEngineAuthHandler>();
+builder.Services
+    .AddHttpClient("tamma-engine")
+    .AddHttpMessageHandler<Tamma.Activities.LlmCall.TammaEngineAuthHandler>();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient. Singleton
 // so the rolling 5-min window is shared across every call site. Fires
 // PLATFORM.API.UNHEALTHY via IAlertEventEmitter when sustained failures
