@@ -37,16 +37,16 @@
 ## ✅ EPIC 27 COMPLETE
 Backend (Waves 0-5) + UIs (Wave 6) + final-review polish + Critical engine→API auth fix + all 4 previously-deferred items (tasks #4 dashboard, #10 hosted-service flakes, #12 Epic 28 prep, #13 23505→409) are all landed and reviewed. C# full-suite gate green; dashboard tests green; build clean. HEAD `e1a5dd17` (plus the doc-progress commit being added now).
 
+**Post-Epic-27 cleanup (after the EPIC COMPLETE marker):** `4639a4a0` (closes the long-standing `StopgapSecretMigratorTests` flake — per-test auditor isolation, root-cause fix unrelated to task #10), `9c0dec5c` (closes IMP-2 — prompt-store emission moved from `PromptEndpoints` into `PromptStoreService` mirroring 27-14; event-type contracts byte-for-byte identical; any future non-HTTP caller of the prompt service now also emits audit events).
+
 **USER MANDATE (locked):** prompt/convention resolution = tenant → system → **error** (`TammaError`); NO empty/plain fallback anywhere (service AND activity). A separate **missing-config notification system** (system + tenant sides) is a planned NEW epic — out of Epic 27 scope.
 
 **DECISION (2026-05-25) — convention system defaults are DB-managed at runtime:** platform admins add/manage system-default `(role,action)` rows via admin CRUD (27-10 AC8–10). The **27-16 seeder is amended to INSERT-MISSING-ONLY** (initial populate + pick up new taxonomy cells; it must NOT revert admin edits on restart — the original surgical-update-on-drift is removed). `ConventionSeedSpecs` (code) is the initial baseline + the source for an explicit per-cell **reset** endpoint. Tradeoff accepted: code default improvements don't auto-propagate; admin uses reset. Backs into new service methods (system-default Upsert/Delete/Reset on `tenant_id IS NULL`, distinct from 27-9's tenant-override CRUD).
 
 **Taxonomy now:** 8 roles, **72 actions** (68 SPEC §4 + 4 review verbs: `review-feasibility`/`-testability`/`-operability`/`-scope`). Source: `apps/tamma-elsa/src/Tamma.Core/Agents/{AgentRole,AgentAction,EnumWire,RolePhaseMap}.cs` (namespace kept `Tamma.Api.Services.Agents` — see C7). `RolePhaseMap.EligibleActions` is the shared `(role,action)` accessor (added in 27-18). Tests: `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/`.
 
-**Remaining open items (NOT closed by Epic 27 — track separately):**
-- Pre-existing flaky `StopgapSecretMigratorTests` (different root cause — shared mutable `_auditor.Events` in the TEST itself, not a hosted-service race; task #10 closed only the hosted-service-race class). Needs a separate test-infra fix.
+**Remaining open items (NOT closed — true follow-ups):**
 - Management-list-shows-disabled-cells — deferred UI/UX decision; backend `GET /api/conventions` returns the resolved view per AC1, so disabled-no-override cells are omitted. Address in a future UX iteration if surfacing them in the admin view becomes useful.
-- Prompt-store emission alignment: move prompt event emission from endpoints into `PromptStoreService` to match the 27-14 pattern (review IMP-2). Prompts still emit from endpoints. Not a blocker; refactor when prompt store gains additional non-HTTP callers.
 - Per-tenant-DB cutover (Epic 28 work): the admin system-default CRUD and tenant-tier writes have grep-able `I-2`/`X-1` hazard comments; when Epic 28 lands, address those points (fanout vs runtime guard for I-2; tenant-id defence-in-depth assertion for X-1).
 
 **Wave 2 follow-ups (tracked, NOT done):**
