@@ -72,7 +72,6 @@ export function ConventionEditor({
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDisable, setConfirmDisable] = useState(false);
-  const [pendingEnabled, setPendingEnabled] = useState(true);
 
   // Load detail when editing an existing convention
   useEffect(() => {
@@ -95,7 +94,6 @@ export function ConventionEditor({
 
   const handleEnabledChange = (val: boolean) => {
     if (!val) {
-      setPendingEnabled(false);
       setConfirmDisable(true);
     } else {
       setEnabled(true);
@@ -357,13 +355,8 @@ export function ConventionEditor({
           setEnabled(false);
           setConfirmDisable(false);
         }}
-        onCancel={() => {
-          setPendingEnabled(true);
-          setConfirmDisable(false);
-        }}
+        onCancel={() => setConfirmDisable(false)}
       />
-      {/* pendingEnabled is used only for the confirm dialog flow; referenced to suppress no-unused-vars. */}
-      {pendingEnabled === undefined && null}
     </>
   );
 }
