@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: Draft
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC1 verify-email→PROVISIONING_REQUESTED trigger NOT wired; AC2 step-10 QueueWelcomeEmail not inside workflow; AC4 backup + pg_terminate_backend verification residual)
 **Priority**: High (this is the central tenant-lifecycle artefact; the
 async-provisioning directive in Doc 03 §0 hinges entirely on it)
 **Estimated Effort**: XL (40h+) — target 45h

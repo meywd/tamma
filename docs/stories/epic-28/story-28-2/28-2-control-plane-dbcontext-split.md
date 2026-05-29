@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (TammaDbContext deleted outright; stronger than AC3 required)
 **Priority**: High (the CP DbContext must exist before any story that
 writes `platform_events`, reads `tenants`, or touches `users` can land;
 Phase 1 serial critical path)

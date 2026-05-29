@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: Draft
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (bootstrap/reset scripts + 3 skipped tests + per-tenant Elsa runner verification residual)
 **Priority**: High (every other Epic 28 story is blocked until four migration sets compile and apply cleanly)
 **Estimated Effort**: L (20-40h) — target 30h
 

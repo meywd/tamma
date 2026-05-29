@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: Draft
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (decide fate of `EnsurePersonalTenantMiddleware`; verify 503/424/410/402/404/409 status-code mapping in `TenantStatusEvaluator`)
 **Priority**: High (without this middleware correctly honouring the
 `tenants.Status` state machine, a client polling during provisioning
 crashes the API or leaks data across tenants during pool eviction)

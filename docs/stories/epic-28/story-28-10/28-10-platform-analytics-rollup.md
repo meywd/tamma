@@ -8,6 +8,7 @@ orchestrator scale benchmark per Epic 28 README cross-doc resolution
 #3; no runtime tenant traffic depends on this story, so it can slip
 a release cycle if needed without breaking provisioning)
 **Estimated Effort**: L (28h)
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (1k/5k/10k idle-orchestrator benchmark + 13-month retention sweeper + per-metric coverage verification residuals)
 
 ## User Story
 

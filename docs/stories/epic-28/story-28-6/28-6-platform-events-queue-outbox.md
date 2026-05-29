@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (RabbitMQ bus is a separate concern; in-memory bus + Postgres LISTEN/NOTIFY cover the 28-6 surface)
 **Priority**: High (Story 28-5 cannot emit lifecycle events or queue
 welcome emails without these tables; pulled forward between Phase 1
 and Phase 2 per `00-sequencing.md`)

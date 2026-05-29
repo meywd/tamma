@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC3 release-build-throws semantics covered by `Replace`-on-real-resolver pattern in `AddTenantConnectionPool`)
 **Priority**: High (the factory is the seam every tenant-scoped handler
 uses; Story 28-4 replaces the stub with the real resolver)
 **Estimated Effort**: M (8-20h) — target 14h

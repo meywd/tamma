@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC2 resourceSummary join + AC3 SSE-fallback verification residual)
 **Priority**: Medium (without this UX, platform admins investigate
 stuck tenants via `psql` and Elsa Studio — workable but slow; this
 is the first-class observability surface for the workflow-driven

@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (metric-name + envelope-byte-layout verification residuals)
 **Priority**: High (every tenant-scoped request ultimately pays through
 this resolver; without it, production is stuck on the stub from Story
 28-3)

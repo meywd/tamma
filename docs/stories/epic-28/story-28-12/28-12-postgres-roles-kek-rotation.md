@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: Draft
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (postgres-roles-lint CI + API-pod startup `current_user` check + `RekeyTenantConnectionStringsWorkflow` location residuals; coordinator-instead-of-workflow may be the new architecture)
 **Priority**: High (the three-role privilege split and per-tenant KEK
 encryption are the hard security floor of the DB-per-tenant model;
 shipping without them lets the runtime API `CREATE DATABASE` and
