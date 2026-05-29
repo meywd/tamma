@@ -462,7 +462,18 @@ public static class AuthEndpoints
         var refreshToken = jwtService.GenerateRefreshToken();
         var refreshHash = HashToken(refreshToken);
 
-        await refreshTokenRepo.CreateAsync(user.Id, refreshHash, DateTime.UtcNow.AddDays(7));
+        // Story 28-9 AC3 — bind the refresh row to the active tenant (null
+        // for rootless tokens when the user has 0/2+ memberships per AC4)
+        // and seed the JTI chain head with a fresh UUID. The first row in
+        // a session lineage IS its own chain head; rotation propagates the
+        // value to children so reuse-detection can revoke the whole
+        // lineage atomically.
+        await refreshTokenRepo.CreateAsync(
+            user.Id,
+            tenantId: tenantId == Guid.Empty ? null : tenantId,
+            refreshHash,
+            DateTime.UtcNow.AddDays(7),
+            jtiChainHead: Guid.NewGuid());
 
         // Cookie carries the ACCESS JWT (not the refresh token), with the
         // configured parent domain so it rides cross-subdomain. 15-minute
@@ -505,12 +516,33 @@ public static class AuthEndpoints
 
         // Reuse-detection: a presented refresh token that is already revoked
         // means an attacker (or stale client) is replaying. Revoke the entire
-        // token family for that user. Story 18-2 §180 / audit finding 007.
+        // session lineage (Story 28-9 AC3 — JtiChainHead). Story 18-2 §180
+        // / audit finding 007.
+        //
+        // Pre-Story-28-9 rows carry a NULL JtiChainHead — for those we fall
+        // back to the previous "burn every token for the user" semantics so
+        // the security posture stays at least as strong as before. New rows
+        // burn only the affected lineage so concurrent sessions on other
+        // devices survive a single compromised token's reuse.
         if (token.RevokedAt is not null)
         {
-            await refreshTokenRepo.RevokeAllForUserAsync(token.UserId);
-            loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
-                .LogWarning("USER.REFRESH_TOKEN_REUSE userId={UserId} — all sessions revoked", token.UserId);
+            var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+            if (token.JtiChainHead is { } chainHead && chainHead != Guid.Empty)
+            {
+                var burned = await refreshTokenRepo.RevokeChainAsync(
+                    chainHead, RefreshTokenRevokedReasons.ReuseDetected);
+                logger.LogWarning(
+                    "AUTH.REFRESH_REUSE_DETECTED userId={UserId} chainHead={ChainHead} burned={Burned} — session lineage revoked",
+                    token.UserId, chainHead, burned);
+            }
+            else
+            {
+                await refreshTokenRepo.RevokeAllForUserAsync(
+                    token.UserId, RefreshTokenRevokedReasons.ReuseDetected);
+                logger.LogWarning(
+                    "USER.REFRESH_TOKEN_REUSE userId={UserId} — all sessions revoked (legacy path; pre-28-9 row had no chain head)",
+                    token.UserId);
+            }
             return Results.Json(new { error = "Refresh token has been revoked" }, statusCode: 401);
         }
 
@@ -521,43 +553,95 @@ public static class AuthEndpoints
         if (user is null)
             return Results.Json(new { error = "User not found" }, statusCode: 401);
 
-        // Story 28-9 — preserve the active tenant across refresh. Resolution
-        // honours the runtime activeTenantId (Settings JSON, written by
-        // switch-org on uuid→uuid moves) before the legacy users.TenantId
-        // column. Only when the user has lost membership in their stored
-        // active tenant do we fall back to the first available membership;
-        // that happens when an admin removed them between refreshes.
+        // Story 28-9 AC3 — the refresh token's DB-side TenantId is the
+        // binding source of truth. A token minted for tenant A can NEVER
+        // mint an access token for tenant B; the DB column is the durable
+        // expression of that contract (the access-token's tenantId claim
+        // expires after 15 minutes, the refresh row persists for 7 days).
+        //
+        // Pre-Story-28-9 rows carry a NULL TenantId — for those we fall
+        // back to the previous logic (active-tenant from Settings.JSON,
+        // with first-available fallback when membership is lost). New
+        // rows lock to their own TenantId; membership loss in the bound
+        // tenant returns 401 instead of silently failing into a different
+        // tenant (that's what /auth/switch-org is for).
         var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, user.Id);
-        var storedTenantId = ReadActiveTenantId(user) ?? Guid.Empty;
-        Guid tenantId = Guid.Empty;
+        Guid tenantId;
         string role = "member";
 
-        if (storedTenantId != Guid.Empty
-            && tenantClaims.Any(t => t.TenantId == storedTenantId))
+        if (token.TenantId is { } boundTenantId && boundTenantId != Guid.Empty)
         {
-            tenantId = storedTenantId;
-            role = tenantClaims.First(t => t.TenantId == storedTenantId).Role;
+            // Story 28-9 AC3 — DB-bound refresh token. Re-resolve the role
+            // for the bound tenant (this is the "mid-session role change"
+            // catch-up per AC3: a demotion in the active tenant flows into
+            // the next refresh's access token).
+            var claim = tenantClaims.FirstOrDefault(t => t.TenantId == boundTenantId);
+            if (claim.TenantId == Guid.Empty)
+            {
+                // Membership in the bound tenant was revoked between
+                // refreshes — the bound refresh row is dead, the user
+                // must re-login or switch-org. Fail closed.
+                loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
+                    .LogInformation(
+                        "USER.REFRESH_MEMBERSHIP_LOST userId={UserId} tenantId={TenantId} — refresh denied; user must switch-org or re-login",
+                        user.Id, boundTenantId);
+                return Results.Json(
+                    new { error = "Refresh token bound to a tenant the user no longer belongs to",
+                          action = "POST /api/v1/auth/switch-org" },
+                    statusCode: 401);
+            }
+            tenantId = boundTenantId;
+            role = claim.Role;
         }
-        else if (tenantClaims.Count > 0)
+        else
         {
-            // Membership lost — drop to the first available tenant and
-            // persist it so subsequent refreshes are stable.
-            tenantId = tenantClaims[0].TenantId;
-            role = tenantClaims[0].Role;
-            await PersistActiveTenantAsync(userRepo, user.Id, tenantId);
-            loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
-                .LogInformation(
-                    "USER.REFRESH_TENANT_FALLBACK userId={UserId} oldTenantId={OldTenantId} newTenantId={NewTenantId} — active tenant lost; reset to first available",
-                    user.Id, storedTenantId, tenantId);
+            // Legacy path — pre-Story-28-9 row (NULL TenantId). Resolve
+            // via Settings JSON. Preserved behaviour for rows that
+            // pre-date the migration; new rows ALWAYS take the bound path
+            // above.
+            var storedTenantId = ReadActiveTenantId(user) ?? Guid.Empty;
+            tenantId = Guid.Empty;
+
+            if (storedTenantId != Guid.Empty
+                && tenantClaims.Any(t => t.TenantId == storedTenantId))
+            {
+                tenantId = storedTenantId;
+                role = tenantClaims.First(t => t.TenantId == storedTenantId).Role;
+            }
+            else if (tenantClaims.Count > 0)
+            {
+                // Membership lost — drop to the first available tenant and
+                // persist it so subsequent refreshes are stable.
+                tenantId = tenantClaims[0].TenantId;
+                role = tenantClaims[0].Role;
+                await PersistActiveTenantAsync(userRepo, user.Id, tenantId);
+                loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
+                    .LogInformation(
+                        "USER.REFRESH_TENANT_FALLBACK userId={UserId} oldTenantId={OldTenantId} newTenantId={NewTenantId} — active tenant lost; reset to first available",
+                        user.Id, storedTenantId, tenantId);
+            }
+            // else: zero memberships — leave tenantId Empty; access token
+            // will emit empty `tenants` claim and middleware fail-closed.
         }
-        // else: zero memberships — leave tenantId Empty; access token will
-        // emit empty `tenants` claim and middleware fail-closed (as today).
 
         // Rotate: revoke the presented token, mint and persist a new one.
-        await refreshTokenRepo.RevokeAsync(token.Id);
+        // Story 28-9 AC3 — stamp the consumed row with `rotation_consumed`
+        // so the next time it appears at /auth/refresh we can recognise it
+        // as the previous link in this lineage (vs a stolen-and-replayed
+        // token from another lineage). Propagate the chain head to the new
+        // row so reuse-detection sees the whole lineage as one unit; mint
+        // a fresh chain head when the parent had none (pre-28-9 row).
+        await refreshTokenRepo.RevokeAsync(
+            token.Id, RefreshTokenRevokedReasons.RotationConsumed);
         var newRefresh = jwtService.GenerateRefreshToken();
         var newRefreshHash = HashToken(newRefresh);
-        await refreshTokenRepo.CreateAsync(user.Id, newRefreshHash, DateTime.UtcNow.AddDays(7));
+        var inheritedChainHead = token.JtiChainHead ?? Guid.NewGuid();
+        await refreshTokenRepo.CreateAsync(
+            user.Id,
+            tenantId: tenantId == Guid.Empty ? null : tenantId,
+            newRefreshHash,
+            DateTime.UtcNow.AddDays(7),
+            jtiChainHead: inheritedChainHead);
 
         var accessToken = jwtService.GenerateAccessToken(
             user, tenantId == Guid.Empty ? null : tenantId, role, tenantClaims);
@@ -617,7 +701,12 @@ public static class AuthEndpoints
                             message = "Too many sign-out-everywhere requests. Please retry later." },
                         statusCode: StatusCodes.Status429TooManyRequests);
 
-                var revokedCount = await refreshTokenRepo.RevokeAllForUserAsync(userId);
+                // Story 28-9 AC3 — tag the revocation reason so SIEM /
+                // SOC2 audit queries can tell a user-initiated logout-all
+                // apart from an admin force-logout or a reuse-detected
+                // burn.
+                var revokedCount = await refreshTokenRepo.RevokeAllForUserAsync(
+                    userId, RefreshTokenRevokedReasons.LogoutAll);
                 rateLimit.Record("logout-all", rateKey);
 
                 await PublishLogoutAllEventAsync(
@@ -643,7 +732,8 @@ public static class AuthEndpoints
                     var tokenHash = HashToken(body.RefreshToken);
                     var token = await refreshTokenRepo.GetByTokenHashAsync(tokenHash);
                     if (token is not null)
-                        await refreshTokenRepo.RevokeAsync(token.Id);
+                        await refreshTokenRepo.RevokeAsync(
+                            token.Id, RefreshTokenRevokedReasons.ManualLogout);
                 }
             }
             catch
@@ -858,7 +948,11 @@ public static class AuthEndpoints
 
         await userRepo.UpdatePasswordHashAsync(user.Id, passwordService.HashPassword(req.NewPassword));
         await resetRepo.ConsumeAsync(token.Id);
-        await refreshTokenRepo.RevokeAllForUserAsync(user.Id);
+        // Story 28-9 AC3 — tag the bulk revoke with the explicit reason so
+        // an admin tracing "why did every session vanish" sees the
+        // password-reset breadcrumb without consulting platform_events.
+        await refreshTokenRepo.RevokeAllForUserAsync(
+            user.Id, RefreshTokenRevokedReasons.PasswordReset);
 
         return Results.Ok(new { message = "Password reset successfully" });
     }
@@ -934,7 +1028,10 @@ public static class AuthEndpoints
             var existing = await refreshTokenRepo.GetByTokenHashAsync(presentedHash);
             if (existing is not null && existing.UserId == userId && existing.RevokedAt is null)
             {
-                await refreshTokenRepo.RevokeAsync(existing.Id);
+                // Story 28-9 AC3 — explicit reason so the audit row records
+                // the switch-org context (vs a generic manual logout).
+                await refreshTokenRepo.RevokeAsync(
+                    existing.Id, RefreshTokenRevokedReasons.SwitchOrg);
             }
         }
         else
@@ -945,13 +1042,25 @@ public static class AuthEndpoints
             //
             // Story 28-R2 / Finding H2: capture the count + flip a flag so
             // the audit event records the "switch-org-no-refresh" reason.
-            revokedAllCount = await refreshTokenRepo.RevokeAllForUserAsync(userId);
+            // Story 28-9 AC3 — explicit reason for SIEM / SOC2.
+            revokedAllCount = await refreshTokenRepo.RevokeAllForUserAsync(
+                userId, RefreshTokenRevokedReasons.SwitchOrg);
             revokedAllPath = true;
         }
 
         var newRefresh = jwtService.GenerateRefreshToken();
         var newRefreshHash = HashToken(newRefresh);
-        await refreshTokenRepo.CreateAsync(userId, newRefreshHash, DateTime.UtcNow.AddDays(7));
+        // Story 28-9 AC3 — bind the new refresh row to the TARGET tenant.
+        // Switch-org STARTS A NEW CHAIN because the tenant context changed:
+        // a token from the previous lineage could not refresh against the
+        // new tenant (tenant_mismatch_on_refresh) and the lineage's chain
+        // head therefore terminates at the old refresh row.
+        await refreshTokenRepo.CreateAsync(
+            userId,
+            tenantId: req.TenantId,
+            newRefreshHash,
+            DateTime.UtcNow.AddDays(7),
+            jtiChainHead: Guid.NewGuid());
 
         var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, userId);
         var accessToken = jwtService.GenerateAccessToken(

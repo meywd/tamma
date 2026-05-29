@@ -87,14 +87,60 @@ internal static class TammaModelConfiguration
         // ── RefreshToken ──
         modelBuilder.Entity<RefreshToken>(entity =>
         {
-            entity.ToTable("refresh_tokens");
+            entity.ToTable("refresh_tokens", t =>
+            {
+                // Story 28-9 AC3 — pin RevokedReason to the closed enum.
+                // Adding a value requires widening the constraint via a new
+                // migration; the entity-level constants in
+                // RefreshTokenRevokedReasons mirror this list.
+                t.HasCheckConstraint(
+                    "CK_refresh_tokens_RevokedReason",
+                    "\"RevokedReason\" IS NULL OR \"RevokedReason\" IN ("
+                    + "'manual_logout','logout_all','rotation_consumed',"
+                    + "'switch_org','reuse_detected','password_reset',"
+                    + "'admin_force_logout')");
+
+                // Story 28-9 AC3 — RevokedReason is set IFF RevokedAt is
+                // set. The pair must move together so a SIEM query can
+                // trust "WHERE RevokedReason='reuse_detected'" without a
+                // null-RevokedAt fallback. New writes go through the
+                // repository's Revoke* methods which set both atomically.
+                t.HasCheckConstraint(
+                    "CK_refresh_tokens_RevokedReason_NullParity",
+                    "(\"RevokedAt\" IS NULL) = (\"RevokedReason\" IS NULL)");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.TokenHash).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
+            // Story 28-9 AC3 — tenant binding (nullable for rootless tokens
+            // issued at login before a tenant is picked) + JtiChainHead
+            // lineage pointer (nullable for pre-story rows). RevokedReason
+            // mirrors the RevokedAt nullability via the CHECK constraint
+            // above.
+            entity.Property(e => e.TenantId);
+            entity.Property(e => e.JtiChainHead);
+            entity.Property(e => e.RevokedReason).HasMaxLength(32);
+
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasIndex(e => e.UserId);
+
+            // Story 28-9 AC3 — reuse-detection hot path. Given a presented
+            // (revoked) refresh token we look up by hash, read its
+            // JtiChainHead, then revoke every active sibling. Partial index
+            // on JtiChainHead IS NOT NULL keeps it tight (only this story's
+            // tokens carry the column).
+            entity.HasIndex(e => e.JtiChainHead)
+                .HasDatabaseName("IX_refresh_tokens_JtiChainHead")
+                .HasFilter("\"JtiChainHead\" IS NOT NULL");
+
+            // Story 28-9 AC3 — tenant-scoped queries (logout-all per
+            // tenant, admin debugging). Partial keeps rootless tokens out
+            // of the index.
+            entity.HasIndex(e => new { e.UserId, e.TenantId })
+                .HasDatabaseName("IX_refresh_tokens_UserId_TenantId")
+                .HasFilter("\"TenantId\" IS NOT NULL");
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.RefreshTokens)

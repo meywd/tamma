@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: Draft
+**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; see Implementation Notes section below. Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC2 5-step atomicity verification, AC6 logout-all path, plus two small AC3 follow-ups (`tenant_mismatch_on_refresh` 400 + `AUTH.REFRESH_REUSE_DETECTED` platform_events emission).
 **Priority**: High (without per-tenant-scoped JWTs plus a switch-org
 endpoint, users with memberships in more than one tenant cannot
 navigate between them without re-logging-in, refresh tokens leak
@@ -329,6 +329,70 @@ Removed versus the pre-epic token:
       and `(UserId, TenantId, RevokedAt)` for the admin-path hot
       query (validated by EXPLAIN ANALYZE against a seeded dataset
       of 100k rows)
+
+## Implementation notes for AC3 (2026-05-29)
+
+AC3 (refresh-token tenant binding + reuse-detection) shipped on `feat/wave-b`.
+Closes the gap flagged by the 2026-05-29 Epic 28 audit.
+
+**Schema:**
+- `apps/tamma-elsa/src/Tamma.Data/Entities/RefreshToken.cs` — added
+  `TenantId UUID NULL`, `JtiChainHead UUID NULL`, `RevokedReason VARCHAR(32) NULL`.
+  Closed-enum constants in `RefreshTokenRevokedReasons` (manual_logout, logout_all,
+  rotation_consumed, switch_org, reuse_detected, password_reset, admin_force_logout).
+- Migration: `Migrations/ControlPlane/20260529125335_Story28_9_RefreshTokenTenantBinding.cs`.
+  Adds the three columns + two partial indexes (`IX_refresh_tokens_JtiChainHead`,
+  `IX_refresh_tokens_UserId_TenantId`) + two CHECK constraints
+  (closed enum on `RevokedReason`, NULL-parity between `RevokedAt` and `RevokedReason`).
+
+**Repository (`apps/tamma-elsa/src/Tamma.Data/Repositories/RefreshTokenRepository.cs`):**
+- New overload `CreateAsync(userId, tenantId, hash, expiresAt, jtiChainHead)`
+  for tenant-bound issuance; legacy 3-arg overload preserved for transitional callers.
+- New `RevokeAsync(id, reason)` + `RevokeAllForUserAsync(userId, reason)`
+  overloads carrying explicit revoke reasons; legacy overloads default to
+  `manual_logout` / `logout_all`.
+- New `FindByJtiChainHeadAsync(chainHead)` and `RevokeChainAsync(chainHead, reason)`
+  for reuse-detection.
+- Client-side guard `EnsureKnownReason` rejects unknown reasons with
+  `ArgumentException` before the DB CHECK fires.
+
+**Endpoint changes (`apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs`):**
+- `Login` mints refresh row with the active tenant (NULL when rootless) and a
+  fresh `JtiChainHead`.
+- `Refresh` re-resolves the role for the bound tenant on every rotation
+  (the mid-session demotion catch-up), reads `token.TenantId` as the binding
+  source of truth, propagates `JtiChainHead` to the rotated row, stamps the
+  consumed row with `rotation_consumed`. Reuse-detection (revoked-then-replayed)
+  burns the entire lineage via `RevokeChainAsync(chainHead, reuse_detected)`;
+  pre-Story-28-9 rows with NULL chain head fall back to the previous
+  `RevokeAllForUserAsync` semantics.
+- `SwitchOrg` revokes the presented refresh row with `switch_org`, bulk-revokes
+  with `switch_org` when no token is in the body, and mints a NEW chain head
+  for the target-tenant lineage (the source-tenant chain terminates at
+  switch-org).
+- `Logout(?all=true)` tags the bulk revoke with `logout_all`; per-token logout
+  uses `manual_logout`.
+- `PasswordResetConfirm` uses `password_reset` reason.
+
+**Tests:**
+- `tests/Tamma.Api.Tests/Auth/RefreshTokenTenantBindingTests.cs` — entity shape,
+  model graph, repository CRUD with new columns, CHECK constraints (32 assertions).
+- `tests/Tamma.Api.Tests/Auth/RefreshTokenReuseDetectionTests.cs` —
+  end-to-end reuse-detection via the Refresh handler (chain burn, sibling 401,
+  pre-Story-28-9 fallback path).
+- `tests/Tamma.Api.Tests/Auth/SwitchOrgRefreshTokenTests.cs` —
+  tenant binding on the new refresh row, new chain head on switch-org,
+  `switch_org` revoke reason on both single-token and bulk-revoke paths.
+- All existing Auth + Epic28 tests (311 + 272) continue to pass.
+
+**Run:** `sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln"`.
+
+**Out of scope (AC1 / AC2 / AC4–AC7 parts):** the audit's other AC3-adjacent
+notes (jti claim explicit in tokens, `tenant_mismatch_on_refresh` 400 — the
+current `RefreshRequest` DTO has no target-tenant field, so that error path
+is only reachable when a future DTO addition lands), `IsPlatformAdminHandler`,
+`tamma_auth_*` metrics, and the `DELETE /api/admin/users/{userId}/sessions`
+endpoint stay on the parent agent's plan for the rest of Story 28-9.
 
 ## Risks / Open Questions
 
