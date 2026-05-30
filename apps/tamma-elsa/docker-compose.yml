@@ -91,8 +91,19 @@ services:
       # rotate it via `ALTER ROLE tamma_app WITH PASSWORD ...` and wire
       # the rotated value via TAMMA_APP_DB_PASSWORD below. Until then
       # TammaAppDb falls back to TammaDb with a warning.
+      #
+      # Story 28-12 AC1+AC2 — dev mirrors the prod three-role shape so the
+      # `ConnectionStrings:TammaAppDb is not configured` warning goes away
+      # and dev matches prod. Dev keeps a single underlying Postgres role
+      # (the tamma_app / tamma_provisioner roles only exist after
+      # scripts/db/postgres-roles.sql runs), so the startup current_user
+      # role check (DbRoleLeastPrivilegeCheck) is a WARNING here, never a
+      # hard fail — that gating lives in ASPNETCORE_ENVIRONMENT=Development.
+      # Provisioner is slotted for parity; the API never reads it (it
+      # belongs to the provisioning workflow on the elsa-server host).
       - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${DB_USER:-tamma};Password=${DB_PASSWORD:-tamma_dev_123};
-      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-changeme};
+      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${TAMMA_APP_DB_USER:-tamma_app};Password=${TAMMA_APP_DB_PASSWORD:-changeme};
+      - ConnectionStrings__Provisioner=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${TAMMA_PROVISIONER_DB_USER:-tamma_provisioner};Password=${TAMMA_PROVISIONER_DB_PASSWORD:-changeme};
       - SLACK_WEBHOOK=${SLACK_WEBHOOK:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     depends_on:

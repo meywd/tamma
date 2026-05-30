@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (postgres-roles-lint CI + API-pod startup `current_user` check + `RekeyTenantConnectionStringsWorkflow` location residuals; coordinator-instead-of-workflow may be the new architecture)
+**Status**: MOSTLY DONE — AC1+AC2 role-split runtime enforcement CLOSED by the 2026-05-30 follow-up (see section below). Remaining residuals: `RekeyTenantConnectionStringsWorkflow` location (coordinator-instead-of-workflow may be the new architecture) and AC5 KEK-rotation items — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC1/AC2 startup `current_user` check + distinct compose role-URL slots are now in place.
 **Priority**: High (the three-role privilege split and per-tenant KEK
 encryption are the hard security floor of the DB-per-tenant model;
 shipping without them lets the runtime API `CREATE DATABASE` and
@@ -78,6 +78,48 @@ Per Doc 01 §7.1 exact matrix:
       global-Elsa `Program.cs` respectively. The API pod asserts at
       startup that it is NOT running as `tamma_provisioner`
       (`SELECT current_user` check) — fails fast if misconfigured.
+
+### Closed by 2026-05-30 follow-up (AC1+AC2 runtime enforcement)
+
+The 2026-05-30 Epic 28 residual-verification report flagged that the
+three-role split existed in `scripts/db/postgres-roles.sql` but was
+**not enforced at runtime**: `docker-compose.{yml,prod.yml}` did not
+slot distinct DB-role URLs, and no `SELECT current_user` startup
+assertion caught a regression (an API pod accidentally configured with
+the provisioner/admin URL would silently run with escalated
+privileges). Closed as follows:
+
+- **Startup least-privilege assertion** —
+  `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/DbRoleLeastPrivilegeCheck.cs`
+  is an `IHealthCheck` (mirrors the existing `KekCabinetHealthCheck`
+  idiom) registered in `Program.cs` on the `"ready"` probe alongside
+  the KEK cabinet check. On the `/health/ready` probe it opens the
+  app connection (`ConnectionStrings:TammaAppDb`), runs
+  `SELECT current_user`, and asserts the result is **not**
+  `tamma_provisioner` and **not** `tamma_admin`.
+- **Dev-warning / prod-fail gating** — the pure decision core
+  (`IsForbiddenAppUser` + `Evaluate`, unit-tested in
+  `Epic28/DbRoleLeastPrivilegeCheckTests.cs`) returns `Fail` only when
+  `ASPNETCORE_ENVIRONMENT=Production` **and** the role is privileged;
+  outside Production a privileged role is `WarnOnly` (logs a WARN,
+  reports Healthy). This is required so the full test suite — which
+  runs under `UseEnvironment("Development")` on a single default
+  Postgres role with no split — stays green. A missing app connection
+  string or an unreachable Postgres degrades rather than hard-fails.
+- **Compose role-URL slots** — `docker-compose.prod.yml` now carries
+  three documented, distinct connection-string slots for the api
+  service: `ConnectionStrings__TammaAppDb` (`tamma_app`, the runtime
+  least-privilege role), `ConnectionStrings__TammaDb` (admin /
+  migration runner, `tamma`→`tamma_admin` via `${TAMMA_ADMIN_DB_USER}`),
+  and `ConnectionStrings__Provisioner` (`tamma_provisioner`, used by
+  the provisioning workflow on the global-Elsa host — slotted for a
+  single-`.env` carry; the API never reads it). All use `${VAR}`
+  interpolation with per-role `*_DB_PASSWORD` placeholders consistent
+  with the existing `.env` secret pattern — no hardcoded secrets.
+  `docker-compose.yml` (dev) mirrors the shape (adds the `Provisioner`
+  slot + role-user env overrides) so the dev logs' "TammaAppDb is not
+  configured" warning goes away and dev matches prod; dev keeps a
+  single underlying role and relies on the WarnOnly gating.
 
 ### AC3: `ISecretsService.EncryptTenantConnectionString` / `Decrypt`
 

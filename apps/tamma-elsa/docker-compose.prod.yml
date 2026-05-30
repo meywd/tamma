@@ -107,15 +107,51 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ELSA_SERVER_URL=http://elsa-server:5000
       - DATABASE_URL=postgresql://tamma:${DB_PASSWORD}@postgres:5432/tamma
-      # Phase-3 dual connection strings (findings orgs/002, orgs/004).
-      # TammaDb = admin role for migrations + background services;
-      # TammaAppDb = tamma_app role for per-request endpoints (RLS-enforced).
-      # Operators must rotate the tamma_app password after first deploy
-      # and set TAMMA_APP_DB_PASSWORD in the env. If TAMMA_APP_DB_PASSWORD
-      # is unset the app falls back to the admin connection with a
-      # warning — acceptable on day-1 bring-up but blocks the RLS layer.
-      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma;Password=${DB_PASSWORD};
+      # ── Story 28-12 AC1+AC2 — Postgres three-role privilege split ────
+      # The runtime API connects as `tamma_app` (least privilege): it can
+      # SELECT/INSERT/UPDATE/DELETE the CP tables but CANNOT CREATE
+      # DATABASE / CREATE ROLE. A SQL-injection or logic bug in request
+      # handling therefore cannot escalate to provisioning databases or
+      # roles. The roles are bootstrapped by scripts/db/postgres-roles.sql
+      # at cluster init; operators set the three passwords below.
+      #
+      # At startup the API runs `SELECT current_user` against TammaAppDb
+      # and refuses readiness (Unhealthy on /health/ready) if it is running
+      # as tamma_provisioner or tamma_admin — see DbRoleLeastPrivilegeCheck.
+      # The check is a hard fail in Production and a warning elsewhere.
+      #
+      #   TammaDb     → tamma_admin    : migrations + DDL + background
+      #                                  services. SUPERUSER-adjacent. The
+      #                                  container's POSTGRES_USER (`tamma`)
+      #                                  IS the cluster superuser that
+      #                                  bootstraps the roles, so TammaDb
+      #                                  stays on `tamma` until the operator
+      #                                  hands DDL over to a dedicated
+      #                                  tamma_admin role (the role exists
+      #                                  after postgres-roles.sql runs; flip
+      #                                  the User Id below when ready).
+      #   TammaAppDb  → tamma_app       : the runtime API's per-request,
+      #                                  RLS-enforced, least-privilege role.
+      #   Provisioner → tamma_provisioner: CREATE DATABASE / CREATE ROLE.
+      #                                  Used ONLY by the provisioning
+      #                                  workflow (CreateTenantWorkflow /
+      #                                  DeleteTenantWorkflow) on the
+      #                                  global-Elsa host — belongs in the
+      #                                  elsa-server env, NOT here. Slotted
+      #                                  here only so a single .env carries
+      #                                  all three URLs; the API never reads
+      #                                  Provisioner. Distinct slot name so
+      #                                  an ops typo can't point the API at
+      #                                  the provisioner URL.
+      #
+      # Operators must rotate each role's password after first deploy and
+      # set the *_DB_PASSWORD vars in the env. If TAMMA_APP_DB_PASSWORD is
+      # unset, TammaAppDb falls back to the admin password — acceptable on
+      # day-1 bring-up but the startup role check will WARN (non-prod) /
+      # block readiness (prod) until tamma_app is wired.
+      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=${TAMMA_ADMIN_DB_USER:-tamma};Password=${TAMMA_ADMIN_DB_PASSWORD:-${DB_PASSWORD}};
       - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-${DB_PASSWORD}};
+      - ConnectionStrings__Provisioner=Server=postgres;Port=5432;Database=tamma;User Id=tamma_provisioner;Password=${TAMMA_PROVISIONER_DB_PASSWORD:-${DB_PASSWORD}};
       - SLACK_WEBHOOK=${SLACK_WEBHOOK}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - JWT_SECRET=${JWT_SECRET}

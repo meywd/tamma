@@ -311,6 +311,20 @@ builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationCoordinator>
 // tenant rows further behind than the cabinet history can decrypt.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>();
 
+// ── Story 28-12 AC1+AC2 (2026-05-30 residual #3) ─────────────────────
+// Runtime least-privilege assertion: probe `SELECT current_user` on the
+// app connection and refuse readiness in Production if the API is running
+// as tamma_provisioner / tamma_admin (privileged) instead of tamma_app.
+// Outside Production it's a warning only (dev/test run as a single default
+// role with no split — keeps the suite green). Captures the resolved app
+// connection string + environment so the check is self-contained.
+builder.Services.AddSingleton(sp =>
+    new Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck(
+        appConnectionString,
+        builder.Environment.IsProduction(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck>>()));
+
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
 builder.Services.AddScoped<IMentorshipService, MentorshipService>();
@@ -767,6 +781,12 @@ builder.Services.AddHealthChecks()
     .AddNpgSql(connectionString, tags: new[] { "ready" })
     .AddCheck<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>(
         name: "kek-cabinet",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+        tags: new[] { "ready" })
+    // Story 28-12 AC1+AC2 — least-privilege DB role assertion (see the
+    // DbRoleLeastPrivilegeCheck registration above for the gating rules).
+    .AddCheck<Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck>(
+        name: "db-role-least-privilege",
         failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
         tags: new[] { "ready" });
 
