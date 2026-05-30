@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; see Implementation Notes section below. Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC2 5-step atomicity verification, AC6 logout-all path, plus two small AC3 follow-ups (`tenant_mismatch_on_refresh` 400 + `AUTH.REFRESH_REUSE_DETECTED` platform_events emission).
+**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC2 5-step atomicity verification, AC6 logout-all path.
 **Priority**: High (without per-tenant-scoped JWTs plus a switch-org
 endpoint, users with memberships in more than one tenant cannot
 navigate between them without re-logging-in, refresh tokens leak
@@ -103,9 +103,19 @@ Removed versus the pre-epic token:
       validates not expired / not revoked, issues a new access +
       refresh token pair scoped to the **same** `TenantId`. A
       refresh token with `TenantId=<A>` can NEVER mint an access
-      token for tenant B — a request asserting a different
+      token for tenant B — ~~a request asserting a different
       target returns 400 `{ "error": "tenant_mismatch_on_refresh",
-      "action": "POST /api/v1/auth/switch-org" }`.
+      "action": "POST /api/v1/auth/switch-org" }`~~. **Intentionally
+      not implemented (2026-05-30)**: `RefreshRequest` is
+      `{ refreshToken }` — there is no target-tenant field for a
+      caller to "assert" against. Refresh is single-tenant by
+      design (the token IS the tenant binding), so a 400 with the
+      `tenant_mismatch_on_refresh` code is unreachable. The DB-side
+      enforcement (token.TenantId is the source of truth, membership
+      loss returns 401 with `action: switch-org`) IS in place; the
+      400 path that the AC text described is an error class the new
+      DTO contract cannot produce. Switch-org is the cross-tenant
+      path. See Implementation Notes for the design call.
 - [ ] Refresh rotates: the incoming refresh token is marked
       `RevokedAt=NOW()` and the new one issued in a single CP
       transaction. Presenting the revoked token a second time
@@ -393,6 +403,58 @@ current `RefreshRequest` DTO has no target-tenant field, so that error path
 is only reachable when a future DTO addition lands), `IsPlatformAdminHandler`,
 `tamma_auth_*` metrics, and the `DELETE /api/admin/users/{userId}/sessions`
 endpoint stay on the parent agent's plan for the rest of Story 28-9.
+
+## Closed by 2026-05-30 follow-up
+
+Two of the AC3 residuals listed in the Status line above closed on
+`feat/wave-b`:
+
+### `AUTH.REFRESH_REUSE_DETECTED` platform_events emission — SHIPPED
+
+`AuthEndpoints.Refresh` now emits an `AUTH.REFRESH_REUSE_DETECTED` row to
+`platform_events` whenever the reuse-detection branch fires (revoked
+token replayed). Tags carry `userId`, `tenantId` (when bound),
+`jtiChainHead` (when known), `actorIp` (resolved through
+`TrustedProxyResolver`), and `source=auth`. Data carries
+`revokedTokenCount` so the dashboard can show "this incident burned N
+sessions". Best-effort: a publisher failure logs `LogWarning` and does
+NOT mask the 401 because the security action (lineage burn) already
+happened. The legacy fallback path (pre-Story-28-9 row with NULL
+`JtiChainHead` / NULL `TenantId`) emits the event without the
+`jtiChainHead` / `tenantId` tags so SIEM can distinguish the two paths.
+
+Code: `AuthEndpoints.cs` — new private helper
+`BuildRefreshReuseDetectedEvent`; the reuse-detection branch in `Refresh`
+calls the publisher inside a try/catch.
+
+Tests: `RefreshTokenReuseDetectionTests.cs` — two new tests
+(`Refresh_ReuseDetection_EmitsAuthRefreshReuseDetectedEvent`,
+`Refresh_ReuseDetection_LegacyNullChainHead_EmitsEventWithoutChainHeadTag`).
+
+### `tenant_mismatch_on_refresh` 400 — INTENTIONALLY NOT IMPLEMENTED
+
+Decision: do NOT add a target-tenant field to `RefreshRequest`.
+
+**Rationale:** the AC3 text describes a 400 error code emitted when a
+client asserts a different target tenant on a refresh call. The current
+DTO (`{ refreshToken }`) provides no way for a client to assert a target
+— refresh's contract is "give me a new pair for the tenant I'm on", and
+the token IS the binding (token.TenantId is the source of truth, set
+when the row was created at login / switch-org). Adding a target field
+would change the contract for zero functional gain: the cross-tenant
+flow already exists as `POST /api/v1/auth/switch-org` with explicit
+membership validation, audit emission, and chain-head reset. Refresh
+deliberately stays single-tenant.
+
+The DB-side enforcement of the same invariant IS in place: if the
+refresh row is bound to tenant A but the user's membership in A was
+revoked between refreshes, the handler returns 401 with `action: POST
+/api/v1/auth/switch-org` (the membership-lost branch in `Refresh`). That
+is the actual user-visible expression of "this refresh token can't mint
+an access token for somewhere else".
+
+If a future client capability requires cross-tenant assertion on
+refresh, re-open this residual: add the field, the 400 path, the test.
 
 ## Risks / Open Questions
 

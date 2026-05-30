@@ -4,11 +4,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Services.Auth;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.RateLimit;
+using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -302,7 +304,8 @@ public static class AuthEndpoints
     public static async Task<IResult> VerifyEmail(
         VerifyEmailRequest req,
         IUserRepository userRepo,
-        [FromServices] ILoggerFactory loggerFactory)
+        [FromServices] ILoggerFactory loggerFactory,
+        HttpContext httpContext)
     {
         if (string.IsNullOrWhiteSpace(req.Token))
             return Results.BadRequest(new { error = "token is required" });
@@ -319,10 +322,161 @@ public static class AuthEndpoints
 
         await userRepo.SetEmailVerifiedAsync(user.Id);
 
-        loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!)
-            .LogInformation("USER.EMAIL_VERIFIED.SUCCESS userId={UserId}", user.Id);
+        var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+        logger.LogInformation("USER.EMAIL_VERIFIED.SUCCESS userId={UserId}", user.Id);
+
+        // Story 28-5 AC1 follow-up (2026-05-30) — for every tenant the
+        // user OWNS that is currently in pending_verification, flip Status
+        // → provisioning and emit TENANT.PROVISIONING_REQUESTED. This is
+        // the verify-email coupling Doc 03 §0 + Story 28-5 AC1 specified:
+        // the workflow trigger fires after the human proves control of the
+        // email address, not earlier (resists bot-driven provisioning).
+        //
+        // Conditional, idempotent guard: only tenants explicitly stamped
+        // pending_verification transition. NULL-Status tenants (today's
+        // shared-infra default — see Register, which leaves Status unset)
+        // are LEFT ALONE because TenantStatusEvaluator treats NULL as
+        // active. Promoting them would 503 the user until a Story 28-5
+        // workflow consumer drains the event, which is not yet wired in
+        // production. The conditional pattern matches AdminTenantsEndpoints
+        // .RetryTenant which sets Status='pending_verification' explicitly
+        // before triggering.
+        //
+        // Best-effort: a missing publisher / DB hiccup must not fail the
+        // verify-email flow — EmailVerified=true is the user-visible
+        // contract; provisioning is a downstream side-effect.
+        await TryTriggerProvisioningForOwnedTenantsAsync(
+            user.Id, httpContext, logger);
 
         return Results.Ok(new { message = "Email verified successfully" });
+    }
+
+    /// <summary>
+    /// Story 28-5 AC1 follow-up (2026-05-30) — finds tenants owned by
+    /// <paramref name="userId"/> with Status='pending_verification', flips
+    /// each to 'provisioning' in a single DB round trip, and emits one
+    /// <c>TENANT.PROVISIONING_REQUESTED</c> per transitioned tenant. The
+    /// CP DbContext and the publisher are both pulled off
+    /// <paramref name="httpContext"/>'s request services so the handler
+    /// stays unit-testable through composite providers; missing services
+    /// are tolerated (audit-only emission is best-effort).
+    /// </summary>
+    private static async Task TryTriggerProvisioningForOwnedTenantsAsync(
+        Guid userId,
+        HttpContext httpContext,
+        ILogger logger)
+    {
+        try
+        {
+            // Open an explicit scope so ControlPlaneDbContext (scoped) is
+            // resolvable even from a root provider (e.g. tests that wire
+            // RequestServices to the test factory's root container). Mirrors
+            // the IServiceScopeFactory pattern used by PlatformEventPublisher.
+            var scopeFactory = httpContext.RequestServices
+                .GetService<IServiceScopeFactory>();
+            if (scopeFactory is null) return;
+            using var scope = scopeFactory.CreateScope();
+
+            var db = scope.ServiceProvider.GetService<ControlPlaneDbContext>();
+            if (db is null) return;
+
+            // Bypass the soft-delete query filter — tenants in
+            // pending_verification by definition have not been deleted,
+            // but explicit is better than implicit. Pre-filter on the
+            // shadow Status column via EF.Property so the WHERE happens
+            // server-side (avoids loading every owned tenant just to skip
+            // most of them) AND ensures shadow-column hydration on the
+            // tracked entity for the subsequent mutation.
+            var pending = await db.Tenants
+                .IgnoreQueryFilters()
+                .Where(t => t.OwnerId == userId
+                            && t.DeletedAt == null
+                            && EF.Property<string?>(t, "Status") == "pending_verification")
+                .ToListAsync();
+
+            if (pending.Count == 0) return;
+
+            var transitioned = new List<Tenant>(pending.Count);
+            foreach (var tenant in pending)
+            {
+                db.Entry(tenant).Property("Status").CurrentValue = "provisioning";
+                tenant.UpdatedAt = DateTime.UtcNow;
+                transitioned.Add(tenant);
+            }
+
+            await db.SaveChangesAsync();
+
+            // Publisher is optional — emission is the audit breadcrumb
+            // for Story 28-11 dashboard + the trigger source the future
+            // Elsa workflow listens on; failing to publish must not roll
+            // back the Status transition because the tenant row IS now in
+            // provisioning and the admin retry path can recover.
+            var publisher = httpContext.RequestServices
+                .GetService<IPlatformEventPublisher>()
+                ?? scope.ServiceProvider.GetService<IPlatformEventPublisher>();
+            if (publisher is null) return;
+
+            foreach (var tenant in transitioned)
+            {
+                var evt = BuildVerifyEmailProvisioningEvent(tenant.Id, userId);
+                try
+                {
+                    await publisher.AppendAndPublishAsync(evt);
+                }
+                catch (Exception innerEx)
+                {
+                    logger.LogWarning(innerEx,
+                        "TENANT.PROVISIONING_REQUESTED publish failed tenantId={TenantId}",
+                        tenant.Id);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // EmailVerified=true is the user-visible contract; provisioning
+            // is a downstream side-effect. Never roll back the response
+            // over a trigger-side hiccup.
+            logger.LogWarning(ex,
+                "verify-email provisioning trigger failed userId={UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// Story 28-5 AC1 follow-up (2026-05-30) — builds the
+    /// <c>TENANT.PROVISIONING_REQUESTED</c> platform_events row emitted by
+    /// verify-email. Shape matches the admin-retry equivalent in
+    /// <c>AdminTenantsEndpoints.BuildAdminEvent</c> but with
+    /// <c>source="verify-email"</c> so dashboards / SIEM can tell the two
+    /// trigger origins apart. The user IS the owner here (we just
+    /// confirmed their email) so tags carry <c>userId</c> as well as
+    /// <c>tenantId</c>; no <c>actorEmail</c>/<c>actorIp</c> because this
+    /// is a system-initiated transition, not an operator action.
+    /// </summary>
+    private static PlatformEvent BuildVerifyEmailProvisioningEvent(
+        Guid tenantId, Guid userId)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["userId"] = userId.ToString("D"),
+            ["source"] = "verify-email",
+        };
+        var data = new Dictionary<string, object?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["userId"] = userId.ToString("D"),
+            ["requestedAt"] = DateTime.UtcNow,
+            ["source"] = "verify-email",
+        };
+        return new PlatformEvent
+        {
+            Type = "TENANT.PROVISIONING_REQUESTED",
+            TenantId = tenantId,
+            UserId = userId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        };
     }
 
     public static async Task<IResult> ResendVerification(
@@ -501,6 +655,15 @@ public static class AuthEndpoints
         [FromServices] ILoggerFactory loggerFactory,
         HttpContext httpContext)
     {
+        // Story 28-9 AC3 follow-up (2026-05-30) — IPlatformEventPublisher
+        // is best-effort resolved off the request scope so existing tests
+        // that pre-date this signature don't need an explicit injection.
+        // When the publisher is registered (production + tests that wire
+        // a recording double), reuse-detection emits AUTH.REFRESH_REUSE_DETECTED;
+        // when it isn't (a small slice of pure-unit tests), the handler
+        // silently skips the emission rather than failing the refresh.
+        var eventPublisher = httpContext.RequestServices
+            .GetService<IPlatformEventPublisher>();
         // Refresh tokens come in via the request body (TS contract). The
         // tamma_session cookie carries the access JWT, not the refresh
         // token (audit finding 004).
@@ -527,22 +690,49 @@ public static class AuthEndpoints
         if (token.RevokedAt is not null)
         {
             var logger = loggerFactory.CreateLogger(typeof(AuthEndpoints).FullName!);
+            int burnedCount;
+            Guid? chainHeadForEvent;
             if (token.JtiChainHead is { } chainHead && chainHead != Guid.Empty)
             {
-                var burned = await refreshTokenRepo.RevokeChainAsync(
+                burnedCount = await refreshTokenRepo.RevokeChainAsync(
                     chainHead, RefreshTokenRevokedReasons.ReuseDetected);
+                chainHeadForEvent = chainHead;
                 logger.LogWarning(
                     "AUTH.REFRESH_REUSE_DETECTED userId={UserId} chainHead={ChainHead} burned={Burned} — session lineage revoked",
-                    token.UserId, chainHead, burned);
+                    token.UserId, chainHead, burnedCount);
             }
             else
             {
-                await refreshTokenRepo.RevokeAllForUserAsync(
+                burnedCount = await refreshTokenRepo.RevokeAllForUserAsync(
                     token.UserId, RefreshTokenRevokedReasons.ReuseDetected);
+                chainHeadForEvent = null;
                 logger.LogWarning(
                     "USER.REFRESH_TOKEN_REUSE userId={UserId} — all sessions revoked (legacy path; pre-28-9 row had no chain head)",
                     token.UserId);
             }
+
+            // Story 28-9 AC3 follow-up (2026-05-30) — durable audit row in
+            // platform_events so SIEM / SOC2 reviews can detect refresh-token
+            // theft without scraping logs. Best-effort: a publisher failure
+            // must NOT mask the 401 — the security action (lineage burn)
+            // already happened.
+            if (eventPublisher is not null)
+            {
+                try
+                {
+                    var evt = BuildRefreshReuseDetectedEvent(
+                        token.UserId, token.TenantId, chainHeadForEvent,
+                        burnedCount, httpContext);
+                    await eventPublisher.AppendAndPublishAsync(evt);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "AUTH.REFRESH_REUSE_DETECTED publish failed userId={UserId}",
+                        token.UserId);
+                }
+            }
+
             return Results.Json(new { error = "Refresh token has been revoked" }, statusCode: 401);
         }
 
@@ -860,6 +1050,74 @@ public static class AuthEndpoints
         {
             Type = eventType,
             TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(data),
+        };
+    }
+
+    /// <summary>
+    /// Story 28-9 AC3 follow-up (2026-05-30) — builds the
+    /// <c>AUTH.REFRESH_REUSE_DETECTED</c> platform_events row emitted when
+    /// a revoked refresh token is replayed. Unlike <see cref="BuildAuthAuditEvent"/>
+    /// this is on an unauthenticated path (the caller's identity is the
+    /// owner of the revoked token, not the request principal), so the
+    /// shape is derived from the refresh-token row plus the request
+    /// fingerprint resolved through <see cref="TrustedProxyResolver"/>.
+    ///
+    /// <para>Tags are the SIEM-filter surface: <c>userId</c>, <c>tenantId</c>
+    /// (when bound), <c>jtiChainHead</c> (when known), <c>actorIp</c>,
+    /// <c>source=auth</c>. Data carries the same identifiers plus
+    /// <c>revokedTokenCount</c> so a dashboard can show "this incident
+    /// burned N sessions" without joining back to refresh_tokens.
+    /// <c>TenantId</c> on the event row mirrors <c>token.TenantId</c> so
+    /// platform-scope reviews can spot pre-Story-28-9 rows distinctly from
+    /// tenant-scoped incidents.</para>
+    /// </summary>
+    private static PlatformEvent BuildRefreshReuseDetectedEvent(
+        Guid userId,
+        Guid? tenantId,
+        Guid? jtiChainHead,
+        int revokedTokenCount,
+        HttpContext httpContext)
+    {
+        var resolver = httpContext.RequestServices.GetService<TrustedProxyResolver>();
+        string? actorIp = resolver is not null
+            ? resolver.ResolveActorIp(httpContext)
+            : httpContext.Connection.RemoteIpAddress?.ToString();
+        if (!string.IsNullOrEmpty(actorIp) && actorIp.Length > 64)
+            actorIp = actorIp[..64];
+
+        var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+        if (userAgent.Length > 256) userAgent = userAgent[..256];
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["source"] = "auth",
+        };
+        if (tenantId is not null && tenantId.Value != Guid.Empty)
+            tags["tenantId"] = tenantId.Value.ToString("D");
+        if (jtiChainHead is not null && jtiChainHead.Value != Guid.Empty)
+            tags["jtiChainHead"] = jtiChainHead.Value.ToString("D");
+        if (!string.IsNullOrEmpty(actorIp))
+            tags["actorIp"] = actorIp;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["tenantId"] = tenantId?.ToString("D"),
+            ["jtiChainHead"] = jtiChainHead?.ToString("D"),
+            ["actorIp"] = actorIp,
+            ["userAgent"] = userAgent,
+            ["revokedTokenCount"] = revokedTokenCount,
+        };
+
+        return new PlatformEvent
+        {
+            Type = "AUTH.REFRESH_REUSE_DETECTED",
+            TenantId = tenantId,
+            UserId = userId,
             Tags = JsonSerializer.Serialize(tags),
             Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
             Data = JsonSerializer.Serialize(data),

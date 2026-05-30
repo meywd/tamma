@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,9 @@ using NUnit.Framework;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -372,5 +375,138 @@ public class RefreshTokenReuseDetectionTests
         var consumed = await db.RefreshTokens.SingleAsync(t => t.Id == seeded.Id);
         consumed.RevokedAt.Should().NotBeNull();
         consumed.RevokedReason.Should().Be(RefreshTokenRevokedReasons.RotationConsumed);
+    }
+
+    // ── AC3 follow-up: AUTH.REFRESH_REUSE_DETECTED platform_events emission ──
+
+    [Test]
+    public async Task Refresh_ReuseDetection_EmitsAuthRefreshReuseDetectedEvent()
+    {
+        // Story 28-9 AC3 follow-up (2026-05-30) — when a revoked refresh
+        // token is replayed, an AUTH.REFRESH_REUSE_DETECTED row must land
+        // in platform_events with userId + tenantId + jtiChainHead + actorIp
+        // tags so SIEM / SOC2 audit can spot stolen-token replays without
+        // depending on log scraping.
+        var user = await CreateUser("heidi@example.com");
+        var tenant = await CreateTenant($"t-{Guid.NewGuid():N}".Substring(0, 12));
+        await _membershipRepo.AddAsync(tenant.Id, user.Id, "owner");
+
+        var chainHead = Guid.NewGuid();
+        var refreshA = _jwt.GenerateRefreshToken();
+        await _refreshTokenRepo.CreateAsync(
+            user.Id, tenant.Id, HashHex(refreshA),
+            DateTime.UtcNow.AddDays(7), chainHead);
+
+        // Capture emissions through a per-test publisher composed over the
+        // factory DI — mirrors AuthAuditEventTests' MakeContext pattern.
+        var publisher = new RecordingPlatformEventPublisher();
+
+        // Rotate once legitimately (uses the factory's real publisher; this
+        // path does not currently emit anything).
+        var rotateLegit = await AuthEndpoints.Refresh(
+            new RefreshRequest(refreshA),
+            _refreshTokenRepo, _jwt, _userRepo, _membershipRepo,
+            _config, _loggerFactory, NewHttpContextWithPublisher(publisher));
+        await UnwrapJson<RefreshResponse>(rotateLegit);
+
+        // Replay the original (now-revoked) token — must emit the event.
+        var replay = await AuthEndpoints.Refresh(
+            new RefreshRequest(refreshA),
+            _refreshTokenRepo, _jwt, _userRepo, _membershipRepo,
+            _config, _loggerFactory,
+            NewHttpContextWithPublisher(publisher, ip: "203.0.113.42"));
+        (await StatusOf(replay)).Should().Be(StatusCodes.Status401Unauthorized);
+
+        publisher.Events.Should().ContainSingle(e => e.Type == "AUTH.REFRESH_REUSE_DETECTED",
+            "reuse-detection must leave an audit breadcrumb in platform_events");
+        var evt = publisher.Events.Single(e => e.Type == "AUTH.REFRESH_REUSE_DETECTED");
+
+        evt.TenantId.Should().Be(tenant.Id,
+            "the platform_events row must be tenant-scoped for SIEM filtering");
+
+        var tags = JsonSerializer.Deserialize<Dictionary<string, string?>>(evt.Tags!);
+        tags!["userId"].Should().Be(user.Id.ToString("D"));
+        tags["tenantId"].Should().Be(tenant.Id.ToString("D"));
+        tags["jtiChainHead"].Should().Be(chainHead.ToString("D"));
+        tags["actorIp"].Should().Be("203.0.113.42");
+        tags["source"].Should().Be("auth");
+
+        var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(evt.Data!);
+        data!["userId"].GetString().Should().Be(user.Id.ToString("D"));
+        data["jtiChainHead"].GetString().Should().Be(chainHead.ToString("D"));
+        data["revokedTokenCount"].GetInt32().Should().BeGreaterThan(0,
+            "the burned-chain row count goes in data so the dashboard can show it");
+    }
+
+    [Test]
+    public async Task Refresh_ReuseDetection_LegacyNullChainHead_EmitsEventWithoutChainHeadTag()
+    {
+        // Pre-Story-28-9 row (NULL JtiChainHead, NULL TenantId) — the
+        // fallback path burns every token for the user. Audit emission
+        // still happens; chain-head tag is absent because there is none,
+        // and the data field carries the legacy revoke count.
+        var user = await CreateUser("ivan@example.com");
+
+        var publisher = new RecordingPlatformEventPublisher();
+
+        var refresh = _jwt.GenerateRefreshToken();
+        await _refreshTokenRepo.CreateAsync(
+            user.Id, HashHex(refresh), DateTime.UtcNow.AddDays(7));
+
+        await AuthEndpoints.Refresh(
+            new RefreshRequest(refresh),
+            _refreshTokenRepo, _jwt, _userRepo, _membershipRepo,
+            _config, _loggerFactory, NewHttpContextWithPublisher(publisher));
+
+        await AuthEndpoints.Refresh(
+            new RefreshRequest(refresh),
+            _refreshTokenRepo, _jwt, _userRepo, _membershipRepo,
+            _config, _loggerFactory,
+            NewHttpContextWithPublisher(publisher, ip: "198.51.100.5"));
+
+        publisher.Events.Should().ContainSingle(e => e.Type == "AUTH.REFRESH_REUSE_DETECTED");
+        var evt = publisher.Events.Single(e => e.Type == "AUTH.REFRESH_REUSE_DETECTED");
+        evt.TenantId.Should().BeNull(
+            "legacy row had no TenantId binding, so the platform_events row is platform-scope");
+
+        var tags = JsonSerializer.Deserialize<Dictionary<string, string?>>(evt.Tags!);
+        tags!["userId"].Should().Be(user.Id.ToString("D"));
+        tags["actorIp"].Should().Be("198.51.100.5");
+        tags.ContainsKey("jtiChainHead").Should().BeFalse(
+            "no chain head means no jtiChainHead tag — the legacy fallback path");
+        tags.ContainsKey("tenantId").Should().BeFalse(
+            "no tenant binding means no tenantId tag in the legacy path");
+    }
+
+    private static HttpContext NewHttpContextWithPublisher(
+        IPlatformEventPublisher publisher,
+        string? ip = null)
+    {
+        // Layered DI: a per-test sub-scope registers the recording publisher
+        // on top of the factory's container so the Refresh handler resolves
+        // it via [FromServices] without disturbing the rest of the suite.
+        var sub = new ServiceCollection();
+        sub.AddSingleton(publisher);
+        var subProvider = sub.BuildServiceProvider();
+        var composite = new CompositeServiceProvider(subProvider, ApiTestFixture.Factory.Services);
+
+        var ctx = new DefaultHttpContext { RequestServices = composite };
+        ctx.Response.Body = new MemoryStream();
+        if (ip is not null)
+            ctx.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(ip);
+        return ctx;
+    }
+
+    private sealed class CompositeServiceProvider : IServiceProvider
+    {
+        private readonly IServiceProvider _primary;
+        private readonly IServiceProvider _fallback;
+        public CompositeServiceProvider(IServiceProvider primary, IServiceProvider fallback)
+        {
+            _primary = primary;
+            _fallback = fallback;
+        }
+        public object? GetService(Type serviceType)
+            => _primary.GetService(serviceType) ?? _fallback.GetService(serviceType);
     }
 }

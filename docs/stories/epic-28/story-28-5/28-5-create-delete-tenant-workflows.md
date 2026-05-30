@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC1 verify-email→PROVISIONING_REQUESTED trigger NOT wired; AC2 step-10 QueueWelcomeEmail not inside workflow; AC4 backup + pg_terminate_backend verification residual)
+**Status**: MOSTLY DONE — AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Remaining residuals: AC2 step-10 `QueueWelcomeEmail` not inside workflow; AC4 backup + pg_terminate_backend verification.
 **Priority**: High (this is the central tenant-lifecycle artefact; the
 async-provisioning directive in Doc 03 §0 hinges entirely on it)
 **Estimated Effort**: XL (40h+) — target 45h
@@ -313,3 +313,67 @@ The 14 integration tests from Doc 03 §9.1:
   correlation handling must treat the second as a no-op. Elsa
   correlation + Step 1's `Status='provisioning'` guard cover this;
   add an explicit test.
+
+## Closed by 2026-05-30 follow-up
+
+### AC1 verify-email → `TENANT.PROVISIONING_REQUESTED` trigger — SHIPPED
+
+`AuthEndpoints.VerifyEmail` now flips owned-tenant Status from
+`pending_verification` to `provisioning` and emits
+`TENANT.PROVISIONING_REQUESTED` (one event per transitioned tenant)
+inside the verify-email handler, after `EmailVerified=true` lands.
+
+**Design call — conditional / idempotent guard:**
+the AC1 spec describes an unconditional flip, but the production
+reality is that `Register` does NOT today stamp Status='pending_verification'
+on the newly-minted personal tenant (Status defaults to NULL, and
+`TenantStatusEvaluator.IsActive(null)` returns true — "legacy rows
+are active"). If verify-email also unconditionally flipped NULL-Status
+tenants to `provisioning`, live signups would land in 503 until a
+workflow consumer drained the event — and the Elsa trigger that consumes
+`TENANT.PROVISIONING_REQUESTED` is not yet wired in production
+(see `AdminTenantsEndpoints.cs` lines 60-65: "wired via the Elsa trigger
+in a follow-up"). Wiring verify-email to unconditionally flip would
+brick the live signup flow.
+
+The conditional guard implemented here ONLY transitions tenants
+explicitly marked `pending_verification` — which today happens
+exclusively via `AdminTenantsEndpoints.RetryTenant`. NULL-Status
+tenants (shared-infra default) are LEFT ALONE. When the db-per-tenant
+rollout reaches the point where `Register` stamps `pending_verification`
+on new tenants (Story 28-5 AC1's original assumption), the verify-email
+coupling will fire automatically with no further code change. Until
+then, it's an audit-trail emission for tenants admins have re-marked
+pending — preserving the existing live signup flow.
+
+**Best-effort semantics:** the trigger runs after `EmailVerified=true`
+commits. A publisher / DbContext failure logs `LogWarning` and does NOT
+fail the verify-email response — `EmailVerified=true` is the
+user-visible contract; the provisioning trigger is a downstream
+side-effect. The admin retry path (`POST /api/admin/tenants/{id}/actions/retry`)
+recovers any tenant whose trigger emission failed.
+
+**Idempotency:** repeat verify-email calls are blocked by the existing
+"Email already verified" 400 in the handler, so the trigger fires at
+most once per user-initiated verification.
+
+**Event shape:** `source=verify-email` (distinct from `source=admin-retry`
+emitted by `AdminTenantsEndpoints.RetryTenant`), `userId` and `tenantId`
+tags. The `PlatformEvent` row carries `TenantId` and `UserId` directly
+for SIEM filtering.
+
+Code: `AuthEndpoints.cs` — new private helpers
+`TryTriggerProvisioningForOwnedTenantsAsync` and
+`BuildVerifyEmailProvisioningEvent`; signature change on `VerifyEmail`
+to accept `HttpContext` (for `IPlatformEventPublisher` +
+`IServiceScopeFactory` resolution).
+
+Tests: `VerifyEmailProvisioningTriggerTests.cs` — five tests covering
+the happy-path flip + emission, NULL-status no-op, multi-owned-tenant
+fan-out, idempotency against `provisioning` Status, and
+publisher-unavailable safety.
+
+**Out of scope of this follow-up:** AC2 step 10 `QueueWelcomeEmail`
+inside the workflow (still a residual), AC4 pg_dump backup + pg_terminate_backend
+in the delete workflow. The Elsa trigger that consumes
+`TENANT.PROVISIONING_REQUESTED` remains future work.
