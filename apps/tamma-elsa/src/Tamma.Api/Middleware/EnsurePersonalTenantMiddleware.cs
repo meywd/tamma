@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Tamma.Api.Auth;
 using System.Text.Json;
+using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -17,6 +18,20 @@ namespace Tamma.Api.Middleware;
 /// <para>Finding 022 remediation: prior implementation built an email-based
 /// slug, never persisted on the existing-membership path (recomputed every
 /// request), and emitted no audit events.</para>
+///
+/// <para><b>Story 28-8 (2026-05-30 audit-residual closure) — mode awareness.</b>
+/// AC1 of Story 28-8 calls for the "former synchronous-create path" to be
+/// eliminated. The pragmatic resolution: this middleware <b>survives in the
+/// pipeline only to serve <see cref="TammaMode.SingleUser"/> deployments</b>
+/// (self-hosted single-user mode where there is no async-provisioning
+/// surface and a personal tenant must materialise on first authenticated
+/// request). In <see cref="TammaMode.SaaS"/> the middleware short-circuits
+/// before touching any repository — SaaS tenant creation is owned by the
+/// async <c>CreateTenantWorkflow</c> (Story 28-5) at registration /
+/// verify-email time, NOT by a per-request middleware. A SaaS-mode user
+/// arriving here without an active tenant is the AC1 "no_active_tenant"
+/// case and falls through to the downstream pipeline (handlers will
+/// surface the appropriate 409).</para>
 /// </summary>
 public class EnsurePersonalTenantMiddleware(RequestDelegate next)
 {
@@ -45,8 +60,19 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
         ITenantMembershipRepository membershipRepo,
         IUserRepository userRepo,
         IEventRepository events,
+        ITammaModeProvider modeProvider,
         ILogger<EnsurePersonalTenantMiddleware> logger)
     {
+        // Story 28-8 AC1 — SaaS mode never auto-creates tenants here.
+        // The whole middleware is a no-op so SaaS pipelines pay zero cost
+        // beyond the mode check. Tenant creation in SaaS is async via
+        // CreateTenantWorkflow (Story 28-5).
+        if (modeProvider.Mode == TammaMode.SaaS)
+        {
+            await next(context);
+            return;
+        }
+
         var path = context.Request.Path.Value ?? "";
         if (SkipPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
         {

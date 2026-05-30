@@ -10,7 +10,8 @@ namespace Tamma.Api.Services.TenantStatus;
 /// flip surfaces the same shape regardless of which authentication
 /// surface the caller hit.
 ///
-/// <para>Mapping (Doc 04 §8.1):</para>
+/// <para>Mapping (Doc 04 §8.1 + Doc 03 §6.1, verified 2026-05-30
+/// against Story 28-8 AC2 by audit-residual closure):</para>
 /// <list type="table">
 ///   <listheader>
 ///     <term>Status</term>
@@ -30,11 +31,23 @@ namespace Tamma.Api.Services.TenantStatus;
 ///   </item>
 ///   <item>
 ///     <term><c>failed</c></term>
-///     <description>424 Failed Dependency + <c>tenant_provisioning_failed</c>.</description>
+///     <description>424 Failed Dependency + <c>tenant_provisioning_failed</c>
+///     (Retry-After deliberately absent so the client stops polling).</description>
 ///   </item>
 ///   <item>
-///     <term><c>deleting</c></term>
-///     <description>503 + <c>tenant_deleting</c> + <c>Retry-After: 0</c>.</description>
+///     <term><c>suspended</c></term>
+///     <description>402 Payment Required + <c>tenant_suspended</c>. Plan
+///     / billing remediation; not retryable on its own.</description>
+///   </item>
+///   <item>
+///     <term><c>delete_requested</c> (grace expired) / <c>dropping</c> /
+///       <c>deleting</c></term>
+///     <description>503 + <c>tenant_deleting</c> + <c>Retry-After: 0</c>.
+///     Doc 04 §8.1 footnote — client should NOT retry, the data plane
+///     is being torn down. (Caller is responsible for short-circuiting
+///     <c>delete_requested</c> with grace-not-expired as
+///     "pass through" per AC2; this evaluator only handles the
+///     terminal branch.)</description>
 ///   </item>
 ///   <item>
 ///     <term><c>deleted</c></term>
@@ -52,6 +65,9 @@ public static class TenantStatusEvaluator
     public const string StatusPendingVerification = "pending_verification";
     public const string StatusProvisioning = "provisioning";
     public const string StatusFailed = "failed";
+    public const string StatusSuspended = "suspended";
+    public const string StatusDeleteRequested = "delete_requested";
+    public const string StatusDropping = "dropping";
     public const string StatusDeleting = "deleting";
     public const string StatusDeleted = "deleted";
 
@@ -122,13 +138,34 @@ public static class TenantStatusEvaluator
                 }, cancellationToken).ConfigureAwait(false);
                 return;
 
+            case StatusSuspended:
+                // 402 Payment Required — plan downgraded / billing failed.
+                // Doc 04 §8.1 + Story 28-8 AC2. Not retryable; the
+                // tenant_owner must remediate via the billing portal.
+                context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
+                await WriteJsonAsync(context, new
+                {
+                    error = "tenant_suspended",
+                    status = StatusSuspended,
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case StatusDeleteRequested:
+            case StatusDropping:
             case StatusDeleting:
+                // Doc 04 §8.1 footnote — `delete_requested` (grace
+                // expired), `dropping`, and `deleting` are all terminal
+                // teardown states from the client's perspective. 503 +
+                // Retry-After:0 signals "we're going away; don't poll".
+                // (`delete_requested` with grace NOT expired must be
+                // short-circuited by the caller as pass-through before
+                // reaching this evaluator — AC2.)
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 context.Response.Headers["Retry-After"] = "0";
                 await WriteJsonAsync(context, new
                 {
                     error = "tenant_deleting",
-                    status = StatusDeleting,
+                    status = (status ?? string.Empty).ToLowerInvariant(),
                 }, cancellationToken).ConfigureAwait(false);
                 return;
 

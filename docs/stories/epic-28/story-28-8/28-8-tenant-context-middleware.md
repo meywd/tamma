@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (decide fate of `EnsurePersonalTenantMiddleware`; verify 503/424/410/402/404/409 status-code mapping in `TenantStatusEvaluator`)
+**Status**: DONE — 2026-05-30 follow-up closed the two audit residuals from `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (see "Closed by 2026-05-30 follow-up" section below)
 **Priority**: High (without this middleware correctly honouring the
 `tenants.Status` state machine, a client polling during provisioning
 crashes the API or leaks data across tenants during pool eviction)
@@ -325,3 +325,87 @@ Per Doc 04 §8.1 table (extended with the `pending_verification` and
   API-key auth to override the JWT, so the behaviour is
   deterministic; verify with a dedicated test T8 if the
   ambiguity concerns reviewers.
+
+## Closed by 2026-05-30 follow-up
+
+Two audit residuals were resolved (see audit
+`docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` — Story 28-8):
+
+### 1. `EnsurePersonalTenantMiddleware` — kept, made mode-aware
+
+**Decision:** the middleware **survives in the pipeline** rather than
+being deleted. It uniquely owns the personal-tenant materialisation
+flow for self-hosted **single-user mode** deployments (`tamma start` /
+`tamma server`), where there is no async-provisioning surface and the
+sole user must get a personal tenant minted on first authenticated
+request.
+
+**Change:** `InvokeAsync` now takes
+`ITammaModeProvider modeProvider` and short-circuits at the top in
+SaaS mode — the middleware becomes a zero-cost no-op for SaaS
+pipelines beyond the mode enum read. SaaS-mode tenant creation
+remains owned by the async `CreateTenantWorkflow` (Story 28-5) at
+registration / verify-email time. A SaaS-mode user arriving without an
+active tenant is the AC1 `no_active_tenant` case and falls through to
+the downstream pipeline so handlers can surface the appropriate 409
+(or the future TenantContextMiddleware AC1 implementation can take
+ownership).
+
+The mode-awareness rationale is also recorded in the middleware's
+class-level xml-doc so it survives a future code-archeology dig
+without the reader having to chase this story doc.
+
+**Tests:** new
+`apps/tamma-elsa/tests/Tamma.Api.Tests/Middleware/EnsurePersonalTenantMiddlewareTests.cs`
+covers (a) SaaS-mode short-circuit with `MockBehavior.Strict` on every
+repository (any repo call would fail), (b) single-user-mode auto-create
+happy path, (c) single-user-mode pass-through when a tenant is already
+bound.
+
+### 2. `TenantStatusEvaluator` status-code mapping — three additions
+
+**Verification result:** the existing mapping matched AC2 for
+`pending_verification`, `provisioning`, `failed`, `deleting`,
+`deleted`, and unknown/not-found, but **omitted** three documented
+status values that all silently fell through to the default-404 branch:
+
+| Status | AC2 expected | Was | Now |
+|---|---|---|---|
+| `suspended` | 402 Payment Required | 404 | 402 + `tenant_suspended` |
+| `delete_requested` (grace expired) | 503 + `Retry-After: 0` | 404 | 503 + `Retry-After: 0` + `tenant_deleting` |
+| `dropping` | 503 + `Retry-After: 0` | 404 | 503 + `Retry-After: 0` + `tenant_deleting` |
+
+**Decision:** match the spec. The implementation was missing forward
+compatibility for `Story 28-5` / `Story 28-11` workflows that will
+write these statuses; matching the spec now means no second pass at
+the evaluator is needed when those writers ship. The runtime today
+only writes `active`, `provisioning`, `failed`, `deleting`, `deleted`
+(confirmed by `grep` over `Tamma.Activities/TenantLifecycle/*.cs`), so
+the change is purely additive.
+
+**Note on `delete_requested` (grace NOT expired) → "pass through" per
+AC2:** that branch is the caller's responsibility (the middleware must
+gate on `DeleteRequestedAt` + the configured grace window before
+asking the evaluator). The evaluator's `delete_requested` arm
+deliberately treats it as the terminal deletion state — the
+"grace-not-yet-expired" case never reaches it.
+
+**Tests:** new
+`apps/tamma-elsa/tests/Tamma.Api.Tests/TenantStatus/TenantStatusEvaluatorTests.cs`
+exhaustively covers every documented status value (table-driven), the
+`IsActive(null)` + `IsActive("active")` passthrough contract, and the
+idempotency-on-committed-response guarantee.
+
+### Test totals after follow-up
+
+- Tamma.Api.Tests: 2657 passed / 0 failed / 8 skipped (was 2628 before
+  the follow-up; the 29-test growth matches the two new test files).
+- Targeted run
+  `--filter 'FullyQualifiedName~Middleware|FullyQualifiedName~TenantStatus'`:
+  92 / 0 / 0.
+
+### Verification command
+
+```bash
+sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln --filter 'FullyQualifiedName~TenantStatusEvaluatorTests|FullyQualifiedName~EnsurePersonalTenantMiddlewareTests'"
+```

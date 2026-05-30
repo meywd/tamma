@@ -1,0 +1,210 @@
+using System.Security.Claims;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using NUnit.Framework;
+using Tamma.Api.Auth;
+using Tamma.Api.Middleware;
+using Tamma.Api.Services.PromptStore;
+using Tamma.Data;
+using Tamma.Data.Entities;
+using Tamma.Data.Repositories;
+
+namespace Tamma.Api.Tests.Middleware;
+
+/// <summary>
+/// Story 28-8 follow-up (2026-05-30 audit-residual closure) — the
+/// <see cref="EnsurePersonalTenantMiddleware"/> survives in the pipeline
+/// to serve <see cref="TammaMode.SingleUser"/> deployments (the sole user
+/// gets a personal tenant minted on first authenticated request). In
+/// <see cref="TammaMode.SaaS"/> the middleware MUST short-circuit without
+/// touching any repository — SaaS-mode tenant creation is owned by the
+/// async <c>CreateTenantWorkflow</c> at registration / verify-email time,
+/// NOT by a per-request middleware (Story 28-8 AC1 + AC4).
+/// </summary>
+[TestFixture]
+public class EnsurePersonalTenantMiddlewareTests
+{
+    private sealed class StubModeProvider : ITammaModeProvider
+    {
+        public StubModeProvider(TammaMode mode) => Mode = mode;
+        public TammaMode Mode { get; }
+    }
+
+    private sealed class StubTenantContext : ITenantContext
+    {
+        public Guid? TenantId { get; private set; }
+        public void SetTenantId(Guid tenantId) => TenantId = tenantId;
+        public void ClearTenantId() => TenantId = null;
+    }
+
+    private static DefaultHttpContext BuildAuthenticatedContext(string path, Guid userId)
+    {
+        var ctx = new DefaultHttpContext();
+        ctx.Request.Path = path;
+        ctx.Response.Body = new MemoryStream();
+        var identity = new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) },
+            authenticationType: "Test");
+        ctx.User = new ClaimsPrincipal(identity);
+        return ctx;
+    }
+
+    private static EnsurePersonalTenantMiddleware BuildMiddleware(out int nextCallCount)
+    {
+        var counter = 0;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            counter++;
+            return Task.CompletedTask;
+        });
+        nextCallCount = 0;
+        // Return both — closure captures `counter`, caller reads via a
+        // local ref by re-invoking through an outer wrapper.
+        return mw;
+    }
+
+    [Test]
+    public async Task SaaSMode_AuthenticatedRequest_NoTenant_DefersToNext_WithoutCreatingTenant()
+    {
+        var userId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Strict);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Strict);
+        var events = new Mock<IEventRepository>(MockBehavior.Strict);
+        var modeProvider = new StubModeProvider(TammaMode.SaaS);
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue(
+            "SaaS-mode requests must pass through — TenantContextMiddleware " +
+            "already handled tenant resolution; AC1 mandates this middleware " +
+            "is a no-op in SaaS.");
+        tenantContext.TenantId.Should().BeNull(
+            "SaaS-mode bootstrap is owned by CreateTenantWorkflow, not this middleware");
+        // MockBehavior.Strict — any repo call would have thrown. The mere
+        // fact we got here means zero CP / membership / user / events
+        // queries were issued.
+    }
+
+    [Test]
+    public async Task SingleUserMode_AuthenticatedRequest_NoTenant_NoMembership_AutoCreatesPersonalTenant()
+    {
+        // This test pins the single-user-mode survival path. The middleware
+        // must still mint a personal tenant + membership + persist the
+        // active tenant + emit TENANT.AUTO_CREATED.SUCCESS.
+        var userId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Loose);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Loose);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
+        var events = new Mock<IEventRepository>(MockBehavior.Loose);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        membershipRepo
+            .Setup(r => r.GetUserTenantsAsync(userId))
+            .ReturnsAsync(new List<TenantMembership>());
+        userRepo
+            .Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User
+            {
+                Id = userId,
+                Email = "sole@self.host",
+                AuthMethod = "email",
+                DisplayName = "Sole User",
+            });
+        tenantRepo
+            .Setup(r => r.GetBySlugAsync(It.IsAny<string>()))
+            .ReturnsAsync((Tenant?)null);
+        tenantRepo
+            .Setup(r => r.CreateAsync(It.IsAny<Tenant>()))
+            .ReturnsAsync((Tenant t) => { t.Id = Guid.NewGuid(); return t; });
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+        tenantContext.TenantId.Should().NotBeNull(
+            "single-user-mode first request must bind a freshly-minted personal tenant");
+        tenantRepo.Verify(r => r.CreateAsync(It.IsAny<Tenant>()), Times.Once);
+        membershipRepo.Verify(
+            r => r.AddAsync(It.IsAny<Guid>(), userId, "owner"), Times.Once);
+        userRepo.Verify(r => r.UpdateActiveTenantAsync(userId, It.IsAny<Guid>()), Times.Once);
+        events.Verify(
+            r => r.AppendAsync(It.Is<DomainEvent>(e => e.Type == "TENANT.AUTO_CREATED.SUCCESS")),
+            Times.Once);
+    }
+
+    [Test]
+    public async Task SingleUserMode_TenantAlreadyBound_PassesThrough_NoWork()
+    {
+        // Sanity: when TenantContextMiddleware already bound a tenant, this
+        // middleware bails before doing anything — same behaviour as before
+        // the mode gate landed.
+        var userId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+
+        var tenantContext = new StubTenantContext();
+        tenantContext.SetTenantId(Guid.NewGuid());
+
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Strict);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Strict);
+        var events = new Mock<IEventRepository>(MockBehavior.Strict);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+    }
+}
