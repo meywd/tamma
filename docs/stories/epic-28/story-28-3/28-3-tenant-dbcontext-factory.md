@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC3 release-build-throws semantics covered by `Replace`-on-real-resolver pattern in `AddTenantConnectionPool`)
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. **AC3 release-build hard-fail closed by 2026-05-30 follow-up** (residual #2 of the 2026-05-30 Epic 28 residual-verification report): the previous wiring only logged Info and silently kept `StubTenantConnectionResolver` live when `ConnectionStrings:ControlPlane` was unset, so a misconfigured Production deployment would route every tenant to the shared central DB with tenant isolation disabled. New guard `DependencyInjection.GuardTenantIsolationInProduction(isProduction, controlPlaneConnectionString)` (in `apps/tamma-elsa/src/Tamma.Data/DependencyInjection.cs`) throws `InvalidOperationException` naming the missing key + consequence when `IsProduction() && CP-string is null/whitespace`; it is a no-op in Development/Test (the stub is acceptable there, which is how the whole suite runs). Wired in `Tamma.Api/Program.cs` directly after `AddTammaData`, before the CP-string pool gating. Tests: `apps/tamma-elsa/tests/Tamma.Api.Tests/Epic28/StubResolverProductionGuardTests.cs`.
 **Priority**: High (the factory is the seam every tenant-scoped handler
 uses; Story 28-4 replaces the stub with the real resolver)
 **Estimated Effort**: M (8-20h) — target 14h

@@ -154,4 +154,62 @@ public static class DependencyInjection
 
         return services;
     }
+
+    /// <summary>
+    /// Story 28-3 AC3 (2026-05-30 residual follow-up) — release-build
+    /// hard-fail when a <b>Production</b> deployment is missing
+    /// <c>ConnectionStrings:ControlPlane</c>.
+    ///
+    /// <para><b>The gap this closes</b>: <c>AddTammaData</c> always
+    /// registers <see cref="StubTenantConnectionResolver"/> (which routes
+    /// every tenant to the single shared central DB). The real
+    /// <c>LruPooledTenantConnectionResolver</c> only replaces it — via
+    /// <c>AddTenantConnectionPool</c> — when a CP connection string is
+    /// present. A Production deployment that forgets the CP string would
+    /// therefore silently keep the stub, putting every tenant on the same
+    /// database and defeating tenant isolation, with only an Info log to
+    /// show for it. This guard converts that silent fallback into a
+    /// fail-fast startup exception.</para>
+    ///
+    /// <para><b>Why this seam</b>: the guard is a pure function of
+    /// <paramref name="isProduction"/> + the CP connection string, so it
+    /// is fully unit-testable without standing up a host, and the
+    /// composition root (<c>Program.cs</c>) calls it with a single line
+    /// next to the existing CP-string gating. It lives here (rather than
+    /// inline in <c>Program.cs</c>) so a sibling stream editing
+    /// <c>Program.cs</c> concurrently does not collide on the logic.</para>
+    ///
+    /// <para><b>Fires ONLY in Production</b>: Development / Test
+    /// deployments run on the stub WITHOUT a CP string by design (the
+    /// whole test suite relies on this), so non-Production callers are a
+    /// no-op regardless of the connection string.</para>
+    /// </summary>
+    /// <param name="isProduction"><c>true</c> when the host environment is
+    /// Production (e.g. <c>builder.Environment.IsProduction()</c>).</param>
+    /// <param name="controlPlaneConnectionString">The resolved
+    /// <c>ConnectionStrings:ControlPlane</c> value (already trimmed of
+    /// fallbacks by the caller), or <c>null</c>/empty when unset.</param>
+    /// <exception cref="InvalidOperationException">Thrown when
+    /// <paramref name="isProduction"/> is <c>true</c> and
+    /// <paramref name="controlPlaneConnectionString"/> is null/whitespace —
+    /// the deployment would otherwise run the stub resolver with tenant
+    /// isolation disabled.</exception>
+    public static void GuardTenantIsolationInProduction(
+        bool isProduction,
+        string? controlPlaneConnectionString)
+    {
+        if (!isProduction)
+            return;
+
+        if (string.IsNullOrWhiteSpace(controlPlaneConnectionString))
+            throw new InvalidOperationException(
+                "ConnectionStrings:ControlPlane is not configured in a "
+                + "Production environment. Without it the platform falls back "
+                + "to StubTenantConnectionResolver, which routes EVERY tenant "
+                + "to the single shared central database — tenant isolation "
+                + "would be disabled. Refusing to start in Production on the "
+                + "stub resolver. Set ConnectionStrings:ControlPlane to the "
+                + "dedicated control-plane database to enable the per-tenant "
+                + "LRU connection pool (Story 28-4).");
+    }
 }

@@ -233,6 +233,17 @@ builder.Services.AddSingleton<
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
+// ── Story 28-3 AC3 (2026-05-30 residual #2) — stub-resolver prod guard ──
+// Fail fast if a PRODUCTION deployment is missing ConnectionStrings:ControlPlane.
+// Without it, AddTammaData's StubTenantConnectionResolver stays live and routes
+// every tenant to the shared central DB — tenant isolation silently disabled.
+// No-op outside Production (dev/test run on the stub by design). Logic lives in
+// Tamma.Data.DependencyInjection so it is unit-testable without a host.
+// (Single self-contained line — placed before the CP-string gating below.)
+DependencyInjection.GuardTenantIsolationInProduction(
+    builder.Environment.IsProduction(),
+    controlPlaneConnectionString);
+
 // ── Story 28-4 — production tenant connection pool (LRU + handles) ──
 //
 // Replaces the StubTenantConnectionResolver registered by AddTammaData

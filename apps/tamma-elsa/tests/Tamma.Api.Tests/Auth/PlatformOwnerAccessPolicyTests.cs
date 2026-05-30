@@ -62,6 +62,16 @@ public class PlatformOwnerAccessPolicyTests
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb",
             ApiTestFixture.Postgres.GetConnectionString());
+        // This factory boots in Production (below), so it must supply
+        // ConnectionStrings:ControlPlane like a real Production deployment —
+        // otherwise the Story 28-3 AC3 stub-resolver guard
+        // (DependencyInjection.GuardTenantIsolationInProduction, Program.cs)
+        // refuses to start. Reset in OneTimeTearDown so the shared static env
+        // doesn't leak a CP string into sibling tests (which would flip them
+        // off the stub resolver onto the LRU pool).
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__ControlPlane",
+            ApiTestFixture.Postgres.GetConnectionString());
 
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>
@@ -80,6 +90,7 @@ public class PlatformOwnerAccessPolicyTests
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
         Environment.SetEnvironmentVariable("Jwt__Issuer", null);
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
+        Environment.SetEnvironmentVariable("ConnectionStrings__ControlPlane", null);
     }
 
     /// <summary>
