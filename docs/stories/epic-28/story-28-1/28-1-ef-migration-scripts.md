@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (bootstrap/reset scripts + 3 skipped tests + per-tenant Elsa runner verification residual)
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (bootstrap/reset scripts + per-tenant Elsa runner verification residual). The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover.
 **Priority**: High (every other Epic 28 story is blocked until four migration sets compile and apply cleanly)
 **Estimated Effort**: L (20-40h) — target 30h
 
@@ -208,3 +208,35 @@ to apply when it spins up a new tenant**.
   seed plan rows. Choose deterministic UUIDs (e.g. `00000000-0000-0000-0000-00000000000{1,2,3}`)
   and document them in a header comment on the seed migration so
   integration tests can rely on them.
+
+## Closed by 2026-05-30 follow-up — disposition of 3 skipped end-state tests
+
+Audit `2026-05-29-epic-28-status-audit.md` flagged commit `bedf38a9`
+("skip 3 aspirational 28-1 tests"). All three tests were re-examined
+post PR D (`c90e03a6`, the 15-entity move from CP → Tenant). Final
+verdict:
+
+| # | Test                                                                                                          | Verdict                                          | Rationale                                                                                                                                                                                                                                                                                                          |
+|---|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | `Epic28.ControlPlaneDbContextModelTests.Model_Has_ExpectedControlPlaneEntities`                               | **Re-enabled (passing)** — closed by PR D       | PR D shipped the 15-entity move (11 business POCOs + 4 mentorship). The `[Ignore]` was removed and the assertion list expanded to the final 25 CP-resident tables (Doc 01 §1.2 base 14 + analytics + alerts + KEK rotations + admin impersonations + bootstrap + Story 31-2/31-7 platform-installations & webhooks). |
+| 2 | `Epic28.ControlPlaneDbContextModelTests.Tenants_Cranl_Columns_Are_Ignored_On_NewContext`                      | **Kept `[Ignore]`** — blocked on Epic 30        | Cranl columns (`CranlDatabaseUrlEncrypted` et al.) are *load-bearing in production*: `LruPooledTenantConnectionResolver` reads them to route per-request DB connections (Story 29-10 stopgap). Removing them today would break tenant routing. Re-enable when Epic 30 ships pluggable infra backends + an alternative routing column. |
+| 3 | `Epic28.TenantDbContextModelTests.Tenant_Resident_Entities_Have_No_TenantId_Column`                           | **Kept `[Ignore]`** — blocked on full cutover   | Production today routes most tenants via `StubTenantConnectionResolver` onto a shared central Postgres (see `CLAUDE.md` "Routing (current state)"). The `TenantId` predicate in tenant repositories is the only isolation plane while the shared-DB topology is in play. Re-enable when every tenant has a dedicated physical DB (Epic 28 full cutover or Epic 30 removes the shared-DB seam). |
+
+Tests #2 and #3 encode the **end-state contract** for the db-per-tenant
+architecture and intentionally remain in the suite as living specs.
+Each `[Ignore]` attribute names the owning epic so the test re-enables
+deterministically when the corresponding blocker lands. They are not
+"aspirational with no plan" — they are aspirational with a plan that
+lives in another epic.
+
+**Status correction:** the audit flagged "3 skipped tests" but PR D
+(`c90e03a6`, dated 2026-04-28, six days after `bedf38a9`) had already
+re-enabled test #1 when the 15-entity move shipped. Today's count is
+2 skipped, both with cross-epic ownership.
+
+**Verification:**
+```
+sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln \
+  --filter 'FullyQualifiedName~Epic28.ControlPlaneDbContextModelTests|FullyQualifiedName~Epic28.TenantDbContextModelTests'"
+# Expect: 13 passed, 2 skipped
+```
