@@ -36,6 +36,30 @@ public interface IRefreshTokenRepository
     Task<RefreshToken?> GetByTokenHashAsync(string tokenHash);
 
     /// <summary>
+    /// Story 28-9 AC2 — acquires a Postgres <c>SELECT ... FOR UPDATE</c>
+    /// row-lock on the user's most-recent active (non-revoked) refresh
+    /// token and returns it (or <c>null</c> when the user has none —
+    /// e.g. a rootless session that only ever held an access token).
+    ///
+    /// <para>This is the serialisation point for concurrent
+    /// <c>/auth/switch-org</c> calls from the same user: the second
+    /// caller blocks on the held row-lock until the first caller's
+    /// switch-org transaction commits, then proceeds against the
+    /// first caller's freshly-rotated state. MUST be called inside an
+    /// open transaction on the same <see cref="ControlPlaneDbContext"/>
+    /// so the lock is held for the duration of the revoke-old +
+    /// insert-new sequence; the caller is responsible for opening that
+    /// transaction.</para>
+    ///
+    /// <para>On the EF InMemory provider (unit tests) there is no real
+    /// row-lock — the method degrades to an ordinary
+    /// most-recent-active lookup, which is safe because in-process
+    /// unit tests never race two switch-org calls against the same
+    /// context. The production Npgsql path takes the real lock.</para>
+    /// </summary>
+    Task<RefreshToken?> FindActiveTokenForUpdateAsync(Guid userId);
+
+    /// <summary>
     /// Legacy single-arg revoke; sets <see cref="RefreshToken.RevokedReason"/>
     /// to <see cref="RefreshTokenRevokedReasons.ManualLogout"/>. New call
     /// sites should pass an explicit reason via

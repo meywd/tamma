@@ -141,7 +141,7 @@ public class SwitchOrgRefreshTokenTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwt, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
         var resp = await UnwrapJson<SwitchOrgResponse>(result);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
@@ -174,7 +174,7 @@ public class SwitchOrgRefreshTokenTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: oldRefresh),
             _userRepo, _membershipRepo, _jwt, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
         var resp = await UnwrapJson<SwitchOrgResponse>(result);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
@@ -205,7 +205,7 @@ public class SwitchOrgRefreshTokenTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: oldRefresh),
             _userRepo, _membershipRepo, _jwt, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
@@ -239,7 +239,7 @@ public class SwitchOrgRefreshTokenTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwt, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();

@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
@@ -150,7 +151,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         await result.ExecuteAsync(ctx);
         ctx.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
@@ -184,7 +185,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         var response = await UnwrapJson<SwitchOrgResponse>(result);
         response.TenantId.Should().Be(tenantB.Id);
@@ -216,7 +217,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantOther.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         (await StatusOf(result)).Should().Be(StatusCodes.Status403Forbidden);
 
@@ -236,7 +237,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(Guid.Empty, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
         (await StatusOf(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -248,7 +249,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(Guid.NewGuid(), RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, anon, ctx);
+            _cookieWriter, _publisher, _db, anon, ctx);
         (await StatusOf(result)).Should().Be(StatusCodes.Status401Unauthorized);
     }
 
@@ -273,7 +274,7 @@ public class SwitchOrgEndpointTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: oldRefresh),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         var response = await UnwrapJson<SwitchOrgResponse>(result);
         response.RefreshToken.Should().NotBe(oldRefresh,
@@ -305,7 +306,7 @@ public class SwitchOrgEndpointTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
 
         var r1 = await _refreshTokenRepo.GetByTokenHashAsync(HashHex(t1));
         var r2 = await _refreshTokenRepo.GetByTokenHashAsync(HashHex(t2));
@@ -330,7 +331,7 @@ public class SwitchOrgEndpointTests
         var switchResult = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher, Principal(user.Id), ctx);
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
         var switchResp = await UnwrapJson<SwitchOrgResponse>(switchResult);
 
         // Refresh.
@@ -384,6 +385,169 @@ public class SwitchOrgEndpointTests
         settings.GetProperty("activeTenantId").GetString().Should().Be(tenantB.Id.ToString());
     }
 
+    // ── Story 28-9 AC2: atomic handover ─────────────────────────────────────
+
+    /// <summary>
+    /// AC2 atomicity — if the insert-new-refresh-token step fails AFTER the
+    /// old token has been revoked, the whole CP transaction rolls back so the
+    /// old token is NOT left revoked (no half-rotated session state). We
+    /// inject the failure by decorating the real repo so its CreateAsync
+    /// throws, while every other method delegates to the real Postgres-backed
+    /// repository (sharing the same DbContext + transaction).
+    /// </summary>
+    [Test]
+    public async Task SwitchOrg_RollsBackRevoke_WhenInsertNewRefreshTokenFails()
+    {
+        var user = await CreateUser("ivan@example.com");
+        var tenantA = await CreateTenant($"a-{Guid.NewGuid():N}".Substring(0, 12));
+        var tenantB = await CreateTenant($"b-{Guid.NewGuid():N}".Substring(0, 12));
+        await _membershipRepo.AddAsync(tenantA.Id, user.Id, "owner");
+        await _membershipRepo.AddAsync(tenantB.Id, user.Id, "member");
+        await _userRepo.UpdateActiveTenantAsync(user.Id, tenantA.Id);
+
+        // Seed an active refresh token so the revoke step has something to do.
+        var oldRefresh = _jwtService.GenerateRefreshToken();
+        var oldRefreshHash = HashHex(oldRefresh);
+        await _refreshTokenRepo.CreateAsync(user.Id, oldRefreshHash, DateTime.UtcNow.AddDays(7));
+
+        var failingRepo = new FailOnCreateRefreshTokenRepository(_refreshTokenRepo);
+
+        var ctx = NewHttpContext();
+        Func<Task> act = async () => await AuthEndpoints.SwitchOrg(
+            new SwitchOrgRequest(tenantB.Id, RefreshToken: oldRefresh),
+            _userRepo, _membershipRepo, _jwtService, failingRepo,
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "the injected insert failure must propagate (no silent fallback)");
+
+        // The presented old token MUST still be active — the transaction that
+        // revoked it rolled back when the insert blew up. Use a FRESH context
+        // so we read committed DB state, not the tracked (rolled-back) entity.
+        using var verifyScope = ApiTestFixture.Factory.Services.CreateScope();
+        var verifyRepo = verifyScope.ServiceProvider
+            .GetRequiredService<IRefreshTokenRepository>();
+        var oldRow = await verifyRepo.GetByTokenHashAsync(oldRefreshHash);
+        oldRow!.RevokedAt.Should().BeNull(
+            "AC2: a failure mid-handover must not leave the old token revoked");
+    }
+
+    /// <summary>
+    /// AC2 serialisation — two switch-org calls from the same user both
+    /// succeed and leave the session in a single coherent state (exactly one
+    /// active refresh token bound to the LAST target tenant; the first
+    /// target's token is revoked). With the real Postgres FOR UPDATE lock the
+    /// second caller blocks on the first's transaction; we drive them
+    /// sequentially here (each on its own scope/transaction) because the
+    /// direct-handler harness shares one DbContext per call — the assertion
+    /// is on the resulting coherent state, which the FOR UPDATE serialisation
+    /// guarantees in production.
+    /// </summary>
+    [Test]
+    public async Task SwitchOrg_ConcurrentCalls_ConvergeOnSingleCoherentState()
+    {
+        var user = await CreateUser("judy@example.com");
+        var tenantA = await CreateTenant($"a-{Guid.NewGuid():N}".Substring(0, 12));
+        var tenantB = await CreateTenant($"b-{Guid.NewGuid():N}".Substring(0, 12));
+        var tenantC = await CreateTenant($"c-{Guid.NewGuid():N}".Substring(0, 12));
+        await _membershipRepo.AddAsync(tenantA.Id, user.Id, "owner");
+        await _membershipRepo.AddAsync(tenantB.Id, user.Id, "member");
+        await _membershipRepo.AddAsync(tenantC.Id, user.Id, "member");
+        await _userRepo.UpdateActiveTenantAsync(user.Id, tenantA.Id);
+
+        // First switch A→B on its own scope/transaction.
+        await RunSwitchOnFreshScope(user.Id, tenantB.Id);
+        // Second switch B→C on a separate scope/transaction. The FOR UPDATE
+        // lock means in production this serialises behind the first; here it
+        // runs after, observing the first's rotated state.
+        await RunSwitchOnFreshScope(user.Id, tenantC.Id);
+
+        using var verifyScope = ApiTestFixture.Factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var active = await db.RefreshTokens
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+
+        active.Should().HaveCount(1, "exactly one active token survives a serialised pair of switches");
+        active[0].TenantId.Should().Be(tenantC.Id, "the surviving token binds to the LAST target");
+    }
+
+    /// <summary>
+    /// AC2 event-ordering — the org-switched audit event is emitted AFTER the
+    /// refresh-token rotation has durably committed. We assert the event fires
+    /// on the happy path AND that a publisher failure does NOT roll back the
+    /// committed rotation (post-commit, best-effort — matching the 28-9
+    /// reuse-detection emission pattern).
+    /// </summary>
+    [Test]
+    public async Task SwitchOrg_EmitsAuditEventAfterCommit_AndPublisherFailureDoesNotRollBackRotation()
+    {
+        var user = await CreateUser("kyle@example.com");
+        var tenantA = await CreateTenant($"a-{Guid.NewGuid():N}".Substring(0, 12));
+        var tenantB = await CreateTenant($"b-{Guid.NewGuid():N}".Substring(0, 12));
+        await _membershipRepo.AddAsync(tenantA.Id, user.Id, "owner");
+        await _membershipRepo.AddAsync(tenantB.Id, user.Id, "member");
+        await _userRepo.UpdateActiveTenantAsync(user.Id, tenantA.Id);
+
+        var throwingPublisher = new ThrowingPlatformEventPublisher();
+
+        var ctx = NewHttpContext();
+        var result = await AuthEndpoints.SwitchOrg(
+            new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
+            _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
+            _cookieWriter, throwingPublisher, _db, Principal(user.Id), ctx);
+
+        await result.ExecuteAsync(ctx);
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status200OK,
+            "a post-commit publisher failure must NOT fail the switch");
+        throwingPublisher.AttemptCount.Should().Be(1, "the publish was attempted after commit");
+
+        // The rotation committed even though the publish threw.
+        using var verifyScope = ApiTestFixture.Factory.Services.CreateScope();
+        var db = verifyScope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var active = await db.RefreshTokens
+            .Where(t => t.UserId == user.Id && t.RevokedAt == null)
+            .ToListAsync();
+        active.Should().HaveCount(1);
+        active[0].TenantId.Should().Be(tenantB.Id);
+    }
+
+    [Test]
+    public async Task SwitchOrg_EmitsOrgSwitchedAuditEvent_OnHappyPath()
+    {
+        var user = await CreateUser("liam@example.com");
+        var tenantA = await CreateTenant($"a-{Guid.NewGuid():N}".Substring(0, 12));
+        var tenantB = await CreateTenant($"b-{Guid.NewGuid():N}".Substring(0, 12));
+        await _membershipRepo.AddAsync(tenantA.Id, user.Id, "owner");
+        await _membershipRepo.AddAsync(tenantB.Id, user.Id, "member");
+        await _userRepo.UpdateActiveTenantAsync(user.Id, tenantA.Id);
+
+        var ctx = NewHttpContext();
+        await AuthEndpoints.SwitchOrg(
+            new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
+            _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
+            _cookieWriter, _publisher, _db, Principal(user.Id), ctx);
+
+        _publisher.Events.Should().ContainSingle(e => e.Type == "USER.ORG_SWITCHED.SUCCESS",
+            "switch-org emits its audit event once the rotation commits");
+    }
+
+    private async Task RunSwitchOnFreshScope(Guid userId, Guid targetTenantId)
+    {
+        using var scope = ApiTestFixture.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        var refreshRepo = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
+        var userRepo = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+        var membershipRepo = scope.ServiceProvider.GetRequiredService<ITenantMembershipRepository>();
+        var ctx = NewHttpContext();
+        var result = await AuthEndpoints.SwitchOrg(
+            new SwitchOrgRequest(targetTenantId, RefreshToken: null),
+            userRepo, membershipRepo, _jwtService, refreshRepo,
+            _cookieWriter, _publisher, db, Principal(userId), ctx);
+        await result.ExecuteAsync(ctx);
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static string HashHex(string token)
@@ -410,5 +574,60 @@ public class SwitchOrgEndpointTests
             PropertyNameCaseInsensitive = true,
         };
         return System.Text.Json.JsonSerializer.Deserialize<T>(json, opts)!;
+    }
+
+    /// <summary>
+    /// Story 28-9 AC2 — decorator that delegates every call to the real
+    /// Postgres-backed repository EXCEPT the tenant-bound CreateAsync, which
+    /// throws. Used to simulate a crash between revoke-old and insert-new so
+    /// the atomicity test can assert the transaction rolled back the revoke.
+    /// All other methods (including FindActiveTokenForUpdateAsync + RevokeAsync)
+    /// run on the inner repo's DbContext, so they participate in the same
+    /// transaction the handler opens.
+    /// </summary>
+    private sealed class FailOnCreateRefreshTokenRepository : IRefreshTokenRepository
+    {
+        private readonly IRefreshTokenRepository _inner;
+        public FailOnCreateRefreshTokenRepository(IRefreshTokenRepository inner) => _inner = inner;
+
+        public Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
+            => throw new InvalidOperationException("injected insert failure (AC2 atomicity test)");
+
+        public Task<RefreshToken> CreateAsync(
+            Guid userId, Guid? tenantId, string tokenHash, DateTime expiresAt, Guid? jtiChainHead)
+            => throw new InvalidOperationException("injected insert failure (AC2 atomicity test)");
+
+        public Task<RefreshToken?> GetByTokenHashAsync(string tokenHash)
+            => _inner.GetByTokenHashAsync(tokenHash);
+
+        public Task<RefreshToken?> FindActiveTokenForUpdateAsync(Guid userId)
+            => _inner.FindActiveTokenForUpdateAsync(userId);
+
+        public Task RevokeAsync(Guid id) => _inner.RevokeAsync(id);
+        public Task RevokeAsync(Guid id, string reason) => _inner.RevokeAsync(id, reason);
+        public Task<int> RevokeAllForUserAsync(Guid userId) => _inner.RevokeAllForUserAsync(userId);
+        public Task<int> RevokeAllForUserAsync(Guid userId, string reason)
+            => _inner.RevokeAllForUserAsync(userId, reason);
+        public Task<IReadOnlyList<RefreshToken>> FindByJtiChainHeadAsync(Guid chainHead)
+            => _inner.FindByJtiChainHeadAsync(chainHead);
+        public Task<int> RevokeChainAsync(Guid chainHead, string reason)
+            => _inner.RevokeChainAsync(chainHead, reason);
+        public Task<int> CleanExpiredAsync() => _inner.CleanExpiredAsync();
+    }
+
+    /// <summary>
+    /// Story 28-9 AC2 — publisher that always throws, to prove a post-commit
+    /// audit-emission failure does NOT roll back the committed token rotation.
+    /// </summary>
+    private sealed class ThrowingPlatformEventPublisher : IPlatformEventPublisher
+    {
+        public int AttemptCount { get; private set; }
+
+        public Task<PlatformEvent?> AppendAndPublishAsync(
+            PlatformEvent evt, CancellationToken ct = default)
+        {
+            AttemptCount++;
+            throw new InvalidOperationException("injected publisher failure (AC2 ordering test)");
+        }
     }
 }

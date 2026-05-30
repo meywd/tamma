@@ -1232,6 +1232,7 @@ public static class AuthEndpoints
         IRefreshTokenRepository refreshTokenRepo,
         ISessionCookieWriter cookieWriter,
         IPlatformEventPublisher eventPublisher,
+        ControlPlaneDbContext cpDb,
         ClaimsPrincipal principal,
         HttpContext httpContext)
     {
@@ -1263,62 +1264,89 @@ public static class AuthEndpoints
         // when the prevent_tenant_id_change trigger pinned the column).
         var fromTenantId = ExtractActiveTenantId(user) ?? user.TenantId;
 
-        // Persist new active tenant before issuing the token so a refresh
-        // racing with switch-org converges on the same tenant. Goes through
-        // PersistActiveTenantAsync because the Phase-2
-        // prevent_tenant_id_change trigger blocks uuid→uuid updates of
-        // users.TenantId — Settings JSON is the runtime stash.
-        await PersistActiveTenantAsync(userRepo, userId, req.TenantId);
+        // Story 28-9 AC2 — the handover (revoke-old + insert-new + persist
+        // active tenant) is a SINGLE CP transaction so a crash mid-sequence
+        // can never leave a revoked-old-without-new-issued (half-rotated)
+        // session. Concurrent switch-org calls from the same user are
+        // serialised by a Postgres SELECT ... FOR UPDATE row-lock on the
+        // user's current refresh-token row: the second caller blocks here
+        // until the first caller's transaction commits, then proceeds against
+        // the first caller's rotated state. The access-token issue is pure
+        // compute and the cookie write + audit-event publish are deliberately
+        // AFTER commit (the spec: "single CP transaction PLUS a RabbitMQ
+        // event publish after commit").
+        var newRefresh = jwtService.GenerateRefreshToken();
+        var newRefreshHash = HashToken(newRefresh);
 
-        // Story 28-9 — rotate the refresh token alongside the access token so
-        // the entire session is bound to the new tenant. The dashboard's
-        // refresh handler picks up the new (cookie-only) refresh token; the
-        // body returns the rotated value for clients that read the JSON.
-        // Caller-supplied refresh token is optional — if not present, all of
-        // the user's existing refresh tokens are revoked so a stale tab
-        // can't keep re-issuing access tokens for the previous tenant.
         var presented = req.RefreshToken;
         int revokedAllCount = 0;
         bool revokedAllPath = false;
-        if (!string.IsNullOrEmpty(presented))
-        {
-            var presentedHash = HashToken(presented);
-            var existing = await refreshTokenRepo.GetByTokenHashAsync(presentedHash);
-            if (existing is not null && existing.UserId == userId && existing.RevokedAt is null)
-            {
-                // Story 28-9 AC3 — explicit reason so the audit row records
-                // the switch-org context (vs a generic manual logout).
-                await refreshTokenRepo.RevokeAsync(
-                    existing.Id, RefreshTokenRevokedReasons.SwitchOrg);
-            }
-        }
-        else
-        {
-            // No refresh token in the request body — revoke all active
-            // refresh tokens for this user so stale clients can't keep the
-            // old tenant alive. Same shape as a password-reset.
-            //
-            // Story 28-R2 / Finding H2: capture the count + flip a flag so
-            // the audit event records the "switch-org-no-refresh" reason.
-            // Story 28-9 AC3 — explicit reason for SIEM / SOC2.
-            revokedAllCount = await refreshTokenRepo.RevokeAllForUserAsync(
-                userId, RefreshTokenRevokedReasons.SwitchOrg);
-            revokedAllPath = true;
-        }
 
-        var newRefresh = jwtService.GenerateRefreshToken();
-        var newRefreshHash = HashToken(newRefresh);
-        // Story 28-9 AC3 — bind the new refresh row to the TARGET tenant.
-        // Switch-org STARTS A NEW CHAIN because the tenant context changed:
-        // a token from the previous lineage could not refresh against the
-        // new tenant (tenant_mismatch_on_refresh) and the lineage's chain
-        // head therefore terminates at the old refresh row.
-        await refreshTokenRepo.CreateAsync(
-            userId,
-            tenantId: req.TenantId,
-            newRefreshHash,
-            DateTime.UtcNow.AddDays(7),
-            jtiChainHead: Guid.NewGuid());
+        await using (var tx = await cpDb.Database.BeginTransactionAsync())
+        {
+            // Acquire the FOR UPDATE lock FIRST so concurrent switch-org
+            // calls from the same user serialise on the user's current
+            // refresh row before any mutation happens. Returns null when the
+            // user holds no active refresh token (rootless session) — in that
+            // case there is nothing to lock and nothing to serialise against,
+            // so we proceed (the insert below still runs inside the txn).
+            await refreshTokenRepo.FindActiveTokenForUpdateAsync(userId);
+
+            // Persist new active tenant inside the transaction so a refresh
+            // racing with switch-org converges on the same tenant. Goes
+            // through PersistActiveTenantAsync because the Phase-2
+            // prevent_tenant_id_change trigger blocks uuid→uuid updates of
+            // users.TenantId — Settings JSON is the runtime stash.
+            await PersistActiveTenantAsync(userRepo, userId, req.TenantId);
+
+            // Story 28-9 — rotate the refresh token alongside the access
+            // token so the entire session is bound to the new tenant.
+            // Caller-supplied refresh token is optional — if not present, all
+            // of the user's existing refresh tokens are revoked so a stale
+            // tab can't keep re-issuing access tokens for the previous tenant.
+            if (!string.IsNullOrEmpty(presented))
+            {
+                var presentedHash = HashToken(presented);
+                var existing = await refreshTokenRepo.GetByTokenHashAsync(presentedHash);
+                if (existing is not null && existing.UserId == userId && existing.RevokedAt is null)
+                {
+                    // Story 28-9 AC3 — explicit reason so the audit row records
+                    // the switch-org context (vs a generic manual logout).
+                    await refreshTokenRepo.RevokeAsync(
+                        existing.Id, RefreshTokenRevokedReasons.SwitchOrg);
+                }
+            }
+            else
+            {
+                // No refresh token in the request body — revoke all active
+                // refresh tokens for this user so stale clients can't keep the
+                // old tenant alive. Same shape as a password-reset.
+                //
+                // Story 28-R2 / Finding H2: capture the count + flip a flag so
+                // the audit event records the "switch-org-no-refresh" reason.
+                // Story 28-9 AC3 — explicit reason for SIEM / SOC2.
+                revokedAllCount = await refreshTokenRepo.RevokeAllForUserAsync(
+                    userId, RefreshTokenRevokedReasons.SwitchOrg);
+                revokedAllPath = true;
+            }
+
+            // Story 28-9 AC3 — bind the new refresh row to the TARGET tenant.
+            // Switch-org STARTS A NEW CHAIN because the tenant context changed:
+            // a token from the previous lineage could not refresh against the
+            // new tenant (tenant_mismatch_on_refresh) and the lineage's chain
+            // head therefore terminates at the old refresh row.
+            await refreshTokenRepo.CreateAsync(
+                userId,
+                tenantId: req.TenantId,
+                newRefreshHash,
+                DateTime.UtcNow.AddDays(7),
+                jtiChainHead: Guid.NewGuid());
+
+            // Commit the atomic handover. After this point the rotation is
+            // durable; the token issue, cookie write, and audit emission are
+            // post-commit best-effort.
+            await tx.CommitAsync();
+        }
 
         var tenantClaims = await LoadTenantClaimsAsync(membershipRepo, userId);
         var accessToken = jwtService.GenerateAccessToken(

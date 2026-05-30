@@ -5,6 +5,8 @@ namespace Tamma.Data.Repositories;
 
 public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRepository
 {
+    private const string NpgsqlProviderName = "Npgsql.EntityFrameworkCore.PostgreSQL";
+
     public Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
         => CreateAsync(userId, tenantId: null, tokenHash, expiresAt, jtiChainHead: null);
 
@@ -31,6 +33,43 @@ public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRep
 
     public async Task<RefreshToken?> GetByTokenHashAsync(string tokenHash)
         => await db.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
+
+    /// <summary>
+    /// Story 28-9 AC2 — serialisation point for concurrent switch-org calls.
+    /// On Postgres, takes a real <c>FOR UPDATE</c> row-lock on the user's
+    /// newest active refresh token so a second switch-org caller blocks
+    /// until the first caller's transaction commits. On the InMemory
+    /// provider the lock clause is unavailable, so we degrade to a plain
+    /// newest-active lookup (safe — in-process unit tests never race the
+    /// same context). MUST run inside an open transaction (the caller owns
+    /// the transaction) for the Postgres lock to be held for the duration
+    /// of the revoke-old + insert-new sequence.
+    /// </summary>
+    public async Task<RefreshToken?> FindActiveTokenForUpdateAsync(Guid userId)
+    {
+        if (string.Equals(db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        {
+            // FOR UPDATE on the single newest active row. ORDER BY +
+            // LIMIT 1 keeps the lock target deterministic when the user
+            // holds several active tokens (multiple devices). The lock is
+            // released when the caller's transaction commits / rolls back.
+            var rows = await db.RefreshTokens.FromSqlInterpolated($"""
+                SELECT * FROM refresh_tokens
+                WHERE "UserId" = {userId}
+                  AND "RevokedAt" IS NULL
+                ORDER BY "CreatedAt" DESC
+                LIMIT 1
+                FOR UPDATE
+                """).ToListAsync();
+            return rows.FirstOrDefault();
+        }
+
+        // InMemory fallback — no real lock, plain newest-active lookup.
+        return await db.RefreshTokens
+            .Where(t => t.UserId == userId && t.RevokedAt == null)
+            .OrderByDescending(t => t.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
 
     public Task RevokeAsync(Guid id)
         => RevokeAsync(id, RefreshTokenRevokedReasons.ManualLogout);

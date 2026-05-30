@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC2 5-step atomicity verification, AC6 logout-all path.
+**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; AC2 atomic SwitchOrg (single CP transaction + `FOR UPDATE` serialisation + post-commit audit emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC6 logout-all path.
 **Priority**: High (without per-tenant-scoped JWTs plus a switch-org
 endpoint, users with memberships in more than one tenant cannot
 navigate between them without re-logging-in, refresh tokens leak
@@ -405,6 +405,73 @@ is only reachable when a future DTO addition lands), `IsPlatformAdminHandler`,
 endpoint stay on the parent agent's plan for the rest of Story 28-9.
 
 ## Closed by 2026-05-30 follow-up
+
+### AC2 — atomic SwitchOrg (single CP transaction + `FOR UPDATE`) — SHIPPED
+
+The #1 security gap from the 2026-05-30 Epic 28 residual verification
+report is closed. Before the fix, `AuthEndpoints.SwitchOrg` ran its
+revoke-old → persist-active-tenant → insert-new sequence with NO
+transaction wrap and NO row-lock; a crash mid-sequence could leave the
+old refresh token revoked-without-a-new-one-issued (half-rotated
+session), and concurrent switch-org calls from the same user could
+interleave into inconsistent session state.
+
+**Atomicity** — the handover (FOR-UPDATE lock → persist active tenant →
+revoke old refresh token → insert new tenant-bound refresh row) now runs
+inside a single `ControlPlaneDbContext.Database.BeginTransactionAsync()`
+that commits as a unit. If any step throws (e.g. the insert fails) the
+whole transaction rolls back, so the old token is NEVER left revoked.
+No silent fallback: if the transaction cannot be established the
+exception propagates.
+
+**Serialisation** — concurrent switch-org calls from the same user are
+serialised by a Postgres `SELECT ... FOR UPDATE` row-lock on the user's
+newest active `refresh_tokens` row, taken as the first statement inside
+the transaction via the new repository method
+`IRefreshTokenRepository.FindActiveTokenForUpdateAsync(userId)`. The
+second caller blocks until the first caller's transaction commits, then
+proceeds against the rotated state. The method is provider-guarded
+(Npgsql `FromSqlInterpolated` with `FOR UPDATE`; EF InMemory degrades to
+a plain newest-active lookup — production code is NOT weakened, the
+fallback only exists for the unit-test provider). When the user holds no
+active refresh token (rootless session) the lookup returns null and the
+insert still runs inside the transaction.
+
+**Event ordering** — `USER.ORG_SWITCHED.SUCCESS` is emitted to
+`platform_events` AFTER the transaction commits (the spec's "single CP
+transaction PLUS a RabbitMQ event publish after commit"). The emission
+is post-commit best-effort: a publisher failure does NOT roll back the
+committed token rotation (matching the AC3 reuse-detection emission
+pattern). The endpoint keeps the existing `USER.ORG_SWITCHED.SUCCESS`
+event type rather than the AC2-text's `AUTH.TENANT_SWITCHED` to avoid
+breaking the already-shipped Story-28-R2 audit contract; the
+durable-audit-after-commit requirement is satisfied by the existing
+event.
+
+Code: `AuthEndpoints.SwitchOrg` (transaction wrap + `cpDb` parameter);
+`RefreshTokenRepository.FindActiveTokenForUpdateAsync` +
+`IRefreshTokenRepository.FindActiveTokenForUpdateAsync`.
+
+Tests (`tests/Tamma.Api.Tests/Auth/SwitchOrgEndpointTests.cs`): four new
+tests — `SwitchOrg_RollsBackRevoke_WhenInsertNewRefreshTokenFails`
+(atomicity: injected insert failure rolls back the revoke),
+`SwitchOrg_ConcurrentCalls_ConvergeOnSingleCoherentState`
+(serialisation: a serialised pair leaves exactly one active token bound
+to the last target),
+`SwitchOrg_EmitsAuditEventAfterCommit_AndPublisherFailureDoesNotRollBackRotation`
+(post-commit best-effort), and
+`SwitchOrg_EmitsOrgSwitchedAuditEvent_OnHappyPath`. All 23 SwitchOrg
+tests pass against the real-Postgres `ApiTestFixture` (Testcontainers).
+
+**Fixture caveat**: the Auth tests run against a real Postgres container
+(`ApiTestFixture`), so the transaction + `FOR UPDATE` exercise the same
+EF/Npgsql surface as production. The direct-handler harness shares one
+`ControlPlaneDbContext` per call, so the concurrency test drives the two
+switches sequentially (each on its own scope/transaction) and asserts on
+the resulting coherent state, which the `FOR UPDATE` serialisation
+guarantees in a true-concurrent production deploy.
+
+### Prior AC3 residuals
 
 Two of the AC3 residuals listed in the Status line above closed on
 `feat/wave-b`:
