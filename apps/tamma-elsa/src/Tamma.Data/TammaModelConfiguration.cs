@@ -466,6 +466,17 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+
+            // Story 28-5 AC2 step-10 + AC5 — exactly-once-per-tenant welcome
+            // email. Partial unique index on (TenantId, Template) excluding
+            // terminally-failed rows so a failed welcome can be re-queued
+            // while a pending/sending/sent one blocks duplicates. The
+            // QueueWelcomeEmailActivity insert relies on this index for the
+            // concurrent-run race; the pre-check covers the in-memory path.
+            entity.HasIndex(e => new { e.TenantId, e.Template })
+                .IsUnique()
+                .HasFilter("\"Status\" <> 'failed' AND \"TenantId\" IS NOT NULL")
+                .HasDatabaseName("UX_platform_email_outbox_tenant_template_active");
         });
 
         // ── AdminImpersonation (Story 28-R2 follow-up B) ──

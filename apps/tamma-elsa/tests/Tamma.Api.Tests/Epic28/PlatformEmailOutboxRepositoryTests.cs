@@ -222,4 +222,64 @@ public class PlatformEmailOutboxRepositoryTests
     {
         await _repo.DeleteAsync(Guid.NewGuid());
     }
+
+    // ── EnqueueWelcomeOnceAsync (Story 28-5 AC2 step-10 + AC5) ────────────────
+
+    [Test]
+    public async Task EnqueueWelcomeOnceAsync_InsertsWelcomeRow_WithCorrectRecipientAndTemplate()
+    {
+        var tenantId = Guid.NewGuid();
+
+        var row = await _repo.EnqueueWelcomeOnceAsync(
+            tenantId, "owner@example.com", "Acme Inc", "noreply@tamma.dev");
+
+        row.Id.Should().NotBe(Guid.Empty);
+        row.TenantId.Should().Be(tenantId);
+        row.Template.Should().Be("welcome");
+        row.ToAddress.Should().Be("owner@example.com");
+        row.FromAddress.Should().Be("noreply@tamma.dev");
+        row.Status.Should().Be("pending");
+        row.Subject.Should().Contain("Acme Inc");
+        row.HtmlBody.Should().NotBeNullOrWhiteSpace();
+        row.TextBody.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Test]
+    public async Task EnqueueWelcomeOnceAsync_IsIdempotent_SecondCallProducesNoSecondRow()
+    {
+        var tenantId = Guid.NewGuid();
+
+        var first = await _repo.EnqueueWelcomeOnceAsync(
+            tenantId, "owner@example.com", "Acme Inc", "noreply@tamma.dev");
+        var second = await _repo.EnqueueWelcomeOnceAsync(
+            tenantId, "owner@example.com", "Acme Inc", "noreply@tamma.dev");
+
+        // Same row returned — exactly-once-per-tenant.
+        second.Id.Should().Be(first.Id);
+
+        var count = await _db.PlatformEmailOutbox
+            .CountAsync(m => m.TenantId == tenantId && m.Template == "welcome");
+        count.Should().Be(1);
+    }
+
+    [Test]
+    public async Task EnqueueWelcomeOnceAsync_ReQueues_WhenPriorWelcomeFailed()
+    {
+        var tenantId = Guid.NewGuid();
+
+        var first = await _repo.EnqueueWelcomeOnceAsync(
+            tenantId, "owner@example.com", "Acme Inc", "noreply@tamma.dev");
+
+        // Simulate the prior welcome exhausting its retries.
+        first.Status = "failed";
+        await _db.SaveChangesAsync();
+
+        // A failed prior row does NOT block a fresh welcome (the partial
+        // unique index excludes status='failed').
+        var second = await _repo.EnqueueWelcomeOnceAsync(
+            tenantId, "owner@example.com", "Acme Inc", "noreply@tamma.dev");
+
+        second.Id.Should().NotBe(first.Id);
+        second.Status.Should().Be("pending");
+    }
 }

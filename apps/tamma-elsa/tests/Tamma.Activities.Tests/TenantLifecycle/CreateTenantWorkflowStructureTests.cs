@@ -34,6 +34,7 @@ public class CreateTenantWorkflowStructureTests
         typeof(EncryptAndPersistConnectionStringActivity),
         typeof(WarmTenantPoolActivity),
         typeof(MarkTenantActiveActivity),
+        typeof(QueueWelcomeEmailActivity),
     };
 
     [Test]

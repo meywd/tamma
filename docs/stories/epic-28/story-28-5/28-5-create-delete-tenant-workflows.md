@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: MOSTLY DONE — AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Remaining residuals: AC2 step-10 `QueueWelcomeEmail` not inside workflow; AC4 backup + pg_terminate_backend verification.
+**Status**: MOSTLY DONE — AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below); AC2 step-10 `QueueWelcomeEmail` + AC5 welcome-to-CP-outbox shipped 2026-05-31 (see Closed by 2026-05-31 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Remaining residual: AC4 backup + pg_terminate_backend verification.
 **Priority**: High (this is the central tenant-lifecycle artefact; the
 async-provisioning directive in Doc 03 §0 hinges entirely on it)
 **Estimated Effort**: XL (40h+) — target 45h
@@ -377,3 +377,62 @@ publisher-unavailable safety.
 inside the workflow (still a residual), AC4 pg_dump backup + pg_terminate_backend
 in the delete workflow. The Elsa trigger that consumes
 `TENANT.PROVISIONING_REQUESTED` remains future work.
+
+## Closed by 2026-05-31 follow-up
+
+### AC2 step-10 `QueueWelcomeEmail` + AC5 welcome → control-plane outbox — SHIPPED
+
+`CreateTenantWorkflow` now appends **step 10 `QueueWelcomeEmailActivity`**
+after `MarkTenantActiveActivity`. It inserts a `template='welcome'` row into
+the **control-plane** `platform_email_outbox` (per Epic 28 conflict
+resolution #2 — Doc 03 §7.1 wins over Doc 01 §4.3; welcome mail rides the CP
+outbox so it delivers independent of tenant-DB routing). Delivery is the
+existing `OutboxSmtpSender`, unchanged (AC5 §2).
+
+**Recipient / body:** owner email resolved from `tenant.Owner.Email` (CP
+lookup via `IDbContextFactory<ControlPlaneDbContext>`, factory-scoped like
+the sibling lifecycle activities); subject/body rendered by
+`WelcomeEmailContent.Render(tenant.Name)` (a `Tamma.Data` helper that mirrors
+`Tamma.Api`'s `EmailTemplates.WelcomeEmail` copy — the activity project can't
+reference `Tamma.Api`). `FromAddress` = `Email:From` config (fallback
+`noreply@tamma.dev`).
+
+**Exactly-once-per-tenant (AC2 step-10 / AC5):**
+`IPlatformEmailOutboxRepository.EnqueueWelcomeOnceAsync` does an in-code
+pre-check for an existing non-`failed` welcome row and returns it unchanged;
+a concurrent-run race is caught by swallowing the `DbUpdateException` from the
+new **partial unique index** `UX_platform_email_outbox_tenant_template_active`
+on `(TenantId, Template) WHERE Status <> 'failed' AND TenantId IS NOT NULL`
+(migration `20260531212831_WelcomeEmailUniquePerTenant`). A terminally
+`failed` prior welcome does NOT block a fresh enqueue. Workflow replay is
+therefore a no-op — re-running step 10 produces no second row.
+
+**Non-fatal (AC5 §3):** when the tenant has no owner email the activity logs
+a warning and returns rather than throwing — a missing welcome must not fail
+an already-active tenant's provisioning.
+
+**Code:** `Tamma.Activities/TenantLifecycle/QueueWelcomeEmailActivity.cs`
+(new), `Tamma.ElsaServer/Workflows/CreateTenantWorkflow.cs` (step-10 wiring),
+`Tamma.Data/Repositories/IPlatformEmailOutboxRepository.cs` +
+`PlatformEmailOutboxRepository.cs` (`EnqueueWelcomeOnceAsync`),
+`Tamma.Data/Repositories/WelcomeEmailContent.cs` (new),
+`Tamma.Data/TammaModelConfiguration.cs` + migration `…WelcomeEmailUniquePerTenant`.
+
+**Tests:** `QueueWelcomeEmailActivityTests.cs` (StepName + base-class wiring),
+`PlatformEmailOutboxRepositoryTests` (+3: inserts welcome row with correct
+recipient/template; idempotent second call → one row; re-queues after a
+`failed` prior), `CreateTenantWorkflowStructureTests` (step-10 ordering).
+
+**Flagged for human review:** none for duplication — the
+`EmailTemplates.WelcomeEmail` template in `Tamma.Api` currently has **zero
+production callers** (confirmed by grep); the welcome email was not being
+enqueued anywhere before this change, so the workflow path is the sole
+enqueue site. No `AuthEndpoints` change was made or needed.
+
+**Out of scope of this follow-up:** AC4 pg_dump backup +
+pg_terminate_backend verification in the delete workflow (separate residual,
+left as-is). AC5 §3's "after 3 retries emit `welcome_email_queued=false`"
+nuance is satisfied structurally (enqueue is best-effort and non-fatal); the
+explicit 3-retry-then-flag counter on the enqueue itself is not implemented —
+enqueue against the CP DB is a local insert, not a network call, so the
+transport-retry semantics live in `OutboxSmtpSender`, not this step.

@@ -180,6 +180,18 @@ public class CreateTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
+        // ── Step 10: queue welcome email (CP outbox, exactly-once) ──────
+        // Story 28-5 AC2 step-10 + AC5 — runs AFTER the tenant is active so
+        // a failed/aborted provision never sends a welcome. Idempotent +
+        // non-fatal (see QueueWelcomeEmailActivity).
+        var queueWelcome = new QueueWelcomeEmailActivity
+        {
+            Id = "QueueWelcomeEmail",
+            Name = "Queue Welcome Email",
+            TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
+            Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+        };
+
         builder.Root = new Sequence
         {
             Activities =
@@ -194,6 +206,7 @@ public class CreateTenantWorkflow : WorkflowBase
                 encryptAndPersist,
                 warmPool,
                 markActive,
+                queueWelcome,
             },
         };
     }
