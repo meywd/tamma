@@ -233,15 +233,21 @@ builder.Services.AddSingleton<
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
-// ── Story 28-3 AC3 (2026-05-30 residual #2) — stub-resolver prod guard ──
-// Fail fast if a PRODUCTION deployment is missing ConnectionStrings:ControlPlane.
-// Without it, AddTammaData's StubTenantConnectionResolver stays live and routes
-// every tenant to the shared central DB — tenant isolation silently disabled.
-// No-op outside Production (dev/test run on the stub by design). Logic lives in
-// Tamma.Data.DependencyInjection so it is unit-testable without a host.
-// (Single self-contained line — placed before the CP-string gating below.)
+// ── Story 28-3 AC3 (2026-05-30 residual #2; revised 2026-05-31) ────────
+// Fail fast ONLY if a Production deployment has opted into mandatory
+// per-tenant DB isolation (Tamma:RequireTenantIsolation=true) but is missing
+// ConnectionStrings:ControlPlane — otherwise it would silently fall back to
+// StubTenantConnectionResolver (every tenant on the shared central DB).
+// Shared-infrastructure mode (no CP string, Phase-3 RLS isolation) is the
+// documented production DEFAULT — what the Hetzner VPS deploy runs — so the
+// guard is a no-op unless the operator explicitly requires isolation.
+// No-op outside Production. Logic lives in Tamma.Data.DependencyInjection so
+// it is unit-testable without a host.
+var requireTenantIsolation =
+    builder.Configuration.GetValue<bool>("Tamma:RequireTenantIsolation");
 DependencyInjection.GuardTenantIsolationInProduction(
     builder.Environment.IsProduction(),
+    requireTenantIsolation,
     controlPlaneConnectionString);
 
 // ── Story 28-4 — production tenant connection pool (LRU + handles) ──

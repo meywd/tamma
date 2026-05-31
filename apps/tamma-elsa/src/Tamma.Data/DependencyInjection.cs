@@ -179,37 +179,61 @@ public static class DependencyInjection
     /// inline in <c>Program.cs</c>) so a sibling stream editing
     /// <c>Program.cs</c> concurrently does not collide on the logic.</para>
     ///
-    /// <para><b>Fires ONLY in Production</b>: Development / Test
-    /// deployments run on the stub WITHOUT a CP string by design (the
-    /// whole test suite relies on this), so non-Production callers are a
-    /// no-op regardless of the connection string.</para>
+    /// <para><b>Fires ONLY when isolation is explicitly required</b>
+    /// (2026-05-31 revision): shared-infrastructure mode — every tenant on
+    /// the central Postgres, isolated via Phase-3 RLS, with
+    /// <c>ConnectionStrings:ControlPlane</c> deliberately unset — is the
+    /// <b>documented production default</b> (it is what the Hetzner VPS
+    /// deploy runs; see <c>docker-compose.prod.yml</c>). The first cut of
+    /// this guard fired on ANY Production host without a CP string and so
+    /// crash-looped that supported topology. The guard now fires only when
+    /// the operator has set <c>Tamma:RequireTenantIsolation=true</c> —
+    /// declaring "per-tenant DBs are mandatory here, a missing CP string is
+    /// a misconfiguration." Without the opt-in, shared-DB-in-Production is
+    /// allowed and the resolver's existing Info-log fallback stands.</para>
+    ///
+    /// <para><b>Always a no-op outside Production</b>: Development / Test
+    /// deployments run on the stub WITHOUT a CP string by design (the whole
+    /// test suite relies on this), regardless of the opt-in.</para>
     /// </summary>
     /// <param name="isProduction"><c>true</c> when the host environment is
     /// Production (e.g. <c>builder.Environment.IsProduction()</c>).</param>
+    /// <param name="requireTenantIsolation"><c>true</c> when the operator has
+    /// opted into mandatory per-tenant DB isolation via
+    /// <c>Tamma:RequireTenantIsolation</c>. When <c>false</c> (the default),
+    /// shared-infrastructure mode is permitted in Production.</param>
     /// <param name="controlPlaneConnectionString">The resolved
     /// <c>ConnectionStrings:ControlPlane</c> value (already trimmed of
     /// fallbacks by the caller), or <c>null</c>/empty when unset.</param>
     /// <exception cref="InvalidOperationException">Thrown when
-    /// <paramref name="isProduction"/> is <c>true</c> and
+    /// <paramref name="isProduction"/> AND
+    /// <paramref name="requireTenantIsolation"/> are both <c>true</c> and
     /// <paramref name="controlPlaneConnectionString"/> is null/whitespace —
-    /// the deployment would otherwise run the stub resolver with tenant
-    /// isolation disabled.</exception>
+    /// the deployment declared per-tenant isolation mandatory but would
+    /// otherwise run the stub resolver with isolation disabled.</exception>
     public static void GuardTenantIsolationInProduction(
         bool isProduction,
+        bool requireTenantIsolation,
         string? controlPlaneConnectionString)
     {
-        if (!isProduction)
+        // Shared-infrastructure mode (RLS isolation, no CP string) is the
+        // documented production default — only enforce per-tenant DB routing
+        // when the operator has explicitly opted in.
+        if (!isProduction || !requireTenantIsolation)
             return;
 
         if (string.IsNullOrWhiteSpace(controlPlaneConnectionString))
             throw new InvalidOperationException(
-                "ConnectionStrings:ControlPlane is not configured in a "
-                + "Production environment. Without it the platform falls back "
-                + "to StubTenantConnectionResolver, which routes EVERY tenant "
-                + "to the single shared central database — tenant isolation "
-                + "would be disabled. Refusing to start in Production on the "
-                + "stub resolver. Set ConnectionStrings:ControlPlane to the "
-                + "dedicated control-plane database to enable the per-tenant "
-                + "LRU connection pool (Story 28-4).");
+                "Tamma:RequireTenantIsolation=true but "
+                + "ConnectionStrings:ControlPlane is not configured in a "
+                + "Production environment. The deployment declared per-tenant "
+                + "database isolation mandatory, yet without the CP string the "
+                + "platform falls back to StubTenantConnectionResolver, which "
+                + "routes EVERY tenant to the single shared central database — "
+                + "isolation would be disabled. Refusing to start. Either set "
+                + "ConnectionStrings:ControlPlane to the dedicated control-plane "
+                + "database to enable the per-tenant LRU connection pool "
+                + "(Story 28-4), or unset Tamma:RequireTenantIsolation to run in "
+                + "shared-infrastructure mode (Phase-3 RLS isolation).");
     }
 }
