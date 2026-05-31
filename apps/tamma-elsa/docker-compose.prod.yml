@@ -21,6 +21,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ./workflows:/app/workflows:ro
       - ./activities:/app/activities:ro
@@ -73,6 +75,36 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── Story 28-1 AC2 — one-shot shared-DB bootstrap ───────────────────────
+  # Ensures the shared `tamma` database exists before api / elsa-server
+  # start. This VPS runs SHARED-INFRASTRUCTURE mode (one central `tamma`
+  # DB, Phase-3 RLS, ConnectionStrings:ControlPlane unset) — so this is
+  # largely a no-op next to postgres' own POSTGRES_DB creation, but it is
+  # idempotent and forward-compatible with the future tamma_control /
+  # tamma_global_elsa split (set TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB).
+  # Schema migrations are applied by the apps themselves at boot
+  # (tamma-api → Database.Migrate(); elsa-server → ef.RunMigrations=true);
+  # this service only guarantees the target databases exist. Runs once and
+  # exits 0; dependents gate on service_completed_successfully.
+  db-bootstrap:
+    image: postgres:17-alpine
+    restart: 'no'
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: tamma
+      PGPASSWORD: ${DB_PASSWORD}
+      TAMMA_CONTROL_DB: tamma
+      TAMMA_GLOBAL_ELSA_DB: ${TAMMA_GLOBAL_ELSA_DB:-tamma}
+    entrypoint: ['/bin/sh', '-c', '/scripts/db/bootstrap-shared-dbs.sh']
+    volumes:
+      - ../../scripts/db:/scripts/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamma-network
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -172,6 +204,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     networks:
       - tamma-network
     deploy:

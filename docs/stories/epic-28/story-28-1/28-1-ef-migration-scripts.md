@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (bootstrap/reset scripts + per-tenant Elsa runner verification residual). The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover.
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC2 bootstrap + AC3 reset scripts now exist and are wired into both compose files (2026-05-31 follow-up below); the remaining residual is per-tenant Elsa runner verification. The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover.
 **Priority**: High (every other Epic 28 story is blocked until four migration sets compile and apply cleanly)
 **Estimated Effort**: L (20-40h) — target 30h
 
@@ -240,3 +240,119 @@ sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln \
   --filter 'FullyQualifiedName~Epic28.ControlPlaneDbContextModelTests|FullyQualifiedName~Epic28.TenantDbContextModelTests'"
 # Expect: 13 passed, 2 skipped
 ```
+
+## Closed by 2026-05-31 follow-up — AC2 bootstrap + AC3 reset scripts (shared-infra reconciliation)
+
+AC2 and AC3 required `scripts/db/bootstrap-shared-dbs.{sh,ps1}` and
+`scripts/db/reset-all.{sh,ps1}`, neither of which existed. They are now
+shipped — but **reconciled against the real current topology**, not the
+aspirational two-database design the AC text was written against.
+
+### Topology reality (why the AC text needed reconciling)
+
+The AC2/AC3 text assumes two separate databases — `tamma_control` and
+`tamma_global_elsa`. The actual deployment is **shared-infrastructure
+mode**:
+
+- `docker-compose.yml` + `docker-compose.prod.yml` define a **single
+  `postgres` service** with **one database, `tamma`**.
+- Both `tamma-api` and `elsa-server` use the same `Database=tamma`
+  connection string — Elsa's tables live in `tamma`, there is no separate
+  `tamma_global_elsa` DB.
+- `ConnectionStrings:ControlPlane` is deliberately unset (the prod
+  `tamma-api` block sets `Tamma__RequireTenantIsolation=false`); all
+  tenants + control-plane data share `tamma` via Phase-3 RLS. Reconfirmed
+  by the 2026-05-31 hotfix (`146c354e`).
+- **Migrations are applied by the apps themselves at boot**, not by a
+  shell script: `Tamma.Api/Program.cs` calls
+  `dbContext.Database.Migrate()`; `Tamma.ElsaServer/Program.cs` sets
+  `ef.RunMigrations = true` on Elsa's EF modules. The EF migration
+  assemblies are the single source of truth for the schema.
+
+### How the scripts reconcile aspirational → real
+
+- The scripts **ensure the databases that actually exist today** (`tamma`)
+  rather than blindly creating `tamma_control` + `tamma_global_elsa`. DB
+  names are **parameterised** (`TAMMA_CONTROL_DB`, `TAMMA_GLOBAL_ELSA_DB`),
+  both defaulting to the shared `tamma`. They de-dupe so shared mode emits
+  one summary line, not two for the same DB.
+- **Forward-compatible with the per-tenant-DB cutover**: when
+  `tamma_control` / `tamma_global_elsa` become real databases, point those
+  two env vars at them and the identical create-if-missing + summary logic
+  applies — no script change needed.
+- "Apply migrations" is honoured by the app's own boot-time
+  `Database.Migrate()` / `RunMigrations`. The bootstrap script's job in the
+  normal Docker flow is to **guarantee the target databases exist** before
+  the api / elsa-server containers start. For fresh-cluster / CI flows that
+  want the schema applied *without* booting the app, set
+  `TAMMA_RUN_EF_MIGRATIONS=1` and the script drives `dotnet ef database
+  update` (best-effort; needs the .NET SDK on the host) and reports the
+  real applied-migration delta. Otherwise the summary reports
+  `migrationsApplied: 0` (DB-existence-only) and the app self-migrates.
+
+### AC2 — `bootstrap-shared-dbs.{sh,ps1}`
+
+- Idempotent: each DB guarded by `SELECT 1 FROM pg_database WHERE datname
+  = …` before `CREATE DATABASE`. Safe to re-run (second run is a no-op).
+- Exits non-zero on any failure (`set -euo pipefail` + explicit checks).
+- Emits one JSON-lines summary per DB on stdout:
+  `{ "db": "…", "migrationsApplied": N, "durationMs": N }`.
+- Reads `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` (with `DB_PASSWORD`
+  fallback) and the two DB-name env vars, all with sensible defaults.
+- Bounded `pg_isready` wait so the one-shot service tolerates a slow
+  Postgres start.
+
+### AC3 — `reset-all.{sh,ps1}`
+
+- Drops (`DROP DATABASE IF EXISTS`, after terminating other backends) +
+  recreates the shared DBs by delegating to the bootstrap script (single
+  source of truth for create + summary).
+- **Never touches per-tenant DBs**: a hard guard refuses any name matching
+  `tamma_tenant_*`. (There are none in shared mode; the guard protects the
+  forward-compatible path.)
+- Safety gate: refuses to run unless `TAMMA_RESET_CONFIRM=yes` or
+  `--force`/`-Force`, and always refuses when
+  `ASPNETCORE_ENVIRONMENT=Production`.
+- Idempotent final schema: `DROP IF EXISTS` + bootstrap create-if-missing
+  + the same EF migration set ⇒ running twice yields the same result.
+
+### Compose wiring — one-shot `db-bootstrap` service
+
+Chose the **one-shot service** approach (per AC2's stated preference) over
+mangling the Postgres entrypoint:
+
+- Added a `db-bootstrap` service (`postgres:17-alpine`, `restart: 'no'`) to
+  **both** `docker-compose.yml` and `docker-compose.prod.yml`. It bind-
+  mounts the repo-root `scripts/db` dir (`../../scripts/db:/scripts/db:ro`)
+  and runs `bootstrap-shared-dbs.sh`, `depends_on` postgres
+  `service_healthy`.
+- `elsa-server` and `tamma-api` now `depends_on` `db-bootstrap` with
+  `condition: service_completed_successfully` (Compose ≥ 2.20; the local
+  toolchain is v2.40). This guarantees the DB exists before either app
+  boots and self-migrates — no deadlock, because the bootstrap container
+  always runs to completion and exits 0.
+- Because the apps self-migrate, the practical effect in shared mode is an
+  ordering + existence guarantee; the script becomes load-bearing on a
+  fresh cluster, in CI, and the day the `tamma_control` /
+  `tamma_global_elsa` split lands.
+
+### Validation performed
+
+- `bash -n` clean on both `.sh` scripts.
+- `docker compose -f docker-compose.yml config -q` and
+  `… -f docker-compose.prod.yml config -q` both pass (only the pre-existing
+  obsolete-`version` warning + unset-var warnings — no errors; the
+  `service_completed_successfully` condition is accepted).
+- Verified the `../../scripts/db` bind mount resolves to
+  `/home/meywd/tamma/scripts/db` where the executable script lives.
+
+### Needs human verification
+
+- **shellcheck** was not available in this environment — only `bash -n`
+  syntax validation ran. Recommend a shellcheck pass in CI.
+- **PowerShell scripts** were not statically validated (no `pwsh` on this
+  host). The `.ps1` files mirror the `.sh` logic but should be parsed
+  on a Windows/pwsh box before relying on them.
+- The compose dependency assumes the apps self-migrate on boot (confirmed
+  in `Program.cs`); confirm this remains true if migration handling is
+  ever refactored.
