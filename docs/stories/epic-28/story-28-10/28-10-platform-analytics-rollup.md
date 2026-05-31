@@ -8,7 +8,7 @@ orchestrator scale benchmark per Epic 28 README cross-doc resolution
 #3; no runtime tenant traffic depends on this story, so it can slip
 a release cycle if needed without breaking provisioning)
 **Estimated Effort**: L (28h)
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (1k/5k/10k idle-orchestrator benchmark + 13-month retention sweeper + per-metric coverage verification residuals)
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. **2026-05-31 decisions (deferred-by-design):** (1) **Metric model — wide-row accepted.** The shipped `platform_analytics_hourly` is a WIDE-ROW fact table (one row per tenant per hour, fixed metric columns) covering the subset of metrics actually surfaced today (workflows / llm-cost / api-requests / errors). The spec's long-narrow `MetricKey/Tags` table was NOT built; the wide-row model is accepted as the current design and this AC is reworded to match. Adding a new metric requires a column + migration (acceptable at current scale). A future long-narrow migration is a separate story if metric cardinality grows. (2) **1k/5k/10k idle-orchestrator benchmark — deferred to the Story 30 production-scale gate.** It only matters before crossing ~500 production tenants; Tamma has zero today. Recorded as a known deferred scale risk, not a 28-10 blocker. Remaining true residual: 13-month retention sweeper (`PURGE_ANALYTICS_HOURLY`) not yet implemented.
 
 ## User Story
 
