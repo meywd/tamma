@@ -260,6 +260,69 @@ public class PlatformAnalyticsServiceFactTableTests
             "clamp prevents negative 'running' when events straddle bucket boundaries");
     }
 
+    // ── Story 28-11 AC2 — per-tenant 24h resource summary ──
+
+    [Test]
+    public async Task GetTenantResourceSummary_SumsLast24hRowsForTenant()
+    {
+        var tenant = Guid.NewGuid();
+
+        await SeedFactRowAsync(FixedNow.AddHours(-1), tenant,
+            workflowsStarted: 10, workflowsCompleted: 8, workflowsFailed: 1,
+            agentDispatches: 3, tokensIn: 600, tokensOut: 200, costUsd: 0.40m);
+        await SeedFactRowAsync(FixedNow.AddHours(-5), tenant,
+            workflowsStarted: 4, workflowsCompleted: 4, workflowsFailed: 0,
+            agentDispatches: 1, tokensIn: 100, tokensOut: 50, costUsd: 0.10m);
+
+        var summary = await _sut.GetTenantResourceSummaryAsync(tenant);
+
+        summary.WorkflowsLast24h.Should().Be(14);
+        summary.WorkflowsCompletedLast24h.Should().Be(12);
+        summary.WorkflowsFailedLast24h.Should().Be(1);
+        summary.AgentDispatchesLast24h.Should().Be(4);
+        summary.TokensInLast24h.Should().Be(700);
+        summary.TokensOutLast24h.Should().Be(250);
+        summary.LlmCostUsdLast24h.Should().Be(0.50m);
+    }
+
+    [Test]
+    public async Task GetTenantResourceSummary_EmptyTenant_ReturnsZeroed()
+    {
+        var summary = await _sut.GetTenantResourceSummaryAsync(Guid.NewGuid());
+
+        summary.WorkflowsLast24h.Should().Be(0);
+        summary.LlmCostUsdLast24h.Should().Be(0m);
+        summary.TokensInLast24h.Should().Be(0);
+    }
+
+    [Test]
+    public async Task GetTenantResourceSummary_ExcludesRowsOlderThan24h()
+    {
+        var tenant = Guid.NewGuid();
+        await SeedFactRowAsync(FixedNow.AddHours(-2), tenant, workflowsStarted: 5, costUsd: 0.05m);
+        await SeedFactRowAsync(FixedNow.AddHours(-30), tenant, workflowsStarted: 500, costUsd: 5.00m);
+
+        var summary = await _sut.GetTenantResourceSummaryAsync(tenant);
+
+        summary.WorkflowsLast24h.Should().Be(5);
+        summary.LlmCostUsdLast24h.Should().Be(0.05m);
+    }
+
+    [Test]
+    public async Task GetTenantResourceSummary_IgnoresOtherTenantsAndPlatformWideRows()
+    {
+        var tenant = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        await SeedFactRowAsync(FixedNow.AddHours(-1), tenant, workflowsStarted: 7, costUsd: 0.07m);
+        await SeedFactRowAsync(FixedNow.AddHours(-1), other, workflowsStarted: 70, costUsd: 0.70m);
+        await SeedFactRowAsync(FixedNow.AddHours(-1), null, workflowsStarted: 700, costUsd: 7.00m);
+
+        var summary = await _sut.GetTenantResourceSummaryAsync(tenant);
+
+        summary.WorkflowsLast24h.Should().Be(7);
+        summary.LlmCostUsdLast24h.Should().Be(0.07m);
+    }
+
     private async Task SeedFactRowAsync(
         DateTime hour,
         Guid? tenantId,

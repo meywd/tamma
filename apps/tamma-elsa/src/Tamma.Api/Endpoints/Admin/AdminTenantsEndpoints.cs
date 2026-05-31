@@ -231,6 +231,7 @@ public static class AdminTenantsEndpoints
         Guid tenantId,
         ControlPlaneDbContext db,
         IPlatformEventPublisher eventPublisher,
+        Tamma.Api.Services.Analytics.IPlatformAnalyticsService analytics,
         CancellationToken ct = default)
     {
         var item = await LoadItemAsync(tenantId, db, ct);
@@ -248,10 +249,16 @@ public static class AdminTenantsEndpoints
                 e.Id, e.Type, e.CreatedAt, e.Tags, e.Data))
             .ToListAsync(ct);
 
+        // Story 28-11 AC2 — the 24h resource rollup from
+        // platform_analytics_hourly. Fact-table-only read; a fresh tenant
+        // with no rows gets TenantResourceSummary.Empty (zeros, never null).
+        var resourceSummary = await analytics.GetTenantResourceSummaryAsync(tenantId, ct);
+
         return Results.Ok(new AdminTenantDetailResponse(
             item,
             events,
-            ComputeActions(item.Status)));
+            ComputeActions(item.Status),
+            resourceSummary));
     }
 
     // ── POST /api/admin/tenants/{id}/actions/retry ──

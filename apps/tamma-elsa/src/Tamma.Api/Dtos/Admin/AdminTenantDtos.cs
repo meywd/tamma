@@ -1,3 +1,5 @@
+using Tamma.Api.Services.Analytics;
+
 namespace Tamma.Api.Dtos.Admin;
 
 /// <summary>
@@ -65,7 +67,14 @@ public record AdminTenantDetailResponse(
     /// reflects whether the action is legal against the current
     /// <see cref="AdminTenantListItem.Status"/>.
     /// </summary>
-    AdminTenantActionGate Actions);
+    AdminTenantActionGate Actions,
+    /// <summary>
+    /// Story 28-11 AC2 — the tenant's last-24h resource rollup, aggregated
+    /// from <c>platform_analytics_hourly</c>. Always present (never null): a
+    /// freshly provisioned tenant with no rows yet carries
+    /// <see cref="TenantResourceSummary.Empty"/> (all zeros).
+    /// </summary>
+    TenantResourceSummary ResourceSummary);
 
 public record AdminTenantEventItem(
     Guid Id,

@@ -397,6 +397,65 @@ public sealed class PlatformAnalyticsService : IPlatformAnalyticsService
             .ToList();
     }
 
+    /// <summary>
+    /// Story 28-11 AC2 — sum a single tenant's <c>platform_analytics_hourly</c>
+    /// rows over <c>[now-24h, now)</c>. Fact-table-only by design: this is an
+    /// O(≤24) row scan over the partial unique index, cheap enough to inline
+    /// on the admin detail response without the cross-tenant live fan-out the
+    /// <see cref="GetSummaryAsync"/> path uses. Platform-wide rows
+    /// (<c>TenantId IS NULL</c>) are excluded by the equality predicate, so
+    /// only the target tenant's per-tenant rows contribute. Returns
+    /// <see cref="TenantResourceSummary.Empty"/> when no rows exist (a freshly
+    /// provisioned tenant) rather than null.
+    /// </summary>
+    public async Task<TenantResourceSummary> GetTenantResourceSummaryAsync(
+        Guid tenantId,
+        CancellationToken ct = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var t24h = now.AddHours(-24);
+
+        var rows = await _cp.PlatformAnalyticsHourly
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.Hour >= t24h && r.Hour < now)
+            .Select(r => new
+            {
+                r.WorkflowsStarted,
+                r.WorkflowsCompleted,
+                r.WorkflowsFailed,
+                r.AgentDispatches,
+                r.TokensIn,
+                r.TokensOut,
+                r.CostUsd,
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (rows.Count == 0) return TenantResourceSummary.Empty;
+
+        long started = 0, completed = 0, failed = 0, dispatches = 0, tokensIn = 0, tokensOut = 0;
+        decimal cost = 0m;
+        foreach (var r in rows)
+        {
+            started += r.WorkflowsStarted;
+            completed += r.WorkflowsCompleted;
+            failed += r.WorkflowsFailed;
+            dispatches += r.AgentDispatches;
+            tokensIn += r.TokensIn;
+            tokensOut += r.TokensOut;
+            cost += r.CostUsd;
+        }
+
+        return new TenantResourceSummary(
+            started,
+            completed,
+            failed,
+            dispatches,
+            tokensIn,
+            tokensOut,
+            Round4(cost));
+    }
+
     // ── Internal helpers — exposed internal (not private) for unit tests via
     //    InternalsVisibleTo("Tamma.Api.Tests") declared in Tamma.Api.csproj. ──
 
