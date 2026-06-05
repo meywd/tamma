@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: MOSTLY DONE — AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below); AC2 step-10 `QueueWelcomeEmail` + AC5 welcome-to-CP-outbox shipped 2026-05-31 (see Closed by 2026-05-31 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Remaining residual: AC4 backup + pg_terminate_backend verification.
+**Status**: MOSTLY DONE — AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below); AC2 step-10 `QueueWelcomeEmail` + AC5 welcome-to-CP-outbox shipped 2026-05-31 (see Closed by 2026-05-31 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC4 step C pg_dump backup shipped 2026-06-05 (`BackupTenantDatabaseActivity`, gated by `Backup:DeletionBackup`, no-op when off; inserted between EvictTenantPool and DropTenantDatabase). AC4 step D `pg_terminate_backend` resolved as accepted spec divergence — `DROP DATABASE WITH (FORCE)` covers it (see AC4 step D note below). No remaining AC4 residual.
 **Priority**: High (this is the central tenant-lifecycle artefact; the
 async-provisioning directive in Doc 03 §0 hinges entirely on it)
 **Estimated Effort**: XL (40h+) — target 45h
@@ -117,6 +117,11 @@ Per Doc 03 §1.2 and the epic README:
   - C (optional): pg_dump backup when `Backup:DeletionBackup=true`
     per Doc 04 §9.
   - D: `pg_terminate_backend` on lingering backends.
+    > **Accepted spec divergence (2026-06-05):** no separate
+    > `pg_terminate_backend` step. Postgres 17's `DROP DATABASE ... WITH
+    > (FORCE)` (step F/G) atomically terminates lingering backends as part
+    > of the drop — see `DropTenantDatabaseActivity.cs`. This removes the
+    > terminate/drop race the explicit two-step form had.
   - E: `ALTER DATABASE ... CONNECTION LIMIT 0` on both DBs.
   - F: `DROP DATABASE tamma_tenant_<g> WITH (FORCE)`.
   - G: `DROP DATABASE tamma_tenant_<g>_elsa WITH (FORCE)`.

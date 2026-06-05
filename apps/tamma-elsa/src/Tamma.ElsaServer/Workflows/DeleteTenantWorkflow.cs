@@ -81,6 +81,17 @@ public class DeleteTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
+        // ── Step B2: optional pg_dump backup (gated by Backup:DeletionBackup;
+        //    no-op when off). Must run AFTER evictPool (pool released) and
+        //    BEFORE dropDatabase (snapshot the data before it's gone). ────
+        var backupDatabase = new BackupTenantDatabaseActivity
+        {
+            Id = "BackupTenantDatabase",
+            Name = "Backup Tenant Database",
+            TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
+            Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+        };
+
         // ── Step C: DROP DATABASE WITH (FORCE) ──────────────────────────
         var dropDatabase = new DropTenantDatabaseActivity
         {
@@ -115,6 +126,7 @@ public class DeleteTenantWorkflow : WorkflowBase
                 initInputs,
                 markDeleting,
                 evictPool,
+                backupDatabase,
                 dropDatabase,
                 dropRole,
                 emitDeleted,

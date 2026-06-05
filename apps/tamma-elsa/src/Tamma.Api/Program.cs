@@ -652,6 +652,15 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
 
+// Story 28-5 AC4 — optional pre-drop tenant backup (pg_dump), disabled by
+// default. Bound here too so the activity resolves config when the delete
+// workflow runs in-process under the API host.
+builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
+            .Bind(opts));
+
 // Factory + activity wrapper.
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
 

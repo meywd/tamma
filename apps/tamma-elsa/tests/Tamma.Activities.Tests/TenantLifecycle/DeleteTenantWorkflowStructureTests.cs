@@ -30,6 +30,7 @@ public class DeleteTenantWorkflowStructureTests
         typeof(SetVariable),                       // initInputs
         typeof(MarkTenantDeletingActivity),
         typeof(EvictTenantPoolActivity),
+        typeof(BackupTenantDatabaseActivity),      // AC4 — pre-drop backup (gated)
         typeof(DropTenantDatabaseActivity),
         typeof(DropTenantRoleActivity),
         typeof(EmitDeletedSuccessActivity),
@@ -88,6 +89,28 @@ public class DeleteTenantWorkflowStructureTests
         evictIdx.Should().BeLessThan(dropDbIdx,
             "the resolver pool must be evicted before DROP DATABASE WITH (FORCE) "
             + "so the cached NpgsqlDataSource is released first");
+    }
+
+    [Test]
+    public void Build_BackupPrecedesDropDatabase()
+    {
+        var workflow = new DeleteTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root;
+        var activities = sequence.Activities.ToList();
+
+        var backupIdx = -1;
+        var dropDbIdx = -1;
+        for (var i = 0; i < activities.Count; i++)
+        {
+            if (activities[i] is BackupTenantDatabaseActivity) backupIdx = i;
+            if (activities[i] is DropTenantDatabaseActivity) dropDbIdx = i;
+        }
+
+        backupIdx.Should().BeGreaterThan(0);
+        dropDbIdx.Should().BeGreaterThan(0);
+        backupIdx.Should().BeLessThan(dropDbIdx,
+            "AC4 — the pg_dump backup must complete before DROP DATABASE");
     }
 
     [Test]

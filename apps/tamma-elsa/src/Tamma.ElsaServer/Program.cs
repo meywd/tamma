@@ -242,6 +242,15 @@ builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
 
+// Story 28-5 AC4 — optional pre-drop tenant backup (pg_dump). Disabled
+// by default; the DeleteTenantWorkflow's BackupTenantDatabaseActivity
+// reads this to decide whether to snapshot before DROP DATABASE.
+builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
+            .Bind(opts));
+
 // Security services (Epic 11 — LLM injection hardening)
 builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
 builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
