@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC2 `resourceSummary` join closed by 2026-05-31 follow-up; AC3 SSE-fallback verification residual remains)
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC2 `resourceSummary` join closed by 2026-05-31 follow-up; AC3 SSE `?fallback=poll` shipped 2026-06-05 — see AC3 note below). No remaining residuals.
 **Priority**: Medium (without this UX, platform admins investigate
 stuck tenants via `psql` and Elsa Studio — workable but slow; this
 is the first-class observability surface for the workflow-driven
@@ -86,11 +86,18 @@ typo-proof**.
       without also hitting AC2.
 - [ ] Heartbeat: `event: ping\ndata: {}\n\n` every 15s so
       intermediate proxies don't drop the connection.
-- [ ] **SSE fallback**: if the client cannot open the stream
+- [x] **SSE fallback**: if the client cannot open the stream
       (proxy incompatibility), the dashboard falls back to
       polling AC2 every 2 seconds. A query param
       `?fallback=poll` lets the client explicitly request polling
       mode.
+      > **Shipped 2026-06-05:** `?fallback=poll` on the events/stream
+      > endpoint returns a one-shot JSON `PollSnapshot`
+      > (`{ events, nextCursor, hasMore }`) instead of a `text/event-stream`.
+      > No `Last-Event-ID` → most recent `PollSnapshotMax` (200) events,
+      > chronological; header present → only rows past that cursor. Same M4
+      > tag scrub + tenant scoping as the stream. The client echoes
+      > `nextCursor` back via `Last-Event-ID` on the next poll.
 - [ ] Per Story 28-8, the SSE handler subscribes to the
       `tenant.deleted` signal and terminates the stream with a
       final `event: tenant_deleted` when a tenant's
