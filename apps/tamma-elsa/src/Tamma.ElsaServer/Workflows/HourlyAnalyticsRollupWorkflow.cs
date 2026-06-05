@@ -135,6 +135,16 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
             TenantsFailed = new Input<int>(ctx => tenantsFailed.Get(ctx)),
         };
 
+        // ── Step 5: PURGE_ANALYTICS_HOURLY — drop rows past the 13-month
+        //    retention window. Best-effort (never throws) so it cannot fail
+        //    a rollup that already wrote useful rows. Runs last so the
+        //    fresh bucket is safely persisted before any deletion. ───────
+        var purgeStale = new PurgeStaleAnalyticsActivity
+        {
+            Id = "PurgeStaleAnalytics",
+            Name = "Purge Stale Analytics",
+        };
+
         builder.Root = new Sequence
         {
             Activities =
@@ -143,6 +153,7 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
                 platformRollup,
                 fanOut,
                 emitCompleted,
+                purgeStale,
             },
         };
     }

@@ -25,6 +25,7 @@ public class HourlyAnalyticsRollupWorkflowStructureTests
         typeof(ComputePlatformRollupActivity),
         typeof(FanOutTenantRollupsActivity),
         typeof(EmitHourCompletedActivity),
+        typeof(PurgeStaleAnalyticsActivity),         // PURGE_ANALYTICS_HOURLY
     };
 
     [Test]

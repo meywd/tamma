@@ -8,7 +8,7 @@ orchestrator scale benchmark per Epic 28 README cross-doc resolution
 #3; no runtime tenant traffic depends on this story, so it can slip
 a release cycle if needed without breaking provisioning)
 **Estimated Effort**: L (28h)
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. **2026-05-31 decisions (deferred-by-design):** (1) **Metric model — wide-row accepted.** The shipped `platform_analytics_hourly` is a WIDE-ROW fact table (one row per tenant per hour, fixed metric columns) covering the subset of metrics actually surfaced today (workflows / llm-cost / api-requests / errors). The spec's long-narrow `MetricKey/Tags` table was NOT built; the wide-row model is accepted as the current design and this AC is reworded to match. Adding a new metric requires a column + migration (acceptable at current scale). A future long-narrow migration is a separate story if metric cardinality grows. (2) **1k/5k/10k idle-orchestrator benchmark — deferred to the Story 30 production-scale gate.** It only matters before crossing ~500 production tenants; Tamma has zero today. Recorded as a known deferred scale risk, not a 28-10 blocker. Remaining true residual: 13-month retention sweeper (`PURGE_ANALYTICS_HOURLY`) not yet implemented.
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. **2026-05-31 decisions (deferred-by-design):** (1) **Metric model — wide-row accepted.** The shipped `platform_analytics_hourly` is a WIDE-ROW fact table (one row per tenant per hour, fixed metric columns) covering the subset of metrics actually surfaced today (workflows / llm-cost / api-requests / errors). The spec's long-narrow `MetricKey/Tags` table was NOT built; the wide-row model is accepted as the current design and this AC is reworded to match. Adding a new metric requires a column + migration (acceptable at current scale). A future long-narrow migration is a separate story if metric cardinality grows. (2) **1k/5k/10k idle-orchestrator benchmark — deferred to the Story 30 production-scale gate.** It only matters before crossing ~500 production tenants; Tamma has zero today. Recorded as a known deferred scale risk, not a 28-10 blocker. **2026-06-05:** 13-month retention sweeper (`PURGE_ANALYTICS_HOURLY`) shipped — `PurgeStaleAnalyticsActivity` (best-effort, set-based `ExecuteDeleteAsync` of `platform_analytics_hourly` rows older than 13 months) runs as the final step of `HourlyAnalyticsRollupWorkflow`, reusing the existing hourly schedule + advisory lock (no second scheduler). No remaining residuals.
 
 ## User Story
 
@@ -167,6 +167,18 @@ All platform-wide metrics write rows with `TenantId=NULL`.
     gracefully (not a failure).
 
 ### AC6: 13-month retention + purge task
+
+> **Implementation note (2026-06-05):** shipped as `PurgeStaleAnalyticsActivity`
+> appended as the final step of `HourlyAnalyticsRollupWorkflow` rather than a
+> separate weekly `WeeklyMaintenanceWorkflow`. Rationale: riding the existing
+> hourly schedule + advisory lock means no second scheduler to operate, and
+> the per-hour delete is cheap (after the first sweep only the single bucket
+> that just crossed the boundary qualifies). The delete is a single set-based
+> EF `ExecuteDeleteAsync` (`WHERE Hour < now - 13 months`) — Postgres handles
+> it without the manual 10000-row batching the spec described. The sweep is
+> best-effort (never throws) so a transient CP hiccup cannot fail the rollup;
+> it emits `ANALYTICS.PURGE.HOURLY` (rows deleted + cutoff) on success and
+> `ANALYTICS.PURGE.FAILED` otherwise.
 
 - [ ] `PURGE_ANALYTICS_HOURLY` task enqueued into
       `platform_queued_tasks` by a separate `WeeklyMaintenanceWorkflow`

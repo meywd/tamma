@@ -27,6 +27,14 @@ public static class AnalyticsRollupEvents
     public const string HourCompleted = "ANALYTICS.ROLLUP.HOUR_COMPLETED";
 
     /// <summary>
+    /// Terminal event for the <c>PURGE_ANALYTICS_HOURLY</c> retention
+    /// sweep — carries the cutoff timestamp and the number of stale
+    /// <c>platform_analytics_hourly</c> rows deleted.
+    /// </summary>
+    public const string AnalyticsPurged = "ANALYTICS.PURGE.HOURLY";
+    public const string AnalyticsPurgeFailed = "ANALYTICS.PURGE.FAILED";
+
+    /// <summary>
     /// Build a <see cref="PlatformEvent"/> for an hourly-rollup milestone.
     /// <paramref name="tenantId"/> is null when the event is platform-wide
     /// (<c>PLATFORM_COMPLETED</c>, <c>HOUR_COMPLETED</c>); per-tenant events
