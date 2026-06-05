@@ -86,6 +86,12 @@ to apply when it spins up a new tenant**.
       `pending_verification | provisioning | active | delete_requested | deleting | deleted | failed | suspended`.
 - [ ] `tenants.KekVersion` is `smallint NOT NULL DEFAULT 1` per Doc 01
       §8.1 and Doc 04 §4.3.
+      > **Accepted spec divergence (2026-06-05):** shipped as `integer NULL`
+      > (`Property<int?>("KekVersion")` in `TammaModelConfiguration.cs`). A
+      > `null` KekVersion is the legacy-row heuristic path in
+      > `AesGcmConnectionStringDecryptor`; the wider, nullable column is
+      > functionally compatible and no migration to `smallint NOT NULL` is
+      > planned. Verification: `2026-05-30-epic-28-residual-verification.md`.
 - [ ] `tenants.EncryptedConnectionString` is `bytea` (nullable only
       during `pending_verification`; enforced by a partial `CHECK`
       constraint — `Status = 'pending_verification' OR

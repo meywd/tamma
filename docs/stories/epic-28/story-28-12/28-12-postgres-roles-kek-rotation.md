@@ -201,6 +201,14 @@ privileges). Closed as follows:
 
 ### AC5: `REKEY_TENANT_CONNECTION_STRINGS` scheduled task
 
+> **Accepted spec divergence (2026-06-05):** rekey is NOT a durable Elsa
+> workflow. It ships as an in-process `KekRotationCoordinator` background
+> `HostedService` (`Tamma.Api/Services/Secrets/`) driven via the
+> `KekRotationEndpoints` REST surface (`/api/admin/kek/rotate/*`). An
+> operator-driven, idempotent, advisory-lock-protected rotation does not
+> need durable-workflow semantics, so `RekeyTenantConnectionStringsWorkflow.cs`
+> was never created. Treat the coordinator + endpoints as the AC5 surface.
+
 - [ ] New scheduled task at
       `apps/tamma-elsa/src/Tamma.ElsaServer.Global/Workflows/RekeyTenantConnectionStringsWorkflow.cs`
       — kicks off manually via `POST /api/admin/secrets/rekey`

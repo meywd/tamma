@@ -89,6 +89,12 @@ never exhausts Postgres `max_connections` under load**.
   - `tamma_tenant_pool_size` (gauge of current cache entries)
   - `tamma_tenant_pool_resolve_seconds` (histogram, cold-miss build
     duration)
+  > **Accepted spec divergence (2026-06-05):** shipped as dot-style OTel
+  > names in `TenantConnectionPoolMetrics.cs` — `tamma.tenant_pools.opened_total`,
+  > `tamma.tenant_pools.evicted_total{reason}`, `tamma.tenant_pools.warm`
+  > (gauge), `tamma.tenant_pools.cache_hit_ratio` (gauge). The per-`tenant_id`
+  > tag is deliberately dropped: with hundreds of tenants it would blow up
+  > meter cardinality. The ratio gauge replaces separate hits/misses counters.
 - [ ] Structured logs per Doc 04 §2.6: `tenant.pool.created`,
       `tenant.pool.evicted`, `tenant.pool.build_failed`.
 - [ ] New admin endpoint
@@ -107,6 +113,12 @@ never exhausts Postgres `max_connections` under load**.
       rotation.
 - [ ] Envelope format: `[1 byte version=0x01][1 byte kek_slot]
       [12 bytes nonce][ciphertext][16 bytes GCM tag]` per Doc 01 §8.1.
+      > **Accepted spec divergence (2026-06-05):** shipped envelope is
+      > `[12 bytes nonce][ciphertext][16 bytes GCM tag]` (no `[0x01][slot]`
+      > prefix) — see `TenantSecretProtector.cs`. Slot routing is done via
+      > the separate `tenants.KekVersion` column looked up by
+      > `AesGcmConnectionStringDecryptor`, not an in-envelope byte. This
+      > avoids rewriting every envelope on a KEK-slot bump.
 - [ ] Decrypt path tries the KEK indicated by `kekVersion` first;
       on auth-tag mismatch, tries the secondary slot — per Doc 01
       §8.3 rotation behaviour.
