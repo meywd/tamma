@@ -19,6 +19,13 @@ services:
       - RabbitMq__Password=${RABBITMQ_PASSWORD:-tamma_dev_123}
       - Logging__LogLevel__Default=Information
       - Elsa__Server__BaseUrl=http://localhost:5000
+      # ── Story 28-5 — optional pre-drop tenant pg_dump backup (OFF) ────
+      # Requires pg_dump in the image + a mounted Backup__Directory. See
+      # docs/deployment/tenant-deletion-backup.md.
+      # - Backup__DeletionBackup=${BACKUP_DELETION_BACKUP:-false}
+      # - Backup__Directory=/app/backups
+      # - Backup__PgDumpPath=pg_dump
+      # - Backup__TimeoutSeconds=${BACKUP_TIMEOUT_SECONDS:-1800}
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,6 +37,7 @@ services:
       - ./workflows:/app/workflows
       - ./activities:/app/activities
       - ./data:/app/storage
+      # - ./data/backups:/app/backups   # Story 28-5 tenant backup target (uncomment with Backup__DeletionBackup)
     networks:
       - tamma-network
     healthcheck:

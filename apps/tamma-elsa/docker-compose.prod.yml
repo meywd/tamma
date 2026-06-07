@@ -16,6 +16,18 @@ services:
       - RabbitMq__Password=${RABBITMQ_PASSWORD}
       - Logging__LogLevel__Default=Warning
       - Elsa__Server__BaseUrl=${ELSA_BASE_URL:-https://tamma.yourcompany.com}
+      # ── Story 28-5 — optional pre-drop tenant pg_dump backup ──────────
+      # OFF by default (shared-infra relies on cluster-level PG backups).
+      # To enable: (1) add postgresql-client to the elsa-server image so
+      # pg_dump resolves, (2) uncomment the Backup__* vars + the
+      # tenant_backups volume below, (3) set BACKUP_DELETION_BACKUP=true in
+      # .env. Without a durable volume the dump lands on the container's
+      # ephemeral FS and is lost on restart. See
+      # docs/deployment/tenant-deletion-backup.md.
+      # - Backup__DeletionBackup=${BACKUP_DELETION_BACKUP:-false}
+      # - Backup__Directory=/var/backups/tamma
+      # - Backup__PgDumpPath=pg_dump
+      # - Backup__TimeoutSeconds=${BACKUP_TIMEOUT_SECONDS:-1800}
     depends_on:
       postgres:
         condition: service_healthy
@@ -27,6 +39,7 @@ services:
       - ./workflows:/app/workflows:ro
       - ./activities:/app/activities:ro
       - elsa_storage:/app/storage
+      # - tenant_backups:/var/backups/tamma   # Story 28-5 (uncomment with Backup__DeletionBackup)
     networks:
       - tamma-network
     deploy:
@@ -257,6 +270,8 @@ volumes:
     driver: local
   elsa_storage:
     driver: local
+  # tenant_backups:    # Story 28-5 — durable pre-drop tenant pg_dump target
+  #   driver: local    # (uncomment together with Backup__DeletionBackup)
 
 networks:
   tamma-network:

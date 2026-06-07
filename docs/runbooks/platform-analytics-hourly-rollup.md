@@ -2,7 +2,7 @@
 
 **Story**: 28-10
 **Owners**: Platform operations
-**Last reviewed**: 2026-04-22
+**Last reviewed**: 2026-06-05
 
 ---
 
@@ -203,8 +203,32 @@ Cross-reference with the `ANALYTICS.ROLLUP.TENANT_FAILED` query in §5.
   'ANALYTICS.ROLLUP.HOUR_COMPLETED' AND "CreatedAt" >= NOW() -
   INTERVAL '24 hours'` should return 24. Lower = missed crons.
 - **Disk footprint**: at 10k tenants × 24 hours × 365 days × ~200
-  bytes/row = ~17 GB/year. Retention policy (not in this story)
-  should trim after 13 months.
+  bytes/row = ~17 GB/year. Bounded by the 13-month retention sweep
+  (see §7.1) — steady-state footprint is ~13 months of rows.
+
+### 7.1 Retention sweep (`PURGE_ANALYTICS_HOURLY`) — shipped 2026-06-05
+
+`PurgeStaleAnalyticsActivity` runs as the **final step of the hourly
+rollup workflow** (`HourlyAnalyticsRollupWorkflow`), so it rides the
+existing hourly cron + advisory lock — there is no separate scheduler to
+operate. Each run issues a single set-based delete:
+
+```sql
+DELETE FROM platform_analytics_hourly WHERE "Hour" < now() - INTERVAL '13 months';
+```
+
+- **Best-effort**: a purge failure is logged + emitted as
+  `ANALYTICS.PURGE.FAILED` but never fails the rollup. A successful sweep
+  emits `ANALYTICS.PURGE.HOURLY` carrying `rowsDeleted` + `cutoff`.
+- **Cheap**: after the first sweep only the single bucket that just
+  crossed the boundary qualifies (indexed on `Hour`).
+- **Retention window** is the `RetentionMonths` activity input (default
+  **13**, clamped to the default if a non-positive value is supplied). It
+  is not currently surfaced as an appsettings key — change the default in
+  `HourlyAnalyticsRollupWorkflow.Build()` if a different window is needed.
+- **Verify**: `SELECT COUNT(*) FROM platform_events WHERE type =
+  'ANALYTICS.PURGE.HOURLY' AND "CreatedAt" >= now() - INTERVAL '24 hours'`
+  should return ~24; `ANALYTICS.PURGE.FAILED` should be 0.
 
 ## 8. Known gaps (follow-up tickets)
 
@@ -217,10 +241,11 @@ Cross-reference with the `ANALYTICS.ROLLUP.TENANT_FAILED` query in §5.
   implying `running=1`. When we sum across the window, this clamps at
   zero in `PlatformAnalyticsService.GetWorkflowCountsFromFactTableAsync`
   — a future enhancement should track storage-state at bucket close.
-- **Retention**. Story 28-10 AC6 calls for a weekly `PURGE_ANALYTICS_HOURLY`
-  task (not shipped in this wave). Until then, ops can manually trim:
-  `DELETE FROM platform_analytics_hourly WHERE "Hour" < NOW() -
-  INTERVAL '13 months';` batched at 10000 rows per statement.
+- ~~**Retention**. Story 28-10 AC6 calls for a weekly `PURGE_ANALYTICS_HOURLY`
+  task.~~ **Shipped 2026-06-05** as an hourly best-effort step of the
+  rollup workflow — see §7.1. (Implementation rides the hourly cron rather
+  than a separate weekly task, and uses a single set-based delete instead
+  of manual 10000-row batching.)
 
 ## 9. Escalation
 

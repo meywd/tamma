@@ -74,6 +74,20 @@ When both `ApiKey` and `OrganizationId` are set, DI wires `CranlTenantProvisione
 
 See [Agent Dispatch](Agent-Dispatch).
 
+### Tenant pre-drop backup (optional; OFF by default)
+
+| Key | Purpose |
+|-----|---------|
+| `Backup:DeletionBackup` | `true` enables a `pg_dump` snapshot of a tenant DB before `DROP DATABASE` in the delete workflow. Default `false`. |
+| `Backup:Directory` | Destination for dump files. **Must be a durable mounted volume** in prod. Default `/var/backups/tamma`. |
+| `Backup:PgDumpPath` | Path to `pg_dump`. Default `pg_dump`. |
+| `Backup:TimeoutSeconds` | Dump timeout. Default `1800`. |
+
+Runs on the **elsa-server** host. Enabling requires `postgresql-client`
+in the elsa-server image (the base image ships only `curl`) plus a mounted
+backup volume — see [tenant-deletion-backup.md](https://github.com/Tam-ma/tamma/blob/main/docs/deployment/tenant-deletion-backup.md).
+The password is passed via `PGPASSWORD`, never on argv.
+
 ### SMTP (required for register / reset emails)
 
 | Key | Purpose |

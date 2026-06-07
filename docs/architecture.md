@@ -1056,6 +1056,15 @@ SSE    /api/v1/events/stream
 "GATE.REVIEW_REQUESTED"
 ```
 
+Epic 28 added these `platform_events` types (control-plane audit trail):
+
+```text
+TENANT.LIFECYCLE.<STEP>.{STEP_STARTED|STEP_COMPLETED|STEP_FAILED}  // create/delete steps, incl. BACKUP_DATABASE
+ANALYTICS.ROLLUP.{PLATFORM_COMPLETED|TENANT_COMPLETED|TENANT_FAILED|HOUR_COMPLETED}
+ANALYTICS.PURGE.HOURLY        // 13-month retention sweep ran (rowsDeleted, cutoff)
+ANALYTICS.PURGE.FAILED        // retention sweep threw (best-effort; rollup unaffected)
+```
+
 ### 2. Structure Patterns
 
 #### Package Structure
@@ -1513,6 +1522,19 @@ data: {"issueId":"uuid","filesChanged":["src/foo.ts"]}
 event: WORKFLOW.STEP_COMPLETED
 data: {"issueId":"uuid","step":"CODE_GENERATION"}
 ```
+
+**Admin tenant-events stream + long-poll fallback (Epic 28-11):**
+
+```text
+GET /api/admin/tenants/{id}/events/stream              // SSE (text/event-stream)
+GET /api/admin/tenants/{id}/events/stream?fallback=poll // one-shot JSON snapshot
+```
+
+The `?fallback=poll` variant returns `PollSnapshot { events, nextEventId,
+hasMore }` (cap 200 events, same tenant-scoping + tag scrub as the stream)
+for clients behind proxies that buffer streaming. The client echoes
+`nextEventId` back via the `Last-Event-ID` header on the next poll — the
+same resume token the SSE stream uses.
 
 ### WebSocket (Future)
 
