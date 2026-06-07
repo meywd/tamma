@@ -15,8 +15,17 @@ namespace Tamma.Api.Auth;
 /// <c>GET /api/v1/orgs</c> round-trip on every page load, and so the
 /// switch-org flow can validate membership against the request token rather
 /// than re-querying the DB on every gate.
+///
+/// <para>Story 28-9 AC1 residual — each row also carries the tenant's
+/// <see cref="Slug"/> so the dashboard's switcher can render a human-readable
+/// URL/label per tenant, and so <see cref="JwtService.GenerateAccessToken"/>
+/// can source the <c>active_tenant_slug</c> claim from the active tenant's
+/// entry without an extra DB round-trip. The parameter defaults to the empty
+/// string so transitional callers (and the older positional
+/// <c>new TenantClaim(id, role)</c> call sites) keep compiling and degrade
+/// gracefully to a blank slug rather than throwing.</para>
 /// </summary>
-public readonly record struct TenantClaim(Guid TenantId, string Role);
+public readonly record struct TenantClaim(Guid TenantId, string Role, string Slug = "");
 
 public interface IJwtService
 {
@@ -26,11 +35,15 @@ public interface IJwtService
     /// <c>{ sub, tenantId, role, platformRole, email, name, authMethod }</c>.
     /// Story 28-9 also emits an explicit <c>active_tenant_id</c> claim
     /// (mirror of <c>tenantId</c>; the explicit name removes the ambiguity
-    /// that <c>tenantId</c> could be a request-scoped tenant) and a
-    /// <c>tenants</c> JSON array of <c>{tenantId, role}</c> tuples for every
-    /// membership the user holds. The <paramref name="tenants"/> argument is
-    /// optional — handlers that haven't been updated yet still mint valid
-    /// (single-tenant) tokens with an empty <c>tenants</c> claim.
+    /// that <c>tenantId</c> could be a request-scoped tenant), an
+    /// <c>active_tenant_slug</c> claim (the human-readable slug of the active
+    /// tenant, sourced from the matching <paramref name="tenants"/> entry;
+    /// <c>""</c> when there is no active tenant or its slug is unknown), and a
+    /// <c>tenants</c> JSON array of <c>{tenantId, role, slug}</c> tuples for
+    /// every membership the user holds. The <paramref name="tenants"/> argument
+    /// is optional — handlers that haven't been updated yet still mint valid
+    /// (single-tenant) tokens with an empty <c>tenants</c> claim and a blank
+    /// <c>active_tenant_slug</c>.
     ///
     /// <para>Story 28-R2 follow-up B — when <paramref name="impId"/> is set
     /// the token carries an <c>imp_id</c> claim pointing at the
@@ -122,6 +135,19 @@ public class JwtService : IJwtService
             ? string.Empty
             : tenantId.Value.ToString();
 
+        // Story 28-9 AC1 residual — `active_tenant_slug`. The slug of the
+        // currently-active tenant, sourced from the matching entry in the
+        // `tenants` membership list so we avoid a separate DB round-trip.
+        // Degrades to "" when there is no active tenant, when the active
+        // tenant isn't present in the (possibly transitional / empty)
+        // membership list, or when that entry has no slug — never throws.
+        var activeTenantSlug = tenantId is null || tenantId.Value == Guid.Empty
+            ? string.Empty
+            : (tenants ?? Array.Empty<TenantClaim>())
+                .Where(t => t.TenantId == tenantId.Value)
+                .Select(t => t.Slug ?? string.Empty)
+                .FirstOrDefault() ?? string.Empty;
+
         // Use short claim names (no ASP.NET URI prefix) so the JWT JSON has
         // bare `role`, `tenantId`, `platformRole`, etc. — matching what the
         // dashboard / nginx role-check / unified-nav clients expect.
@@ -134,6 +160,10 @@ public class JwtService : IJwtService
             // fallback, nginx auth_request, dashboard) keep working through
             // the transition.
             new("active_tenant_id", tenantClaimValue),
+            // Story 28-9 AC1 residual — the active tenant's human-readable
+            // slug. Always emitted (possibly "") so the dashboard can
+            // distinguish "no/blank slug" from "claim missing → stale token".
+            new("active_tenant_slug", activeTenantSlug),
             new("role", role),
             new("platformRole", platformRole),
             new(JwtRegisteredClaimNames.Email, user.Email),
@@ -152,7 +182,12 @@ public class JwtService : IJwtService
         // defensively.
         var tenantList = (tenants ?? Array.Empty<TenantClaim>())
             .Where(t => t.TenantId != Guid.Empty)
-            .Select(t => new { tenantId = t.TenantId.ToString(), role = t.Role })
+            // Story 28-9 AC1 residual — carry the per-tenant slug alongside
+            // {tenantId, role} so the dashboard switcher can label/route each
+            // tenant. Additive: existing readers that only pick tenantId/role
+            // are unaffected. Null slug coalesces to "" so the JSON never
+            // emits a null literal.
+            .Select(t => new { tenantId = t.TenantId.ToString(), role = t.Role, slug = t.Slug ?? string.Empty })
             .ToArray();
         var tenantsJson = JsonSerializer.Serialize(tenantList);
         // Stored as a string-typed claim that holds the JSON array literal.

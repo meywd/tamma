@@ -49,7 +49,12 @@ public static class AuthEndpoints
         var memberships = await membershipRepo.GetUserTenantsAsync(userId);
         return memberships
             .Where(m => m.TenantId != Guid.Empty)
-            .Select(m => new TenantClaim(m.TenantId, m.Role))
+            // Story 28-9 AC1 residual — carry the tenant slug so the active
+            // tenant's `active_tenant_slug` claim can be sourced from this
+            // list without a second DB hit. `GetUserTenantsAsync` already
+            // `.Include(m => m.Tenant)`s the navigation. Coalesce to "" so a
+            // null slug (legacy/partial row) degrades gracefully.
+            .Select(m => new TenantClaim(m.TenantId, m.Role, m.Tenant?.Slug ?? string.Empty))
             .ToList();
     }
 

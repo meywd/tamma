@@ -230,6 +230,83 @@ public class JwtServiceTests
     }
 
     [Test]
+    public void GenerateAccessToken_EmitsActiveTenantSlugClaim_FromMatchingMembership()
+    {
+        // Story 28-9 AC1 residual — the active tenant's slug is carried on a
+        // dedicated `active_tenant_slug` claim, sourced from the matching
+        // entry in the tenants membership list.
+        var t1 = Guid.Parse("aaaaaaaa-1111-1111-1111-111111111111");
+        var t2 = Guid.Parse("bbbbbbbb-2222-2222-2222-222222222222");
+        var tenants = new[]
+        {
+            new TenantClaim(t1, "owner", "acme-corp"),
+            new TenantClaim(t2, "member", "globex"),
+        };
+
+        var token = _service.GenerateAccessToken(MakeUser(), t1, "owner", tenants);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_slug"
+            && c.Value == "acme-corp");
+    }
+
+    [Test]
+    public void GenerateAccessToken_NullTenant_EmitsEmptyActiveTenantSlugClaim()
+    {
+        // No active tenant → blank slug, but the claim is still present so the
+        // dashboard can distinguish "no slug" from "stale token".
+        var token = _service.GenerateAccessToken(MakeUser(), null, "member");
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_slug"
+            && c.Value == string.Empty);
+    }
+
+    [Test]
+    public void GenerateAccessToken_ActiveTenantNotInMembershipList_EmitsEmptySlug()
+    {
+        // Degrade gracefully — active tenantId has no matching entry in the
+        // tenants list (transitional caller / partial state). Slug is "",
+        // not an exception.
+        var active = Guid.Parse("cccccccc-3333-3333-3333-333333333333");
+        var other = Guid.Parse("dddddddd-4444-4444-4444-444444444444");
+        var tenants = new[] { new TenantClaim(other, "member", "globex") };
+
+        var token = _service.GenerateAccessToken(MakeUser(), active, "owner", tenants);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        jwt.Claims.Should().Contain(c => c.Type == "active_tenant_slug"
+            && c.Value == string.Empty);
+    }
+
+    [Test]
+    public void GenerateAccessToken_TenantsClaim_CarriesPerTenantSlug()
+    {
+        // The slug rides alongside {tenantId, role} in each `tenants` entry so
+        // the dashboard switcher can label/route per tenant.
+        var t1 = Guid.Parse("aaaaaaaa-1111-1111-1111-111111111111");
+        var tenants = new[] { new TenantClaim(t1, "owner", "acme-corp") };
+
+        var token = _service.GenerateAccessToken(MakeUser(), t1, "owner", tenants);
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+
+        var raw = jwt.Claims.First(c => c.Type == "tenants").Value;
+        var parsed = System.Text.Json.JsonDocument.Parse(raw).RootElement;
+        parsed[0].GetProperty("slug").GetString().Should().Be("acme-corp");
+    }
+
+    [Test]
+    public void ValidateToken_RoundTrip_PreservesActiveTenantSlugClaim()
+    {
+        var t1 = Guid.NewGuid();
+        var tenants = new[] { new TenantClaim(t1, "owner", "acme-corp") };
+        var token = _service.GenerateAccessToken(MakeUser(), t1, "owner", tenants);
+
+        var principal = _service.ValidateToken(token);
+        principal.Should().NotBeNull();
+        principal!.FindFirst("active_tenant_slug")!.Value.Should().Be("acme-corp");
+    }
+
+    [Test]
     public void ValidateToken_RoundTrip_PreservesActiveTenantAndTenantsClaims()
     {
         var t1 = Guid.NewGuid();
