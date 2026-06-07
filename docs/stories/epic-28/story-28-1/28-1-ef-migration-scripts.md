@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC2 bootstrap + AC3 reset scripts now exist and are wired into both compose files (2026-05-31 follow-up below); the remaining residual is per-tenant Elsa runner verification. The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover.
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC2 bootstrap + AC3 reset scripts now exist and are wired into both compose files (2026-05-31 follow-up below). The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover. **Remaining residual (AC1 last bullet — per-tenant Elsa DB migrate/run): code-verified as an INTENTIONAL no-op stub, NOT runtime-verified, and correctly deferred to the Epic 30 db-per-tenant runtime cutover** (2026-06-07 verification below).
 **Priority**: High (every other Epic 28 story is blocked until four migration sets compile and apply cleanly)
 **Estimated Effort**: L (20-40h) — target 30h
 
@@ -362,3 +362,77 @@ mangling the Postgres entrypoint:
 - The compose dependency assumes the apps self-migrate on boot (confirmed
   in `Program.cs`); confirm this remains true if migration handling is
   ever refactored.
+
+## Per-tenant Elsa runner residual — 2026-06-07 verification (AC1, last bullet)
+
+Read-only code audit of the per-tenant DB creation + migration paths to
+settle the "per-tenant Elsa runner verification" residual. **Verdict: 28-1
+correctly stays MOSTLY DONE.** AC1's first three bullets (CP / Tenant /
+global-Elsa migration sets) and AC2–AC6 are satisfied; **AC1's fourth
+bullet — per-tenant Elsa DB migrations applied against a tenant-resolved
+connection string into `tamma_tenant_<guid32>_elsa` — is a deliberate
+no-op stub, not a working runner.** Closing 28-1 outright would overclaim.
+
+### What is CODE-VERIFIED now (static, no runtime)
+
+- **Naming is real and tested-shaped.**
+  `Tamma.Data/Pooling/TenantNaming.cs` emits the canonical per-tenant Elsa
+  DB name `tamma_tenant_<hex>_elsa` via `ElsaDatabaseName(Guid)`
+  (`ElsaSuffix = "_elsa"`, hex = `Guid.ToString("N")`, under the 63-byte
+  Postgres identifier limit). This is the only Elsa-DB-specific piece that
+  is fully implemented.
+- **Per-tenant APP DB create + migrate IS implemented** (not Elsa).
+  `CreateTenantWorkflow` (10 steps) wires
+  `CreateTenantDatabaseActivity` → `CREATE DATABASE tamma_tenant_<hex>`
+  (idempotent `pg_database` probe, owner = the minted role) then
+  `MigrateTenantDatabaseActivity` → `ITenantDbMigrator.MigrateTenantAppAsync`,
+  which in `EfTenantDbMigrator` builds an ad-hoc `TenantDbContext` on the
+  tenant connection string and runs EF `MigrateAsync` against
+  `__TenantMigrationsHistory` (idempotent). That covers the *app* schema.
+- **The per-tenant Elsa migrator is an explicit no-op stub.**
+  `EfTenantDbMigrator.MigrateTenantElsaAsync` logs
+  `tenant.lifecycle.migrate_elsa skipped reason=elsa_db_not_split` and
+  returns `Task.CompletedTask`. Its own XML doc states per-tenant Elsa DBs
+  are deferred (Story 28-5 plan §9 open question — embed Elsa migration
+  assembly hash, fail-fast on drift). The interface
+  (`ITenantDbMigrator.MigrateTenantElsaAsync`) exists so the activity
+  surface is stable for the day the dedicated Elsa DBs ship.
+- **There is NO per-tenant Elsa step in the provisioning workflow.**
+  `CreateTenantWorkflow`'s `Activities` list has no
+  Create-Tenant-Elsa-Database or Migrate-Tenant-Elsa activity;
+  `src/Tamma.Activities/TenantLifecycle/` ships no Elsa-DB activity file.
+  `MigrateTenantElsaAsync` has **no production caller** (grep: only the
+  interface decl + the stub impl). So the Elsa runner is not merely
+  unverified — it is not invoked anywhere in the live provisioning path.
+
+### What is RUNTIME-DEFERRED to the Epic 30 db-per-tenant cutover
+
+- The whole per-tenant-DB topology is dormant in dev/test/today's prod:
+  `Tamma.Api/Program.cs` only swaps in the LRU pool when
+  `ConnectionStrings:ControlPlane` is set; otherwise (the documented VPS
+  default, `Tamma:RequireTenantIsolation=false`) every tenant rides the
+  shared central `tamma` DB via `StubTenantConnectionResolver`. In that
+  mode no per-tenant DB is created at all, so a per-tenant Elsa DB has
+  nothing to attach to.
+- Therefore the per-tenant Elsa runner cannot be runtime-verified until
+  the db-per-tenant runtime cutover lands (Epic 30 / full Epic 28 cutover)
+  — the same blocker that keeps end-state contract tests #2/#3 `[Ignore]`d
+  (see the 2026-05-30 follow-up above). Verifying it now would require
+  standing up real per-tenant DBs, which the current resolver wiring does
+  not do outside a CP-connection-string deployment.
+
+### Conclusion
+
+- **Closeable now?** No — keep MOSTLY DONE. AC1's per-tenant-Elsa bullet is
+  a stub-with-a-plan, not a verified runner.
+- **What 28-1 genuinely delivers today:** the four migration *sets* compile
+  and apply (CP, Tenant, global-Elsa via Elsa's EF provider, and the
+  per-tenant *app* migrate runner), bootstrap/reset scripts, seed plans,
+  constraints, and indexes — enough to unblock every downstream Epic 28
+  story, which is the story's stated purpose.
+- **Honest residual line:** "per-tenant Elsa DB migrate/run is an
+  intentional no-op stub (`EfTenantDbMigrator.MigrateTenantElsaAsync`),
+  uncalled by the provisioning workflow, deferred to the Epic 30
+  db-per-tenant runtime cutover." Not "verification pending" — there is
+  nothing to verify until the runner is built and the runtime topology
+  flips on.
