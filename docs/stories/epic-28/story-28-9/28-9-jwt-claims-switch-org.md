@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; AC2 atomic SwitchOrg (single CP transaction + `FOR UPDATE` serialisation + post-commit audit emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residuals: AC1 (`jti` + `tenantSlug` claim verification), AC6 logout-all path.
+**Status**: MOSTLY DONE — AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; AC2 atomic SwitchOrg (single CP transaction + `FOR UPDATE` serialisation + post-commit audit emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residual (corrected 2026-06-06): only the AC1 `tenantSlug` claim is unshipped — `jti` IS emitted (`JwtService.cs:142`) and the AC6 logout-all path IS implemented (`RevokeAllForUserAsync`, `AuthEndpoints.cs:706`); both were mis-listed as residuals before. `tenantSlug` is a UI-display nicety (~5–20 LoC) and the only item keeping this MOSTLY DONE.
 **Priority**: High (without per-tenant-scoped JWTs plus a switch-org
 endpoint, users with memberships in more than one tenant cannot
 navigate between them without re-logging-in, refresh tokens leak

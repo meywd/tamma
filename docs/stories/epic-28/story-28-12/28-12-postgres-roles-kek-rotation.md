@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: MOSTLY DONE — AC1+AC2 role-split runtime enforcement CLOSED by the 2026-05-30 follow-up (see section below). Remaining residuals: `RekeyTenantConnectionStringsWorkflow` location (coordinator-instead-of-workflow may be the new architecture) and AC5 KEK-rotation items — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC1/AC2 startup `current_user` check + distinct compose role-URL slots are now in place.
+**Status**: MOSTLY DONE — AC1+AC2 role-split runtime enforcement CLOSED by the 2026-05-30 follow-up (see section below). Remaining residual (corrected 2026-06-06): the `RekeyTenantConnectionStringsWorkflow` "location" item is RESOLVED as an accepted spec divergence — rotation is the in-process `KekRotationCoordinator` + REST endpoints (see AC5 note in this doc). The one genuine open item is the AC5 `tamma_kek_rotation_remaining` OTel gauge, which is not yet emitted (`Tamma.Api/Services/Secrets/` has no such meter) — operator visibility nicety, ~10 LoC. AC1/AC2 startup `current_user` check + distinct compose role-URL slots are in place. See audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`.
 **Priority**: High (the three-role privilege split and per-tenant KEK
 encryption are the hard security floor of the DB-per-tenant model;
 shipping without them lets the runtime API `CREATE DATABASE` and
