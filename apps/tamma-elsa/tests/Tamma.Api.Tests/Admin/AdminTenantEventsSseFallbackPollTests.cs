@@ -31,11 +31,12 @@ public class AdminTenantEventsSseFallbackPollTests
     public async Task FallbackPoll_NoHeader_ReturnsRecentEvents_AsJson()
     {
         var tenantId = Guid.NewGuid();
+        var newestId = Guid.NewGuid();
         var factory = new InMemoryFactory();
         await SeedAsync(factory, tenantId,
             (Guid.NewGuid(), "A", 3),
             (Guid.NewGuid(), "B", 5),
-            (Guid.NewGuid(), "C", 9));
+            (newestId, "C", 9));
 
         var http = BuildContext(fallbackPoll: true);
         await AdminTenantEventsSseEndpoint.StreamEvents(
@@ -52,8 +53,9 @@ public class AdminTenantEventsSseFallbackPollTests
         // Chronological — matches the stream's frame order.
         events[0].GetProperty("type").GetString().Should().Be("A");
         events[2].GetProperty("type").GetString().Should().Be("C");
-        root.GetProperty("nextCursor").GetInt64().Should().Be(9,
-            "the cursor the client echoes back must be the newest sequence");
+        // Resume token is the newest row's Guid Id — echoed back via
+        // Last-Event-ID, the SAME token the SSE stream uses.
+        root.GetProperty("nextEventId").GetGuid().Should().Be(newestId);
         root.GetProperty("hasMore").GetBoolean().Should().BeFalse();
     }
 
@@ -62,11 +64,12 @@ public class AdminTenantEventsSseFallbackPollTests
     {
         var tenantId = Guid.NewGuid();
         var cursorRow = Guid.NewGuid();
+        var newestId = Guid.NewGuid();
         var factory = new InMemoryFactory();
         await SeedAsync(factory, tenantId,
             (Guid.NewGuid(), "A", 3),
             (cursorRow, "B", 5),
-            (Guid.NewGuid(), "C", 9));
+            (newestId, "C", 9));
 
         var http = BuildContext(fallbackPoll: true);
         http.Request.Headers["Last-Event-ID"] = cursorRow.ToString("D");
@@ -79,11 +82,36 @@ public class AdminTenantEventsSseFallbackPollTests
         var events = doc.RootElement.GetProperty("events");
         events.GetArrayLength().Should().Be(1, "only rows strictly past seq 5 are new");
         events[0].GetProperty("type").GetString().Should().Be("C");
-        doc.RootElement.GetProperty("nextCursor").GetInt64().Should().Be(9);
+        // The returned token round-trips: it's the newest row's Guid Id,
+        // a valid Last-Event-ID for the next poll.
+        doc.RootElement.GetProperty("nextEventId").GetGuid().Should().Be(newestId);
     }
 
     [Test]
-    public async Task FallbackPoll_EmptyStore_ReturnsEmptyArray_CursorZero()
+    public async Task FallbackPoll_ResumeWithNoNewRows_EchoesPriorCursor()
+    {
+        // Empty delta must not lose the client's place: nextEventId echoes
+        // the cursor the client sent so the next poll resumes correctly.
+        var tenantId = Guid.NewGuid();
+        var cursorRow = Guid.NewGuid();
+        var factory = new InMemoryFactory();
+        await SeedAsync(factory, tenantId, (cursorRow, "ONLY", 5));
+
+        var http = BuildContext(fallbackPoll: true);
+        http.Request.Headers["Last-Event-ID"] = cursorRow.ToString("D");
+
+        await AdminTenantEventsSseEndpoint.StreamEvents(
+            tenantId, factory, JsonOpts(), new NullLoggerFactory(),
+            TimeProvider.System, http, CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(ReadBody(http));
+        doc.RootElement.GetProperty("events").GetArrayLength().Should().Be(0);
+        doc.RootElement.GetProperty("nextEventId").GetGuid().Should().Be(cursorRow,
+            "an empty delta echoes the client's prior cursor so it keeps its place");
+    }
+
+    [Test]
+    public async Task FallbackPoll_EmptyStore_ReturnsEmptyArray_NullCursor()
     {
         var tenantId = Guid.NewGuid();
         var factory = new InMemoryFactory();
@@ -95,7 +123,7 @@ public class AdminTenantEventsSseFallbackPollTests
 
         using var doc = JsonDocument.Parse(ReadBody(http));
         doc.RootElement.GetProperty("events").GetArrayLength().Should().Be(0);
-        doc.RootElement.GetProperty("nextCursor").GetInt64().Should().Be(0);
+        doc.RootElement.GetProperty("nextEventId").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Test]

@@ -61,6 +61,13 @@ public sealed class PurgeStaleAnalyticsActivity : TammaAsyncActivity
                 factory, publisher, DateTime.UtcNow, months, Logger, context.CancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            // Host shutdown / workflow cancellation is NOT a purge failure —
+            // let it propagate so the workflow cancels cleanly instead of
+            // being masked as a swallowed best-effort error.
+            throw;
+        }
         catch (Exception ex)
         {
             // Best-effort — never fail the parent rollup. Record the

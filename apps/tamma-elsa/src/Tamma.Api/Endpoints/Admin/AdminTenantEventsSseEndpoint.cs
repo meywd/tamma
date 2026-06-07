@@ -361,16 +361,22 @@ public static class AdminTenantEventsSseEndpoint
     /// <summary>
     /// AC3 — public shape of the long-poll fallback response.
     /// <see cref="Events"/> are chronological (oldest first, matching the
-    /// stream's frame order). <see cref="NextCursor"/> is the
-    /// <c>SequenceNumber</c> the client echoes back via the
-    /// <c>Last-Event-ID</c> header on its next poll to fetch only newer
-    /// rows. <see cref="HasMore"/> is true when the snapshot hit
-    /// <see cref="PollSnapshotMax"/> and the client should poll again
-    /// immediately rather than after its normal interval.
+    /// stream's frame order). <see cref="NextEventId"/> is the
+    /// <c>platform_events.Id</c> (a Guid) the client echoes back verbatim
+    /// in the <c>Last-Event-ID</c> request header on its next poll to
+    /// fetch only newer rows — the SAME resume token the SSE stream uses,
+    /// so the poll path round-trips through
+    /// <see cref="ResolveStartingCursorAsync"/> identically. It is the id
+    /// of the newest returned row; on an empty delta it echoes the
+    /// client's previous cursor (so the client never loses its place);
+    /// null only when the store has no rows for the tenant yet.
+    /// <see cref="HasMore"/> is true only on a resume poll that filled the
+    /// <see cref="PollSnapshotMax"/> page (more new rows await — poll again
+    /// immediately); always false on the initial newest-window snapshot.
     /// </summary>
     public sealed record PollSnapshot(
         IReadOnlyList<SanitizedEvent> Events,
-        long NextCursor,
+        Guid? NextEventId,
         bool HasMore);
 
     /// <summary>
@@ -456,10 +462,21 @@ public static class AdminTenantEventsSseEndpoint
         }
 
         var events = rows.Select(ScrubEvent).ToList();
-        var nextCursor = events.Count > 0
-            ? events[^1].SequenceNumber
-            : cursorBaseline;
-        var snapshot = new PollSnapshot(events, nextCursor, events.Count >= PollSnapshotMax);
+        // Resume token is the newest returned row's Guid Id — the same
+        // value the SSE stream emits as `id:` and resolves from
+        // Last-Event-ID. On an empty resume delta, echo the client's prior
+        // cursor back so it doesn't lose its place; null only when the
+        // tenant has no rows at all.
+        Guid? nextEventId = rows.Count > 0
+            ? rows[^1].Id
+            : (resuming && Guid.TryParse(rawLastEventId, out var prior) && prior != Guid.Empty
+                ? prior
+                : (Guid?)null);
+        // HasMore only means "a full resume page — poll again now". The
+        // initial newest-window snapshot is never "more" (there is nothing
+        // newer than what we just returned).
+        var hasMore = resuming && rows.Count >= PollSnapshotMax;
+        var snapshot = new PollSnapshot(events, nextEventId, hasMore);
 
         http.Response.StatusCode = StatusCodes.Status200OK;
         http.Response.Headers.ContentType = "application/json; charset=utf-8";

@@ -93,11 +93,13 @@ typo-proof**.
       mode.
       > **Shipped 2026-06-05:** `?fallback=poll` on the events/stream
       > endpoint returns a one-shot JSON `PollSnapshot`
-      > (`{ events, nextCursor, hasMore }`) instead of a `text/event-stream`.
+      > (`{ events, nextEventId, hasMore }`) instead of a `text/event-stream`.
       > No `Last-Event-ID` → most recent `PollSnapshotMax` (200) events,
       > chronological; header present → only rows past that cursor. Same M4
       > tag scrub + tenant scoping as the stream. The client echoes
-      > `nextCursor` back via `Last-Event-ID` on the next poll.
+      > `nextEventId` (the newest row's Guid Id — the SAME resume token the
+      > stream emits as `id:`) back via `Last-Event-ID` on the next poll;
+      > an empty delta echoes the prior cursor so the client keeps its place.
 - [ ] Per Story 28-8, the SSE handler subscribes to the
       `tenant.deleted` signal and terminates the stream with a
       final `event: tenant_deleted` when a tenant's

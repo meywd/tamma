@@ -137,8 +137,18 @@ public sealed class BackupTenantDatabaseActivity : TenantLifecycleActivity
                 $"pg_dump timed out after {options.TimeoutSeconds}s backing up {dbName}.");
 
         if (result.ExitCode != 0)
+        {
+            // Log the (truncated) stderr locally for the operator, but do
+            // NOT embed it in the thrown message: TenantLifecycleActivity's
+            // base persists ex.Message verbatim into the STEP_FAILED
+            // platform_event, and pg_dump stderr can echo connection
+            // details. Keep the durable event message scrubbed.
+            logger?.LogWarning(
+                "tenant.lifecycle.backup_database failed tenantId={TenantId} db={Db} exit={Exit} stderr={StdErr}",
+                tenantId, dbName, result.ExitCode, Truncate(result.StdErr));
             throw new InvalidOperationException(
-                $"pg_dump failed (exit {result.ExitCode}) backing up {dbName}: {Truncate(result.StdErr)}");
+                $"pg_dump failed (exit {result.ExitCode}) backing up {dbName}. See logs for stderr.");
+        }
 
         logger?.LogInformation(
             "tenant.lifecycle.backup_database completed tenantId={TenantId} db={Db} file={File}",
