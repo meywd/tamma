@@ -313,6 +313,14 @@ builder.Services.TryAddSingleton<
 // only one rotation can be in flight at a time.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationCoordinator>();
 
+// Story 28-12 AC5 residual — OTel ObservableGauge
+// `tamma.kek_rotation.remaining` reading "tenants still needing rekey"
+// from the coordinator's in-memory status snapshot. Constructing this
+// singleton instantiates the Meter ("Tamma.KekRotation") whose gauge is
+// then discoverable by any wired MeterProvider; resolve it eagerly so
+// the meter exists from process start rather than first /status poll.
+builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationMetrics>();
+
 // R2-H13 — readiness probe refuses to flip green when there are
 // tenant rows further behind than the cabinet history can decrypt.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>();
@@ -1130,6 +1138,14 @@ else
 }
 
 var app = builder.Build();
+
+// Story 28-12 AC5 residual — eagerly resolve the KEK-rotation metrics so
+// the `tamma.kek_rotation.remaining` ObservableGauge's Meter is alive
+// from process start (otherwise no consumer would force-construct the
+// lazy singleton until the first /status poll). Resolving here also keeps
+// the instance rooted on the app's service provider for the process
+// lifetime so the Meter is never GC-disposed mid-run.
+_ = app.Services.GetRequiredService<Tamma.Api.Services.Secrets.KekRotationMetrics>();
 
 // ────────────────────────────────────────────────────────────────────────────
 // CLI dispatch — Story 29-9 one-shot commands run BEFORE the HTTP pipeline
