@@ -51,7 +51,18 @@ internal static class TammaModelConfiguration
         // ── User ──
         modelBuilder.Entity<User>(entity =>
         {
-            entity.ToTable("users");
+            entity.ToTable("users", t =>
+            {
+                // Story 28-R2/C1 — model-level mirror of the raw-SQL CHECK
+                // installed by migration 20260426172707_AddUsersPlatformRole.
+                // The old constraint name ('users_platform_role_check') stays
+                // in databases built from the old chain; this new name
+                // ('ck_users_platform_role') coexists harmlessly and the old
+                // one vanishes when the chain is collapsed in Phase 0 Step N.
+                t.HasCheckConstraint(
+                    "ck_users_platform_role",
+                    "\"platform_role\" IN ('user','platform_admin')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
@@ -330,7 +341,16 @@ internal static class TammaModelConfiguration
         // ── ApiKey ──
         modelBuilder.Entity<ApiKey>(entity =>
         {
-            entity.ToTable("api_keys");
+            entity.ToTable("api_keys", t =>
+            {
+                // Phase 0 transitional enumeration (plan 2026-06-09 §2.4 deviation 1).
+                // Spec target on CP is ('platform','user') — unreachable until
+                // tenant-scoped keys physically move to tenant schemas (Phase 2+)
+                // and the service/installation scopes are reconciled with the spec.
+                t.HasCheckConstraint(
+                    "ck_api_keys_scope",
+                    "\"Scope\" IN ('platform','user','installation','service','tenant')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
