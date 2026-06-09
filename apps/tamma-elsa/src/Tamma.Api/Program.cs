@@ -1972,6 +1972,7 @@ using (var scope = app.Services.CreateScope())
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
                     sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
+                    tenant_databases,
                     tenant_platform_installations,
                     user_api_keys, user_installations, user_invites, users,
                     workflow_definitions, workflow_instances,

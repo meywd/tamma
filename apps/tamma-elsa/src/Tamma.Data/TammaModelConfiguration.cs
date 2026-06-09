@@ -222,6 +222,44 @@ internal static class TammaModelConfiguration
                 entity.Property<string?>("ProviderResourceIds")
                     .HasColumnType("jsonb");
 
+                // ── Unified-tenancy Phase 0 (plan 2026-06-09 §2.2) ──
+                //
+                // SchemaName = the tenant's schema (t_<hex>) inside its assigned DB;
+                // DatabaseId = which tenant_databases row hosts that schema. Both stay
+                // NULL until the unified creation path (Phase 3) mints them — Phase 0
+                // is schema-only.
+                entity.Property<string?>("SchemaName").HasMaxLength(63);
+                entity.Property<Guid?>("DatabaseId");
+
+                entity.HasIndex("SchemaName").IsUnique()
+                    .HasFilter("\"SchemaName\" IS NOT NULL");
+                entity.HasIndex("DatabaseId");
+
+                entity.HasOne<TenantDatabase>()
+                    .WithMany()
+                    .HasForeignKey("DatabaseId")
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                // CHECKs reference shadow columns, so they live inside this guard.
+                // Conn-string CHECK: the spec invariant is "active tenants always have
+                // a connection string". provisioning/failed/deleted are exempt because
+                // today's flows legitimately hold NULL there (mint happens mid-
+                // provisioning; failure can precede mint; delete nulls the envelope).
+                // Tighten to spec-exact (only pending_verification exempt) in Phase 3.
+                entity.ToTable("tenants", t =>
+                {
+                    t.HasCheckConstraint(
+                        "ck_tenants_status",
+                        "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
+                        "'provisioning','active','delete_requested','deleting'," +
+                        "'deleted','failed','suspended')");
+                    t.HasCheckConstraint(
+                        "ck_tenants_connection_string_present",
+                        "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
+                        "'provisioning','failed','deleted') " +
+                        "OR \"EncryptedConnectionString\" IS NOT NULL");
+                });
+
                 // Epic 28 shadow-column indexes used by Admin tenant
                 // filtering + plan FK joins.
                 entity.HasIndex("Status");
