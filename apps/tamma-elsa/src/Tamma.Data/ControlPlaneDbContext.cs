@@ -59,6 +59,12 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<PlatformWebhookDelivery> PlatformWebhookDeliveries =>
         Set<PlatformWebhookDelivery>();
 
+    /// <summary>
+    /// Unified-tenancy Phase 0 — operator DB pool registry. One row per
+    /// Postgres database available for tenant-schema placement.
+    /// </summary>
+    public DbSet<TenantDatabase> TenantDatabases => Set<TenantDatabase>();
+
     // ── Control-plane platform tables (Story 28-6 + 28-10) ──
     //
     // These three tables (platform_events, platform_queued_tasks,
@@ -232,6 +238,7 @@ public class ControlPlaneDbContext : DbContext
         ConfigurePlatformBootstrap(modelBuilder);
         ConfigureTenantPlatformInstallations(modelBuilder);
         ConfigurePlatformWebhookDeliveries(modelBuilder);
+        ConfigureTenantDatabases(modelBuilder);
     }
 
     /// <summary>
@@ -416,6 +423,46 @@ public class ControlPlaneDbContext : DbContext
             entity.HasIndex(e => e.StartedAt)
                 .HasDatabaseName("IX_kek_rotations_StartedAt")
                 .IsDescending(true);
+        });
+    }
+
+    /// <summary>
+    /// Unified-tenancy Phase 0 — <c>tenant_databases</c> registry (the admin DB
+    /// pool). CHECKs pin the two closed enums; <c>Label</c> is the operator key.
+    /// </summary>
+    private static void ConfigureTenantDatabases(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantDatabase>(entity =>
+        {
+            entity.ToTable("tenant_databases", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_tenant_databases_placement_class",
+                    "\"PlacementClass\" IN ('shared','dedicated')");
+                t.HasCheckConstraint(
+                    "ck_tenant_databases_status",
+                    "\"Status\" IN ('active','draining','full','retired')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Label).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Host).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Port).HasDefaultValue(5432);
+            entity.Property(e => e.AdminConnectionStringEncrypted)
+                .IsRequired().HasColumnType("bytea");
+            entity.Property(e => e.PlacementClass)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
+            entity.Property(e => e.TierEligibility)
+                .HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
+            entity.Property(e => e.TenantCount).HasDefaultValue(0);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.KekVersion).HasDefaultValue((short)1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => e.Label).IsUnique();
+            entity.HasIndex(e => e.Status);
         });
     }
 
