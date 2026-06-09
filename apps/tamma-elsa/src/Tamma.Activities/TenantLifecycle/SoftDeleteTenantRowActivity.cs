@@ -79,7 +79,7 @@ public sealed class SoftDeleteTenantRowActivity : CleanupStepActivity
 
         db.Entry(tenant).Property("Status").CurrentValue = "deleted";
         db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = (byte[]?)null;
-        db.Entry(tenant).Property("KekVersion").CurrentValue = (int?)null;
+        // KekVersion is smallint NOT NULL DEFAULT 1 — clearing on delete is a no-op (plan 2026-06-09 §2.2).
 
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);

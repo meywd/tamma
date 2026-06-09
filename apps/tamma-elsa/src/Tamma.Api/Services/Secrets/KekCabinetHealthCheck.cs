@@ -73,7 +73,7 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
                 .IgnoreQueryFilters()
                 .Where(t => t.DeletedAt == null)
                 .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Where(t => EF.Property<int?>(t, "KekVersion") == null)
+                .Where(t => (int?)EF.Property<short>(t, "KekVersion") == null)
                 .CountAsync(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -85,7 +85,7 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
                 .IgnoreQueryFilters()
                 .Where(t => t.DeletedAt == null)
                 .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Select(t => (int?)EF.Property<int?>(t, "KekVersion"))
+                .Select(t => (int?)EF.Property<short>(t, "KekVersion"))
                 .Where(v => v != null)
                 .MinAsync(cancellationToken)
                 .ConfigureAwait(false);

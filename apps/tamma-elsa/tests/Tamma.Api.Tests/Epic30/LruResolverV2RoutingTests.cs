@@ -88,7 +88,7 @@ public class LruResolverV2RoutingTests
         entry.Property("Status").CurrentValue = status;
         entry.Property("EncryptedConnectionString").CurrentValue =
             Encoding.UTF8.GetBytes(legacyConnectionString);
-        entry.Property("KekVersion").CurrentValue = 1;
+        entry.Property("KekVersion").CurrentValue = (short)1;
         await ctx.SaveChangesAsync();
         return tenantId;
     }

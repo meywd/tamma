@@ -109,7 +109,7 @@ public class KekRotationMetricsTests
         var entry = ctx.Tenants.Add(tenant);
         entry.Property("Status").CurrentValue = "active";
         entry.Property("EncryptedConnectionString").CurrentValue = envelope;
-        entry.Property("KekVersion").CurrentValue = kekVersion;
+        entry.Property("KekVersion").CurrentValue = (short)kekVersion;
         await ctx.SaveChangesAsync();
         return tenantId;
     }

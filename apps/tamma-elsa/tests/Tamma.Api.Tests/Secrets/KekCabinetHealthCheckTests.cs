@@ -79,9 +79,9 @@ public class KekCabinetHealthCheckTests
         _db.Tenants.Add(tenant);
         await _db.SaveChangesAsync();
 
-        // Set EncryptedConnectionString to a non-null bytea so the
-        // health check picks the row up; KekVersion to whatever the
-        // test wants (NULL allowed).
+        // KekVersion is smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2).
+        // Legacy-NULL rows can no longer be seeded via raw SQL — passing null
+        // falls back to the column default (1) to keep the helper compiling.
         await using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             UPDATE tenants
@@ -90,8 +90,7 @@ public class KekCabinetHealthCheckTests
             WHERE "Id" = @id
         """;
         cmd.Parameters.Add(new NpgsqlParameter("id", tenant.Id));
-        cmd.Parameters.Add(new NpgsqlParameter("kek",
-            kekVersion is null ? (object)DBNull.Value : (object)kekVersion.Value));
+        cmd.Parameters.Add(new NpgsqlParameter<short>("kek", (short)(kekVersion ?? 1)));
         await cmd.ExecuteNonQueryAsync();
         return tenant.Id;
     }
@@ -123,6 +122,8 @@ public class KekCabinetHealthCheckTests
     }
 
     [Test]
+    [Ignore("KekVersion is now smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2). " +
+            "Legacy-NULL rows can no longer be inserted — this scenario is permanently dead.")]
     public async Task CheckHealth_LegacyNullVersionRow_ReturnsUnhealthy()
     {
         // PF-S10 — exact regression case: KekVersion=null + active=v3 +
@@ -143,6 +144,8 @@ public class KekCabinetHealthCheckTests
     }
 
     [Test]
+    [Ignore("KekVersion is now smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2). " +
+            "Legacy-NULL rows can no longer be inserted — this scenario is permanently dead.")]
     public async Task CheckHealth_LegacyNullCount_ReportedInMessage()
     {
         // Three legacy rows (NULL version) + one current row. The

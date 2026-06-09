@@ -109,7 +109,7 @@ public class KekRotationCoordinatorTests
         var entry = ctx.Tenants.Add(tenant);
         entry.Property("Status").CurrentValue = "active";
         entry.Property("EncryptedConnectionString").CurrentValue = envelope;
-        entry.Property("KekVersion").CurrentValue = kekVersion;
+        entry.Property("KekVersion").CurrentValue = (short)kekVersion;
         await ctx.SaveChangesAsync();
         return tenantId;
     }
@@ -149,7 +149,7 @@ public class KekRotationCoordinatorTests
                 .FirstAsync(t => t.Id == tenantId);
             var entry = ctx.Entry(tenant);
             var envelope = (byte[])entry.Property("EncryptedConnectionString").CurrentValue!;
-            var version = (int?)entry.Property("KekVersion").CurrentValue;
+            var version = (int?)(short?)entry.Property("KekVersion").CurrentValue;
 
             version.Should().Be(2);
             var decrypted = AesGcmConnectionStringDecryptor.DecryptWithKey(envelope, newKek);

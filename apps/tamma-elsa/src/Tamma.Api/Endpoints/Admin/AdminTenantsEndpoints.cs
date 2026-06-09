@@ -166,7 +166,7 @@ public static class AdminTenantsEndpoints
                 Status = EF.Property<string?>(t, "Status"),
                 PlanId = EF.Property<Guid?>(t, "PlanId"),
                 EncryptedConn = EF.Property<byte[]?>(t, "EncryptedConnectionString"),
-                KekVersion = EF.Property<int?>(t, "KekVersion"),
+                KekVersion = (int?)EF.Property<short>(t, "KekVersion"),
                 FailureReason = EF.Property<string?>(t, "FailureReason"),
                 DeleteRequestedAt = EF.Property<DateTime?>(t, "DeleteRequestedAt"),
             })
@@ -650,7 +650,7 @@ public static class AdminTenantsEndpoints
                 Status = EF.Property<string?>(t, "Status"),
                 PlanId = EF.Property<Guid?>(t, "PlanId"),
                 EncryptedConn = EF.Property<byte[]?>(t, "EncryptedConnectionString"),
-                KekVersion = EF.Property<int?>(t, "KekVersion"),
+                KekVersion = (int?)EF.Property<short>(t, "KekVersion"),
                 FailureReason = EF.Property<string?>(t, "FailureReason"),
                 DeleteRequestedAt = EF.Property<DateTime?>(t, "DeleteRequestedAt"),
             })

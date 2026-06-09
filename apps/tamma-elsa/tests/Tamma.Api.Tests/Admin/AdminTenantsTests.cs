@@ -132,7 +132,7 @@ public class AdminTenantsTests
         _db.Entry(tenant).Property("PlanId").CurrentValue = planId ?? PlansSeeder.FreePlanId;
         _db.Entry(tenant).Property("FailureReason").CurrentValue = failureReason;
         _db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = deleteRequestedAt;
-        _db.Entry(tenant).Property("KekVersion").CurrentValue = kekVersion;
+        _db.Entry(tenant).Property("KekVersion").CurrentValue = (short)(kekVersion ?? 1);
         _db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = encryptedConn;
         await _db.SaveChangesAsync();
         return id;

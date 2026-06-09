@@ -114,7 +114,7 @@ public class KekRotationPostFixTests
             var entry = ctx.Tenants.Add(tenant);
             entry.Property("Status").CurrentValue = "active";
             entry.Property("EncryptedConnectionString").CurrentValue = envelope;
-            entry.Property("KekVersion").CurrentValue = 1;
+            entry.Property("KekVersion").CurrentValue = (short)1;
             await ctx.SaveChangesAsync();
         }
 
@@ -211,7 +211,7 @@ public class KekRotationPostFixTests
             var entry = ctx.Tenants.Add(tenant);
             entry.Property("Status").CurrentValue = "active";
             entry.Property("EncryptedConnectionString").CurrentValue = envelope;
-            entry.Property("KekVersion").CurrentValue = 1;
+            entry.Property("KekVersion").CurrentValue = (short)1;
             await ctx.SaveChangesAsync();
         }
 
@@ -325,7 +325,7 @@ public class KekRotationPostFixTests
             var entry = ctx.Tenants.Add(tenant);
             entry.Property("Status").CurrentValue = "active";
             entry.Property("EncryptedConnectionString").CurrentValue = envelope;
-            entry.Property("KekVersion").CurrentValue = 1;
+            entry.Property("KekVersion").CurrentValue = (short)1;
             await ctx.SaveChangesAsync();
         }
 

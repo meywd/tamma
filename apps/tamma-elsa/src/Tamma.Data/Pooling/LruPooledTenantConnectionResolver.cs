@@ -874,7 +874,7 @@ public sealed class LruPooledTenantConnectionResolver
                 t.DeletedAt,
                 Status = EF.Property<string?>(t, "Status"),
                 Envelope = EF.Property<byte[]?>(t, "EncryptedConnectionString"),
-                KekVersion = EF.Property<int?>(t, "KekVersion"),
+                KekVersion = (int?)EF.Property<short>(t, "KekVersion"),
             })
             .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);

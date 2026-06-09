@@ -83,7 +83,7 @@ public class LruPooledTenantConnectionResolverTests
         entry.Property("Status").CurrentValue = status;
         entry.Property("EncryptedConnectionString").CurrentValue =
             Encoding.UTF8.GetBytes(connectionString);
-        entry.Property("KekVersion").CurrentValue = 1;
+        entry.Property("KekVersion").CurrentValue = (short)1;
         await ctx.SaveChangesAsync();
         return tenantId;
     }
@@ -164,7 +164,7 @@ public class LruPooledTenantConnectionResolverTests
             var entry = ctx.Tenants.Add(tenant);
             entry.Property("Status").CurrentValue = "active";
             entry.Property("EncryptedConnectionString").CurrentValue = Array.Empty<byte>();
-            entry.Property("KekVersion").CurrentValue = 1;
+            entry.Property("KekVersion").CurrentValue = (short)1;
             await ctx.SaveChangesAsync();
         }
 

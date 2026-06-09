@@ -203,7 +203,9 @@ internal static class TammaModelConfiguration
                 entity.Property<string?>("Status").HasMaxLength(32);
                 entity.Property<Guid?>("PlanId");
                 entity.Property<byte[]?>("EncryptedConnectionString").HasColumnType("bytea");
-                entity.Property<int?>("KekVersion");
+                // smallint NOT NULL DEFAULT 1 per spec (plan 2026-06-09 §2.2). CLR type
+                // short — every EF.Property<T> read of this column must use short.
+                entity.Property<short>("KekVersion").HasDefaultValue((short)1);
                 entity.Property<string?>("FailureReason");
                 entity.Property<DateTime?>("DeleteRequestedAt");
 

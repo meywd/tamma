@@ -65,7 +65,7 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
         // because the rotation re-encrypt loop owns that path explicitly;
         // this just guards the retry-loop case.
         var existingEnvelope = (string?)db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue;
-        var existingKek = (int?)db.Entry(tenant).Property("KekVersion").CurrentValue;
+        var existingKek = (int?)(short?)db.Entry(tenant).Property("KekVersion").CurrentValue;
         if (!string.IsNullOrEmpty(existingEnvelope) && existingKek == kek)
         {
             Logger?.LogInformation(
@@ -76,7 +76,7 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
 
         var envelope = protector.Encrypt(cs);
         db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = envelope;
-        db.Entry(tenant).Property("KekVersion").CurrentValue = kek;
+        db.Entry(tenant).Property("KekVersion").CurrentValue = (short)kek;
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(context.CancellationToken);
 
