@@ -88,11 +88,16 @@ public class ControlPlaneDbContextModelTests
             // older table stays for the deprecation window but new
             // deliveries land here for every PlatformKind.
             "platform_webhook_deliveries",
+            // Unified-tenancy Phase 0 (plan 2026-06-09) — registry of
+            // shared-pool and dedicated DB instances. Each tenant row
+            // references one of these via DatabaseId.
+            "tenant_databases",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
             + "tenant_platform_installations; Story 31-7 adds "
-            + "platform_webhook_deliveries.");
+            + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
+            + "tenant_databases.");
     }
 
     [Test]

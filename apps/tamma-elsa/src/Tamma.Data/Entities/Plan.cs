@@ -35,6 +35,13 @@ public class Plan
     /// signup UI. Legacy/grandfathered plans flip this off.</summary>
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// Unified-tenancy placement (plan 2026-06-09 §2.3, decision 2):
+    /// <c>shared</c> = tenant schema lands in a shared-pool DB;
+    /// <c>dedicated</c> = tenant gets a single-tenant DB.
+    /// </summary>
+    public string PlacementPolicy { get; set; } = "shared";
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

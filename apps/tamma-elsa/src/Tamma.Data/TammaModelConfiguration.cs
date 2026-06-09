@@ -434,13 +434,20 @@ internal static class TammaModelConfiguration
         // ── Plan (Story 28-1) ──
         modelBuilder.Entity<Plan>(entity =>
         {
-            entity.ToTable("plans");
+            entity.ToTable("plans", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plans_placement_policy",
+                    "\"PlacementPolicy\" IN ('shared','dedicated')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(64);
             entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.MonthlyPriceUsd).HasPrecision(18, 2);
             entity.Property(e => e.Quotas).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.PlacementPolicy)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
