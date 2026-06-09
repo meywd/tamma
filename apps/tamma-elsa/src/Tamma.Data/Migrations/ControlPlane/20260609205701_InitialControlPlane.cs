@@ -1161,12 +1161,14 @@ namespace Tamma.Data.Migrations.ControlPlane
             // triggers), partial/expression indexes, legacy CHECKs, and the
             // api_keys self-FK. RLS removal is deliberately deferred to
             // unified-tenancy Phase 5 — Phase 0 is behavior-neutral.
+            // Must remain the last operation in Up(): sections 2-7 reference tables created above.
             migrationBuilder.Sql("""
                 -- 1. tamma_app role (cluster-level, idempotent) + grants.
                 --    Phase-3 RLS design: tamma_app is the future runtime role;
-                --    policies below stay dormant until the connection string
-                --    switches to it. Password is a placeholder; production
-                --    overrides via ALTER ROLE.
+                --    RLS policies are enforced only for non-BYPASSRLS roles like
+                --    tamma_app — the migrator/superuser connection bypasses RLS
+                --    entirely, so policies here have no effect on migrations.
+                --    Password is a placeholder; production overrides via ALTER ROLE.
                 DO $$
                 BEGIN
                   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tamma_app') THEN
@@ -1240,14 +1242,21 @@ namespace Tamma.Data.Migrations.ControlPlane
                 -- 4. RLS policies — FINAL shapes as the old chain left them
                 --    (users / github_installations / user_invites carry the
                 --    Phase2RlsNullPolicyTightening strict shape, no IS NULL branch).
+                DROP POLICY IF EXISTS tenant_isolation_policy ON tenants;
                 CREATE POLICY tenant_isolation_policy ON tenants
                   USING ("Id" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
                   WITH CHECK ("Id" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
+                DROP POLICY IF EXISTS tenant_isolation_policy ON tenant_memberships;
                 CREATE POLICY tenant_isolation_policy ON tenant_memberships
                   USING ("TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
                   WITH CHECK ("TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
 
+                -- The IS NULL branch below is deliberate: it covers the Phase-1 join
+                -- path where a repo row can be reached via an installation whose TenantId
+                -- has not yet been set. The github_installations policy intentionally
+                -- lacks this branch (tightened in Phase2RlsNullPolicyTightening).
+                DROP POLICY IF EXISTS tenant_isolation_policy ON github_installation_repos;
                 CREATE POLICY tenant_isolation_policy ON github_installation_repos
                   USING (
                     EXISTS (
@@ -1260,6 +1269,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                     )
                   );
 
+                DROP POLICY IF EXISTS tenant_isolation_policy ON api_keys;
                 CREATE POLICY tenant_isolation_policy ON api_keys
                   USING (
                     "Scope" = 'service'
@@ -1272,6 +1282,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                     OR "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
                   );
 
+                DROP POLICY IF EXISTS tenant_isolation_policy ON users;
                 CREATE POLICY tenant_isolation_policy ON users
                   USING (
                     "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
@@ -1280,6 +1291,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                     "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
                   );
 
+                DROP POLICY IF EXISTS tenant_isolation_policy ON github_installations;
                 CREATE POLICY tenant_isolation_policy ON github_installations
                   USING (
                     "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
@@ -1288,6 +1300,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                     "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
                   );
 
+                DROP POLICY IF EXISTS tenant_isolation_policy ON user_invites;
                 CREATE POLICY tenant_isolation_policy ON user_invites
                   USING (
                     "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
@@ -1353,9 +1366,10 @@ namespace Tamma.Data.Migrations.ControlPlane
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Ported objects: everything table-scoped (policies, triggers,
-            // partial indexes, CHECKs, the api_keys self-FK) dies with the
-            // DropTable calls below. Only the trigger function is standalone.
+            // Ported objects: triggers die via the DROP FUNCTION ... CASCADE line
+            // immediately below (the function is the trigger's dependency).
+            // All remaining table-scoped objects (policies, partial indexes,
+            // CHECKs, the api_keys self-FK) die with the DropTable calls below.
             // The tamma_app role is deliberately NOT dropped: it is
             // cluster-level and may carry grants in other databases on the
             // same server — dropping a role another DB still references is
