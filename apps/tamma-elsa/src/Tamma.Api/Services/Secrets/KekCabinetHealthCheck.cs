@@ -77,7 +77,6 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
                 .Where(t => t.DeletedAt == null)
                 .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
                 .Select(t => (int?)EF.Property<short>(t, "KekVersion"))
-                .Where(v => v != null)
                 .MinAsync(cancellationToken)
                 .ConfigureAwait(false);
 

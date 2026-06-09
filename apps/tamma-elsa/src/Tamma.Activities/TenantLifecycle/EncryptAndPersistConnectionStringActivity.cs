@@ -19,7 +19,9 @@ namespace Tamma.Activities.TenantLifecycle;
 ///
 /// <para>Compensation: <see cref="DeleteTenantWorkflow"/> nulls the
 /// column on cleanup; per Doc 04 §6.3 step J. The compensator here
-/// (used when later steps fail) sets the columns back to NULL.</para>
+/// (used when later steps fail) sets <c>EncryptedConnectionString</c>
+/// back to NULL; <c>KekVersion</c> retains its last written value
+/// because the column is <c>NOT NULL</c> and cannot be cleared.</para>
 /// </summary>
 [Activity(
     "Tamma.TenantLifecycle",

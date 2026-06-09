@@ -14,15 +14,23 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Tests.Secrets;
 
 /// <summary>
-/// PF-S10 — pin the legacy-NULL handling in
-/// <see cref="KekCabinetHealthCheck"/>. The previous filter
-/// (<c>WHERE v != null</c>) skipped legacy rows entirely; after two
-/// rotations they would silently fall off the retired-keys ring and
-/// become permanently undecryptable, but readiness still passed.
+/// Integration tests for <see cref="KekCabinetHealthCheck"/>.
 ///
-/// The fix: count rows with <c>KekVersion IS NULL</c> separately and
-/// surface as <see cref="HealthStatus.Unhealthy"/> with a remediation
-/// message.
+/// <para>Covered scenarios:</para>
+/// <list type="bullet">
+///   <item><description>No encrypted rows → Healthy ("no encrypted tenant rows yet").</description></item>
+///   <item><description>All rows at the active KEK version → Healthy.</description></item>
+///   <item><description>A row whose <c>KekVersion</c> is older than the minimum
+///   decryptable version (active − retainedHistorySize) → Unhealthy with a
+///   rotation-runbook message. This ensures the health check catches laggard rows
+///   before they fall outside the retained-keys ring and become permanently
+///   undecryptable.</description></item>
+///   <item><description>No <see cref="IDbContextFactory{ControlPlaneDbContext}"/> wired
+///   (dev/test path, stub resolver) → Healthy with a "no CP DbContext factory" note.</description></item>
+/// </list>
+///
+/// <para><c>KekVersion</c> is <c>smallint NOT NULL DEFAULT 1</c> (Phase 0 schema).
+/// Legacy-NULL rows cannot exist, so no NULL-specific path is tested.</para>
 /// </summary>
 [TestFixture]
 public class KekCabinetHealthCheckTests
