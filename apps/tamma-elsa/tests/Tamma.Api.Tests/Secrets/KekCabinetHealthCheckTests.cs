@@ -122,52 +122,6 @@ public class KekCabinetHealthCheckTests
     }
 
     [Test]
-    [Ignore("KekVersion is now smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2). " +
-            "Legacy-NULL rows can no longer be inserted — this scenario is permanently dead.")]
-    public async Task CheckHealth_LegacyNullVersionRow_ReturnsUnhealthy()
-    {
-        // PF-S10 — exact regression case: KekVersion=null + active=v3 +
-        // retainedHistorySize=2 (so the cabinet covers v1..v3). Without
-        // the fix the legacy row is invisible to the laggard check and
-        // readiness passes. With the fix we surface as Unhealthy with
-        // a remediation message.
-        await SeedTenantWithKekVersionAsync(kekVersion: null);
-        var kek = MakeKekProvider(activeVersion: 3, retainedHistorySize: 2);
-        var check = new KekCabinetHealthCheck(
-            kek, NullLogger<KekCabinetHealthCheck>.Instance, _dbContextFactory);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("legacy");
-        result.Description.Should().Contain("re-encrypt");
-    }
-
-    [Test]
-    [Ignore("KekVersion is now smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2). " +
-            "Legacy-NULL rows can no longer be inserted — this scenario is permanently dead.")]
-    public async Task CheckHealth_LegacyNullCount_ReportedInMessage()
-    {
-        // Three legacy rows (NULL version) + one current row. The
-        // health check should surface "3 legacy rows lack version
-        // stamp" so operators have an actionable count.
-        for (var i = 0; i < 3; i++)
-        {
-            await SeedTenantWithKekVersionAsync(kekVersion: null);
-        }
-        await SeedTenantWithKekVersionAsync(kekVersion: 3);
-
-        var kek = MakeKekProvider(activeVersion: 3, retainedHistorySize: 2);
-        var check = new KekCabinetHealthCheck(
-            kek, NullLogger<KekCabinetHealthCheck>.Instance, _dbContextFactory);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("3 legacy rows");
-    }
-
-    [Test]
     public async Task CheckHealth_LaggardVersion_BeyondRing_ReturnsUnhealthy()
     {
         // Existing behaviour: a row at v1 with active=v3 + history=1

@@ -63,6 +63,7 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
             await using var ctx = await _dbContextFactory
                 .CreateDbContextAsync(cancellationToken)
                 .ConfigureAwait(false);
+            // Vestigial since Phase 0 made KekVersion NOT NULL — always 0 rows; remove in unified-tenancy Phase 5.
             // PF-S10 — count legacy rows that were stamped before
             // KekVersion existed (NULL). Treat them as "version 0";
             // after two rotations they fall off the retired ring and
