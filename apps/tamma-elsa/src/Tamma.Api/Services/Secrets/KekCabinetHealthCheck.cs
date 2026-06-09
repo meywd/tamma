@@ -63,20 +63,10 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
             await using var ctx = await _dbContextFactory
                 .CreateDbContextAsync(cancellationToken)
                 .ConfigureAwait(false);
-            // Vestigial since Phase 0 made KekVersion NOT NULL — always 0 rows; remove in unified-tenancy Phase 5.
-            // PF-S10 — count legacy rows that were stamped before
-            // KekVersion existed (NULL). Treat them as "version 0";
-            // after two rotations they fall off the retired ring and
-            // become permanently undecryptable. Report as Unhealthy
-            // with a remediation message so readiness blocks the
-            // deploy until an operator re-encrypts them.
-            var legacyNullCount = await ctx.Tenants
-                .IgnoreQueryFilters()
-                .Where(t => t.DeletedAt == null)
-                .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Where(t => (int?)EF.Property<short>(t, "KekVersion") == null)
-                .CountAsync(cancellationToken)
-                .ConfigureAwait(false);
+            // Vestigial since Phase 0 made KekVersion NOT NULL — the legacy
+            // "NULL = version 0" state can no longer exist. Field retained so the
+            // health-check output shape is unchanged; remove in unified-tenancy Phase 5.
+            const int legacyNullCount = 0;
 
             // Find the lowest KekVersion across non-deleted tenant rows
             // that actually carry an encrypted connection string AND
