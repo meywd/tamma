@@ -1923,7 +1923,7 @@ kb.MapGet("/analytics/costs", KbEndpoints.GetKbCosts);
 //
 // On first-ever deploy (no EF migration history), any legacy tables from the
 // previous TypeScript API / raw-SQL mentorship schema would collide with the
-// InitialSchema migration. Drop them before applying migrations — per the
+// InitialControlPlane baseline. Drop them before applying migrations — per the
 // Epic 19 wipe-and-recreate directive. Subsequent deploys apply migrations
 // incrementally without any cleanup.
 // ────────────────────────────────────────────────────────────────────────────
@@ -1935,7 +1935,8 @@ using (var scope = app.Services.CreateScope())
         // Per the Epic 19 wipe-and-recreate directive ("nothing exists
         // important, wipe and recreate"): drop all Tamma-managed tables
         // including the EF migration history on every deploy, then let
-        // Migrate() rebuild from InitialSchema + all subsequent migrations.
+        // Migrate() rebuild from the InitialControlPlane baseline + any
+        // subsequent migrations.
         //
         // This is destructive. Do NOT adopt this pattern in an environment
         // with user data you care about. It exists to unstick the EF Core

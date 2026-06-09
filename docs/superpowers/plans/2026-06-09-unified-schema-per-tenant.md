@@ -172,9 +172,12 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
 6. **api_keys Scope CHECK is transitional**: `('platform','user','installation','service','tenant')`
    on CP — live code writes service/installation/tenant scopes to CP today. Tighten to the spec's
    `('platform','user')` when tenant-scoped keys physically move out (Phase 2+).
-7. **Conn-string CHECK exempts `provisioning`,`failed`,`deleted`** (besides NULL/`pending_verification`)
-   — today's flows hold NULL conn strings in those states (mint happens mid-provisioning; failure can
-   precede mint; delete nulls the envelope). Spec-exact form lands with Phase 3's mint-at-creation.
+7. **Conn-string CHECK exempts `provisioning`,`failed`,`deleted`,`deleting`,`delete_requested`**
+   (besides NULL/`pending_verification`) — presence is enforced only for `active`/`suspended`.
+   Today's flows hold NULL conn strings in those states (mint happens mid-provisioning; failure can
+   precede mint; delete nulls the envelope), and force-delete enters deleting/delete_requested from
+   `failed` (or legacy NULL-status) rows that never got minted — without the exemption the designed
+   cleanup path hits 23514. Spec-exact form lands with Phase 3's mint-at-creation.
 8. **RLS + tamma_app role ported verbatim** into the collapsed `InitialControlPlane` baseline
    (34 raw-SQL objects) so Phase 0 stays behavior-neutral; removal stays Phase 5.
 

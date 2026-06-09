@@ -561,7 +561,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_tenants", x => x.Id);
-                    table.CheckConstraint("ck_tenants_connection_string_present", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','failed','deleted') OR \"EncryptedConnectionString\" IS NOT NULL");
+                    table.CheckConstraint("ck_tenants_connection_string_present", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','failed','deleted','deleting','delete_requested') OR \"EncryptedConnectionString\" IS NOT NULL");
                     table.CheckConstraint("ck_tenants_status", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','active','delete_requested','deleting','deleted','failed','suspended')");
                     table.ForeignKey(
                         name: "FK_tenants_plans_PlanId",
@@ -1331,9 +1331,11 @@ namespace Tamma.Data.Migrations.ControlPlane
                   WHERE "RevokedAt" IS NULL;
 
                 -- 6. Legacy CHECK constraints not represented in the model.
+                -- 'team' (not legacy 'pro') matches the real PlansSeeder slugs
+                -- written by UpdateTenantPlan.
                 ALTER TABLE tenants
                   ADD CONSTRAINT ck_tenants_plan
-                  CHECK ("Plan" IN ('free', 'pro', 'enterprise'));
+                  CHECK ("Plan" IN ('free', 'team', 'enterprise'));
 
                 ALTER TABLE tenant_memberships
                   ADD CONSTRAINT ck_tenant_memberships_role

@@ -475,7 +475,7 @@ Key files:
 
 ### 6.1 Epic 17 RLS — superseded
 
-The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). Unified-tenancy Phase 0 (2026-06-09) collapsed the CP migration chain into a single `InitialControlPlane` baseline and ported the RLS scaffold (role + policies + triggers, 34 raw-SQL objects) into it verbatim so Phase 0 stays behavior-neutral; removal is planned for unified-tenancy Phase 5.
+The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). Unified-tenancy Phase 0 (2026-06-09) collapsed the CP migration chain into a single `InitialControlPlane` baseline and ported the surviving RLS scaffold into it: the role plus 7 RLS policies and 4 tenant-id triggers — the remaining policies/triggers died with the tables that moved out of the CP schema. Phase 0 stays behavior-neutral for the tables that remain; removal is planned for unified-tenancy Phase 5.
 
 ### 6.2 KEK rotation (Story 28-12)
 
@@ -806,7 +806,7 @@ The following are **in the codebase but scheduled for deletion**:
 
 1. **`TammaDbContext`** (`Tamma.Data/TammaDbContext.cs`) — legacy monolithic context. Still used by admin paths, migrations, background services, and most Story 18 endpoints. To be removed once every endpoint migrates to the CP + tenant split.
 2. **`TammaAppDbContext`** (`Tamma.Data/TammaAppDbContext.cs`) — RLS-enforcing subclass. Obsolete once db-per-tenant covers every path.
-3. **Phase-2 RLS artefacts** — the `tamma_app` role, 8 RLS policies, 6 tenant-id triggers (originally migration `20260419021119`; since unified-tenancy Phase 0 they live in the collapsed `InitialControlPlane` baseline, ported verbatim). The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant; removal is unified-tenancy Phase 5.
+3. **Phase-2 RLS artefacts** — the `tamma_app` role, 7 RLS policies, 4 tenant-id triggers (originally 8/6 in migration `20260419021119`; since unified-tenancy Phase 0 the survivors live in the collapsed `InitialControlPlane` baseline — the rest died with tables that left the CP schema). The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant; removal is unified-tenancy Phase 5.
 4. **Cranl provisioning columns** (`cranl_project_id`, `cranl_database_id`, etc. on `tenants` — originally migration `20260419204924`, now part of the collapsed `InitialControlPlane` baseline). Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns; they go when the legacy provisioning path is removed.
 5. **Mentorship single-DB path** — `MentorshipSessionRepository` + `MentorshipController` still reference `TammaDbContext`. Move to `TenantDbContext` when the mentorship stories get re-validated.
 

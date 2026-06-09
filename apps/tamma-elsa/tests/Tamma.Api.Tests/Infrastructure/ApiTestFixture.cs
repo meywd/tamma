@@ -108,11 +108,12 @@ public class ApiTestFixture
                 builder.DisableAlertHostedServices();
             });
 
-        // The InitialSchema migration references uuid_generate_v4() (pre-existing
-        // mentorship schema) which lives in the uuid-ossp extension. Enable it
-        // before running migrations so the container image (stock postgres:17-alpine)
-        // can execute the migration bundle. Same need on the tenant DB —
-        // the tenant migration creates uuid + jsonb columns.
+        // The TENANT migration chain references uuid_generate_v4() (mentorship
+        // schema) which lives in the uuid-ossp extension. Enable it before
+        // running migrations so the container image (stock postgres:17-alpine)
+        // can execute the migration bundle. The CP InitialControlPlane baseline
+        // only uses the built-in gen_random_uuid(); extensions are enabled on
+        // both DBs for uniformity.
         await EnableExtensionsAsync(Postgres.GetConnectionString());
         await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
 

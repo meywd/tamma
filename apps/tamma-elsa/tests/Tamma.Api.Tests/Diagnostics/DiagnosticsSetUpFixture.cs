@@ -107,8 +107,10 @@ public class DiagnosticsSetUpFixture
                 builder.DisableAlertHostedServices();
             });
 
-        // Some migrations depend on uuid-ossp / pgcrypto. Ensure both are
-        // available before EF applies the InitialSchema migration.
+        // The TENANT migration chain depends on uuid-ossp (uuid_generate_v4 in
+        // the mentorship schema). Ensure the extensions are available before EF
+        // applies migrations; the CP InitialControlPlane baseline only uses the
+        // built-in gen_random_uuid().
         await EnableExtensionsAsync(Postgres.GetConnectionString());
         await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
 

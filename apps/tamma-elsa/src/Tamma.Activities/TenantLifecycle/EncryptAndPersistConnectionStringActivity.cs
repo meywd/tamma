@@ -66,9 +66,9 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
         // We DO re-encrypt when the KEK version differs (rotation in flight)
         // because the rotation re-encrypt loop owns that path explicitly;
         // this just guards the retry-loop case.
-        var existingEnvelope = (string?)db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue;
+        var existingEnvelope = db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue;
         var existingKek = (int?)(short?)db.Entry(tenant).Property("KekVersion").CurrentValue;
-        if (!string.IsNullOrEmpty(existingEnvelope) && existingKek == kek)
+        if (ShouldSkipReencrypt(existingEnvelope, existingKek, kek))
         {
             Logger?.LogInformation(
                 "tenant.lifecycle.encrypt_creds skipped (idempotent) tenantId={TenantId} kek={Kek}",
@@ -86,4 +86,16 @@ public sealed class EncryptAndPersistConnectionStringActivity : TenantLifecycleA
             "tenant.lifecycle.encrypt_creds persisted tenantId={TenantId} kek={Kek} envelopeLen={Len}",
             tenantId, kek, envelope.Length);
     }
+
+    /// <summary>
+    /// Idempotency guard: skip re-encryption when the envelope is already
+    /// populated under the active KEK version. <paramref name="existingEnvelope"/>
+    /// is the raw shadow-property <c>CurrentValue</c> — a boxed <c>byte[]</c>
+    /// for the bytea column (it was previously cast to <c>string</c>, which
+    /// threw <see cref="InvalidCastException"/> whenever the guard fired with
+    /// a populated envelope). Exposed for direct unit testing because the
+    /// activity itself only runs inside the Elsa runtime.
+    /// </summary>
+    internal static bool ShouldSkipReencrypt(object? existingEnvelope, int? existingKek, int activeKek)
+        => existingEnvelope is byte[] { Length: > 0 } && existingKek == activeKek;
 }

@@ -49,9 +49,10 @@ public class ProvidersSetUpFixture
 
         await Task.WhenAll(Postgres.StartAsync(), TenantPostgres.StartAsync());
 
-        // InitialSchema uses uuid_generate_v4() which requires the uuid-ossp
-        // extension; create it up-front so EF migrations succeed on a vanilla
-        // Postgres image.
+        // The TENANT migration chain uses uuid_generate_v4() which requires the
+        // uuid-ossp extension; create it up-front so EF migrations succeed on a
+        // vanilla Postgres image. (The CP InitialControlPlane baseline only
+        // uses the built-in gen_random_uuid(); enabled on both for uniformity.)
         await EnableExtensionsAsync(Postgres.GetConnectionString());
         await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
 

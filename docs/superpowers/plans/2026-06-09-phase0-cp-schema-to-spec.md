@@ -60,11 +60,16 @@ image as CI), `dotnet-ef` 9.0.9 (already installed globally — verified).
    'service','tenant')`, NOT the spec-final `('platform','user')`. Reason: three live CP code paths
    write `service`/`installation`/`tenant` today (see facts above); the spec-final CHECK lands when
    tenant-scoped keys physically move out of CP (unified-tenancy Phase 2+).
-2. **Connection-string CHECK exempts `provisioning`, `failed`, `deleted`** in addition to NULL and
-   `pending_verification`. Reason: those three states legitimately coexist with a NULL connection
-   string in today's flows (mint happens mid-provisioning; failure can precede mint; delete nulls
-   the envelope). The spec's invariant — *active tenants always have a connection string* — is
-   enforced. Tighten to spec-exact in Phase 3 when every tenant is minted at creation.
+2. **Connection-string CHECK exempts `provisioning`, `failed`, `deleted`, `deleting`,
+   `delete_requested`** in addition to NULL and `pending_verification` — i.e. presence is enforced
+   only for `active` and `suspended`. Reason: provisioning/failed/deleted legitimately coexist with
+   a NULL connection string in today's flows (mint happens mid-provisioning; failure can precede
+   mint; delete nulls the envelope), and deleting/delete_requested can be entered from `failed`
+   (or legacy NULL-status) rows that never got a connection string minted — force-delete
+   (`AdminTenantsEndpoints.ForceDeleteTenant`, `MarkTenantDeletingActivity`) would otherwise hit
+   23514 on the designed cleanup path. The spec's invariant — *active tenants always have a
+   connection string* — is enforced. Tighten to spec-exact in Phase 3 when every tenant is minted
+   at creation.
 
 ---
 

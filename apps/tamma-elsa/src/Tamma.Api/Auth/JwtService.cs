@@ -101,8 +101,8 @@ public class JwtService : IJwtService
         Guid? impId = null)
     {
         // Story 28-R2 / Finding C1 — the platform role is now sourced from the
-        // dedicated users.platform_role column (added by AddUsersPlatformRole
-        // migration), NOT from the per-tenant role. Before C1, this was
+        // dedicated users.platform_role column, NOT from the per-tenant
+        // role. Before C1, this was
         // `role == "owner" ? "platform_admin" : "user"` — but every signed-up
         // user is auto-owner of their personal tenant, so that mapping let
         // every user pass OwnerAccess on every /api/admin/* route.

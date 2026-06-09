@@ -53,12 +53,11 @@ internal static class TammaModelConfiguration
         {
             entity.ToTable("users", t =>
             {
-                // Story 28-R2/C1 — model-level mirror of the raw-SQL CHECK
-                // installed by migration 20260426172707_AddUsersPlatformRole.
-                // The old constraint name ('users_platform_role_check') stays
-                // in databases built from the old chain; this new name
-                // ('ck_users_platform_role') coexists harmlessly and the old
-                // one vanishes when the chain is collapsed in Phase 0 Step N.
+                // Story 28-R2/C1 — model-level CHECK on platform_role. The
+                // legacy raw-SQL constraint ('users_platform_role_check')
+                // from the pre-collapse chain was dropped when the chain was
+                // collapsed into InitialControlPlane (Phase 0); this model-
+                // level constraint is now the only source of truth.
                 t.HasCheckConstraint(
                     "ck_users_platform_role",
                     "\"platform_role\" IN ('user','platform_admin')");
@@ -68,8 +67,8 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Role).IsRequired().HasMaxLength(20).HasDefaultValue("member");
             // Story 28-R2/C1 — separate platform-admin column. The DB-level
-            // CHECK constraint is installed by the AddUsersPlatformRole
-            // migration; here we just declare the EF projection.
+            // CHECK constraint is the model-level ck_users_platform_role
+            // declared above; here we just declare the EF projection.
             entity.Property(e => e.PlatformRole)
                 .HasColumnName("platform_role")
                 .IsRequired()
@@ -255,9 +254,15 @@ internal static class TammaModelConfiguration
 
                 // CHECKs reference shadow columns, so they live inside this guard.
                 // Conn-string CHECK: the spec invariant is "active tenants always have
-                // a connection string". provisioning/failed/deleted are exempt because
-                // today's flows legitimately hold NULL there (mint happens mid-
-                // provisioning; failure can precede mint; delete nulls the envelope).
+                // a connection string" — enforced only for active/suspended.
+                // provisioning/failed/deleted are exempt because today's flows
+                // legitimately hold NULL there (mint happens mid-provisioning;
+                // failure can precede mint; delete nulls the envelope).
+                // deleting/delete_requested are exempt because force-delete enters
+                // them from failed (or legacy NULL-status) rows that never got a
+                // connection string minted — without the exemption the designed
+                // cleanup path (AdminTenantsEndpoints.ForceDeleteTenant,
+                // MarkTenantDeletingActivity) hits 23514.
                 // Tighten to spec-exact (only pending_verification exempt) in Phase 3.
                 entity.ToTable("tenants", t =>
                 {
@@ -269,7 +274,8 @@ internal static class TammaModelConfiguration
                     t.HasCheckConstraint(
                         "ck_tenants_connection_string_present",
                         "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
-                        "'provisioning','failed','deleted') " +
+                        "'provisioning','failed','deleted','deleting'," +
+                        "'delete_requested') " +
                         "OR \"EncryptedConnectionString\" IS NOT NULL");
                 });
 
