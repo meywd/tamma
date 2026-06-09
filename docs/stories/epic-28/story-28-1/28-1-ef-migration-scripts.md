@@ -81,26 +81,41 @@ to apply when it spins up a new tenant**.
 
 ### AC5: Strict typing and constraints
 
-- [ ] `tenants.Status` is backed by a `CHECK` constraint enumerating the
+- [x] `tenants.Status` is backed by a `CHECK` constraint enumerating the
       valid states from Doc 01 §10.2:
       `pending_verification | provisioning | active | delete_requested | deleting | deleted | failed | suspended`.
-- [ ] `tenants.KekVersion` is `smallint NOT NULL DEFAULT 1` per Doc 01
+      > **Landed via unified-tenancy Phase 0 (2026-06-09):**
+      > `ck_tenants_status` in `TammaModelConfiguration.cs` (also permits
+      > `NULL` for pre-cutover rows).
+- [x] `tenants.KekVersion` is `smallint NOT NULL DEFAULT 1` per Doc 01
       §8.1 and Doc 04 §4.3.
-      > **Accepted spec divergence (2026-06-05):** shipped as `integer NULL`
-      > (`Property<int?>("KekVersion")` in `TammaModelConfiguration.cs`). A
-      > `null` KekVersion is the legacy-row heuristic path in
-      > `AesGcmConnectionStringDecryptor`; the wider, nullable column is
-      > functionally compatible and no migration to `smallint NOT NULL` is
-      > planned. Verification: `2026-05-30-epic-28-residual-verification.md`.
+      > **Superseded divergence:** Story 28-1 originally shipped `integer
+      > NULL` with a legacy-row heuristic in
+      > `AesGcmConnectionStringDecryptor` (accepted 2026-06-05). Unified-
+      > tenancy Phase 0 (2026-06-09) brought the column to spec —
+      > `Property<short>("KekVersion").HasDefaultValue((short)1)` — and
+      > excised the legacy-NULL path.
 - [ ] `tenants.EncryptedConnectionString` is `bytea` (nullable only
       during `pending_verification`; enforced by a partial `CHECK`
       constraint — `Status = 'pending_verification' OR
       EncryptedConnectionString IS NOT NULL`).
+      > **Transitional form shipped (Phase 0, 2026-06-09):**
+      > `ck_tenants_connection_string_present` also exempts
+      > `provisioning`/`failed`/`deleted` (and `NULL` Status) because
+      > today's flows legitimately hold NULL there. Spec-exact form lands
+      > with Phase 3's mint-at-creation.
 - [ ] `tenants.EncryptedElsaConnectionString` mirrors the same shape
       per Doc 04 §4.3.
 - [ ] `api_keys` CP table has a `Scope` column constrained to
       `('platform','user')`; tenant DB `api_keys` has `Scope = 'tenant'`
       enforced by a `CHECK` constraint per Doc 01 §1.4.
+      > **Transitional form shipped (Phase 0, 2026-06-09):** CP
+      > `ck_api_keys_scope` allows
+      > `('platform','user','installation','service','tenant')` — live
+      > code still writes service/installation/tenant scopes to CP.
+      > Tighten to `('platform','user')` when tenant-scoped keys
+      > physically move out (Phase 2+). Tenant-DB
+      > `ck_api_keys_tenant_scope` (`Scope = 'tenant'`) is in place.
 
 ### AC6: Required indexes
 

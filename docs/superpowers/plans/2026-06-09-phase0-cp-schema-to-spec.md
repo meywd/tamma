@@ -859,3 +859,20 @@ baseline via `Program.cs` `Migrate()` — this is the end-to-end gate).
   all `EF.Property<short>` reads cast back to `int?`/`int` at DTO boundaries.
 - **Known risk**: EF model ≠ old chain between T1-T6 and T8 — harmless (tests build schema from
   the model or run on the new baseline; old chain only replayed statically in T7).
+
+---
+
+## Execution record (2026-06-09)
+
+All 10 tasks completed on feat/wave-b (commits 65ff281f..9ec93dd4 + this docs-closure commit).
+Validation: old-chain vs collapsed-baseline schema diff fully reconciled (110 lines, all
+whitelisted); 12/12 CHECK probes behaved as labeled on bare Postgres; full suite green. Notable
+execution findings:
+- Old chain's narrow `ck_api_keys_scope` ('user','installation','service') meant org-key creation
+  (Scope='tenant' on CP) violated it — latent prod bug fixed by the transitional CHECK.
+- `fk_api_keys_rotated_from` existed only as raw SQL (never modeled) — now ported; candidate for
+  proper modeling later.
+- uuid-ossp is NOT needed by the CP model (only mentorship configs reference uuid_generate_v4, and
+  CP ignores them); the collapsed baseline applies on bare Postgres.
+- Interim TenancyP0_* migrations were created during Tasks 2-5 (test suite replays the chain at API
+  startup) and deleted by the Task-8 collapse, as planned.

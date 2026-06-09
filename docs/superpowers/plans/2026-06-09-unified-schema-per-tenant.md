@@ -110,7 +110,7 @@ active tenant genuinely has a connection string.
 
 ## 4. Phase decomposition (each becomes its own task-plan)
 
-- **Phase 0 — CP schema to target + collapse CP baseline.** Add `tenant_databases`, tenant columns
+- **Phase 0 — DONE 2026-06-09.** CP schema to target + collapse CP baseline. Add `tenant_databases`, tenant columns
   (`SchemaName`, `DatabaseId`), CHECKs (Status, uniform connection-string, api_keys Scope), KekVersion
   → smallint; `plans.PlacementPolicy` + seed. Reconcile the runtime/design-time history-table-name
   mismatch. Delete CP migrations (`Migrations/` + `Migrations/ControlPlane/`) and regenerate one
@@ -166,6 +166,17 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
 5. **Scope vs Epic 28 — default:** treat as an **extension/re-scope of Epic 28** (reuses 28's resolver,
    KEK envelope, lifecycle-workflow + activity base). Tracking-doc update only; not a blocker. Confirm
    epic numbering when we wire story docs.
+
+**Phase 0 implementation deviations (2026-06-09, recorded from the task-plan):**
+
+6. **api_keys Scope CHECK is transitional**: `('platform','user','installation','service','tenant')`
+   on CP — live code writes service/installation/tenant scopes to CP today. Tighten to the spec's
+   `('platform','user')` when tenant-scoped keys physically move out (Phase 2+).
+7. **Conn-string CHECK exempts `provisioning`,`failed`,`deleted`** (besides NULL/`pending_verification`)
+   — today's flows hold NULL conn strings in those states (mint happens mid-provisioning; failure can
+   precede mint; delete nulls the envelope). Spec-exact form lands with Phase 3's mint-at-creation.
+8. **RLS + tamma_app role ported verbatim** into the collapsed `InitialControlPlane` baseline
+   (34 raw-SQL objects) so Phase 0 stays behavior-neutral; removal stays Phase 5.
 
 ---
 
