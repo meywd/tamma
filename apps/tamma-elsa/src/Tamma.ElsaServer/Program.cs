@@ -145,7 +145,9 @@ if (!string.IsNullOrWhiteSpace(cpConnection))
 {
     builder.Services.AddDbContextFactory<Tamma.Data.ControlPlaneDbContext>(opts =>
         opts.UseNpgsql(cpConnection, npgsql =>
-            npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
+            // Must match ControlPlaneDesignTimeDbContextFactory and DependencyInjection.cs
+            // (unified-tenancy Phase 0 reconciliation).
+            npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory")));
     builder.Services.AddScoped(sp =>
         sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<
             Tamma.Data.ControlPlaneDbContext>>().CreateDbContext());

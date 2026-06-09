@@ -11,10 +11,10 @@ namespace Tamma.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Program.cs wipes a known set of Tamma tables + __TammaMigrationsHistory
-            // on every deploy to work around a 42P07 race with EF's history
-            // table. `email_outbox` is not in that list, so on the second
-            // migrate replay the CreateTable below would collide. Drop it
+            // Program.cs wipes a known set of Tamma tables + __ControlPlaneMigrationsHistory
+            // (formerly __TammaMigrationsHistory) on every deploy to work around a 42P07
+            // race with EF's history table. `email_outbox` is not in that list, so on the
+            // second migrate replay the CreateTable below would collide. Drop it
             // defensively here so the migration is idempotent across the
             // wipe-and-recreate dance. Harmless for first-ever deploys.
             migrationBuilder.Sql("DROP TABLE IF EXISTS email_outbox CASCADE;");

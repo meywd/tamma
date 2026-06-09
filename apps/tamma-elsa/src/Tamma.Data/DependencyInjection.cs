@@ -73,7 +73,9 @@ public static class DependencyInjection
         services.AddDbContextFactory<ControlPlaneDbContext>(options =>
         {
             options.UseNpgsql(adminConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
+                // Must match ControlPlaneDesignTimeDbContextFactory — one history table
+                // for design-time and runtime (unified-tenancy Phase 0 reconciliation).
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
         });
         services.AddScoped(sp =>
             sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()

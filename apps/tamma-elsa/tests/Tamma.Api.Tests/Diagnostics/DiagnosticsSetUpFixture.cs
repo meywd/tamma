@@ -124,7 +124,7 @@ public class DiagnosticsSetUpFixture
         _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
         {
             DbAdapter = DbAdapter.Postgres,
-            TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__ControlPlaneMigrationsHistory") },
             SchemasToInclude = new[] { "public" }
         });
 

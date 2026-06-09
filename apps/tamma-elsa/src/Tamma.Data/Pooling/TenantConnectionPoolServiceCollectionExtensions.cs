@@ -105,7 +105,9 @@ public static class TenantConnectionPoolServiceCollectionExtensions
         services.AddPooledDbContextFactory<ControlPlaneDbContext>(opts =>
         {
             opts.UseNpgsql(controlPlaneConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
+                // Must match ControlPlaneDesignTimeDbContextFactory and DependencyInjection.cs
+                // (unified-tenancy Phase 0 reconciliation).
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
         });
 
         // Replace the stub. Use Replace+Singleton (not TryAdd) so this

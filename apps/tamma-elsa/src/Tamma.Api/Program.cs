@@ -1940,7 +1940,12 @@ using (var scope = app.Services.CreateScope())
         // This is destructive. Do NOT adopt this pattern in an environment
         // with user data you care about. It exists to unstick the EF Core
         // + Npgsql history-table race that crashed two consecutive deploys
-        // with SqlState=42P07 on __TammaMigrationsHistory.
+        // with SqlState=42P07 on the CP migrations-history table.
+        //
+        // History-table note (unified-tenancy Phase 0): the CP history table
+        // was renamed from __TammaMigrationsHistory to __ControlPlaneMigrationsHistory
+        // to match the design-time factory. BOTH names are dropped below so
+        // servers deployed before this rename are also cleaned up correctly.
         //
         // TAMMA_PRESERVE_DB=1 opts out — Migrate() runs incrementally,
         // preserving data but risking the 42P07 collision until EF/Npgsql
@@ -1971,13 +1976,14 @@ using (var scope = app.Services.CreateScope())
                     platform_email_outbox, platform_events, platform_queued_tasks,
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
-                    sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
-                    tenant_databases,
+                    sanitization_rules, stories,
+                    tenant_databases, tenant_invites, tenant_memberships, tenants,
                     tenant_platform_installations,
                     user_api_keys, user_installations, user_invites, users,
                     workflow_definitions, workflow_instances,
                     knex_migrations, knex_migrations_lock,
-                    ""__TammaMigrationsHistory""
+                    ""__TammaMigrationsHistory"",
+                    ""__ControlPlaneMigrationsHistory""
                 CASCADE;");
         }
 
