@@ -849,6 +849,30 @@ public class TenantMoveServiceEndToEndTests
         .Split(Path.PathSeparator)
         .Any(dir => !string.IsNullOrWhiteSpace(dir) && File.Exists(Path.Combine(dir, tool)));
 
+    private static int? ToolMajorVersion(string tool)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(tool, "--version")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            var output = p!.StandardOutput.ReadToEnd();
+            p.WaitForExit(5000);
+            var m = System.Text.RegularExpressions.Regex.Match(output, @"\b(\d+)\.");
+            return m.Success ? int.Parse(m.Groups[1].Value) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Major of the postgres image used below — keep in sync.</summary>
+    private const int ServerMajor = 17;
+
     [OneTimeSetUp]
     public async Task OneTimeSetUp()
     {
@@ -857,6 +881,22 @@ public class TenantMoveServiceEndToEndTests
             Assert.Ignore(
                 "pg_dump/pg_restore not found on PATH — the move e2e shells out to the "
                 + "real Postgres client tools and cannot run on this host.");
+        }
+
+        // pg_dump hard-refuses to dump a server NEWER than itself ("aborting
+        // because of server version mismatch"), so tool presence alone is not
+        // enough — CI runners ship an older client than the postgres:17
+        // container. Gate on client major >= server major.
+        var dumpMajor = ToolMajorVersion("pg_dump");
+        var restoreMajor = ToolMajorVersion("pg_restore");
+        if (dumpMajor is null || restoreMajor is null
+            || dumpMajor < ServerMajor || restoreMajor < ServerMajor)
+        {
+            Assert.Ignore(
+                $"pg_dump/pg_restore client major ({dumpMajor?.ToString() ?? "?"}/"
+                + $"{restoreMajor?.ToString() ?? "?"}) is older than the postgres:{ServerMajor} "
+                + "test server — pg_dump aborts on server-newer-than-client. Install "
+                + $"postgresql-client-{ServerMajor}+ to run the move e2e.");
         }
 
         _postgres = new PostgreSqlBuilder()
