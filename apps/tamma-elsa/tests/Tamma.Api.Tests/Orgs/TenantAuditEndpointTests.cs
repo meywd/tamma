@@ -176,6 +176,9 @@ public class TenantAuditEndpointTests
             Type = "org",
             OwnerId = owner.Id,
         });
+        // Phase 3 -- tenant events live in the tenant store, which is only
+        // reachable for provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(tenant.Id);
         return (tenant.Id, owner.Id);
     }
 
