@@ -1,7 +1,7 @@
 # Configuration & Feature-Flag Reference
 
 **Audience**: platform operators / oncall engineers
-**Last updated**: 2026-06-05
+**Last updated**: 2026-06-10
 
 Canonical index of Tamma's operator-facing configuration sections and
 feature flags. Settings are bound from `appsettings.json` (env-var form:
@@ -18,7 +18,7 @@ the linked docs.
 
 | Flag | Default | Host | Effect | Docs |
 |---|---|---|---|---|
-| `Backup:DeletionBackup` | `false` | elsa-server | `pg_dump` snapshot of a tenant DB before `DROP DATABASE` in `DeleteTenantWorkflow`. Requires `pg_dump` in the image + a durable mounted `Backup:Directory`. | [tenant-deletion-backup.md](./tenant-deletion-backup.md) |
+| `Backup:DeletionBackup` | `false` | elsa-server | Schema-scoped `pg_dump -n t_<hex>` snapshot before `DROP SCHEMA` in `DeleteTenantWorkflow` (was whole-DB pre unified-tenancy Phase 2). Requires `pg_dump` in the image + a durable mounted `Backup:Directory`. | [tenant-deletion-backup.md](./tenant-deletion-backup.md) |
 | `TenantConnectionPool:Warmup:Enabled` | `false` | api | Pre-warm the top-N tenant connection pools at startup. | [connection-pool-tuning.md](./connection-pool-tuning.md) |
 | `HourlyAnalyticsRollup:Enabled` | `true` | elsa-server | Hourly `platform_analytics_hourly` rollup scheduler. | [../runbooks/platform-analytics-hourly-rollup.md](../runbooks/platform-analytics-hourly-rollup.md) |
 | `TenantCleanupTrigger:Enabled` | `true` | elsa-server | Consumes `TENANT.CLEANUP_REQUESTED` events to drive `DeleteTenantWorkflow`. | Story 28-5 |
@@ -34,6 +34,7 @@ the linked docs.
 | `TenantConnectionPool` | api | Per-tenant LRU `NpgsqlDataSource` pool sizing + warmup. | [connection-pool-tuning.md](./connection-pool-tuning.md) |
 | `HourlyAnalyticsRollup` | elsa-server | Rollup scheduler cadence (`FireAtMinute`, `PollInterval`). | [runbook](../runbooks/platform-analytics-hourly-rollup.md) |
 | `Cranl` | api | Per-tenant infra provisioning (see `CLAUDE.md` "Multi-tenant provisioning"). | — |
+| `Cranl:EncryptionKey` | api | AES-GCM KEK (base64, 32 bytes) protecting tenant connection strings at rest. **REQUIRED for tenant provisioning** (unified-tenancy Phase 3 — every tenant mints an encrypted connection string at creation). A dev-only default ships in `appsettings.Development.json`; production supplies it via the `TAMMA_CRANL_ENCRYPTION_KEY` deploy secret (lands as `CRANL_ENCRYPTION_KEY` in the VPS `.env`). | `CLAUDE.md` "Multi-tenant provisioning" |
 
 ## Non-configurable behaviours worth knowing
 

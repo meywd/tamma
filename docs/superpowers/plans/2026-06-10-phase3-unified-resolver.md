@@ -243,3 +243,60 @@ inverted/added tests). Commit per bucket or as one
   bucket procedure. (2) `AddTenantConnectionPool`'s pooled CP factory behavior without a dedicated
   CP string needs reading before edit (T3 instructs). (3) ApiKeyAuthHandler's exception handling
   for missing envelopes — T5 will surface it via failing tests if inadequate; fix there.
+
+---
+
+## Execution record (2026-06-10) — PHASE COMPLETE
+
+**Commit range:** `27f99619..a58f983d` on `feat/wave-b`, plus the closing docs commit
+(`docs(tenancy-p3): mark Phase 3 complete ...`).
+
+| Commit | Task | What |
+|---|---|---|
+| `27f99619` | T1 | `ISystemStoreDbContextFactory` seam + ConventionStore system/tenant split; seeder off the resolver (`GetDataSourceAsync(Guid.Empty)` gone) |
+| — | T2 | **Resolved as no-op** (see below) — no commit |
+| `750bf004` | T3 | `feat!`: LRU resolver is the only tenant connection path; stub + `GuardTenantIsolationInProduction`/`Tamma:RequireTenantIsolation` deleted; `TenantDbContextFactory` resolver-only; pool registers unconditionally |
+| `ed287b1d` | T4 | Personal-tenant provisioning mandatory (soft-fail try/catch removed); dev KEK in `appsettings.Development.json` |
+| `f1107558` | T5 | Diagnostics bucket provisions tenants through the unified path |
+| `e54aec20` | T5 | Providers bucket (pinned test tenant provisioned) |
+| `683b7426` | T5 | Orgs bucket (org tenants provisioned) |
+| `c9ef45d5` | T5 | Dashboard/Engine/TaskQueue buckets |
+| `9d72951d` | T5 | SaaS/Epic9/Agents/Alerts buckets |
+| `d9dc85c6` | T5 | ConventionStore harness drops the relocated stub resolver |
+| `a58f983d` | T5 | src fix: per-tenant migration connection no longer strands an idle pool |
+
+**T2 finding — resolved as no-op.** The grep + service read showed the system-row (TenantId NULL)
+tiers for `sanitization_rules`, `agent_configs`, `budget_configs`, and `provider_health` are
+**dead**: their platform defaults are in-code per Story 28-1, and no live read/write path queries a
+NULL-tenant row for them. Only **conventions** has a real system-default tier, and T1 already moved
+it onto the system store. No split was invented for the dead tiers (per the plan's instruction).
+
+**T5 failure inventory:** the post-T3/T4 full suite opened at **91 failures**; bucket-by-bucket
+fixture migration (KEK env var + explicit `ProvisionAsync` per test tenant + resolver-ctor/fake
+swaps) drove it to **0**.
+
+**Production bugs exposed by the unified path** (fixed in `f1107558..a58f983d` — the test
+migration was the detector, the fixes are src/):
+
+1. **EF internal-service-provider explosion at >20 tenant data sources** — each per-tenant
+   `NpgsqlDataSource` produced a distinct EF internal service provider; `TenantDbContextFactory`
+   now lends a pooled connection instead.
+2. **CreateOrg emitted into the not-yet-provisioned tenant store** — org creation now calls
+   `ProvisionAsync` synchronously before the first tenant-store write; orgs and personal tenants
+   share the same first-class path.
+3. **DeleteOrg emitted after the soft-delete made the store unreachable** — lifecycle event now
+   emits before the delete (emit-before-delete).
+4. **Per-tenant migration connections stranded one idle pool each** — the one-shot migration
+   connection now sets `Pooling=false`.
+
+**Known residuals (deliberate):** failed CreateOrg leaves a recoverable half-tenant (idempotent
+re-provision exists, operator-driven — no self-service org re-provision endpoint yet);
+tenant-terminal lifecycle events (DELETED/PURGED) are written to the tenant's own store and are
+unreachable post-delete — move to the CP store when convenient.
+
+**Final gate:** full suite **4461 passed / 0 failed** (count shifted from the 4464 baseline with
+inverted/removed stub-era tests). Docs updated: parent plan Phase 3 marked DONE + deviations 13–17;
+`wiki/Architecture.md` (single resolver path, §6.3 system store, hard-fail provisioning);
+`wiki/Multi-Tenant-Provisioning.md` (synchronous org provisioning, stub removal);
+`docs/deployment/configuration-reference.md` (`Cranl:EncryptionKey` row; RequireTenantIsolation
+removal note verified).

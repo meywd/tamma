@@ -218,15 +218,16 @@ platform_email_outbox      (orphan — SMTP outbox)
 ### 3.2 Per-tenant schema (unified tenancy, authoritative)
 
 Code: `apps/tamma-elsa/src/Tamma.Data/TenantDbContext.cs`.
-Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Each tenant lives in its own `t_<hex>` Postgres schema inside a pooled database (`tenant_databases` registry), connecting as its own `tamma_tenant_<hex>` role with a minted `...;Search Path=t_<hex>` connection string — there is no `TenantId` column on any row; **the discriminator is the connection string**. (History: Epic 28 originally placed each tenant in its own database; unified-tenancy Phase 2 (2026-06-10) superseded that with schema-per-tenant — same connection-is-the-boundary model, cheaper placement.)
+Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Since unified-tenancy Phase 3 (2026-06-10) there is exactly **one** implementation — `LruPooledTenantConnectionResolver`, which decrypts the tenant's stored `EncryptedConnectionString` (`...;Search Path=t_<hex>`) and caches a pooled `NpgsqlDataSource` per tenant; the transitional `StubTenantConnectionResolver` (central-DB fallback) is deleted. Each tenant lives in its own `t_<hex>` Postgres schema inside a pooled database (`tenant_databases` registry), connecting as its own `tamma_tenant_<hex>` role — there is no `TenantId` column on any row; **the discriminator is the connection string**. (History: Epic 28 originally placed each tenant in its own database; unified-tenancy Phase 2 (2026-06-10) superseded that with schema-per-tenant — same connection-is-the-boundary model, cheaper placement.)
 Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/` — a single collapsed `InitialTenant` baseline (unified-tenancy Phase 1, 2026-06-09) that applies on bare Postgres (no extensions; `gen_random_uuid()` is a pg_catalog builtin since PG13). Tenant migrations are schema-aware: when the connection string carries a `Search Path`, `EfTenantDbMigrator` applies the baseline into that `t_<hex>` schema with an in-schema `__TenantMigrationsHistory`; with no `Search Path` it applies into `public`, exactly as before.
 
-**16 tables**:
+**17 tables**:
 
 | Table                    | Entity               | Purpose                                                                 |
 | ------------------------ | -------------------- | ----------------------------------------------------------------------- |
 | `agent_configs`          | `AgentConfig`        | Per-tenant role → provider-chain mapping                                |
 | `prompt_overrides`       | `PromptOverride`     | 3-layer prompt store overrides (user × scope × role × action)           |
+| `conventions`            | `Convention`         | Convention store rows; system defaults (TenantId NULL) live in the **system store** (§6.3) |
 | `provider_health`        | `ProviderHealth`     | Three-state circuit-breaker per provider+model                          |
 | `provider_diagnostics`   | `ProviderDiagnostic` | Per-call cost + latency + success samples                               |
 | `sanitization_rules`     | `SanitizationRule`   | Per-tenant content-sanitizer rule overrides                             |
@@ -254,6 +255,7 @@ email_outbox ────┘
 
 agent_configs
 prompt_overrides
+conventions
 provider_health ───< provider_diagnostics
 sanitization_rules
 budget_configs
@@ -448,7 +450,7 @@ The current architecture is **one Postgres role + `t_<hex>` schema per tenant in
 3. **Mint** — a tenant-facing connection string (`...;Search Path=t_<hex>`) is built against the pool row's database, AES-GCM-encrypted under the current KEK, and persisted to `tenants.EncryptedConnectionString` + `KekVersion`.
 4. **Migrate** — `EfTenantDbMigrator` applies the `InitialTenant` baseline into the schema (in-schema `__TenantMigrationsHistory`).
 
-Personal tenants provision **synchronously at first login** (soft-fail onto the transitional shared path until Phase 3 removes the stub resolver). Delete runs the reverse: schema-scoped backup (`pg_dump -n t_<hex>`) → `DROP SCHEMA ... CASCADE` → `DROP OWNED BY` + `DROP ROLE` on the target cluster → pool slot released (TenantCount decrement, `DatabaseId`/`SchemaName` nulled). The previous `CREATE DATABASE`/`DROP DATABASE` activities are deleted.
+Personal tenants provision **synchronously at first login**, and since Phase 3 this is **mandatory** — provisioning failures propagate and fail the request (the transitional soft-fail onto a shared path died with the stub resolver). Org creation likewise provisions its tenant synchronously before the first tenant-store write. Delete runs the reverse: schema-scoped backup (`pg_dump -n t_<hex>`) → `DROP SCHEMA ... CASCADE` → `DROP OWNED BY` + `DROP ROLE` on the target cluster → pool slot released (TenantCount decrement, `DatabaseId`/`SchemaName` nulled). The previous `CREATE DATABASE`/`DROP DATABASE` activities are deleted.
 
 ```
 resolution pipeline (per request)
@@ -473,9 +475,12 @@ TenantDbContext bound to the tenant-specific NpgsqlDataSource
         │  isolation comes from the CONNECTION, not the row
 ```
 
+Since unified-tenancy Phase 3 (2026-06-10) this pipeline is the **only** tenant connection path: `LruPooledTenantConnectionResolver` registers unconditionally (in dev/self-host the "control plane" is simply the central DB), `TenantDbContextFactory` is resolver-only (its shared-connection-string ctor is gone), and `StubTenantConnectionResolver` is deleted. The `Tamma:RequireTenantIsolation` guard knob was deleted with it — it guarded exactly the stub fallback that no longer exists. An unprovisioned tenant touching tenant data now fails fast (`TenantNotProvisionedException` / `TenantNotFoundException` → mapped by `TenantContextMiddleware`).
+
 Key files:
 
-- **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
+- **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `ISystemStoreDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
+- **Resolver**: `apps/tamma-elsa/src/Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs` — the single `ITenantConnectionResolver` implementation (LRU-cached per-tenant `NpgsqlDataSource`s).
 - **CP shadow columns** (Doc 01 §8.1): declared on the `Tenant` entity in `TammaModelConfiguration.ConfigureControlPlaneEntities` — `PlanId`, `Status` (state machine `pending_verification` → `provisioning` → `active` → `suspended`/`failed`/`delete_requested` → `deleting` → `deleted`, CHECK-enforced by `ck_tenants_status` since unified-tenancy Phase 0), `EncryptedConnectionString` (bytea), `KekVersion` (`smallint NOT NULL DEFAULT 1`), `FailureReason`, `DeleteRequestedAt`, plus `SchemaName` / `DatabaseId` (FK → `tenant_databases`; added in Phase 0, stamped at creation by the Phase-2 placement service).
 - **Interceptors**: `Tamma.Data/Interceptors/TenantContextInterceptor.cs` runs `SET LOCAL app.current_tenant_id = '...'` on every connection open (used on the legacy `TammaAppDbContext` path to make the Phase-2 RLS policies enforce).
 
@@ -493,6 +498,12 @@ The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (mig
 4. When every row is rewrapped, promote secondary → primary, clear secondary.
 
 Endpoints: `POST /api/admin/kek/rotate/start`, `GET /api/admin/kek/rotate/status` (owner-only). `apps/tamma-elsa/src/Tamma.Api/Endpoints/KekRotationEndpoints.cs`.
+
+### 6.3 System store (unified-tenancy Phase 3)
+
+Platform-level default rows — the **system store** — live in the central database's `public`-schema tenant tables (exactly where they always have) and are reached through a dedicated seam, `ISystemStoreDbContextFactory` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ISystemStoreDbContextFactory.cs`), which returns a `TenantDbContext` bound to the central connection (no `Search Path`). This replaced the transitional trick of routing `Guid.Empty` through the stub resolver.
+
+In practice the system store holds **conventions only**: `ConventionStore`/`ConventionStoreSeeder` read and write system-default rows (`TenantId IS NULL`) through the seam, while tenant-override rows go through `ITenantDbContextFactory` into the tenant's own schema — the resolution semantics (tenant → system → error) are unchanged. The other candidate entities (`sanitization_rules`, `agent_configs`, `budget_configs`, `provider_health`) turned out to have **no live system-row tier** — their platform defaults are in-code (Story 28-1), so no split was built for them. Moving system rows into CP-native tables is explicitly deferred (Phase 5+ consideration, only if friction appears).
 
 See [Epic 28 — DB-per-Tenant](Epics/Epic-28-DB-Per-Tenant.md) for the full 14-story plan and [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) for the onboarding UX.
 

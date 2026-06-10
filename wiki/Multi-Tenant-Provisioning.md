@@ -4,16 +4,16 @@
 **Depends on**: Epic 28 (tenant DbContext factory, tenant lifecycle workflows), Epic 29 Stories 29-6..29-8 (rotation primitive + handlers).
 **Source**: `docs/stories/epic-30/` (10 briefs + 10 impl plans + README).
 
-## Current state — unified tenancy Phase 2 (shipped 2026-06-10)
+## Current state — unified tenancy Phases 2–3 (shipped 2026-06-10)
 
-Before any Epic 30 backend lands, tenant creation already runs a **unified schema-per-tenant pipeline** (`TenantProvisioningService`, shared by the SaaS `CreateTenantWorkflow` and the single-user `EnsurePersonalTenantMiddleware`):
+Before any Epic 30 backend lands, tenant creation already runs a **unified schema-per-tenant pipeline** (`TenantProvisioningService`, shared by the SaaS `CreateTenantWorkflow`, inline org creation (`OrgEndpoints.CreateOrg`), and the single-user `EnsurePersonalTenantMiddleware`):
 
 1. **Placement** — `ITenantPlacementService` assigns the tenant to a `tenant_databases` pool row by plan tier (`plans.PlacementPolicy`: free/team → shared, enterprise → dedicated) and stamps `tenants.DatabaseId` + `SchemaName`.
 2. **Role + schema** — `CREATE ROLE tamma_tenant_<hex>` on the pool row's cluster; `CREATE SCHEMA t_<hex> AUTHORIZATION` that role with schema-scoped grants only (no access to `public` or sibling schemas) + `GRANT CONNECT` + per-DB default `search_path`.
 3. **Mint** — a `...;Search Path=t_<hex>` connection string is built against the pool row's database, AES-GCM-encrypted under the current KEK, and persisted on the tenant row.
 4. **Migrate** — the `InitialTenant` baseline applies into the schema (in-schema `__TenantMigrationsHistory`).
 
-The central DB auto-bootstraps as pool member #1 (`Label='central'`, shared, all tiers) so dev/self-host and SaaS share one placement path. Personal tenants provision **synchronously at first login** in single-user mode. Delete drops the schema (`DROP SCHEMA ... CASCADE`) and role (`DROP OWNED BY` + `DROP ROLE`) and releases the pool slot; backups are schema-scoped (`pg_dump -n t_<hex>`).
+The central DB auto-bootstraps as pool member #1 (`Label='central'`, shared, all tiers) so dev/self-host and SaaS share one placement path. Since Phase 3, provisioning is **mandatory and synchronous on both entry paths**: org creation (`POST /api/v1/orgs`) calls `ITenantProvisioningService.ProvisionAsync` inline before the org's first tenant-store write (failure propagates — no half-usable org), and personal tenants provision **synchronously at first login** in single-user mode with failures failing the request (the transitional soft-fail onto a shared path was removed with the stub resolver). Tenant data access goes through one path only — `LruPooledTenantConnectionResolver` resolving the tenant's stored encrypted `...;Search Path=t_<hex>` connection string; `StubTenantConnectionResolver` is deleted. Delete drops the schema (`DROP SCHEMA ... CASCADE`) and role (`DROP OWNED BY` + `DROP ROLE`) and releases the pool slot; backups are schema-scoped (`pg_dump -n t_<hex>`).
 
 **Superseded**: the Epic-28 `CreateTenantDatabaseActivity`/`DropTenantDatabaseActivity` (one Postgres *database* per tenant) were deleted in Phase 2 — placement now hands out schemas inside pooled databases. Epic 30's role narrows accordingly: its backends provision **pool rows into `tenant_databases`** (and dedicated compute), not per-tenant DBs directly — see `ProviderKey` Decision 3 in `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md`.
 

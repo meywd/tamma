@@ -121,7 +121,7 @@ active tenant genuinely has a connection string.
 - **Phase 2 (re-ordered: was "Phase 3 — unified creation path") — DONE 2026-06-10.** `ITenantPlacementService` (tier → DB); `CreateTenantSchemaActivity`
   (role+schema+grants); mint+encrypt connection string for **every** tenant, including the personal
   tenant at registration. Remove "shared-infra-only until provisioning."
-- **Phase 3 (re-ordered: was "Phase 2 — unified resolver").** Resolver always uses the stored
+- **Phase 3 (re-ordered: was Phase 2) — DONE 2026-06-10.** Resolver always uses the stored
   connection string + search_path; remove `StubTenantConnectionResolver` central fallback — now
   possible because every tenant mints at creation.
 - **Phase 4 — Admin placement + move.** `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
@@ -196,6 +196,24 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
     tiers, insert-missing-only seeder) — dev/self-host and SaaS share one placement path.
 12. **Personal tenants provision synchronously at first login** in single-user mode (soft-fail
     until Phase 3 stub removal makes it hard).
+
+**Phase 3 implementation deviations (2026-06-10, recorded from the task-plan):**
+
+13. **System store** — platform-default rows stay in the central DB public schema behind
+    ISystemStoreDbContextFactory (not moved to CP tables).
+14. **RequireTenantIsolation knob deleted** — it guarded the stub fallback that no longer exists.
+15. **Dev KEK ships in appsettings.Development.json** (dev-only, documented).
+16. **Unified path exposed and fixed 4 latent production bugs** (test migration, commits
+    f1107558..a58f983d): EF internal-service-provider explosion at >20 tenant data sources
+    (TenantDbContextFactory now lends a pooled connection); CreateOrg emitted into the
+    not-yet-provisioned tenant store (now provisions synchronously — orgs and personal tenants
+    share the same first-class path); DeleteOrg emitted after the soft-delete made the store
+    unreachable (emit-before-delete); per-tenant migration connections stranded one idle pool
+    each (Pooling=false on the one-shot migration connection).
+17. **Known residuals (deliberate):** failed CreateOrg leaves a recoverable half-tenant (idempotent
+    re-provision exists, operator-driven — no self-service org re-provision endpoint yet);
+    tenant-terminal lifecycle events (DELETED/PURGED) are written to the tenant's own store and are
+    unreachable post-delete — move to the CP store when convenient.
 
 ---
 
