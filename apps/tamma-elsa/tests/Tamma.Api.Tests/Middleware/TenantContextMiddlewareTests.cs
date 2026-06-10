@@ -454,6 +454,116 @@ public class TenantContextMiddlewareTests
             .Should().Be("tenant_deleted");
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  draining — Phase 4 read-only window (tenant move in progress).
+    //  Safe verbs pass through to the handler; mutating verbs 503 with
+    //  Retry-After: 5 so the client retries after the move lands.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [TestCase("GET")]
+    [TestCase("HEAD")]
+    [TestCase("OPTIONS")]
+    public async Task DrainingStatus_SafeVerb_PassesToNext(string method)
+    {
+        var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "draining";
+        var ds = StubDataSource();
+        _resolver
+            .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<NpgsqlDataSource>(ds));
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+        ctx.Request.Method = method;
+
+        await InvokeAsync(ctx);
+
+        _nextCalled.Should().BeTrue(
+            "draining is a READ-ONLY window — safe verbs must reach the handler");
+        _tenantContext.TenantId.Should().Be(tenantId);
+    }
+
+    [Test]
+    public async Task DrainingStatus_SafeVerb_ColdPath_PassesToNext_AndCachesStatus()
+    {
+        // Same read-only carve-out on the cold (CP-read) path: the status
+        // lands in the cache so the NEXT mutating request short-circuits
+        // without re-reading CP.
+        var tenantId = Guid.NewGuid();
+        await SeedTenantStatusAsync(tenantId, "draining");
+        var ds = StubDataSource();
+        _resolver
+            .Setup(r => r.GetDataSourceAsync(tenantId, It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<NpgsqlDataSource>(ds));
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+        ctx.Request.Method = "GET";
+
+        await InvokeAsync(ctx);
+
+        _nextCalled.Should().BeTrue();
+        _tenantContext.TenantId.Should().Be(tenantId);
+        _statusCache.Entries[tenantId].Should().Be("draining");
+    }
+
+    [TestCase("POST")]
+    [TestCase("PUT")]
+    [TestCase("PATCH")]
+    [TestCase("DELETE")]
+    public async Task DrainingStatus_MutatingVerb_Returns503_WithRetryAfter5(string method)
+    {
+        var tenantId = Guid.NewGuid();
+        _statusCache.Entries[tenantId] = "draining";
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+        ctx.Request.Method = method;
+
+        await InvokeAsync(ctx);
+
+        _nextCalled.Should().BeFalse(
+            "mutations during the move window must never reach the handler");
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ctx.Response.Headers["Retry-After"].ToString().Should().Be("5");
+
+        var body = await ReadJsonBodyAsync(ctx);
+        body.RootElement.GetProperty("error").GetString().Should().Be("tenant_read_only");
+        body.RootElement.GetProperty("status").GetString().Should().Be("draining");
+        body.RootElement.GetProperty("message").GetString()
+            .Should().Contain("move in progress");
+
+        _tenantContext.TenantId.Should().BeNull();
+        _resolver.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task DrainingStatus_MutatingVerb_ColdPath_Returns503()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedTenantStatusAsync(tenantId, "draining");
+
+        var ctx = BuildContext("/api/v1/issues", claims: new[]
+        {
+            new Claim("active_tenant_id", tenantId.ToString()),
+        });
+        ctx.Request.Method = "POST";
+
+        await InvokeAsync(ctx);
+
+        _nextCalled.Should().BeFalse();
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ctx.Response.Headers["Retry-After"].ToString().Should().Be("5");
+        _statusCache.Entries[tenantId].Should().Be("draining");
+        _resolver.VerifyNoOtherCalls();
+    }
+
     [Test]
     public async Task CachedNonActiveStatus_Returns503_WithoutCpReadOrResolverCall()
     {

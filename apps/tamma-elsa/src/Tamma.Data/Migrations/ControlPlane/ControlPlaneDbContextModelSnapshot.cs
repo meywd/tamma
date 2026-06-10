@@ -1405,7 +1405,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                         {
                             t.HasCheckConstraint("ck_tenants_connection_string_present", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','failed','deleted','deleting','delete_requested') OR \"EncryptedConnectionString\" IS NOT NULL");
 
-                            t.HasCheckConstraint("ck_tenants_status", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','active','delete_requested','deleting','deleted','failed','suspended')");
+                            t.HasCheckConstraint("ck_tenants_status", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','active','draining','delete_requested','deleting','deleted','failed','suspended')");
                         });
                 });
 

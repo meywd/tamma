@@ -50,6 +50,14 @@ namespace Tamma.Api.Services.TenantStatus;
 ///     terminal branch.)</description>
 ///   </item>
 ///   <item>
+///     <term><c>draining</c></term>
+///     <description>Phase 4 (unified tenancy) read-only window — a tenant
+///     move is in progress. Safe verbs (GET/HEAD/OPTIONS) pass through
+///     (see <see cref="AllowsRequest"/>); mutating verbs get 503 +
+///     <c>tenant_read_only</c> + <c>Retry-After: 5</c> so clients retry
+///     once the move lands.</description>
+///   </item>
+///   <item>
 ///     <term><c>deleted</c></term>
 ///     <description>410 Gone + <c>tenant_deleted</c>.</description>
 ///   </item>
@@ -72,6 +80,14 @@ public static class TenantStatusEvaluator
     public const string StatusDeleted = "deleted";
 
     /// <summary>
+    /// Phase 4 (unified tenancy) — the tenant is mid-move to another pool
+    /// database and is serving a brief READ-ONLY window (parent plan
+    /// decision 4). Not a teardown state: clients should retry mutations
+    /// after <c>Retry-After</c>.
+    /// </summary>
+    public const string StatusDraining = "draining";
+
+    /// <summary>
     /// Returns true when <paramref name="status"/> permits the request to
     /// continue. <c>null</c> and <c>active</c> both qualify (null treats
     /// legacy rows as active per Doc 04 §2.2).
@@ -79,6 +95,35 @@ public static class TenantStatusEvaluator
     public static bool IsActive(string? status) =>
         status is null
         || string.Equals(status, StatusActive, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns true when <paramref name="status"/> is the Phase 4
+    /// read-only window (<c>draining</c>) — safe verbs may proceed,
+    /// mutating verbs must be 503'd via
+    /// <see cref="WriteNonActiveResponseAsync"/>.
+    /// </summary>
+    public static bool IsReadOnly(string? status) =>
+        string.Equals(status, StatusDraining, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// RFC 9110 §9.2.1 safe methods that a read-only tenant may still
+    /// serve: GET, HEAD, OPTIONS.
+    /// </summary>
+    public static bool IsSafeMethod(string method) =>
+        HttpMethods.IsGet(method)
+        || HttpMethods.IsHead(method)
+        || HttpMethods.IsOptions(method);
+
+    /// <summary>
+    /// Verb-aware gate: <c>active</c>/<c>null</c> allow every verb;
+    /// <c>draining</c> allows only <see cref="IsSafeMethod">safe</see>
+    /// verbs; every other status blocks regardless of verb. Callers that
+    /// get <c>false</c> must write
+    /// <see cref="WriteNonActiveResponseAsync"/> and short-circuit.
+    /// </summary>
+    public static bool AllowsRequest(string? status, string method) =>
+        IsActive(status)
+        || (IsReadOnly(status) && IsSafeMethod(method));
 
     /// <summary>
     /// Writes the HTTP response for a non-active status. The caller MUST
@@ -166,6 +211,25 @@ public static class TenantStatusEvaluator
                 {
                     error = "tenant_deleting",
                     status = (status ?? string.Empty).ToLowerInvariant(),
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case StatusDraining:
+                // Phase 4 read-only window — a mutating verb reached the
+                // writer while a tenant move is in progress. 503 +
+                // Retry-After: 5 (the window is brief by design); the body
+                // names the move so this is distinguishable from
+                // teardown (`tenant_deleting`) and provisioning
+                // (`tenant_not_ready`).
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.Headers["Retry-After"] = "5";
+                await WriteJsonAsync(context, new
+                {
+                    error = "tenant_read_only",
+                    status = StatusDraining,
+                    retryAfter = 5,
+                    message = "tenant move in progress — writes are "
+                        + "temporarily unavailable; retry shortly",
                 }, cancellationToken).ConfigureAwait(false);
                 return;
 

@@ -562,7 +562,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                 {
                     table.PrimaryKey("PK_tenants", x => x.Id);
                     table.CheckConstraint("ck_tenants_connection_string_present", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','failed','deleted','deleting','delete_requested') OR \"EncryptedConnectionString\" IS NOT NULL");
-                    table.CheckConstraint("ck_tenants_status", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','active','delete_requested','deleting','deleted','failed','suspended')");
+                    table.CheckConstraint("ck_tenants_status", "\"Status\" IS NULL OR \"Status\" IN ('pending_verification','provisioning','active','draining','delete_requested','deleting','deleted','failed','suspended')");
                     table.ForeignKey(
                         name: "FK_tenants_plans_PlanId",
                         column: x => x.PlanId,

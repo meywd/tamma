@@ -269,7 +269,7 @@ internal static class TammaModelConfiguration
                     t.HasCheckConstraint(
                         "ck_tenants_status",
                         "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
-                        "'provisioning','active','delete_requested','deleting'," +
+                        "'provisioning','active','draining','delete_requested','deleting'," +
                         "'deleted','failed','suspended')");
                     t.HasCheckConstraint(
                         "ck_tenants_connection_string_present",

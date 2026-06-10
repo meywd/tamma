@@ -55,6 +55,7 @@ public class TenantStatusEvaluatorTests
     [TestCase("suspended")]
     [TestCase("delete_requested")]
     [TestCase("dropping")]
+    [TestCase("draining")]
     [TestCase("deleting")]
     [TestCase("deleted")]
     [TestCase("not_found")]
@@ -62,6 +63,104 @@ public class TenantStatusEvaluatorTests
     public void IsActive_GatesEveryNonActiveStatus(string status)
     {
         TenantStatusEvaluator.IsActive(status).Should().BeFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  draining — Phase 4 read-only window (tenant move in progress).
+    //  Safe verbs (GET/HEAD/OPTIONS) pass through; mutating verbs get
+    //  503 + Retry-After: 5 so clients retry once the move lands.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [TestCase("draining")]
+    [TestCase("DRAINING")] // case-insensitive like every other status
+    public void IsReadOnly_TrueForDraining(string status)
+    {
+        TenantStatusEvaluator.IsReadOnly(status).Should().BeTrue();
+    }
+
+    [TestCase(null)]
+    [TestCase("active")]
+    [TestCase("provisioning")]
+    [TestCase("suspended")]
+    [TestCase("deleting")]
+    [TestCase("")]
+    public void IsReadOnly_FalseForEveryOtherStatus(string? status)
+    {
+        TenantStatusEvaluator.IsReadOnly(status).Should().BeFalse();
+    }
+
+    [TestCase("GET")]
+    [TestCase("HEAD")]
+    [TestCase("OPTIONS")]
+    [TestCase("get")] // method comparison must be case-insensitive
+    public void IsSafeMethod_TrueForReadVerbs(string method)
+    {
+        TenantStatusEvaluator.IsSafeMethod(method).Should().BeTrue();
+    }
+
+    [TestCase("POST")]
+    [TestCase("PUT")]
+    [TestCase("PATCH")]
+    [TestCase("DELETE")]
+    public void IsSafeMethod_FalseForMutatingVerbs(string method)
+    {
+        TenantStatusEvaluator.IsSafeMethod(method).Should().BeFalse();
+    }
+
+    // Allowed/read-only outcome: draining + safe verb proceeds like active.
+    [TestCase("draining", "GET")]
+    [TestCase("draining", "HEAD")]
+    [TestCase("draining", "OPTIONS")]
+    [TestCase("active", "GET")]
+    [TestCase("active", "POST")]
+    [TestCase(null, "DELETE")] // null = legacy active, all verbs allowed
+    public void AllowsRequest_PermitsActiveAlways_AndDrainingForSafeVerbs(
+        string? status, string method)
+    {
+        TenantStatusEvaluator.AllowsRequest(status, method).Should().BeTrue();
+    }
+
+    // Blocked outcome: draining + mutating verb, and every other
+    // non-active status regardless of verb.
+    [TestCase("draining", "POST")]
+    [TestCase("draining", "PUT")]
+    [TestCase("draining", "PATCH")]
+    [TestCase("draining", "DELETE")]
+    [TestCase("provisioning", "GET")]
+    [TestCase("suspended", "GET")]
+    [TestCase("deleting", "GET")]
+    public void AllowsRequest_BlocksDrainingMutations_AndAllOtherNonActiveStatuses(
+        string? status, string method)
+    {
+        TenantStatusEvaluator.AllowsRequest(status, method).Should().BeFalse();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  draining (mutating verb reached the writer) → 503 + Retry-After: 5
+    //  + body naming the tenant move so a blocked client knows it is a
+    //  brief, retryable window — NOT a teardown.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public async Task Draining_Returns503_WithRetryAfter5_AndMoveInProgressBody()
+    {
+        var ctx = BuildContext();
+        var tenantId = Guid.NewGuid();
+
+        await TenantStatusEvaluator.WriteNonActiveResponseAsync(
+            ctx, tenantId, TenantStatusEvaluator.StatusDraining);
+
+        ctx.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ctx.Response.Headers["Retry-After"].ToString().Should().Be("5");
+
+        var body = await ReadJsonAsync(ctx);
+        body.RootElement.GetProperty("error").GetString().Should().Be("tenant_read_only");
+        body.RootElement.GetProperty("status").GetString().Should().Be("draining");
+        body.RootElement.GetProperty("retryAfter").GetInt32().Should().Be(5);
+        body.RootElement.GetProperty("message").GetString()
+            .Should().Contain("move in progress",
+                "the body must name the tenant move so operators/clients "
+                + "can tell this 503 apart from teardown/provisioning");
     }
 
     // ─────────────────────────────────────────────────────────────────────
