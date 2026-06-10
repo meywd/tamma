@@ -162,25 +162,16 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
         await userRepo.UpdateActiveTenantAsync(userId, tenant.Id);
         tenantContext.SetTenantId(tenant.Id);
 
-        // Unified-tenancy Phase 2: the personal tenant is provisioned
+        // Unified-tenancy Phase 3: the personal tenant is provisioned
         // synchronously (placement → role → schema → minted connection string →
         // migrations) so it is a first-class tenant from its first request.
-        // Failure policy: log + continue — the request proceeds on the
-        // transitional shared path (stub resolver) and the admin retry
-        // endpoint can re-provision; Phase 3 (stub removal) makes this
-        // failure hard.
-        try
-        {
-            var provisioning = context.RequestServices
-                .GetRequiredService<ITenantProvisioningService>();
-            await provisioning.ProvisionAsync(tenant.Id, context.RequestAborted);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "personal tenant provisioning failed tenantId={TenantId} — continuing on shared path",
-                tenant.Id);
-        }
+        // Failure policy: propagate. The Phase 2 stub resolver (shared-path
+        // fallback) is gone — an unprovisioned tenant cannot access tenant
+        // data at all, so failing the first request with the real error
+        // beats limping on with a broken half-tenant.
+        var provisioning = context.RequestServices
+            .GetRequiredService<ITenantProvisioningService>();
+        await provisioning.ProvisionAsync(tenant.Id, context.RequestAborted);
 
         try
         {

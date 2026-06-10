@@ -159,6 +159,9 @@ public class EnsurePersonalTenantMiddlewareTests
         // active tenant + emit TENANT.AUTO_CREATED.SUCCESS.
         var userId = Guid.NewGuid();
         var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+        // Phase 3: provisioning is mandatory on the auto-create path, so the
+        // fake must be resolvable from RequestServices.
+        ctx.RequestServices = BuildRequestServices(new FakeTenantProvisioningService());
 
         var tenantContext = new StubTenantContext();
         var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Loose);
@@ -365,11 +368,12 @@ public class EnsurePersonalTenantMiddlewareTests
     }
 
     [Test]
-    public async Task SingleUserMode_ProvisioningThrows_RequestStillProceeds()
+    public async Task SingleUserMode_ProvisioningThrows_RequestFails()
     {
-        // Phase 2 failure policy: log + continue — the request proceeds on
-        // the transitional shared path (stub resolver); Phase 3 (stub
-        // removal) makes this failure hard.
+        // Phase 3 failure policy: propagate. The Phase 2 shared-path stub
+        // is gone — an unprovisioned tenant cannot access tenant data at
+        // all, so the first request must fail loudly with the real error
+        // instead of proceeding with a broken half-tenant.
         var userId = Guid.NewGuid();
         var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
         var provisioning = new FakeTenantProvisioningService
@@ -411,7 +415,7 @@ public class EnsurePersonalTenantMiddlewareTests
             return Task.CompletedTask;
         });
 
-        await mw.InvokeAsync(
+        var act = () => mw.InvokeAsync(
             ctx,
             tenantContext,
             tenantRepo.Object,
@@ -421,15 +425,18 @@ public class EnsurePersonalTenantMiddlewareTests
             modeProvider,
             NullLogger<EnsurePersonalTenantMiddleware>.Instance);
 
+        await act.Should().ThrowAsync<InvalidOperationException>(
+                "Phase 3 removed the shared-path stub — a provisioning failure "
+                + "must propagate so the first request fails with the real error")
+            .WithMessage("cluster unreachable");
         provisioning.ProvisionCalls.Should().ContainSingle(
-            "the hook must have been attempted before swallowing the failure");
-        nextCalled.Should().BeTrue(
-            "a provisioning failure must NOT fail the request — the tenant rides "
-            + "the transitional shared path until the admin retries / Phase 3 lands");
-        tenantContext.TenantId.Should().NotBeNull(
-            "the tenant row + binding survive a provisioning failure");
+            "the hook must have been attempted before the failure propagated");
+        nextCalled.Should().BeFalse(
+            "the request must NOT proceed when provisioning fails — there is "
+            + "no shared path for an unprovisioned tenant to ride");
         events.Verify(
             r => r.AppendAsync(It.Is<DomainEvent>(e => e.Type == "TENANT.AUTO_CREATED.SUCCESS")),
-            Times.Once);
+            Times.Never,
+            "the success event is emitted after provisioning, which threw");
     }
 }
