@@ -69,7 +69,12 @@ public sealed class TenantPlacementService : ITenantPlacementService
         // empty (one tenant per dedicated DB). The predicate is shared
         // with TenantMoveService's target validation (Phase 4) via
         // EligibleFor. NOTE: TierEligibility is a text[] column — Npgsql
-        // translates Contains to array containment.
+        // translates Enumerable.Contains to array containment. The STATIC
+        // Enumerable.Contains call (not extension-method syntax) is
+        // deliberate: newer C# compilers bind `array.Contains(x)` to the
+        // MemoryExtensions span overload (ReadOnlySpan op_Implicit), which
+        // EF cannot translate — local SDK builds passed while CI's newer
+        // SDK failed with 120 query-translation errors.
         var candidates = db.TenantDatabases.Where(EligibleFor(slug, policy));
 
         var row = await candidates
@@ -128,13 +133,13 @@ public sealed class TenantPlacementService : ITenantPlacementService
         {
             return d => d.Status == "active"
                 && d.PlacementClass == policy
-                && d.TierEligibility.Contains(tier)
+                && Enumerable.Contains(d.TierEligibility, tier)
                 && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity)
                 && d.TenantCount == 0;
         }
         return d => d.Status == "active"
             && d.PlacementClass == policy
-            && d.TierEligibility.Contains(tier)
+            && Enumerable.Contains(d.TierEligibility, tier)
             && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity);
     }
 }
