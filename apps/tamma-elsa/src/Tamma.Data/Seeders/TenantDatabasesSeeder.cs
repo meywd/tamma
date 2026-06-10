@@ -44,6 +44,10 @@ public static class TenantDatabasesSeeder
             TenantCapacity = null,
             TenantCount = 0,
             Status = "active",
+            // CurrentKekVersion is hard-coded to 1 in TenantSecretProtectorAdapter
+            // (pre-existing adapter limitation, shared with
+            // EncryptAndPersistConnectionStringActivity) — fine while rotation
+            // hasn't shipped a v2 KEK; tracked with the rotation work.
             KekVersion = (short)protector.CurrentKekVersion,
             CreatedAt = now,
             UpdatedAt = now,

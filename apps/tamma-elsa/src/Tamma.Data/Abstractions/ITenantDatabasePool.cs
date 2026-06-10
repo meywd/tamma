@@ -17,6 +17,9 @@ public interface ITenantDatabasePool
     /// <summary>
     /// Execute one statement on the pool row's admin connection
     /// (autocommit, fresh connection — mirrors ITenantAdminConnection).
+    /// The <paramref name="commandText"/> is sent verbatim — callers are
+    /// responsible for quoting identifiers (use
+    /// <c>TenantNaming.Quote</c>) and must never inline untrusted input.
     /// </summary>
     Task<int> ExecuteOnAsync(Guid databaseId, string commandText, CancellationToken ct = default);
 
