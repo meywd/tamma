@@ -118,18 +118,22 @@ active tenant genuinely has a connection string.
 - **Phase 1 — DONE 2026-06-09.** Tenant schema + per-schema migrations. `TenantNaming.SchemaName`; `EfTenantDbMigrator`
   + `TenantDbContextFactory` apply into `t_<hex>` via `Search Path` + in-schema history table. Collapse
   the tenant baseline.
-- **Phase 2 — Unified resolver.** Resolver always uses the stored connection string + search_path;
-  remove `StubTenantConnectionResolver` central fallback and the "ControlPlane string ⇒ stub" branch.
-- **Phase 3 — Unified creation path.** `ITenantPlacementService` (tier → DB); `CreateTenantSchemaActivity`
+- **Phase 2 (re-ordered: was "Phase 3 — unified creation path") — DONE 2026-06-10.** `ITenantPlacementService` (tier → DB); `CreateTenantSchemaActivity`
   (role+schema+grants); mint+encrypt connection string for **every** tenant, including the personal
   tenant at registration. Remove "shared-infra-only until provisioning."
+- **Phase 3 (re-ordered: was "Phase 2 — unified resolver").** Resolver always uses the stored
+  connection string + search_path; remove `StubTenantConnectionResolver` central fallback — now
+  possible because every tenant mints at creation.
 - **Phase 4 — Admin placement + move.** `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
   view; `MoveTenantWorkflow` (dump-schema → restore → re-point → evict → drop source).
 - **Phase 5 — Remove Phase-3 RLS + cleanup.** Drop RLS policies on tenant tables; retire the
   `ProviderKey` mode flag (per Decisions); adapt the 28-5 backup to `--schema`.
 
-Phases 0–2 are internal/safe (no live data). Phase 3 changes the registration/login path — gate behind
-tests. Phases 4–5 are additive + cleanup.
+Re-order rationale: stub removal hard-depends on every tenant having a minted connection string, so
+the creation-path phase had to land first — sequencing swapped during execution (2026-06-09).
+
+Phases 0–2 are internal/safe (Phase 2's registration/login change soft-fails onto the shared path
+until Phase 3). Phase 3 flips the access path — gate behind tests. Phases 4–5 are additive + cleanup.
 
 ---
 
@@ -185,6 +189,13 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
    Postgres with zero extensions.
 10. **Tenant baseline carries zero raw SQL** — the NULLS NOT DISTINCT unique indexes are
     model-level in EF 9.
+
+**Phase 2 implementation deviations (2026-06-10, recorded from the task-plan):**
+
+11. **Central DB bootstraps as pool member #1** (tenant_databases Label='central', shared, all
+    tiers, insert-missing-only seeder) — dev/self-host and SaaS share one placement path.
+12. **Personal tenants provision synchronously at first login** in single-user mode (soft-fail
+    until Phase 3 stub removal makes it hard).
 
 ---
 

@@ -588,3 +588,76 @@ git commit -m "docs(tenancy-p2): mark Phase 2 complete (unified creation path; p
   additions discovered mid-task — T3/T5 call this out as acceptable interface growth with test
   updates. (3) KEK in pure dev (no Cranl:ApiKey): tests always pass an explicit base64 KEK; the
   middleware path soft-fails by design until Phase 3.
+
+---
+
+## Execution record (2026-06-10)
+
+**Status: Phase 2 COMPLETE.** All 8 tasks executed; full suite green.
+
+**Commit range:** `c7073248..60202650` (8 commits on `feat/wave-b`) + the Task-8 docs commit:
+
+- `2709147e` polish(tenancy-p2): pool ExecuteOn injection contract doc + seeder KEK-version note
+- `3bd67c46` feat(tenancy-p2): tier-driven tenant placement service
+- `461f3e1d` fix(tenancy-p2): reject placement of soft-deleted tenants + corrupt-state coverage
+- `d8235917` feat(tenancy-p2): TenantProvisioningService — shared placement/role/schema/mint pipeline
+- `e402e08a` polish(tenancy-p2): correct provisioning recovery runbook text + comment fixes
+- `0a1fd62a` feat(tenancy-p2): CreateTenantWorkflow provisions schema-per-tenant via shared pipeline
+- `3aa04e8d` feat(tenancy-p2): delete path drops tenant schema/role and releases pool slot
+- `60202650` feat(tenancy-p2): personal tenants provision schema+conn-string at first login
+- (this commit) docs(tenancy-p2): mark Phase 2 complete (unified creation path; phases 2/3 re-ordered)
+
+**Full suite (Task 7):** `dotnet build Tamma.sln` 0 errors; `dotnet test Tamma.sln` →
+**4464 passed / 11 skipped / 0 failed** across 10 projects (baseline 2026-06-09 was ~4409/11 —
+Phase 2 net +~55 tests):
+
+| Project | Passed | Skipped |
+|---|---:|---:|
+| Tamma.Api.Tests | 2744 | 8 |
+| Tamma.Activities.Tests | 1237 | 0 |
+| Tamma.Platforms.GitLab.Tests | 97 | 0 |
+| Tamma.Platforms.Gitea.Tests | 96 | 0 |
+| Tamma.Platforms.Tests | 90 | 0 |
+| Tamma.Platforms.Abstractions.Tests | 66 | 0 |
+| Tamma.Platforms.GitHub.Tests | 63 | 0 |
+| Tamma.Studio.Tests | 30 | 0 |
+| Tamma.Core.Tests | 23 | 0 |
+| Tamma.Platforms.IntegrationTests | 18 | 3 |
+
+One Task-7 fix: 9 failures in `PlatformOwnerAccessPolicyTests` — the fixture boots a
+**Production-environment** WebApplicationFactory, and the new Phase-2 startup seeder
+(`TenantDatabasesSeeder` in `Program.cs`) eagerly resolves `ITenantConnectionStringProtector`,
+whose `FromConfiguration` hard-fails in Production without `Cranl:EncryptionKey` (R2-H11).
+Fix: the fixture now supplies a base64 32-byte `Cranl__EncryptionKey` (like a real Production
+deployment must) and resets it in teardown; `Cranl__ApiKey` stays unset so the Null provisioner
+seam is unaffected.
+
+**Phase proof (Task 3 e2e, both legs):**
+`Provision_PersonalTenant_EndToEnd_ResolvableByRealResolver`
+(`tests/Tamma.Api.Tests/Tenancy/TenantProvisioningServiceTests.cs`):
+
+- *Real-resolver leg:* after `ProvisionAsync`, a directly-constructed
+  `LruPooledTenantConnectionResolver` + real `AesGcm` decryptor (same KEK) resolves the tenant,
+  and a `TenantDbContext` opened via `TenantDbContextFactory` reads `AgentConfigs` successfully —
+  decrypt → pool → `Search Path` → schema, end-to-end ahead of Phase 3.
+- *Role-isolation leg:* connected as the tenant role on the minted connection string,
+  `SELECT * FROM public.tenants` and `CREATE TABLE public.x(...)` both fail with SqlState
+  **42501** (permission denied), while DML/DDL inside the tenant's own `t_<hex>` schema succeeds —
+  the locked role-per-tenant isolation decision is tested, not assumed.
+
+**Notable findings / deviations during execution:**
+
+1. **PG privilege-check-before-IF-NOT-EXISTS forced a DO-block in the migrator** — Postgres
+   evaluates CREATE privileges on `CREATE SCHEMA IF NOT EXISTS` even when the schema already
+   exists, so the tenant-role migration path wraps the safety-net create in a `DO $$ ... $$`
+   existence-checked block.
+2. **Interfaces moved to `Tamma.Data.Abstractions`** — `ITenantPlacementService` /
+   `ITenantProvisioningService` could not live in `Tamma.Api.Services.Provisioning` as planned:
+   the activities project must reference the contracts, and project-reference direction
+   (Activities → Data, never Activities → Api) forced them down into Data abstractions.
+3. **Soft-deleted-tenant placement guard added in review** — `AssignAsync` rejects tenants whose
+   row is soft-deleted (`461f3e1d`), with corrupt-state coverage.
+4. **`SchemaExistsOnAsync` added to `ITenantDatabasePool`** for backup idempotency (skip
+   `pg_dump -n` when the schema is already gone on a delete retry).
+5. **Cleanup vocabulary renamed** — `drop_database_failed` → `drop_schema_failed` in
+   `CleanupFailureClassifier` / terminal-event codes, matching the schema-scoped delete path.
