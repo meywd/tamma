@@ -736,16 +736,17 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Story 27-2 — unique on (UserId, TenantId, Scope, Role, Action).
-            // The Postgres-side index uses NULLS NOT DISTINCT so a single
-            // (null, tenantId, scope, role, action) row is unique across
-            // all repeated NULLs in UserId. This is enforced through raw
-            // SQL in the migration; the EF HasIndex below is purely a
-            // model-graph hint so the migration generator + InMemory
-            // tests see the same shape. NULLS NOT DISTINCT requires PG15+
-            // (production runs PG17 — see Tamma project tech stack).
+            // Story 27-2 — unique on (UserId, TenantId, Scope, Role, Action)
+            // with NULLS NOT DISTINCT so a single (null, tenantId, scope,
+            // role, action) row is unique across all repeated NULLs in
+            // UserId. NULLS NOT DISTINCT requires PG15+ (production runs
+            // PG17 — see Tamma project tech stack).
+            // Replaces the raw-SQL index from migration 20260429152530 — NULLS NOT
+            // DISTINCT became model-expressible in EF 9. Name preserved.
             entity.HasIndex(e => new { e.UserId, e.TenantId, e.Scope, e.Role, e.Action })
-                .IsUnique();
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_prompt_overrides_UserId_TenantId_Scope_Role_Action");
 
             if (omitTenantIdColumn) entity.Ignore(e => e.TenantId);
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
@@ -772,7 +773,7 @@ internal static class TammaModelConfiguration
         // doc-comment.
         //
         // The UNIQUE(TenantId, Role, Action) index uses NULLS NOT DISTINCT
-        // (enforced via raw SQL in the migration, EF model hint below) so
+        // (declared on the model below — EF 9 expresses it natively) so
         // exactly one system-default row per (role, action) cell is permitted.
         // This index also serves as the resolution hot-path B-tree seek —
         // no separate non-unique index is needed (it would be fully covered
@@ -790,13 +791,15 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // EF model-graph hint for (TenantId, Role, Action).
-            // The Postgres index uses NULLS NOT DISTINCT (applied via raw SQL
-            // in the migration) so the single null-tenant system-default per
-            // (role, action) cell is unique. NULLS NOT DISTINCT requires
-            // PG 15+ (production runs PG17).
+            // Unique on (TenantId, Role, Action) with NULLS NOT DISTINCT so
+            // the single null-tenant system-default per (role, action) cell
+            // is unique. NULLS NOT DISTINCT requires PG 15+ (production runs
+            // PG17).
+            // Replaces the raw-SQL index from migration 20260524143833. Name preserved.
             entity.HasIndex(e => new { e.TenantId, e.Role, e.Action })
-                .IsUnique();
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_conventions_TenantId_Role_Action");
 
             // No omitTenantIdColumn branch — intentional. Unlike BudgetConfig,
             // where tenant_id is a simple ownership column that can be dropped
@@ -1200,7 +1203,11 @@ internal static class TammaModelConfiguration
         {
             entity.ToTable("mentorship_sessions");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("uuid_generate_v4()");
+            // gen_random_uuid (pg_catalog builtin, PG13+) instead of uuid-ossp's
+            // uuid_generate_v4: extension functions don't resolve under a
+            // per-tenant "Search Path=t_<hex>" and the extension dependency is
+            // pointless since PG13. Unified-tenancy Phase 1.
+            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.StoryId).HasColumnName("story_id").IsRequired();
             entity.Property(e => e.JuniorId).HasColumnName("junior_id").IsRequired();
             entity.Property(e => e.CurrentState).HasColumnName("current_state").HasConversion<string>().IsRequired();
@@ -1229,7 +1236,7 @@ internal static class TammaModelConfiguration
         {
             entity.ToTable("mentorship_events");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("uuid_generate_v4()");
+            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.SessionId).HasColumnName("session_id").IsRequired();
             entity.Property(e => e.EventType).HasColumnName("event_type").IsRequired();
             entity.Property(e => e.EventData).HasColumnName("event_data").HasColumnType("jsonb")
