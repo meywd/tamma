@@ -249,6 +249,61 @@ public class TenantProvisioningServiceTests
             .Which.SqlState.Should().Be("42501", "expected: permission denied for schema public");
     }
 
+    // ── Phase 2 Task 6: single-user first-login shape ─────────────────
+
+    [Test]
+    public async Task Provision_FirstLogin_PersonalTenant_EndsActiveWithSchema()
+    {
+        // Mirrors EXACTLY what EnsurePersonalTenantMiddleware persists on
+        // first login (Type='personal', free plan, u-<8hex> slug, OwnerId)
+        // before calling ITenantProvisioningService.ProvisionAsync — the
+        // point: a personal-shaped tenant provisions to Status='active'
+        // with schema + envelope like any other tenant.
+        var cpDbName = nameof(Provision_FirstLogin_PersonalTenant_EndsActiveWithSchema);
+        var ownerId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        await using (var cp = CreateCpContext(cpDbName))
+        {
+            await PlansSeeder.SeedAsync(cp);
+            await TenantDatabasesSeeder.SeedAsync(cp, _adminConnectionString, _protector);
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Sole User's Workspace",
+                Slug = $"u-{ownerId.ToString("N")[..8]}",
+                Type = "personal",
+                Plan = "free",
+                OwnerId = ownerId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await cp.SaveChangesAsync();
+        }
+        var factory = new InMemoryCpFactory(cpDbName);
+
+        await CreateService(factory).ProvisionAsync(tenantId);
+
+        var schema = TenantNaming.SchemaName(tenantId);
+        (await ScalarAsync(_adminConnectionString,
+            $"SELECT count(*) FROM information_schema.tables WHERE table_schema = '{schema}' "
+            + "AND table_name = '__TenantMigrationsHistory'"))
+            .Should().Be(1L, "the personal tenant's schema must exist with migrations applied");
+
+        await using (var cp = CreateCpContext(cpDbName))
+        {
+            var tenant = await cp.Tenants.IgnoreQueryFilters().SingleAsync(t => t.Id == tenantId);
+            var entry = cp.Entry(tenant);
+            entry.Property<string?>("Status").CurrentValue.Should().Be("active",
+                "a first-login personal tenant is a first-class tenant from its first request");
+            entry.Property<string?>("SchemaName").CurrentValue.Should().Be(schema);
+            ((byte[]?)entry.Property("EncryptedConnectionString").CurrentValue)
+                .Should().NotBeNullOrEmpty("the personal tenant gets a minted envelope too");
+            entry.Property<Guid?>("DatabaseId").CurrentValue
+                .Should().Be(TenantDatabasesSeeder.CentralDatabaseId,
+                    "free personal tenants place on the central bootstrap pool row");
+        }
+    }
+
     // ── idempotency + failure modes ───────────────────────────────────
 
     [Test]

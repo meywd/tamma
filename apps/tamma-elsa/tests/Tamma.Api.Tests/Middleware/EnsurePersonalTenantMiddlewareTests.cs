@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
@@ -8,6 +9,7 @@ using Tamma.Api.Auth;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -38,6 +40,49 @@ public class EnsurePersonalTenantMiddlewareTests
         public void SetTenantId(Guid tenantId) => TenantId = tenantId;
         public void ClearTenantId() => TenantId = null;
     }
+
+    /// <summary>
+    /// Unified-tenancy Phase 2 Task 6 — fake for the synchronous
+    /// provisioning hook. The middleware resolves
+    /// <see cref="ITenantProvisioningService"/> from
+    /// <c>context.RequestServices</c> and calls ONLY
+    /// <see cref="ITenantProvisioningService.ProvisionAsync"/>; the
+    /// step-level members throw to pin that contract.
+    /// </summary>
+    private sealed class FakeTenantProvisioningService : ITenantProvisioningService
+    {
+        public List<Guid> ProvisionCalls { get; } = new();
+        public Exception? ThrowOnProvision { get; set; }
+
+        public Task<TenantPlacement> AssignPlacementAsync(
+            Guid tenantId, CancellationToken ct = default) =>
+            throw new NotSupportedException("middleware must only call ProvisionAsync");
+
+        public Task<string?> CreateRoleAsync(
+            Guid tenantId, TenantPlacement placement, CancellationToken ct = default) =>
+            throw new NotSupportedException("middleware must only call ProvisionAsync");
+
+        public Task CreateSchemaAsync(
+            Guid tenantId, TenantPlacement placement, CancellationToken ct = default) =>
+            throw new NotSupportedException("middleware must only call ProvisionAsync");
+
+        public Task<string> BuildConnectionStringAsync(
+            Guid tenantId, TenantPlacement placement, string password,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException("middleware must only call ProvisionAsync");
+
+        public Task ProvisionAsync(Guid tenantId, CancellationToken ct = default)
+        {
+            ProvisionCalls.Add(tenantId);
+            if (ThrowOnProvision is not null) throw ThrowOnProvision;
+            return Task.CompletedTask;
+        }
+    }
+
+    private static IServiceProvider BuildRequestServices(ITenantProvisioningService provisioning) =>
+        new ServiceCollection()
+            .AddSingleton(provisioning)
+            .BuildServiceProvider();
 
     private static DefaultHttpContext BuildAuthenticatedContext(string path, Guid userId)
     {
@@ -206,5 +251,185 @@ public class EnsurePersonalTenantMiddlewareTests
             NullLogger<EnsurePersonalTenantMiddleware>.Instance);
 
         nextCalled.Should().BeTrue();
+    }
+
+    // ── Unified-tenancy Phase 2 Task 6: synchronous provisioning hook ──
+
+    [Test]
+    public async Task SingleUserMode_FirstLoginCreation_InvokesProvisioningOnce_WithNewTenantId()
+    {
+        var userId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+        var provisioning = new FakeTenantProvisioningService();
+        ctx.RequestServices = BuildRequestServices(provisioning);
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Loose);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Loose);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
+        var events = new Mock<IEventRepository>(MockBehavior.Loose);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        membershipRepo
+            .Setup(r => r.GetUserTenantsAsync(userId))
+            .ReturnsAsync(new List<TenantMembership>());
+        userRepo
+            .Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User
+            {
+                Id = userId,
+                Email = "sole@self.host",
+                AuthMethod = "email",
+                DisplayName = "Sole User",
+            });
+        tenantRepo
+            .Setup(r => r.GetBySlugAsync(It.IsAny<string>()))
+            .ReturnsAsync((Tenant?)null);
+        tenantRepo
+            .Setup(r => r.CreateAsync(It.IsAny<Tenant>()))
+            .ReturnsAsync((Tenant t) => { t.Id = Guid.NewGuid(); return t; });
+
+        var mw = new EnsurePersonalTenantMiddleware(_ => Task.CompletedTask);
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        tenantContext.TenantId.Should().NotBeNull();
+        provisioning.ProvisionCalls.Should().ContainSingle(
+                "the freshly-minted personal tenant must be provisioned synchronously "
+                + "(placement → role → schema → conn string → migrate) exactly once")
+            .Which.Should().Be(tenantContext.TenantId!.Value,
+                "ProvisionAsync must receive the NEW tenant's id");
+    }
+
+    [Test]
+    public async Task SingleUserMode_ExistingMembership_DoesNotProvision()
+    {
+        // Tenant already exists (existing-membership path) — provisioning
+        // happened at creation time; re-running it per-request would be
+        // wasted work. The hook fires ONLY on first-login creation.
+        var userId = Guid.NewGuid();
+        var existingTenantId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+        var provisioning = new FakeTenantProvisioningService();
+        ctx.RequestServices = BuildRequestServices(provisioning);
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Strict);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Loose);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
+        var events = new Mock<IEventRepository>(MockBehavior.Loose);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        membershipRepo
+            .Setup(r => r.GetUserTenantsAsync(userId))
+            .ReturnsAsync(new List<TenantMembership>
+            {
+                new()
+                {
+                    TenantId = existingTenantId,
+                    UserId = userId,
+                    Role = "owner",
+                    JoinedAt = DateTime.UtcNow.AddDays(-1),
+                },
+            });
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        nextCalled.Should().BeTrue();
+        tenantContext.TenantId.Should().Be(existingTenantId);
+        provisioning.ProvisionCalls.Should().BeEmpty(
+            "an already-existing tenant must NOT be re-provisioned on every request");
+    }
+
+    [Test]
+    public async Task SingleUserMode_ProvisioningThrows_RequestStillProceeds()
+    {
+        // Phase 2 failure policy: log + continue — the request proceeds on
+        // the transitional shared path (stub resolver); Phase 3 (stub
+        // removal) makes this failure hard.
+        var userId = Guid.NewGuid();
+        var ctx = BuildAuthenticatedContext("/api/v1/issues", userId);
+        var provisioning = new FakeTenantProvisioningService
+        {
+            ThrowOnProvision = new InvalidOperationException("cluster unreachable"),
+        };
+        ctx.RequestServices = BuildRequestServices(provisioning);
+
+        var tenantContext = new StubTenantContext();
+        var tenantRepo = new Mock<ITenantRepository>(MockBehavior.Loose);
+        var membershipRepo = new Mock<ITenantMembershipRepository>(MockBehavior.Loose);
+        var userRepo = new Mock<IUserRepository>(MockBehavior.Loose);
+        var events = new Mock<IEventRepository>(MockBehavior.Loose);
+        var modeProvider = new StubModeProvider(TammaMode.SingleUser);
+
+        membershipRepo
+            .Setup(r => r.GetUserTenantsAsync(userId))
+            .ReturnsAsync(new List<TenantMembership>());
+        userRepo
+            .Setup(r => r.GetByIdAsync(userId))
+            .ReturnsAsync(new User
+            {
+                Id = userId,
+                Email = "sole@self.host",
+                AuthMethod = "email",
+                DisplayName = "Sole User",
+            });
+        tenantRepo
+            .Setup(r => r.GetBySlugAsync(It.IsAny<string>()))
+            .ReturnsAsync((Tenant?)null);
+        tenantRepo
+            .Setup(r => r.CreateAsync(It.IsAny<Tenant>()))
+            .ReturnsAsync((Tenant t) => { t.Id = Guid.NewGuid(); return t; });
+
+        var nextCalled = false;
+        var mw = new EnsurePersonalTenantMiddleware(_ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        });
+
+        await mw.InvokeAsync(
+            ctx,
+            tenantContext,
+            tenantRepo.Object,
+            membershipRepo.Object,
+            userRepo.Object,
+            events.Object,
+            modeProvider,
+            NullLogger<EnsurePersonalTenantMiddleware>.Instance);
+
+        provisioning.ProvisionCalls.Should().ContainSingle(
+            "the hook must have been attempted before swallowing the failure");
+        nextCalled.Should().BeTrue(
+            "a provisioning failure must NOT fail the request — the tenant rides "
+            + "the transitional shared path until the admin retries / Phase 3 lands");
+        tenantContext.TenantId.Should().NotBeNull(
+            "the tenant row + binding survive a provisioning failure");
+        events.Verify(
+            r => r.AppendAsync(It.Is<DomainEvent>(e => e.Type == "TENANT.AUTO_CREATED.SUCCESS")),
+            Times.Once);
     }
 }

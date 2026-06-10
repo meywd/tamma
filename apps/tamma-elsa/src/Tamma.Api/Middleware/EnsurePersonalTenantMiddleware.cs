@@ -3,6 +3,7 @@ using Tamma.Api.Auth;
 using System.Text.Json;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -160,6 +161,26 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
         await membershipRepo.AddAsync(tenant.Id, userId, "owner");
         await userRepo.UpdateActiveTenantAsync(userId, tenant.Id);
         tenantContext.SetTenantId(tenant.Id);
+
+        // Unified-tenancy Phase 2: the personal tenant is provisioned
+        // synchronously (placement → role → schema → minted connection string →
+        // migrations) so it is a first-class tenant from its first request.
+        // Failure policy: log + continue — the request proceeds on the
+        // transitional shared path (stub resolver) and the admin retry
+        // endpoint can re-provision; Phase 3 (stub removal) makes this
+        // failure hard.
+        try
+        {
+            var provisioning = context.RequestServices
+                .GetRequiredService<ITenantProvisioningService>();
+            await provisioning.ProvisionAsync(tenant.Id, context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "personal tenant provisioning failed tenantId={TenantId} — continuing on shared path",
+                tenant.Id);
+        }
 
         try
         {
